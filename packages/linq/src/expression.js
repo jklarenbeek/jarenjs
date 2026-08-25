@@ -231,6 +231,11 @@ const METHODS = {
   geohashBounds: unary('$geohash-bounds'),
   geohashNeighbours: unary('$geohash-neighbours'),
   geoSimplify: binary('$geo-simplify'),
+  // §8.15 vectors. One method for one operator: the metric is cosine
+  // and there is no distance spelling to choose between. A member
+  // literally named `similarity` is read with `get('similarity')`, the
+  // same escape every method name needs.
+  similarity: binary('$similarity'),
   geohash(record, precision) {
     const args = precision === undefined
       ? record.doc

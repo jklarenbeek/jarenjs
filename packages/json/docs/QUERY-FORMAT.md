@@ -1435,6 +1435,96 @@ the answer.
 selects the cities inside a region and orders them by how far they are from a
 point — a spatial filter and a spatial sort, in the language's own clauses.
 
+### 8.15 Vectors
+
+A vector is an **array of numbers** — what a JSON document already holds when
+something has been embedded. There is no vector type to construct, no width to
+declare, and nothing to register: `[0.1, 0.2, 0.3]` is one.
+
+| Operator | Definition |
+|---|---|
+| `$similarity` | `[a, b]` → the cosine similarity of two vectors, a number in [-1, 1]; two vectors that cannot be compared → empty |
+
+Cosine is the only metric, and that is a decision rather than a first
+instalment. For vectors of unit length — the form an embedding is normally
+stored in — cosine, the dot product and Euclidean distance all rank the same
+candidates in the same order, so a second metric would buy a different *number*
+for the same *answer* while doubling every recipe below. **Higher is better**:
+`1` is the same direction, `0` unrelated, `-1` opposite, which is why a
+similarity sort is always descending.
+
+**The operand split is §8.14's.** A value that is not an array of numbers has
+no similarity to anything — a string, an object, an array with a non-number in
+it — and is `JQ2001`, the same type-level refusal a non-geographic operand
+gets. Two operands that *are* arrays of numbers but cannot be compared —
+different widths, an empty array, or a component a computation made non-finite
+— answer the **empty sequence**, the same data-level answer a measurement with
+no bounded position gives. Nothing is padded, truncated or zero-filled to make
+a comparison possible: two vectors of different widths are not a near miss,
+they are unrelated.
+
+One degenerate pair is a **score, not a refusal**: a vector of all zeros
+points nowhere, and it answers `0` against everything, including itself. That
+is the one number here not derived from a direction, and it is the truthful
+answer to "how aligned are these" when one of them has no alignment — an
+all-zero embedding sorts below every real one and above the rows that have no
+vector at all, which is exactly where it belongs.
+
+Because of that rule `$similarity` is **optional-valued**: it can answer empty
+for two operands that are present, so `[{"$similarity": [a, b]}]` builds an
+empty array rather than a one-item one and `{"score": {"$similarity": [a, b]}}`
+omits the member entirely. That is the answer to want — a document that carries
+no score is honest, and one carrying `0` for a comparison that never happened
+is not, because `0` is a real similarity.
+
+**Nearest-neighbours is a composition, not an operator.** "The k most similar"
+is an ordering and a window, and this format already spells both: `$orderby` on
+a `$similarity` key, descending, then `$subsequence`.
+
+```json
+{ "$for": { "m": "$.memories[*]" },
+  "$orderby": [ { "$key": { "$similarity": ["$m.embedding", "$query"] },
+                  "$dir": "desc", "$empty": "least" } ],
+  "$return": "$m.text" }
+```
+
+```json
+{ "$subsequence": [ { "$for": { "m": "$.memories[*]" },
+                      "$orderby": [ { "$key": { "$similarity": ["$m.embedding", "$query"] },
+                                      "$dir": "desc", "$empty": "least" },
+                                    "$m.id" ],
+                      "$return": "$m" },
+                    0, 10 ] }
+```
+
+The first orders every memory by how close it is to an external `$query`
+vector; the second wraps that ordering in a window and takes the first ten of
+it, which is the whole of "k nearest". The window goes **outside** the phrase,
+because `$subsequence` inside `$return` would trim each tuple's own result
+rather than the stream of tuples.
+
+Two details in the second document are load-bearing. `"$empty": "least"` places
+an empty key **last** under `"desc"` (§6.6), which is where a row with no
+vector, or with one of the wrong width, belongs: present in the input, never in
+the top k, and never scored. And the second key, `"$m.id"`, breaks ties by row
+identity — the sort is stable, but stability is only about the *input* order,
+and two candidates at an identical similarity are exactly what a corpus of
+near-duplicates produces. An explicit tie-break is what makes the same document
+answer with the same rows every time it runs.
+
+A filter is the same key in a `$where`, and it composes with the ordering:
+
+```json
+{ "$for": { "m": "$.memories[*]" },
+  "$where": { "$gt": [{ "$similarity": ["$m.embedding", "$query"] }, 0.8] },
+  "$return": "$m.text" }
+```
+
+— everything closer than a threshold, in the language's own clauses. Note that
+`$gt` over an empty key answers `false`, so an unvectored row drops out of a
+threshold filter for free.
+
+
 ## 9. Variables, scoping, and external parameters
 
 1. Variables are introduced by `$for`, `$let`, `$at`, `$count`, `$groupby`

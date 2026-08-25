@@ -52,6 +52,12 @@ played by the provider seam below.
   spatial measurements are `geoArea`/`geoLength` because `length` on
   this surface is already `$string-length` — the mapping table says so
   in its own row.
+- **Meaning is spellable too.** `m.embedding.similarity(query)` emits
+  §8.15's `$similarity`, and k-nearest is the chain it already looks
+  like — `.orderByDescending(..., { empty: 'least' }).thenBy(m => m.id)
+  .take(10)` — because ordering and windowing are stages, not a `knn`
+  method. `.params({ query })` binds the query vector at call time, so
+  one compiled document serves every question.
 - **The provider contract.** Any object with
   `execute(queryDocument, { externals })` is a provider.
   `@jarenjs/db` implements it — a chain over a SQLite-backed

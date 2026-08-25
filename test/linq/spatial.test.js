@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import * as assert from 'node:assert';
 
 import { from } from '@jarenjs/linq';
+import { sectionOf } from '../format-sections.js';
 
 const REGION = {
   type: 'Polygon',
@@ -139,7 +140,12 @@ describe('the spatial surface is documented exactly once, in LINQ-FORMAT §4', (
   const format = readFileSync(new URL('../../packages/linq/docs/LINQ-FORMAT.md', import.meta.url), 'utf8');
   const query = readFileSync(new URL('../../packages/json/docs/QUERY-FORMAT.md', import.meta.url), 'utf8');
 
-  const spatialOperators = new Set([...query.slice(query.indexOf('### 8.14'), query.indexOf('## 9'))
+  // the section, not everything after it: §8.14 stopped being the last
+  // subsection of §8, so the slice ends at the NEXT heading — measured
+  // from past its own, or the section would be one character long and
+  // every assertion below would pass over an empty set
+  const spatialSection = sectionOf(query, '### 8.14');
+  const spatialOperators = new Set([...spatialSection
     .matchAll(/^\| `(\$[a-z-]+)` \|/gm)].map((m) => m[1]));
 
   /** Every METHODS member that emits an operator, from the source. */
@@ -163,6 +169,12 @@ describe('the spatial surface is documented exactly once, in LINQ-FORMAT §4', (
   const documented = [...new Set(tokens)];
 
   it('names the same methods in the source and in the format row', () => {
+    // the sections first: an empty slice would make every membership
+    // assertion below compare two empty sets and pass over nothing
+    assert.ok(spatialOperators.size >= 13,
+      `§8.14 yielded ${spatialOperators.size} operators — the section slice is wrong`);
+    assert.ok(spatialMethods.length >= 13,
+      `the source yielded ${spatialMethods.length} spatial methods`);
     assert.ok(row !== undefined, 'LINQ-FORMAT §4 has the spatial row');
     const unknown = documented.filter((name) => !emitted.has(name) && !handWritten.has(name));
     assert.deepStrictEqual(unknown, [], 'the row names a method the source does not have');

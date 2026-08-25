@@ -1314,3 +1314,162 @@ describe('section 8.14 — spatial, inherited by JSLT', () => {
     assert.strictEqual(transform({ cell: 'u173z' }).cell.type, 'Polygon');
   });
 });
+
+describe('section 8.15 — vectors', () => {
+  // A vector is an array of numbers, so every case here is a value a
+  // JSON document could actually hold. The exact answers are safe to
+  // pin: cosine over these components is a ratio of small integers, not
+  // a rounded measurement.
+  const NAN = { $div: [0, 0] };
+  const INF = { $div: [1, 0] };
+
+  it('should answer the cosine of two vectors, higher-is-better', () => {
+    assert.strictEqual(queryJson({ $similarity: [[1, 0], [1, 0]] }, {}), 1);
+    assert.strictEqual(queryJson({ $similarity: [[1, 0], [0, 1]] }, {}), 0);
+    assert.strictEqual(queryJson({ $similarity: [[1, 0], [-1, 0]] }, {}), -1);
+    // 24/25: a ratio of integers, exact in binary64
+    assert.strictEqual(queryJson({ $similarity: [[3, 4], [4, 3]] }, {}), 0.96);
+    // magnitude is not direction — cosine ignores the scale of both
+    assert.strictEqual(queryJson({ $similarity: [[3, 4], [30, 40]] }, {}), 1);
+    // and it reads the document, not only literals
+    assert.strictEqual(
+      queryJson({ $similarity: ['$.a', '$.b'] }, { a: [1, 0, 0], b: [1, 0, 0] }), 1);
+    assert.strictEqual(
+      queryJson({ $similarity: ['$.a', '$q'] }, { a: [0, 1] }, { q: [0, 2] }), 1);
+  });
+
+  it('should refuse an operand that is not an array of numbers (JQ2001)', () => {
+    // the type-level half of §8.14's split: a value with no components
+    // has no similarity to anything, and answering empty would hide a
+    // wrong column rather than name it
+    runtimeFails({ $similarity: ['$.s', [1, 0]] }, { s: 'text' }, 'JQ2001', '/$similarity/0');
+    runtimeFails({ $similarity: [[1, 0], '$.s'] }, { s: 'text' }, 'JQ2001', '/$similarity/1');
+    runtimeFails({ $similarity: ['$.o', [1, 0]] }, { o: { x: 1 } }, 'JQ2001', '/$similarity/0');
+    runtimeFails({ $similarity: ['$.n', [1, 0]] }, { n: 3 }, 'JQ2001', '/$similarity/0');
+    runtimeFails({ $similarity: ['$.b', [1, 0]] }, { b: true }, 'JQ2001', '/$similarity/0');
+    runtimeFails({ $similarity: ['$.z', [1, 0]] }, { z: null }, 'JQ2001', '/$similarity/0');
+    // a MIXED array is the case that matters: it is shaped like a
+    // vector and is not one
+    runtimeFails({ $similarity: ['$.m', [1, 0]] }, { m: [1, 'x'] }, 'JQ2001', '/$similarity/0');
+    runtimeFails({ $similarity: ['$.m', [1, 0]] }, { m: [1, null] }, 'JQ2001', '/$similarity/0');
+    runtimeFails({ $similarity: ['$.m', [1, 0]] }, { m: [[1], [0]] }, 'JQ2001', '/$similarity/0');
+    // and the message names the component, not just the array
+    assert.throws(() => queryJson({ $similarity: ['$.m', [1, 0]] }, { m: [1, 'x'] }),
+      (e) => /at index 1/.test(e.message));
+  });
+
+  it('should answer empty for a comparison it cannot make', () => {
+    // the data-level half: both operands ARE vectors and there is still
+    // no answer. Nothing is padded, truncated or zero-filled to invent
+    // one — two widths are not a near miss, they are unrelated
+    assert.strictEqual(queryJson({ $similarity: [[3], [3, 4]] }, {}), undefined);
+    assert.strictEqual(queryJson({ $similarity: [[3, 4], [3]] }, {}), undefined);
+    assert.strictEqual(queryJson({ $similarity: [[], []] }, {}), undefined);
+    assert.strictEqual(queryJson({ $similarity: [[], [1]] }, {}), undefined);
+    // NaN and Infinity are not JSON numbers, but a computed value can
+    // carry one, and the kernel's 0-on-malformed convention must not
+    // leak here: 0 is a real similarity and this is not one
+    assert.strictEqual(queryJson({ $similarity: [[NAN, 1], [1, 0]] }, {}), undefined);
+    assert.strictEqual(queryJson({ $similarity: [[1, 0], [INF, 1]] }, {}), undefined);
+    // and a missing operand propagates, as everywhere else
+    assert.strictEqual(queryJson({ $similarity: ['$.nope', [1, 0]] }, {}), undefined);
+  });
+
+  it('should never leak the empty marker into a constructor', () => {
+    // the cardinality declaration, proven from the outside: OPTIONAL,
+    // never ONE. Declaring exactly-one lets the internal empty marker
+    // escape into an array or object constructor, where it is neither
+    // an item nor a JSON value
+    const mismatch = { $similarity: [[3], [3, 4]] };
+    assert.deepStrictEqual(queryJson([mismatch], {}), []);
+    assert.deepStrictEqual(queryJson({ score: mismatch }, {}), {});
+    // a document with no score is honest; one carrying 0 for a
+    // comparison that never happened is not
+    assert.deepStrictEqual(
+      queryJson({ id: '$.id', score: { $similarity: ['$.v', '$q'] } },
+        { id: 'a' }, { q: [1, 0] }),
+      { id: 'a' });
+  });
+
+  it('should spell k-nearest as an ordering and a window, with no new keyword', () => {
+    const data = {
+      memories: [
+        { id: 'a', text: 'alpha', embedding: [1, 0] },
+        { id: 'b', text: 'beta', embedding: [0, 1] },
+        { id: 'c', text: 'gamma' },
+        { id: 'd', text: 'delta', embedding: [1, 0] },
+        { id: 'e', text: 'epsilon', embedding: [1, 2, 3] },
+      ],
+    };
+    const ranked = {
+      $for: { m: '$.memories[*]' },
+      $orderby: [
+        { $key: { $similarity: ['$m.embedding', '$query'] }, $dir: 'desc', $empty: 'least' },
+        '$m.id',
+      ],
+      $return: '$m.id',
+    };
+    // 'least' under 'desc' puts an empty key LAST, which is where a row
+    // with no vector (c) or one of the wrong width (e) belongs: present
+    // in the input, never in the top k, never scored
+    assert.deepStrictEqual(queryJson(ranked, data, { query: [1, 0] }),
+      ['a', 'd', 'b', 'c', 'e']);
+    // the tie is broken by row identity, not by input order: stability
+    // is only about the input, and identical similarities are exactly
+    // what a corpus of near-duplicates produces
+    const reversed = { memories: [...data.memories].reverse() };
+    assert.deepStrictEqual(queryJson(ranked, reversed, { query: [1, 0] }),
+      ['a', 'd', 'b', 'c', 'e']);
+    // and the k is a window OUTSIDE the phrase
+    assert.deepStrictEqual(
+      queryJson({ $subsequence: [ranked, 0, 2] }, data, { query: [1, 0] }), ['a', 'd']);
+  });
+
+  it('should filter by a threshold, dropping the unvectored for free', () => {
+    const data = { rows: [{ v: [1, 0] }, { v: [0, 1] }, { v: [0.9, 0.1] }, {}] };
+    assert.deepStrictEqual(
+      queryJson({
+        $for: { r: '$.rows[*]' },
+        $where: { $gt: [{ $similarity: ['$r.v', '$q'] }, 0.8] },
+        $return: { $similarity: ['$r.v', '$q'] },
+      }, data, { q: [1, 0] }),
+      [1, 0.9938837346736189]);
+  });
+
+  it('should score the zero vector 0, the kernel\'s answer and not a refusal', () => {
+    // the one degenerate pair the shape guard does not catch, and the
+    // only place the operator answers a number it did not derive from a
+    // direction: a zero vector has no direction, and @jarenjs/core's
+    // kernel documents that it scores 0 against everything. Refusing it
+    // here would put a fourth rule in the language that the kernel, the
+    // ranked recall and the store would each have to learn too — and 0
+    // is the truthful answer to \"how aligned are these\" when one of
+    // them points nowhere
+    assert.strictEqual(queryJson({ $similarity: [[0, 0], [1, 0]] }, {}), 0);
+    assert.strictEqual(queryJson({ $similarity: [[0, 0], [0, 0]] }, {}), 0);
+    // it is a SCORE, so it sorts like one — below every real alignment
+    // and above nothing, which is where an all-zero embedding belongs
+    assert.deepStrictEqual(
+      queryJson({
+        $for: { r: '$.rows[*]' },
+        $orderby: [{ $key: { $similarity: ['$r.v', '$q'] }, $dir: 'desc', $empty: 'least' }, '$r.id'],
+        $return: '$r.id',
+      }, { rows: [{ id: 'zero', v: [0, 0] }, { id: 'near', v: [1, 0] }, { id: 'none' }] },
+      { q: [1, 0] }),
+      ['near', 'zero', 'none']);
+  });
+
+  it('should be inherited by a JSLT stylesheet, with no stylesheet feature', () => {
+    // the operator registry is one table and JSLT rule bodies are query
+    // expressions, so §8.15 arrives in stylesheets and in @jarenjs/linq
+    // by construction — this proves it rather than assuming it
+    const transform = compileJsltStylesheet([
+      { match: '$.rows[*]', body: {
+        id: '$.id',
+        score: { $similarity: ['$.v', { $const: [1, 0] }] },
+      } },
+    ]);
+    assert.deepStrictEqual(transform({ rows: [{ id: 'a', v: [3, 4] }, { id: 'b' }] }),
+      { rows: [{ id: 'a', score: 0.6 }, { id: 'b' }] });
+  });
+});

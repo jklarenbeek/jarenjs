@@ -252,7 +252,7 @@ writes a validated script per action (coder model), and a query node assembles t
 ### When the grammar is too big to decode (measured)
 
 The pattern above has a size limit, and the published JSLT grammar is past it. Asked for a
-stylesheet with `jaren-jslt.schema.json` (18,817 characters) as the `response_format`,
+stylesheet with `jaren-jslt.schema.json` (18,831 characters) as the `response_format`,
 `qwen3.6-35b-a3b` returns **an empty reply — three times out of three, in 14 seconds each**.
 Not a bad document: no document. The LLM-profile twin does not help, because a relaxation
 *restates* every constraint it removes and therefore **grows** the schema (19,158
@@ -286,7 +286,7 @@ Four changes, each one answering something that was measured rather than suspect
 **1. Narrow the response format; move the vocabulary to the prompt.**
 [`jaren-jslt.authoring.schema.json`](../json/schemas/jaren-jslt.authoring.schema.json) is
 the canonical grammar cut at the one `$ref` that pulls in the whole expression language —
-**18,817 → 3,491 characters**, the document shape intact and the body open. It is
+**18,831 → 3,491 characters**, the document shape intact and the body open. It is
 mechanically derived and the artifact test asserts the committed file *is* the derivation.
 It is deliberately weaker than the canonical schema, which is why `canonical` is validated
 locally afterwards and the compiler still gates everything: the same validate-then-compile
@@ -361,7 +361,7 @@ should: the nearest probability *among the upper class*, which is not the neares
 
 | response format | model | trials | authored | correct | calls | wall clock | reasoning tokens/attempt |
 | --- | --- | ---: | ---: | ---: | ---: | --- | --- |
-| canonical grammar (18,817 chars) | `qwen3.6-35b-a3b` | 3 | 0 | 0 | 3 | 14 s per empty reply | n/a — the reply was empty |
+| canonical grammar (18,831 chars) | `qwen3.6-35b-a3b` | 3 | 0 | 0 | 3 | 14 s per empty reply | n/a — the reply was empty |
 | authoring profile (3,491 chars) | `qwen3.6-27b` | 5 | 5 | **5** | 1 each | **3.3–5.5 s** | **0** |
 | authoring profile (3,491 chars) | `qwen3.6-35b-a3b` | 3 | 3 | 2 | 1 each | 40–141 s | 3,000–5,600 |
 | authoring profile (3,491 chars) | 27b → 35b escalation | 2 | 2 | **2** | 1 each | 4.0–61 s | 0 (27b answered both) |

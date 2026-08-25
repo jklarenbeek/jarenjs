@@ -575,6 +575,7 @@
           "$within",
           "$bbox-intersects",
           "$geo-simplify",
+          "$similarity",
           "$default"
         ]
       },

@@ -126,7 +126,7 @@ query.nodes(data);  // [{ path: "$['store']['book'][0]['title']", value: '...' }
 
 ### JSON Query
 
-XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 98-operator
+XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 99-operator
 library extensible with host operator packs (see JSLT stylesheets, below) — as
 JSON documents with JSONPath leaves. The grammar is published as JSON Schema,
 so a constrained decoder cannot emit an invalid query.
@@ -137,6 +137,11 @@ so a constrained decoder cannot emit an invalid query.
   "$orderby": ["$b.price"],
   "$return": { "title": "$b.title", "price": "$b.price" } }
 ```
+
+The library reaches past scalars: the spatial family measures GeoJSON
+geodesically, and `$similarity` scores two vectors by cosine — so ranking a
+collection by meaning is an `$orderby` on a similarity key and a window, not a
+keyword the language had to grow.
 
 A `$fold` clause turns the same phrase into a reduction: the accumulator is a
 binding, not a lambda, so the language gets folds, running totals and runtime

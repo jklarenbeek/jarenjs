@@ -386,9 +386,9 @@ queryJson({
 }, [1, 2, 3, 4, 5]); // [2, 3, 4] — a 3-point moving average
 ```
 
-The operator library (98 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, and the spatial family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+The operator library (99 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, the spatial family and `$similarity`) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
 
-**Extending the vocabulary (host opt-in).** The 98 are closed, but a host can add more the way `@jarenjs/validate` gains formats from `@jarenjs/formats`: `createJsltRegistry().use(mathPack).use(financePack)` composes packs of pure `@jarenjs/core` functions into a compiler, so `{ "$sqrt": "$.variance" }` and `{ "$npv": ["$.rate", "$.cashflows[*]"] }` work in a stylesheet, a bare query, and `@jarenjs/linq` — while a document compiled *without* the registry still rejects them. Aggregators fold a `seq` operand to an array before the pure call. See [JSLT-FORMAT.md §13](./docs/JSLT-FORMAT.md#13-registered-operators-host-opt-in-non-normative).
+**Extending the vocabulary (host opt-in).** The 99 are closed, but a host can add more the way `@jarenjs/validate` gains formats from `@jarenjs/formats`: `createJsltRegistry().use(mathPack).use(financePack)` composes packs of pure `@jarenjs/core` functions into a compiler, so `{ "$sqrt": "$.variance" }` and `{ "$npv": ["$.rate", "$.cashflows[*]"] }` work in a stylesheet, a bare query, and `@jarenjs/linq` — while a document compiled *without* the registry still rejects them. Aggregators fold a `seq` operand to an array before the pure call. See [JSLT-FORMAT.md §13](./docs/JSLT-FORMAT.md#13-registered-operators-host-opt-in-non-normative).
 
 **Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), `$week`/`$week-year`/`$quarter`/`$weekday` add the derived calendar fields, and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
 
@@ -441,6 +441,45 @@ compileJsltStylesheet([{
 The one trap: `coordinates` and `features` take the **array constructor** (the brackets, §3.4), never `$seq` — a two-item *sequence* in member position is `JQ2001`, because a sequence is not an array.
 
 A geohash is a string, so **bucketing and tiling** need no operator: `$groupby` over `$substring` groups by cell and an index over the hash is a spatial index. **Proximity is different**, and a prefix test is not it — two points ten metres apart can differ in the *first* character of their cell, so a single prefix misses a neighbour at every cell boundary. `$geohash-neighbours` gives the nine-cell probe a correct proximity query needs; narrow it with `$distance` when an exact radius matters. The whole recipe, end to end, is in [HOWTO](../../docs/HOWTO.md#getting-geographic-data-in-and-out).
+
+### Similarity, and why there is no `$knn`
+
+An embedding is an array of numbers, which a JSON document can already hold, so
+the language needs exactly one operator to compare two of them
+([§8.15](./docs/QUERY-FORMAT.md#815-vectors)):
+
+```javascript
+queryJson({ $similarity: [[3, 4], [4, 3]] }, {}); // 0.96
+```
+
+`$similarity` is cosine, in [-1, 1], higher-is-better. One metric, because a
+stored vector is normally normalized and cosine, the dot product and Euclidean
+distance then rank the same candidates in the same order — a second metric
+would buy a different number for the same answer. An operand that is not an
+array of numbers is `JQ2001`; two vectors that cannot be compared — different
+widths, empty, or carrying a component a computation made non-finite — answer
+**empty**, so a document never carries a score nobody computed. Nothing is
+padded or truncated to make a comparison possible.
+
+"The k most similar" needs no keyword either: it is an ordering and a window,
+and both already exist.
+
+```javascript
+queryJson({ $subsequence: [{
+  $for: { m: '$.memories[*]' },
+  $orderby: [
+    { $key: { $similarity: ['$m.embedding', '$query'] }, $dir: 'desc', $empty: 'least' },
+    '$m.id',
+  ],
+  $return: '$m.text',
+}, 0, 10] }, data, { query: vector });
+```
+
+`$empty: 'least'` under a descending sort puts the rows with no vector **last**
+— present in the input, never in the top k, never scored — and the second key
+breaks ties by identity, so the same document answers with the same rows every
+time it runs. `@jarenjs/linq` spells the whole chain fluently as
+`.orderByDescending(m => m.embedding.similarity(q), { empty: 'least' }).take(10)`.
 
 ### External parameters
 

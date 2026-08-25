@@ -44,6 +44,7 @@ import { parseCsv } from '@jarenjs/josl';
 import authoringSchema from '@jarenjs/json/schemas/jaren-jslt.authoring.schema.json' with { type: 'json' };
 import canonicalSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
+import { sectionOf } from '../format-sections.js';
 
 /** The real dataset: the CSV the round-trip recipe reads, as the
  * sample the profile grounds on and the run gate runs on. */
@@ -158,8 +159,7 @@ const run = (doc) => compileJsltStylesheet(doc)(SAMPLE);
 describe('ai — the spatial profile teaches exactly §8.14', function () {
   it('names the operators QUERY-FORMAT §8.14 publishes, and no other', function () {
     const format = readFileSync(new URL('../../packages/json/docs/QUERY-FORMAT.md', import.meta.url), 'utf8');
-    const section = format.slice(format.indexOf('### 8.14'), format.indexOf('## 9'));
-    const published = [...section.matchAll(/^\| `(\$[a-z-]+)` \|/gm)].map((m) => m[1]);
+    const published = [...sectionOf(format, '### 8.14').matchAll(/^\| `(\$[a-z-]+)` \|/gm)].map((m) => m[1]);
     assert.ok(published.length >= 13, `the section publishes a table (${published.length} rows)`);
     assert.deepStrictEqual(Object.keys(SPATIAL_OPERATORS), published,
       'the profile teaches the format\'s own table, in its order');

@@ -417,6 +417,22 @@ const OPERATOR_ALIASES = {
   $project: "the renderer — the language cannot make a projected coordinate at all, so a measurement can never land on one; measurement here is geodesic",
   "$geo-project": "the renderer, as for '$project'",
   $srid: null, $transform: null,
+  // vectors: the spellings a writer reaches for from a ranking library.
+  // The metric names all point at the one operator because the packed
+  // form is normalized and they then rank identically; `$knn` and its
+  // synonyms get the composition, because ordering and windowing are
+  // clauses this language already has and a second spelling of them
+  // would be the drift, not the convenience
+  $cosine: "$similarity", "$cosine-similarity": "$similarity",
+  "$cos-sim": "$similarity", "$dot-product": "$similarity",
+  $dot: "$similarity", "$inner-product": "$similarity",
+  "$vector-distance": "$similarity (higher is closer; there is no distance metric)",
+  "$l2-distance": "$similarity (higher is closer; there is no distance metric)",
+  $knn: "$orderby on a $similarity key with $dir 'desc', then $subsequence for the k",
+  $nearest: "$orderby on a $similarity key with $dir 'desc', then $subsequence for the k",
+  "$nearest-neighbours": "$orderby on a $similarity key, then $subsequence",
+  "$nearest-neighbors": "$orderby on a $similarity key, then $subsequence",
+  "$top-k": "$orderby then $subsequence", $embed: null, $normalize: null,
 };
 
 // JQ0002 for an unknown $-key, with a "did you mean" suggestion. A

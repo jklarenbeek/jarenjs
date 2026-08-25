@@ -56,6 +56,7 @@ import {
   fixedUnitMs,
   compileDateFormat,
 } from '@jarenjs/core/dates';
+import { isVector, cosineSimilarity } from '@jarenjs/core/vector';
 import {
   isPosition,
   bboxOf,
@@ -836,6 +837,41 @@ function geoUnaryEntry(measure, check = geoArg) {
       };
     },
   };
+}
+
+//#endregion
+
+//#region vector operators (section 8.15)
+// One operator, one metric. A vector here is what a JSON document can
+// hold — an array of numbers — and the arithmetic lives once, in
+// `@jarenjs/core/vector`, where the ledger and the store read it too.
+//
+// The kernel and the language answer a malformed comparison
+// differently, on purpose. A kernel scores 0 so that one bad vector
+// among ten thousand loses a ranking sweep instead of killing it; the
+// language answers the empty sequence, the same thing §8.14 answers for
+// a measurement it cannot make, so a document never carries a score
+// that was never computed. The gate between the two is `isVector`, the
+// one shape guard the suite shares.
+
+// A vector operand, split the way §8.14 splits geography: a value that
+// is not an array of numbers is the wrong TYPE and raises, while an
+// array of numbers that cannot be compared — empty, or carrying a
+// component a computation made non-finite — is a DATA-level answer of
+// empty, decided by the caller against the other operand's width.
+function vectorArg(v, docPath) {
+  if (!Array.isArray(v)) {
+    throw runtimeError('JQ2001',
+      `expected a vector (an array of numbers), got ${describeItem(v)}`, docPath);
+  }
+  for (let i = 0; i < v.length; i++) {
+    if (typeof v[i] !== 'number') {
+      throw runtimeError('JQ2001',
+        `expected a vector (an array of numbers), got ${describeItem(v[i])} at index ${i}`,
+        docPath);
+    }
+  }
+  return v;
 }
 
 //#endregion
@@ -1742,6 +1778,39 @@ export const OPERATORS = Object.freeze({
             tolerancePath);
         }
         return simplifyGeometry(geoArg(v, valuePath), tolerance);
+      };
+    },
+  },
+
+  //#endregion
+
+  //#region section 8.15 - vectors
+
+  '$similarity': { // cosine similarity of two vectors, higher-is-better
+    params: ARGS_2,
+    // OPTIONAL: two present operands can still have no comparison — a
+    // width mismatch, an empty vector, a component a computation made
+    // non-finite. Declaring exactly-one would let the internal empty
+    // marker escape into an array or object constructor.
+    result: RESULT_OPT,
+    compile: (gets, args) => {
+      const aGet = gets[0];
+      const aPath = args[0].docPath;
+      const bGet = gets[1];
+      const bPath = args[1].docPath;
+      return (f) => {
+        const a = aGet(f);
+        const b = bGet(f);
+        if (a === EMPTY || b === EMPTY)
+          return EMPTY;
+        const va = vectorArg(a, aPath);
+        const vb = vectorArg(b, bPath);
+        // the width is the second operand's obligation, so the same
+        // guard answers both "is this comparable at all" and "is it
+        // comparable to THAT" — nothing here pads or truncates
+        if (!isVector(va) || !isVector(vb, va.length))
+          return EMPTY;
+        return cosineSimilarity(va, vb);
       };
     },
   },

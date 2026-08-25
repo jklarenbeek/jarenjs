@@ -116,6 +116,7 @@ is part of THIS design.
 | `Zip` | — no positional co-iteration in the grammar | unsupported (`JL0006`) | — |
 | expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `and or not`; `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `year month day epoch` → §8.13; `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
 | spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |
+| vector family (§8.15) | `similarity(other)` → `$similarity`. The other operand is an array of numbers: a captured one embeds as a literal, `.params({ query })` binds it at call time. There is no `knn` method — k-nearest is `orderByDescending(...).take(k)`, which is the composition the emitted document already is | native | on `Expr<…>`, per the typed-surface order |
 
 Two spatial names are deliberately not the obvious ones, and the reason
 is the same one that made §8.14's `$length` and §8.7's `$string-length`
@@ -130,7 +131,31 @@ names the family the way `geoParse`/`geoText` already do.
 Every method name shadows a data member of the same name — that is what
 the null prototype on the method table is for, and what `get(name)`
 escapes. A position stored as `at` is the case that bites: `p.at` is the
-index method, so it reads `p.get('at').within(region)`.
+index method, so it reads `p.get('at').within(region)`. A stored score
+named `similarity` is the same bite with a worse error — `r.similarity`
+is the *method*, so calling it as a member yields a `TypeError` about a
+function rather than a coded build error, because the surface never sees
+a member access at all. `r.get('similarity')` reads the data.
+
+**k-nearest is a chain, not a method.** `similarity()` is one operator
+and the ordering and the window are stages that already exist, so the
+top k reads as what it is:
+
+```js
+from(memories)
+  .params({ query })
+  .orderByDescending((m, p) => m.embedding.similarity(p.query), { empty: 'least' })
+  .thenBy((m) => m.id)
+  .take(10)
+  .select((m) => m.text)
+```
+
+`{ empty: 'least' }` under a descending sort puts the rows whose key is
+empty — no vector, or one of the wrong width — **last**, and `thenBy` on
+the identity breaks ties, so the chain answers the same rows in the same
+order every time it runs. `.params({ query })` rather than a captured
+array is what makes the emitted document one query for every question,
+which is the shape a provider can push down.
 
 ## 5. Deferred execution and re-enumeration
 

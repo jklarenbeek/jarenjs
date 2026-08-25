@@ -378,8 +378,38 @@ describe('Jaren JSON Query normalizer', () => {
       });
     });
 
+    it('should point a vector guess at the one operator, and $knn at the composition', () => {
+      const cases = [
+        // every metric name lands on the one operator: the stored form
+        // is normalized, so cosine, dot and Euclidean rank identically
+        ['$cosine', "use '$similarity'"],
+        ['$dot', "use '$similarity'"],
+        ['$inner-product', "use '$similarity'"],
+        ['$l2-distance', 'higher is closer; there is no distance metric'],
+        // and the KNN spellings get the clauses, because ordering and
+        // windowing already exist and a second spelling of them is drift
+        ['$knn', "use $orderby on a $similarity key with $dir 'desc', then $subsequence"],
+        ['$nearest-neighbors', 'use $orderby on a $similarity key, then $subsequence'],
+        ['$top-k', 'use $orderby then $subsequence'],
+      ];
+      for (const [op, expected] of cases) {
+        assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
+          assert.strictEqual(e.code, 'JQ0002');
+          assert.ok(e.message.includes(expected),
+            `${op}: expected "${expected}" in "${e.message}"`);
+          return true;
+        });
+      }
+      // a plain typo still reaches the near-miss path
+      assert.throws(() => compileJsonQuery({ '$similariti': '$' }), (e) => {
+        assert.strictEqual(e.code, 'JQ0002');
+        assert.ok(e.message.includes("did you mean '$similarity'?"), e.message);
+        return true;
+      });
+    });
+
     it('should say plainly when no operator does it (e.g. $abs)', () => {
-      for (const op of ['$abs', '$sqrt', '$ceil', '$buffer', '$union']) {
+      for (const op of ['$abs', '$sqrt', '$ceil', '$buffer', '$union', '$embed']) {
         assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
           assert.strictEqual(e.code, 'JQ0002');
           assert.ok(e.message.includes('no operator does this'), e.message);
