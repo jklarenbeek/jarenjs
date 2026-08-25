@@ -30,9 +30,10 @@ export { typeOfPath, isNumericType } from './types.js';
 export { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
 export { deterministicFragment, registerFragment } from './udf.js';
 export {
-  DERIVE_KINDS, PHYSICAL_KINDS, BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
-  deriveGeohash, deriveBboxEdge, derivedValue, memberAt, storedMemberForm,
-  registerDeriveFunctions,
+  DERIVE_KINDS, DERIVE_MAPPING, PHYSICAL_KINDS, BBOX_COMPONENTS, BBOX_INDEX_ORDER,
+  PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
+  deriveGeohash, deriveBboxEdge, deriveVector, derivedValue, derivedMappingFor, memberAt,
+  storedMemberForm, registerDeriveFunctions,
 } from './derive.js';
 export {
   createQueryEngine, createQueryState, createEntityQueryEngine,

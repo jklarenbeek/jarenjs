@@ -144,7 +144,7 @@
       "additionalProperties": false
     },
     "deriveStep": {
-      "description": "Recompute named STORED derived index columns from the documents already in a collection. Only the physical mapping that cannot index a registered deterministic function has these columns; the generated mapping populates them itself. The step is idempotent — a derived value is a pure function of the document — so a replay writes what the first run wrote.",
+      "description": "Recompute named STORED derived index columns from the documents already in a collection. A spatial column is stored only under the physical mapping that cannot index a registered deterministic function (the generated mapping populates itself); a vector column is stored under both. The step is idempotent — a derived value is a pure function of the document — so a replay writes what the first run wrote.",
       "type": "object",
       "properties": {
         "kind": {
@@ -168,13 +168,19 @@
               "derive": {
                 "enum": [
                   "geohash",
-                  "bbox"
+                  "bbox",
+                  "vector"
                 ]
               },
               "precision": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 12
+              },
+              "dims": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8192
               },
               "component": {
                 "enum": [

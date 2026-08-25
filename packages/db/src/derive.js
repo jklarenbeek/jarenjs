@@ -3,20 +3,34 @@
  * @file Derived index columns: the one place a declared
  * `indexes[].derive` becomes a value. A spatial member is an array of
  * numbers or an object, and a generated column must be a scalar, so a
- * geohash cell or a bounding-box edge is what actually gets indexed.
+ * geohash cell or a bounding-box edge is what actually gets indexed;
+ * an embedding is an array of hundreds of numbers, and what gets
+ * stored is its packed, l2-normalized Float32 form.
  *
- * Every cell and every box comes from `@jarenjs/core/geo`; nothing
- * here computes spatial arithmetic of its own. The same functions
- * serve BOTH physical mappings — registered as deterministic SQL
- * functions inside a virtual generated column's expression where the
- * driver can index them, and called directly on the write path where
- * it cannot — so the two branches cannot drift into different answers.
+ * Every cell and every box comes from `@jarenjs/core/geo`, and every
+ * normalization and packing from `@jarenjs/core/vector`; nothing here
+ * computes arithmetic of its own. The spatial functions serve BOTH
+ * physical mappings — registered as deterministic SQL functions inside
+ * a virtual generated column's expression where the driver can index
+ * them, and called directly on the write path where it cannot — so
+ * the two branches cannot drift into different answers. The vector
+ * kind has ONE mapping, stored everywhere (`DERIVE_MAPPING`), and
+ * registers no function at all: a whole array re-derived per row as a
+ * host call is the cost the spatial work measured at 150×, a stored
+ * column is readable without any registration, and bun has no
+ * function API — one mapping is the only way every driver agrees.
  *
  * It is also this package's ONLY seam onto `@jarenjs/core/geo` (D1 —
- * one home for spatial arithmetic, grep-proven by test): the planner's
- * probe geometry — the box of a literal or bound region, the box of a
- * bounded-distance circle, a cell's neighbourhood — is computed by the
- * helpers below rather than by an import of its own.
+ * one home for spatial arithmetic, grep-proven by test) and onto
+ * `@jarenjs/core/vector` (the same rule, the vector campaign's D2):
+ * the planner's probe geometry — the box of a literal or bound region,
+ * the box of a bounded-distance circle, a cell's neighbourhood — is
+ * computed by the helpers below rather than by an import of its own.
+ *
+ * The switches over the kind are EXHAUSTIVE: a kind with no rule
+ * throws, here and in the dialect, so that adding a kind without
+ * teaching both is a failure at the first call rather than a bbox
+ * edge of the first two floats and `jaren_bbox_undefined(...)` SQL.
  *
  * Determinism is the contract, not a convenience: a value here is a
  * pure function of the document bytes. Nothing reads the clock, a
@@ -31,11 +45,33 @@
 import {
   bboxOf, centroidOf, circleBounds, geohashEncode, geohashNeighbours,
 } from '@jarenjs/core/geo';
+import { isVector, l2Normalize, packVector } from '@jarenjs/core/vector';
 
 import { chain } from './driver.js';
 
 /** The closed set of derive kinds. */
-export const DERIVE_KINDS = new Set(['geohash', 'bbox']);
+export const DERIVE_KINDS = new Set(['geohash', 'bbox', 'vector']);
+
+/**
+ * The per-kind PHYSICAL MAPPING override. A spatial kind takes the
+ * mapping the driver's capability selects (`null` here); the vector
+ * kind is `'stored'` on every driver, for the three reasons in the
+ * file header, and never joins `registerDeriveFunctions`.
+ * @type {Readonly<Record<string, 'stored' | null>>}
+ */
+export const DERIVE_MAPPING = Object.freeze({ geohash: null, bbox: null, vector: 'stored' });
+
+/**
+ * The physical mapping one derived column takes: the kind's override
+ * where it has one, the driver's mapping otherwise.
+ * @param {string} kind
+ * @param {'virtual' | 'stored'} driverMapping
+ * @returns {'virtual' | 'stored'}
+ */
+export function derivedMappingFor(kind, driverMapping) {
+  if (!DERIVE_KINDS.has(kind)) throw new TypeError(`derive: unknown derive kind '${kind}'`);
+  return DERIVE_MAPPING[kind] ?? driverMapping;
+}
 
 /**
  * The closed set of PHYSICAL realizations a `derive: 'bbox'` index may
@@ -68,6 +104,10 @@ const BBOX_AT = { w: 0, s: 1, e: 2, n: 3 };
 /** The declared geohash precision range (characters). */
 export const PRECISION_MIN = 1;
 export const PRECISION_MAX = 12;
+
+/** The declared vector width range (components). */
+export const DIMS_MIN = 1;
+export const DIMS_MAX = 8192;
 
 /**
  * The representative position of any GeoJSON value: the position
@@ -110,6 +150,47 @@ export function deriveBboxEdge(value, component) {
 }
 
 /**
+ * The packed column value of a member ALREADY in its stored form (see
+ * {@link storedMemberForm}): the l2-normalized vector as little-endian
+ * binary32 bytes, or `null` when the member is not a vector of exactly
+ * `dims` finite numbers — absent, the wrong width, a non-finite
+ * component (which JSON turned into `null`), not an array at all. An
+ * unrankable document is INVISIBLE to the column, never a stored-but-
+ * wrong one; the document itself stores fine.
+ *
+ * Normalized because the stored form is what a fetch-and-rank plan
+ * sweeps, and over unit vectors the dot product IS the cosine — the
+ * agreement invariant between this column and an engine computing
+ * cosine over the raw member. A zero vector normalizes to itself and
+ * is stored (it scores 0 against everything; the kernel documents it
+ * and the query format publishes it), not refused.
+ * @param {any} stored - the member as the database holds it
+ * @param {number} dims
+ * @returns {Uint8Array | null}
+ */
+function packedVector(stored, dims) {
+  if (!isVector(stored, dims)) return null;
+  return packVector(l2Normalize(stored));
+}
+
+/**
+ * The value of a `derive: 'vector'` column for a document member — the
+ * ONE seam from this package onto `@jarenjs/core/vector`. The member
+ * round-trips through its stored form first, exactly as the spatial
+ * kinds do: a `Float32Array` in the document is held as an object and
+ * a `NaN` as `null`, and the column must be a function of what is
+ * held, so that a write, a migration backfill and a second open can
+ * never disagree about one row.
+ * @param {any} member - the value at the index path, or `undefined`
+ * @param {number} dims - the declared width
+ * @returns {Uint8Array | null} `4·dims` bytes, or `null` when the
+ *   member is not a vector of that width
+ */
+export function deriveVector(member, dims) {
+  return packedVector(storedMemberForm(member), dims);
+}
+
+/**
  * A member as the database will hold it. A derived value must be a
  * function of the STORED document, not of the object handed to the
  * write: JSON has no `NaN` and no `Infinity`, so a non-finite
@@ -130,16 +211,27 @@ export function storedMemberForm(member) {
 }
 
 /**
- * The value of one derived column for a document member.
- * @param {{ derive: string, precision?: number, component?: string }} column
- * @param {any} member - the value at the index path, or `undefined`
- * @returns {string | number | null}
+ * The value of one derived column for a document member, which the
+ * caller hands over in its STORED form (`storedMemberForm`): the write
+ * path round-trips it, and a migration backfill reads it from the row.
+ * Exhaustive over the kind — see the file header.
+ * @param {{ derive: string, precision?: number, component?: string,
+ *   dims?: number }} column
+ * @param {any} member - the stored value at the index path, or `undefined`
+ * @returns {string | number | Uint8Array | null}
  */
 export function derivedValue(column, member) {
   if (member === undefined || member === null) return null;
-  return column.derive === 'geohash'
-    ? deriveGeohash(member, /** @type {number} */ (column.precision))
-    : deriveBboxEdge(member, /** @type {string} */ (column.component));
+  switch (column.derive) {
+    case 'geohash':
+      return deriveGeohash(member, /** @type {number} */ (column.precision));
+    case 'bbox':
+      return deriveBboxEdge(member, /** @type {string} */ (column.component));
+    case 'vector':
+      return packedVector(member, /** @type {number} */ (column.dims));
+    default:
+      throw new TypeError(`derive: no value rule for derive kind '${column.derive}'`);
+  }
 }
 
 /**

@@ -84,6 +84,16 @@ A `jslt` transform on such a collection gets the same treatment for the
 same reason: it rewrites the documents the columns are computed from,
 so the planner follows it with a `derive` step that recomputes them.
 
+A `derive: 'vector'` column (MODEL-FORMAT §2.1) is stored under BOTH
+mappings, so the planner emits its backfill whatever `derived` says,
+and the column entry carries the width the value is packed to:
+
+```json
+{ "kind": "derive", "collection": "items",
+  "columns": [ { "name": "gx_embedding_v768", "derive": "vector", "dims": 768,
+                 "segments": [ { "name": "embedding" } ] } ] }
+```
+
 ## 3. Planning and the widening/narrowing rule
 
 `planMigration(fromModel, toModel, { dialect, id, derived })` produces

@@ -110,10 +110,11 @@
      "type": "boolean"
     },
     "derive": {
-     "description": "Derive indexable columns from the selected spatial member instead of indexing it: 'geohash' (one TEXT cell column, precision required) or 'bbox' (four REAL columns — west, south, east, north). A derived index is never unique.",
+     "description": "Derive columns from the selected member instead of indexing it: 'geohash' (one TEXT cell column, precision required), 'bbox' (four REAL columns — west, south, east, north), or 'vector' (one packed BLOB column holding the l2-normalized Float32 form of an array of numbers, dims required; stored on every driver, with no B-tree over it — a fetch-and-rank plan reads it whole). A derived index is never unique.",
      "enum": [
       "geohash",
-      "bbox"
+      "bbox",
+      "vector"
      ]
     },
     "precision": {
@@ -121,6 +122,12 @@
      "type": "integer",
      "minimum": 1,
      "maximum": 12
+    },
+    "dims": {
+     "description": "The width of a derive: 'vector' column in components, 1-8192. Required beside derive: 'vector' and refused anywhere else: the width is the column's identity — two widths over one path are two columns — and a member that is not an array of exactly this many finite numbers stores NULL in the column (the document itself still stores). Constrain the member with minItems/maxItems equal to dims in the collection's schema so a wrong-width vector is refused at the write instead.",
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 8192
     },
     "physical": {
      "description": "The shape a derive: 'bbox' index takes on disk: 'columns' (the default) is four generated columns under one B-tree; 'rtree' keeps the same four columns and adds a SQLite R*Tree virtual table beside the collection, kept in sync by declared triggers, with no B-tree over the columns. The logical meaning of derive: 'bbox' is identical either way. Refused on any other index kind, and on a driver without the module it falls back to 'columns' and says so through explain().prefilters[].via.",

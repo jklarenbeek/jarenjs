@@ -71,26 +71,31 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
 
-### 2.1 Derived indexes (spatial storage)
+### 2.1 Derived indexes (spatial and vector storage)
 
 A generated column must be a scalar (§3), and a GeoJSON position is an
 array of numbers while a geometry is an object. No path over spatial
 data is therefore indexable as written. `derive` supplies the missing
-vocabulary: it says what indexable scalar is computed from the member.
+vocabulary: it says what is computed from the member — an indexable
+scalar for the spatial kinds, and for an embedding (an array of
+hundreds of numbers, which no B-tree could seek) the packed form a
+fetch-and-rank plan reads whole.
 
 ```jsonc
 "indexes": [
-  { "name": "by_cell", "path": "$.at",       "derive": "geohash", "precision": 7 },
-  { "name": "by_box",  "path": "$.geometry", "derive": "bbox" }
+  { "name": "by_cell", "path": "$.at",        "derive": "geohash", "precision": 7 },
+  { "name": "by_box",  "path": "$.geometry",  "derive": "bbox" },
+  { "name": "by_vec",  "path": "$.embedding", "derive": "vector",  "dims": 768 }
 ]
 ```
 
-| `derive` | `path` selects | `precision` | columns | type |
+| `derive` | `path` selects | `precision` / `dims` | columns | type |
 |---|---|---|---|---|
-| `"geohash"` | a position `[lon, lat]`, a `Point`, or any value with a representative position (the mean of its vertices) | 1..12, **required** | one, `<column>` | `TEXT` |
+| `"geohash"` | a position `[lon, lat]`, a `Point`, or any value with a representative position (the mean of its vertices) | `precision` 1..12, **required** | one, `<column>` | `TEXT` |
 | `"bbox"` | any GeoJSON value | — | four: `<column>_w`, `<column>_s`, `<column>_e`, `<column>_n` | `REAL` |
+| `"vector"` | an array of exactly `dims` finite numbers, typed `array` by the schema | `dims` 1..8192, **required** | one, `<column>_v<dims>` — a COLUMN, not an index (below) | `BLOB` |
 
-`derive` is a CLOSED set of those two values. An open "expression"
+`derive` is a CLOSED set of those three values. An open "expression"
 member would be a second query language inside the model document,
 which this format does not have and will not grow.
 
@@ -146,6 +151,52 @@ connection, the same probe is <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6
 second table: choose it deliberately, per index, which is why it is
 neither automatic nor a store-wide option.
 
+**`vector` — one packed column, never a B-tree.** The column holds the
+member **l2-normalized** and packed as little-endian IEEE 754 binary32:
+`4·dims` bytes, computed by `@jarenjs/core/vector` (`l2Normalize`, then
+`packVector`) — the same kernels the query engine compares with, and
+the one place this package reaches for them. It is normalized because
+over unit vectors the dot product IS the cosine: the engine computes
+`$similarity` (QUERY-FORMAT §8.15) as the cosine of the RAW members,
+and a plan that ranks over the column computes the dot product of the
+stored forms — `cos(raw) ≡ dot(normalized)` is the agreement the two
+must keep, entry by entry, and the reason the column stores the
+normalized form rather than the bytes of the member as written.
+
+Three things follow:
+
+- **No B-tree is created over the column**, and the `indexes` entry
+  therefore names a column, not an index: nothing seeks a blob of
+  floats, and a ranking plan reads the column whole and orders in the
+  engine. The verification set (§3) carries the column and no index.
+- **It is a stored column on every driver** — §3.1 says why, and why
+  that is a deliberate divergence from the spatial kinds.
+- **`dims` is the identity of the column.** Two widths over one path
+  are two columns (`<column>_v768` beside `<column>_v1536`), exactly as
+  two geohash precisions are; and the width is what makes a stored
+  vector comparable at all — a column that accepted any width would be
+  ranking vectors from different models against each other, which
+  produces plausible garbage rather than an error.
+
+**What the write path does with a member that is not a vector of
+`dims`** — absent, the wrong width, a non-finite component, not an
+array — is store the document and write `NULL` to the column (§3.2).
+The write is never refused on the column's account: refusing would
+make a schema-valid document unstorable. The declaration that DOES
+refuse a wrong-width vector at the write is the collection's own
+schema, and a model that declares `dims` should constrain the member
+to match:
+
+```jsonc
+"embedding": { "type": "array", "items": { "type": "number" },
+               "minItems": 768, "maxItems": 768 }
+```
+
+With `compileSchema` injected, a document whose embedding has 767
+components is then `JD2003` at the write; without it, the document
+stores and is simply unrankable. Both are honest; only the second is
+silent, and the schema is where the author chooses.
+
 Every rule below is `JD0004` with a `docPath` at the offending member:
 
 1. **`precision` is required for `geohash`, and refused anywhere
@@ -154,7 +205,8 @@ Every rule below is `JD0004` with a `docPath` at the offending member:
    index for city-scale work) and precision 4 is ~20 km. The right
    value follows from the query radius, which the model cannot know.
 2. **A derived index is never `unique`.** Two distinct positions share
-   a cell — and share a box edge — by construction.
+   a cell — and share a box edge — by construction, and a vector column
+   is one nothing seeks.
 3. **The path must still be singular, and there must be exactly one of
    it.** `derive` changes what is computed from the member, never how
    the member is selected: a wildcard path is refused exactly as it is
@@ -171,11 +223,12 @@ Every rule below is `JD0004` with a `docPath` at the offending member:
    a non-geographic operand and a pushed filter would simply not see
    the row. Declaring the type is what turns a derived index from
    storage into a plan.
-5. **Two indexes with the same `(path, derive, precision)` share one
-   column set**, extending §3's rule for undecorated paths. Two
-   `geohash` indexes over one path at DIFFERENT precisions are two
-   column sets, and legitimately so: a coarse bucketing index and a
-   fine proximity one are different indexes.
+5. **Two indexes with the same `(path, derive, precision)` — or
+   `(path, derive, dims)` — share one column set**, extending §3's rule
+   for undecorated paths. Two `geohash` indexes over one path at
+   DIFFERENT precisions are two column sets, and legitimately so: a
+   coarse bucketing index and a fine proximity one are different
+   indexes; two vector widths likewise.
 6. **A `bbox` index covers its four columns in `(w, e, s, n)` order** —
    not the order they are declared in. An intersection test reads
    `w <= ? AND e >= ? AND s <= ? AND n >= ?`, so the two longitude
@@ -186,9 +239,21 @@ Every rule below is `JD0004` with a `docPath` at the offending member:
    twice.
 7. **`physical` belongs to a `bbox` index and to nothing else.** It is
    refused on a `geohash` index (an R\*Tree carries numbers and a cell
-   is text), on an undecorated index (which has only one shape), and for
-   any value outside `{"columns", "rtree"}`. It is a property of the
+   is text), on a `vector` index (which has one shape on disk, §3.1),
+   on an undecorated index (which has only one shape), and for any
+   value outside `{"columns", "rtree"}`. It is a property of the
    COLUMN SET, so two indexes sharing one set must agree about it.
+8. **`dims` is required for `vector`, and refused anywhere else** — on
+   a `geohash` or `bbox` index and on an undecorated one — and must be
+   an integer 1..8192. `precision` is refused on a `vector` index for
+   the mirror reason: a vector has a width, not a cell size.
+9. **A `vector` index needs a member the schema types `array` and
+   nothing else** — `"type": "array"` or `["array"]`; a member the
+   schema does not type, or types `object`, or `["array", "null"]`, is
+   refused. Rule 4's leniency for an untyped spatial member does not
+   carry over: a column over a member the schema lets be a string is a
+   column that lies about some documents, and every refusal here says
+   how to declare the member (`items`, `minItems`, `maxItems`).
 
 *Why the model and not an `openStore` option:* the store must know which
 shape to expect in order to **verify without altering** (§3). With the
@@ -227,9 +292,11 @@ no SQL text exists outside a dialect. On SQLite:
 - one **virtual generated column** per distinct indexed path, typed
   from the collection's schema at that path (`string` → `TEXT`,
   `integer` → `INTEGER`, `number` → `REAL`, `boolean` → `INTEGER`,
-  undeclared → `ANY`), and
+  undeclared → `ANY`), one derived column set per spatial `derive`
+  (§3.1), one stored `BLOB` column per `derive: 'vector'` width, and
 - one index per `indexes` entry, named `<collection>_<index name>`,
-  over the generated columns of its paths.
+  over the generated columns of its paths — except a `vector` entry,
+  which names its column and creates no index (§2.1).
 
 Index paths are analyzed through the query engine's published AST: a
 path is indexable exactly when the analysis reports it singular and
@@ -289,6 +356,29 @@ The two branches are independent: the `physical` mapping composes with
 either derived-column mapping, and the sync triggers read the derived
 columns either way, so their text is identical on both.
 
+**The vector column does not branch.** A `derive: 'vector'` column is
+the stored `BLOB` column under BOTH rows of the table — the store
+writes it on every insert, upsert and patch, on every driver, computed
+in JavaScript through the same seam a migration backfill uses — and
+**no function is ever registered for it**. That is a deliberate
+divergence from the spatial kinds, for three measured reasons:
+
+- a virtual generated column is a host-function call per row, measured
+  at 150× against a stored read in the spatial work — and a vector's
+  call would re-derive a whole array per row, not a scalar;
+- a stored column is readable without any registration, so a plain
+  `SELECT`, a backup and a foreign tool can never hit `unknown
+  function` over it, which the first consequence below shows a virtual
+  column can;
+- `bun` has no function API at all, so one mapping is the only way
+  every driver stores, verifies and reads the same column.
+
+Two things follow that are NOT true of a spatial column: a database
+created under `node` opens under `bun` with no drift on the vector
+column's account (the same declared text on both), and the migration
+planner emits the backfill step for it under either `derived` setting
+(MIGRATION-FORMAT §2.1).
+
 Three consequences, each normative:
 
 - **The registered function MUST be deterministic** in the strong
@@ -305,12 +395,13 @@ Three consequences, each normative:
   `NaN` and no `Infinity`, so the write path computes from the member
   as it will be held rather than from the object handed in. Without
   that the two mappings would answer differently for one document.
-- **The same model document produces two different physical shapes**,
-  and *match* is by declared text (above). A database created under
-  `node` and opened under `bun` therefore reports `JD0002` naming the
-  derived column — correctly: the column really is different. The
-  physical mapping is a property of the driver that CREATED the file,
-  and moving a file between the two is a migration, not an open.
+- **The same model document produces two different physical shapes**
+  for a spatial column, and *match* is by declared text (above). A
+  database created under `node` and opened under `bun` therefore
+  reports `JD0002` naming the derived column — correctly: the column
+  really is different. The physical mapping is a property of the driver
+  that CREATED the file, and moving a file between the two is a
+  migration, not an open.
 - **The R\*Tree fallback is a REPORT, not a degradation.** §4 promises
   that a model declaring a spatial index is portable across all three
   drivers and that the physical shape it produces is not, so refusing at
@@ -357,6 +448,28 @@ kernel: a value that carries SOME positions is bounded by the positions
 it has. A `LineString` whose second vertex did not survive as a
 position is bounded by its first — a document the GeoJSON meta-schema
 refuses in the first place — and both mappings agree about it.
+
+**A `vector` column is `NULL` when the member is not a vector of
+exactly `dims` finite numbers:**
+
+| the stored member | column |
+|---|---|
+| absent | `NULL` |
+| an array of another width (767 where `dims` is 768) | `NULL` |
+| a component that is not finite — JSON has no `NaN`, so it arrives as `null` | `NULL` |
+| not an array: a string, an object, a typed array (which JSON holds as an object), an array of arrays | `NULL` |
+| the zero vector | **stored** — `4·dims` zero bytes; it has no direction and scores 0 against everything, which the query format publishes as a score, not a refusal |
+| an array of `dims` finite numbers | the packed, l2-normalized form |
+
+The document itself stores in every row of that table; the write is
+never refused on the column's account (§2.1). The consequence is the
+same as the spatial one: **a row whose vector column is `NULL` is
+invisible to a plan that ranks over the column** — unrankable, not
+wrong. Here it is not even a divergence in the error path: `$similarity`
+over such a member answers the empty sequence (QUERY-FORMAT §8.15)
+rather than raising, so the column and the engine agree the row is
+unranked. What the column cannot do is refuse a wrong-width vector at
+the write — that is the schema's job, and §2.1 shows the declaration.
 
 ## 4. The driver contract and the synchronous fast path
 

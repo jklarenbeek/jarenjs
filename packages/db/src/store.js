@@ -37,8 +37,8 @@ import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js'
 import { createJobEngine } from './jobs.js';
 import { collectEntityRoots } from './plan.js';
 import {
-  DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, derivedValue, memberAt,
-  storedMemberForm, registerDeriveFunctions,
+  DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
+  derivedValue, memberAt, storedMemberForm, registerDeriveFunctions,
 } from './derive.js';
 
 /** The model format version this store implements. */
@@ -58,10 +58,11 @@ function modelError(code, reason, docPath) {
 }
 
 /**
- * Normalize one index's `derive` declaration — the spatial storage
- * vocabulary. `derive` says what is COMPUTED from the selected member,
- * never how the member is selected, so the singular-path rule and its
- * `JD0004` are untouched; these are the refusals a derived index adds.
+ * Normalize one index's `derive` declaration — the spatial and vector
+ * storage vocabulary. `derive` says what is COMPUTED from the selected
+ * member, never how the member is selected, so the singular-path rule
+ * and its `JD0004` are untouched; these are the refusals a derived
+ * index adds.
  *
  * Every one of them is a mistake worth catching at open rather than at
  * the first query that quietly returns nothing.
@@ -69,10 +70,11 @@ function modelError(code, reason, docPath) {
  * @param {string[]} paths
  * @param {string} docPath
  * @returns {{ kind: string | null, precision: number | undefined,
- *   physical: string | undefined }}
+ *   physical: string | undefined, dims: number | undefined }}
  */
 function normalizeDerive(index, paths, docPath) {
   const declared = index.derive;
+  const none = { precision: undefined, physical: undefined, dims: undefined };
   if (declared === undefined) {
     if (index.precision !== undefined) {
       throw modelError('JD0004',
@@ -85,23 +87,69 @@ function normalizeDerive(index, paths, docPath) {
         + 'index has only one shape',
         `${docPath}/physical`);
     }
-    return { kind: null, precision: undefined, physical: undefined };
+    if (index.dims !== undefined) {
+      throw modelError('JD0004',
+        `index '${index.name}': dims is the width of a derive: 'vector' column — declare `
+        + 'derive beside it; an undecorated index has no width',
+        `${docPath}/dims`);
+    }
+    return { ...none, kind: null };
   }
   if (typeof declared !== 'string' || !DERIVE_KINDS.has(declared)) {
     throw modelError('JD0004',
-      `derive is a closed set ('geohash' or 'bbox'), got ${JSON.stringify(declared)} — `
+      `index '${index.name}': derive is a closed set ('geohash', 'bbox' or 'vector'), got `
+      + `${JSON.stringify(declared)} — `
       + 'an open expression member would be a second query language inside the model',
       `${docPath}/derive`);
   }
   if (paths.length !== 1) {
     throw modelError('JD0004',
-      `a ${declared} index derives its columns from ONE member; a composite path declares several`,
+      `index '${index.name}': a ${declared} index derives its columns from ONE member; a composite `
+      + 'path declares several',
       `${docPath}/path`);
   }
   if (index.unique === true) {
     throw modelError('JD0004',
-      `a ${declared} index is never unique: distinct positions share a cell (and a box edge) by construction`,
+      declared === 'vector'
+        ? `index '${index.name}': a vector index is never unique — it is a column nothing seeks, `
+          + 'and two documents may carry one embedding'
+        : `index '${index.name}': a ${declared} index is never unique: distinct positions share a `
+          + 'cell (and a box edge) by construction',
       `${docPath}/unique`);
+  }
+  if (declared === 'vector') {
+    if (index.precision !== undefined) {
+      throw modelError('JD0004',
+        `index '${index.name}': precision applies to a geohash index; a vector column has a `
+        + 'width (dims), not a cell size',
+        `${docPath}/precision`);
+    }
+    if (index.physical !== undefined) {
+      throw modelError('JD0004',
+        `index '${index.name}': physical applies to a bbox index; a vector column has one `
+        + 'shape on disk — a stored packed column, on every driver',
+        `${docPath}/physical`);
+    }
+    const dims = index.dims;
+    if (dims === undefined) {
+      throw modelError('JD0004',
+        `index '${index.name}': a vector index must declare dims (${DIMS_MIN}..${DIMS_MAX}) — `
+        + 'the width is the identity of the column, and a column that accepted any width '
+        + 'would rank vectors from different models against each other',
+        `${docPath}/dims`);
+    }
+    if (typeof dims !== 'number' || !Number.isInteger(dims) || dims < DIMS_MIN || dims > DIMS_MAX) {
+      throw modelError('JD0004',
+        `index '${index.name}': dims must be an integer ${DIMS_MIN}..${DIMS_MAX}, got ${JSON.stringify(dims)}`,
+        `${docPath}/dims`);
+    }
+    return { ...none, kind: 'vector', dims };
+  }
+  if (index.dims !== undefined) {
+    throw modelError('JD0004',
+      `index '${index.name}': dims is the width of a derive: 'vector' column; a ${declared} `
+      + 'index has no width',
+      `${docPath}/dims`);
   }
   if (declared === 'bbox') {
     if (index.precision !== undefined) {
@@ -116,7 +164,7 @@ function normalizeDerive(index, paths, docPath) {
         `physical is a closed set ('columns' or 'rtree'), got ${JSON.stringify(physical)}`,
         `${docPath}/physical`);
     }
-    return { kind: 'bbox', precision: undefined, physical };
+    return { ...none, kind: 'bbox', physical };
   }
   if (index.physical !== undefined) {
     throw modelError('JD0004',
@@ -138,7 +186,7 @@ function normalizeDerive(index, paths, docPath) {
       `precision must be an integer ${PRECISION_MIN}..${PRECISION_MAX}, got ${JSON.stringify(precision)}`,
       `${docPath}/precision`);
   }
-  return { kind: 'geohash', precision, physical: undefined };
+  return { ...none, kind: 'geohash', precision };
 }
 
 /**
@@ -251,6 +299,7 @@ export function normalizeModel(model) {
         derive: derive.kind,
         precision: derive.precision,
         physical: derive.physical,
+        dims: derive.dims,
         docPath: indexDocPath,
       });
     }
@@ -943,9 +992,12 @@ export function openStore(model, options) {
       }
       // a table whose column expression calls a function this connection
       // has not registered cannot even be SELECTed (probed), so the
-      // registration precedes every statement over it
+      // registration precedes every statement over it. Only a VIRTUAL
+      // derived column needs one: a vector column is stored on every
+      // driver and a model with nothing else registers nothing
       const needsDeriveFunctions = derivedMapping === 'virtual'
-        && [...plans.values()].some((plan) => plan.derived.length > 0);
+        && [...plans.values()].some((plan) => plan.generated.some(
+          (column) => column.derive !== undefined && column.stored !== true));
 
       const pragmas = chain(
         memory

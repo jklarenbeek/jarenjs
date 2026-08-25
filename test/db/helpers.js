@@ -189,6 +189,7 @@ export function fullDoubleDialect(createDialect) {
     tableSuffix: '',
     epochFromRfc3339: (v) => `EPOCHMS(${v})`,
     docColumnType: 'JSONDOC',
+    packedVectorType: 'VECBYTES',
     quoteIdentifier: (s) => `[${s}]`,
     parameterRef: (i) => `@p${i}`,
     stringLiteral: (s) => `'${String(s).replace(/'/g, "''")}'`,

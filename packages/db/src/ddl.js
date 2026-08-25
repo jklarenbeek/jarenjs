@@ -17,7 +17,7 @@
 import { analyzeQuery } from '@jarenjs/json/query';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
-import { BBOX_COMPONENTS, BBOX_INDEX_ORDER } from './derive.js';
+import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 
 /** The fixed physical column names of the 0.1 mapping. */
 export const KEY_COLUMN = 'key';
@@ -119,15 +119,30 @@ export function schemaTypeAt(schema, segments) {
 const SCALAR_TYPES = new Set(['string', 'integer', 'number', 'boolean']);
 
 /**
+ * Whether a schema node types its value as `array` and nothing else —
+ * `type: 'array'` or `type: ['array']`. A vector column over a member
+ * the schema also lets be a string (or does not type at all) is a
+ * column that lies: some documents would carry a member the column
+ * silently ignores.
+ * @param {any} node
+ * @returns {boolean}
+ */
+function typedArrayOnly(node) {
+  if (node === undefined) return false;
+  if (node.type === 'array') return true;
+  return Array.isArray(node.type) && node.type.length === 1 && node.type[0] === 'array';
+}
+
+/**
  * A stable generated-column name for a canonical path: readable where
  * the path is tame, disambiguated by suffix where sanitizing collides.
  *
  * A DERIVED index names its columns from the same stem plus what makes
  * the derivation distinct — the kind, and the geohash precision, since
  * two precisions over one path are legitimately two column sets (a
- * coarse bucketing index and a fine proximity one). A bbox derivation
- * owns FOUR columns under one stem, so every one of them is claimed
- * before the stem is accepted.
+ * coarse bucketing index and a fine proximity one); a vector width
+ * likewise. A bbox derivation owns FOUR columns under one stem, so
+ * every one of them is claimed before the stem is accepted.
  * @param {string} canonical
  * @param {Map<string, string>} byKey - identity -> column name (or stem)
  * @param {Set<string>} taken
@@ -152,6 +167,57 @@ function generatedColumnName(canonical, byKey, taken, options = undefined) {
 }
 
 /**
+ * The one column a `derive: 'vector'` index contributes: the packed,
+ * l2-normalized member as `dialect.packedVectorType`, STORED on every
+ * driver (`derivedMappingFor`), with no B-tree over it — nothing seeks
+ * a blob of floats; a fetch-and-rank plan reads the whole column — so
+ * the index declaration names a column, not an index, and contributes
+ * nothing to `expected.indexes`. `dims` is part of the identity for
+ * the reason `precision` is: a different width is a different column.
+ * @param {any} index - the normalized index declaration
+ * @param {any} context
+ * @returns {null} — no index covers the column
+ */
+function vectorColumn(index, context) {
+  const {
+    collection, dialect, segments, canonical, pathText, columnByCanonical, taken,
+    generated, derived,
+  } = context;
+  const node = schemaNodeAt(collection.schema, segments);
+  if (!typedArrayOnly(node)) {
+    const typed = node?.type === undefined ? 'not typed' : `typed ${JSON.stringify(node.type)}`;
+    throw new DbCompileError('JD0004',
+      `index '${index.name}': the path '${index.paths[0]}' is ${typed} by the schema, and a `
+      + "vector column needs a member the schema types 'array' and nothing else — a column over "
+      + 'a member that may also be a string, an object or null is a column that lies about '
+      + 'some documents (declare items: { type: \'number\' } and minItems/maxItems equal to '
+      + 'dims beside it)',
+      `${index.docPath}/derive`);
+  }
+  if (typeof dialect.packedVectorType !== 'string') {
+    throw new TypeError(
+      `ddl: the '${dialect.name}' dialect declares no packedVectorType, so it cannot hold a vector column`);
+  }
+  const key = `${canonical}|vector|${index.dims}`;
+  const name = generatedColumnName(canonical, columnByCanonical, taken,
+    { key, suffix: `v${index.dims}` });
+  if (!generated.some((column) => column.name === name)) {
+    generated.push({
+      name,
+      type: dialect.packedVectorType,
+      pathText,
+      canonical,
+      derive: 'vector',
+      dims: index.dims,
+      stored: true,
+      expression: null,
+    });
+    derived.push({ name, derive: 'vector', dims: index.dims, segments });
+  }
+  return null;
+}
+
+/**
  * The columns one derived index contributes, appended to the plan's
  * `generated` (the physical column list) and `derived` (what the write
  * path and the migration backfill need to recompute a value).
@@ -162,21 +228,27 @@ function generatedColumnName(canonical, byKey, taken, options = undefined) {
  * rather than at the first query that returns nothing.
  * @param {any} index - the normalized index declaration
  * @param {any} context
- * @returns {string[]} the column names the index covers, in order
+ * @returns {string[] | null} the column names the index covers, in
+ *   order — or `null` when no B-tree covers them (an R\*Tree, or a
+ *   vector column)
  */
 function deriveColumns(index, context) {
   const {
-    collection, table, dialect, stored, segments, canonical, pathText,
+    collection, table, dialect, mapping, segments, canonical, pathText,
     columnByCanonical, taken, generated, derived, rtreeCapable, virtualTables,
     physicalByKey,
   } = context;
+  // the per-kind override: a vector column is stored on every driver
+  const stored = derivedMappingFor(index.derive, mapping) === 'stored';
   const declaredType = schemaTypeAt(collection.schema, segments);
   if (declaredType !== undefined && SCALAR_TYPES.has(declaredType)) {
     throw new DbCompileError('JD0004',
-      `the index path '${index.paths[0]}' is typed '${declaredType}' by the schema, and a `
-      + `${index.derive} index derives from a position or a geometry — an array or an object`,
+      `index '${index.name}': the path '${index.paths[0]}' is typed '${declaredType}' by the schema, and a `
+      + `${index.derive} index derives from ${index.derive === 'vector'
+        ? 'an array of numbers' : 'a position or a geometry — an array or an object'}`,
       `${index.docPath}/derive`);
   }
+  if (index.derive === 'vector') return vectorColumn(index, context);
   const isGeohash = index.derive === 'geohash';
   // the identity that decides column SHARING: two indexes over the same
   // path with the same derivation and the same precision are one column
@@ -271,12 +343,14 @@ function deriveColumns(index, context) {
  * is false): there the columns are ordinary ones the store writes. The
  * two mappings produce different declared text on purpose — a database
  * built under one and opened under the other really does disagree, and
- * `verifyShape` says so rather than papering over it.
+ * `verifyShape` says so rather than papering over it. A
+ * `derive: 'vector'` column is the stored shape under BOTH mappings
+ * (`derivedMappingFor`), so for it the two agree.
  * @param {string} name - The collection name (also the table name)
  * @param {{ schema: any, keySegments: { name: string }[] | null,
  *   identity: string, indexes: { name: string, paths: string[],
  *   unique: boolean, derive?: string | null, precision?: number,
- *   docPath: string }[] }} collection - normalized
+ *   dims?: number, docPath: string }[] }} collection - normalized
  * @param {any} dialect
  * @param {{ derived?: 'virtual' | 'stored', rtree?: boolean }} [options]
  *   - `derived` is the physical mapping for derived columns:
@@ -292,7 +366,7 @@ function deriveColumns(index, context) {
  *   generated: { name: string, type: string, pathText: string,
  *     canonical: string }[],
  *   derived: { name: string, derive: string, precision?: number,
- *     component?: string, segments: any[] }[],
+ *     component?: string, dims?: number, segments: any[] }[],
  *   columnByCanonical: Map<string, string>,
  *   createSql: string[],
  *   virtualTables: { stem: string, name: string, columns: string[],
@@ -304,7 +378,8 @@ function deriveColumns(index, context) {
  * }}
  */
 export function planCollection(name, collection, dialect, options = undefined) {
-  const stored = options?.derived === 'stored';
+  /** @type {'virtual' | 'stored'} */
+  const mapping = options?.derived === 'stored' ? 'stored' : 'virtual';
   const rtreeCapable = options?.rtree !== false;
   const keyType = collection.identity === 'integer'
     ? dialect.typeFor('integer', 'key')
@@ -330,7 +405,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
 
   for (const index of collection.indexes) {
     const columns = [];
-    let mappedToVirtual = false;
+    let noBtree = false;
     for (let i = 0; i < index.paths.length; i++) {
       const pathDocPath = `${index.docPath}/path`;
       const { segments, canonical } = compileIndexPath(index.paths[i], pathDocPath);
@@ -342,11 +417,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
       }
       if (index.derive) {
         const contributed = deriveColumns(index, {
-          collection, table: name, dialect, stored, segments, canonical, pathText,
+          collection, table: name, dialect, mapping, segments, canonical, pathText,
           columnByCanonical, taken, generated, derived, rtreeCapable, virtualTables,
           physicalByKey,
         });
-        if (contributed === null) mappedToVirtual = true;
+        if (contributed === null) noBtree = true;
         else columns.push(...contributed);
         continue;
       }
@@ -364,8 +439,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
     }
     // a column set realized as an R*Tree has no B-tree over it: the
     // virtual table IS the index, and the four columns stay only as the
-    // box's one definition (the triggers read them)
-    if (mappedToVirtual) continue;
+    // box's one definition (the triggers read them). A vector column
+    // has none either: it is fetched whole and ranked, never sought
+    if (noBtree) continue;
     indexes.push({
       name: `${name}_${index.name}`,
       unique: index.unique,
@@ -630,8 +706,17 @@ export function verifyShape(connection, plan, collection, docPath) {
       const expected = [...plan.expected.columns]
         .map((c) => ({ ...c, type: c.type.toUpperCase() }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
-      if (actual.length !== expected.length)
-        disagree(`${actual.length} columns exist, the model declares ${expected.length}`);
+      if (actual.length !== expected.length) {
+        // name what is missing or extra: a count alone sends the reader
+        // to a pragma to learn which column a foreign tool dropped
+        const actualNames = new Set(actual.map((column) => column.name));
+        const expectedNames = new Set(expected.map((column) => column.name));
+        const missing = expected.filter((column) => !actualNames.has(column.name));
+        const extra = actual.filter((column) => !expectedNames.has(column.name));
+        disagree(`${actual.length} columns exist, the model declares ${expected.length}`
+          + (missing.length > 0 ? `; missing: ${missing.map((c) => `'${c.name}'`).join(', ')}` : '')
+          + (extra.length > 0 ? `; undeclared: ${extra.map((c) => `'${c.name}'`).join(', ')}` : ''));
+      }
       for (let i = 0; i < expected.length; i++) {
         const want = expected[i];
         const have = actual[i];

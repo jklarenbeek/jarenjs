@@ -105,6 +105,7 @@ function deriveStep(collection, plan, columnNames, note) {
       const entry = { name: column.name, derive: column.derive, segments: column.segments };
       if (column.precision !== undefined) entry.precision = column.precision;
       if (column.component !== undefined) entry.component = column.component;
+      if (column.dims !== undefined) entry.dims = column.dims;
       return entry;
     });
   return { kind: 'derive', collection, columns, note };

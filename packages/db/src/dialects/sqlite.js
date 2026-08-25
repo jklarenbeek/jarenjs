@@ -90,6 +90,10 @@ export const sqliteDialect = createDialect({
   epochFromRfc3339: (valueSql) =>
     `CAST(round((julianday(${valueSql}) - 2440587.5) * 86400000.0) AS INTEGER)`,
   docColumnType: 'BLOB',
+  // a `derive: 'vector'` column holds the packed little-endian binary32
+  // form (`4·dims` bytes); it is a stored column on every driver, so
+  // this is the whole of its SQL
+  packedVectorType: 'BLOB',
   quoteIdentifier,
   parameterRef: () => '?',
   stringLiteral,
@@ -105,10 +109,24 @@ export const sqliteDialect = createDialect({
   // the deterministic function the store registers at open. The
   // precision is a LITERAL, not a parameter — a generated column's
   // expression takes none — which is also what makes two precisions
-  // over one path two different columns by declared text.
-  derivedExpression: (memberSql, column) => (column.derive === 'geohash'
-    ? `jaren_geohash(${memberSql}, ${Math.trunc(Number(column.precision))})`
-    : `jaren_bbox_${column.component}(${memberSql})`),
+  // over one path two different columns by declared text. Exhaustive
+  // over the kind: a vector column is stored, never generated, so
+  // asking for its expression is a planner defect, and an unknown kind
+  // is refused rather than spelled as `jaren_bbox_undefined(...)`
+  derivedExpression: (memberSql, column) => {
+    switch (column.derive) {
+      case 'geohash':
+        return `jaren_geohash(${memberSql}, ${Math.trunc(Number(column.precision))})`;
+      case 'bbox':
+        return `jaren_bbox_${column.component}(${memberSql})`;
+      case 'vector':
+        throw new TypeError(
+          "sqlite dialect: a derive: 'vector' column is stored on every driver and has no generated expression");
+      default:
+        throw new TypeError(
+          `sqlite dialect: no generated-column expression for derive kind '${column.derive}'`);
+    }
+  },
   jsonSet: (exprSql, pathText, valueSql) =>
     `jsonb_set(${exprSql}, ${stringLiteral(pathText)}, ${valueSql})`,
   jsonRemove: (exprSql, pathText) =>

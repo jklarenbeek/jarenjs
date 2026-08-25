@@ -34,6 +34,7 @@
  *   capabilities: Record<string, any>,
  *   tableSuffix: string,
  *   docColumnType: string,
+ *   packedVectorType: string,
  *   quoteIdentifier: (s: string) => string,
  *   parameterRef: (i: number, name: string) => string,
  *   stringLiteral: (s: string) => string,
@@ -43,7 +44,7 @@
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string) => string,
  *   derivedExpression?: (memberSql: string, column: { derive: string,
- *     precision?: number, component?: string }) => string,
+ *     precision?: number, component?: string, dims?: number }) => string,
  *   jsonSet: (exprSql: string, pathText: string, valueSql: string) => string,
  *   jsonRemove: (exprSql: string, pathText: string) => string,
  *   jsonAppend: (exprSql: string, arrayPathText: string, valueSql: string) => string,
@@ -86,7 +87,9 @@ export function createDialect(spec) {
    * generated column over the document; a DERIVED column is the same
    * shape over a registered deterministic function, except where the
    * driver cannot index one — there the store writes the value and the
-   * column is an ordinary one.
+   * column is an ordinary one. A packed vector column is ALWAYS that
+   * ordinary stored column (its type is `packedVectorType`), on every
+   * driver: it never has an expression to spell.
    * @param {string} docColumn
    * @param {{ name: string, type: string, pathText: string,
    *   expression?: string | null, stored?: boolean }} column
@@ -415,6 +418,9 @@ export function createDialect(spec) {
     name: spec.name,
     capabilities: Object.freeze({ ...spec.capabilities }),
     docColumnType: spec.docColumnType,
+    // the declared type of a `derive: 'vector'` column — the bytes of
+    // the packed form, spelled by the dialect like every other type
+    packedVectorType: spec.packedVectorType,
     quoteIdentifier: q,
     parameterRef: p,
     stringLiteral: spec.stringLiteral,
