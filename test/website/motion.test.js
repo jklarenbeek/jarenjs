@@ -25,12 +25,14 @@ import { createMotion, prefersReducedMotion } from '../../packages/website/src/l
 
 const SRC = fileURLToPath(new URL('../../packages/website/src/', import.meta.url));
 
-/** Every source file of the site, path-relative to `src/`. */
+/** Every source file of the site, path-relative to `src/`, in posix
+ * spelling whatever the host separator — the assertions name files the
+ * way the imports do, and `path.join` reads `/` fine everywhere. */
 function sources(dir = '') {
   return readdirSync(path.join(SRC, dir), { withFileTypes: true }).flatMap((entry) => (
     entry.isDirectory()
       ? sources(path.join(dir, entry.name))
-      : (entry.name.endsWith('.js') ? [path.join(dir, entry.name)] : [])));
+      : (entry.name.endsWith('.js') ? [path.join(dir, entry.name).split(path.sep).join('/')] : [])));
 }
 
 /** One element: the classes it carries, the text it shows, the custom
