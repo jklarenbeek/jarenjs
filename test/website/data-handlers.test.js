@@ -137,7 +137,8 @@ describe('the studio over a real store', function () {
       { id: 'n2', title: 'second', points: 40 },
     ]) await table.handlers['data.insert']({ collection: 'notes', doc: doc_ });
   });
-  after(function () {
+  after(async function () {
+    await table.dispose();
     fixture.cleanup();
   });
 
@@ -263,6 +264,7 @@ describe('a migration the studio runs', function () {
         'and the report is one the page reads it through');
     }
     finally {
+      await table.dispose();
       fixture.cleanup();
     }
   });
@@ -286,6 +288,7 @@ describe('a migration the studio runs', function () {
         'the tabs are told either way — their subscriptions ended either way');
     }
     finally {
+      await table.dispose();
       fixture.cleanup();
     }
   });

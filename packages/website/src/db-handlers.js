@@ -264,6 +264,11 @@ export function createDataHandlers(host) {
 
   return {
     handlers,
+    // Release the store and end every live registration. The worker never
+    // calls this — its lifetime is the tab's — but an embedder or a test
+    // holds a real file open and must be able to let it go: Windows will
+    // not delete a database whose handle is still held.
+    dispose: closeStore,
     // The channel a CLIENT tab reaches the owner on serves the same store
     // through the same table, minus what only the owner may do: `reset`
     // unlinks the database this context holds open, and no frame tells the

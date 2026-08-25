@@ -208,14 +208,27 @@ describe('adapters — the body limit', () => {
     };
     pump();
     const outcome = /** @type {any} */ (await settled);
-    assert.ok(outcome.res !== undefined,
-      `the 413 must be observable through the closing socket, got ${outcome.err ?? 'close without a response'}`);
-    const res = /** @type {http.IncomingMessage} */ (outcome.res);
-    assert.strictEqual(res.statusCode, 413);
-    assert.strictEqual(res.headers.connection, 'close');
-    let text = '';
-    for await (const c of res) text += c;
-    assert.strictEqual(JSON.parse(text).code, 'JC2003');
+    if (outcome.res !== undefined) {
+      const res = /** @type {http.IncomingMessage} */ (outcome.res);
+      assert.strictEqual(res.statusCode, 413);
+      assert.strictEqual(res.headers.connection, 'close');
+      let text = '';
+      for await (const c of res) text += c;
+      assert.strictEqual(JSON.parse(text).code, 'JC2003');
+    }
+    else {
+      // a SATURATING upload may legitimately die by reset before the 413
+      // is readable: with the receive buffer full of unread upload, the
+      // OS-level close can still discard the response on some platforms
+      // (winsock does; measured ECANCELED there). The linger keeps the
+      // 413 observable for a well-behaved upload — the test after this
+      // one pins that — so here the accepted alternative is a
+      // reset-class socket error, never a hang and never a wrong status.
+      const err = outcome.err ?? errors[0];
+      const code = /** @type {any} */ (err)?.code ?? 'close without a response';
+      assert.match(String(code), /^(ECONNRESET|ECANCELED|EPIPE|ECONNABORTED)$/,
+        `expected the 413 or a reset-class error, got ${err ?? code}`);
+    }
     // whatever the socket did to the tail of the upload is not an unhandled error
     req.destroy();
   });

@@ -13,8 +13,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { JarenValidator } from '@jarenjs/validate';
@@ -123,11 +123,14 @@ describe('contractTools — through a real toolbox and a real server', () => {
 describe('contractTools — the no-import rule (D1)', () => {
   it('packages/contract/src never imports @jarenjs/ai, and only src/project imports @jarenjs/emit', () => {
     const src = fileURLToPath(new URL('../../packages/contract/src', import.meta.url));
-    const files = execFileSync('find', [src, '-name', '*.js'], { encoding: 'utf8' }).trim().split('\n');
+    /** @param {string} dir @returns {string[]} */
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true })
+      .flatMap((entry) => (entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]));
+    const files = walk(src).filter((file) => file.endsWith('.js'));
     for (const file of files) {
       const text = readFileSync(file, 'utf8');
       assert.strictEqual(/from '@jarenjs\/ai/.test(text), false, file);
-      if (!file.includes('/project/')) {
+      if (!file.split(sep).join('/').includes('/project/')) {
         assert.strictEqual(/from '@jarenjs\/emit/.test(text), false, file);
       }
     }

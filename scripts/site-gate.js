@@ -78,7 +78,11 @@ let failed = false;
 function stage(label, args) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn('npm', args, { env: process.env });
+    // npm is npm.cmd on Windows, and Node only spawns a .cmd through a
+    // shell; every argument this runner passes is space-free
+    const child = process.platform === 'win32'
+      ? spawn('npm.cmd', args, { env: process.env, shell: true })
+      : spawn('npm', args, { env: process.env });
     running.set(label, child);
     let output = '';
     child.stdout.on('data', (chunk) => { output += chunk; });

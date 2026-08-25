@@ -19,10 +19,11 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { createMotion, prefersReducedMotion } from '../../packages/website/src/lib/motion.js';
 
-const SRC = new URL('../../packages/website/src/', import.meta.url).pathname;
+const SRC = fileURLToPath(new URL('../../packages/website/src/', import.meta.url));
 
 /** Every source file of the site, path-relative to `src/`. */
 function sources(dir = '') {

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { renderToString } from '@jarenjs/view';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
@@ -912,7 +913,7 @@ describe('website — the packages own their pages', function () {
     // what it found — a card on the grid and a section on the docs page
     // — through the same code paths, knowing nothing about it
     const content = buildSiteContent(
-      new URL('../../test/website/fixtures/zero-edit/', import.meta.url).pathname);
+      fileURLToPath(new URL('../../test/website/fixtures/zero-edit/', import.meta.url)));
     // both artifacts come from the ONE collection of that repository:
     // the grid reads the cards projection, the docs page the bodies
     const siteData = { ...SITE_DATA, content, cards: buildSiteCards(content) };

@@ -506,7 +506,9 @@ describe('one home for spatial arithmetic (D1)', () => {
       'every cell and every box comes from @jarenjs/core/geo');
     const geoImporters = files.filter((file) =>
       /from '@jarenjs\/core\/geo'/.test(fs.readFileSync(file, 'utf8')));
-    assert.deepStrictEqual(geoImporters, ['packages/db/src/derive.js'],
+    // compare in posix spelling: path.join walked with the host separator
+    assert.deepStrictEqual(geoImporters.map((file) => file.split(path.sep).join('/')),
+      ['packages/db/src/derive.js'],
       'and exactly one file in this package reaches for it');
   });
 });

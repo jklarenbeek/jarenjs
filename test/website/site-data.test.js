@@ -371,9 +371,12 @@ describe('the collected site content', function () {
 
   it('never reaches an npm tarball — site presence is a repo concern', function () {
     const workspaces = buildSiteData().packages.map((p) => `--workspace=${p.name}`);
-    const packed = JSON.parse(execFileSync('npm',
+    // on Windows npm is npm.cmd, and Node only spawns a .cmd through a
+    // shell; every argument here is space-free, so the join is safe
+    const packed = JSON.parse(execFileSync(
+      process.platform === 'win32' ? 'npm.cmd' : 'npm',
       ['pack', '--dry-run', '--json', '--ignore-scripts', ...workspaces],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], shell: process.platform === 'win32' }));
     assert.strictEqual(packed.length, workspaces.length, 'every published workspace is checked');
     for (const tarball of packed) {
       assert.ok(tarball.files.some((/** @type {any} */ f) => f.path === 'README.md'),
