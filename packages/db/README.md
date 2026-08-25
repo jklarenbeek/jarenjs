@@ -282,6 +282,156 @@ build, and its query is SQL, not a document. Neither runs one document
 through three executors proven to agree, and neither validates ring
 closure in a schema.
 
+## Vector storage — the column, the cut, the price, the ceiling
+
+A collection can declare that one member is an embedding, and the store
+keeps it as a packed column beside the document:
+
+```js
+const store = await openStore({
+  $model: '0.1',
+  collections: {
+    memories: {
+      schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          text: { type: 'string' },
+          // typed `array` and nothing else: a column over a member that
+          // may also be a string or null is a column that lies about
+          // some documents. minItems/maxItems make a wrong-width write
+          // a validation error instead of an unrankable row.
+          embedding: { type: 'array', items: { type: 'number' },
+            minItems: 768, maxItems: 768 },
+        },
+      },
+      key: '/id',
+      indexes: [{ name: 'by_vec', path: '$.embedding', derive: 'vector', dims: 768 }],
+    },
+  },
+}, { driver: nodeDriver() });
+```
+
+`derive: 'vector'` materializes the member **l2-normalized and packed as
+little-endian binary32** — `4·dims` bytes, computed by
+`@jarenjs/core/vector` — into one **stored** column on every driver, with
+**no B-tree over it and no registered function** (MODEL-FORMAT §§2.1,
+3.1). Nothing seeks a blob of floats, so the entry names a column rather
+than an index; and because the column is stored rather than generated, a
+plain `SELECT`, a backup or a foreign tool can read the table without
+registering anything — which is also what lets `bun`, whose SQLite
+binding has no function API at all, store and read the same bytes.
+
+**"The k most similar" is not a keyword.** It is the query language's own
+ordering and window (QUERY-FORMAT §8.15) — `$orderby` on a `$similarity`
+key, descending, under a `$subsequence`:
+
+```js
+const memories = store.collection('memories');
+const nearest = {
+  $subsequence: [{
+    $for: { m: '$[*]' },
+    $where: { $eq: ['$m.topic', 'deploys'] },
+    $orderby: [{ $key: { $similarity: ['$m.embedding', '$q'] }, $dir: 'desc', $empty: 'least' },
+      '$m.id'],
+    $return: '$m',
+  }, 0, 10],
+};
+await memories.execute(nearest, { externals: { q: probe } });
+
+const how = await memories.explain(nearest, { externals: { q: probe } });
+how.mode;                       // 'knn'
+how.rank;                       // { column: 'gx_embedding_v768', dims: 768,
+                                //   probe: { external: 'q' }, offset: 0, limit: 10,
+                                //   margin: 1e-6, decides: 'engine' }
+how.sql;                        // SELECT "rowid", "gx_embedding_v768" … WHERE …
+                                // — no ORDER BY, no LIMIT, no similarity call
+memories.stats().knn;           // { queries, rows, candidates, fullFetches }
+```
+
+The pushed `$where` narrows in SQL exactly as in any other mode; the
+statement then projects `(row identity, packed column)` and nothing else;
+the **engine** unpacks, scores and keeps every row within `1e-6` of the
+`offset + limit`-th best; the candidates' documents are fetched by
+identity, and the ORIGINAL document — its whole `$orderby`, its window,
+its `$return` — runs over exactly those. So **the column cuts and the
+engine decides**: ties break by the document's own secondary keys,
+offsets and nested windows compose for free, and the rows the column
+cannot rank still appear where `$empty: 'least'` puts them. `strict: true`
+refuses the shape with `JD0010` naming the rank, because the ordering is
+engine work — the same honesty the spatial refinement gets. A probe of
+the wrong width, or one that is not an array of numbers, **diverts** to
+the residual with the reason in `explain()`, so a query can never quietly
+become an O(table) scan nobody counted (ARCHITECTURE, "The k-nearest plan").
+
+**The numbers, the losses included.** `benchmark/vector.js` measures one
+k-nearest query every physical way it can run — over <!--bm:vector.grid-->10,000 and 50,000 vectors at 384 and 768 dimensions, k = 10, the median of 10 probes<!--/bm--> —
+and asserts that every path returns the identical top-k, ids and order,
+on every probe before a single timing prints. The flagship row is the
+plan a consumer's own document runs, which measures <!--bm:vector.plan-->206 ms at 50,000 × 768<!--/bm-->:
+<!--bm:vector.table-->
+| path (ms) | 10,000 × 384 | 10,000 × 768 | 50,000 × 384 | 50,000 × 768 |
+|---|---:|---:|---:|---:|
+| engine resident sweep (no database) | 3.3 | 6.7 | 17 | 32 |
+| **the k-nearest plan (the store's own)** | 22 | 33 | 139 | 206 |
+| raw fetch + engine sweep (the plan's statement) | 20 | 31 | 130 | 202 |
+| `ORDER BY` over a registered function | 18 | 31 | 121 | 180 |
+| JSON-doc sweep (no vector column) | 249 | 501 | — | — |
+| sqlite-vec | 3.6 | 7.5 | 18 | 38 |
+<!--/bm-->
+
+The row the column exists to beat is the last one that has no column: the
+same query document over a collection that stores the embedding only
+inside the document costs <!--bm:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/bm-->,
+because every row's vector is parsed out of JSON before it can be
+compared. The row the store **cannot** beat is the one with no database
+in it: the same top-k over a resident `Float32Array` is <!--bm:vector.resident-->32 ms, which the plan is 6.4× slower than<!--/bm-->.
+That comparison is not an even one and the direction is the point — the
+sweep starts from decoded floats in RAM and pays nothing for durability,
+for filters that compose with the ranking, or for a process that can
+restart — but it stays published, because a store that is worth its
+price should be able to say what the price is.
+
+**Both halves of the price.** The column costs on the way in as well as
+saving on the way out: writing the same documents with
+the index costs <!--bm:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/bm-->,
+because every write pays a JSON round trip of the member plus a
+normalize and a pack. On disk one vector is <!--bm:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/bm--> —
+smaller, but *added*, since the document still carries the member the
+column is derived from.
+
+**Pushing the rank into SQL, re-measured.** A registered similarity
+function inside an `ORDER BY … LIMIT k` is the obvious alternative, and
+the suite measures it against the real column with the probe hoisted out
+of the per-row call: <!--bm:vector.udf-->180 ms against 202 ms at 50,000 × 768, and 0.87–1.00× the fetch-and-rank across the grid — rough parity on speed<!--/bm-->.
+The plan does not emit it, and after that measurement the reasons are not
+speed: `bun` has no user-function API, so a plan that needed one would
+exclude an executor outright; and an ordering decided in SQL cannot break
+a tie by the document's own secondary keys, which is what the three
+executors have to agree on.
+
+**The rival, and the ceiling.** `sqlite-vec` is the extension built for
+exactly this, and it is measured rather than described: it answers the
+same probes in <!--bm:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/bm-->,
+over <!--bm:vector.agreement-->40 probes, no disagreements<!--/bm-->. It is a
+loadable native extension, which is the one thing this store will not
+require — it would exclude the wasm tab and stock `bun`, half the
+execution story — so the comparison is published as what it is: a faster
+engine you may prefer, and a dependency this one does not take. What
+neither of them is, is an approximate index. Exact brute force is linear
+in `n · d`, and the suite states the envelope as arithmetic rather than
+opinion: <!--bm:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/bm-->.
+Past that this design is the wrong tool and no margin changes it; what
+lies beyond is an approximate index, and this store does not have one.
+
+**One document, three executors, proven to agree.** As with the spatial
+family, the k-nearest shapes of a committed corpus
+(`test/json/fixtures/vector-corpus.json`) run through the JavaScript
+engine, SQLite through the Node driver, and a real wasm build — indexed
+and unindexed — and every entry must answer identically, including a
+deliberate one-binary32-ulp near-tie and the windows that reach past the
+scored rows into the tail the column cannot rank.
+
 ## What SQLite-only means, frankly
 
 SQLite is the supported backend — 3.45 or newer, on `node:sqlite`,

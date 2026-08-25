@@ -51,6 +51,7 @@ export const SUITES = [
   { key: 'live', label: 'Live' },
   { key: 'long-horizon', label: 'Long horizon' },
   { key: 'retrieval', label: 'Retrieval' },
+  { key: 'vector', label: 'Vector' },
 ];
 
 /** The render nodes for the current benchmarks suite. */
@@ -89,6 +90,7 @@ export function deriveSuite(state, suite) {
     case 'live': return liveSuite(data);
     case 'long-horizon': return scoreTables(data);
     case 'retrieval': return scoreTables(data);
+    case 'vector': return scoreTables(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];
   }
 }

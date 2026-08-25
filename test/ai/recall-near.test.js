@@ -194,7 +194,7 @@ describe('ai ledger — recall({ near }) refuses before it ranks', function () {
 
     // a filter that excludes the foreign record makes the rest rankable
     const narrowed = await ledger.recall({ near: 'alpha beta', tags: ['none'] });
-    assert.deepStrictEqual(narrowed, { memories: [], scores: [], skipped: 0 },
+    assert.deepStrictEqual(narrowed, { memories: [], scores: [], skipped: 0, via: 'sweep' },
       'nothing passes the filter, so nothing mixes');
   });
 
@@ -261,7 +261,7 @@ describe('ai ledger — recall({ near }) ranks, breaks ties, and reports what it
     assert.deepStrictEqual(result.memories.map((m) => m.id), ['exact', 'close']);
     assert.strictEqual(result.skipped, 1, 'bare-1 is tagged greek and un-embedded; bare-2 never passed the filter');
     const none = await ledger.recall({ near: 'anything', tags: ['absent'] });
-    assert.deepStrictEqual(none, { memories: [], scores: [], skipped: 0 });
+    assert.deepStrictEqual(none, { memories: [], scores: [], skipped: 0, via: 'sweep' });
   });
 
   it('`limit` caps after ranking and `minScore` filters after ranking', async function () {
@@ -442,7 +442,8 @@ describe('ai ledger — auto-embedding on write is opt-in', function () {
     assert.strictEqual(stored.embedding, undefined);
     assert.strictEqual(embedder.batches.length, 0, 'the seam was not called by a write');
     const ranked = await ledger.recall({ near: 'a fact' });
-    assert.deepStrictEqual(ranked, { memories: [], scores: [], skipped: 1 }, 'and ranked recall says so');
+    assert.deepStrictEqual(ranked, { memories: [], scores: [], skipped: 1, via: 'sweep' },
+      'and ranked recall says so — over an adapter with no rank capability, by sweeping');
   });
 
   it('on, a write acquires its embedding inside the write, and keeps one it was handed', async function () {

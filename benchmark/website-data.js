@@ -32,6 +32,7 @@
  *   live.json         live.js           — live queries/capture/jobs vs RxDB/TinyBase (incremental vs re-run)
  *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
  *   retrieval.json    retrieval.js      — did the right memory reach the prompt: recall@k + MRR per policy, oracle-gated
+ *   vector.json       vector.js         — k-nearest over a stored vector column every way it runs, vs sqlite-vec, equivalence-gated
  *   meta.json                          — run metadata, conformance summary, QT3 scorecard
  *
  * meta.json is the one file here whose shape the website declares: it is
@@ -108,7 +109,7 @@ function parseArgs(argv) {
       }
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, long-horizon, retrieval, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, long-horizon, retrieval, vector, qt3');
         process.exit(0);
         break;
       default:
@@ -871,7 +872,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'contract', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'spatial', 'orm', 'live', 'long-horizon', 'retrieval',
+  'spatial', 'orm', 'live', 'long-horizon', 'retrieval', 'vector',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -1236,6 +1237,34 @@ function buildHeadlines(generated, meta) {
       });
     }
   }
+  if (generated.vector !== undefined) {
+    // The rival here IS an engine and IS timed, so this row does carry a
+    // ratio — and it is the one row on the overview where a purpose-built
+    // native extension is expected to win. It stays for that reason.
+    const meta = generated.vector.meta ?? {};
+    const figures = meta.figures ?? {};
+    const classes = meta.classes ?? [];
+    const disagreed = classes
+      .filter((/** @type {any} */ c) => c.key !== 'same')
+      .reduce((/** @type {number} */ sum, /** @type {any} */ c) => sum + c.count, 0);
+    if (figures.largest !== undefined) {
+      const times = (/** @type {number} */ r) => `${r.toFixed(2)}×`;
+      add('vector', 'Vector', {
+        ratio: figures.rivalVsPlan === null ? null : figures.rivalVsPlan,
+        rival: meta.rival?.unavailable === undefined ? 'sqlite-vec' : 'sqlite-vec (did not load)',
+        conformance: `${disagreed} disagreement${disagreed === 1 ? '' : 's'}`,
+        note: `k-nearest over a derive: 'vector' column at ${figures.largest}: every path answers the`
+          + ' identical top-k before a timing prints. The plan is'
+          + ` ${figures.jsonDocVsPlan === null ? 'the only column path measured' : `${times(figures.jsonDocVsPlan)} the same query with no column`}`
+          + ` and ${times(figures.planVsResident)} the resident sweep with no database at all;`
+          + ` the column costs ${times(figures.loadCost)} the write.`
+          + (figures.rivalVsPlan === null ? ' sqlite-vec did not load on the measuring host.'
+            : ` sqlite-vec answers ${times(figures.rivalVsPlan)} faster out of a database`
+              + ` ${times(figures.rivalStorage)} smaller that holds no documents`)
+          + ' — see the suite page',
+      });
+    }
+  }
   return out;
 }
 
@@ -1387,6 +1416,33 @@ function generateRetrieval(tmp) {
   }
   catch (e) {
     console.warn(`  warning: retrieval run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
+  return readJson(file);
+}
+
+/**
+ * The vector suite: one k-nearest query over a `derive: 'vector'`
+ * column measured every physical way it can run, against sqlite-vec.
+ * Every path must answer the identical top-k on every probe before a
+ * timing prints, so the tool exits non-zero and writes nothing when one
+ * disagrees — an omitted suite here is a withheld table, never a wrong
+ * one. The rival is a benchmark devDependency and its loadability is
+ * recorded either way: a host where the extension does not load still
+ * publishes every other row, with the exact reason beside the one it
+ * cannot.
+ */
+function generateVector(tmp, options) {
+  const file = path.join(tmp, 'vector.json');
+  try {
+    runTool([
+      'benchmark/vector.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: vector run failed (${e.message}); the suite will be omitted.`);
     return null;
   }
   return readJson(file);
@@ -1624,6 +1680,11 @@ async function main() {
     const retrieval = generateRetrieval(tmp);
     if (retrieval !== null)
       generated.retrieval = retrieval;
+  }
+  if (!options.skip.has('vector')) {
+    const vector = generateVector(tmp, options);
+    if (vector !== null)
+      generated.vector = vector;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

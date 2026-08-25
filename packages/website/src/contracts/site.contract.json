@@ -1222,6 +1222,173 @@
       },
       "additionalProperties": false
     },
+    "SuiteVector": {
+      "description": "vector.json — k-nearest over a derive: 'vector' column, measured every physical way it runs: the run meta (the grid, the probes, the rival and its loadability, the rival-disagreement classes with their pinned sizes, the derived figures and the notes), the equivalence checks that gate every timing, the query and price tables, one flat row per path per leg, and the storage measurements per leg.",
+      "type": "object",
+      "required": ["meta", "headline", "checks", "tables", "rows", "storage"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["suite", "title", "description", "date", "node", "seed", "k", "probes", "warmup", "quick", "engine", "legs", "rival", "classes", "figures", "notes", "equivalenceFailures"],
+          "properties": {
+            "suite": { "type": "string" },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "date": { "type": "string" },
+            "node": { "type": "string" },
+            "seed": { "type": "number" },
+            "k": { "type": "number" },
+            "probes": { "type": "number" },
+            "warmup": { "type": "number" },
+            "quick": { "type": "boolean" },
+            "engine": { "type": "string" },
+            "legs": {
+              "description": "One entry per corpus size x width measured, with the column the plan read and the candidates its cut kept.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["n", "dims", "label", "column", "candidates"],
+                "properties": {
+                  "n": { "type": "number" },
+                  "dims": { "type": "number" },
+                  "label": { "type": "string" },
+                  "column": { "type": ["null", "string"] },
+                  "candidates": { "type": ["null", "number"] }
+                },
+                "additionalProperties": false
+              }
+            },
+            "rival": {
+              "description": "The measured rival, or the exact reason it did not load on the measuring host — never silently dropped.",
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string" },
+                "version": { "type": "string" },
+                "table": { "type": "string" },
+                "metric": { "type": "string" },
+                "unavailable": { "type": "string" }
+              },
+              "additionalProperties": false
+            },
+            "classes": {
+              "description": "How the rival's answers related to this suite's, counted into named classes with pinned sizes: a rival that answers differently is a finding, not a tolerance.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key", "name", "expected", "count", "note"],
+                "properties": {
+                  "key": { "type": "string" },
+                  "name": { "type": "string" },
+                  "expected": { "type": ["null", "number"] },
+                  "count": { "type": "number" },
+                  "note": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "figures": {
+              "description": "The ratios the notes and the published prose are derived from, so a verdict can never outlive the number it was drawn from.",
+              "type": "object",
+              "required": ["jsonDocVsPlan", "jsonDocLeg", "planVsResident", "planVsFetch", "udfVsFetch", "udfVsFetchLow", "udfVsFetchHigh", "loadCost", "storageCost", "columnShare", "packedVsJson", "rivalVsPlan", "rivalStorage", "largest", "planNsPerComponent", "rivalNsPerComponent", "ceiling100msAt768", "ceiling1sAt768", "rivalCeiling1sAt768"],
+              "properties": {
+                "jsonDocVsPlan": { "type": ["null", "number"] },
+                "jsonDocLeg": { "type": ["null", "string"] },
+                "planVsResident": { "type": "number" },
+                "planVsFetch": { "type": "number" },
+                "udfVsFetch": { "type": "number" },
+                "udfVsFetchLow": { "type": "number" },
+                "udfVsFetchHigh": { "type": "number" },
+                "loadCost": { "type": "number" },
+                "storageCost": { "type": "number" },
+                "columnShare": { "type": "number" },
+                "packedVsJson": { "type": "number" },
+                "rivalVsPlan": { "type": ["null", "number"] },
+                "rivalStorage": { "type": ["null", "number"] },
+                "largest": { "type": "string" },
+                "planNsPerComponent": { "type": ["null", "number"] },
+                "rivalNsPerComponent": { "type": ["null", "number"] },
+                "ceiling100msAt768": { "type": ["null", "number"] },
+                "ceiling1sAt768": { "type": ["null", "number"] },
+                "rivalCeiling1sAt768": { "type": ["null", "number"] }
+              },
+              "additionalProperties": false
+            },
+            "notes": { "type": "array" },
+            "equivalenceFailures": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "headline": {
+          "type": "object",
+          "required": ["title", "text"],
+          "properties": { "title": { "type": "string" }, "text": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "agrees", "detail"],
+            "properties": {
+              "name": { "type": "string" },
+              "agrees": { "type": "boolean" },
+              "detail": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "head", "rows", "note"],
+            "properties": {
+              "title": { "type": "string" },
+              "head": { "type": "array" },
+              "rows": { "type": "array" },
+              "note": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["n", "dims", "path", "label", "ns"],
+            "properties": {
+              "n": { "type": "number" },
+              "dims": { "type": "number" },
+              "path": { "type": "string" },
+              "label": { "type": "string" },
+              "ns": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "storage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["n", "dims", "jsonBytes", "plainBytes", "docPayload", "indexedBytes", "columnPayload", "packedBytes"],
+            "properties": {
+              "n": { "type": "number" },
+              "dims": { "type": "number" },
+              "jsonBytes": { "type": "number" },
+              "plainBytes": { "type": "number" },
+              "docPayload": { "type": "number" },
+              "indexedBytes": { "type": "number" },
+              "columnPayload": { "type": "number" },
+              "packedBytes": { "type": "number" },
+              "rivalBytes": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "SuiteView": {
       "description": "view.json — the view engine: the build/update/SSR/frame/memo tables and the corpus the run used.",
       "type": "object",
@@ -1391,11 +1558,12 @@
           { "$ref": "#/$defs/SuiteSpatial" },
           { "$ref": "#/$defs/SuiteToml" },
           { "$ref": "#/$defs/SuiteValidate" },
+          { "$ref": "#/$defs/SuiteVector" },
           { "$ref": "#/$defs/SuiteView" }
         ]
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
-      "doc": "One benchmark suite's payload. The twenty-three suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
+      "doc": "One benchmark suite's payload. The twenty-four suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
     },
     "readme.fetch": {
       "kind": "read",

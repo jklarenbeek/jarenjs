@@ -629,6 +629,12 @@ const storage = {
 };
 ```
 
+`keys()` really must be **sorted**: listings, the goal archive and a snapshot's entries are
+read in key order, and the ledger's zero-padded sequences exist so that order is
+chronological. One optional fifth method, `rank`, lets an adapter that can rank vectors
+where they live answer `recall({ near })` without handing every record over (§A durable
+ledger over `@jarenjs/db`).
+
 Back it with `@jarenjs/db` over OPFS, with one `localStorage` slot, with a file, with a
 server — or with nothing. The package gains no dependency either way, which is the whole
 posture: it loads in a static page with two dependencies and degrades to in-memory and
@@ -700,9 +706,10 @@ const { memories, scores, skipped } = await ledger.recall({
   and reports it on the returned record as `embedError` (not part of the stored record) — one
   bad network call never loses a memory, and `embedMissing()` closes the gap later.
 - **No arithmetic lives here.** The cosine is `@jarenjs/core/vector`'s; the ledger calls it and
-  computes nothing. Ranked recall is an exact sweep — one adapter scan plus one cosine per
-  embedded record — which is the right tool for a ledger of thousands and the wrong one for
-  millions; the instrument below says what it costs. The same question over a `@jarenjs/db`
+  computes nothing. Ranked recall is an exact sweep by default — one adapter scan plus one cosine
+  per embedded record, reported as `via: 'sweep'` — which is the right tool for a ledger of
+  thousands and the wrong one for millions; the instrument below says what it costs, and an
+  adapter that declares `rank` (below) turns that scan into a k-nearest plan. The same question over a `@jarenjs/db`
   collection is the query language's own k-nearest composition (QUERY-FORMAT §8.15) — and
   over a `derive: 'vector'` column the store plans it as a cut the engine finishes, with
   `explain()` naming the mode (its ARCHITECTURE, "The k-nearest plan").
@@ -710,6 +717,149 @@ const { memories, scores, skipped } = await ledger.recall({
   default over the same seeded corpus, through the deterministic reference embedder
   (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
   A real model's number is the host's to measure through the same instrument's `--live` tier.
+
+#### A durable ledger over `@jarenjs/db`
+
+The adapter is four methods over one collection, and it needs nothing from this package —
+the storage contract is the whole interface between a ledger and where it lives. Declare a
+`derive: 'vector'` column over the records' embeddings and the same adapter can implement
+the **optional fifth**, `rank`, so `recall({ near })` is answered by the store's k-nearest
+plan instead of by reading every record back to be swept:
+
+```js
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+/**
+ * One collection is the whole schema a ledger needs: the storage key,
+ * the JSON value, and — when records carry embeddings — one packed
+ * vector column derived from `value.embedding`. `value` is deliberately
+ * untyped: the ledger stores objects, strings and arrays under the same
+ * contract, and only the vector member has to be declared.
+ */
+const ledgerModel = (dims) => ({
+  $model: '0.1',
+  collections: {
+    slots: {
+      schema: {
+        type: 'object',
+        properties: {
+          key: { type: 'string' },
+          value: { properties: { embedding: { type: 'array', items: { type: 'number' } } } },
+        },
+        required: ['key'],
+      },
+      key: '/key',
+      indexes: dims === undefined ? []
+        : [{ name: 'by_vec', path: '$.value.embedding', derive: 'vector', dims }],
+    },
+  },
+});
+
+/** A collection answer as a list — `execute` returns the bare item for one. */
+const many = (result) => (Array.isArray(result) ? result : result === undefined ? [] : [result]);
+
+/**
+ * A durable ledger storage adapter over one `@jarenjs/db` collection:
+ * the four methods, plus `rank` when a vector column is declared. It
+ * imports nothing from `@jarenjs/ai` — the storage contract is the
+ * whole interface between them.
+ *
+ * The prefix is INLINE in every query document rather than bound as an
+ * external, because a string operator only translates to SQL with a
+ * literal pattern; inlined, `keys()` and the ranked read both become a
+ * range scan over the key column. The ledger asks for a handful of
+ * distinct prefixes, so the documents are built once each and cached.
+ */
+export async function createDbStorage({ path = ':memory:', dims } = {}) {
+  const store = await openStore(ledgerModel(dims), { driver: nodeDriver(), path });
+  const slots = store.collection('slots');
+  const documents = new Map();
+
+  /** Every query document one prefix needs, built once. */
+  const forPrefix = (prefix) => {
+    let built = documents.get(prefix);
+    if (built !== undefined) return built;
+    const under = { '$starts-with': ['$r.key', prefix] };
+    const score = { $similarity: ['$r.value.embedding', '$q'] };
+    const mine = [{ $eq: ['$r.value.embeddedBy.model', '$model'] },
+      { $eq: ['$r.value.embeddedBy.dims', '$dims'] }];
+    const counted = (where) => ({ $count: { $for: { r: '$[*]' }, $where: where, $return: '$r' } });
+    const ranked = {
+      $for: { r: '$[*]' },
+      $where: { $and: [under, ...mine] },
+      // the ledger re-scores and re-sorts what comes back, so this
+      // ordering only has to agree with its tie-break: score, then
+      // newest, then the key
+      $orderby: [{ $key: score, $dir: 'desc', $empty: 'least' },
+        { $key: '$r.value.at', $dir: 'desc' }, '$r.key'],
+      $return: { key: '$r.key', score },
+    };
+    built = {
+      keys: { $for: { r: '$[*]' }, $where: under, $orderby: ['$r.key'], $return: '$r.key' },
+      ranked,
+      window: (limit) => ({ $subsequence: [ranked, 0, limit] }),
+      skipped: counted({ $and: [under, { $not: { $exists: '$r.value.embedding' } }] }),
+      held: counted({ $and: [under, { $exists: '$r.value.embedding' }] }),
+      ours: counted({ $and: [under, { $exists: '$r.value.embedding' }, ...mine] }),
+      names: { $distinct: { $for: { r: '$[*]' }, $where: under, $return: '$r.value.embeddedBy' } },
+    };
+    documents.set(prefix, built);
+    return built;
+  };
+
+  return {
+    get: async (key) => (await slots.get(key))?.value,
+    set: async (key, value) => { await slots.put({ key, value }); },
+    delete: async (key) => { await slots.delete(key); },
+    // sorted, because the ledger reads listings, the goal archive and a
+    // snapshot's entries in key order and its zero-padded sequences
+    // exist so that order is chronological
+    keys: async (prefix = '') => many(await slots.execute(forPrefix(prefix).keys)),
+    /**
+     * The optional fifth: rank where the records live. The window is the
+     * k-nearest plan — the vector column cuts the candidates, the engine
+     * orders them — and the two reports the ledger needs are counts,
+     * which push to SQL. Naming every identity costs a scan, so it is
+     * paid only when the counts prove a mixture, which is the one case
+     * that is about to refuse anyway.
+     */
+    rank: async ({ prefix, vector, model, dims: width, limit }) => {
+      const docs = forPrefix(prefix);
+      const externals = { q: vector, model, dims: width };
+      const hits = many(await slots.execute(
+        limit === undefined ? docs.ranked : docs.window(limit), { externals }));
+      const skipped = await slots.execute(docs.skipped);
+      const held = await slots.execute(docs.held);
+      const ours = await slots.execute(docs.ours, { externals });
+      const identities = held === ours
+        ? (ours === 0 ? [] : [{ model, dims: width }])
+        : many(await slots.execute(docs.names));
+      return { hits, skipped, identities };
+    },
+    // beyond the contract, and deliberately: the store is the host's to
+    // migrate, back up and explain, and hiding it would only mean
+    // opening a second one to do any of that
+    store,
+    close: () => store.close(),
+  };
+}
+```
+
+`recall({ near })` reports which path answered — `via: 'adapter'` when the store ranked,
+`via: 'sweep'` when the ledger did — and answers **the same records with the same scores
+either way**: the adapter selects candidates, the kernels re-score them, and `minScore` and
+`limit` are applied here, so an adapter can never quietly change what a similarity means. A
+query carrying `tags` or `where` narrows on members the adapter knows nothing about and
+takes the sweep. An adapter whose `rank` answers anything other than
+`{ hits, skipped, identities }` is refused rather than trusted, because a capability that
+cannot be relied on to report what it skipped is worse than one that is absent.
+
+`identities` is what makes the mixture refusal the ledger's and not each adapter's: the
+store reports the distinct `embeddedBy` it holds under the prefix, and the wording, the
+order and the decision stay in one place. Above, that report is two pushed `COUNT(*)`
+statements on the hot path — the naming scan is paid only when the counts prove a mixture,
+which is the one case about to refuse anyway.
 
 Each dropped round is archived to a slot **before** the synopsis is written, and every
 synopsis line carries its address:

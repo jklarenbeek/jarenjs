@@ -47,7 +47,11 @@
  *    seam's network dependency unless `embedOnWrite` asks for it;
  *    `embedMissing()` is the explicit sweep that closes the gap. Every
  *    dot and cosine comes from `@jarenjs/core/vector`; none is computed
- *    here.
+ *    here. A storage adapter that can rank the records itself may say so
+ *    with an optional fifth method (`rank`, see
+ *    {@link createMemoryStorage}'s contract); the ledger then asks it
+ *    instead of sweeping, holds it to the same identity refusal and skip
+ *    report, and names which one ran in `via`.
  *
  * Its consumers today: the agent's compaction archive, the environment's
  * slots, refinement's patchable state, and the website assistant's
@@ -81,6 +85,8 @@ import { LEDGER_SCHEMAS } from './schemas/ledger.js';
  * @property {LedgerMemory[]} memories
  * @property {number[]} scores
  * @property {number} skipped
+ * @property {'sweep' | 'adapter'} via - which path answered: the ledger's
+ *   own read-and-rank, or the adapter's `rank` capability
  */
 
 /**
@@ -89,6 +95,7 @@ import { LEDGER_SCHEMAS } from './schemas/ledger.js';
  * @property {LedgerSkill[]} skills
  * @property {number[]} scores
  * @property {number} skipped
+ * @property {'sweep' | 'adapter'} via - see {@link LedgerRankedMemories}
  */
 
 /**
@@ -225,14 +232,20 @@ const EMBED_BATCH = 64;
  * @param {{ storage?: { get: (key: string) => Promise<any>,
  *     set: (key: string, value: any) => Promise<void>,
  *     delete: (key: string) => Promise<void>,
- *     keys: (prefix?: string) => Promise<string[]> },
+ *     keys: (prefix?: string) => Promise<string[]>,
+ *     rank?: (request: { prefix: string, vector: number[], model: string, dims: number,
+ *       limit?: number, minScore?: number }) => Promise<{ hits: { key: string, score: number }[],
+ *       skipped: number, identities: LedgerEmbeddedBy[] }> },
  *   compileQuery?: (document: any) => (data: any) => any,
  *   embedder?: Embedder,
  *   embedOnWrite?: boolean,
  *   validator?: any,
  *   now?: () => string }} [options]
  *   - `storage` defaults to an in-memory adapter, so a ledger works with
- *     nothing wired. Anything durable is the host's to inject.
+ *     nothing wired. Anything durable is the host's to inject. Its four
+ *     methods are the contract; an adapter that can rank vectors itself
+ *     declares an optional fifth (`rank`) and `recall({ near })` asks it
+ *     instead of reading every record.
  *   - `compileQuery` is the retrieval seam — `compileJsonQuery` from
  *     `@jarenjs/json/query`, or absent. With it, `recall` filters with a
  *     real query document; without it, retrieval degrades to tag match
@@ -724,6 +737,52 @@ export function createLedger(options = {}) {
   }
 
   /**
+   * The mixture refusal, in one place, so the sweep and an adapter that
+   * ranks for us word it identically and in the same order.
+   * @param {string} name
+   * @param {Map<string, LedgerEmbeddedBy>} found - every identity seen, in the order seen
+   * @param {LedgerEmbeddedBy} identity - the query embedder's
+   * @returns {{ error: string } | null}
+   */
+  function refuseMixture(name, found, identity) {
+    if ([...found.values()].every((stored) => sameIdentity(stored, identity))) return null;
+    return { error: `${name}: near cannot rank across embedders — the ledger holds vectors from`
+      + ` ${[...found.keys()].join(', ')} and the query embedder is ${describeIdentity(identity)};`
+      + ' rank through the embedder that wrote them, or re-embed every record with one embedder' };
+  }
+
+  /**
+   * The last two steps both ranked paths share: the kernels score every
+   * record the path selected, `minScore` filters and `limit` caps.
+   *
+   * The score is always `cosineSimilarity` over the record as stored —
+   * never a number an adapter handed back — so the two paths cannot
+   * report different similarities for the same record. Equal scores
+   * fall back to recency, then id.
+   * @param {any[]} records
+   * @param {any} probe
+   * @param {LedgerQuery} query
+   * @param {'memories' | 'skills'} member
+   * @param {number} skipped
+   * @param {'sweep' | 'adapter'} via
+   */
+  function rankedResult(records, probe, query, member, skipped, via) {
+    const ranked = records
+      .map((record) => ({ record, score: cosineSimilarity(probe, record.embedding) }))
+      .sort((a, b) => (b.score - a.score) || recencyOrder(a.record, b.record));
+    const kept = typeof query.minScore === 'number'
+      ? ranked.filter((entry) => entry.score >= /** @type {number} */ (query.minScore))
+      : ranked;
+    const capped = typeof query.limit === 'number' ? kept.slice(0, query.limit) : kept;
+    return {
+      [member]: capped.map((entry) => entry.record),
+      scores: capped.map((entry) => entry.score),
+      skipped,
+      via,
+    };
+  }
+
+  /**
    * Retrieve by meaning: the records that pass the tag/where filter AND
    * carry a vector, ranked by cosine similarity to the embedded query.
    *
@@ -739,27 +798,71 @@ export function createLedger(options = {}) {
    * not hidden (a silent drop poisons trust): they are counted in
    * `skipped`.
    *
+   * TWO paths reach that answer and both report which one ran. By
+   * default the ledger reads every record under the prefix and ranks
+   * them here. An adapter that declares `rank` is asked instead — it
+   * knows how to narrow to the k best without handing over the whole
+   * ledger — and is held to exactly the same contract: it reports the
+   * distinct identities it holds so the mixture refusal is the ledger's,
+   * it reports what it skipped, and the kernels re-score what it
+   * returns. An adapter whose own ranking is approximate makes recall
+   * approximate: the ledger can re-score what it is handed, never
+   * recover a record the adapter did not return.
+   *
+   * `tags` and `where` narrow candidates the adapter knows nothing
+   * about, so a query carrying either takes the sweep.
+   *
    * Ranking is `cosineSimilarity` from the kernels, descending; equal
    * scores fall back to recency, then id, so the order is deterministic.
    * `minScore` filters the ranked list; `limit` caps what survives.
-   * @param {any[]} records
    * @param {LedgerQuery} query
    * @param {'recall' | 'recallSkills'} name - the entry point, for the refusal text
    * @param {'memories' | 'skills'} member - the result member the ranked records go under
-   * @returns {Promise<{ error: string } | { [member: string]: any, scores: number[], skipped: number }>}
+   * @param {string} prefix - the key space the records live under
+   * @returns {Promise<{ error: string }
+   *   | { [member: string]: any, scores: number[], skipped: number, via: 'sweep' | 'adapter' }>}
    */
-  async function rankNear(records, query, name, member) {
+  async function rankNear(query, name, member, prefix) {
     const { near } = query;
     if (typeof near !== 'string' || near === '')
       return { error: `${name}: near must be a non-empty string — the text to rank by meaning against` };
     if (embedder === null) return { error: `${name}: near ${SEAM_REFUSAL}` };
-    const filtered = filter(records, query.tags, query.where);
-    if (filtered.error !== undefined) return filtered;
+
+    const narrowed = query.tags !== undefined || query.where !== undefined;
+    const delegated = typeof storage.rank === 'function' && !narrowed;
+    // the sweep reads first so that a `where` without the compileQuery
+    // seam still refuses before the embedder is called; the adapter path
+    // has no filter to compile
+    const filtered = delegated ? null : filter(await readAll(prefix), query.tags, query.where);
+    if (filtered !== null && filtered.error !== undefined) return filtered;
 
     const answer = await embedThrough([near]);
     if (answer.error !== undefined) return { error: `${name}: the embedder seam failed — ${answer.error}` };
     const probe = answer.vectors[0];
     const identity = answer.identity;
+
+    if (delegated) {
+      const hits = await /** @type {any} */ (storage).rank({
+        prefix, vector: Array.from(probe), model: identity.model, dims: identity.dims,
+        limit: query.limit, minScore: query.minScore,
+      });
+      if (hits === null || typeof hits !== 'object' || !Array.isArray(hits.hits)
+        || !Array.isArray(hits.identities) || typeof hits.skipped !== 'number') {
+        return { error: `${name}: the storage adapter's rank answered something other than`
+          + ' { hits, skipped, identities } — a capability that cannot be trusted to report what it'
+          + ' skipped is worse than one that is absent' };
+      }
+      /** @type {Map<string, LedgerEmbeddedBy>} */
+      const found = new Map();
+      for (const stored of hits.identities) found.set(describeIdentity(stored), stored);
+      const refused = refuseMixture(name, found, identity);
+      if (refused !== null) return refused;
+      const records = await Promise.all(hits.hits.map((/** @type {any} */ hit) => storage.get(hit.key)));
+      // a key the adapter ranked and a read that no longer finds it is a
+      // record deleted in between, not a record without a vector
+      return rankedResult(records.filter((record) => record?.embedding !== undefined),
+        probe, query, member, hits.skipped, 'adapter');
+    }
 
     // the identity check, before any math: every candidate's identity
     // must be the query's, or nothing is ranked
@@ -768,7 +871,7 @@ export function createLedger(options = {}) {
     /** @type {Map<string, LedgerEmbeddedBy>} */
     const found = new Map();
     let skipped = 0;
-    for (const record of filtered.value) {
+    for (const record of /** @type {any} */ (filtered).value) {
       if (record.embedding === undefined) {
         skipped += 1;
         continue;
@@ -776,32 +879,16 @@ export function createLedger(options = {}) {
       found.set(describeIdentity(record.embeddedBy), record.embeddedBy);
       candidates.push(record);
     }
-    const foreign = [...found.values()].filter((stored) => !sameIdentity(stored, identity));
-    if (foreign.length > 0) {
-      return { error: `${name}: near cannot rank across embedders — the ledger holds vectors from`
-        + ` ${[...found.keys()].join(', ')} and the query embedder is ${describeIdentity(identity)};`
-        + ' rank through the embedder that wrote them, or re-embed every record with one embedder' };
-    }
-
-    const ranked = candidates
-      .map((record) => ({ record, score: cosineSimilarity(probe, record.embedding) }))
-      .sort((a, b) => (b.score - a.score) || recencyOrder(a.record, b.record));
-    const kept = typeof query.minScore === 'number'
-      ? ranked.filter((entry) => entry.score >= /** @type {number} */ (query.minScore))
-      : ranked;
-    const capped = typeof query.limit === 'number' ? kept.slice(0, query.limit) : kept;
-    return {
-      [member]: capped.map((entry) => entry.record),
-      scores: capped.map((entry) => entry.score),
-      skipped,
-    };
+    const refused = refuseMixture(name, found, identity);
+    if (refused !== null) return refused;
+    return rankedResult(candidates, probe, query, member, skipped, 'sweep');
   }
 
   /**
    * Memories relevant to a query. Without `near`: tag match, then
    * recency — an array, newest first. With `near`: ranked by meaning
-   * through the embedder seam — `{ memories, scores, skipped }` — or the
-   * refusal that says why not.
+   * through the embedder seam — `{ memories, scores, skipped, via }` — or
+   * the refusal that says why not.
    * @param {LedgerQuery} [query]
    * @returns {Promise<LedgerMemory[] | LedgerRankedMemories | { error: string }>}
    *   the `{ error }` is a query problem — no seam for a `where` or a
@@ -809,10 +896,9 @@ export function createLedger(options = {}) {
    *   a mixture of vector identities — content, not a crash
    */
   async function recall(query = {}) {
-    const records = await readAll(KEYS.memory);
     return query.near === undefined
-      ? retrieve(records, query)
-      : /** @type {any} */ (rankNear(records, query, 'recall', 'memories'));
+      ? retrieve(await readAll(KEYS.memory), query)
+      : /** @type {any} */ (rankNear(query, 'recall', 'memories', KEYS.memory));
   }
 
   /**
@@ -823,10 +909,9 @@ export function createLedger(options = {}) {
    * @returns {Promise<LedgerSkill[] | LedgerRankedSkills | { error: string }>}
    */
   async function recallSkills(query = {}) {
-    const records = await readAll(KEYS.skill);
     return query.near === undefined
-      ? retrieve(records, query)
-      : /** @type {any} */ (rankNear(records, query, 'recallSkills', 'skills'));
+      ? retrieve(await readAll(KEYS.skill), query)
+      : /** @type {any} */ (rankNear(query, 'recallSkills', 'skills', KEYS.skill));
   }
 
   /**

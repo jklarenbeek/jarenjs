@@ -88,12 +88,14 @@ import { createEmbeddingClient, probeEmbeddings } from '@jarenjs/ai';
 import { readAiEnv, describeAiEnv } from './lib/env.js';
 import { formatNs } from './lib/fmt.js';
 import { KS, LIVE_BATCH, POLICY_SEED, loadCorpus, runSize } from './lib/retrieval.js';
+import { createDbStorage } from './lib/ledger-db.js';
 
 //#region flags
 
 function parseArgs(argv) {
   const options = {
     live: false,
+    store: null,
     verbose: false,
     sizes: null,
     seed: POLICY_SEED,
@@ -101,6 +103,14 @@ function parseArgs(argv) {
     filepath: null,
   };
   for (let i = 2; i < argv.length; i++) {
+    if (argv[i].startsWith('--store=')) {
+      options.store = argv[i].slice('--store='.length);
+      if (options.store !== 'db') {
+        console.error(`Unknown store '${options.store}': the only durable one is 'db' (@jarenjs/db).`);
+        process.exit(2);
+      }
+      continue;
+    }
     switch (argv[i]) {
       case '--live': options.live = true; break;
       case '--verbose': case '-v': options.verbose = true; break;
@@ -113,6 +123,7 @@ function parseArgs(argv) {
         console.log('  --sizes a,b         corpus sizes to score (default: every size the corpus carries)');
         console.log(`  --seed N            the random policy's seed (default ${POLICY_SEED})`);
         console.log('  --live              add the near-live row: rank through the live /embeddings provider (lib/env.js, JAREN_AI_EMBED_MODEL)');
+        console.log('  --store=db          add the durable rows: the same corpus through a @jarenjs/db adapter, ranked by its vector column and by the sweep');
         console.log('  --verbose, -v       print every question the incumbent missed at the largest k');
         console.log('  --output json --filepath PATH');
         process.exit(0);
@@ -144,7 +155,7 @@ function printSize(result) {
     + ` (${result.untagged} name no tag), one top-${Math.max(...KS)} call per question;`
     + ` swept ${thousands(result.ranked.embedded)} memories through ${result.ranked.model} in ${ms(result.ranked.sweepMs)}`
     + (result.live === null ? '' : ` and through ${result.live.model} (${result.live.dims} dims) in ${ms(result.live.sweepMs)}`));
-  const width = 30;
+  const width = Math.max(30, ...result.policies.map((policy) => policy.label.length + 1));
   console.log(`  ${HEAD[0].padEnd(width)} ${HEAD.slice(1).map((h) => h.padStart(9)).join(' ')}`);
   for (const policy of result.policies) {
     console.log(`  ${policy.label.padEnd(width)} ${[
@@ -152,6 +163,11 @@ function printSize(result) {
     ].map((c) => c.padStart(9)).join(' ')}`);
   }
   console.log(`  ${'random floor (analytic)'.padEnd(width)} ${KS.map((k) => fmt3(result.floor[k]).padStart(9)).join(' ')}`);
+  if (result.durable !== null && result.durable !== undefined) {
+    console.log(`  durable store: ${thousands(result.n)} memories written through the adapter in`
+      + ` ${ms(result.durable.loadMs)}, swept in ${ms(result.durable.sweepMs)};`
+      + ` the ranked rows agree with the in-memory ones column for column, which is the gate`);
+  }
 }
 
 /** The published table for one size, in the shape the benchmarks page renders. */
@@ -175,6 +191,11 @@ function tableFor(result) {
       + ` swept with the deterministic ${result.ranked.model} reference embedder (lexical, not semantic —`
       + ' a mechanism score, not a model-quality claim).'
       + (result.live === null ? '' : ` The near-live row embeds through ${result.live.model} (${result.live.dims} dims).`)
+      + (result.durable == null ? ''
+        : ' The durable rows run the same corpus through a @jarenjs/db storage adapter: the'
+          + ' near-db row is answered by the store\'s k-nearest plan over a packed vector column,'
+          + ' near-db-sweep by the ledger reading every record back. Their quality columns are'
+          + ' asserted equal to the in-memory rows\', so only the latency column moves.')
       + ' The oracle row is the scorer\'s proof; the analytic floor is what a uniform draw expects.',
   };
 }
@@ -270,7 +291,8 @@ async function main() {
       }
       else liveAt = { embedder: live.embedder, label: `near-live (${live.embedder.model}, ${live.provider})` };
     }
-    const result = await runSize(corpus, size, { seed: flags.seed, live: liveAt });
+    const result = await runSize(corpus, size, { seed: flags.seed, live: liveAt,
+      store: flags.store === 'db' ? (dims) => createDbStorage({ dims }) : null });
     results.push(result);
   }
   const liveRan = results.filter((r) => r.live !== null);
@@ -289,6 +311,9 @@ async function main() {
   console.log(`\nscorer gate: oracle 1.000 at every k, random inside its analytic band, at every size`);
   console.log(`corpus seed ${corpus.seed}, policy seed ${flags.seed}; ${corpus.facts.length} facts over`
     + ` ${corpus.topics.length} topics, ${corpus.questions.length} questions`);
+  console.log(`durable store: ${flags.store === null
+    ? '--store not requested; every row is over the ledger\'s in-memory adapter'
+    : `the ${flags.store} rows ran, and their quality columns are asserted equal to the in-memory ones`}`);
   console.log(`live tier: ${liveSkipped}`);
   console.log(`\n# ${NOTE}`);
 

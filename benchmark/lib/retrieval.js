@@ -104,17 +104,32 @@ export function questionTags(text, tagSet) {
  *
  * An `embedder` is wired into the ledger (auto-embedding on write stays
  * at its default, off); `sweepLedger` is the separate, explicit step.
+ * `storage` is the durable adapter when there is one — absent, the
+ * ledger's in-memory default answers, which is what every row scored
+ * before `--store` existed.
  * @param {any[]} memories
- * @param {{ embedder?: import('@jarenjs/ai').Embedder }} [options]
+ * @param {{ embedder?: import('@jarenjs/ai').Embedder, storage?: any }} [options]
  */
 export async function loadLedger(memories, options = {}) {
-  const ledger = createLedger({ now: () => '2025-12-31T23:59:59Z', embedder: options.embedder });
+  const ledger = createLedger({ now: () => '2025-12-31T23:59:59Z',
+    embedder: options.embedder, storage: options.storage });
   const results = await Promise.all(memories.map((m) => ledger.addMemory(m)));
   const rejected = results.find((r) => /** @type {any} */ (r).error !== undefined);
   if (rejected !== undefined)
     throw new Error(`the ledger rejected a corpus memory: ${JSON.stringify(rejected)}`);
   return ledger;
 }
+
+/**
+ * The same adapter with only the storage contract's four methods, so a
+ * ledger over it reads and ranks for itself. The pair — one store, two
+ * ledgers — is what makes the optional `rank` capability's cost and its
+ * answer separately measurable.
+ * @param {any} adapter
+ */
+export const fourMethods = (adapter) => ({
+  get: adapter.get, set: adapter.set, delete: adapter.delete, keys: adapter.keys,
+});
 
 /**
  * Sweep a loaded ledger through `embedMissing()` — the explicit path a
@@ -141,18 +156,44 @@ export async function sweepLedger(ledger, count, batch) {
  * through the ledger's embedder, ids in ranked order. A refusal or a
  * skipped record here is a broken run, not a score — the corpus was
  * swept whole, so the ledger must answer.
+ *
+ * `via` is asserted when given: a row that claims to measure the store's
+ * k-nearest plan and silently swept instead would publish the wrong
+ * latency under the right name.
  * @param {any} ledger
  * @param {string} key
  * @param {string} label
+ * @param {'sweep' | 'adapter'} [via] - the path this row must have taken
  * @returns {{ key: string, label: string, run: (question: any, k: number) => Promise<string[]> }}
  */
-export function rankedPolicy(ledger, key, label) {
+export function rankedPolicy(ledger, key, label, via) {
   return { key, label,
     run: async (question, k) => {
       const result = await ledger.recall({ near: question.text, limit: k });
       if (result.error !== undefined) throw new Error(`${key}: ${result.error}`);
       if (result.skipped !== 0) throw new Error(`${key}: ${result.skipped} memories carried no vector`);
+      if (via !== undefined && result.via !== via)
+        throw new Error(`${key}: recall answered via '${result.via}', not '${via}'`);
       return result.memories.map((/** @type {any} */ m) => m.id);
+    } };
+}
+
+/** The default recall, capped — recency, and nothing else. */
+export function recencyPolicy(ledger, key, label) {
+  return { key, label,
+    run: async (_question, k) => {
+      const records = await ledger.recall({ limit: k });
+      return Array.isArray(records) ? records.map((/** @type {any} */ r) => r.id) : [];
+    } };
+}
+
+/** The incumbent: the question's words that are tags, then recency. */
+export function tagPolicy(ledger, tags, key, label) {
+  return { key, label,
+    run: async (question, k) => {
+      const found = questionTags(question.text, tags);
+      const records = await ledger.recall(found.length === 0 ? { limit: k } : { tags: found, limit: k });
+      return Array.isArray(records) ? records.map((/** @type {any} */ r) => r.id) : [];
     } };
 }
 
@@ -170,7 +211,6 @@ export function rankedPolicy(ledger, key, label) {
 export function makePolicies({ ledger, memories, tags, seed = POLICY_SEED, embedder }) {
   const ids = memories.map((m) => m.id);
   const random = mulberry32(seed);
-  const asIds = (records) => (Array.isArray(records) ? records.map((r) => r.id) : []);
   return [
     { key: 'oracle', label: 'oracle (gold first)',
       run: async (question) => [...question.gold] },
@@ -187,14 +227,10 @@ export function makePolicies({ ledger, memories, tags, seed = POLICY_SEED, embed
         }
         return out;
       } },
-    { key: 'recency', label: 'recency',
-      run: async (_question, k) => asIds(await ledger.recall({ limit: k })) },
-    { key: 'tag+recency', label: 'tag+recency (today\'s recall)',
-      run: async (question, k) => {
-        const found = questionTags(question.text, tags);
-        return asIds(await ledger.recall(found.length === 0 ? { limit: k } : { tags: found, limit: k }));
-      } },
-    ...(embedder === undefined ? [] : [rankedPolicy(ledger, 'near', `near (${embedder.model}, ranked)`)]),
+    recencyPolicy(ledger, 'recency', 'recency'),
+    tagPolicy(ledger, tags, 'tag+recency', 'tag+recency (today\'s recall)'),
+    ...(embedder === undefined ? []
+      : [rankedPolicy(ledger, 'near', `near (${embedder.model}, ranked)`, 'sweep')]),
   ];
 }
 
@@ -311,15 +347,82 @@ export function assertScorer(result, ks = KS) {
 }
 
 /**
+ * The durable rows: the SAME corpus loaded through an injected storage
+ * adapter, scored by the same policies, plus the two ranked paths that
+ * store can take — its own `rank` capability (the k-nearest plan over a
+ * vector column) and the ledger's sweep over the same records.
+ *
+ * Three executors of one ordering, which is why `assertDurable` holds
+ * their quality columns to the in-memory rows exactly: a durable path
+ * that answered differently would be a different retrieval policy
+ * wearing the same name, and only the LATENCY column is allowed to move.
+ * @param {{ memories: any[], tags: Set<string> }} at
+ * @param {import('@jarenjs/ai').Embedder} embedder
+ * @param {(dims: number) => Promise<any>} open - the adapter factory
+ */
+export async function durablePolicies(at, embedder, open) {
+  const adapter = await open(/** @type {number} */ (embedder.dims));
+  const start = process.hrtime.bigint();
+  const ledger = await loadLedger(at.memories, { embedder, storage: adapter });
+  const loadMs = Number(process.hrtime.bigint() - start) / 1e6;
+  const sweep = await sweepLedger(ledger, at.memories.length);
+  // one store, two ledgers: the second sees only the four methods
+  const swept = createLedger({ now: () => '2025-12-31T23:59:59Z',
+    embedder, storage: fourMethods(adapter) });
+  return {
+    adapter,
+    durable: { loadMs, sweepMs: sweep.ms, embedded: sweep.embedded, ranked: typeof adapter.rank === 'function' },
+    policies: [
+      recencyPolicy(ledger, 'recency-db', 'recency (durable store)'),
+      tagPolicy(ledger, at.tags, 'tag+recency-db', 'tag+recency (durable store)'),
+      rankedPolicy(ledger, 'near-db', 'near (durable store, via adapter)', 'adapter'),
+      rankedPolicy(swept, 'near-db-sweep', 'near (durable store, via sweep)', 'sweep'),
+    ],
+  };
+}
+
+/** Which durable row must equal which in-memory row, column for column. */
+const DURABLE_TWINS = [
+  ['recency-db', 'recency'], ['tag+recency-db', 'tag+recency'],
+  ['near-db', 'near'], ['near-db-sweep', 'near'],
+];
+
+/**
+ * The durable gate: every durable row's quality columns equal its
+ * in-memory twin's, exactly. Throws naming the pair that disagreed.
+ * @param {{ n: number, policies: Array<{ key: string, recall: Record<number, number>, mrr: number }> }} result
+ * @param {number[]} [ks]
+ */
+export function assertDurable(result, ks = KS) {
+  const at = (key) => result.policies.find((p) => p.key === key);
+  for (const [durable, memoryRow] of DURABLE_TWINS) {
+    const a = at(durable);
+    const b = at(memoryRow);
+    if (a === undefined || b === undefined) continue;
+    for (const k of ks) {
+      if (a.recall[k] !== b.recall[k]) {
+        throw new Error(`${durable} recall@${k} is ${a.recall[k]} at n=${result.n} and ${memoryRow} is`
+          + ` ${b.recall[k]}: two executors of one ordering must agree on every question`);
+      }
+    }
+    if (a.mrr !== b.mrr)
+      throw new Error(`${durable} MRR is ${a.mrr} at n=${result.n} and ${memoryRow} is ${b.mrr}`);
+  }
+}
+
+/**
  * Score every policy at one corpus size and gate the scorer. The
  * deterministic ledger is swept by the reference embedder, so the table
  * carries the `near` row beside the incumbents on every host; a `live`
  * embedder, when given, sweeps a SECOND ledger (one ledger, one
- * identity — the ledger refuses a mixture) and adds a `near-live` row.
+ * identity — the ledger refuses a mixture) and adds a `near-live` row;
+ * a `store` factory, when given, adds the durable rows beside them and
+ * holds their quality columns to the in-memory ones.
  * @param {any} corpus
  * @param {number} size
  * @param {{ seed?: number, ks?: number[],
- *   live?: { embedder: import('@jarenjs/ai').Embedder, label: string } | null }} [options]
+ *   live?: { embedder: import('@jarenjs/ai').Embedder, label: string } | null,
+ *   store?: ((dims: number) => Promise<any>) | null }} [options]
  */
 export async function runSize(corpus, size, options = {}) {
   const ks = options.ks ?? KS;
@@ -337,11 +440,20 @@ export async function runSize(corpus, size, options = {}) {
     live = { model: options.live.embedder.model, dims: /** @type {number} */ (options.live.embedder.dims),
       embedded: secondSweep.embedded, sweepMs: secondSweep.ms };
   }
+  let durable = null;
+  let adapter = null;
+  if (options.store != null) {
+    const built = await durablePolicies(at, embedder, options.store);
+    durable = built.durable;
+    adapter = built.adapter;
+    policies.push(...built.policies);
+  }
   const scored = [];
   for (const policy of policies) {
     const score = await scorePolicy(policy, at.questions, ks);
     scored.push({ key: policy.key, label: policy.label, ...score });
   }
+  if (adapter !== null) await adapter.close();
   const untagged = at.questions.filter((q) => questionTags(q.text, at.tags).length === 0).length;
   const result = {
     size,
@@ -352,8 +464,10 @@ export async function runSize(corpus, size, options = {}) {
     policies: scored,
     ranked: { model: embedder.model, dims: embedder.dims, embedded: sweep.embedded, sweepMs: sweep.ms },
     live,
+    durable,
   };
   assertScorer(result, ks);
+  if (durable !== null) assertDurable(result, ks);
   return result;
 }
 

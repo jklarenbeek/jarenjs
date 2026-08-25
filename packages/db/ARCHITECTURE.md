@@ -328,11 +328,17 @@ if that distinction matters to you.
 
 A `derive: 'vector'` column (MODEL-FORMAT §2.1) holds each row's member
 as a packed, l2-normalized binary32 vector. Nothing in SQL ranks over
-it — measured, every `ORDER BY`-over-a-function spelling loses to
-fetching the column and ranking in the engine, and none of them runs
-where no function can be registered — so the k-nearest composition is
-planned as **a cut the engine finishes**, the implied-conjunct pattern
-applied to an ordering instead of a predicate:
+it, and the reasons are portability and correctness rather than speed:
+none of the `ORDER BY`-over-a-function spellings runs where no function
+can be registered, and an ordering decided in SQL cannot break a tie by
+the document's own secondary keys — which the engine executor has to,
+for the three executors to agree. (On speed the two are close: re-measured
+against the real column with the probe hoisted out of the per-row call,
+`ORDER BY` over a registered function sits at rough parity with fetching
+the column and ranking in the engine — `benchmark/vector.js` publishes
+the band, and the store does not emit it anyway.) The k-nearest
+composition is therefore planned as **a cut the engine finishes**, the
+implied-conjunct pattern applied to an ordering instead of a predicate:
 
 | stage | what | where |
 |---|---|---|

@@ -32,6 +32,7 @@ number in a README performance table names the command that produced it.
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
 | [`long-horizon.js`](./long-horizon.js) | What survives `@jarenjs/ai`'s history compaction — needle + pairwise, ceiling and live model | Measuring agent context retention |
 | [`retrieval.js`](./retrieval.js) | Did the right memory reach the prompt — recall@k and MRR for `@jarenjs/ai`'s recall policies (tag+recency, and the seam-gated ranked path) over a seeded corpus, against an oracle | Measuring ledger retrieval, default and ranked, on one instrument |
+| [`vector.js`](./vector.js) | k-nearest over a `derive: 'vector'` column every physical way it runs — resident sweep, the shipped plan, its own statement, `ORDER BY` over a UDF, the same query with no column — against **sqlite-vec**, equivalence-gated, with what the column costs to write and to store | Choosing between a vector column, a JSON member and an extension |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
@@ -768,6 +769,79 @@ and random gates, and a kill-check that the gate refuses a broken oracle.
 The generated file is `packages/website/public/benchmarks/retrieval.json`
 (`npm run benchmark:generate` writes it, and the Benchmarks page renders it).
 
+`--store=db` adds four **durable** rows beside the in-memory ones: the same
+corpus written through a `@jarenjs/db` storage adapter
+([`lib/ledger-db.js`](./lib/ledger-db.js), the recipe `packages/ai`'s README
+publishes), scored by the same policies, with the ranked path measured twice —
+once answered by the store's k-nearest plan over a packed vector column
+(`via: 'adapter'`) and once by the ledger reading every record back
+(`via: 'sweep'`). Their quality columns are **asserted equal** to the in-memory
+rows' before anything prints: three executors of one ordering, and only the
+latency column is allowed to move. The flag is a hand-run mode; the tracked file
+is always generated without it.
+
+```bash
+node benchmark/retrieval.js --store=db              # both sizes, nine rows
+```
+
+## vector.js — k-nearest over a stored column, every way it runs
+
+The `@jarenjs/db` store can hold each document's embedding as a packed,
+l2-normalized Float32 `BLOB` column (`derive: 'vector'`), and plans "the k most
+similar" as a **cut the engine finishes**: the column narrows the candidates,
+the engine orders them, the winners' documents are fetched. This suite measures
+that decision against every alternative, over seeded unit vectors loaded through
+the real write path at two corpus sizes and two widths:
+
+1. **engine resident sweep** — the kernels over a contiguous `Float32Array` in
+   RAM. No database at all, and the row the store has to be *worth* rather than
+   beat: it starts from decoded floats and pays nothing for durability;
+2. **the k-nearest plan** — `collection.execute` end to end, the flagship row;
+3. **raw fetch + engine sweep** — the plan's own statement (read out of
+   `explain()`, never typed) run by hand, which isolates what the plan costs;
+4. **`ORDER BY` over a registered function** — the shape the store deliberately
+   does *not* emit, re-measured against the real column so the decision is a
+   number rather than a memory;
+5. **JSON-doc sweep** — the same query document over a twin collection with no
+   vector column: the row the column exists to beat;
+6. **sqlite-vec** — the extension built for this, over the same bytes in a
+   `vec0` table, same k, same probes.
+
+**Equivalence before timing, and refusal on disagreement.** The stored column is
+compared byte for byte against what `@jarenjs/core/vector` packs, then paths 1–5
+must return the identical top-k — ids and order — for every probe of every leg
+before a single number prints. The rival is compared the same way and every
+disagreement is counted into a **named class with a pinned size**: a rival that
+answers differently is a finding, not a reason to drop the row.
+
+**Both halves of the price.** The read is the query table; the write is the load
+row (the same documents inserted in one transaction with and without the index —
+the column costs a JSON round trip of the member plus a normalize and a pack on
+every write), and the storage table carries what the column holds against what a
+vector costs as JSON inside the document it is derived from.
+
+**The ceiling is published as arithmetic.** Exact brute force is linear in
+`n · d`; the suite fits the measured slope and states the corpus size at which
+one query crosses 100 ms and one second, for both engines. Past that, this
+design is the wrong tool and no margin changes it.
+
+```bash
+node benchmark/vector.js                            # the full grid
+npm run benchmark:vector                            # the same
+node benchmark/vector.js --quick                    # one small leg
+node benchmark/vector.js --check-only               # equivalence only, no timings
+node benchmark/vector.js --sizes 10000 --dims 768
+node benchmark/vector.js --output json --filepath out.json
+```
+
+The rival is a devDependency of this workspace (`sqlite-vec`), loaded into
+`node:sqlite` with `allowExtension`. A host where it does not load still
+publishes every other row, with the exact loader error recorded beside the one
+it cannot: a dropped rival row would be the one kind of missing number a reader
+could not see.
+
+The generated file is `packages/website/public/benchmarks/vector.json`.
+
 ## qt3-runner.js — the W3C QT3 scorecard
 
 Runs the complete W3C QT3 suite (31,821 XQuery/XPath 3.1 test cases) against
@@ -790,7 +864,8 @@ documented in [qt3-README.md](./qt3-README.md).
 - Competitor engines (`ajv`, `json-p3`, `fontoxpath`, `jsonata`,
   `jsonpointer`, `fast-xml-parser`, `marked`, `markdown-it`, `micromark`,
   `@mermaid-js/parser`, `mermaid`, `jsdom`, `pouchdb`, `rxdb`, `lowdb`,
-  `prisma`/`@prisma/client`, `drizzle-orm`, `better-sqlite3`, `kysely`)
+  `prisma`/`@prisma/client`, `drizzle-orm`, `better-sqlite3`, `kysely`,
+  `sqlite-vec`)
   are devDependencies of this benchmark workspace only — the `packages/*` and `components/*`
   workspaces stay zero-dependency. (`mermaid` + `jsdom` power the
   flowchart/sequence Jison head-to-head; `@mermaid-js/parser` the pie

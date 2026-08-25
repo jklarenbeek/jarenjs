@@ -24,6 +24,29 @@
  * where nothing needs to be: an adapter over IndexedDB or OPFS is
  * unavoidably async, and a synchronous default would let a caller write
  * code that silently breaks the moment real storage is wired in.
+ *
+ * And one OPTIONAL fifth, for an adapter that can rank vectors where
+ * they live instead of handing every record over:
+ *
+ *   rank({ prefix, vector, model, dims, limit, minScore })
+ *     -> Promise<{ hits: { key, score }[], skipped, identities }>
+ *
+ * `hits` are the best `limit` records under `prefix` whose
+ * `embeddedBy` is `{ model, dims }`, best first; `skipped` is how many
+ * records under the prefix carry no embedding at all; `identities` is
+ * every DISTINCT `embeddedBy` the prefix holds, which is what lets the
+ * ledger refuse a mixture in its own words rather than each adapter
+ * inventing them. The ledger re-scores what comes back with its own
+ * kernels and applies `minScore` and `limit` itself, so `score` selects
+ * candidates and never decides the answer; an adapter free to rank
+ * approximately is therefore free to, and says so by returning fewer
+ * of the right records, not different numbers for them.
+ *
+ * This is the `compileQuery` seam's shape, one layer down: a capability
+ * that is present or absent, never half-implemented. An adapter without
+ * it loses nothing — `recall({ near })` reads and ranks, and reports
+ * `via: 'sweep'` — which is why the in-memory adapter below does not
+ * grow it.
  */
 
 /**

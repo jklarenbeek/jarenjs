@@ -81,6 +81,8 @@ const ns = (x) => String(Math.round(x));
 const us = (x) => Number((x / 1000).toPrecision(3)).toString();
 /** The min and max of a list, as a `lo–hi` band. */
 const band = (xs, fmt) => `${fmt(Math.min(...xs))}–${fmt(Math.max(...xs))}`;
+/** A count with thousand separators, the one grouping the docs use. */
+const thousands = (n) => n.toLocaleString('en-US');
 
 //#endregion
 
@@ -832,7 +834,119 @@ const FACTS = {
         ? `${ratio(rtreeLoadCost)}× the write cost`
         : `${ratio(1 / rtreeLoadCost)}× cheaper`);
   },
+
+  // -- vector: k-nearest over a stored column. Every figure names the
+  // leg it was measured at, because the suite is a grid and a timing
+  // without its (n x d) coordinates is whichever row sorted last.
+  'vector.grid': () => {
+    const { meta } = data('vector');
+    const sizes = [...new Set(meta.legs.map((/** @type {any} */ leg) => leg.n))];
+    const dims = [...new Set(meta.legs.map((/** @type {any} */ leg) => leg.dims))];
+    return `${sizes.map(thousands).join(' and ')} vectors at ${dims.join(' and ')} dimensions,`
+      + ` k = ${meta.k}, the median of ${meta.probes} probes`;
+  },
+  'vector.plan': () => `${ms(vectorMs('plan'))} ms at ${largestLeg()}`,
+  'vector.resident': () => `${ms(vectorMs('resident'))} ms, which the plan is `
+    + `${ratio(data('vector').meta.figures.planVsResident)}× slower than`,
+  'vector.jsonDoc': () => {
+    const { figures } = data('vector').meta;
+    if (figures.jsonDocVsPlan === null) return 'not measured at any size in this run';
+    return `${ratio(figures.jsonDocVsPlan)}× the plan at ${figures.jsonDocLeg}`;
+  },
+  'vector.udf': () => {
+    const { figures } = data('vector').meta;
+    const verdict = figures.udfVsFetchLow >= 1.1 ? 'a loss'
+      : figures.udfVsFetchHigh <= 0.9 ? 'a win' : 'rough parity';
+    return `${ms(vectorMs('udf'))} ms against ${ms(vectorMs('fetch'))} ms at ${largestLeg()}, and `
+      + `${figures.udfVsFetchLow.toFixed(2)}–${figures.udfVsFetchHigh.toFixed(2)}× the fetch-and-rank`
+      + ` across the grid — ${verdict} on speed`;
+  },
+  'vector.write': () => {
+    const { figures } = data('vector').meta;
+    const leg = data('vector').meta.legs[data('vector').meta.legs.length - 1];
+    // a load is seconds where a query is milliseconds, and `10609 ms`
+    // is a number a reader has to divide before it means anything
+    const wall = (x) => (x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${ms(x)} ms`);
+    return `${wall(vectorMs('load-indexed'))} against ${wall(vectorMs('load-plain'))} for `
+      + `${thousands(leg.n)} documents in one transaction — ${ratio(figures.loadCost)}× the write cost`;
+  },
+  'vector.storage': () => {
+    const { storage } = data('vector');
+    const last = storage[storage.length - 1];
+    return `${thousands(last.packedBytes)} B packed against ${thousands(last.jsonBytes)} B as a JSON`
+      + ` number array inside the document — ${ratio(data('vector').meta.figures.packedVsJson)}× smaller`;
+  },
+  'vector.rival': () => {
+    const { meta } = data('vector');
+    if (meta.rival.unavailable !== undefined)
+      return `not measured: sqlite-vec did not load on the measuring host (${meta.rival.unavailable})`;
+    const { rivalVsPlan, rivalStorage } = meta.figures;
+    return `${ms(vectorMs('rival'))} ms against ${ms(vectorMs('plan'))} ms at ${largestLeg()} — `
+      + (rivalVsPlan >= 1 ? `${ratio(rivalVsPlan)}× in sqlite-vec's favour` : `${ratio(1 / rivalVsPlan)}× in the plan's favour`)
+      + `, out of a database ${ratio(rivalStorage)}× smaller that holds no documents`;
+  },
+  'vector.agreement': () => {
+    const { meta } = data('vector');
+    const probes = meta.probes * meta.legs.length;
+    const same = meta.classes.find((/** @type {any} */ c) => c.key === 'same')?.count ?? 0;
+    const off = probes - same;
+    return `${probes} probes, ${off === 0 ? 'no disagreements' : `${off} disagreement(s), each classed and pinned`}`;
+  },
+  'vector.ceiling': () => {
+    const { figures } = data('vector').meta;
+    if (figures.planNsPerComponent === null) return 'not derivable from a single-leg run';
+    return `${figures.planNsPerComponent} ns per vector component — one query reaches 100 ms at about`
+      + ` ${thousands(figures.ceiling100msAt768)} vectors of 768 dimensions and one second at about`
+      + ` ${thousands(figures.ceiling1sAt768)}`;
+  },
+  'vector.table': () => {
+    const { meta } = data('vector');
+    const legs = meta.legs;
+    const paths = [
+      ['resident', 'engine resident sweep (no database)'],
+      ['plan', "the k-nearest plan (the store's own)"],
+      ['fetch', "raw fetch + engine sweep (the plan's statement)"],
+      ['udf', '`ORDER BY` over a registered function'],
+      ['jsonDoc', 'JSON-doc sweep (no vector column)'],
+      ['rival', 'sqlite-vec'],
+    ];
+    const cell = (path, leg) => {
+      const row = data('vector').rows.find((/** @type {any} */ r) =>
+        r.path === path && r.n === leg.n && r.dims === leg.dims);
+      return row === undefined ? '—' : `${ms(row.ns / 1e6)}`;
+    };
+    const lines = [
+      `| path (ms) | ${legs.map((/** @type {any} */ l) => l.label).join(' | ')} |`,
+      `|---|${legs.map(() => '---:').join('|')}|`,
+      ...paths.map(([key, name]) =>
+        `| ${key === 'plan' ? `**${name}**` : name} | ${legs.map((/** @type {any} */ l) => cell(key, l)).join(' | ')} |`),
+    ];
+    return `\n${lines.join('\n')}\n`;
+  },
 };
+
+/** One named row of the vector suite's flat rows at the largest leg. */
+function vectorMs(path) {
+  const legs = data('vector').meta.legs;
+  const leg = legs[legs.length - 1];
+  const row = data('vector').rows.find((/** @type {any} */ r) =>
+    r.path === path && r.n === leg.n && r.dims === leg.dims);
+  if (row === undefined) {
+    // the JSON-doc row runs only up to the size it is honest at, so a
+    // caller that asks for it at the largest leg gets the largest leg
+    // that HAS it rather than a number from another path
+    const fallback = [...data('vector').rows].reverse().find((/** @type {any} */ r) => r.path === path);
+    if (fallback === undefined) throw new Error(`vector.json has no '${path}' row — regenerate it before quoting one`);
+    return fallback.ns / 1e6;
+  }
+  return row.ns / 1e6;
+}
+
+/** The label of the leg every headline vector figure is quoted at. */
+function largestLeg() {
+  const legs = data('vector').meta.legs;
+  return legs[legs.length - 1].label;
+}
 
 /** One named row of the spatial suite's tables, or a refusal. */
 function spatialRow(key) {

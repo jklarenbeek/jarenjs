@@ -178,6 +178,19 @@ Three things follow:
   ranking vectors from different models against each other, which
   produces plausible garbage rather than an error.
 
+**What it buys, and what it costs.** Measured against the same query
+over a collection with no such column — the whole embedding parsed out
+of the stored JSON per row — the column is worth <!--bm:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/bm-->
+on the read, and costs <!--bm:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/bm-->
+on the way in, because every write pays a JSON round trip of the member
+plus the normalize and the pack. On
+disk it is <!--bm:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/bm-->
+per vector — smaller than the member, and *added* to it, since the
+document still carries what the column is derived from. Choose it the
+way `physical: 'rtree'` is chosen: per index, with both halves in view
+(`benchmark/vector.js`; the store's README carries the whole table, the
+losses and the brute-force ceiling).
+
 **What the write path does with a member that is not a vector of
 `dims`** — absent, the wrong width, a non-finite component, not an
 array — is store the document and write `NULL` to the column (§3.2).
