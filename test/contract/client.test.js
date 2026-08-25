@@ -375,6 +375,7 @@ describe('openHttpClient — the platform fetch over a real socket', () => {
       assert.deepStrictEqual(!r.ok && [r.kind, r.error.code], ['network', 'JC2051']);
     }
     finally {
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
       server.close();
       await once(server, 'close');
     }

@@ -96,6 +96,12 @@ jobs:
       - name: Tests
         id: tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        # Bounded at the step, not only the job: a hung test run must fail
+        # THIS step by name and let the independent build/type/tree/pack
+        # evidence below still execute, instead of a 30-minute job cancel
+        # that destroys it. The per-test `--test-timeout` in the test
+        # script is the first line; this is the backstop.
+        timeout-minutes: 15
         run: npm test
 
       - name: Clean generated output

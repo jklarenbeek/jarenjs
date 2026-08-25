@@ -9,8 +9,10 @@
  *
  * The body is collected chunk by chunk up to the matched operation's
  * `policy.limits.maxBodyBytes`; on overflow the read stops, the 413 is
- * answered with `connection: close` and the request is destroyed once
- * the response has flushed. A declared `content-length` above the limit
+ * answered with `connection: close`, and once the response has flushed
+ * the socket lingers — draining and discarding the rest of the upload
+ * (bounded by a grace timer) before it is destroyed, so the close is a
+ * FIN the peer can read the 413 through, not an RST that discards it. A declared `content-length` above the limit
  * is never read at all; an unmatched request's body is never read (the
  * dispatcher answers 404/405 without it and the platform discards the
  * rest). Bytes are handed to the dispatcher as received — for a JSON
@@ -33,8 +35,17 @@
  * @property {Record<string, string | string[] | undefined>} headers
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} on
  * @property {() => unknown} [pause]
+ * @property {() => unknown} [resume]
  * @property {(error?: Error) => unknown} [destroy]
+ * @property {boolean} [readableEnded]
+ * @property {boolean} [destroyed]
  */
+
+/** How long a closing response waits for the peer's upload to end before
+ * destroying the socket anyway. Long enough for a client that finishes
+ * writing once it sees the response; short enough that a peer that never
+ * stops cannot hold the socket. The timer is unref'd. */
+const LINGER_MS = 1000;
 
 /**
  * The response surface the adapter writes — `http.ServerResponse` fits.
@@ -149,14 +160,20 @@ function send(res, response, close, done) {
 /**
  * Put a dispatcher behind Node's `(req, res)` listener.
  * @param {HttpDispatcher} dispatcher
+ * @param {{ lingerMs?: number }} [options] - `lingerMs` bounds how long a
+ *   closing response waits, draining the peer's unfinished upload, before
+ *   the socket is destroyed (default 1000 ms; see the linger comment
+ *   below — it is what keeps an overflow 413 readable through the close).
  * @returns {(req: NodeRequestLike, res: NodeResponseLike) => void}
  * @example
  * http.createServer(toNodeHandler(serveHttp(contract, handlers))).listen(8080);
  */
-export function toNodeHandler(dispatcher) {
+export function toNodeHandler(dispatcher, options = {}) {
   if (dispatcher === null || typeof dispatcher !== 'object' || typeof dispatcher.dispatch !== 'function') {
     throw new TypeError('toNodeHandler: the argument must be a dispatcher from serveHttp');
   }
+  const lingerMs = typeof options.lingerMs === 'number' && options.lingerMs >= 0
+    ? options.lingerMs : LINGER_MS;
   const contract = dispatcher.contract;
   const head = dispatcher.capabilities.head;
 
@@ -172,9 +189,30 @@ export function toNodeHandler(dispatcher) {
       if (res.writableFinished !== true) controller.abort();
     });
 
+    // Closing a socket with unread data in its receive buffer sends RST,
+    // and winsock discards buffered receive data on RST — the flushed 413
+    // would never reach a Windows client. So the close lingers: resume the
+    // paused request so what is still arriving drains and discards (the
+    // settled guard below already ignores it), and destroy only after a
+    // grace window, which closes with FIN and leaves the response
+    // readable. No request event can drive this — once the response has
+    // finished, a paused, unconsumed request emits nothing further — so
+    // the window is a plain unref'd timer.
+    const lingerThenDestroy = () => {
+      if (typeof req.destroy !== 'function' || req.destroyed === true) return;
+      if (req.readableEnded === true) {
+        req.destroy();
+        return;
+      }
+      if (typeof req.resume === 'function') req.resume();
+      const timer = setTimeout(() => {
+        if (req.destroyed !== true) req.destroy();
+      }, lingerMs);
+      if (typeof timer.unref === 'function') timer.unref();
+    };
     /** @param {import('../http/wire.js').HttpResponse} response @param {boolean} close */
     const finish = (response, close) => {
-      send(res, response, close, close ? () => { if (typeof req.destroy === 'function') req.destroy(); } : undefined);
+      send(res, response, close, close ? lingerThenDestroy : undefined);
     };
     /** @param {string | Uint8Array | null} body @param {boolean} close */
     const answer = (body, close) => {

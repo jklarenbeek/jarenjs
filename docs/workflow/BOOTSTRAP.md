@@ -25,10 +25,12 @@ Function`, ESM everywhere, JSDoc on exports, match surrounding style.
    checklist. The checklist is the definition of done — nothing more,
    nothing less.
 4. Prove it green before you call it done, from the repo root:
-   **`npm run site:gate`** — one command, eight stages, fail-fast (lint,
-   test, website:build, benchmark:coverage, docs:check, test:documents,
-   test:design, test:browser), each by exit code, spelled out in
-   `CONVENTIONS.md` §2. Add `npm run test:packed` and
+   **`npm run site:gate`** — one command, eight stages, first-failure
+   aborts (lint, test, benchmark:coverage, docs:check and test:documents
+   concurrently; then one website:build, test:design, and the browser
+   matrix over that build), each by exit code, spelled out in
+   `CONVENTIONS.md` §2 — including when the matrix must be full and when
+   `-- --browser=smoke` is the accepted gate. Add `npm run test:packed` and
    `npm run test:tree-shaking` when exports moved, and any further gate
    your work order's checklist names.
 5. Write the session record (`templates/session-record.md`) after the

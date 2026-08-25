@@ -39,25 +39,53 @@ this file wins and the playbook is repaired.
 
 Every pass, order or release ends green from the repo root, by **exit code**,
 never by eyeballing output. **`npm run site:gate` is the full gate**: one command
-that runs all eight stages fail-fast, so nobody has to assemble them from memory —
+(`scripts/site-gate.js`) that runs all eight stages and aborts on the first
+failure, so nobody has to assemble them from memory. The runner is shaped by
+what the stages cost: the five independent read-only stages run
+**concurrently** (wall clock: the slowest, not the sum), then the site is
+built **exactly once**, then the two stages that read the build run against
+it. Output is buffered per stage and printed whole, so a record still quotes
+every stage's counts.
+
+Concurrent first phase:
 
 1. `npm run lint` — zero errors **and** zero warnings, fixed at the source (no new
    disables without a justified false positive);
 2. `npm test` — all packages, with no expected-value/fixture edits unless the work
    deliberately changed behavior and says so;
-3. `npm run website:build`;
-4. `npm run benchmark:coverage` — every dead-code finding resolved (removed,
+3. `npm run benchmark:coverage` — every dead-code finding resolved (removed,
    covered, or a justified, ideally excluded, keep);
-5. `npm run docs:check` — every published figure still derives from the committed
+4. `npm run docs:check` — every published figure still derives from the committed
    measurements (`npm run docs:benchmarks` refreshes them; §4.6);
-6. `npm run test:documents` — every ```` ```mermaid ```` fence in the committed
+5. `npm run test:documents` — every ```` ```mermaid ```` fence in the committed
    Markdown parses through `@jarenjs/mermaid` and every ```` ```json ```` fence
    parses as JSON (JSON-shaped *notation* is fenced ```` ```jsonc ```` and is not
    parsed). The diagrams the site embeds in JavaScript content are gated from the
    other side by `test/website/documents.test.js`;
+
+then, in order:
+
+6. `npm run website:build` — the one build this gate performs;
 7. `npm run test:design` — the `docs/DESIGN.md` §1 banned hues, over the site's
    source **and** its built `dist/`;
-8. `npm run test:browser` — the three-engine matrix.
+8. the Playwright matrix over that same build (`npm run test:browser:prebuilt`;
+   the standalone `npm run test:browser` still builds first, for use outside
+   the gate).
+
+**Browser scope.** The full three-engine matrix is required when the change
+touches the website workspace or anything it imports (`packages/view`,
+`packages/app`, `packages/forms`, `components/*`, `packages/website` itself,
+or a package the site's pages consume), and for every phase-close and
+close-out order. A change that cannot affect the site may land on
+`npm run site:gate -- --browser=smoke` (chromium only) — CI's browser job
+runs the full matrix on every push either way, so the backstop holds.
+`--browser=skip` is for inner loops only and is never the gate a change
+lands on. Every other argument is forwarded to Playwright verbatim
+(`-- --workers=1` on a loaded host). A host that cannot launch every
+engine directly sets `SITE_GATE_BROWSER_SHELL` to the complete command
+that runs the matrix (e.g. a container exec of `npx playwright test -c
+packages/website/playwright.config.js`); the gate builds the site on the
+host first and, in full mode, runs that command verbatim.
 
 Running a subset is a speed convenience for a small change in flight, never the
 basis a change lands on. Two gates sit outside `site:gate` because they answer a
@@ -162,7 +190,14 @@ code — a step that exists only as prose is a step that gets skipped:
    (a lockfile written by another npm is one the pinned npm then rejects, in CI
    rather than here), bumps every manifest and internal range, syncs the
    lockfile, runs `npm run test:lock` and rebuilds.
-3. **Deploy the website:** `npm run website:deploy` must finish `Published`. It
+3. **Deploy the website — when this close-out deploys.** A close-out deploys
+   when the work is visible on the published site (site content, published
+   figures, a registered benchmark suite) and always at a phase close and at
+   a campaign close-out; a close-out whose changes are invisible on the site
+   skips this step, and the next deploying close-out publishes cumulatively —
+   the live `build.json` trailing HEAD between deploys is the accepted cost,
+   and the drift gates below still guard every deploy that does happen.
+   When deploying: `npm run website:deploy` must finish `Published`. It
    **refuses before building** when the tracked
    `packages/website/public/benchmarks/*.json` differ from HEAD, because a deploy
    publishes figures derived from them and those must be the ones a commit

@@ -956,6 +956,17 @@ export function openHttpClient(contract, options = {}) {
       const body = /** @type {any} */ (response).body;
       if (typeof contentType !== 'string' || contentType.toLowerCase().indexOf(STREAM_MEDIA) === -1
         || body === null || body === undefined || typeof body.getReader !== 'function') {
+        // a refused stream still holds a live response body; release it,
+        // or the transport keeps the connection reserved for a read that
+        // will never come
+        try {
+          if (body !== null && body !== undefined && typeof body.cancel === 'function') {
+            Promise.resolve(body.cancel()).catch(() => {});
+          }
+        }
+        catch {
+          // cancellation is best-effort; the outcome below is the answer
+        }
         consumer.fail(failedOutcome('contract',
           outcomeError('JC2090', renderMessage(catalog, STREAM_ERRORS.JC2090.msgid, { op: route.id }), status, null, false), meta));
         return;

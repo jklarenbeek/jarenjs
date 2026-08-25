@@ -163,6 +163,7 @@ describe('adapters — the same request through node:http and toFetchHandler', (
   it('a body on a GET is never read: the request still answers', async () => {
     const r = await fetch(origin + '/api/catalog', { method: 'GET', headers: { 'content-type': 'application/json' }, body: undefined });
     assert.strictEqual(r.status, 200);
+    await r.arrayBuffer(); // consume, so undici releases the connection
   });
 });
 
@@ -183,7 +184,15 @@ describe('adapters — the body limit', () => {
     });
     const errors = [];
     req.on('error', (err) => { errors.push(err); });
-    const response = new Promise((resolve) => { req.on('response', resolve); });
+    // settled on EVERY terminal event, not only 'response': a socket
+    // reset that discards the response (the winsock RST behavior this
+    // once hung a whole CI run on) must fail this test with a name,
+    // never park an unbounded await
+    const settled = new Promise((resolve) => {
+      req.on('response', (incoming) => resolve({ res: incoming }));
+      req.on('error', (err) => resolve({ err }));
+      req.on('close', () => resolve({ closedWithoutResponse: true }));
+    });
     // 10 MiB against the operation's 4 KiB limit
     const chunk = Buffer.alloc(64 * 1024, 0x78);
     let written = 0;
@@ -198,7 +207,10 @@ describe('adapters — the body limit', () => {
       req.end();
     };
     pump();
-    const res = /** @type {http.IncomingMessage} */ (await response);
+    const outcome = /** @type {any} */ (await settled);
+    assert.ok(outcome.res !== undefined,
+      `the 413 must be observable through the closing socket, got ${outcome.err ?? 'close without a response'}`);
+    const res = /** @type {http.IncomingMessage} */ (outcome.res);
     assert.strictEqual(res.statusCode, 413);
     assert.strictEqual(res.headers.connection, 'close');
     let text = '';
@@ -206,6 +218,39 @@ describe('adapters — the body limit', () => {
     assert.strictEqual(JSON.parse(text).code, 'JC2003');
     // whatever the socket did to the tail of the upload is not an unhandled error
     req.destroy();
+  });
+
+  it('the 413 lingers, then the grace timer closes the socket: a client that never stops uploading cannot hold it', async () => {
+    // a dedicated server with a short linger, so the timer path runs
+    // inside this test instead of an unref'd second later
+    const short = http.createServer(toNodeHandler(dispatcher, { lingerMs: 25 }));
+    short.listen(0, '127.0.0.1');
+    await once(short, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (short.address()).port;
+    const req = http.request(`http://127.0.0.1:${port}/product.remove`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' },
+    });
+    req.on('error', () => {
+      // the tail of the never-ended upload dying with the socket is expected
+    });
+    const settled = new Promise((resolve) => {
+      req.on('response', (incoming) => resolve({ res: incoming }));
+      req.on('close', () => resolve({}));
+    });
+    const closed = new Promise((resolve) => { req.on('close', resolve); });
+    req.write(Buffer.alloc(8 * 1024, 0x78)); // over the 4 KiB limit — and never end()ed
+    const outcome = /** @type {any} */ (await settled);
+    assert.ok(outcome.res !== undefined, 'the 413 must arrive before the linger closes the socket');
+    assert.strictEqual(outcome.res.statusCode, 413);
+    let text = '';
+    for await (const c of outcome.res) text += c;
+    assert.strictEqual(JSON.parse(text).code, 'JC2003');
+    // the client never ends its upload, so only the server's linger
+    // timer can close this connection
+    await closed;
+    short.close();
+    await once(short, 'close');
   });
 
   it('a chunked body within the limit is collected and dispatched; bytes reach the strict decoder (invalid UTF-8 is JC2005)', async () => {

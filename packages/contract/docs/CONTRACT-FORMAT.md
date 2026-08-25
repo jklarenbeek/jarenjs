@@ -962,8 +962,12 @@ the platform:
 - **`toNodeHandler(dispatcher)`** (`@jarenjs/contract/node`) → `(req,
   res)` — `http.createServer`'s listener and Express middleware. It
   collects the body chunk by chunk up to the operation's limit; on
-  overflow it stops reading, answers the 413 with `connection: close`
-  and destroys the request once the response has flushed; a declared
+  overflow it stops reading, answers the 413 with `connection: close`,
+  then lingers — draining and discarding the rest of the upload, bounded
+  by a grace timer (`toNodeHandler(dispatcher, { lingerMs })`, default
+  1000 ms) — before destroying the request, so the close is a FIN the
+  client can read the 413 through rather than an RST that discards it
+  (winsock drops buffered receive data on RST); a declared
   `content-length` above the limit is never read; an unmatched request's
   body is never read. Bytes reach the dispatcher as received (its strict
   UTF-8 decode decides `JC2005`); repeated header lines arrive as arrays
