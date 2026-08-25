@@ -26,6 +26,21 @@ import {
  * @property {(value: string) => boolean} test - Synchronous validity test
  * @property {string} control - Suggested HTML input control
  * @property {string} [placeholder] - Suggested placeholder text
+ * @property {FormatPreview} [preview] - What a host MAY render beside the
+ *   control, as data (see {@link FormatPreview}); absent for formats a
+ *   text control already shows in full
+ */
+
+/**
+ * A preview hint: a description of what to draw from the field's value,
+ * for a host that has a renderer for it. It is DATA, not a renderer —
+ * `@jarenjs/forms` imports no chart, and a host that does not recognise
+ * `kind` ignores the hint and the field behaves exactly as without it.
+ * The one kind shipped is `map`: the host feeds the field's parsed
+ * GeoJSON to a map renderer (`@jarenjs/charts`' `map` type takes a
+ * `FeatureCollection`, a `Feature` or a geometry as `features`).
+ * @typedef {object} FormatPreview
+ * @property {string} kind - The renderer family the host is asked for ('map')
  */
 
 /**
@@ -34,7 +49,7 @@ import {
  * also override the canonical `test` when what a form field holds is not
  * what the validator's format judges (a field holds `geojson` as text,
  * the format applies to the parsed object).
- * @type {Record<string, { control?: string, placeholder?: string, test?: (value: string) => boolean }>}
+ * @type {Record<string, { control?: string, placeholder?: string, test?: (value: string) => boolean, preview?: FormatPreview }>}
  */
 const FORM_HINTS = {
   // -- date and time. Which formats get a native control is decided by
@@ -101,11 +116,17 @@ const FORM_HINTS = {
 
   // -- geospatial. The geojson tester judges the OBJECT, but a form
   //    field holds its text, so the field-level test parses first.
+  //    The text a user types is valid GeoJSON long before it is the
+  //    shape they meant, which no textarea can show: `preview` tells a
+  //    host that has a map renderer to draw the parsed value. It is a
+  //    hint in the same sense `control` is — a host without one
+  //    ignores it and the field is exactly this textarea.
   'geohash': { placeholder: 'u173z' },
   'wkt': { placeholder: 'POINT (4.9041 52.3676)' },
   'geojson': {
     control: 'textarea',
     placeholder: '{"type":"Point","coordinates":[4.9,52.4]}',
+    preview: { kind: 'map' },
     test: (text) => {
       try {
         return isValidGeoJson(JSON.parse(text));

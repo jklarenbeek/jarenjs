@@ -33,6 +33,7 @@ import { createJsltRegistry, mathPack } from '@jarenjs/json/jslt';
 import { equalsJson } from '@jarenjs/core/object';
 
 import { createDataHandlers, wireError } from '../../packages/website/src/db-handlers.js';
+import { tripPipeline, TRIP_CSV } from '../../packages/website/src/boundaries/data.js';
 import { tempDbPath } from '../db/helpers.js';
 import { readSpatialCorpus, buildSpatialCorpus } from '../../scripts/lib/spatial-corpus.js';
 
@@ -398,6 +399,42 @@ describe('the oracle — a second executor held to the engine from any tab', fun
           { model: PLACES, collection: 'places', documents: DOCS, query: within(far) }),
         { answer: null, empty: true });
       assert.deepStrictEqual(fixture.scratch, { opened: 1, closed: 1 });
+    }
+    finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('answers the plan beside the answer when asked: the studio\'s round trip, held in Node', async function () {
+    // the fourth card's whole loop, minus the browser: the pure half
+    // makes the documents, the model and the linq document; the handler
+    // runs them over a throwaway store with the derived indexes and
+    // explains the plan it ran — the box seek, the exact refinement
+    const fixture = testHost();
+    const table = createDataHandlers(fixture.host);
+    try {
+      const trip = tripPipeline(TRIP_CSV);
+      assert.strictEqual(trip.valid, true);
+      const request = {
+        model: trip.model, collection: trip.collectionName, documents: trip.documents,
+        query: trip.query, externals: trip.externals,
+      };
+      const explained = await table.handlers['data.oracle']({ ...request, explain: true });
+      assert.strictEqual(explained.empty, false);
+      assert.deepStrictEqual(explained.answer.map((/** @type {any} */ f) => f.properties.name),
+        ['Amsterdam', 'Utrecht', 'Rotterdam'], 'the three Dutch cities, not Paris or Berlin');
+      assert.deepStrictEqual(explained.explain.prefilters.map((/** @type {any} */ p) => [p.construct, p.exact]),
+        [['$within', false]], 'the box is pushed as a pre-filter and containment refines exactly');
+      assert.match(explained.explain.scanNarrative, /SEARCH places USING INDEX places_by_box/,
+        'the database\'s own plan seeks the derived box index');
+      assert.deepStrictEqual(explained.explain.indexes, ['places_by_box'], 'the physical name the store gave the declared by_box');
+      assert.match(explained.explain.sql, /SELECT/);
+      assert.strictEqual(explained.explain.residual?.mode, 'set');
+      // and without asking, the answer is the answer — the shape order 07 fixed
+      const plain = await table.handlers['data.oracle'](request);
+      assert.deepStrictEqual(Object.keys(plain).sort(), ['answer', 'empty']);
+      assert.deepStrictEqual(fixture.scratch, { opened: 2, closed: 2 });
+      assert.strictEqual(table.state.store, null);
     }
     finally {
       fixture.cleanup();

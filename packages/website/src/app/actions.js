@@ -525,6 +525,7 @@ export const ACTIONS = {
     patch: [
       { op: 'replace', path: '/data/modelText', value: '$payload.modelText' },
       { op: 'replace', path: '/data/queryText', value: '$payload.queryText' },
+      { op: 'replace', path: '/data/trip/csv', value: '$payload.tripCsv' },
     ],
   },
   // the phone pane switcher (Store · Query · Live) — pure chrome; the
@@ -551,6 +552,12 @@ export const ACTIONS = {
   // the entries are still crossing the worker
   'data/oracle-run': { effects: [{ run: 'data-oracle' }] },
   'data/oracle': { patch: [{ op: 'replace', path: '/data/oracle', value: '$payload' }] },
+  // the spatial round trip, driven from the fourth card: the CSV is the
+  // editable input, the report replaces the last one, and `running`
+  // shows while the throwaway store is crossing the worker
+  'data/trip-csv': { patch: [{ op: 'replace', path: '/data/trip/csv', value: '$event.value' }] },
+  'data/trip-run': { effects: [{ run: 'data-trip', with: { csv: '$.data.trip.csv' } }] },
+  'data/trip': { patch: [{ op: 'replace', path: '/data/trip/report', value: '$payload' }] },
   'data/status': {
     patch: [
       { op: 'replace', path: '/data/topology', value: '$payload.topology' },

@@ -219,10 +219,16 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       // executor (data.oracle, one throwaway store per entry): null until
       // asked, then { status: 'running' } and the report
       oracle: null,
+      // the spatial round trip (CSV → stylesheet → meta-schema → a
+      // throwaway store with derived spatial indexes → a linq $within →
+      // explain() → a map), run from the fourth card: the editable CSV,
+      // and the last report (null until asked, then { status, … })
+      trip: { csv: '', report: null },
       booted: false,           // the boot effect fires exactly once
       error: null,
-      // the phone layout: which single card shows (store | query | live).
-      // Query is the default — it is what a reader of this page came for.
+      // the phone layout: which single card shows (store | query | live |
+      // trip). Query is the default — it is what a reader of this page
+      // came for.
       mobilePane: 'query',
     },
 

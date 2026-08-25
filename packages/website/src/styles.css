@@ -742,10 +742,16 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 
   .data-grid[data-pane='store'] .data-query,
   .data-grid[data-pane='store'] .data-live,
+  .data-grid[data-pane='store'] .data-trip,
   .data-grid[data-pane='query'] .data-status,
   .data-grid[data-pane='query'] .data-live,
+  .data-grid[data-pane='query'] .data-trip,
   .data-grid[data-pane='live']  .data-status,
-  .data-grid[data-pane='live']  .data-query { display: none; }
+  .data-grid[data-pane='live']  .data-query,
+  .data-grid[data-pane='live']  .data-trip,
+  .data-grid[data-pane='trip']  .data-status,
+  .data-grid[data-pane='trip']  .data-query,
+  .data-grid[data-pane='trip']  .data-live { display: none; }
 
   /* touch targets: the studios' controls are finger-sized (WCAG 2.5.8) */
   .flow-grid .btn, .flow-grid .seg-btn,
@@ -1157,6 +1163,12 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 .data-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.8rem; }
 .data-row-delete { flex: none; color: var(--muted); }
 .data-row-delete:hover { color: var(--fail); border-color: var(--fail); }
+
+/* The round trip's map: the charts page's card, inside the studio card,
+   so the drawing shares the visual language the map card established
+   rather than inventing one. */
+.data-trip-map { margin-block: var(--space-3); padding: 0; border: 0; background: transparent; }
+.data-trip-narrative { word-break: break-word; }
 
 /* ---- The adventure game (#/game) ------------------------------------ */
 .game-title { display: grid; place-items: center; padding-block: var(--space-8); }

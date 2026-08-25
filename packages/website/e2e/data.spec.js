@@ -77,6 +77,36 @@ test('the wasm store boots, a live query maintains, explain shows the pushdown',
   expect(errors, 'no uncaught page errors').toEqual([]);
 });
 
+test('the spatial round trip runs CSV → stylesheet → meta-schema → store → linq $within → explain() → map, in this tab', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+  await gotoData(page);
+
+  // the seed CSV is on the page, and the emitted query document beside it
+  await expect(page.locator('.data-trip')).toContainText('Round trip');
+  await expect(page.locator('.data-trip-query')).toContainText('$within');
+  await page.locator('.data-trip-run').click();
+  await expect(page.locator('.data-trip-report')).toHaveAttribute('data-status', 'done', READY);
+  await expect(page.locator('.data-trip-summary')).toContainText('5 CSV rows');
+  await expect(page.locator('.data-trip-summary')).toContainText('3 inside the region');
+
+  // explain(): both stages of the spatial plan, from the throwaway
+  // store's own SQLite — the box seek and the exact refinement
+  await expect(page.locator('.data-trip-prefilters')).toContainText('$within');
+  await expect(page.locator('.data-trip-prefilters')).toContainText('"exact":false');
+  await expect(page.locator('.data-trip-narrative')).toContainText('SEARCH');
+  await expect(page.locator('.data-trip-narrative')).toContainText('USING INDEX');
+  await expect(page.locator('.data-trip-indexes')).toContainText('by_box');
+
+  // the result is the three Dutch cities, as stored, and it is drawn
+  const results = JSON.parse(await page.locator('.data-trip-results').textContent());
+  expect(results.map((f) => f.properties.name)).toEqual(['Amsterdam', 'Utrecht', 'Rotterdam']);
+  await expect(page.locator('.data-trip-map svg')).toBeVisible();
+  expect(await page.locator('.data-trip-map svg circle').count()).toBe(3);
+
+  expect(errors, 'no uncaught page errors').toEqual([]);
+});
+
 test('data survives a reload via OPFS (or is honestly in-memory)', async ({ page }) => {
   // the only test here that pays for TWO store opens — the wasm build boots
   // again after the reload — so it gets more than the single-boot budget its

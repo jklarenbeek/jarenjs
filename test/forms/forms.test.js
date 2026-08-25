@@ -222,6 +222,19 @@ describe('Preemptive Field Validation', function () {
       assert.isTrue(validateField(date, '2024-13-45')[0].keyword === 'format');
     });
 
+    it('should carry the format\'s preview hint on the field, and null where there is none', function () {
+      // a host that understands `preview.kind` renders it beside the
+      // control; one that does not sees the same textarea as before
+      const geojson = fieldFor({ type: 'string', format: 'geojson' });
+      assert.deepEqual(geojson.preview, { kind: 'map' });
+      assert.isTrue(geojson.control === 'textarea');
+      assert.isTrue(geojson.kind === 'string');
+      const email = fieldFor({ type: 'string', format: 'email' });
+      assert.isTrue(email.preview === null);
+      const plain = fieldFor({ type: 'string' });
+      assert.isTrue(plain.preview === null);
+    });
+
     it('should ignore unknown formats', function () {
       const field = fieldFor({ type: 'string', format: 'flux-capacitance' });
       assert.isTrue(validateField(field, 'anything').length === 0);
@@ -419,6 +432,21 @@ describe('Format Registry', function () {
     assert.isTrue(!getFormatInfo('json-pointer').test('a/b'));
     assert.isTrue(getFormatInfo('geohash').test('u173z'));
     assert.isTrue(getFormatInfo('wkt').test('POINT (4.9041 52.3676)'));
+  });
+
+  it('should carry a preview hint for geojson, and none for a format a text control shows in full', function () {
+    // the hint is DATA: a host with a map renderer draws the parsed
+    // value beside the textarea, one without ignores the member
+    assert.deepEqual(getFormatInfo('geojson').preview, { kind: 'map' });
+    assert.isTrue(getFormatInfo('email').preview === undefined);
+    assert.isTrue(getFormatInfo('wkt').preview === undefined);
+    assert.isTrue(getFormatInfo('geohash').preview === undefined);
+    // and the control, placeholder and test are exactly what they were
+    const geojson = getFormatInfo('geojson');
+    assert.isTrue(geojson.control === 'textarea');
+    assert.isTrue(typeof geojson.placeholder === 'string');
+    assert.isTrue(geojson.test('{"type":"Point","coordinates":[4.9,52.4]}'));
+    assert.isTrue(!geojson.test('{"type":"Circle","coordinates":[4.9,52.4]}'));
   });
 
   it("should parse a field's text before judging it as GeoJSON", function () {

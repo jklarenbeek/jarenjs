@@ -40,7 +40,15 @@ const { message } = await agent.send(history, { onDelta: (t) => ui.stream(t) });
 ```
 
 The same tools publish over WebMCP (`navigator.modelContext`) with one call, so
-a browser-hosted agent drives the identical schema-guarded surface. The
+a browser-hosted agent drives the identical schema-guarded surface. Geography
+ships ready-made: `createGeoToolbox` is seven tools — distance, containment,
+bounding box, geohash cell, the nine-cell neighbourhood, WKT in and out — each
+one call into `@jarenjs/core/geo` and each guarded by the GeoJSON meta-schema
+by reference, with no overlay and a refusal that says so; and
+`createSpatialAuthor` is the stylesheet author with the query format’s spatial
+section taught in the prompt and its three folklore mistakes refused at the
+gate (a geohash prefix offered as proximity, Pythagoras over degrees, a
+geographic ask with no spatial operator), each with a pointer and the fix. The
 assistant knows the site’s own example library, can save what you build
 together as named experiments, and keeps the conversation across reloads.
 Everything — the key and the transcript — stays in your browser, stored locally

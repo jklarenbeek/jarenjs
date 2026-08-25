@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/ai",
   "private": false,
-  "version": "0.45.0",
+  "version": "0.45.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -102,6 +102,14 @@
       "types": "./dist/types/stylesheet.d.ts",
       "default": "./src/stylesheet.js"
     },
+    "./spatial": {
+      "types": "./dist/types/spatial.d.ts",
+      "default": "./src/spatial.js"
+    },
+    "./geo-tools": {
+      "types": "./dist/types/geo-tools.d.ts",
+      "default": "./src/geo-tools.js"
+    },
     "./refine": {
       "types": "./dist/types/refine.d.ts",
       "default": "./src/refine.js"
@@ -125,7 +133,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.45.0",
-    "@jarenjs/validate": "^0.45.0"
+    "@jarenjs/core": "^0.45.1",
+    "@jarenjs/validate": "^0.45.1"
   }
 }

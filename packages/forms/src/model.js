@@ -46,6 +46,7 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {any} constValue - Fixed value when the schema is a const
  * @property {any} defaultValue
  * @property {string|undefined} placeholder
+ * @property {import('./formats.js').FormatPreview|null} preview - The format's preview hint (formats.js), for a host with a renderer for it; null otherwise
  * @property {object} constraints - minLength/maxLength/pattern/minimum/... extracted for the UI
  * @property {object|null} rules - The raw `x-form` rules annotation, if any (see rules.js)
  * @property {Array<FormField>|null} children - Child fields for object kinds
@@ -327,6 +328,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
     constValue: kind === 'const' ? effective.const : undefined,
     defaultValue: effective.default,
     placeholder: t(`${base}#placeholder`, placeholder),
+    preview: formatInfo?.preview ?? null,
     constraints: getConstraints(effective),
     // The raw `x-form` annotation only - compiling its query documents is
     // rules.js territory, so model building stays query-engine-free.

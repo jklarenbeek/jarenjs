@@ -537,8 +537,27 @@ const EXAMPLE = {
 /** The example, exported so a test can compile it. */
 export const STYLESHEET_EXAMPLE = EXAMPLE;
 
-/** The default system message, assembled from what the caller injected. */
-function systemMessage(crib) {
+/**
+ * The default system message, assembled from what the caller injected.
+ *
+ * Exported because a DOMAIN author (the spatial one) is this author
+ * with a different worked example and a paragraph of domain rules in
+ * front of it — the shape of the language, the crib and the closing
+ * instructions are the same message, and two copies of "what a body
+ * is" would be two answers to one question.
+ * @param {string} crib - {@link operatorCrib}'s text, or `''`
+ * @param {{ example?: any, exampleIntro?: string, extra?: string }} [options]
+ *   - `example` replaces the worked example (it must compile — the
+ *     tests assert that for every example this package ships);
+ *   - `exampleIntro` is the sentence that introduces it;
+ *   - `extra` is domain prose placed after the crib and before the
+ *     example — the rules a profile teaches.
+ * @returns {string}
+ */
+export function stylesheetSystemMessage(crib, options = {}) {
+  const example = options.example ?? EXAMPLE;
+  const intro = options.exampleIntro
+    ?? 'Here is a stylesheet in the right shape, taking the highest-scoring item OF ONE KIND:';
   return 'You author jaren-JSLT stylesheets. A stylesheet is a JSON document:'
     + ' {"$jslt":"0.1","rules":[{"match":<JSONPath string>,"body":<expression>}]}.'
     + '\n\nA body is JSON, never source text. Rule 1 of the language: a string starting'
@@ -555,8 +574,9 @@ function systemMessage(crib) {
     // recovers from being told only that the document does not validate.
     + '\n\nThere is no absolute-value operator. Write |a − b| as'
     + ' {"$if": [{"$gt": [a, b]}, {"$sub": [a, b]}, {"$sub": [b, a]}]}.'
-    + '\n\nHere is a stylesheet in the right shape, taking the highest-scoring item OF ONE KIND:\n'
-    + JSON.stringify(EXAMPLE)
+    + (options.extra === undefined || options.extra === '' ? '' : `\n\n${options.extra}`)
+    + `\n\n${intro}\n`
+    + JSON.stringify(example)
     + '\n\nUse every condition the question names. If it restricts the answer to a subset'
     + ' ("of class X", "in year Y"), that restriction is a "$where" — an answer ranked over'
     + ' everything is the wrong answer.'
@@ -579,7 +599,9 @@ function systemMessage(crib) {
  *   stream?: boolean,
  *   allowLiteralBody?: boolean,
  *   maxRepairs?: number,
- *   system?: string }} options
+ *   system?: string,
+ *   gates?: Array<(doc: any) => any> | ((call: { question: string, sample?: any, externals?: any }) => Array<(doc: any) => any>),
+ *   describe?: (sample: any) => string }} options
  *   - `schema` is the response format — pass the AUTHORING profile, not
  *     the canonical grammar; that is the whole measured point.
  *   - `canonical` is the full grammar. Given, an authored document is
@@ -597,6 +619,17 @@ function systemMessage(crib) {
  *   - `reasoning` bounds thinking (default `{ effort: 'low' }`), because
  *     ~85% of this tier's output budget went to reasoning on exactly this
  *     call. Pass `null` to send no control at all.
+ *   - `gates` are DOMAIN gates — checks a profile makes that neither the
+ *     grammar nor the engine can (the spatial profile's "a geohash prefix
+ *     is not proximity"). An array is used as is; a function is called
+ *     per authoring call with the question and the sample, for a gate
+ *     that depends on what was asked. They run right after the
+ *     vocabulary check and BEFORE the canonical grammar, because a
+ *     domain refusal is the most specific message the caller has and
+ *     the first invalid check is the one whose errors travel back.
+ *   - `describe` replaces {@link describePaths} for the grounding — a
+ *     profile that knows what a member IS (a position, say) can say so
+ *     beside the path.
  * @returns {{ author: (question: string, options?: { sample?: any, signal?: AbortSignal }) =>
  *   Promise<any> }}
  */
@@ -619,7 +652,8 @@ export function createStylesheetAuthor(options) {
   // safe default. `null` sends none.
   const maxTokens = options.maxTokens === undefined ? 8192 : options.maxTokens;
   const operators = options.operators ?? [];
-  const system = options.system ?? systemMessage(operatorCrib(options.grammar, operators));
+  const system = options.system ?? stylesheetSystemMessage(operatorCrib(options.grammar, operators));
+  const describe = options.describe ?? describePaths;
   // the vocabulary check needs the same grammar the crib was read from,
   // and the same host additions — a gate stricter than the prompt would
   // refuse what the instructions offered
@@ -641,12 +675,17 @@ export function createStylesheetAuthor(options) {
     const sample = hooks.sample;
     const grounding = sample === undefined
       ? ''
-      : `\n\nThe document it runs on has these paths:\n${describePaths(sample)}`;
+      : `\n\nThe document it runs on has these paths:\n${describe(sample)}`;
+    const domain = typeof options.gates === 'function'
+      ? options.gates({ question, sample, externals: hooks.externals })
+      : options.gates ?? [];
     const gates = [
       // BEFORE the canonical schema, deliberately. Both refuse the same
       // documents; only this one says which member is wrong, and the
       // first invalid check is the one whose errors travel back.
       ...(unknown === null ? [] : [unknown]),
+      // the domain's own refusals next, for the same reason
+      ...domain,
       // the profile decoded it; the canonical grammar says whether it is
       // in the language. Before the compiler, so a grammar error is
       // reported as one.

@@ -37,8 +37,9 @@
  *    from another one.
  *  - **The oracle's store is throwaway.** `data.oracle` opens a fresh
  *    in-memory store on the model it is handed, answers one query over
- *    the documents it is handed, and closes it — the store this context
- *    holds, its registrations and its peers are untouched. That is what
+ *    the documents it is handed (with its plan, when asked), and closes
+ *    it — the store this context holds, its registrations and its peers
+ *    are untouched. That is what
  *    lets the committed spatial corpus hold SQLite-in-wasm to the
  *    JavaScript engine from any tab, including one with no OPFS at all.
  */
@@ -256,8 +257,15 @@ export function createDataHandlers(host) {
     try {
       const rows = scratch.collection(input.collection);
       for (const document of input.documents) await rows.insert(document);
-      const answer = await rows.execute(input.query, { externals: input.externals ?? {} });
-      return { answer: answer === undefined ? null : answer, empty: answer === undefined };
+      const options = { externals: input.externals ?? {} };
+      const answer = await rows.execute(input.query, options);
+      /** @type {any} */
+      const out = { answer: answer === undefined ? null : answer, empty: answer === undefined };
+      // the plan beside the answer, when asked: the same record
+      // `data.explain` gives over the studio's store, so a reader can
+      // see the pushdown a throwaway store ran, not only what it said
+      if (input.explain === true) out.explain = await rows.explain(input.query, options);
+      return out;
     }
     finally {
       await scratch.close();

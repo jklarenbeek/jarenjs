@@ -157,6 +157,20 @@ describe('gate 3 — the operator registry equals QUERY-FORMAT §8', () => {
       'the operator count moved — update this pin and every COUNT_SOURCES document together');
   });
 
+  it('every registry operator is enumerated by the published grammar artifacts', () => {
+    // the JSON Schema grammars are a published source of the vocabulary
+    // too — the LLM profile, the authoring profile and every structured-
+    // output caller decode against them — so a name the registry has and
+    // the grammar lacks is an operator a model can never be allowed to
+    // write. Measured: five §8.14 conversion operators were missing from
+    // every artifact after the docs and the count sources had them.
+    for (const artifact of ['jaren-query.schema.json', 'jaren-jslt.schema.json']) {
+      const text = fs.readFileSync(`packages/json/schemas/${artifact}`, 'utf8');
+      const missing = Object.keys(OPERATORS).filter((op) => !text.includes(`"${op}"`));
+      assert.deepStrictEqual(missing, [], `${artifact} does not enumerate these registry operators`);
+    }
+  });
+
   it('every document that states the count states the derived one', () => {
     const derived = Object.keys(OPERATORS).length;
     const stale = [];

@@ -252,7 +252,7 @@ writes a validated script per action (coder model), and a query node assembles t
 ### When the grammar is too big to decode (measured)
 
 The pattern above has a size limit, and the published JSLT grammar is past it. Asked for a
-stylesheet with `jaren-jslt.schema.json` (18,736 characters) as the `response_format`,
+stylesheet with `jaren-jslt.schema.json` (18,817 characters) as the `response_format`,
 `qwen3.6-35b-a3b` returns **an empty reply — three times out of three, in 14 seconds each**.
 Not a bad document: no document. The LLM-profile twin does not help, because a relaxation
 *restates* every constraint it removes and therefore **grows** the schema (19,158
@@ -286,7 +286,7 @@ Four changes, each one answering something that was measured rather than suspect
 **1. Narrow the response format; move the vocabulary to the prompt.**
 [`jaren-jslt.authoring.schema.json`](../json/schemas/jaren-jslt.authoring.schema.json) is
 the canonical grammar cut at the one `$ref` that pulls in the whole expression language —
-**18,736 → 3,491 characters**, the document shape intact and the body open. It is
+**18,817 → 3,491 characters**, the document shape intact and the body open. It is
 mechanically derived and the artifact test asserts the committed file *is* the derivation.
 It is deliberately weaker than the canonical schema, which is why `canonical` is validated
 locally afterwards and the compiler still gates everything: the same validate-then-compile
@@ -361,7 +361,7 @@ should: the nearest probability *among the upper class*, which is not the neares
 
 | response format | model | trials | authored | correct | calls | wall clock | reasoning tokens/attempt |
 | --- | --- | ---: | ---: | ---: | ---: | --- | --- |
-| canonical grammar (18,736 chars) | `qwen3.6-35b-a3b` | 3 | 0 | 0 | 3 | 14 s per empty reply | n/a — the reply was empty |
+| canonical grammar (18,817 chars) | `qwen3.6-35b-a3b` | 3 | 0 | 0 | 3 | 14 s per empty reply | n/a — the reply was empty |
 | authoring profile (3,491 chars) | `qwen3.6-27b` | 5 | 5 | **5** | 1 each | **3.3–5.5 s** | **0** |
 | authoring profile (3,491 chars) | `qwen3.6-35b-a3b` | 3 | 3 | 2 | 1 each | 40–141 s | 3,000–5,600 |
 | authoring profile (3,491 chars) | 27b → 35b escalation | 2 | 2 | **2** | 1 each | 4.0–61 s | 0 (27b answered both) |
@@ -394,6 +394,53 @@ answered a question nobody asked. It copied the shape it was shown, filter and a
 shape it was shown had no filter. Adding the clause to the example fixed it on the next
 run. This is the "a few-shot example fixes *shape*" note above, in its sharpest form: an
 example that omits a clause teaches the model to omit it.
+
+### The spatial profile — the same author, three rules a model gets wrong by default
+
+Geography is where a cheap model's defaults are wrong in ways that *compile and run*:
+asked for "places within 5 km", it reaches for Pythagoras on raw degrees (wrong by two
+thirds over a kilometre at Dutch latitudes), assumes a distance to a shape is the minimum
+distance (it is the distance to the centroid), and tests a geohash **prefix** for nearness —
+the folklore the internet taught it, which misses a neighbour at every cell boundary. None
+of those is a schema error or a compile error. `createSpatialAuthor` is the stylesheet
+author above with the query format's §8.14 taught in the prompt and refused at the gate:
+
+```javascript
+import { createSpatialAuthor, createStructuredOutput } from '@jarenjs/ai';
+
+const author = createSpatialAuthor({
+  client, createStructuredOutput, compile: compileJsltStylesheet,
+  schema: authoring, canonical, grammar,   // the same three artifacts as above
+});
+const { value } = await author.author('the cities inside the region, nearest to the centre first',
+  { sample: { centre: [4.9041, 52.3676], region, places } });
+```
+
+What changes is the message and the gates. The prompt carries the thirteen §8.14 operators
+with their one-line definitions (a test holds that table to `QUERY-FORMAT.md`'s own, so it
+cannot teach an operator that does not exist), the three rules — *geodesic, never planar*;
+*a value is measured by one representative position*; *a prefix is bucketing, proximity is
+the nine cells* — and a worked example that filters with `$within`, orders by `$distance`
+and projects kilometres. The grounding names which sample paths hold a `[longitude,
+latitude]` position, because a digest alone shows `at[*]  number` and leaves the model to
+guess. And three gates run beside the stylesheet author's, each with a pointer and the fix:
+
+| the document | why every existing check passes it | what catches it |
+| --- | --- | --- |
+| `{"$starts-with": [{"$geohash": ["$c.at", 6]}, {"$geohash": ["$.here", 4]}]}` asked for "near" | a legal prefix test that compiles, runs and answers something | `prefixProximityGate` → `AI0230`, naming `$geohash-neighbours` — the **same document asked for "group by cell" passes**, because a prefix is exactly right for bucketing |
+| `{"$mul": [{"$sub": ["$c.at[0]", "$.here[0]"]}, …]}` | legal arithmetic over numbers | `planarArithmeticGate` → `AI0231` at the operator, naming `$distance` in metres |
+| four `$gt`/`$lt` over `at[0]`/`at[1]` that "mean" within | a correct filter for a rectangle, and for nothing else | `spatialOperatorGate` → `AI0232`: a geographic ask with no spatial operator |
+
+The gate reads the *question* (`spatialIntent`: near, within N km, closest → proximity;
+inside, region, polygon → spatial) so a prefix is refused only when nearness was asked for.
+The run gate stays: the worked example is proven to compile **and run** on the repository's
+own five-city dataset, answering Amsterdam 0 km, Utrecht 34, Rotterdam 57.
+
+**What was measured, and what was not.** The gates and the prompt are proven against
+recorded fixtures — the documents a model writes when it gets each rule wrong — and the
+repair round is shown to carry the code, the pointer and the fix. No live model was run
+against this profile in the session that built it; the stylesheet rows above are the only
+live measurements this package carries, and a spatial row will be added when one is taken.
 
 ## A model as a dataflow node
 
@@ -449,6 +496,40 @@ call answers `{ error, errors, inputSchema }` — up to eight validation errors 
 `{ instancePath, keyword, message }`, plus the tool's own schema to re-read — and adds a
 named `hint` when a property that wanted structure arrived as JSON text that does not
 parse, naming the offending properties.
+
+### The geo toolbox — spatial answers about data the model was given
+
+`createGeoToolbox` is a closed set of seven tools, each one call into `@jarenjs/core/geo`
+and each guarded by the shipped GeoJSON meta-schema **by reference**:
+
+```javascript
+import { createGeoToolbox, registerModelContext } from '@jarenjs/ai';
+import geojson from '@jarenjs/json/schemas/geojson.schema.json' with { type: 'json' };
+
+const geo = createGeoToolbox({ geojson });     // the artifact is injected — this package depends on no engine
+geo.execute('geo_distance', { a: [4.9041, 52.3676], b: { type: 'Point', coordinates: [2.3522, 48.8566] } });
+// → { metres: 429861.98… }
+geo.execute('geo_neighbours', { cell: 'u173zt' });   // → { cells: [ …nine cells, reading order… ] }
+registerModelContext(geo);                           // the same seven over WebMCP
+```
+
+| tool | input | returns |
+| --- | --- | --- |
+| `geo_distance` | two GeoJSON values (or bare positions) | `{ metres }`, geodesic, between representative positions |
+| `geo_within` | a value and an area | `{ within }` — only a polygon has an inside |
+| `geo_bbox` | a value | `{ bbox: [w, s, e, n] }` |
+| `geo_geohash` | a value, `precision` 1–12 (default 9) | `{ cell }` — a bucket, the description says so |
+| `geo_neighbours` | a cell | `{ cells }` — the nine-cell **proximity** probe |
+| `geo_parse_wkt` / `geo_to_wkt` | text ↔ value | the conversion, both ways |
+
+Every `inputSchema` `$ref`s `https://jarenjs.dev/schemas/geojson` (and its `position`
+definition) rather than restating a geometry shape, so a longitude of `200` is refused by
+the validator at `/a/coordinates/0` with the schema to re-read — before the tool runs, and
+not by a `try`/`catch` (the module has none). A value with no positions is a content
+refusal the model can read (`{ error }`). And there is **no overlay**: a request for
+`geo_union`, `geo_intersection`, `geo_difference`, `geo_buffer` or their kin is answered
+with a refusal naming why — a half-correct clipper is worse than none, and JSTS or Turf do
+that work — never an approximation.
 
 ## What the three paths actually buy
 

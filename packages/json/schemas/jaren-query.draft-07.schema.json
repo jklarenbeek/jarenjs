@@ -530,7 +530,11 @@
           "$bbox",
           "$area",
           "$length",
-          "$centroid"
+          "$centroid",
+          "$geo-parse",
+          "$geo-text",
+          "$geohash-bounds",
+          "$geohash-neighbours"
         ]
       },
       "additionalProperties": {
@@ -570,6 +574,7 @@
           "$distance",
           "$within",
           "$bbox-intersects",
+          "$geo-simplify",
           "$default"
         ]
       },

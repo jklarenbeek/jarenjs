@@ -8,10 +8,13 @@
  * Middle: the query document with results and `explain()` — the
  * pushdown made visible. Right: a live query maintaining as rows are
  * inserted, and the worked migration with its shadow verification.
+ * Fourth: the spatial round trip — CSV to a map through the stylesheet,
+ * the meta-schema, a throwaway store with derived spatial indexes, a
+ * linq `$within` and its `explain()`, in this tab.
  *
- * Below the breakpoint those three become one pane at a time behind the
- * shared segmented switcher (Store · Query · Live), defaulting to the
- * query — the pane a reader of this page came for.
+ * Below the breakpoint those four become one pane at a time behind the
+ * shared segmented switcher (Store · Query · Live · Round trip),
+ * defaulting to the query — the pane a reader of this page came for.
  */
 import { editorTextarea, errorLine, paneSwitcher } from './studio-kit.js';
 
@@ -139,6 +142,54 @@ const liveCard =
       ]] },
   ];
 
+/**
+ * The round trip, where a reader can watch it: every stage is a
+ * document the page prints, the store stage is explained beside its
+ * answer, and the answer is drawn. The map is what the `geojson`
+ * format's preview hint asks a host for; this host has a renderer.
+ */
+const tripCard =
+  ['div', { class: 'card pg-card data-trip' },
+    ['h3', {}, 'Round trip'],
+    ['p', { class: 'muted' },
+      'CSV in, a map out, in this tab. The rows become a FeatureCollection through a JSLT stylesheet, the collection is judged by the GeoJSON meta-schema, stored in a throwaway collection with derived spatial indexes, queried with a $within written through @jarenjs/linq, and explain() shows the two-stage plan \u2014 the bounding box the index seeks and the exact refinement the engine keeps \u2014 before the result is drawn.'],
+    editorTextarea({ value: '$.tripCsv', action: 'data/trip-csv', rows: 7 }),
+    ['p', {},
+      ['button', { class: 'btn small primary data-trip-run', type: 'button', on: { click: 'data/trip-run' } },
+        'Run the round trip']],
+    { $if: ['$.trip',
+      ['div', { class: 'data-trip-report', 'data-status': '$.tripStatus' },
+        ['p', { class: 'data-trip-summary' }, '$.tripSummary'],
+        { $if: ['$.tripDone',
+          ['div', {},
+            ['details', { class: 'details-card', open: true },
+              ['summary', {}, 'explain() \u2014 the two-stage spatial plan'],
+              ['pre', { class: 'code-block data-trip-sql' }, ['code', {}, '$.tripExplainSql']],
+              ['p', { class: 'muted' }, 'pre-filters: ', ['code', { class: 'data-trip-prefilters' }, '$.tripPrefilters']],
+              ['p', { class: 'muted' }, 'scan narrative: ', ['code', { class: 'data-trip-narrative' }, '$.tripNarrative']],
+              ['p', { class: 'muted' }, 'indexes: ', ['code', { class: 'data-trip-indexes' }, '$.tripIndexes']],
+              ['p', { class: 'muted' }, 'residual: ', ['code', { class: 'data-trip-residual' }, '$.tripResidual']],
+            ],
+            { $if: ['$.tripMap', ['div', { class: 'chart-card data-trip-map' }, '$.tripMap']] },
+            ['details', { class: 'details-card' },
+              ['summary', {}, 'The result \u2014 the features inside the region, as stored'],
+              ['pre', { class: 'code-block clamp data-trip-results' }, ['code', {}, '$.tripResultsJson']]],
+          ]] },
+      ]] },
+    ['details', { class: 'details-card' },
+      ['summary', {}, 'The stylesheet \u2014 CSV rows to a FeatureCollection, no code'],
+      ['pre', { class: 'code-block clamp' }, ['code', {}, '$.tripStylesheet']]],
+    ['details', { class: 'details-card' },
+      ['summary', {}, 'The model \u2014 derived spatial indexes over the geometry'],
+      ['pre', { class: 'code-block clamp' }, ['code', {}, '$.tripModel']]],
+    ['details', { class: 'details-card' },
+      ['summary', {}, 'The query \u2014 written through @jarenjs/linq'],
+      ['pre', { class: 'code-block' }, ['code', {}, '$.tripChain']],
+      ['p', { class: 'muted' }, 'emits this document, with the region bound as an external:'],
+      ['pre', { class: 'code-block data-trip-query' }, ['code', {}, '$.tripQuery']],
+      ['pre', { class: 'code-block clamp' }, ['code', {}, '$.tripRegion']]],
+  ];
+
 export const DATA_RULES = [
   documentRow,
   {
@@ -155,11 +206,12 @@ export const DATA_RULES = [
       ['div', { class: 'data-grid', 'data-pane': '$.mobilePane' },
         paneSwitcher({
           class: 'data-panebar', pane: '$.mobilePane', action: 'data/pane',
-          panes: [['store', 'Store'], ['query', 'Query'], ['live', 'Live']],
+          panes: [['store', 'Store'], ['query', 'Query'], ['live', 'Live'], ['trip', 'Round trip']],
         }),
         statusCard,
         queryCard,
         liveCard,
+        tripCard,
       ],
     ],
   },

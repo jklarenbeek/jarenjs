@@ -49,7 +49,7 @@ function fieldControl(container, pointer, tag = 'input') {
 
 /** A complete form app over the stub DOM: the whole suite in one loop. */
 function mountForm(options = {}) {
-  const model = buildFormModel(schema);
+  const model = buildFormModel(options.schema ?? schema);
   const rules = compileFormRules(model);
   const appDoc = {
     state: { data: createInitialData(model) },
@@ -86,6 +86,27 @@ describe('the standard forms stylesheet', function () {
     const options = fieldControl(container, '/plan', 'select').childNodes;
     assert.strictEqual(options.length, 2);
     assert.strictEqual(options[0].childNodes[0].nodeValue, 'free');
+  });
+
+  it('ignores a format\'s preview hint: a geojson field is the textarea it always was', function () {
+    // the hint is data for a host WITH a map renderer; this stylesheet
+    // has none, so the member changes nothing it draws — no map, no
+    // extra control, no attribute carrying the hint
+    const { container } = mountForm({
+      schema: {
+        type: 'object',
+        properties: { where: { type: 'string', format: 'geojson' } },
+      },
+    });
+    const control = fieldControl(container, '/where', 'textarea');
+    assert.notStrictEqual(control, undefined, 'the geojson control is a textarea');
+    assert.strictEqual(control.attributes.get('placeholder'), '{"type":"Point","coordinates":[4.9,52.4]}');
+    assert.strictEqual(find(container, (n) => n.tagName === 'svg'), undefined, 'nothing drawn');
+    const wrapper = find(container, (n) => n.attributes?.get('data-pointer') === '/where');
+    const controls = [];
+    (function walk(n) { if (n.tagName) controls.push(n.tagName); for (const c of n.childNodes ?? []) walk(c); })(wrapper);
+    assert.deepStrictEqual(controls.filter((t) => t === 'textarea' || t === 'input' || t === 'svg'), ['textarea'],
+      'exactly one control, and it is the textarea');
   });
 
   it('typing writes through the standard input action', function () {

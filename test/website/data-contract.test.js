@@ -77,6 +77,17 @@ describe('the data studio contract document', () => {
     assert.strictEqual(oracle.output.validate({ answer: null, empty: true }).valid, true);
     assert.strictEqual(oracle.output.validate({ answer: [1, 2], empty: false }).valid, true);
     assert.strictEqual(oracle.output.validate({ answer: null }).valid, false, 'the flag is required');
+    // the plan rides beside the answer only when asked for, as the same
+    // record data.explain gives — the two-stage spatial plan, legible
+    assert.strictEqual(oracle.input.validate({
+      model: {}, collection: 'rows', documents: [{}], query: true, explain: true,
+    }).valid, true);
+    assert.strictEqual(oracle.output.validate({
+      answer: [], empty: false,
+      explain: { sql: 'SELECT', params: [], indexes: [], prefilters: [], residual: null, scanNarrative: 'SCAN' },
+    }).valid, true);
+    assert.strictEqual(oracle.output.validate({ answer: [], empty: false, explain: 'SELECT' }).valid, false,
+      'the plan is a record, not prose');
     assert.strictEqual(oracle.input.validate({
       model: {}, collection: 'rows', documents: [{}], query: { $for: { d: '$[*]' }, $return: '$d' },
     }).valid, true);

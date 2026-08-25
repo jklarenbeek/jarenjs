@@ -122,4 +122,9 @@ model produces.
 
 **Try it.** [The Data studio](#/data) runs a store in your browser on a lazily
 loaded sqlite-wasm build: edit the model, insert documents, run a query and
-read the plan `explain()` produced for it.
+read the plan `explain()` produced for it. Its Round trip card runs the whole
+spatial loop in the tab — CSV rows become GeoJSON through a JSLT stylesheet,
+are judged by the GeoJSON meta-schema, stored in a throwaway collection with
+derived spatial indexes, queried with a `$within` written through
+`@jarenjs/linq`, explained (the box the index seeks beside the exact
+refinement) and drawn as a map.

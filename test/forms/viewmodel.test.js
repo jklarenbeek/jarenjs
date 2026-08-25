@@ -55,6 +55,24 @@ describe('buildFormViewModel', function () {
     assert.strictEqual(child(root, 'newsletter').value, true);
   });
 
+  it('carries the format\'s preview hint through to the node, as data', function () {
+    // the host decides: one with a map renderer draws `preview.kind ===
+    // 'map'` beside the control, one without ignores the member
+    const model = buildFormModel({
+      type: 'object',
+      properties: {
+        where: { type: 'string', format: 'geojson' },
+        mail: { type: 'string', format: 'email' },
+      },
+    });
+    const root = buildFormViewModel(model, { where: '{"type":"Point","coordinates":[4.9,52.4]}' });
+    const where = child(root, 'where');
+    assert.deepStrictEqual(where.preview, { kind: 'map' });
+    assert.strictEqual(where.control, 'textarea');
+    assert.strictEqual(where.value, '{"type":"Point","coordinates":[4.9,52.4]}', 'the value stays the text');
+    assert.strictEqual(child(root, 'mail').preview, null);
+  });
+
   it('binds absent values as null, never undefined', function () {
     const name = child(tree({}), 'name');
     assert.strictEqual(name.value, null);

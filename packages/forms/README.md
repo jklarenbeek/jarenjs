@@ -66,10 +66,27 @@ const result = validate(data); // { valid, errors: [{ instancePath, keyword, mes
 | `constraints` | `minLength`/`maxLength`/`pattern`/`format`/`minimum`/`maximum`/`multipleOf`/`minItems`/... |
 | `rules` | The raw `x-form` rules annotation, if any (see below) |
 | `enumValues` / `constValue` / `defaultValue` / `placeholder` | Values for the UI |
+| `preview` | A preview hint, or `null`: what a host MAY draw beside the control, as data (`{ kind: 'map' }` for `geojson`) — see below |
 | `children` | Child fields (object kinds) |
 | `item` / `tuple` | Item template and tuple prefix fields (array kinds) |
 
 Field kinds are inferred from structural keywords when `type` is absent, and `format` maps to input controls and placeholders through the same registry the preemptive validation uses (`getFormatInfo`).
+
+### The preview hint — a renderer described as data
+
+A `geojson` field is a `textarea` whose text is validated by parsing it and judging the
+object (`isValidGeoJson`), and that is where a text control stops: the value can be valid
+GeoJSON long before it is the shape the user meant, and no textarea can show the
+difference. The format registry therefore carries a **preview hint** —
+`getFormatInfo('geojson').preview` is `{ kind: 'map' }` — and the field and the view node
+carry it through as `preview`. It is a description, not a renderer: `@jarenjs/forms`
+imports no chart, and the dependency arrow forbids it (`@jarenjs/charts` sits above this
+package). A **host that understands** `preview.kind === 'map'` parses the field's text and
+hands it to a map renderer — `@jarenjs/charts` draws a `FeatureCollection`, a `Feature` or a
+geometry through `compileChart({ type: 'map' }, { features })` — beside the control. A host
+that does **not** ignores the member, and the field is exactly the textarea it always was:
+same control, same placeholder, same test. Both paths are tests; the `@jarenjs/app` form
+stylesheet is the second kind of host, and the website's data studio the first.
 
 Which date formats get a **native** control is decided by the offset, not by convenience. HTML's `datetime-local` and `time` inputs cannot produce one, and RFC 3339 requires one — binding them to `date-time`/`time` would make the control emit values its own schema rejects, so those stay text inputs. The `iso-date-time`/`iso-time` formats leave the offset optional and are exactly what those inputs spell, so they map losslessly. `formatMinimum`/`formatMaximum` reach the field as constraints and become the control's `min`/`max`, so the picker itself refuses an out-of-range date; HTML has no exclusive date bounds, so `formatExclusive*` stays a submit-time check.
 

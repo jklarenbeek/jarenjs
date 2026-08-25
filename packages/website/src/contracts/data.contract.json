@@ -145,7 +145,11 @@
           "collection": { "$ref": "#/$defs/Collection" },
           "documents": { "type": "array", "items": { "type": "object" } },
           "query": true,
-          "externals": { "type": "object" }
+          "externals": { "type": "object" },
+          "explain": {
+            "description": "Also answer the store's explain record for the query — the SQL pushed down, the pre-filters and the database's own scan narrative — so a reader can see the plan the throwaway store ran, not only its answer.",
+            "type": "boolean"
+          }
         }
       },
       "output": {
@@ -156,11 +160,23 @@
           "empty": {
             "description": "The query answered the empty sequence, which JSON cannot spell and null must not stand in for — answer is null then, and means nothing.",
             "type": "boolean"
+          },
+          "explain": {
+            "description": "Present only when asked for: the same record data.explain answers, over the throwaway store.",
+            "type": "object",
+            "properties": {
+              "sql": { "type": "string" },
+              "params": { "type": "array" },
+              "indexes": { "type": "array" },
+              "prefilters": { "type": "array" },
+              "residual": { "type": ["object", "null"] },
+              "scanNarrative": { "type": "string" }
+            }
           }
         }
       },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Run one query over a THROWAWAY store: a fresh in-memory store on the model, the documents inserted, the query executed, the store closed — whatever happened. The store this context holds is untouched: no registration, no announcement, and it works with no store open at all. It is how a second executor is held to the spatial corpus from a real browser tab, in every engine: the corpus needs execution, not persistence, so a tab whose OPFS pool is absent answers it exactly as an owner does."
+      "doc": "Run one query over a THROWAWAY store: a fresh in-memory store on the model, the documents inserted, the query executed (and explained, when explain is asked for), the store closed — whatever happened. The store this context holds is untouched: no registration, no announcement, and it works with no store open at all. It is how a second executor is held to the spatial corpus from a real browser tab, in every engine: the corpus needs execution, not persistence, so a tab whose OPFS pool is absent answers it exactly as an owner does."
     },
     "data.live": {
       "kind": "subscribe",

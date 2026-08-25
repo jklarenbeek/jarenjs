@@ -31,6 +31,7 @@
     "@jarenjs/forms": "file:../forms",
     "@jarenjs/josl": "file:../josl",
     "@jarenjs/json": "file:../json",
+    "@jarenjs/linq": "file:../linq",
     "@jarenjs/locales": "file:../locales",
     "@jarenjs/md": "file:../../components/md",
     "@jarenjs/mermaid": "file:../../components/mermaid",

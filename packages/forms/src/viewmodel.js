@@ -43,6 +43,9 @@ const EMPTY_STATE = Object.freeze({});
  * @property {boolean} readOnly
  * @property {boolean} enabled - `x-form.enabled`, defaulting true.
  * @property {string|null} placeholder
+ * @property {import('./formats.js').FormatPreview|null} preview - The
+ *   format's preview hint, carried through for a host that renders it;
+ *   a host without a renderer for `preview.kind` ignores it.
  * @property {any} value - The current value (`x-form.computed` wins);
  *   `null` when the field is absent from the data.
  * @property {Array<{value: any, key: string, label: string, selected: boolean}>|null} options
@@ -321,6 +324,7 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
     readOnly: field.readOnly === true,
     enabled: rs === undefined || rs.enabled !== false,
     placeholder: field.placeholder ?? null,
+    preview: field.preview ?? null,
     value: value === undefined ? null : value,
     options: null,
     errors,

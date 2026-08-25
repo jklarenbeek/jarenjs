@@ -289,7 +289,8 @@
           "$year", "$month", "$day", "$hours", "$minutes", "$seconds",
           "$offset", "$epoch", "$datetime",
           "$week", "$week-year", "$quarter", "$weekday",
-          "$bbox", "$area", "$length", "$centroid"
+          "$bbox", "$area", "$length", "$centroid",
+          "$geo-parse", "$geo-text", "$geohash-bounds", "$geohash-neighbours"
         ]
       },
       "additionalProperties": { "$ref": "#/$defs/expression" }
@@ -306,7 +307,7 @@
           "$contains", "$starts-with", "$ends-with", "$match", "$search",
           "$index-of", "$range", "$get",
           "$start-of", "$end-of", "$date-format",
-          "$distance", "$within", "$bbox-intersects", "$default"
+          "$distance", "$within", "$bbox-intersects", "$geo-simplify", "$default"
         ]
       },
       "additionalProperties": {

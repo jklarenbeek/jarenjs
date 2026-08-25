@@ -110,6 +110,7 @@ const STUDIOS = [
       ['store', 'Store', 'data-status'],
       ['query', 'Query', 'data-query'],
       ['live', 'Live', 'data-live'],
+      ['trip', 'Round trip', 'data-trip'],
     ],
   },
 ];
