@@ -7485,7 +7485,35 @@
               },
               {
                 "type": "text",
-                "value": "database has to beat not using the database at all."
+                "value": "database has to beat not using the database at all. One committed corpus holds"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "three executors of the same spatial query document to the same answers — the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "JavaScript engine, SQLite through the Node driver, and SQLite compiled to wasm"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "in a browser tab, where the Data studio runs it in Chromium, Firefox and WebKit;"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "that leg proves execution, not durability."
               }
             ]
           },
@@ -7964,7 +7992,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/db/site.md",
-          "hash": "1y2vknk",
+          "hash": "168qq3y",
           "frontmatterLang": "yaml"
         }
       },
