@@ -121,6 +121,13 @@
      "type": "integer",
      "minimum": 1,
      "maximum": 12
+    },
+    "physical": {
+     "description": "The shape a derive: 'bbox' index takes on disk: 'columns' (the default) is four generated columns under one B-tree; 'rtree' keeps the same four columns and adds a SQLite R*Tree virtual table beside the collection, kept in sync by declared triggers, with no B-tree over the columns. The logical meaning of derive: 'bbox' is identical either way. Refused on any other index kind, and on a driver without the module it falls back to 'columns' and says so through explain().prefilters[].via.",
+     "enum": [
+      "columns",
+      "rtree"
+     ]
     }
    },
    "required": [

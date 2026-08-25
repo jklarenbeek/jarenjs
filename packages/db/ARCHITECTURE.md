@@ -273,17 +273,31 @@ member as an array or an object **and nothing else** — §8.14 answers
 
 | Jaren predicate | pushed | exact? | why it is implied |
 |---|---|---|---|
-| `$bbox-intersects(<path>, <literal\|external>)` | `w <= L_e AND e >= L_w AND s <= L_n AND n >= L_s` | **exact** | the derived columns ARE `B(row)`, so box overlap is fully decidable. `<=`/`>=`, not `<`/`>`: the kernel counts touching edges as intersecting, and a strict comparison would disagree on every shared edge |
-| `$within(<path>, <literal\|external>)` | the same four comparisons against `B(area)` | implied | the representative position is inside `B(subject)` — a bare position IS the box, and a centroid is a mean of positions, which lies within their min/max — and inside the area's surface implies inside `B(area)`; so the two boxes share at least that position ∎ |
+| `$bbox-intersects(<path>, <literal\|external>)`, `physical: 'columns'` | `w <= L_e AND e >= L_w AND s <= L_n AND n >= L_s` | **exact** | the derived columns ARE `B(row)`, so box overlap is fully decidable. `<=`/`>=`, not `<`/`>`: the kernel counts touching edges as intersecting, and a strict comparison would disagree on every shared edge |
+| the same, `physical: 'rtree'` | the same four comparisons, spelled as `rowid IN (SELECT id FROM <c>_rtree WHERE minx <= L_e AND maxx >= L_w AND miny <= L_n AND maxy >= L_s)` | implied | an R\*Tree stores coordinates as **32-bit floats rounded OUTWARD**, so what it holds is `B(row)` widened — a superset, by ~3 cm in x and ~84 cm in y at 52°N. A superset has no false negatives, which is all a pre-filter needs; it is not a decision, so the exact box test refines and `strict: true` is `JD0010` here where the column mapping was native |
+| `$within(<path>, <literal\|external>)` | the same four comparisons against `B(area)`, in whichever spelling the mapping takes | implied | the representative position is inside `B(subject)` — a bare position IS the box, and a centroid is a mean of positions, which lies within their min/max — and inside the area's surface implies inside `B(area)`; so the two boxes share at least that position ∎ |
 | `{$le\|$lt: [{$distance: [<path>, <literal>]}, r]}` | the same four comparisons against `circleBounds(probe, r)` | implied | every position within `r` metres lies inside the circle's box, which the kernel computes on the same sphere and the same `EARTH_RADIUS` the engine measures with — so the two cannot disagree by model. `$ge`/`$gt` is NOT promoted: no box narrows "farther than r" |
 | `{$starts-with: [{$geohash: [<path>, k]}, "<cell>"]}`, cell length ≤ k | `<c> IN ("<cell>")` or `<c> >= "<cell>" AND <c> < successor` | **exact** | the column HOLDS `$geohash(row, k)`, and geohash is a prefix code, so a prefix test on the expression is the same test on the column |
 | the same, cell length > k | the cell truncated to k | implied | the column can only confirm its own first k characters |
 | `{$exists: {$index-of: [{$geohash-neighbours: "<cell>"}, {$geohash: [<path>, k]}]}}`, cell length = k | `<c> IN (…the nine cells…)` | **exact** | the membership test compares whole strings and the column is exactly one of them. Nine cells, never one: two points ten metres apart can differ in the FIRST character of their cell (D7), so a single prefix is bucketing and only the neighbourhood is proximity |
 
+**The proof is a proof about BOXES, not about SQL**, so the physical
+mapping (MODEL-FORMAT §2.1, `physical`) does not enter it: the same box
+is computed either way and only its spelling changes. The `rtree`
+spelling is a `rowid` subquery — a conjunct on the collection table, so
+the `FROM` clause, the residual machinery and `prefilters` are all
+untouched. It is not a join (which would need join support the emitter
+does not have, for 6 % ) and emphatically not a correlated `EXISTS`,
+which defeats the virtual table's index entirely and measured 85× worse
+than the subquery.
+
 The implied forms carry no `json_type` guard — a derived column IS the
 value — but each is TOTAL through its own `IS NOT NULL`, so a row with
 no box answers `FALSE` rather than SQL's `NULL` and negation composes
-classically. An implied conjunct may not be negated at all: negating a
+classically. The `rtree` form is total for the same reason by a
+different route: a row with no box was never inserted into the virtual
+table (the sync trigger's guard, MODEL-FORMAT §3.2), so it is simply not
+in the list. An implied conjunct may not be negated at all: negating a
 superset is a subset, and that drops rows. That guard also makes the
 leading term a two-sided range, which is what SQLite will actually
 **seek**: with a one-sided range it prefers a table scan, and a scan over
@@ -327,11 +341,16 @@ are ALWAYS bound, never interpolated). `indexes` names the declared
 indexes whose generated columns the pushed predicates and ordering
 touch, and the `scanNarrative` is the database's own `EXPLAIN QUERY
 PLAN` prose so the claim is checkable against the engine that will run
-it. `prefilters` is the implied conjuncts — `{ construct, columns,
-exact }` each — because whether a declared index is earning its keep is
-not readable from `sql` alone, and because `indexes` says what a
-predicate TOUCHES while the narrative says what the database will
-DO. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
+it. `prefilters` is the implied conjuncts —
+`{ construct, via, columns, exact }` each — because whether a declared
+index is earning its keep is not readable from `sql` alone, and because
+`indexes` says what a predicate TOUCHES while the narrative says what
+the database will DO. `via` is `'columns'` or `'rtree'`: which physical
+realization of a `bbox` column set actually ran, which is not always
+what the model declared — a build without the R\*Tree module falls back
+and this is where it says so (MODEL-FORMAT §4). Under `'rtree'` the
+`columns` member names the virtual table's own columns and `indexes`
+names the virtual table. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
 is empty and no number is fabricated. `residual` is `null` or
 `{ mode: 'row' | 'set', reasons: [{ construct, reason }] }` with
 reasons drawn from the deliberate-residual table. With

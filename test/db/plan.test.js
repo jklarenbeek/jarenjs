@@ -290,6 +290,7 @@ describe('spatial promotions (the implied conjunct)', () => {
     });
     assert.deepStrictEqual(planned.prefilters, [{
       construct: '$bbox-intersects',
+      via: 'columns',
       columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
       exact: true,
     }]);

@@ -9,8 +9,9 @@
  * browser to it: the data studio's Store pane runs the corpus the site
  * built from the same fixture through the tab's wasm store — one
  * throwaway in-memory store per entry, under the model with the
- * derived spatial indexes and the one without — and publishes every
- * answer. The assertions are made HERE, against the fixture read from
+ * derived spatial indexes, the one that realizes every box column set
+ * as an R\*Tree, and the one with no derived index at all — and
+ * publishes every answer. The assertions are made HERE, against the fixture read from
  * disk, so the page's own verdict is checked and not trusted.
  *
  * The leg needs execution, not persistence: an entry seeds its own
@@ -33,11 +34,11 @@ const CORPUS = JSON.parse(readFileSync(
   new URL('../../../test/json/fixtures/spatial-corpus.json', import.meta.url), 'utf8'));
 const RUNNABLE = CORPUS.filter((entry) => entry.executors === undefined);
 const MARKED = CORPUS.filter((entry) => entry.executors !== undefined).map((entry) => entry.name);
-const MAPPINGS = ['indexed', 'unindexed'];
+const MAPPINGS = ['indexed', 'rtree', 'unindexed'];
 const EXECUTOR = 'sqlite-wasm';
 
 // the wasm build + the first store open is real work; the corpus is
-// two hundred throwaway stores on top of it
+// nearly three hundred throwaway stores on top of it
 const READY = { timeout: 30_000 };
 const RAN = { timeout: 120_000 };
 

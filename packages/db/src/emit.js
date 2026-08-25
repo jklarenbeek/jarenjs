@@ -228,6 +228,23 @@ export function emitPlan(plan, dialect, physical) {
           + ` AND ${q(c.e)} >= ${edge('w')}`
           + ` AND ${q(c.s)} <= ${edge('n')} AND ${q(c.n)} >= ${edge('s')})`;
       }
+      case 'bboxRtree': {
+        // The same box test, over the same box, in the shape a
+        // `physical: 'rtree'` column set stores it: a LIST subquery over
+        // the virtual table, which is a conjunct on the collection table
+        // — so the FROM clause, the residual machinery and `prefilters`
+        // are all untouched, and only this one case knows the mapping.
+        //
+        // Total by construction: a row with no box was never inserted
+        // into the virtual table (the sync trigger's `IS NOT NULL`
+        // guard), so it is simply not in the list — the same answer the
+        // column mapping's leading `IS NOT NULL` produces.
+        const [id, minx, maxx, miny, maxy] = [dialect.rtree.columns[0], ...pred.columns];
+        const edge = (axis) => probeEdge(pred.probe, param, axis);
+        return `${dialect.rowIdentity()} IN (SELECT ${q(id)} FROM ${q(pred.table)}`
+          + ` WHERE ${q(minx)} <= ${edge('e')} AND ${q(maxx)} >= ${edge('w')}`
+          + ` AND ${q(miny)} <= ${edge('n')} AND ${q(maxy)} >= ${edge('s')})`;
+      }
       case 'cellIn': {
         // The cells are whole values of the column, so this is an
         // equality set — and `IN` is the spelling that keeps it one:

@@ -169,6 +169,24 @@ describe('the derive declaration', () => {
     assert.match(error.message, /typed 'string'/);
   });
 
+  it("refuses physical anywhere but on a bbox index, and refuses an unknown value", () => {
+    refusal([{ name: 'by_cell', path: '$.at', derive: 'geohash', precision: 7,
+      physical: 'rtree' }], '/collections/places/indexes/0/physical');
+    refusal([{ name: 'by_name', path: '$.name', physical: 'rtree' }],
+      '/collections/places/indexes/0/physical');
+    const unknown = refusal([{ name: 'by_box', path: '$.geometry', derive: 'bbox',
+      physical: 'quadtree' }], '/collections/places/indexes/0/physical');
+    assert.match(unknown.message, /closed set/);
+  });
+
+  it('refuses two indexes over one column set asking for two shapes on disk', () => {
+    const error = refusal([
+      { name: 'by_box', path: '$.geometry', derive: 'bbox' },
+      { name: 'also_box', path: '$.geometry', derive: 'bbox', physical: 'rtree' },
+    ], '/collections/places/indexes/1/physical');
+    assert.match(error.message, /one shape on disk/);
+  });
+
   it('refuses an unknown derive value and a composite derived path', () => {
     refusal([{ name: 'by_cell', path: '$.at', derive: 'quadkey', precision: 7 }],
       '/collections/places/indexes/0/derive');

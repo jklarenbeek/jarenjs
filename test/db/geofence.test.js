@@ -240,3 +240,42 @@ describe('the geofence — an external region', () => {
     await store.close();
   });
 });
+
+// The physical mapping is not supposed to be visible from up here. A
+// predicate that was EXACT over four columns and is REFINED over an
+// R*Tree is precisely the input that could move a live query between
+// strategies — so it is checked rather than assumed, and pinned so a
+// later change to the classifier has to confront it.
+describe('the geofence under both physical mappings of derive: \'bbox\'', () => {
+  const RTREE = INDEXES.map((index) =>
+    (index.derive === 'bbox' ? { ...index, physical: 'rtree' } : index));
+
+  for (const [mapping, indexes] of [['columns', INDEXES], ['rtree', RTREE]]) {
+    it(`${mapping}: the same strategy, the same emissions, the same rows`, async () => {
+      const store = await open(indexes);
+      const places = store.collection('places');
+      await places.insert({ id: 'p', name: 'p', at: OUTSIDE_WEST });
+      try {
+        // $bbox-intersects is exact over columns and refined over the
+        // R*Tree; either way it is a maintained per-row geofence
+        for (const where of [WITHIN_EXTERNAL, { '$bbox-intersects': ['$it.at', '$region'] }]) {
+          const live = await places.live([flwor(where)], { externals: { region: REGION } });
+          assert.deepStrictEqual(live.mode, { strategy: 'rows', mode: 'incremental' },
+            `${mapping}: ${JSON.stringify(where)}`);
+          await live.close();
+        }
+
+        const { live, events } = await watch(places, flwor(WITHIN_EXTERNAL), { region: REGION });
+        assert.deepStrictEqual(live.result.rows, []);
+        await places.put({ id: 'p', name: 'p', at: INSIDE }, 'p');
+        assert.deepStrictEqual(live.result.rows, [{ id: 'p', name: 'p', at: INSIDE }],
+          `${mapping}: the point entered the region`);
+        await places.put({ id: 'p', name: 'p', at: OUTSIDE_EAST }, 'p');
+        assert.deepStrictEqual(live.result.rows, [], `${mapping}: and left it`);
+        assert.strictEqual(events.length, 2);
+        await live.close();
+      }
+      finally { await store.close(); }
+    });
+  }
+});

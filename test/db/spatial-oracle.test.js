@@ -9,11 +9,13 @@
  * here rather than in a benchmark, and a divergence names which
  * executor moved.
  *
- * Every entry runs TWICE: once against a collection that declares the
+ * Every entry runs THREE times: against a collection that declares the
  * derived spatial indexes (where a spatial predicate is promoted onto
- * them) and once against one that declares none (where it is not).
- * Both must equal the engine's recorded answer — the pre-filter
- * narrows, it never decides.
+ * them), against one that declares the same indexes with every `bbox`
+ * column set realized as an R\*Tree, and against one that declares none
+ * (where nothing is promoted). All three must equal the engine's
+ * recorded answer — the pre-filter narrows, it never decides, and the
+ * physical mapping is not allowed to be visible in an answer.
  *
  * How an entry becomes documents, a query and a model for a store is
  * `scripts/lib/spatial-corpus.js` — shared with the site build, which
@@ -34,7 +36,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { deepEquals } from './oracle/harness.js';
 import {
   readSpatialCorpus, isRunnable, asCollectionQuery, spatialModel, SPATIAL_INDEXES,
-  SPATIAL_COLLECTION,
+  SPATIAL_INDEXES_RTREE, SPATIAL_COLLECTION,
 } from '../../scripts/lib/spatial-corpus.js';
 
 /** The executor this file holds to the engine, as a divergence names it. */
@@ -65,11 +67,17 @@ describe('the spatial corpus through SQLite', () => {
   });
 
   /** Entries actually executed, per mapping. */
-  const ran = { indexed: 0, unindexed: 0 };
+  const ran = { indexed: 0, rtree: 0, unindexed: 0 };
 
-  for (const mapping of /** @type {const} */ (['indexed', 'unindexed'])) {
+  /** The indexes each mapping declares — the SAME logical model twice
+   * over, once as four columns under a B-tree and once as an R*Tree. */
+  const INDEXES = {
+    indexed: SPATIAL_INDEXES, rtree: SPATIAL_INDEXES_RTREE, unindexed: [],
+  };
+
+  for (const mapping of /** @type {const} */ (['indexed', 'rtree', 'unindexed'])) {
     describe(`${mapping} — every entry answers what the engine answered`, () => {
-      const indexes = mapping === 'indexed' ? SPATIAL_INDEXES : [];
+      const indexes = INDEXES[mapping];
       for (const entry of RUNNABLE) {
         it(entry.name, async () => {
           const { documents, query } = asCollectionQuery(entry);
@@ -96,9 +104,10 @@ describe('the spatial corpus through SQLite', () => {
     });
   }
 
-  it('ran every runnable entry under both mappings — the count, not the absence of failures', () => {
+  it('ran every runnable entry under all three mappings — the count, not the absence of failures', () => {
     assert.ok(RUNNABLE.length > 0, 'nothing to run');
-    assert.deepStrictEqual(ran, { indexed: RUNNABLE.length, unindexed: RUNNABLE.length },
+    assert.deepStrictEqual(ran, { indexed: RUNNABLE.length, rtree: RUNNABLE.length,
+      unindexed: RUNNABLE.length },
       `${EXECUTOR} ran fewer entries than the corpus carries`);
     assert.strictEqual(RUNNABLE.length + CORPUS.filter((entry) => !isRunnable(entry)).length,
       CORPUS.length, 'every entry is either run or skipped by its marker');
@@ -137,25 +146,48 @@ describe('the binding name is the document\'s to choose — the spatial corpus u
 });
 
 describe('the plan cases really are promoted (and still agree)', () => {
-  /** @type {any} */
-  let opened = null;
   const planCases = CORPUS.filter((entry) => entry.collection === true);
 
-  before(async () => { opened = await storeFor([], SPATIAL_INDEXES); });
-  after(async () => { await opened.store.close(); });
+  for (const mapping of /** @type {const} */ (['indexed', 'rtree'])) {
+    describe(mapping, () => {
+      /** @type {any} */
+      let opened = null;
+      before(async () => {
+        opened = await storeFor([],
+          mapping === 'indexed' ? SPATIAL_INDEXES : SPATIAL_INDEXES_RTREE);
+      });
+      after(async () => { await opened.store.close(); });
 
-  it('every plan case either pushes a spatial pre-filter or refuses on purpose', async () => {
-    const report = [];
-    for (const entry of planCases) {
-      const explained = await opened.collection.explain(entry.query);
-      report.push(`${entry.name}: ${explained.prefilters.length} prefilter(s)`
-        + `${explained.prefilters.map((p) => ` ${p.construct}(exact:${p.exact})`).join('')}`);
-    }
-    // the two refusals are deliberate and named; everything else pushes
-    const refused = report.filter((line) => line.includes('0 prefilter'));
-    assert.deepStrictEqual(refused, [
-      'plan/distance-across-the-antimeridian: 0 prefilter(s)',
-      'plan/distance-over-a-pole: 0 prefilter(s)',
-    ], report.join('\n'));
-  });
+      it('every plan case either pushes a spatial pre-filter or refuses on purpose', async () => {
+        const report = [];
+        for (const entry of planCases) {
+          const explained = await opened.collection.explain(entry.query);
+          report.push(`${entry.name}: ${explained.prefilters.length} prefilter(s)`
+            + `${explained.prefilters.map((p) => ` ${p.construct}(exact:${p.exact})`).join('')}`);
+        }
+        // the two refusals are deliberate and named; everything else pushes
+        const refused = report.filter((line) => line.includes('0 prefilter'));
+        assert.deepStrictEqual(refused, [
+          'plan/distance-across-the-antimeridian: 0 prefilter(s)',
+          'plan/distance-over-a-pole: 0 prefilter(s)',
+        ], report.join('\n'));
+      });
+
+      it('every box pre-filter names the mapping it ran under', async () => {
+        const via = new Set();
+        for (const entry of planCases) {
+          for (const prefilter of (await opened.collection.explain(entry.query)).prefilters) {
+            if (prefilter.construct === '$starts-with'
+              || prefilter.construct === '$geohash-neighbours') continue;
+            via.add(`${prefilter.construct}:${prefilter.via}:${prefilter.exact}`);
+          }
+        }
+        assert.deepStrictEqual([...via].sort(), mapping === 'indexed'
+          ? ['$bbox-intersects:columns:true', '$distance:columns:false', '$within:columns:false']
+          // the one thing that changes with the shape: an R*Tree stores
+          // 32-bit floats rounded outward, so the box test is a superset
+          : ['$bbox-intersects:rtree:false', '$distance:rtree:false', '$within:rtree:false']);
+      });
+    });
+  }
 });

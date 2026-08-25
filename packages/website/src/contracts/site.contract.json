@@ -1025,7 +1025,7 @@
       "properties": {
         "meta": {
           "type": "object",
-          "required": ["docs", "docBytes", "probe", "repetitions", "node", "engine", "rtree", "corpus", "figures", "notes", "equivalenceFailures"],
+          "required": ["docs", "docBytes", "probe", "repetitions", "node", "engine", "rtree", "mappings", "corpus", "figures", "notes", "equivalenceFailures"],
           "properties": {
             "docs": { "type": "number" },
             "docBytes": { "type": "number" },
@@ -1034,6 +1034,11 @@
             "node": { "type": "string" },
             "engine": { "type": "string" },
             "rtree": { "type": "boolean" },
+            "mappings": {
+              "description": "The physical realizations of derive: 'bbox' the run measured, read AND load.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
             "corpus": {
               "type": "object",
               "required": ["cases", "agreed"],
@@ -1045,14 +1050,16 @@
             },
             "figures": {
               "type": "object",
-              "required": ["scanVsIndexed", "engineVsIndexed", "udfSolo", "udfSelective", "udfLimit", "rtreeVsGenerated"],
+              "required": ["scanVsIndexed", "engineVsIndexed", "udfSolo", "udfSelective", "udfLimit", "rtreeVsGenerated", "storeRtreeVsColumns", "rtreeLoadCost"],
               "properties": {
                 "scanVsIndexed": { "type": "number" },
                 "engineVsIndexed": { "type": "number" },
                 "udfSolo": { "type": "number" },
                 "udfSelective": { "type": "number" },
                 "udfLimit": { "type": "number" },
-                "rtreeVsGenerated": { "type": "number" }
+                "rtreeVsGenerated": { "type": "number" },
+                "storeRtreeVsColumns": { "type": "number" },
+                "rtreeLoadCost": { "type": "number" }
               },
               "additionalProperties": false
             },
@@ -1311,11 +1318,12 @@
           },
           "collection": { "type": "string", "minLength": 1 },
           "mappings": {
-            "description": "The model each store runner answers under: with the derived spatial indexes, and without.",
+            "description": "The model each store runner answers under: with the derived spatial indexes over four generated columns, with the same indexes realized as R*Tree virtual tables, and with none at all. The logical model is the same in the first two; only the shape on disk differs, and an answer that differs with it would falsify the separation.",
             "type": "object",
-            "required": ["indexed", "unindexed"],
+            "required": ["indexed", "rtree", "unindexed"],
             "properties": {
               "indexed": { "type": "object" },
+              "rtree": { "type": "object" },
               "unindexed": { "type": "object" }
             },
             "additionalProperties": false
@@ -1330,7 +1338,7 @@
         "additionalProperties": false
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
-      "doc": "The committed spatial corpus, projected for a store: every entry the JavaScript engine recorded an answer for, as the documents to insert and the query to run over them, under a model with the derived spatial indexes and one without. The data studio posts each entry to its worker so that SQLite compiled to wasm — the third executor, beside the engine and the Node driver — is held to the same recorded answers in a real browser tab. Projected from the fixture by the build, never copied by hand."
+      "doc": "The committed spatial corpus, projected for a store: every entry the JavaScript engine recorded an answer for, as the documents to insert and the query to run over them, under three models — the derived spatial indexes over generated columns, the same indexes as R*Trees, and none. The data studio posts each entry to its worker so that SQLite compiled to wasm — the third executor, beside the engine and the Node driver — is held to the same recorded answers in a real browser tab. Projected from the fixture by the build, never copied by hand."
     },
     "bench.meta": {
       "kind": "read",

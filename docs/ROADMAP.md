@@ -877,19 +877,6 @@ still open is listed here, each with its reason.
   that composes the bound value with the radius, and the derived slot kind is
   closed at one axis of one bound value. Such a query is correct and reads
   every row. `$within` and `$bbox-intersects` do bind an external region.
-- [ ] **An R\*Tree mapping for `derive: 'bbox'`.** A `bbox` index is a
-  four-column B-tree and only its leading column carries a bound from a
-  box-overlap probe, so the seek narrows on longitude alone and the other
-  three comparisons filter the rows it returns. Measured on the same 50 000
-  rows and probe box, a hand-built R\*Tree probes at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.2× in the R*Tree's favour<!--/bm-->
-  (`benchmark/spatial.js`, the physical-question table), which is over the bar
-  that makes the second mapping worth building. It is a different physical
-  mapping for the same declaration, with three costs the generated columns do
-  not have: a second table that must be kept in sync inside every write
-  transaction, a changed meaning for "the model verifies the shape" (a virtual
-  table beside the collection, not columns on it), and `capabilities.rtree`
-  being `false` on any build without the module — so the generated-column path
-  stays as the fallback and the declaration does not change.
 - [ ] **A live ordering by `$distance` re-runs.** The geofence maintains a
   `$where` per row; an `$orderby` over `$distance` (or over a member beside a
   refined predicate) and a spatial aggregate re-run on invalidation with the

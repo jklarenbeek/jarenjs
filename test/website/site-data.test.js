@@ -432,17 +432,27 @@ describe('the spatial corpus, as the site ships it for the browser runner', func
     assert.deepStrictEqual(asCollectionQuery(plan), { documents: plan.data, query: plan.query });
   });
 
-  it('declares the two mappings a store runner answers under', function () {
-    assert.deepStrictEqual(Object.keys(corpus.mappings), ['indexed', 'unindexed']);
+  it('declares the three mappings a store runner answers under', function () {
+    assert.deepStrictEqual(Object.keys(corpus.mappings), ['indexed', 'rtree', 'unindexed']);
     const indexed = corpus.mappings.indexed.collections[corpus.collection];
     assert.deepStrictEqual(indexed.indexes, SPATIAL_INDEXES);
     assert.ok(indexed.indexes.some((index) => index.derive === 'bbox')
       && indexed.indexes.some((index) => index.derive === 'geohash'),
     'both derive kinds are declared, so both promotions are held to the engine');
     assert.deepStrictEqual(corpus.mappings.unindexed.collections[corpus.collection].indexes, []);
-    assert.deepStrictEqual(corpus.mappings.indexed.collections[corpus.collection].schema,
-      corpus.mappings.unindexed.collections[corpus.collection].schema,
-      'the mappings differ in their indexes and nothing else');
+    // the R*Tree mapping is the SAME logical model — same paths, same
+    // derivations — with one member added to every box index. If it
+    // differed in anything else the corpus would not be deciding what it
+    // claims to decide
+    const rtree = corpus.mappings.rtree.collections[corpus.collection];
+    assert.deepStrictEqual(rtree.indexes,
+      indexed.indexes.map((index) => (index.derive === 'bbox'
+        ? { ...index, physical: 'rtree' } : index)));
+    for (const mapping of ['rtree', 'unindexed']) {
+      assert.deepStrictEqual(corpus.mappings.indexed.collections[corpus.collection].schema,
+        corpus.mappings[mapping].collections[corpus.collection].schema,
+        'the mappings differ in their indexes and nothing else');
+    }
   });
 
   it('is one the site would accept, and byte-identical run over run', function () {

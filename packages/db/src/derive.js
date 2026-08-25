@@ -37,6 +37,18 @@ import { chain } from './driver.js';
 /** The closed set of derive kinds. */
 export const DERIVE_KINDS = new Set(['geohash', 'bbox']);
 
+/**
+ * The closed set of PHYSICAL realizations a `derive: 'bbox'` index may
+ * ask for. `'columns'` is the default and what an absent member means:
+ * four generated columns under one B-tree. `'rtree'` is the same four
+ * columns (they stay the box's one definition) beside a SQLite R\*Tree
+ * virtual table kept in sync by declared triggers, with no B-tree over
+ * them. The LOGICAL meaning of `derive: 'bbox'` is identical either
+ * way — same rows, same answers — which is the whole point of naming
+ * the shape separately from the derivation.
+ */
+export const PHYSICAL_KINDS = new Set(['columns', 'rtree']);
+
 /** A bbox index's four columns, in the order they are declared —
  * `[west, south, east, north]`, the order the kernel's boxes carry. */
 export const BBOX_COMPONENTS = Object.freeze(['w', 's', 'e', 'n']);

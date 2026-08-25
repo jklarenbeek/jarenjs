@@ -491,7 +491,8 @@ describe('the oracle — a second executor held to the engine from any tab', fun
         }
       }
       assert.deepStrictEqual(moved, []);
-      assert.strictEqual(ran, corpus.entries.length * 2, 'every entry ran under both mappings');
+      assert.strictEqual(ran, corpus.entries.length * Object.keys(corpus.mappings).length,
+        'every entry ran under every mapping');
       assert.ok(corpus.entries.length >= 80, `only ${corpus.entries.length} entries`);
       assert.deepStrictEqual(fixture.scratch, { opened: ran, closed: ran },
         'one throwaway store per entry, every one closed');

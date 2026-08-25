@@ -174,7 +174,7 @@ describe('the spatial round trip — the pure half, and what the page makes of t
       explain: {
         sql: 'SELECT … WHERE gx_geometry_bbox_w <= ? …',
         params: [], indexes: ['by_box'],
-        prefilters: [{ construct: '$within', columns: ['gx_geometry_bbox_w'], exact: false }],
+        prefilters: [{ construct: '$within', via: 'columns', columns: ['gx_geometry_bbox_w'], exact: false }],
         residual: { mode: 'set', reasons: [{ construct: '$within', reason: 'refined' }] },
         scanNarrative: 'SEARCH places USING INDEX places_by_box (gx_geometry_bbox_w<?)',
       },

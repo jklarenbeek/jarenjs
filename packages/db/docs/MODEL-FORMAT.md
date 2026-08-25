@@ -94,6 +94,58 @@ vocabulary: it says what indexable scalar is computed from the member.
 member would be a second query language inside the model document,
 which this format does not have and will not grow.
 
+**`physical` — the shape a `bbox` index takes on disk.** `derive` says
+what is COMPUTED; `physical` says how it is STORED, and the two are
+separable:
+
+```jsonc
+{ "name": "by_box", "path": "$.geometry", "derive": "bbox", "physical": "rtree" }
+```
+
+| `physical` | shape | index |
+|---|---|---|
+| `"columns"` (the default, and what an absent member means) | the four derived columns | one B-tree over them, in `(w, e, s, n)` order |
+| `"rtree"` | the same four columns, plus an R\*Tree virtual table `<collection>_<column stem>_rtree` and three triggers that keep it in sync | the virtual table; **no B-tree over the columns** |
+
+`physical` is a CLOSED set of those two values and is refused anywhere
+but on a `derive: 'bbox'` index (rule 7 below). The **logical** meaning
+of `derive: 'bbox'` is identical either way — same rows, same answers,
+proven entry by entry by the spatial corpus in all three executors — and
+that is the whole reason it is spelled separately from the derivation.
+
+Three things follow, and none of them is optional:
+
+- **The sync is three DECLARED triggers, not a second write path.** A
+  trigger is inside the writing transaction by construction, no write
+  path can bypass it (`insert`, `upsert`, a translated patch, the patch
+  fallback, a delete and a migration backfill all fire it), and it
+  belongs to the collection table — so an rtree-mapped file opened with
+  a `columns` model reports `JD0002` naming the trigger, and the reverse
+  direction likewise, through the drift check that was already there.
+  The trigger body READS the derived columns, so the box keeps ONE
+  definition and the same trigger text works on the stored-column branch
+  (§3.1) unchanged.
+- **The virtual table is named from the COLUMN STEM, not the index
+  name**, because rule 5 lets two indexes share one column set: there is
+  one R\*Tree per column set, never one per index. Two indexes over one
+  column set asking for two shapes is `JD0004`.
+- **`$bbox-intersects` stops being EXACT under this mapping.** An
+  R\*Tree stores coordinates as 32-bit floats rounded OUTWARD, so the
+  stored box is a superset of the row's — by about 3 cm in longitude and
+  84 cm in latitude at Dutch latitudes. That is safe for a pre-filter (a
+  superset has no false negatives, which is what the implied conjunct
+  needs) and it is not a decision, so the exact box test keeps a
+  refinement and `strict: true` is `JD0010` where the column mapping
+  reported a native plan. `ARCHITECTURE.md`'s truth table carries the
+  per-mapping cell.
+
+**What it costs, both halves** (`benchmark/spatial.js`, the store's own
+rows over 50 000 points): the same `$within` measures <!--bm:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/bm-->, and loading them
+costs <!--bm:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/bm-->. Isolated from the store on a raw
+connection, the same probe is <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/bm-->. Read speed bought with write cost and a
+second table: choose it deliberately, per index, which is why it is
+neither automatic nor a store-wide option.
+
 Every rule below is `JD0004` with a `docPath` at the offending member:
 
 1. **`precision` is required for `geohash`, and refused anywhere
@@ -129,6 +181,23 @@ Every rule below is `JD0004` with a `docPath` at the offending member:
    `w <= ? AND e >= ? AND s <= ? AND n >= ?`, so the two longitude
    bounds sit together at the front of the index where a leading-column
    range can use them; `(a,b)` and `(b,a)` are different indexes (§3).
+   Under `physical: 'rtree'` that B-tree is **not created at all** — the
+   virtual table is the index, and paying for both would be paying
+   twice.
+7. **`physical` belongs to a `bbox` index and to nothing else.** It is
+   refused on a `geohash` index (an R\*Tree carries numbers and a cell
+   is text), on an undecorated index (which has only one shape), and for
+   any value outside `{"columns", "rtree"}`. It is a property of the
+   COLUMN SET, so two indexes sharing one set must agree about it.
+
+*Why the model and not an `openStore` option:* the store must know which
+shape to expect in order to **verify without altering** (§3). With the
+choice in the model, the file and the model agree by construction; with
+it at a call site, a caller who forgets the option gets `JD0002` on a
+database that is perfectly correct. *Why not automatic whenever the
+driver can:* it would change the physical shape of every existing
+spatially-indexed database on a version bump, and the write cost above
+is not something a store may opt a consumer into.
 
 Approximate geohash cell size by precision (the kernel's
 `geohashCellSize` computes the degree figures; the metric ones are at
@@ -210,10 +279,15 @@ mapping BRANCHES on what the driver declares. That is what the
 capability table (§4) is for: a driver that cannot do a thing says so
 rather than degrading silently.
 
-| `capabilities.deterministicIndexableFunctions` | mapping | drivers |
-|---|---|---|
-| `true` | a **virtual generated column** whose expression calls a deterministic function the store registers at open — `jaren_geohash(<member>, <precision>)`, `jaren_bbox_w(<member>)`, … over `json(jsonb_extract("doc", '<path>'))` | `node`, `wasm` |
-| `false` | a **stored column** the store writes on every insert, upsert and patch, computed in JavaScript from the same kernel call | `bun` |
+| capability | value | mapping | drivers |
+|---|---|---|---|
+| `deterministicIndexableFunctions` | `true` | a **virtual generated column** whose expression calls a deterministic function the store registers at open — `jaren_geohash(<member>, <precision>)`, `jaren_bbox_w(<member>)`, … over `json(jsonb_extract("doc", '<path>'))` | `node`, `wasm` |
+| `deterministicIndexableFunctions` | `false` | a **stored column** the store writes on every insert, upsert and patch, computed in JavaScript from the same kernel call | `bun` |
+| `rtree` | `false` | a `derive: 'bbox'` column set that declared `physical: 'rtree'` (§2.1) is planned, created and verified as the **B-tree over its four columns**, and `explain().prefilters[].via` reports `'columns'` beside `store.capabilities.rtree === false` | any build without `ENABLE_RTREE` |
+
+The two branches are independent: the `physical` mapping composes with
+either derived-column mapping, and the sync triggers read the derived
+columns either way, so their text is identical on both.
 
 Three consequences, each normative:
 
@@ -237,6 +311,15 @@ Three consequences, each normative:
   derived column — correctly: the column really is different. The
   physical mapping is a property of the driver that CREATED the file,
   and moving a file between the two is a migration, not an open.
+- **The R\*Tree fallback is a REPORT, not a degradation.** §4 promises
+  that a model declaring a spatial index is portable across all three
+  drivers and that the physical shape it produces is not, so refusing at
+  open on a build without the module would break a stated property of
+  the format for the sake of tidiness. The answers do not change — the
+  refinement is what makes them identical — and the surface a consumer
+  reads says which shape ran. A store that reported `via: 'rtree'` while
+  running columns, or that said nothing at all, is the one behaviour
+  this format forbids.
 
 ### 3.2 When a derived column is `NULL`
 
@@ -259,6 +342,15 @@ stored `null`), and a row the pushed filter never fetched cannot
 raise. The promotion therefore requires the schema to type the member
 as an array or an object and nothing else; a store that wants the
 engine's refusal instead keeps `compileSchema` injected.
+
+Under `physical: 'rtree'` the same rule is enforced in SQL, by the
+`WHEN <stem>_w IS NOT NULL` guard on the sync triggers: **a document
+with no bounded position is ABSENT from the virtual table**, so the
+pushed subquery simply does not list it — the same answer the column
+mapping's leading `IS NOT NULL` produces. The guard is load-bearing and
+not defensive: an R\*Tree coerces a `NULL` (or a text) coordinate to
+`0.0` without complaining, so without it every unbounded document would
+be indexed at `[0, 0]`.
 
 Traversal and validity stay separate concerns, as they do in the
 kernel: a value that carries SOME positions is bounded by the positions
@@ -306,6 +398,14 @@ no `createSession`. `deterministicIndexableFunctions` is the capability
 the derived-column mapping branches on (§3.1), so a model that declares
 a spatial index is portable across all three drivers and the physical
 shape it produces is not.
+
+`rtree` is read from the library's compile options (`ENABLE_RTREE`) and
+is the second mapping branch: a `derive: 'bbox'` index that declares
+`physical: 'rtree'` (§2.1) opens on a build without the module as the
+B-tree over its four columns, and `explain().prefilters[].via` names
+the shape that actually ran. That is this table's posture applied to a
+mapping rather than to a method — the store says which shape it used,
+and never claims one it did not.
 
 A library below SQLite **3.45** fails at open with `JD0001` naming
 the version found.
@@ -686,12 +786,12 @@ pushes everything BUT the spatial conjunct):
 <!--bm:spatial.udfTable-->
 | shape | pushed (ms) | residual (ms) | verdict |
 |---|---|---|---|
-| solo `$within` over a full scan | 93 | 80 | ~even |
-| indexed `$eq` **and** `$within` (~5 % pass the index) | 6.1 | 55 | push **9.0×** |
-| `$within` with `LIMIT 10` | 1.9 | 77 | push **40.0×** |
+| solo `$within` over a full scan | 94 | 80 | ~even |
+| indexed `$eq` **and** `$within` (~5 % pass the index) | 5.7 | 52 | push **9.1×** |
+| `$within` with `LIMIT 10` | 1.9 | 77 | push **41.0×** |
 <!--/bm-->
 
-So the spatial hatch <!--bm:spatial.udfVerdict-->earns its row: 9.0× beside the selective conjunct and 40.0× under the LIMIT<!--/bm-->,
+So the spatial hatch <!--bm:spatial.udfVerdict-->earns its row: 9.1× beside the selective conjunct and 41.0× under the LIMIT<!--/bm-->,
 by the same rule as `$sqrt`: a sole `$within` over a full scan is a
 loss (the UDF re-parses every row in the callback, and the exact
 containment test is dearer than a square root), a `$within` beside

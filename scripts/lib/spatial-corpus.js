@@ -16,6 +16,11 @@
  * which a browser tab posts to the data studio's worker entry by entry
  * so that SQLite compiled to wasm is the third executor.
  *
+ * A store runner answers under every mapping `SPATIAL_MAPPINGS` names —
+ * three of them, because `derive: 'bbox'` has two physical realizations
+ * and a physical mapping that changed an answer would be the campaign's
+ * claim falsified.
+ *
  * The projection is a pure function of the fixture: nothing here reads
  * the clock or the repository, so a rebuild of the same fixture writes
  * byte-identical output. Entries marked `executors: ["engine"]` are left
@@ -78,13 +83,26 @@ export function spatialModel(indexes) {
 }
 
 /**
- * The two mappings every store runner answers under: with the derived
- * spatial indexes (where a spatial predicate is promoted onto them) and
- * without (where it is not). Both must equal the engine's recorded
- * answer — the pre-filter narrows, it never decides.
+ * The same indexes, with every `bbox` column set realized as an R\*Tree
+ * beside the collection instead of a B-tree over its four columns
+ * (MODEL-FORMAT §2.1, `physical`). The LOGICAL model is identical —
+ * same paths, same derivations — so an entry that answers differently
+ * here is a mapping that is not equivalent, which is the whole thing
+ * this corpus is asked to decide.
+ */
+export const SPATIAL_INDEXES_RTREE = SPATIAL_INDEXES.map((index) =>
+  (index.derive === 'bbox' ? { ...index, physical: 'rtree' } : index));
+
+/**
+ * The three mappings every store runner answers under: with the derived
+ * spatial indexes (where a spatial predicate is promoted onto them),
+ * with the same indexes stored as R\*Trees, and without any (where the
+ * predicate is not promoted at all). All three must equal the engine's
+ * recorded answer — the pre-filter narrows, it never decides.
  */
 export const SPATIAL_MAPPINGS = Object.freeze({
   indexed: spatialModel(SPATIAL_INDEXES),
+  rtree: spatialModel(SPATIAL_INDEXES_RTREE),
   unindexed: spatialModel([]),
 });
 
@@ -166,7 +184,7 @@ export function readSpatialCorpus(root = ROOT) {
  * @typedef {Object} SpatialCorpus
  * @property {string} source - The fixture this was projected from.
  * @property {string} collection - The collection the mappings store rows in.
- * @property {{ indexed: any, unindexed: any }} mappings - The model per mapping.
+ * @property {{ indexed: any, rtree: any, unindexed: any }} mappings - The model per mapping.
  * @property {string[]} skipped - Entries left out by their `executors` marker.
  * @property {SpatialCorpusEntry[]} entries - Every runnable entry, in fixture order.
  */
@@ -180,7 +198,7 @@ export function buildSpatialCorpus(corpus) {
   return {
     source: SPATIAL_CORPUS_PATH,
     collection: SPATIAL_COLLECTION,
-    mappings: { indexed: SPATIAL_MAPPINGS.indexed, unindexed: SPATIAL_MAPPINGS.unindexed },
+    mappings: { ...SPATIAL_MAPPINGS },
     skipped: corpus.filter((entry) => !isRunnable(entry)).map((entry) => entry.name),
     entries: corpus.filter(isRunnable).map((entry) => {
       const { documents, query } = asCollectionQuery(entry);

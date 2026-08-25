@@ -13,4 +13,4 @@
 # values and refuses a document edited without them. The update procedure
 # is written down where the refusal is raised — test/website/site-contract.test.js.
 
-71f592f052355b024b10390c849cb518dcf0858b72f63e2cd06c5b7f2b34b556 additive
+d0079a37af6ce0ce87a382c750cfdf1a437e3bcac02304fd590d4b280a272529 additive

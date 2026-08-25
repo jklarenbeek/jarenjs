@@ -169,6 +169,7 @@ describe('a spatial linq chain reaches the derived index (D2)', () => {
       { externals: { region: REGION } });
     assert.deepStrictEqual(explained.prefilters, [{
       construct: '$within',
+      via: 'columns',
       columns: ['gx_at_bbox_w', 'gx_at_bbox_e', 'gx_at_bbox_s', 'gx_at_bbox_n'],
       exact: false,
     }]);

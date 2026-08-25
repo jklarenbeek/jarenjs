@@ -368,6 +368,9 @@ const SPATIAL_REASONS = {
     + 'disjuncts this suite\'s box convention does not carry — '
     + 'pushing nothing is correct, pushing a wrong box is not',
   precision: "the cell length must match the derived column's precision",
+  rtreeBox: "the box is stored in an R*Tree, whose coordinates are 32-bit floats rounded "
+    + 'OUTWARD, so the stored box is a superset of the row\'s; the exact box test refines '
+    + 'in the engine',
 };
 
 /**
@@ -416,6 +419,47 @@ function constantOf(node) {
  * @param {number} [precision]
  * @returns {string | { w: string, s: string, e: string, n: string } | null}
  */
+/**
+ * The R\*Tree virtual table a `bbox` column set is realized as, or
+ * `null` when it is realized as four columns under a B-tree — which is
+ * also the answer on a driver whose build carries no R\*Tree module,
+ * because the physical plan already fell back there (MODEL-FORMAT §4).
+ * @param {any} shape
+ * @param {string} canonical
+ * @returns {{ name: string, columns: string[] } | null}
+ */
+function rtreeTableOf(shape, canonical) {
+  const stem = shape.columnByCanonical?.get(`${canonical}|bbox|`);
+  if (stem === undefined) return null;
+  return shape.virtualByStem?.get(stem) ?? null;
+}
+
+/**
+ * The pushed box conjunct for one column set, under whichever physical
+ * mapping the collection declares — the same box either way, because
+ * the implied-conjunct proof is a proof about BOXES and not about SQL.
+ *
+ * Under `'rtree'` it is a `rowid` subquery over the virtual table: a
+ * conjunct on the collection table, so the `FROM` clause, the residual
+ * machinery and `prefilters` are all untouched. A join would be 6 %
+ * faster and would need join support the emitter does not have; a
+ * correlated `EXISTS` defeats the virtual table's index entirely and is
+ * 85x worse than the subquery.
+ * @param {{ w: string, s: string, e: string, n: string }} columns
+ * @param {{ name: string, columns: string[] } | null} virtual
+ * @param {any} probe
+ * @returns {{ pred: any, via: 'columns' | 'rtree', columns: string[],
+ *   inexact: boolean }}
+ */
+function boxConjunct(columns, virtual, probe) {
+  if (virtual === null) {
+    return { pred: { p: 'bboxOverlap', columns, probe },
+      via: 'columns', columns: boxColumnList(columns), inexact: false };
+  }
+  return { pred: { p: 'bboxRtree', table: virtual.name, columns: virtual.columns, probe },
+    via: 'rtree', columns: [...virtual.columns], inexact: true };
+}
+
 function derivedColumnsOf(shape, canonical, derive, precision) {
   const stem = shape.columnByCanonical?.get(`${canonical}|${derive}|${precision ?? ''}`);
   if (stem === undefined) return null;
@@ -499,11 +543,19 @@ function planBoxPredicate(node, itSlot, shape) {
     if (box === null) return { refusal: refusal(construct, SPATIAL_REASONS.unbounded) };
     probe = { box };
   }
-  const pred = { p: 'bboxOverlap', columns, probe };
-  const exact = construct === '$bbox-intersects';
-  return promotion(pred,
-    { construct, columns: boxColumnList(columns), exact },
-    exact ? [] : [refusal('$within', SPATIAL_REASONS.within)]);
+  const conjunct = boxConjunct(columns, rtreeTableOf(shape, subject.canonical), probe);
+  // `$bbox-intersects` is EXACT over the four columns — they ARE
+  // `B(row)` — and only IMPLIED over an R*Tree, whose 32-bit float
+  // coordinates round outward: the stored box is a superset. No false
+  // negatives either way, which is what D8 needs; but a superset does
+  // not DECIDE, so the exact box test keeps its refinement and
+  // `strict: true` is JD0010 where the column mapping ran native
+  const exact = construct === '$bbox-intersects' && !conjunct.inexact;
+  const refinements = construct === '$bbox-intersects'
+    ? (conjunct.inexact ? [refusal(construct, SPATIAL_REASONS.rtreeBox)] : [])
+    : [refusal('$within', SPATIAL_REASONS.within)];
+  return promotion(conjunct.pred,
+    { construct, via: conjunct.via, columns: conjunct.columns, exact }, refinements);
 }
 
 /**
@@ -555,8 +607,9 @@ function planDistanceBound(node, itSlot, shape) {
   if (box[0] < -180 || box[2] > 180)
     return { refusal: refusal('$distance', SPATIAL_REASONS.wrapped) };
 
-  return promotion({ p: 'bboxOverlap', columns, probe: { box } },
-    { construct: '$distance', columns: boxColumnList(columns), exact: false },
+  const conjunct = boxConjunct(columns, rtreeTableOf(shape, subject.canonical), { box });
+  return promotion(conjunct.pred,
+    { construct: '$distance', via: conjunct.via, columns: conjunct.columns, exact: false },
     [refusal('$distance', SPATIAL_REASONS.distance)]);
 }
 
@@ -617,7 +670,7 @@ function planCellPrefix(node, itSlot, shape) {
     ? { p: 'cellIn', column: derivation.column, cells: [cell] }
     : { p: 'cellPrefix', column: derivation.column, prefix: cell };
   return promotion(pred,
-    { construct: '$starts-with', columns: [derivation.column], exact },
+    { construct: '$starts-with', via: 'columns', columns: [derivation.column], exact },
     exact ? [] : [refusal('$starts-with', SPATIAL_REASONS.prefix)]);
 }
 
@@ -652,7 +705,8 @@ function planCellNeighbourhood(node, itSlot, shape) {
   if (cells.length === 0)
     return { refusal: refusal('$geohash-neighbours', SPATIAL_REASONS.operand) };
   return promotion({ p: 'cellIn', column: derivation.column, cells },
-    { construct: '$geohash-neighbours', columns: [derivation.column], exact: true });
+    { construct: '$geohash-neighbours', via: 'columns', columns: [derivation.column],
+      exact: true });
 }
 
 /**
@@ -969,7 +1023,8 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
  *   reasons: { construct: string, reason: string }[],
  *   rowReturn: any,
  *   udfs: string[],
- *   prefilters: { construct: string, columns: string[], exact: boolean }[],
+ *   prefilters: { construct: string, via: 'columns' | 'rtree',
+ *     columns: string[], exact: boolean }[],
  * }}
  */
 function planCollectionCore(document, shape, options = undefined) {
@@ -1131,7 +1186,8 @@ function planCollectionCore(document, shape, options = undefined) {
  *   reasons: { construct: string, reason: string }[],
  *   rowReturn: any,
  *   udfs: string[],
- *   prefilters: { construct: string, columns: string[], exact: boolean }[],
+ *   prefilters: { construct: string, via: 'columns' | 'rtree',
+ *     columns: string[], exact: boolean }[],
  * }}
  */
 export function planQuery(document, shape, options = undefined) {

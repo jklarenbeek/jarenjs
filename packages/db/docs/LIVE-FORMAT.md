@@ -180,6 +180,16 @@ what the pushdown planner already means by it.
 | joins, multi-entity roots, graph loads, every entity query | **re-run on invalidation — declared, not attempted** in this version | the previous result, for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
+The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
+`physical`) does not move a query between these rows. It can change one
+input to the choice — `$bbox-intersects` translates exactly over four
+generated columns and is refined over an R\*Tree, whose stored box is a
+32-bit-float superset — but both the exact row above and the refined one
+below it are the maintained per-row strategy, so the geofence behaves
+identically under either shape. That is checked, not assumed:
+`test/db/geofence.test.js` runs the same watch under both mappings and
+asserts the same strategy, the same emissions and the same rows.
+
 **What the geofence costs, stated rather than discovered.** A refined
 spatial predicate is maintained *per row*, not incrementally: there is
 no live spatial index, and none is planned. Every insert or update the

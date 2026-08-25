@@ -123,6 +123,12 @@ export function createQueryEngine(context) {
     collection: collection.name,
     schema: collection.schema,
     columnByCanonical: physicalPlan.columnByCanonical,
+    // the R*Tree virtual tables this collection's `bbox` column sets are
+    // realized as, by stem — empty under `physical: 'columns'`, and
+    // empty on a driver whose build carries no R*Tree module, because
+    // the physical plan already fell back there
+    virtualByStem: new Map((physicalPlan.virtualTables ?? [])
+      .map((virtual) => [virtual.stem, { name: virtual.name, columns: virtual.columns }])),
     operators,
   };
   const physical = {
@@ -537,12 +543,17 @@ export function createQueryEngine(context) {
     const entry = entryFor(document, strict, profile, pushdown);
 
     const touchedColumns = new Set();
+    // an R*Tree probe touches no generated column at all — the index it
+    // reads IS a table — so the virtual tables are collected beside the
+    // declared indexes and named in the same `indexes` list
+    const touchedVirtual = new Set();
     const collectColumns = (pred) => {
       if (pred === null) return;
       if (pred.p === 'and' || pred.p === 'or') pred.items.forEach(collectColumns);
       else if (pred.p === 'not') collectColumns(pred.item);
       else if (pred.p === 'bboxOverlap')
         for (const column of Object.values(pred.columns)) touchedColumns.add(column);
+      else if (pred.p === 'bboxRtree') touchedVirtual.add(pred.table);
       else if (pred.p === 'cellIn' || pred.p === 'cellPrefix')
         touchedColumns.add(pred.column);
       else if ('ref' in pred && pred.ref?.column) touchedColumns.add(pred.ref.column);
@@ -552,9 +563,12 @@ export function createQueryEngine(context) {
       if (term.ref.column !== null) touchedColumns.add(term.ref.column);
     }
     if (entry.plan.aggregate?.ref?.column) touchedColumns.add(entry.plan.aggregate.ref.column);
-    const indexes = physicalPlan.expected.indexes
-      .filter((index) => index.columns.some((column) => touchedColumns.has(column)))
-      .map((index) => index.name);
+    const indexes = [
+      ...physicalPlan.expected.indexes
+        .filter((index) => index.columns.some((column) => touchedColumns.has(column)))
+        .map((index) => index.name),
+      ...[...touchedVirtual].sort(),
+    ];
 
     const params = entry.slots.map((slot) => {
       if ('external' in slot) return { external: slot.external };

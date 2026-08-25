@@ -39,12 +39,15 @@ import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
  * generates them; one that cannot has them written, which is why the
  * planner emits a backfill for the second and not the first.
  * @param {any} connection
- * @returns {{ derived: 'virtual' | 'stored' }}
+ * @returns {{ derived: 'virtual' | 'stored', rtree: boolean }}
  */
 function mappingFor(connection) {
   return {
     derived: connection.capabilities?.deterministicIndexableFunctions === true
       ? 'virtual' : 'stored',
+    // the same reasoning for the R*Tree mapping: a build without the
+    // module plans (and verifies) the B-tree shape
+    rtree: connection.capabilities?.rtree === true,
   };
 }
 
@@ -121,7 +124,7 @@ function deriveStep(collection, plan, columnNames, note) {
  * @param {any} fromModel
  * @param {any} toModel
  * @param {{ id?: string, dialect?: any,
- *   derived?: 'virtual' | 'stored' }} [options]
+ *   derived?: 'virtual' | 'stored', rtree?: boolean }} [options]
  * @returns {{ migration: any, report: {
  *   renamed: { from: string, to: string }[],
  *   added: string[], removed: string[],
@@ -132,7 +135,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
-  const mapping = { derived: options?.derived ?? 'virtual' };
+  const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false };
   const fromCollections = normalizeModel(fromModel);
   const toCollections = normalizeModel(toModel);
 
@@ -215,6 +218,33 @@ export function planMigration(fromModel, toModel, options = undefined) {
     // database refuses to drop a column under a live index) — then
     // everything runs in dependency order: drop indexes, drop columns,
     // add columns, create indexes
+    // the R*Tree half of the physical shape (MODEL-FORMAT §2.1,
+    // `physical`). Changing it in either direction is a physical change
+    // and needs a migration, not an open-time alteration: the virtual
+    // table and its three triggers leave BEFORE the columns they read
+    // are disturbed, and arrive AFTER them with a backfill — a
+    // generated column arrives populated, an R*Tree does not.
+    //
+    // A virtual table is compared by NAME and not by declared text,
+    // which is where a column and an index are different: the name is
+    // built from the column stem, the module and its column list are
+    // fixed, and the three triggers are built from that same stem — so
+    // under this dialect a table present on both sides cannot differ,
+    // and one whose stem moved has a different name. `verifyShape`
+    // compares the declared text at open, which is the backstop if that
+    // ever stops being true.
+    const fromVirtual = new Map(fromPlan.virtualTables.map((v) => [v.name, v]));
+    const toVirtual = new Map(toPlan.virtualTables.map((v) => [v.name, v]));
+    for (const [virtualName, from] of fromVirtual) {
+      if (toVirtual.has(virtualName)) continue;
+      for (const trigger of from.triggers) {
+        steps.push({ kind: 'ddl', sql: dialect.ddl.dropTrigger(trigger.name),
+          note: `drop sync trigger '${trigger.name}' on '${name}'` });
+      }
+      steps.push({ kind: 'ddl', sql: dialect.ddl.dropVirtualTable(virtualName),
+        note: `drop the R*Tree '${virtualName}' (and its shadow tables) on '${name}'` });
+    }
+
     const disturbedColumns = new Set();
     for (const [columnName, fromColumn] of fromColumns) {
       const target = toColumns.get(columnName);
@@ -271,6 +301,19 @@ export function planMigration(fromModel, toModel, options = undefined) {
         });
       }
     }
+    for (const [virtualName, target] of toVirtual) {
+      if (fromVirtual.has(virtualName)) continue;
+      steps.push({ kind: 'ddl', sql: target.createSql,
+        note: `create the R*Tree '${virtualName}' on '${name}'` });
+      for (const trigger of target.triggers) {
+        steps.push({ kind: 'ddl', sql: trigger.sql,
+          note: `create sync trigger '${trigger.name}' on '${name}'` });
+      }
+      // the triggers fire on WRITES; the rows already stored need the
+      // backfill, and without it a probe silently returns nothing
+      steps.push({ kind: 'sql', sql: target.fillSql,
+        note: `backfill the R*Tree '${virtualName}' from the stored documents` });
+    }
 
     if (canonicalizeJson(fromCollection.schema) !== canonicalizeJson(toCollection.schema)) {
       report.schemaChanged.push(name);
@@ -298,7 +341,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
     }
   }
 
-  for (const [name] of fromCollections) {
+  for (const [name, fromCollection] of fromCollections) {
     if (toCollections.has(name) || consumedOldNames.has(name)) continue;
     report.removed.push(name);
     report.destructive = true;
@@ -309,6 +352,13 @@ export function planMigration(fromModel, toModel, options = undefined) {
         + 'A rename is declared with x-rename on the target collection; without '
         + 'one, this is a drop plus a create.',
     });
+    // DROP TABLE takes the collection's own triggers with it and leaves
+    // the R*Tree — and its three shadow tables — standing. A leftover
+    // virtual table is a stale index a recreated collection would probe
+    for (const virtual of planCollection(name, fromCollection, dialect, mapping).virtualTables) {
+      steps.push({ kind: 'ddl', sql: dialect.ddl.dropVirtualTable(virtual.name),
+        note: `drop the R*Tree '${virtual.name}' that belonged to '${name}'` });
+    }
   }
 
   planEntityChanges(fromModel, toModel, dialect, steps, report);

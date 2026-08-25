@@ -805,10 +805,32 @@ const FACTS = {
       ? `earns its row: ${ratio(udfSelective)}× beside the selective conjunct and ${ratio(udfLimit)}× under the LIMIT`
       : `does not earn a row: ${ratio(udfSelective)}× beside the selective conjunct and ${ratio(udfLimit)}× under the LIMIT, both under the 1.5× bar`;
   },
+  // `R\*Tree` is escaped because these three facts are quoted INLINE and
+  // more than one of them can share a paragraph: two bare asterisks in
+  // one paragraph pair into emphasis, which moves the closing marker
+  // into an emphasis node and breaks the directive the gate reads
   'spatial.rtree': () => {
     const { rtreeVsGenerated } = data('spatial').meta.figures;
     return `${ms(spatialMs('rtree-raw'))} ms against ${ms(spatialMs('generated-raw'))} ms — `
-      + (rtreeVsGenerated >= 1 ? `${ratio(rtreeVsGenerated)}× in the R*Tree's favour` : `${ratio(1 / rtreeVsGenerated)}× in the B-tree's favour`);
+      + (rtreeVsGenerated >= 1 ? `${ratio(rtreeVsGenerated)}× in the R\\*Tree's favour` : `${ratio(1 / rtreeVsGenerated)}× in the B-tree's favour`);
+  },
+  // the same question through the STORE — what a consumer actually gets,
+  // JSON parsing, refinement and statement overhead included
+  'spatial.rtreeStore': () => {
+    const { storeRtreeVsColumns } = data('spatial').meta.figures;
+    return `${ms(spatialMs('within-rtree'))} ms against ${ms(spatialMs('within-indexed'))} ms — `
+      + (storeRtreeVsColumns >= 1
+        ? `${ratio(storeRtreeVsColumns)}× in the R\\*Tree's favour`
+        : `${ratio(1 / storeRtreeVsColumns)}× in the columns' favour`);
+  },
+  // and the other half of it, which D10 requires beside the read
+  'spatial.rtreeLoad': () => {
+    const { rtreeLoadCost } = data('spatial').meta.figures;
+    return `${ms(spatialMs('load-rtree'))} ms against ${ms(spatialMs('load-columns'))} ms for `
+      + `${data('spatial').meta.docs.toLocaleString('en-US')} documents in one transaction — `
+      + (rtreeLoadCost >= 1
+        ? `${ratio(rtreeLoadCost)}× the write cost`
+        : `${ratio(1 / rtreeLoadCost)}× cheaper`);
   },
 };
 

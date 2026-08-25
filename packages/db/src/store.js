@@ -37,7 +37,7 @@ import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js'
 import { createJobEngine } from './jobs.js';
 import { collectEntityRoots } from './plan.js';
 import {
-  DERIVE_KINDS, PRECISION_MIN, PRECISION_MAX, derivedValue, memberAt,
+  DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, derivedValue, memberAt,
   storedMemberForm, registerDeriveFunctions,
 } from './derive.js';
 
@@ -68,7 +68,8 @@ function modelError(code, reason, docPath) {
  * @param {any} index - the declared index member
  * @param {string[]} paths
  * @param {string} docPath
- * @returns {{ kind: string | null, precision: number | undefined }}
+ * @returns {{ kind: string | null, precision: number | undefined,
+ *   physical: string | undefined }}
  */
 function normalizeDerive(index, paths, docPath) {
   const declared = index.derive;
@@ -78,7 +79,13 @@ function normalizeDerive(index, paths, docPath) {
         "precision belongs to a derived index — declare derive: 'geohash' beside it",
         `${docPath}/precision`);
     }
-    return { kind: null, precision: undefined };
+    if (index.physical !== undefined) {
+      throw modelError('JD0004',
+        "physical names the shape a derive: 'bbox' index takes on disk; an undecorated "
+        + 'index has only one shape',
+        `${docPath}/physical`);
+    }
+    return { kind: null, precision: undefined, physical: undefined };
   }
   if (typeof declared !== 'string' || !DERIVE_KINDS.has(declared)) {
     throw modelError('JD0004',
@@ -102,7 +109,20 @@ function normalizeDerive(index, paths, docPath) {
         'precision applies to a geohash index; a bbox index has no cell size',
         `${docPath}/precision`);
     }
-    return { kind: 'bbox', precision: undefined };
+    const physical = index.physical;
+    if (physical !== undefined
+      && (typeof physical !== 'string' || !PHYSICAL_KINDS.has(physical))) {
+      throw modelError('JD0004',
+        `physical is a closed set ('columns' or 'rtree'), got ${JSON.stringify(physical)}`,
+        `${docPath}/physical`);
+    }
+    return { kind: 'bbox', precision: undefined, physical };
+  }
+  if (index.physical !== undefined) {
+    throw modelError('JD0004',
+      "physical applies to a bbox index; an R*Tree carries numbers, and a geohash cell "
+      + 'is text',
+      `${docPath}/physical`);
   }
   const precision = index.precision;
   if (precision === undefined) {
@@ -118,7 +138,7 @@ function normalizeDerive(index, paths, docPath) {
       `precision must be an integer ${PRECISION_MIN}..${PRECISION_MAX}, got ${JSON.stringify(precision)}`,
       `${docPath}/precision`);
   }
-  return { kind: 'geohash', precision };
+  return { kind: 'geohash', precision, physical: undefined };
 }
 
 /**
@@ -230,6 +250,7 @@ export function normalizeModel(model) {
         unique: index.unique === true,
         derive: derive.kind,
         precision: derive.precision,
+        physical: derive.physical,
         docPath: indexDocPath,
       });
     }
@@ -888,6 +909,13 @@ export function openStore(model, options) {
       // drift — that is a migration, not an open.
       const derivedMapping = connection.capabilities.deterministicIndexableFunctions === true
         ? 'virtual' : 'stored';
+      // the SECOND physical branch, and the same posture: a build
+      // without the R*Tree module maps `physical: 'rtree'` back onto
+      // the B-tree over the four columns and SAYS so through
+      // `explain().prefilters[].via` (MODEL-FORMAT §4). Refusing at open
+      // would break the format's stated portability promise; a silent
+      // fallback would break its stated honesty one
+      const rtreeCapable = connection.capabilities.rtree === true;
       /** @type {Map<string, any>} */
       const plans = new Map();
       /** @type {Map<string, any>} */
@@ -899,7 +927,8 @@ export function openStore(model, options) {
       // for that reason: the refusal is raised after acquisition.
       try {
         for (const [name, collection] of collections)
-          plans.set(name, planCollection(name, collection, dialect, { derived: derivedMapping }));
+          plans.set(name, planCollection(name, collection, dialect,
+            { derived: derivedMapping, rtree: rtreeCapable }));
         if (mapping !== null) {
           for (const name of Object.keys(mapping.entities))
             entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect));

@@ -131,6 +131,16 @@ const DERIVED = [
   { name: 'by_cell', path: '$.at', derive: 'geohash', precision: CELL_PRECISION },
 ];
 
+/**
+ * The SAME logical indexes with every `bbox` column set realized as an
+ * R*Tree virtual table instead of a B-tree over four generated columns
+ * (MODEL-FORMAT §2.1, `physical`). Same paths, same derivations, same
+ * answers — a different shape on disk, which is the only thing being
+ * measured here.
+ */
+const DERIVED_RTREE = DERIVED.map((index) =>
+  (index.derive === 'bbox' ? { ...index, physical: 'rtree' } : index));
+
 const flwor = (where, extra = {}) => ({ $for: { it: '$[*]' }, $where: where, ...extra, $return: '$it' });
 const WITHIN_LITERAL = { $within: ['$it.at', REGION] };
 const WITHIN_EXTERNAL = { $within: ['$it.at', '$region'] };
@@ -192,6 +202,16 @@ const SHAPES = [
     store: 'indexed',
     document: flwor({ $exists: { '$index-of': [
       { '$geohash-neighbours': CELL }, { $geohash: ['$it.at', CELL_PRECISION] }] } }) },
+  // — the same three box predicates over the OTHER physical mapping —
+  { key: 'within-rtree', table: 'rtree',
+    name: "$within, external region — R*Tree probe (physical: 'rtree'), same refinement",
+    store: 'rtree', document: flwor(WITHIN_EXTERNAL), externals: EXTERNALS },
+  { key: 'bbox-intersects-rtree', table: 'rtree',
+    name: '$bbox-intersects — R*Tree probe, refined (32-bit float box is a superset)',
+    store: 'rtree', document: flwor({ '$bbox-intersects': ['$it.at', REGION] }) },
+  { key: 'distance-rtree', table: 'rtree',
+    name: `bounded $distance (${RADIUS / 1000} km) — R*Tree probe, exact distance in the engine`,
+    store: 'rtree', document: flwor({ $le: [{ $distance: ['$it.at', CENTRE] }, RADIUS] }) },
 ];
 
 //#endregion
@@ -201,10 +221,15 @@ const SHAPES = [
 async function openPlaces(indexes) {
   const store = await openStore(model(indexes), { driver: nodeDriver() });
   const sync = store.sync.collection('places');
+  // the LOAD is timed here because it is the honest other half of the
+  // read: an R*Tree is a second table written inside every write
+  // transaction, and a suite that publishes only the probe is marketing
+  const start = process.hrtime.bigint();
   store.sync.transaction(() => {
     for (const doc of DOCS) sync.insert(doc);
   });
-  return { store, places: store.collection('places') };
+  const loadNs = Number(process.hrtime.bigint() - start);
+  return { store, places: store.collection('places'), loadNs };
 }
 
 /**
@@ -338,7 +363,8 @@ console.log(`spatial corpus: ${corpus.agreed} / ${corpus.cases} plan cases agree
 
 const plain = await openPlaces([BY_KIND]);
 const indexed = await openPlaces([BY_KIND, ...DERIVED]);
-const stores = { plain: plain.places, indexed: indexed.places };
+const rtree = await openPlaces([BY_KIND, ...DERIVED_RTREE]);
+const stores = { plain: plain.places, indexed: indexed.places, rtree: rtree.places };
 console.log(`engine: node:sqlite :memory:, JSONB documents; capabilities.rtree = ${plain.store.capabilities.rtree}`);
 
 /** @type {Record<string, any>} the measured rows by key */
@@ -363,6 +389,18 @@ for (const shape of SHAPES) {
     udf: explained.udfs.length > 0,
     prefilters: explained.prefilters.map((p) => `${p.construct}${p.exact ? '' : ' (refined)'}`),
     narrative: explained.scanNarrative.split('\n')[0],
+  };
+}
+
+// the write cost of each shape, measured on the same load: one
+// transaction, 50 000 inserts, the store's own write path
+for (const [key, name, opened] of [
+  ['load-columns', "load — derive: 'bbox' over four generated columns under a B-tree", indexed],
+  ['load-rtree', "load — derive: 'bbox' as an R*Tree kept in sync by three triggers", rtree],
+]) {
+  measured[key] = {
+    key, name, results: [opened.loadNs], rows: N, mode: 'load', udf: false,
+    prefilters: [], narrative: `${N} documents in one transaction`,
   };
 }
 
@@ -406,6 +444,7 @@ for (const shape of SHAPES) {
 
 await plain.store.close();
 await indexed.store.close();
+await rtree.store.close();
 
 if (failures > 0) {
   console.error(`\n${failures} equivalence failure(s): the timing table is withheld.`);
@@ -419,11 +458,14 @@ if (failures > 0) {
 const TABLES = [
   { key: 'plain', title: `Without a derived index — ${N} points, $within at ~0.5 % selectivity` },
   { key: 'indexed', title: `With derive: 'bbox' and derive: 'geohash' — the two-stage plan over the same ${N} points` },
+  { key: 'rtree', title: "The store's own R*Tree mapping (physical: 'rtree') — the read, and what the write costs" },
   { key: 'physical', title: 'The physical question — generated-box B-tree against an R*Tree, raw, same refinement' },
 ];
 const rowsFor = {
   plain: SHAPES.filter((s) => s.table === 'plain').map((s) => measured[s.key]),
   indexed: [...SHAPES.filter((s) => s.table === 'indexed').map((s) => measured[s.key]), measured.engine],
+  rtree: [...SHAPES.filter((s) => s.table === 'rtree').map((s) => measured[s.key]),
+    measured['load-columns'], measured['load-rtree']],
   physical: [measured['generated-raw'], measured['rtree-raw']],
 };
 const tables = TABLES.map((t) => ({
@@ -451,6 +493,14 @@ const figures = {
   udfLimit: ratio('within-residual-limit', 'within-udf-limit'),
   // the R*Tree question (> 1 is an R*Tree win)
   rtreeVsGenerated: ratio('generated-raw', 'rtree-raw'),
+  // the same question through the STORE, which is what a consumer gets:
+  // the raw comparison isolates the mapping, this one pays for JSON
+  // parsing, the refinement and the statement overhead too
+  storeRtreeVsColumns: ratio('within-indexed', 'within-rtree'),
+  // and the price of it: the write side, where the R*Tree is a second
+  // table written inside every transaction (> 1 means the R*Tree load
+  // is SLOWER, which is the direction to expect)
+  rtreeLoadCost: ratio('load-rtree', 'load-columns'),
 };
 const notes = [
   `the shape a consumer writes ($within against an external region) runs ${figures.scanVsIndexed}x faster `
@@ -464,6 +514,9 @@ const notes = [
   `an R*Tree probe is ${figures.rtreeVsGenerated}x the generated-box B-tree on the same rows and box `
   + '(> 1 favours the R*Tree); the R*Tree is a second table kept in sync transactionally and absent on any '
   + 'build without the module',
+  `through the STORE, the same $within is ${figures.storeRtreeVsColumns}x over physical: 'rtree' as over `
+  + `the four columns — and the load costs ${figures.rtreeLoadCost}x as much, because the R*Tree is a `
+  + 'second table written inside every write transaction. Both halves are the price of the mapping',
   'no head-to-head rival: nothing else in JavaScript stores GeoJSON in SQLite from a JSON query document. '
   + 'MongoDB (2dsphere) and DuckDB-wasm (spatial) have real spatial indexes and overlay operations this '
   + 'suite does not; neither runs one document through three executors proven to agree',
@@ -481,6 +534,7 @@ if (flags.output === 'json') {
       node: process.version,
       engine: 'node:sqlite :memory:, JSONB documents',
       rtree: plain.store.capabilities.rtree,
+      mappings: ['columns', 'rtree'],
       corpus,
       figures,
       notes,

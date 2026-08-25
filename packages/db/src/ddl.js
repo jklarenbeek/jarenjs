@@ -166,8 +166,9 @@ function generatedColumnName(canonical, byKey, taken, options = undefined) {
  */
 function deriveColumns(index, context) {
   const {
-    collection, dialect, stored, segments, canonical, pathText,
-    columnByCanonical, taken, generated, derived,
+    collection, table, dialect, stored, segments, canonical, pathText,
+    columnByCanonical, taken, generated, derived, rtreeCapable, virtualTables,
+    physicalByKey,
   } = context;
   const declaredType = schemaTypeAt(collection.schema, segments);
   if (declaredType !== undefined && SCALAR_TYPES.has(declaredType)) {
@@ -181,6 +182,20 @@ function deriveColumns(index, context) {
   // path with the same derivation and the same precision are one column
   // set; two precisions over one path are two, and legitimately so
   const key = `${canonical}|${index.derive}|${index.precision ?? ''}`;
+  // `physical` is a property of the COLUMN SET, not of the index: rule 5
+  // lets two indexes share one set, and one set has one shape on disk.
+  // Two indexes asking for two shapes is a model that cannot be built,
+  // and saying so beats silently honouring whichever came first.
+  const wanted = isGeohash ? 'columns' : (index.physical ?? 'columns');
+  const agreed = physicalByKey.get(key);
+  if (agreed !== undefined && agreed !== wanted) {
+    throw new DbCompileError('JD0004',
+      `the index path '${index.paths[0]}' already has a ${index.derive} column set declared `
+      + `physical: '${agreed}', and this index declares '${wanted}' — two indexes over one `
+      + 'path share one column set, and a column set has one shape on disk',
+      `${index.docPath}/physical`);
+  }
+  physicalByKey.set(key, wanted);
   const stem = generatedColumnName(canonical, columnByCanonical, taken, {
     key,
     suffix: isGeohash ? `gh${index.precision}` : 'bbox',
@@ -216,6 +231,31 @@ function deriveColumns(index, context) {
       });
     }
   }
+  if (wanted === 'rtree' && rtreeCapable) {
+    // the R*Tree mapping: the four columns stay (the triggers read them,
+    // and they are the box's one definition) and the B-tree over them
+    // does NOT get built — that is where part of the write cost is
+    // repaid, and it is what makes the two shapes differ in `expected`.
+    // One virtual table per COLUMN SET, never per index (rule 5).
+    if (!virtualTables.some((virtual) => virtual.stem === stem)) {
+      const name = `${table}_${stem}_rtree`;
+      // (w, e, s, n) — the order the virtual table's
+      // (minx, maxx, miny, maxy) carry, and the order the index covers
+      const edges = BBOX_INDEX_ORDER.map((component) => ({ name: nameOf(component) }));
+      const triggers = dialect.ddl.createSyncTriggers(
+        { table, virtualTable: name, prefix: name, edges });
+      virtualTables.push({
+        stem,
+        name,
+        columns: [...dialect.rtree.columns].slice(1),
+        edges: edges.map((edge) => edge.name),
+        createSql: dialect.ddl.createVirtualTable({ name }),
+        fillSql: dialect.ddl.fillVirtualTable({ table, virtualTable: name, edges }),
+        triggers,
+      });
+    }
+    return null;
+  }
   // the index COVERS its columns in (w, e, s, n) order, which is not
   // their declaration order — see BBOX_INDEX_ORDER
   return isGeohash ? [stem] : BBOX_INDEX_ORDER.map((component) => nameOf(component));
@@ -238,9 +278,14 @@ function deriveColumns(index, context) {
  *   unique: boolean, derive?: string | null, precision?: number,
  *   docPath: string }[] }} collection - normalized
  * @param {any} dialect
- * @param {{ derived?: 'virtual' | 'stored' }} [options] - the physical
- *   mapping for derived columns; `'virtual'` (a generated column over a
- *   registered function) unless the driver says it cannot index one
+ * @param {{ derived?: 'virtual' | 'stored', rtree?: boolean }} [options]
+ *   - `derived` is the physical mapping for derived columns:
+ *   `'virtual'` (a generated column over a registered function) unless
+ *   the driver says it cannot index one. `rtree` is whether the driver
+ *   carries the R\*Tree module; when it does not, a column set that
+ *   declared `physical: 'rtree'` falls back to the B-tree over its
+ *   columns and `explain().prefilters[].via` reports which shape ran
+ *   (MODEL-FORMAT §4) — a report, not a silent degradation
  * @returns {{
  *   table: string, keyColumn: string, docColumn: string,
  *   keyType: string,
@@ -250,6 +295,9 @@ function deriveColumns(index, context) {
  *     component?: string, segments: any[] }[],
  *   columnByCanonical: Map<string, string>,
  *   createSql: string[],
+ *   virtualTables: { stem: string, name: string, columns: string[],
+ *     edges: string[], createSql: string, fillSql: string,
+ *     triggers: { name: string, sql: string }[] }[],
  *   expected: { columns: { name: string, type: string,
  *     generated: boolean }[], indexes: { name: string, unique: boolean,
  *     columns: string[] }[] },
@@ -257,6 +305,7 @@ function deriveColumns(index, context) {
  */
 export function planCollection(name, collection, dialect, options = undefined) {
   const stored = options?.derived === 'stored';
+  const rtreeCapable = options?.rtree !== false;
   const keyType = collection.identity === 'integer'
     ? dialect.typeFor('integer', 'key')
     : collection.identity === 'uuid'
@@ -274,9 +323,14 @@ export function planCollection(name, collection, dialect, options = undefined) {
   const derived = [];
   /** @type {{ name: string, unique: boolean, columns: string[] }[]} */
   const indexes = [];
+  /** @type {any[]} */
+  const virtualTables = [];
+  /** @type {Map<string, string>} */
+  const physicalByKey = new Map();
 
   for (const index of collection.indexes) {
     const columns = [];
+    let mappedToVirtual = false;
     for (let i = 0; i < index.paths.length; i++) {
       const pathDocPath = `${index.docPath}/path`;
       const { segments, canonical } = compileIndexPath(index.paths[i], pathDocPath);
@@ -287,10 +341,13 @@ export function planCollection(name, collection, dialect, options = undefined) {
           pathDocPath);
       }
       if (index.derive) {
-        columns.push(...deriveColumns(index, {
-          collection, dialect, stored, segments, canonical, pathText,
-          columnByCanonical, taken, generated, derived,
-        }));
+        const contributed = deriveColumns(index, {
+          collection, table: name, dialect, stored, segments, canonical, pathText,
+          columnByCanonical, taken, generated, derived, rtreeCapable, virtualTables,
+          physicalByKey,
+        });
+        if (contributed === null) mappedToVirtual = true;
+        else columns.push(...contributed);
         continue;
       }
       const known = columnByCanonical.has(canonical);
@@ -305,6 +362,10 @@ export function planCollection(name, collection, dialect, options = undefined) {
       }
       columns.push(columnName);
     }
+    // a column set realized as an R*Tree has no B-tree over it: the
+    // virtual table IS the index, and the four columns stay only as the
+    // box's one definition (the triggers read them)
+    if (mappedToVirtual) continue;
     indexes.push({
       name: `${name}_${index.name}`,
       unique: index.unique,
@@ -327,7 +388,25 @@ export function planCollection(name, collection, dialect, options = undefined) {
       columns: index.columns,
       unique: index.unique,
     })),
+    ...virtualTables.flatMap((virtual) =>
+      [virtual.createSql, ...virtual.triggers.map((trigger) => trigger.sql)]),
   ];
+  // the virtual table and its triggers are named from the column stem,
+  // and an index is named from the model's own index name — two
+  // namespaces that meet in `sqlite_schema`. A collision would have one
+  // object silently standing in for another, so it is refused here
+  const objectNames = [name, ...indexes.map((index) => index.name),
+    ...virtualTables.flatMap((virtual) =>
+      [virtual.name, ...virtual.triggers.map((trigger) => trigger.name)])];
+  const seen = new Set();
+  for (const objectName of objectNames) {
+    if (seen.has(objectName)) {
+      throw new DbCompileError('JD0004',
+        `collection '${name}' would declare two schema objects named '${objectName}'`,
+        collection.docPath ?? `/collections/${name}`);
+    }
+    seen.add(objectName);
+  }
 
   return {
     table: name,
@@ -337,6 +416,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
     generated,
     derived,
     columnByCanonical,
+    virtualTables,
     createSql,
     expected: {
       columns: [
@@ -464,13 +544,40 @@ export function comparableDeclaredSql(sql) {
 function verifyDeclaredSql(connection, plan, disagree) {
   const dialect = connection.dialect;
   const planned = new Map();
+  // an R*Tree virtual table is NOT owned by the collection table —
+  // `declaredSql` is scoped to `tbl_name`, and a virtual table's is
+  // itself — so it is checked by its own look below rather than
+  // reported as an object the database is missing. Its three triggers
+  // ARE the collection's, so drift in both directions falls out of this
+  // comparison for free.
+  const owned = new Set(plan.virtualTables?.map((virtual) => virtual.name) ?? []);
   for (const sql of plan.createSql) {
     const comparable = comparableDeclaredSql(sql);
     // the object's name is the first quoted identifier in the statement
     const name = /"((?:[^"]|"")*)"/.exec(comparable)?.[1]?.replace(/""/g, '"');
-    if (name === undefined) continue;
+    if (name === undefined || owned.has(name)) continue;
     planned.set(name, comparable);
   }
+  /** The virtual tables, each by its own name. */
+  const verifyVirtual = (i) => {
+    const list = plan.virtualTables ?? [];
+    if (i >= list.length) return null;
+    const virtual = list[i];
+    return chain(connection.prepare(dialect.introspect.declaredSql(virtual.name)),
+      (statement) => chain(statement.all([]), (rows) => {
+        const row = rows.find((candidate) => String(candidate.name) === virtual.name);
+        if (row === undefined) {
+          disagree(`the model declares the virtual table '${virtual.name}', `
+            + 'which the database does not have');
+        }
+        const have = comparableDeclaredSql(row.sql);
+        const wanted = comparableDeclaredSql(virtual.createSql);
+        if (have !== wanted) {
+          disagree(`'${virtual.name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}`);
+        }
+        return verifyVirtual(i + 1);
+      }));
+  };
   return chain(connection.prepare(dialect.introspect.declaredSql(plan.table)),
     (statement) => chain(statement.all([]), (rows) => {
       /** @type {Map<string, string>} */
@@ -490,7 +597,7 @@ function verifyDeclaredSql(connection, plan, disagree) {
             + 'an undeclared index or trigger changes deletion semantics and query plans');
         }
       }
-      return null;
+      return verifyVirtual(0);
     }));
 }
 
@@ -541,8 +648,24 @@ export function verifyShape(connection, plan, collection, docPath) {
             .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0 }))
             .sort((a, b) => (a.name < b.name ? -1 : 1));
           const wantedIndexes = plan.expected.indexes;
-          if (created.length !== wantedIndexes.length)
-            disagree(`${created.length} declared indexes exist, the model declares ${wantedIndexes.length}`);
+          if (created.length !== wantedIndexes.length) {
+            // the COUNT is the fact, but the NAMES are what a reader
+            // needs: a file moved between two physical mappings differs
+            // by exactly one index, and saying which one is the whole
+            // diagnosis
+            const have = new Set(created.map((index) => index.name));
+            const want = new Set(wantedIndexes.map((index) => index.name));
+            const missing = [...want].filter((index) => !have.has(index));
+            const extra = [...have].filter((index) => !want.has(index));
+            disagree(`${created.length} declared indexes exist, the model declares `
+              + `${wantedIndexes.length}`
+              + (missing.length > 0
+                ? ` — the model declares ${missing.join(', ')}, which the database does not have`
+                : '')
+              + (extra.length > 0
+                ? ` — the database has ${extra.join(', ')}, which the model does not declare`
+                : ''));
+          }
           const collectColumns = (i) => {
             if (i >= created.length) return null;
             const have = created[i];

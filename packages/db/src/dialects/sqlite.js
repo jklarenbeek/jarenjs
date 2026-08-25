@@ -135,6 +135,12 @@ export const sqliteDialect = createDialect({
   strContains: (valueSql, patternSql) => `instr(${valueSql}, ${patternSql}) > 0`,
   orderNulls: (nullsFirst) => (nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
   rowIdentity: () => '"rowid"',
+  // the R*Tree module and the shape this store gives it: the row id
+  // and the four box edges in (minx, maxx, miny, maxy) order, which is
+  // the (w, e, s, n) a bbox index covers its columns in. The three
+  // shadow tables SQLite creates beside a virtual table are its own
+  // storage — deterministic from the name, and dropped with it.
+  rtree: { module: 'rtree', columns: ['id', 'minx', 'maxx', 'miny', 'maxy'] },
   explainQuery: (sql) => `EXPLAIN QUERY PLAN ${sql}`,
   excludedRef: (columnSql) => `excluded.${columnSql}`,
   tx: {

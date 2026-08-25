@@ -223,21 +223,34 @@ reason in `live.mode` — declared, never silent.
 over the Netherlands and probes one box at <!--bm:spatial.rows-->258 of 50,000 (0.5 %)<!--/bm--> selectivity,
 asserting every plan case of the committed spatial corpus and every timed shape against the JavaScript
 engine before a single timing is printed. The `$within` a consumer writes went from <!--bm:spatial.scan-->80 ms<!--/bm-->
-as a full scan to <!--bm:spatial.within-->2.1 ms<!--/bm--> over the `bbox` index (<!--bm:spatial.scanVsIndexed-->38.9<!--/bm-->×);
-`$bbox-intersects` is <!--bm:spatial.bboxIntersects-->1.9 ms<!--/bm-->, a bounded `$distance` <!--bm:spatial.distance-->1.4 ms<!--/bm-->;
-one geohash cell answers in <!--bm:spatial.cellOne-->0.007 ms for 0 row(s)<!--/bm--> and the honest nine-cell
-probe in <!--bm:spatial.cellNine-->0.022 ms for 2 row(s)<!--/bm-->. The row the store had to win is the same
+as a full scan to <!--bm:spatial.within-->2 ms<!--/bm--> over the `bbox` index (<!--bm:spatial.scanVsIndexed-->40.0<!--/bm-->×);
+`$bbox-intersects` is <!--bm:spatial.bboxIntersects-->1.9 ms<!--/bm-->, a bounded `$distance` <!--bm:spatial.distance-->1.5 ms<!--/bm-->;
+one geohash cell answers in <!--bm:spatial.cellOne-->0.0068 ms for 0 row(s)<!--/bm--> and the honest nine-cell
+probe in <!--bm:spatial.cellNine-->0.026 ms for 2 row(s)<!--/bm-->. The row the store had to win is the same
 `$within` in the in-memory engine over the parsed array, no database at all: <!--bm:spatial.engine-->32 ms<!--/bm-->.
-The indexed store is now <!--bm:spatial.engineVsIndexed-->15.4× faster than<!--/bm--> it — but the un-indexed scan
+The indexed store is now <!--bm:spatial.engineVsIndexed-->16.1× faster than<!--/bm--> it — but the un-indexed scan
 is not, and the comparison is not an even one either way: the engine starts from parsed objects where the
 store starts from bytes on a page and pays JSON materialisation for every row it returns. Both rows stay
 published. The deterministic-UDF hatch takes a literal `$within` on a collection with no derived index, and
 its profile is measured on the same rows in MODEL-FORMAT §8.2 (a loss as a sole predicate, a large win
-beside a selective conjunct or a `LIMIT`). A hand-built R\*Tree over the same rows probes
-at <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.2× in the R*Tree's favour<!--/bm--> against the four-column
-B-tree the `bbox` index is today, because the B-tree seeks on longitude alone; it is a second table kept in
-sync transactionally and absent on any build without the module, and it is open work on the roadmap with
-that number beside it.
+beside a selective conjunct or a `LIMIT`).
+
+**Two shapes on disk for one declaration.** `derive: 'bbox'` has a
+second physical realization: `physical: 'rtree'` keeps the same four
+derived columns and stores the boxes in a SQLite R\*Tree beside the
+collection, synced by three declared triggers, with no B-tree over the
+columns (MODEL-FORMAT §2.1). The logical model is unchanged — the
+spatial corpus runs every entry under both mappings, in all three
+executors, with no special-cased entry — and the pushed conjunct becomes
+a `rowid` subquery over the virtual table. Through the store the same
+`$within` measures <!--bm:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/bm-->; loading the same rows
+costs <!--bm:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/bm-->, because the R\*Tree is a
+second table written inside every write transaction. Isolated from the
+store on a raw connection the probe is <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/bm-->.
+Both halves are published because both are the price. One honest
+difference comes with it: an R\*Tree stores 32-bit floats rounded
+outward, so its box is a superset and `$bbox-intersects` is refined
+rather than exact there — same rows, and `strict: true` says so.
 
 **One document, three executors, proven to agree.** The same spatial
 query document runs in three places — the JavaScript engine
@@ -246,7 +259,8 @@ compiled to wasm in a real browser tab — and one committed corpus holds
 all three to the same answers. `test/json/fixtures/spatial-corpus.json`
 records what the engine answers for every case (generated, never
 hand-typed); `test/db/spatial-oracle.test.js` runs every entry through
-the Node driver, with the derived indexes and without; and
+the Node driver under all three mappings — the derived indexes as
+columns, the same indexes as R\*Trees, and none; and
 `packages/website/e2e/spatial-agreement.spec.js` drives the data
 studio's Store pane to run the same entries through the wasm build in
 Chromium, Firefox and WebKit, asserting every answer against the
