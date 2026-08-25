@@ -17,6 +17,11 @@
  *    `@jarenjs/db` over OPFS, with `localStorage`, or with nothing. This
  *    package keeps exactly two dependencies, so it still loads in a
  *    static page — `createLedger()` with no arguments works, in memory.
+ *    One writer at a time: a ledger serializes its own mutations through
+ *    one queue, so concurrent calls in one process cannot interleave;
+ *    two processes — or two ledgers — writing one adapter at once are
+ *    outside the contract, because the adapter is four methods, not a
+ *    transaction.
  *  - **Nothing enters without passing its schema**, compiled by
  *    `JarenValidator` here at construction. A rejected write answers the
  *    same `{ error, errors, inputSchema }` the toolbox answers with (one
@@ -64,6 +69,29 @@ const SLOT_EXCERPT_CHARS = 120;
 
 /** A zero-padded sequence, so `keys()` sorts lexicographically into order. */
 const seq = (n) => String(n).padStart(6, '0');
+
+/**
+ * The next sequence number under a prefix: one past the highest that
+ * still exists, read from the trailing digits of every key. Never the
+ * count — a count shrinks when a record is deleted, and a sequence that
+ * shrinks hands a new record the address of a live one. A caller-named
+ * key that happens to end in digits merely advances the sequence, which
+ * costs nothing: uniqueness needs only that no existing key ends in the
+ * number minted.
+ * @param {string[]} keys - every key under the prefix
+ * @returns {number}
+ */
+function nextSequence(keys) {
+  let highest = -1;
+  for (const key of keys) {
+    const match = /(\d+)$/.exec(key);
+    if (match !== null) {
+      const n = Number(match[1]);
+      if (n > highest) highest = n;
+    }
+  }
+  return highest + 1;
+}
 
 /**
  * A record with its `undefined` members removed.
@@ -148,7 +176,26 @@ export function createLedger(options = {}) {
    * time would be the kind of waste that only shows up under load. */
   const queryCache = new Map();
 
-  let snapshots = 0;
+  /** The tail of the write queue: the promise every mutation waits on. */
+  let queue = Promise.resolve();
+
+  /**
+   * Run one mutating operation after every one queued before it has
+   * settled. Every write is a read-modify-write — mint an id from what
+   * exists, then store; read the goal, then replace it — and two of them
+   * interleaved read the same "what exists" and collide. One queue per
+   * ledger makes a `Promise.all` of writes behave as the sequence it
+   * reads as. A rejected operation does not stall the queue: the next
+   * one runs regardless, and only its own caller sees the rejection.
+   * @template T
+   * @param {() => Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  function enqueue(task) {
+    const result = queue.then(task);
+    queue = result.then(() => undefined, () => undefined);
+    return result;
+  }
 
   /**
    * Validate a complete record against its kind, or produce the standard
@@ -180,12 +227,14 @@ export function createLedger(options = {}) {
 
   /**
    * An id for a record the caller did not name. Derived from the
-   * timestamp and how many of that kind already exist, so it is unique
-   * within a ledger and reproducible under an injected clock.
+   * timestamp and one past the highest sequence of that kind still
+   * stored, so it is unique within a ledger and reproducible under an
+   * injected clock. Called only from inside the write queue: the mint
+   * and the store that follows it are one step, so no second writer can
+   * read the same highest in between.
    */
   async function mintId(kind, prefix) {
-    const existing = await storage.keys(prefix);
-    return `${kind}-${now()}-${seq(existing.length)}`;
+    return `${kind}-${now()}-${seq(nextSequence(await storage.keys(prefix)))}`;
   }
 
   //#region goal
@@ -199,24 +248,26 @@ export function createLedger(options = {}) {
    *   progress?: any[] }} input
    * @returns {Promise<LedgerGoal | LedgerRejection>} the stored goal, or a rejection
    */
-  async function setGoal(input) {
-    const goal = defined({
-      objective: input?.objective,
-      createdAt: input?.createdAt ?? now(),
-      status: input?.status ?? 'active',
-      progress: input?.progress ?? [],
-    });
-    const rejected = validate('goal', goal);
-    if (rejected !== null) return rejected;
+  function setGoal(input) {
+    return enqueue(async () => {
+      const goal = defined({
+        objective: input?.objective,
+        createdAt: input?.createdAt ?? now(),
+        status: input?.status ?? 'active',
+        progress: input?.progress ?? [],
+      });
+      const rejected = validate('goal', goal);
+      if (rejected !== null) return rejected;
 
-    const previous = await storage.get(KEYS.goal);
-    if (previous !== undefined) {
-      const archived = await storage.keys(KEYS.goalArchive);
-      await storage.set(`${KEYS.goalArchive}${seq(archived.length)}`,
-        { ...previous, status: 'superseded' });
-    }
-    await storage.set(KEYS.goal, goal);
-    return goal;
+      const previous = await storage.get(KEYS.goal);
+      if (previous !== undefined) {
+        const archived = await storage.keys(KEYS.goalArchive);
+        await storage.set(`${KEYS.goalArchive}${seq(nextSequence(archived))}`,
+          { ...previous, status: 'superseded' });
+      }
+      await storage.set(KEYS.goal, goal);
+      return goal;
+    });
   }
 
   /**
@@ -244,21 +295,23 @@ export function createLedger(options = {}) {
    *   the goal with the entry appended; the bare `{ error }` is "no
    *   active goal", which is a state problem, not a validation one
    */
-  async function recordProgress(entry) {
-    const goal = await storage.get(KEYS.goal);
-    if (goal === undefined) return { error: 'no active goal — call setGoal first' };
-    const next = {
-      ...goal,
-      progress: [...goal.progress, defined({
-        at: entry?.at ?? now(),
-        note: entry?.note,
-        evidence: entry?.evidence,
-      })],
-    };
-    const rejected = validate('goal', next);
-    if (rejected !== null) return rejected;
-    await storage.set(KEYS.goal, next);
-    return next;
+  function recordProgress(entry) {
+    return enqueue(async () => {
+      const goal = await storage.get(KEYS.goal);
+      if (goal === undefined) return { error: 'no active goal — call setGoal first' };
+      const next = {
+        ...goal,
+        progress: [...goal.progress, defined({
+          at: entry?.at ?? now(),
+          note: entry?.note,
+          evidence: entry?.evidence,
+        })],
+      };
+      const rejected = validate('goal', next);
+      if (rejected !== null) return rejected;
+      await storage.set(KEYS.goal, next);
+      return next;
+    });
   }
 
   /**
@@ -267,14 +320,16 @@ export function createLedger(options = {}) {
    * @param {'active'|'done'|'abandoned'|'superseded'} status
    * @returns {Promise<LedgerGoal | LedgerRejection | { error: string }>}
    */
-  async function setGoalStatus(status) {
-    const goal = await storage.get(KEYS.goal);
-    if (goal === undefined) return { error: 'no active goal — call setGoal first' };
-    const next = { ...goal, status };
-    const rejected = validate('goal', next);
-    if (rejected !== null) return rejected;
-    await storage.set(KEYS.goal, next);
-    return next;
+  function setGoalStatus(status) {
+    return enqueue(async () => {
+      const goal = await storage.get(KEYS.goal);
+      if (goal === undefined) return { error: 'no active goal — call setGoal first' };
+      const next = { ...goal, status };
+      const rejected = validate('goal', next);
+      if (rejected !== null) return rejected;
+      await storage.set(KEYS.goal, next);
+      return next;
+    });
   }
 
   //#endregion
@@ -285,24 +340,31 @@ export function createLedger(options = {}) {
    * Store a fact worth carrying. `evidence` is required by the schema,
    * and the rejection says so: a memory without it is a guess, and a
    * ledger of guesses is worse than an empty one.
+   *
+   * The record is EVERY member of the input plus the generated defaults,
+   * validated whole — so a member the schema does not know is refused
+   * with the same `additionalProperties` answer `validate()` gives,
+   * never silently dropped. A write that quietly stored less than it
+   * was handed would let "it was accepted" and "it is there" diverge.
    * @param {{ id?: string, text: string, evidence: string,
    *   tags?: string[], at?: string }} input
    * @returns {Promise<LedgerMemory | LedgerRejection>} the record as
    *   stored (defaults filled, undefined members stripped), or the
    *   rejection saying why nothing was
    */
-  async function addMemory(input) {
-    const memory = defined({
-      id: input?.id ?? await mintId('memory', KEYS.memory),
-      text: input?.text,
-      evidence: input?.evidence,
-      tags: input?.tags ?? [],
-      at: input?.at ?? now(),
+  function addMemory(input) {
+    return enqueue(async () => {
+      const memory = defined({
+        ...input,
+        id: input?.id ?? await mintId('memory', KEYS.memory),
+        tags: input?.tags ?? [],
+        at: input?.at ?? now(),
+      });
+      const rejected = validate('memory', memory);
+      if (rejected !== null) return rejected;
+      await storage.set(`${KEYS.memory}${memory.id}`, memory);
+      return memory;
     });
-    const rejected = validate('memory', memory);
-    if (rejected !== null) return rejected;
-    await storage.set(`${KEYS.memory}${memory.id}`, memory);
-    return memory;
   }
 
   /**
@@ -326,32 +388,35 @@ export function createLedger(options = {}) {
    * Remove a memory. Answers whether one was there.
    * @param {string} id
    */
-  async function deleteMemory(id) {
-    const key = `${KEYS.memory}${id}`;
-    const existed = (await storage.get(key)) !== undefined;
-    await storage.delete(key);
-    return existed;
+  function deleteMemory(id) {
+    return enqueue(async () => {
+      const key = `${KEYS.memory}${id}`;
+      const existed = (await storage.get(key)) !== undefined;
+      await storage.delete(key);
+      return existed;
+    });
   }
 
   /**
-   * Store a reusable recipe.
+   * Store a reusable recipe. Built and validated exactly as a memory is:
+   * every input member, defaults filled, the whole record checked.
    * @param {{ id?: string, name: string, when: string,
    *   instructions: string, tools?: string[], at?: string }} input
    * @returns {Promise<LedgerSkill | LedgerRejection>}
    */
-  async function addSkill(input) {
-    const skill = defined({
-      id: input?.id ?? await mintId('skill', KEYS.skill),
-      name: input?.name,
-      when: input?.when,
-      instructions: input?.instructions,
-      tools: input?.tools ?? [],
-      at: input?.at ?? now(),
+  function addSkill(input) {
+    return enqueue(async () => {
+      const skill = defined({
+        ...input,
+        id: input?.id ?? await mintId('skill', KEYS.skill),
+        tools: input?.tools ?? [],
+        at: input?.at ?? now(),
+      });
+      const rejected = validate('skill', skill);
+      if (rejected !== null) return rejected;
+      await storage.set(`${KEYS.skill}${skill.id}`, skill);
+      return skill;
     });
-    const rejected = validate('skill', skill);
-    if (rejected !== null) return rejected;
-    await storage.set(`${KEYS.skill}${skill.id}`, skill);
-    return skill;
   }
 
   /**
@@ -375,11 +440,13 @@ export function createLedger(options = {}) {
    * Remove a skill. Answers whether one was there.
    * @param {string} id
    */
-  async function deleteSkill(id) {
-    const key = `${KEYS.skill}${id}`;
-    const existed = (await storage.get(key)) !== undefined;
-    await storage.delete(key);
-    return existed;
+  function deleteSkill(id) {
+    return enqueue(async () => {
+      const key = `${KEYS.skill}${id}`;
+      const existed = (await storage.get(key)) !== undefined;
+      await storage.delete(key);
+      return existed;
+    });
   }
 
   //#endregion
@@ -493,21 +560,23 @@ export function createLedger(options = {}) {
    *   the writer knows it; absent where it does not, rather than guessed.
    * @returns {Promise<LedgerSlot | LedgerRejection>}
    */
-  async function putSlot(name, content, meta = {}) {
-    const text = typeof content === 'string' ? content : JSON.stringify(content ?? null);
-    const slot = defined({
-      name,
-      kind: meta.kind ?? 'text',
-      size: text.length,
-      excerpt: excerpt(text, SLOT_EXCERPT_CHARS),
-      at: meta.at ?? now(),
-      count: meta.count,
+  function putSlot(name, content, meta = {}) {
+    return enqueue(async () => {
+      const text = typeof content === 'string' ? content : JSON.stringify(content ?? null);
+      const slot = defined({
+        name,
+        kind: meta.kind ?? 'text',
+        size: text.length,
+        excerpt: excerpt(text, SLOT_EXCERPT_CHARS),
+        at: meta.at ?? now(),
+        count: meta.count,
+      });
+      const rejected = validate('slot', slot);
+      if (rejected !== null) return rejected;
+      await storage.set(`${KEYS.slotContent}${name}`, text);
+      await storage.set(`${KEYS.slot}${name}`, slot);
+      return slot;
     });
-    const rejected = validate('slot', slot);
-    if (rejected !== null) return rejected;
-    await storage.set(`${KEYS.slotContent}${name}`, text);
-    await storage.set(`${KEYS.slot}${name}`, slot);
-    return slot;
   }
 
   /**
@@ -540,12 +609,14 @@ export function createLedger(options = {}) {
    * Remove a slot and its content. Answers whether one was there.
    * @param {string} name
    */
-  async function deleteSlot(name) {
-    const key = `${KEYS.slot}${name}`;
-    const existed = (await storage.get(key)) !== undefined;
-    await storage.delete(key);
-    await storage.delete(`${KEYS.slotContent}${name}`);
-    return existed;
+  function deleteSlot(name) {
+    return enqueue(async () => {
+      const key = `${KEYS.slot}${name}`;
+      const existed = (await storage.get(key)) !== undefined;
+      await storage.delete(key);
+      await storage.delete(`${KEYS.slotContent}${name}`);
+      return existed;
+    });
   }
 
   //#endregion
@@ -555,15 +626,20 @@ export function createLedger(options = {}) {
   /**
    * Record the whole state under a token. Cheap — a ledger is small JSON
    * — and it is what makes an automatic write safe to accept: a bad one
-   * is undone by its token, with no human reading a diff.
+   * is undone by its token, with no human reading a diff. The token
+   * continues the sequence already in storage, exactly as an id does: a
+   * second ledger over the same adapter — the next process over a
+   * durable one — mints the next token, never the first one's again.
    * @returns {Promise<string>} an opaque token for `rollback`
    */
-  async function snapshot() {
-    const keys = await storage.keys(STATE);
-    const entries = await Promise.all(keys.map(async (key) => [key, await storage.get(key)]));
-    const token = `snap-${seq(snapshots++)}`;
-    await storage.set(`${SNAP}${token}`, entries);
-    return token;
+  function snapshot() {
+    return enqueue(async () => {
+      const keys = await storage.keys(STATE);
+      const entries = await Promise.all(keys.map(async (key) => [key, await storage.get(key)]));
+      const token = `snap-${seq(nextSequence(await storage.keys(SNAP)))}`;
+      await storage.set(`${SNAP}${token}`, entries);
+      return token;
+    });
   }
 
   /**
@@ -574,12 +650,14 @@ export function createLedger(options = {}) {
    * @param {string} token
    * @returns {Promise<true | { error: string }>}
    */
-  async function rollback(token) {
-    const entries = await storage.get(`${SNAP}${token}`);
-    if (entries === undefined) return { error: `unknown snapshot '${token}'` };
-    for (const key of await storage.keys(STATE)) await storage.delete(key);
-    for (const [key, value] of entries) await storage.set(key, value);
-    return true;
+  function rollback(token) {
+    return enqueue(async () => {
+      const entries = await storage.get(`${SNAP}${token}`);
+      if (entries === undefined) return { error: `unknown snapshot '${token}'` };
+      for (const key of await storage.keys(STATE)) await storage.delete(key);
+      for (const [key, value] of entries) await storage.set(key, value);
+      return true;
+    });
   }
 
   //#endregion

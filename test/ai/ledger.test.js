@@ -83,6 +83,23 @@ describe('ai ledger — it works with nothing wired', function () {
     assert.deepStrictEqual((await storage.get('k')).list, [1, 2],
       'nor by mutating what it read');
   });
+
+  it('the in-memory adapter has JSON-value semantics, and keys() answers sorted', async function () {
+    // what survives a set/get is what JSON.stringify preserves — real
+    // storage serializes, so the default must not promise more than it
+    // does: a typed array comes back as a plain object, a non-finite
+    // number as null. An embedding is stored as a plain number[] or not
+    // at all.
+    const storage = createMemoryStorage();
+    await storage.set('v', { vector: new Float32Array([0.5, 1]), gap: NaN });
+    assert.deepStrictEqual(await storage.get('v'), { vector: { 0: 0.5, 1: 1 }, gap: null });
+    // the ledger reads listings, archives and snapshots in key order;
+    // an adapter that answered keys() unsorted would reorder all three
+    await storage.set('a/2', 1);
+    await storage.set('a/1', 2);
+    await storage.set('b/0', 3);
+    assert.deepStrictEqual(await storage.keys('a/'), ['a/1', 'a/2']);
+  });
 });
 
 describe('ai ledger — writes are validated at the boundary', function () {
@@ -132,6 +149,31 @@ describe('ai ledger — writes are validated at the boundary', function () {
       id: 'y', text: 't', evidence: 'e', tags: [], at: '2026-08-12T00:00:00+02:00',
     });
     assert.strictEqual(ok.id, 'y', 'a real offset is still a real timestamp');
+  });
+
+  it('refuses an unknown member with the answer validate() gives, never by dropping it', async function () {
+    // the write and the gate must be one question: a member the schema
+    // does not know is rejected by both, or a caller that checked first
+    // stores something other than what it checked
+    const ledger = bare();
+    const input = {
+      id: 'm-embed', text: 'a fact', evidence: 'a source', tags: [],
+      at: '2026-08-12T00:00:00.000Z', embedding: [0.1, 0.2],
+    };
+    const rejected = await ledger.addMemory(input);
+    assert.match(rejected.error, /invalid input for memory/);
+    assert.ok(rejected.errors.some((e) => e.keyword === 'additionalProperties' && e.instancePath === '/embedding'),
+      `the rejection names the member: ${JSON.stringify(rejected.errors)}`);
+    assert.deepStrictEqual(rejected, ledger.validate('memory', input),
+      'the write answers exactly what the gate answers');
+    assert.strictEqual(await ledger.getMemory('m-embed'), null, 'and nothing was stored');
+
+    const skill = await ledger.addSkill({
+      id: 's-embed', name: 'n', when: 'w', instructions: 'i', embedding: [0.1],
+    });
+    assert.match(skill.error, /invalid input for skill/);
+    assert.ok(skill.errors.some((e) => e.keyword === 'additionalProperties'));
+    assert.strictEqual(await ledger.getSkill('s-embed'), null);
   });
 
   it('there is exactly one rejection-shape implementation', function () {
@@ -184,6 +226,60 @@ describe('ai ledger — the goal is singular', function () {
     assert.strictEqual((await ledger.getGoal()).status, 'done');
     assert.deepStrictEqual(await ledger.listArchivedGoals(), []);
     assert.match((await ledger.setGoalStatus('nonsense')).error, /invalid input for goal/);
+  });
+});
+
+describe('ai ledger — writes serialize and a minted id never collides', function () {
+  /** A clock that never moves: every minted id shares one timestamp, so
+   * only the sequence can keep two ids apart. */
+  const frozen = () => '2026-08-12T00:00:00.000Z';
+  const kinds = [
+    ['memory',
+      (ledger, n) => ledger.addMemory({ text: `fact ${n}`, evidence: `source ${n}` }),
+      (ledger) => ledger.listMemories(),
+      (ledger, id) => ledger.deleteMemory(id),
+      (ledger, id) => ledger.getMemory(id)],
+    ['skill',
+      (ledger, n) => ledger.addSkill({ name: `skill ${n}`, when: 'w', instructions: 'i' }),
+      (ledger) => ledger.listSkills(),
+      (ledger, id) => ledger.deleteSkill(id),
+      (ledger, id) => ledger.getSkill(id)],
+  ];
+
+  it('five concurrent adds store five records under five distinct ids', async function () {
+    // the batch shape every bulk loader has: Promise.all over adds
+    for (const [kind, add, list] of kinds) {
+      const ledger = createLedger({ now: frozen });
+      const stored = await Promise.all([1, 2, 3, 4, 5].map((n) => add(ledger, n)));
+      const ids = stored.map((record) => record.id);
+      assert.strictEqual(new Set(ids).size, 5, `${kind}: five distinct ids, got ${JSON.stringify(ids)}`);
+      assert.strictEqual((await list(ledger)).length, 5, `${kind}: all five are stored`);
+    }
+  });
+
+  it('delete-then-add never hands a new record a live id', async function () {
+    // a sequence derived from a COUNT shrinks on delete and re-mints the
+    // address of a survivor; one derived from the highest that exists
+    // cannot
+    for (const [kind, add, list, remove, get] of kinds) {
+      const ledger = createLedger({ now: frozen });
+      const first = await add(ledger, 1);
+      await add(ledger, 2);
+      const third = await add(ledger, 3);
+      assert.strictEqual(await remove(ledger, first.id), true);
+      const fourth = await add(ledger, 4);
+      assert.notStrictEqual(fourth.id, third.id, `${kind}: the survivor keeps its address`);
+      assert.deepStrictEqual(await get(ledger, third.id), third, `${kind}: and its content`);
+      assert.strictEqual((await list(ledger)).length, 3);
+    }
+  });
+
+  it('concurrent setGoal calls archive every superseded objective', async function () {
+    const ledger = createLedger({ now: frozen });
+    await Promise.all(['first', 'second', 'third'].map((objective) => ledger.setGoal({ objective })));
+    assert.strictEqual((await ledger.getGoal()).objective, 'third');
+    assert.deepStrictEqual((await ledger.listArchivedGoals()).map((goal) => goal.objective),
+      ['first', 'second'], 'archived oldest first, none lost to a colliding key');
   });
 });
 
@@ -322,6 +418,28 @@ describe('ai ledger — every mutation is reversible', function () {
     // the later snapshot survived the wipe and still restores forward
     assert.strictEqual(await ledger.rollback(second), true);
     assert.strictEqual((await ledger.getMemory('b')).id, 'b');
+  });
+
+  it('two ledgers over one storage mint distinct tokens, each restoring its own state', async function () {
+    // the durable case: the adapter outlives the process, and the next
+    // ledger over it must continue the token sequence, not restart it
+    // over the first one's undo point
+    const backing = new Map();
+    const a = createLedger({ storage: createMemoryStorage(backing), now: clock() });
+    const b = createLedger({ storage: createMemoryStorage(backing), now: clock(10) });
+    await a.addMemory({ id: 'base', text: 'shared', evidence: 'e', tags: [] });
+    const tokenA = await a.snapshot();
+    await b.addMemory({ id: 'b1', text: 'from b', evidence: 'e', tags: [] });
+    const tokenB = await b.snapshot();
+    assert.notStrictEqual(tokenA, tokenB, 'the second ledger continues the sequence');
+    await a.addMemory({ id: 'a2', text: 'from a', evidence: 'e', tags: [] });
+
+    assert.strictEqual(await b.rollback(tokenB), true);
+    assert.deepStrictEqual((await a.listMemories()).map((m) => m.id).sort(), ['b1', 'base'],
+      "b's snapshot restores b's state");
+    assert.strictEqual(await a.rollback(tokenA), true);
+    assert.deepStrictEqual((await b.listMemories()).map((m) => m.id), ['base'],
+      "a's snapshot was not overwritten by b's");
   });
 
   it('answers an unknown token rather than throwing', async function () {

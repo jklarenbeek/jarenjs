@@ -46,7 +46,10 @@ const { message } = await client.complete({
 ```
 
 Base URLs are forgiving: `http://localhost:11434` becomes `http://localhost:11434/v1`, a
-pasted `…/chat/completions` suffix is stripped. `fetch` is injectable
+pasted `…/chat/completions` suffix is stripped (in any case), and a query string or
+fragment is refused with `AI0001` rather than spliced into the middle of every endpoint.
+The resolved base is `endpoint.base`; `/chat/completions` and `/models` are both composed
+from it, never re-derived from one another. `fetch` is injectable
 (`createChatClient({ fetch: myFetch })`) so the client runs identically in the browser, in
 Node, and in tests against a scripted stub. Failures carry stable codes: `AI0001` (caller
 error), `AI0002` (HTTP error status), `AI0003` (malformed payload).
@@ -472,7 +475,7 @@ const storage = {
   get: async (key) => …,              // a JSON value, or undefined
   set: async (key, value) => …,       // value is a JSON value
   delete: async (key) => …,           // an absent key is not an error
-  keys: async (prefix) => […],        // every key starting with prefix
+  keys: async (prefix) => […],        // every key starting with prefix, sorted
 };
 ```
 
@@ -481,7 +484,9 @@ server — or with nothing. The package gains no dependency either way, which is
 posture: it loads in a static page with two dependencies and degrades to in-memory and
 schema-only. This site's assistant backs it with a single JSON slot
 ([`ledgerStore.js`](../website/src/lib/ledgerStore.js)), which is all a browser session
-needs.
+needs. The ledger serializes its own writes, so a `Promise.all` of adds is safe; two
+processes — two tabs, a worker and a page — writing one adapter at once are outside the
+contract, because the adapter is four methods, not a transaction.
 
 The ledger holds four kinds, and they differ in every dimension that matters — lifetime,
 retrieval and who may write them:

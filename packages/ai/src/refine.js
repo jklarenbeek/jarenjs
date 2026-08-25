@@ -419,10 +419,10 @@ export function createRefiner(options) {
       : { error: `the refinement was rolled back: ${what} — ${outcome.error}`,
         errors: outcome.errors ?? [], patchSchema, snapshot: token });
 
-    // stored BEFORE the removals, which is not cosmetic: the ledger
-    // mints an id from the count of records that exist, so removing
-    // first would let a replacement be minted the id of the record it
-    // replaced. Two different claims sharing one address is exactly what
+    // stored BEFORE the removals, which is not cosmetic: a minted id
+    // continues from the highest sequence still stored, so removing the
+    // newest record first could hand its replacement the address it just
+    // vacated. Two different claims sharing one address is exactly what
     // an auditable ledger may not do.
     for (const record of plan.memories.add) {
       const stop = failure(await ledger.addMemory(record), 'a memory could not be stored');

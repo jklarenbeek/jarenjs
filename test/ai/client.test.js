@@ -112,6 +112,32 @@ describe('ai — the chat client', function () {
     assert.strictEqual(fromSse.message.content, 'streamed-as-text');
   });
 
+  it('a streamed request answered with one JSON document yields the message, not a blank', async function () {
+    // a provider or proxy that ignores `stream: true` answers a complete
+    // completion over a readable body; the reply is the message
+    const client = createChatClient({
+      provider: 'ollama', model: 'x',
+      fetch: () => Promise.resolve(new Response(JSON.stringify({
+        choices: [{ message: { content: 'hello' }, finish_reason: 'stop' }],
+      }), { status: 200 })),
+    });
+    const result = await client.complete({ messages: [{ role: 'user', content: 'q' }] });
+    assert.strictEqual(result.message.content, 'hello');
+    assert.strictEqual(result.finishReason, 'stop');
+  });
+
+  it('a streamed body that is neither SSE nor JSON is AI0003, never a silent empty message', async function () {
+    let n = 0;
+    const client = createChatClient({
+      provider: 'ollama', model: 'x',
+      retry: { sleep: () => Promise.resolve() },
+      fetch: () => { n++; return Promise.resolve(new Response('<html>gateway</html>', { status: 200 })); },
+    });
+    await assert.rejects(client.complete({ messages: [{ role: 'user', content: 'q' }] }),
+      (err) => err instanceof AiError && err.code === 'AI0003' && err.attempts === 3);
+    assert.strictEqual(n, 3, 'a 200 that carried nothing is retried like a no-choices reply');
+  });
+
   it('HTTP errors throw AI0002 with a body excerpt', async function () {
     const client = createChatClient({
       provider: 'openrouter', apiKey: 'bad', model: 'm',
@@ -365,6 +391,18 @@ describe('ai — the retry policy', function () {
     ], { maxMs: 4000 });
     await capped.client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
     assert.deepStrictEqual(capped.delays, [4000], 'Retry-After capped at maxMs');
+  });
+
+  it('a Retry-After past the default cap sleeps maxMs (8 000 ms), not the header', async function () {
+    // the header wins over the computed delay only up to `maxMs`; a
+    // provider asking for a minute gets the cap, and the ignored value
+    // rides the final error as `retryAfterMs`
+    const { client, delays } = scriptedClient([
+      new Response('later', { status: 429, headers: { 'retry-after': '60' } }),
+      ok(),
+    ]);
+    await client.complete({ messages: [{ role: 'user', content: 'x' }], stream: false });
+    assert.deepStrictEqual(delays, [8000]);
   });
 
   it('honors a Retry-After HTTP-date, capped by maxMs when the date is far off', async function () {

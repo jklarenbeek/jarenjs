@@ -36,6 +36,25 @@ describe('ai — provider endpoint resolution', function () {
       'http://localhost:1234/v1/chat/completions');
   });
 
+  it('refuses a baseUrl carrying a query string or fragment with AI0001', function () {
+    // this wire family composes endpoints by appending a path; a query
+    // string has nowhere to go but into the middle of every URL
+    for (const baseUrl of ['https://x.test/v1?api-version=1', 'https://x.test/v1#frag']) {
+      assert.throws(() => resolveEndpoint({ baseUrl }),
+        (err) => err instanceof AiError && err.code === 'AI0001' && /query|fragment/.test(err.message),
+        baseUrl);
+    }
+  });
+
+  it('resolves the base once and exposes it beside the chat URL', function () {
+    const endpoint = resolveEndpoint({ baseUrl: 'https://api.example.com/v1/' });
+    assert.strictEqual(endpoint.base, 'https://api.example.com/v1');
+    assert.strictEqual(endpoint.url, `${endpoint.base}/chat/completions`);
+    // the pasted-suffix strip is case-insensitive
+    assert.strictEqual(resolveEndpoint({ baseUrl: 'https://api.example.com/v1/CHAT/Completions' }).base,
+      'https://api.example.com/v1');
+  });
+
   it('a baseUrl without a provider means custom; custom demands a baseUrl', function () {
     assert.strictEqual(resolveEndpoint({ baseUrl: 'https://x.test/api' }).provider, 'custom');
     assert.throws(() => resolveEndpoint({ provider: 'custom' }),
@@ -94,6 +113,8 @@ describe('ai — provider capability probes', function () {
     });
     assert.deepStrictEqual(result, { ok: true, models: ['qwen/qwen3-4b', 'meta/llama-3'] });
     assert.strictEqual(seen.url, 'https://openrouter.ai/api/v1/models');
+    assert.strictEqual(seen.url, `${resolveEndpoint({ provider: 'openrouter' }).base}/models`,
+      'the probe is the resolved base plus /models — one resolution, not a second');
     assert.strictEqual(seen.init.method, 'GET');
     assert.strictEqual(seen.init.headers.authorization, 'Bearer sk-x',
       'the probe authenticates exactly like a chat turn');
@@ -120,6 +141,14 @@ describe('ai — provider capability probes', function () {
     const misconfigured = await probeProvider({ provider: 'custom' });
     assert.strictEqual(misconfigured.ok, false);
     assert.match(/** @type {any} */ (misconfigured).error, /baseUrl/);
+
+    // a base with a query string is refused before any request is made
+    const queried = await probeProvider({
+      baseUrl: 'https://x.test/v1?api-version=1',
+      fetch: () => { throw new Error('must not reach fetch'); },
+    });
+    assert.strictEqual(queried.ok, false);
+    assert.match(/** @type {any} */ (queried).error, /query/);
   });
 
   it('falls back to the global fetch when none is injected', async function () {

@@ -502,7 +502,7 @@ async function fetchPricing(config) {
     const endpoint = resolveEndpoint({
       provider: config.provider, baseUrl: config.baseUrl, apiKey: config.apiKey,
     });
-    const response = await fetch(endpoint.url.replace(/\/chat\/completions$/, '/models'), {
+    const response = await fetch(`${endpoint.base}/models`, {
       headers: endpoint.headers, signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) return null;

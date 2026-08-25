@@ -128,6 +128,30 @@ function fromCompletion(payload) {
 }
 
 /**
+ * A reply that arrived as text rather than as a stream of events: one
+ * JSON completion document — a provider or proxy that ignores `stream`
+ * — or nothing this client can read. One implementation for both places
+ * that can happen (a fetch without a readable body, and a stream that
+ * closed without a single event), so both answer the same way: the
+ * message, or `AI0003`. Never a silent empty message.
+ * @param {string} text
+ * @returns {any} the normalized result
+ */
+function completionFromText(text) {
+  if (!/^\s*\{/.test(text))
+    throw new AiError('AI0003', `expected an SSE stream or a JSON completion, got: ${text.slice(0, 120)}`);
+  /** @type {any} */
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  }
+  catch {
+    throw new AiError('AI0003', `malformed completion: ${text.slice(0, 120)}`);
+  }
+  return fromCompletion(payload);
+}
+
+/**
  * @param {any} response
  * @returns {Promise<string>} a short excerpt of the error body
  */
@@ -256,10 +280,13 @@ function normalizeRetry(retry) {
  *     `ChatRequest.reasoning`); a per-request value overrides it.
  *   - `retry.attempts` is the TOTAL number of tries (default 3; 1
  *     disables retrying); backoff is exponential with full jitter,
- *     capped at `maxMs`, and a provider `Retry-After` wins over the
- *     computed delay. `random` and `sleep` exist for deterministic
+ *     capped at `maxMs`. A provider `Retry-After` (seconds or HTTP-date)
+ *     wins over the computed delay, capped at `maxMs` too: a provider
+ *     asking for a minute gets the cap (8 000 ms by default), and the
+ *     value it asked for rides the final error as `retryAfterMs` for
+ *     the caller to honour. `random` and `sleep` exist for deterministic
  *     tests.
- * @returns {{ endpoint: { provider: string, url: string,
+ * @returns {{ endpoint: { provider: string, base: string, url: string,
  *   headers: Record<string, string>, model: string },
  *   complete: (request: ChatRequest) => Promise<any> }}
  */
@@ -358,25 +385,42 @@ export function createChatClient(options = {}) {
       }
     };
 
+    // the body's text is kept only until the first event arrives: a
+    // reply that closes without one was never a stream (see below), and
+    // must then be read whole as a document
+    let events = 0;
+    let raw = '';
+    /** @param {string} text */
+    const feed = (text) => {
+      if (events === 0) raw += text;
+      for (const payload of decoder.feed(text)) {
+        events += 1;
+        handle(payload);
+      }
+      if (events > 0) raw = '';
+    };
     if (typeof response.body?.getReader === 'function') {
       const reader = response.body.getReader();
       const textDecoder = new TextDecoder();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        for (const payload of decoder.feed(textDecoder.decode(value, { stream: true })))
-          handle(payload);
+        feed(textDecoder.decode(value, { stream: true }));
       }
-      for (const payload of decoder.end()) handle(payload);
     }
     else {
-      // a host without a readable body (test stubs, exotic fetch
-      // shims): the text is either one JSON document or a full SSE log
-      const text = await response.text();
-      if (/^\s*\{/.test(text)) return fromCompletion(JSON.parse(text));
-      for (const payload of decoder.feed(text)) handle(payload);
-      for (const payload of decoder.end()) handle(payload);
+      // a host without a readable body (test stubs, exotic fetch shims)
+      // hands over the whole text at once
+      feed(await response.text());
     }
+    for (const payload of decoder.end()) {
+      events += 1;
+      handle(payload);
+    }
+    // zero events means the reply was never a stream: a provider or proxy
+    // that ignores `stream` answers one JSON document, and anything else
+    // is malformed — either way a coded answer, never an empty message
+    if (events === 0) return completionFromText(raw);
     return accumulator.result();
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.43.6",
+  "version": "0.44.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -102,9 +102,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.43.6",
-    "@jarenjs/json": "^0.43.6",
-    "@jarenjs/validate": "^0.43.6",
-    "@jarenjs/emit": "^0.43.6"
+    "@jarenjs/core": "^0.44.0",
+    "@jarenjs/json": "^0.44.0",
+    "@jarenjs/validate": "^0.44.0",
+    "@jarenjs/emit": "^0.44.0"
   }
 }
