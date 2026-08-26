@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-26T16:04:47+02:00",
-  "commit": "18a54a246b34608346d9dc794fa9a302f8afcb19",
+  "generated": "2026-08-26T19:03:12+02:00",
+  "commit": "ef8d272c5b5c6ee61b781697141fed8b8abc4b96",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -7672,6 +7672,154 @@
             "children": [
               {
                 "type": "text",
+                "value": "Time is a composite index rather than a storage kind. Declare"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "{ \"path\": [\""
+              },
+              {
+                "type": "inlineCode",
+                "value": "$.series"
+              },
+              {
+                "type": "text",
+                "value": "\", \""
+              },
+              {
+                "type": "inlineCode",
+                "value": "$.at"
+              },
+              {
+                "type": "text",
+                "value": "\"] } over a numeric epoch member and the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "planner reads three shapes through it: a half-open range under a series"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "equality, an as-of lookup that is the index read backwards for one row, and a"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "fixed-width bucket ladder — a "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$groupby"
+              },
+              {
+                "type": "text",
+                "value": " over "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$time-bucket"
+              },
+              {
+                "type": "text",
+                "value": ", or a "
+              },
+              {
+                "type": "inlineCode",
+                "value": "$resample"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "whose spec asks for nothing a GROUP BY cannot do — pushed as integer arithmetic"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "in SQL. A fill policy, a calendar width, a rolling window and an as-of join are"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "named refinements instead: the index bounds the fetch and the temporal kernel"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "decides over what comes back, with "
+              },
+              {
+                "type": "inlineCode",
+                "value": "explain()"
+              },
+              {
+                "type": "text",
+                "value": ".series carrying the reason code,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "the index the fetch seeks through and the LAST ACTUAL run's candidate and result"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "counts rather than an estimate. strict: true refuses every refinement before a"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "statement runs. The batched as-of join costs one statement whatever the probes"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "number — the failure it exists to refuse is one seek per left row — and the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "series"
+              },
+              {
+                "type": "text",
+                "value": " benchmark publishes what that bound costs where it loses."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
                 "value": "A store can also open with an operator registry — "
               },
               {
@@ -8189,7 +8337,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/db/site.md",
-          "hash": "11ycpq6",
+          "hash": "14ntnuf",
           "frontmatterLang": "yaml"
         }
       },
