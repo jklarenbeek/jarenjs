@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-26T14:47:29+02:00",
-  "commit": "e280911bfc8d6d4bebb4eb4bacf7e9fd9bc4d8eb",
+  "generated": "2026-08-26T16:04:47+02:00",
+  "commit": "18a54a246b34608346d9dc794fa9a302f8afcb19",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -552,7 +552,7 @@
             "children": [
               {
                 "type": "text",
-                "value": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 99-operator"
+                "value": "XQuery 3.1 semantics — FLWOR, joins, grouping, quantifiers, a 104-operator"
               },
               {
                 "type": "softBreak"
@@ -595,7 +595,7 @@
               },
               {
                 "type": "text",
-                "value": "geodesically, and "
+                "value": "geodesically, "
               },
               {
                 "type": "inlineCode",
@@ -625,7 +625,35 @@
               },
               {
                 "type": "text",
-                "value": "keyword the language had to grow."
+                "value": "keyword the language had to grow — and the time-series family buckets,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "resamples, fills, rolls a window measured in time and answers an as-of join,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "each one a call into the same temporal kernel a chart and an indexed database"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "read. Its specs are literals, so a misspelled fill policy is a broken document"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "rather than a surprise on the ten-thousandth row."
               }
             ]
           },
@@ -1556,7 +1584,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/json/site.md",
-          "hash": "1padns0",
+          "hash": "jfu2v",
           "frontmatterLang": "yaml"
         }
       },
