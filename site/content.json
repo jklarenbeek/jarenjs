@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-26T20:07:27+02:00",
-  "commit": "1a9ba4f621d11f3a114032a5b4849ea64984b0bb",
+  "generated": "2026-08-26T21:00:59+02:00",
+  "commit": "0486b970921b014288b0ad9bee6ffb3486cdedbd",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -4454,7 +4454,7 @@
               },
               {
                 "type": "text",
-                "value": "(flowchart and sequence fully; class, ER, state, gantt and pie too) into a"
+                "value": "(flowchart, sequence, state and gantt fully; class, ER and pie too) into a"
               },
               {
                 "type": "softBreak"
@@ -4672,7 +4672,7 @@
         ],
         "meta": {
           "sourceUrl": "components/mermaid/site.md",
-          "hash": "1ttcerk",
+          "hash": "tv4i8k",
           "frontmatterLang": "yaml"
         }
       },
