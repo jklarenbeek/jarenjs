@@ -751,6 +751,16 @@ function generateMermaid(tmp, options) {
         parseMs: sig4(row.parseMs),
         svgMs: sig4(row.svgMs),
       })),
+      // the four Gantt stages stay separate: parse is also schedule
+      // resolution, and the string is the part that does not scale
+      gantt: (raw.profile.gantt ?? []).map((row) => ({
+        name: row.name,
+        tasks: row.tasks,
+        parseMs: sig4(row.parseMs),
+        layoutMs: sig4(row.layoutMs),
+        vnodeMs: sig4(row.vnodeMs),
+        svgMs: sig4(row.svgMs),
+      })),
     },
   };
 }

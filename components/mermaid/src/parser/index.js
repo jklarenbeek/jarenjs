@@ -60,7 +60,10 @@ export const SECONDARY_TYPES = new Set([
 /**
  * Parse Mermaid source into a `DiagramDocument`.
  * @param {string} source
- * @param {{ parseFrontmatter?: (text: string) => any }} [options]
+ * @param {{ parseFrontmatter?: (text: string) => any,
+ *   dateNames?: import('@jarenjs/core/dates').DateNames }} [options] -
+ *   `dateNames` is the locale-name record a Gantt's `dateFormat` needs
+ *   for a month name token; this engine ships none of its own
  * @returns {import('../ast.js').DiagramDocument}
  */
 export function parseMermaid(source, options = {}) {
@@ -92,7 +95,7 @@ export function parseMermaid(source, options = {}) {
     ast = parseSequence(bodyLines, bodyOffset);
   }
   else if (TYPE_PARSERS[type] !== undefined) {
-    ast = TYPE_PARSERS[type](bodyLines, bodyOffset, header);
+    ast = TYPE_PARSERS[type](bodyLines, bodyOffset, header, options);
   }
   else {
     // Secondary: preserve the raw body so `toMermaid` round-trips and

@@ -15,7 +15,7 @@ engines:
 ---
 
 A native, headless Mermaid clone: `@jarenjs/mermaid` parses diagrams-as-code
-(flowchart and sequence fully; class, ER, state, gantt and pie too) into a
+(flowchart, sequence, state and gantt fully; class, ER and pie too) into a
 geometry-free JSON AST, then lays it out and renders pure-vnode SVG through
 `@jarenjs/view` — no innerHTML, no browser. `render()` is synchronous, complete
 and error-safe, memoized by content hash.

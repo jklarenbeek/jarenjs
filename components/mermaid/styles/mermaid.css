@@ -82,6 +82,27 @@
 .mermaid .mm-note rect { fill: var(--mm-note-fill); stroke: var(--mm-note-stroke); }
 .mermaid .mm-note text { fill: var(--mm-note-text); }
 
+/* Gantt reuses the vocabulary rather than adding a second one: a bar is a
+   node, a done bar an activation, a critical bar a note, the grid a cluster
+   edge. A status class is therefore both the theme hook and the hit-test
+   handle a host reads off `data-id`. */
+.mermaid.mm-gantt .mm-gantt-band { fill: var(--mm-cluster-fill); }
+.mermaid.mm-gantt .mm-gantt-excluded { fill: var(--mm-activation-fill); }
+.mermaid.mm-gantt .mm-gantt-grid { stroke: var(--mm-cluster-stroke); }
+.mermaid.mm-gantt .mm-gantt-axis { stroke: var(--mm-line-color); }
+.mermaid.mm-gantt .mm-gantt-link { stroke: var(--mm-line-color); }
+.mermaid.mm-gantt .mm-gantt-tick,
+.mermaid.mm-gantt .mm-gantt-label,
+.mermaid.mm-gantt .mm-gantt-section,
+.mermaid.mm-gantt .mm-gantt-title { fill: var(--mm-node-text); }
+.mermaid.mm-gantt .mm-gantt-shape { fill: var(--mm-node-fill); stroke: var(--mm-node-stroke); }
+.mermaid.mm-gantt .mm-gantt-done .mm-gantt-shape {
+  fill: var(--mm-activation-fill); stroke: var(--mm-activation-stroke);
+}
+.mermaid.mm-gantt .mm-gantt-crit .mm-gantt-shape {
+  fill: var(--mm-note-fill); stroke: var(--mm-note-stroke);
+}
+
 .mermaid.mm-error { font-family: monospace; }
 .mermaid .mm-error-box { fill: var(--mm-err-fill); stroke: var(--mm-err-stroke); }
 .mermaid .mm-error-title { fill: var(--mm-err-title); }

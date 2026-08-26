@@ -109,6 +109,7 @@ flowchart TB
             DatesRfc["rfc3339.js<br/>RFC 3339 / ISO 8601"]
             DatesCivil["civil.js<br/>Gregorian day-number math"]
             DatesFormat["format.js<br/>LDML pattern compiler"]
+            DatesParse["parse.js<br/>LDML pattern parser"]
             DatesDuration["duration.js<br/>ISO 8601 durations"]
             DatesTicks["ticks.js<br/>Time-axis step ladder"]
         end
@@ -472,6 +473,7 @@ intermediate and is plain data, never an opaque handle.
 | `rfc3339.js` | validation, lexical decomposition, epoch conversion |
 | `civil.js` | proleptic Gregorian arithmetic over integers |
 | `format.js` | LDML pattern → compiled formatter |
+| `parse.js` | LDML pattern → compiled strict parser (the formatter's inverse) |
 | `duration.js` | ISO 8601 duration decomposition and date arithmetic |
 | `ticks.js` | the time-axis step ladder and its calendar boundaries |
 
@@ -485,6 +487,23 @@ against precomputed bounds (the `formatMinimum`/`formatMaximum` validators)
 allocates nothing per value. Formatting is the two-stage compiler again — a
 pattern is scanned once into a chain of appenders, which measured ~4.5×
 against re-scanning it per call.
+
+Parsing is the same compiler run backwards. `compileDateParser` scans a
+pattern once into a chain of readers and returns a function from text to the
+same parts record `parseRFC3339Parts` produces, so every calendar function
+takes its output unchanged. It is strict in three ways that a permissive
+reader is not: trailing input fails, an impossible civil date (31 February,
+hour 24) fails rather than rolling forward into the next month, and a
+fixed-width token reads exactly its width. Failure is `null` — malformed
+*text* is data — while a malformed *pattern* throws at compile time. The
+tokens that only ever format, because they are derived from a date rather
+than fields of one (`EEEE`, `DDD`, `ww`, `Q`), are compile errors with a
+message saying which and why, rather than tokens that quietly read nothing.
+A consumer whose patterns are not LDML — Mermaid's Gantt `dateFormat` is
+moment's grammar and its `axisFormat` is strftime — adapts its own tokens
+onto this vocabulary rather than handing its spelling to this compiler:
+LDML's `YYYY` is the week-numbering year, so `YYYY-MM-DD` read as LDML
+answers 2019 for 2018-12-31.
 
 Locale-dependent presentation (month and weekday names, meridiem, relative
 phrasing) is deliberately **not** here, so this package stays zero-dependency
@@ -547,7 +566,26 @@ addToParts(parts, 3, 'hour');           // TypeError — a full-date has no cloc
 
 const fmt = compileDateFormat("yyyy-'W'ww");  // compile once…
 fmt(parts);                             // …call many: '2026-W05'
+
+const read = compileDateParser('dd-MM-yyyy');
+read('06-01-2014');                     // { year: 2014, month: 1, day: 6, … }
+read('06-01-2014x');                    // null — trailing input
+read('31-02-2014');                     // null — February has no 31st
 ```
+
+**Ticks a caller chose, or ticks this module chose:**
+
+```javascript
+import { axisTicksTime, timeTicksEvery } from '@jarenjs/core/dates';
+
+axisTicksTime(from, to, 4);                  // the ladder picks the step
+timeTicksEvery(from, to, 'week', 1, { weekStart: 7 });  // Sundays
+```
+
+`axisTicksTime` is the chart axis's planner; `timeTicksEvery` is the same
+boundary rule with the step supplied, which is what a document declaring its
+own interval (Mermaid's `tickInterval 1week`) needs. One ladder, so a chart
+and a timeline cannot disagree about where a tick falls.
 
 ### 5b. Geo Module (`geo/`)
 

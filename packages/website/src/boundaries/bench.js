@@ -967,7 +967,7 @@ function mermaid(data) {
         cells: [type, `${data.scorecard[type]?.rendered} / ${data.scorecard[type]?.total}`],
         strong: type === 'flowchart' || type === 'sequence',
       })),
-      'Flowchart and sequence are fully laid out; class/ER/state/gantt render as structured panels and pie as a chart. Secondary types (mindmap, gitGraph) parse-accept and render an honest "not yet laid out" placeholder — counted, not hidden.'));
+      'Flowchart, sequence, state and gantt are fully laid out — gantt as a real time axis with bars, milestones and dependencies — and pie renders as a chart. Class and ER still render as structured panels. Secondary types (mindmap, gitGraph) parse-accept and render an honest "not yet laid out" placeholder — counted, not hidden.'));
   }
   const profile = data.profile;
   if (profile !== undefined && profile !== null) {
@@ -1003,6 +1003,21 @@ function mermaid(data) {
           cells: [p.name, formatMs(p.parseMs), formatMs(p.svgMs)],
         })),
         'mermaid.js needs a browser DOM (getBBox) to render, so there is no fair full-render head-to-head; @jarenjs/mermaid produces a complete standalone SVG string in pure Node — a capability mermaid.js lacks.'));
+    }
+    if (Array.isArray(profile.gantt) && profile.gantt.length > 0) {
+      out.push(table(
+        'Gantt scale: schedule resolution, layout and render, separately',
+        ['Tasks', 'parse + resolve', 'layout', 'render', 'whole pipeline + string'],
+        profile.gantt.map((p) => ({
+          cells: [
+            String(p.tasks),
+            formatMs(p.parseMs),
+            formatMs(p.layoutMs),
+            formatMs(p.vnodeMs - p.layoutMs),
+            formatMs(p.svgMs),
+          ],
+        })),
+        'Parsing a Gantt document is also resolving its schedule — every date read through the document\'s own dateFormat, every dependency ordered, every duration walked past the excluded days. That, the layout and the renderer all stay roughly linear in the task count. The last column does not: at ten thousand rows most of it is serializing the vnode tree to a string, which is the view layer\'s cost rather than the timeline\'s. Every size is checked against its geometry invariants before it is timed.'));
     }
   }
   return out;

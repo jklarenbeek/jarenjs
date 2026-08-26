@@ -105,7 +105,7 @@ whose grammar permits those characters in ids.
 (`{ kind:'block', blockType, branches:[{ label, statements[] }] }`) for
 loop/opt/alt/par/critical/break.
 
-### 4.3 class / er / state / gantt / pie
+### 4.3 class / er / state / pie
 
 Class: `{ classes:[{ name, label, members[] }], relations[] }`. ER:
 `{ entities:[{ name, attributes[] }], relationships[] }`. State:
@@ -118,10 +118,102 @@ the guard (nesting counted), the effect starts at the first `/` after
 it (or the first `/` at all when there is no guard), and a label that
 fits no pattern — an unmatched `[`, or text between `]` and `/` — reads
 whole as the event, which keeps plain labels meaning what they always
-meant. Gantt: `{ meta, sections:[{ name, tasks[] }] }`. Pie:
-`{ title, showData, slices:[{ label, value }] }`.
+meant. Pie: `{ title, showData, slices:[{ label, value }] }`.
 
-### 4.4 Secondary types
+Gantt is `{ meta, rules, sections:[{ name, tasks[] }], domain }` and is
+described in §4.4, because it is the one AST that carries a *resolved*
+answer rather than only what the source said.
+
+### 4.4 gantt — a resolved schedule
+
+```
+{ meta, rules, sections:[{ name, tasks[] }], domain:{ start, end } }
+```
+
+`meta` holds the header lines **verbatim** (`title`, `dateFormat`,
+`axisFormat`, `excludes`, `tickInterval`, `weekday`, `weekend`,
+`todayMarker`), which is what keeps `printGantt` a fixed point. `rules`
+holds the same directives *interpreted*:
+`{ dateFormat, axisFormat, tick, weekStart, weekendStart, excludes,
+todayMarker }`, where `tick` is `{ amount, unit }` or `null`,
+`weekStart`/`weekendStart` are ISO weekdays (1 is Monday), and
+`excludes` is `{ weekends, weekdays[], days[] }` with `days` as day
+indexes from 1970-01-01.
+
+A task is
+`{ name, info, id, flags, start, end, duration, after, line }`. `info`
+is the raw metadata string the printer emits; the rest is the schedule.
+`start`/`end` are epoch milliseconds and the interval is **half-open**,
+so `end` is the first instant the task no longer occupies — except a
+milestone, which is the instant `start === end`. `flags` is the subset
+of `done`, `active`, `crit`, `milestone` in that order. `domain` is the
+half-open span every task falls inside, and it is what layout scales
+against.
+
+The AST stays geometry-free and plain JSON: no compiled closure and no
+coordinate crosses this boundary. `layout/gantt.js` re-compiles the axis
+pattern from `rules`, once per diagram.
+
+#### The three grammars
+
+A Gantt header speaks three pattern languages and **none of them is
+Unicode LDML**, so each gets its own tokenizer and each token is mapped
+individually onto the core vocabulary (`src/parser/gantt-grammar.js`):
+
+| Directive | Grammar | Example |
+|---|---|---|
+| `dateFormat` | dayjs `customParseFormat` (moment's spelling) | `DD-MM-YYYY` |
+| `axisFormat` | d3-time-format (strftime) | `%Y-%m-%d` |
+| `tickInterval` | `^([1-9]\d*)(millisecond\|second\|minute\|hour\|day\|week\|month)$` | `1week` |
+| a task duration | `^(\d+(?:\.\d+)?)([Mdhmswy]\|ms)$` | `3d`, `1.5w`, `2M` |
+
+Handing `YYYY` straight to the core compiler would be a silent lie —
+LDML's `YYYY` is the *week-numbering* year, so `YYYY-MM-DD` read as LDML
+answers 2019 for `2018-12-31`. Note also that moment's `m` is a minute
+while strftime's `%m` is a month: one shared table would mis-read half
+of every diagram.
+
+An **unsupported** token is a `JM` error naming the token and the
+reason, not a literal passed through. The vendored conformance table —
+every documented token of the Mermaid version this engine tracks, marked
+supported or refused with its reason, plus the provenance of where it
+was read — is `test/mermaid/fixtures/gantt-grammar.json`, and
+`test/mermaid/gantt.test.js` pins the code against it in both
+directions.
+
+#### Task forms and working days
+
+The field-count rule is Mermaid's own: one field is an end, two are a
+start and an end, three add an explicit id in front, and the four flags
+lead. `after <id …>` starts a task at the latest end of those ids;
+`until <id …>` ends it at the earliest start of those. Ids may be
+forward references — resolution is a topological pass — and a cycle, a
+missing id, a duplicate id, a reversed span and an empty non-milestone
+span are all refused with the offending line.
+
+`excludes` removes whole days: `weekends` (the `weekend` day and the one
+after it, saturday by default), weekday names, and dates written in the
+document's own `dateFormat`. An end derived from a *duration* is pushed
+out one day per excluded day it crosses; an end written as an explicit
+*date* is the author's answer and is never pushed. The probes are the
+instants `start + k days`, so a task starting Friday noon and lasting a
+day ends Monday noon. Days are UTC days. This is not a holiday service:
+a schedule skips exactly what its own `excludes` line lists.
+
+#### Three deliberate divergences from Mermaid
+
+1. **No clock.** Mermaid starts an undated first task *today*. This
+   engine has no clock anywhere (`docs/ROADMAP.md`, "there is no now"),
+   so a schedule with no dated anchor is a `JM` error rather than a
+   diagram that means something different tomorrow. In practice only the
+   first task needs a date. For the same reason `todayMarker` is kept
+   in `meta` and never drawn.
+2. **No silent literals** — an unsupported pattern token is refused by
+   name, where Mermaid passes it through as text.
+3. **No guessed dependencies** — Mermaid falls back to today for an
+   `after` naming an unknown id; this engine refuses.
+
+### 4.5 Secondary types
 
 mindmap, gitGraph, journey, timeline, quadrantChart, requirement
 parse-accept into `{ diagram, lines[] }` and render an honest "not yet

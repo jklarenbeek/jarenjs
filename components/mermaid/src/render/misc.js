@@ -3,7 +3,7 @@
  * @file Renderers for the first-class types beyond flowchart and
  * sequence, and an honest placeholder for the deferred secondary
  * types. Pie is
- * a real chart; class/ER/state/gantt render as structured panels — a
+ * a real chart; class and ER render as structured panels — a
  * readable, geometry-light view that renders without error and so counts
  * honestly in the coverage scorecard. Secondary types (mindmap,
  * gitGraph, journey, timeline) render a labeled "not yet laid out"
@@ -120,16 +120,8 @@ export function structuredSections(diagram, ast) {
     }
     return { title: 'Entity–relationship', sections };
   }
-  // state diagrams left this path for the graph layout; a stray call
-  // must fail loudly rather than quietly resurrect the old panel
-  if (diagram !== 'gantt') {
-    throw new Error(`structuredSections: '${diagram}' is not a structured-panel type`);
-  }
-  return {
-    title: 'Gantt' + (ast.meta.title ? ': ' + ast.meta.title : ''),
-    sections: ast.sections.map((s) => ({
-      heading: s.name ?? 'tasks',
-      rows: s.tasks.map((tk) => `${tk.name} — ${tk.info}`),
-    })),
-  };
+  // state diagrams left this path for the graph layout, and gantt left
+  // it for the real timeline (`layout/gantt.js`); a stray call must fail
+  // loudly rather than quietly resurrect the old panel
+  throw new Error(`structuredSections: '${diagram}' is not a structured-panel type`);
 }

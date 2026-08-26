@@ -70,6 +70,15 @@ Below a second the calendar has nothing to say and the numeric ladder
 answers instead. The chart component re-exports both rather than
 carrying its own copy.
 
+`timeTicksEvery(min, max, unit, amount?, options?)` is the same boundary
+rule with the step supplied instead of chosen — what a document that
+declares its own interval needs (Mermaid's Gantt `tickInterval 1week` is
+the one in this repo). `options.weekStart` is an ISO weekday, so a
+document whose weeks begin on Sunday gets Sundays; `options.limit` caps
+the count. `axisTicksTime` is now this function with the ladder in
+front of it, so a chart axis and a timeline cannot disagree about where
+a tick falls.
+
 ## Durations — `duration.js`
 
 `parseDuration('P3DT4H')` — ISO 8601 duration decomposition into
@@ -97,6 +106,39 @@ byte-stable across Node/ICU versions.
 wide and short, 7 weekdays wide and short from Sunday, the two day-period
 markers), read once out of a locale pack's own msgids and frozen, so a
 pattern compiled against them costs no lookup per date.
+
+## Parsing — `parse.js`
+
+`compileDateParser(pattern, names?)` is the formatter's strict inverse
+over the same LDML vocabulary, compiled the same way: the pattern is
+scanned once into a chain of readers, and no regular expression is built
+per compile or per parse. It returns a function from text to the parts
+record `parseRFC3339Parts` produces, so `epochOfRFC3339Parts`,
+`addToParts` and `formatRFC3339Parts` all take its output unchanged, and
+the lexical family follows the pattern — date tokens only give a
+full-date, time tokens only a full-time.
+
+Strict means three things, and each of them is the difference between an
+answer and a plausible wrong answer:
+
+1. **Full consumption.** `yyyy-MM-dd` does not read `2026-01-02T03:04`.
+2. **Impossible civil dates fail.** `31-02-2014` is `null`, not 3 March.
+3. **Fixed-width tokens are fixed width.** `MM` reads exactly two digits.
+
+Malformed *text* is data and comes back `null`; a malformed *pattern* is
+the programmer's error and throws at compile time. The tokens that only
+ever format — `EEEE`, `DDD`, `ww`, `Q` are derived *from* a date rather
+than fields *of* one — throw with a message naming the token and the
+reason, rather than reading nothing in silence. Two tokens are
+documented rather than refused: `yy` reads 00–68 as 2000–2068 and 69–99
+as 1969–1999 (the POSIX pivot), and `h`/`hh` with no `a` in the same
+pattern read as the morning.
+
+A consumer whose patterns are **not** LDML adapts its own tokens onto
+this vocabulary rather than handing its spelling over. `@jarenjs/mermaid`
+does exactly that for a Gantt's `dateFormat` (moment's grammar) and
+`axisFormat` (strftime): LDML's `YYYY` is the *week-numbering* year, so
+reading `YYYY-MM-DD` as LDML answers 2019 for 2018-12-31.
 
 ## Not here
 

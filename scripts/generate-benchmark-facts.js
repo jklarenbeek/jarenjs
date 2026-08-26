@@ -486,6 +486,15 @@ const FACTS = {
     return `~${ms(at('flowchart ~25 nodes'))} ms for a 25-node flowchart, ~${ms(at('flowchart ~100 nodes'))} ms at 100 nodes`;
   },
 
+  // ——— @jarenjs/mermaid: the gantt timeline at scale ———
+  'mermaid.ganttScale': () => {
+    const rows = data('mermaid').profile.gantt;
+    const row = rows.find((r) => r.tasks === 10000) ?? rows[rows.length - 1];
+    return `at ${row.tasks.toLocaleString('en-US')} tasks, ~${ms(row.parseMs)} ms to parse and`
+      + ` resolve, ~${ms(row.layoutMs)} ms to lay out and ~${ms(row.vnodeMs - row.layoutMs)} ms`
+      + ' to render';
+  },
+
   // ——— @jarenjs/flow: the pure step against XState's actor ———
   'flow.fsmBand': () => {
     const t = data('flow').transition;

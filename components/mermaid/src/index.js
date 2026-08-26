@@ -39,7 +39,11 @@ export {
 /**
  * Convenience: parse → layout → render, error-safe, in one call.
  * @param {string} source
- * @param {{ theme?: any }} [options]
+ * @param {{ theme?: any, dateNames?: import('@jarenjs/core/dates').DateNames,
+ *   parseFrontmatter?: (text: string) => any }} [options] - `dateNames`
+ *   is the locale-name record a Gantt's `dateFormat`/`axisFormat` needs
+ *   for a month or weekday token (`compileDateLocale(pack).names`);
+ *   this engine ships none of its own
  * @returns {any} an SVG vnode
  */
 export function renderMermaid(source, options = {}) {

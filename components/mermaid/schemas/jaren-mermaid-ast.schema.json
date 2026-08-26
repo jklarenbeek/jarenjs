@@ -4,74 +4,416 @@
   "title": "Jaren Mermaid diagram document",
   "description": "The DiagramDocument envelope and per-type AST vocabulary of @jarenjs/mermaid (normative prose in docs/MERMAID-FORMAT.md). Draft-neutral: no $ref siblings, no unevaluated*, no $dynamic*. The AST is geometry-free — layout is a separate pass.",
   "type": "object",
-  "required": ["$mermaid", "diagram", "config", "ast", "meta"],
+  "required": [
+    "$mermaid",
+    "diagram",
+    "config",
+    "ast",
+    "meta"
+  ],
   "properties": {
-    "$mermaid": { "const": "0.1" },
-    "diagram": { "type": "string" },
-    "config": { "type": "object" },
-    "ast": { "type": "object" },
+    "$mermaid": {
+      "const": "0.1"
+    },
+    "diagram": {
+      "type": "string"
+    },
+    "config": {
+      "type": "object"
+    },
+    "ast": {
+      "type": "object"
+    },
     "meta": {
       "type": "object",
-      "required": ["hash", "direction", "title"],
+      "required": [
+        "hash",
+        "direction",
+        "title"
+      ],
       "properties": {
-        "hash": { "type": "string" },
-        "direction": { "type": ["string", "null"] },
-        "title": { "type": ["string", "null"] }
+        "hash": {
+          "type": "string"
+        },
+        "direction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     }
   },
   "$defs": {
     "flowNode": {
       "type": "object",
-      "required": ["id", "label", "shape"],
+      "required": [
+        "id",
+        "label",
+        "shape"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "label": { "type": "string" },
-        "shape": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "shape": {
+          "type": "string"
+        }
       }
     },
     "flowEdge": {
       "type": "object",
-      "required": ["from", "to", "stroke", "head", "tail", "length", "label"],
+      "required": [
+        "from",
+        "to",
+        "stroke",
+        "head",
+        "tail",
+        "length",
+        "label"
+      ],
       "properties": {
-        "from": { "type": "string" },
-        "to": { "type": "string" },
-        "stroke": { "enum": ["solid", "thick", "dotted"] },
-        "head": { "enum": ["none", "arrow", "circle", "cross"] },
-        "tail": { "enum": ["none", "arrow", "circle", "cross"] },
-        "length": { "type": "integer" },
-        "label": { "type": ["string", "null"] }
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "stroke": {
+          "enum": [
+            "solid",
+            "thick",
+            "dotted"
+          ]
+        },
+        "head": {
+          "enum": [
+            "none",
+            "arrow",
+            "circle",
+            "cross"
+          ]
+        },
+        "tail": {
+          "enum": [
+            "none",
+            "arrow",
+            "circle",
+            "cross"
+          ]
+        },
+        "length": {
+          "type": "integer"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "flowchartAst": {
       "type": "object",
-      "required": ["direction", "nodes", "edges", "subgraphs", "classDefs", "classes", "styles"],
+      "required": [
+        "direction",
+        "nodes",
+        "edges",
+        "subgraphs",
+        "classDefs",
+        "classes",
+        "styles"
+      ],
       "properties": {
-        "direction": { "type": "string" },
-        "nodes": { "type": "array", "items": { "$ref": "#/$defs/flowNode" } },
-        "edges": { "type": "array", "items": { "$ref": "#/$defs/flowEdge" } },
-        "subgraphs": { "type": "array" },
-        "classDefs": { "type": "array" },
-        "classes": { "type": "array" },
-        "styles": { "type": "array" }
+        "direction": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flowNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flowEdge"
+          }
+        },
+        "subgraphs": {
+          "type": "array"
+        },
+        "classDefs": {
+          "type": "array"
+        },
+        "classes": {
+          "type": "array"
+        },
+        "styles": {
+          "type": "array"
+        }
       }
     },
     "seqParticipant": {
       "type": "object",
-      "required": ["id", "label", "kind"],
+      "required": [
+        "id",
+        "label",
+        "kind"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "label": { "type": "string" },
-        "kind": { "enum": ["participant", "actor"] }
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "participant",
+            "actor"
+          ]
+        }
       }
     },
     "sequenceAst": {
       "type": "object",
-      "required": ["participants", "statements", "autonumber"],
+      "required": [
+        "participants",
+        "statements",
+        "autonumber"
+      ],
       "properties": {
-        "participants": { "type": "array", "items": { "$ref": "#/$defs/seqParticipant" } },
-        "statements": { "type": "array" },
-        "autonumber": { "type": "boolean" }
+        "participants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/seqParticipant"
+          }
+        },
+        "statements": {
+          "type": "array"
+        },
+        "autonumber": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ganttTask": {
+      "description": "A resolved task row. `info` is the raw metadata string the printer round-trips; the rest is the schedule the layout draws. `start`/`end` are epoch milliseconds and the interval is half-open, so `end` is the first instant the task no longer occupies — except for a milestone, which is the instant `start === end`.",
+      "type": "object",
+      "required": [
+        "name",
+        "info",
+        "id",
+        "flags",
+        "start",
+        "end",
+        "duration",
+        "after",
+        "line"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "info": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "done",
+              "active",
+              "crit",
+              "milestone"
+            ]
+          }
+        },
+        "start": {
+          "type": "number"
+        },
+        "end": {
+          "type": "number"
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ganttRules": {
+      "description": "The header directives, interpreted. `dateFormat` and `axisFormat` keep their Mermaid spelling (dayjs and strftime respectively, not LDML); `tick` is the parsed `tickInterval`; `weekStart` and `weekendStart` are ISO weekdays, 1 is Monday.",
+      "type": "object",
+      "required": [
+        "dateFormat",
+        "axisFormat",
+        "tick",
+        "weekStart",
+        "weekendStart",
+        "excludes",
+        "todayMarker"
+      ],
+      "properties": {
+        "dateFormat": {
+          "type": "string"
+        },
+        "axisFormat": {
+          "type": "string"
+        },
+        "tick": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "amount",
+            "unit"
+          ],
+          "properties": {
+            "amount": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "unit": {
+              "enum": [
+                "millisecond",
+                "second",
+                "minute",
+                "hour",
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        },
+        "weekStart": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+        },
+        "weekendStart": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+        },
+        "excludes": {
+          "type": "object",
+          "required": [
+            "weekends",
+            "weekdays",
+            "days"
+          ],
+          "properties": {
+            "weekends": {
+              "type": "boolean"
+            },
+            "weekdays": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 7
+              }
+            },
+            "days": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "todayMarker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ganttAst": {
+      "description": "gantt — a resolved schedule. `meta` holds the header lines verbatim so the printer stays a fixed point; `rules` holds the same directives interpreted, and `domain` is the half-open span every task falls inside.",
+      "type": "object",
+      "required": [
+        "meta",
+        "rules",
+        "sections",
+        "domain"
+      ],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "rules": {
+          "$ref": "#/$defs/ganttRules"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "tasks"
+            ],
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/ganttTask"
+                }
+              }
+            }
+          }
+        },
+        "domain": {
+          "type": "object",
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "number"
+            },
+            "end": {
+              "type": "number"
+            }
+          }
+        }
       }
     }
   }

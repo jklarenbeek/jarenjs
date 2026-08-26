@@ -56,7 +56,7 @@ describe('render to pure-vnode SVG', function () {
       'stateDiagram-v2\n [*] --> S',
       'classDiagram\n class Foo',
       'erDiagram\n A ||--o{ B : has',
-      'gantt\n title T\n section S\n T1 : a, 1d',
+      'gantt\n title T\n section S\n T1 : a, 2024-01-01, 1d',
     ]) {
       const svg = renderToString(renderMermaid(src));
       assert.equal(svg.startsWith('<svg'), true, src);

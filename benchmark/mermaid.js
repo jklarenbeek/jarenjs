@@ -20,6 +20,19 @@
  *    (headless, no browser), the pipeline mermaid.js cannot run without a
  *    DOM (mirrors @jarenjs/md's jaren-only rows).
  *
+ * 4. Gantt scale — four stages, reported separately at 100 / 1,000 /
+ *    10,000 tasks, because they do not scale alike:
+ *      `parseMs`  parse AND schedule resolution (dates, dependencies,
+ *                 the working calendar);
+ *      `layoutMs` the time domain, the tick ladder and every bar;
+ *      `vnodeMs`  layout plus the renderer, so render is
+ *                 `vnodeMs - layoutMs`;
+ *      `svgMs`    the whole pipeline INCLUDING serialization to a
+ *                 string, which is what dominates at ten thousand rows.
+ *    Every size is checked against its geometry invariants BEFORE it is
+ *    timed, and the check is a hard exit: a fast wrong answer is not a
+ *    result.
+ *
  * Usage:
  *   node ./benchmark/mermaid.js                       # scorecard + perf
  *   node ./benchmark/mermaid.js --profile --iterations 500
@@ -28,8 +41,8 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { parseMermaid, compileMermaid } from '@jarenjs/mermaid';
-import { CORPUS, PIE_CORPUS, buildScaled } from './fixtures/mermaid.js';
+import { parseMermaid, compileMermaid, layoutDiagram, diagramToVnode } from '@jarenjs/mermaid';
+import { CORPUS, PIE_CORPUS, buildScaled, buildGantt } from './fixtures/mermaid.js';
 import { timeIt } from './lib/measure.js';
 
 const args = process.argv.slice(2);
@@ -144,6 +157,56 @@ const JISON_SCALES = [
   ['~25 nodes', 25],
 ];
 
+/** Gantt scale: the sizes the schedule resolver and the timeline are reported at. */
+const GANTT_SCALES = [100, 1000, 10000];
+
+/**
+ * The invariants a scaled Gantt must satisfy before it is timed. They
+ * are the answer, not the shape of it: ids are unique, every span is
+ * ordered and inside the shared domain, every bar is inside the plot,
+ * and the ticks ascend. Anything red here exits non-zero — publishing a
+ * median for a wrong timeline is worse than publishing nothing.
+ *
+ * @param {string} src
+ * @param {number} expected
+ * @returns {void}
+ */
+function checkGantt(src, expected) {
+  const problems = [];
+  const doc = parseMermaid(src);
+  const tasks = doc.ast.sections.flatMap((s) => s.tasks);
+  const ids = new Set(tasks.map((t) => t.id));
+  if (tasks.length !== expected)
+    problems.push(`parsed ${tasks.length} tasks, expected ${expected}`);
+  if (ids.size !== tasks.length)
+    problems.push(`${tasks.length - ids.size} duplicate task ids`);
+  for (const task of tasks) {
+    if (!(task.end >= task.start)) problems.push(`${task.id} ends before it starts`);
+    if (task.duration !== task.end - task.start) problems.push(`${task.id} duration disagrees`);
+    if (task.start < doc.ast.domain.start || task.end > doc.ast.domain.end)
+      problems.push(`${task.id} falls outside the domain`);
+  }
+  const scene = layoutDiagram(doc);
+  if (scene.rows.length !== expected)
+    problems.push(`laid out ${scene.rows.length} rows, expected ${expected}`);
+  for (const row of scene.rows) {
+    if (row.x < scene.plot.x - 0.01 || row.x + row.w > scene.plot.x + scene.plot.w + 0.01)
+      problems.push(`row ${row.id} is outside the plot`);
+  }
+  for (let i = 1; i < scene.ticks.length; i++) {
+    if (scene.ticks[i].at <= scene.ticks[i - 1].at)
+      problems.push('the ticks are not ascending');
+  }
+  const svg = compileMermaid(src).toSvgString();
+  if (!svg.startsWith('<svg') || svg.includes('mm-error'))
+    problems.push('the document did not render');
+  if (problems.length > 0) {
+    console.error(`\ngantt ${expected}: equivalence failed before timing`);
+    for (const problem of problems.slice(0, 5)) console.error(`  - ${problem}`);
+    process.exit(1);
+  }
+}
+
 /**
  * @param {number} iterations
  */
@@ -186,7 +249,25 @@ async function measure(iterations) {
       jaren.push({ name: `${kind} ${label}`, chars: src.length, parseMs, svgMs });
     }
   }
-  return { iterations, parse, parseJison, jaren };
+
+  // Gantt scale: parse (resolution), layout (geometry) and render,
+  // separately, each size gated on its invariants first.
+  const gantt = [];
+  for (const n of GANTT_SCALES) {
+    const src = buildGantt(n);
+    checkGantt(src, n);
+    const rounds = n >= 10000 ? 5 : Math.max(10, iterations >> 3);
+    const doc = parseMermaid(src);
+    const parseMs = timeIt(() => parseMermaid(src), rounds);
+    const layoutMs = timeIt(() => layoutDiagram(doc), rounds);
+    const vnodeMs = timeIt(() => diagramToVnode(doc), Math.max(3, rounds >> 1));
+    const svgMs = timeIt(() => compileMermaid(src).toSvgString(), Math.max(3, rounds >> 1));
+    gantt.push({
+      name: `gantt ${n} tasks`, tasks: n, chars: src.length,
+      parseMs, layoutMs, vnodeMs, svgMs,
+    });
+  }
+  return { iterations, parse, parseJison, jaren, gantt };
 }
 
 // ------------------------------------------------------------------
@@ -241,5 +322,12 @@ else {
   console.log('\nJaren-only — parse→AST and parse→layout→SVG (headless, no browser)');
   for (const row of profile.jaren) {
     console.log(`  ${row.name.padEnd(22)} parse ${row.parseMs.toFixed(4)} ms   svg ${row.svgMs.toFixed(4)} ms`);
+  }
+  console.log('\nGantt scale — parse is also schedule resolution; every size checked before timing');
+  for (const row of profile.gantt) {
+    console.log(`  ${row.name.padEnd(20)} parse ${row.parseMs.toFixed(3)} ms`
+      + `  layout ${row.layoutMs.toFixed(3)} ms`
+      + `  render ${(row.vnodeMs - row.layoutMs).toFixed(3)} ms`
+      + `  svg+string ${row.svgMs.toFixed(3)} ms`);
   }
 }

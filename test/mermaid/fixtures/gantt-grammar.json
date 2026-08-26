@@ -1,0 +1,136 @@
+{
+  "$comment": "Vendored conformance table for the Mermaid Gantt directives this engine implements. Read from the shipped grammar and renderer of the version below, not from prose, so a claim here can be checked against the file named in `source`. Every token this engine accepts and every token it refuses appears once; `supported:false` is a deliberate published gap, not an oversight.",
+  "provenance": {
+    "engine": "mermaid",
+    "version": "11.16.1",
+    "recorded": "2026-08-26",
+    "url": "https://mermaid.js.org/syntax/gantt.html",
+    "source": "node_modules/mermaid/dist/chunks/mermaid.esm.min/ganttDiagram-2QTCJSNI.mjs",
+    "note": "The dateFormat token table is dayjs' customParseFormat vocabulary (moment's spelling), the axisFormat table is d3-time-format's strftime vocabulary, and the tickInterval and duration grammars are the two regular expressions the shipped chunk executes."
+  },
+  "dateFormat": {
+    "default": "YYYY-MM-DD",
+    "grammar": "dayjs customParseFormat; a bracketed run is a literal",
+    "tokens": [
+      { "token": "YYYY", "means": "4 digit year", "ldml": "yyyy", "supported": true },
+      { "token": "YY", "means": "2 digit year", "ldml": "yy", "supported": true },
+      { "token": "M", "means": "month, 1..12", "ldml": "M", "supported": true },
+      { "token": "MM", "means": "month, 01..12", "ldml": "MM", "supported": true },
+      { "token": "MMM", "means": "abbreviated month name", "ldml": "MMM", "supported": true },
+      { "token": "MMMM", "means": "wide month name", "ldml": "MMMM", "supported": true },
+      { "token": "D", "means": "day of month, 1..31", "ldml": "d", "supported": true },
+      { "token": "DD", "means": "day of month, 01..31", "ldml": "dd", "supported": true },
+      { "token": "H", "means": "hour, 0..23", "ldml": "H", "supported": true },
+      { "token": "HH", "means": "hour, 00..23", "ldml": "HH", "supported": true },
+      { "token": "h", "means": "hour, 1..12", "ldml": "h", "supported": true },
+      { "token": "hh", "means": "hour, 01..12", "ldml": "hh", "supported": true },
+      { "token": "m", "means": "minute, 0..59", "ldml": "m", "supported": true },
+      { "token": "mm", "means": "minute, 00..59", "ldml": "mm", "supported": true },
+      { "token": "s", "means": "second, 0..59", "ldml": "s", "supported": true },
+      { "token": "ss", "means": "second, 00..59", "ldml": "ss", "supported": true },
+      { "token": "S", "means": "tenths of a second", "ldml": "S", "supported": true },
+      { "token": "SSS", "means": "milliseconds", "ldml": "SSS", "supported": true },
+      { "token": "a", "means": "lower-case meridiem", "ldml": "a", "supported": true },
+      { "token": "A", "means": "upper-case meridiem", "ldml": "a", "supported": true },
+      { "token": "Z", "means": "offset as +HH:MM or Z", "ldml": "XXX", "supported": true },
+      { "token": "ZZ", "means": "offset as +HHMM or Z", "ldml": "XX", "supported": true },
+      { "token": "SS", "means": "hundredths of a second", "ldml": null, "supported": false, "reason": "the LDML fraction tokens are tenths (S) and milliseconds (SSS); there is no hundredths field to read into" },
+      { "token": "Q", "means": "quarter of the year, 1..4", "ldml": null, "supported": false, "reason": "a quarter is derived from a month rather than a field of a date, so the core parser refuses it" },
+      { "token": "Do", "means": "day of month with an ordinal suffix", "ldml": null, "supported": false, "reason": "the suffix is locale text (1st, 1er, 1º) and this engine ships no ordinal data" },
+      { "token": "DDD", "means": "day of the year, 1..365", "ldml": null, "supported": false, "reason": "derived from a date, not a field of one" },
+      { "token": "DDDD", "means": "day of the year, 001..365", "ldml": null, "supported": false, "reason": "derived from a date, not a field of one" },
+      { "token": "X", "means": "Unix seconds", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field; write it as a date instead" },
+      { "token": "x", "means": "Unix milliseconds", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field; write it as a date instead" }
+    ]
+  },
+  "axisFormat": {
+    "default": "%Y-%m-%d",
+    "grammar": "d3-time-format (strftime)",
+    "tokens": [
+      { "token": "%Y", "means": "year with century", "ldml": "yyyy", "supported": true },
+      { "token": "%y", "means": "year without century, 00..99", "ldml": "yy", "supported": true },
+      { "token": "%m", "means": "month, 01..12", "ldml": "MM", "supported": true },
+      { "token": "%d", "means": "day of month, 01..31", "ldml": "dd", "supported": true },
+      { "token": "%H", "means": "hour, 00..23", "ldml": "HH", "supported": true },
+      { "token": "%I", "means": "hour, 01..12", "ldml": "hh", "supported": true },
+      { "token": "%M", "means": "minute, 00..59", "ldml": "mm", "supported": true },
+      { "token": "%S", "means": "second, 00..59", "ldml": "ss", "supported": true },
+      { "token": "%L", "means": "milliseconds, 000..999", "ldml": "SSS", "supported": true },
+      { "token": "%j", "means": "day of the year, 001..366", "ldml": "DDD", "supported": true },
+      { "token": "%a", "means": "abbreviated weekday name", "ldml": "EEE", "supported": true, "needsNames": true },
+      { "token": "%A", "means": "wide weekday name", "ldml": "EEEE", "supported": true, "needsNames": true },
+      { "token": "%b", "means": "abbreviated month name", "ldml": "MMM", "supported": true, "needsNames": true },
+      { "token": "%B", "means": "wide month name", "ldml": "MMMM", "supported": true, "needsNames": true },
+      { "token": "%p", "means": "AM or PM", "ldml": "a", "supported": true, "needsNames": true },
+      { "token": "%Z", "means": "offset such as -0700", "ldml": "XX", "supported": true },
+      { "token": "%x", "means": "the date, as %m/%d/%Y", "ldml": "MM'/'dd'/'yyyy", "supported": true },
+      { "token": "%X", "means": "the time, as %H:%M:%S", "ldml": "HH':'mm':'ss", "supported": true },
+      { "token": "%%", "means": "a literal percent sign", "ldml": "'%'", "supported": true },
+      { "token": "%e", "means": "day of month, space padded", "ldml": null, "supported": false, "reason": "the formatter pads with zeroes or not at all; a space-padded field would be a token of its own" },
+      { "token": "%c", "means": "the date and time, as %a %b %e %H:%M:%S %Y", "ldml": null, "supported": false, "reason": "it expands to %e, which is unsupported" },
+      { "token": "%U", "means": "week of the year, Sunday first", "ldml": null, "supported": false, "reason": "the core week number is ISO (Monday first, week 1 holds January 4th) and is a different rule, so answering with it would be wrong rather than approximate" },
+      { "token": "%W", "means": "week of the year, Monday first", "ldml": null, "supported": false, "reason": "d3 counts from the first Monday; ISO counts from the week holding January 4th, so the two disagree in January" },
+      { "token": "%w", "means": "weekday number, 0 is Sunday", "ldml": null, "supported": false, "reason": "the core weekday number is ISO (1 is Monday), so the same digit would mean a different day" }
+    ]
+  },
+  "tickInterval": {
+    "grammar": "^([1-9]\\d*)(millisecond|second|minute|hour|day|week|month)$",
+    "units": ["millisecond", "second", "minute", "hour", "day", "week", "month"],
+    "examples": ["1day", "2week", "12hour", "1month"],
+    "rejects": ["0day", "1days", "day", "-1day", "1year", "1.5day", "01day"]
+  },
+  "duration": {
+    "grammar": "^(\\d+(?:\\.\\d+)?)([Mdhmswy]|ms)$",
+    "units": {
+      "ms": "millisecond", "s": "second", "m": "minute", "h": "hour",
+      "d": "day", "w": "week", "M": "month", "y": "year"
+    },
+    "examples": ["1d", "3w", "12h", "1.5d", "2M", "1y", "500ms"],
+    "rejects": ["1", "d", "1D", "1mo", "-1d", "1 d"]
+  },
+  "weekday": {
+    "keyword": "weekday",
+    "values": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+    "means": "which day a `tickInterval` of whole weeks starts on"
+  },
+  "weekend": {
+    "keyword": "weekend",
+    "values": ["friday", "saturday"],
+    "default": "saturday",
+    "means": "the first of the two days `excludes weekends` removes"
+  },
+  "excludes": {
+    "terms": ["weekends", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "<a date in dateFormat>"],
+    "note": "`weekends` removes the `weekend` day and the day after it; a named weekday removes every occurrence of that day; a date removes that one day."
+  },
+  "status": {
+    "flags": ["done", "active", "crit", "milestone"],
+    "note": "Flags lead the task data, in any order, before the id and the dates."
+  },
+  "taskForms": [
+    { "form": "id, start, end", "example": "des1, 2014-01-06, 2014-01-08" },
+    { "form": "id, start, duration", "example": "des1, 2014-01-06, 3d" },
+    { "form": "id, after other, duration", "example": "des2, after des1, 5d" },
+    { "form": "id, after other, end", "example": "des2, after des1, 2014-01-12" },
+    { "form": "id, after other, until other2", "example": "des2, after des1, until des3" },
+    { "form": "start, end", "example": "2014-01-06, 2014-01-08" },
+    { "form": "start, duration", "example": "2014-01-06, 3d" },
+    { "form": "duration", "example": "3d", "note": "starts where the previous task ended" },
+    { "form": "flags, id, start, duration", "example": "done, crit, des1, 2014-01-06, 3d" },
+    { "form": "milestone, id, at, 0d", "example": "milestone, m1, 2014-01-08, 0d" }
+  ],
+  "divergences": [
+    {
+      "what": "a schedule with no dated anchor",
+      "mermaid": "the first task starts today",
+      "jaren": "a JM error naming the task and its line",
+      "why": "no operation in this suite reads the clock, so a diagram whose meaning changes daily has no answer to give"
+    },
+    {
+      "what": "an unsupported dateFormat or axisFormat token",
+      "mermaid": "the token is passed through as a literal",
+      "jaren": "a JM error naming the token and the reason",
+      "why": "a silent literal turns a typo into a date that parses as something else"
+    }
+  ]
+}

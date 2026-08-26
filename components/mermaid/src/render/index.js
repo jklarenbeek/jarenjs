@@ -12,8 +12,10 @@ import { MermaidParseError } from '../errors.js';
 import { layoutFlowchart } from '../layout/flowchart.js';
 import { layoutState } from '../layout/state.js';
 import { layoutSequence } from '../layout/sequence.js';
+import { layoutGantt } from '../layout/gantt.js';
 import { renderFlowchart } from './flowchart.js';
 import { renderSequence } from './sequence.js';
+import { renderGantt } from './gantt.js';
 import { renderPie, renderStructured, renderPlaceholder, structuredSections } from './misc.js';
 import { errorVnode } from './error.js';
 
@@ -28,6 +30,7 @@ export function layoutDiagram(doc) {
     case 'flowchart': return layoutFlowchart(doc.ast);
     case 'state': return layoutState(doc.ast);
     case 'sequence': return layoutSequence(doc.ast);
+    case 'gantt': return layoutGantt(doc.ast);
     default: return null;
   }
 }
@@ -62,9 +65,10 @@ export function diagramToVnode(docOrSource, options = {}) {
         return renderSequence(layoutSequence(doc.ast), theme, hash);
       case 'pie':
         return renderPie(doc.ast, theme, hash);
+      case 'gantt':
+        return renderGantt(layoutGantt(doc.ast, options), theme, hash);
       case 'class':
-      case 'er':
-      case 'gantt': {
+      case 'er': {
         const { title, sections } = structuredSections(doc.diagram, doc.ast);
         return renderStructured(title, sections, theme, hash);
       }

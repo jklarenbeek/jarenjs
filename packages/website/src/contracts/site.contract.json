@@ -868,7 +868,7 @@
       "additionalProperties": false
     },
     "SuiteMermaid": {
-      "description": "mermaid.json — the diagram engine against the jison-based reference: the per-diagram scorecard and the parse profile.",
+      "description": "mermaid.json — the diagram engine against the jison-based reference: the per-diagram scorecard, the parse profile and the Gantt scale rows.",
       "type": "object",
       "required": ["date", "node", "engines", "jisonEngines", "examples", "scorecard", "profile"],
       "properties": {
@@ -880,12 +880,29 @@
         "scorecard": { "type": "object", "additionalProperties": { "type": "object" } },
         "profile": {
           "type": "object",
-          "required": ["iterations", "parse", "parseJison", "jaren"],
+          "required": ["iterations", "parse", "parseJison", "jaren", "gantt"],
           "properties": {
             "iterations": { "type": "number" },
             "parse": { "type": "array" },
             "parseJison": { "type": "array" },
-            "jaren": { "type": "array" }
+            "jaren": { "type": "array" },
+            "gantt": {
+              "description": "The Gantt scale rows. Four stages because they do not scale alike: `parseMs` is parse AND schedule resolution, `layoutMs` the time domain and every bar, `vnodeMs` layout plus the renderer (so render is vnodeMs - layoutMs), and `svgMs` the whole pipeline including serialization to a string.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "tasks", "parseMs", "layoutMs", "vnodeMs", "svgMs"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "tasks": { "type": "integer", "minimum": 1 },
+                  "parseMs": { "type": "number", "minimum": 0 },
+                  "layoutMs": { "type": "number", "minimum": 0 },
+                  "vnodeMs": { "type": "number", "minimum": 0 },
+                  "svgMs": { "type": "number", "minimum": 0 }
+                },
+                "additionalProperties": false
+              }
+            }
           },
           "additionalProperties": false
         }

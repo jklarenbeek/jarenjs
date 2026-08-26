@@ -13,7 +13,10 @@
 // and turning one into a label is `compileDateFormat` (format.js).
 
 import { niceStep, axisTicksLinear } from '../math/float64.js';
-import { partsFromEpoch, startOfParts, addToParts } from './civil.js';
+import {
+  partsFromEpoch, startOfParts, addToParts, isDateUnit,
+  daysFromCivil, civilFromDays, isoWeekdayFromDays,
+} from './civil.js';
 import { epochOfRFC3339Parts } from './rfc3339.js';
 
 // The steps a clock and a calendar actually have. The 1/2/5 ladder is
@@ -97,17 +100,56 @@ export function axisTicksTime(min, max, count = 4) {
   // below a second the calendar has nothing to say; the numeric ladder does
   if (span < 1000 * count)
     return axisTicksLinear(min, max, count);
+  const [unit, amount] = niceTimeStep(span, count);
+  return timeTicksEvery(min, max, unit, amount);
+}
+
+/**
+ * Time ticks on a step the CALLER chose, rather than one this module
+ * picked for a target count: the first tick is the start of the
+ * `amount`-wide `unit` at or after `min`, and each following one is a
+ * whole step later. This is the boundary rule {@link axisTicksTime}
+ * uses once it has decided a step, exposed on its own because a
+ * consumer whose document declares its own interval — Mermaid's Gantt
+ * `tickInterval 1week` is the one in this repo — needs the same
+ * boundaries without the ladder choosing for it.
+ *
+ * A multi-unit step lands on a multiple of its own amount, so months
+ * fall on 1, 4, 7, 10 and years on 1900, 1950, 2000. A `week` step
+ * starts on Monday unless `weekStart` names another ISO weekday, which
+ * is what a document that says "weeks begin on Sunday" means.
+ *
+ * @param {number} min - Domain minimum, epoch milliseconds
+ * @param {number} max - Domain maximum, epoch milliseconds
+ * @param {string} unit - a `DATE_UNITS` member (`'day'`, `'week'`, …)
+ * @param {number} [amount] - whole steps per tick, at least 1
+ * @param {{ weekStart?: number, limit?: number }} [options] -
+ *   `weekStart` is an ISO weekday, 1 (Monday) to 7 (Sunday);
+ *   `limit` caps the tick count (default 1000)
+ * @returns {number[]} tick values in epoch milliseconds
+ * @example
+ * timeTicksEvery(Date.UTC(2024, 0, 3), Date.UTC(2024, 0, 20), 'week', 1);
+ * // the Mondays of 2024-01-08 and 2024-01-15
+ */
+export function timeTicksEvery(min, max, unit, amount = 1, options = {}) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max < min)
+    return [];
+  if (!isDateUnit(unit) || !Number.isInteger(amount) || amount < 1)
+    return [];
   if (min < CALENDAR_MIN_MS)
     return [];
-  const [unit, amount] = niceTimeStep(span, count);
-  // snap to the step's own boundary, then advance whole steps
-  let parts = startOfParts(partsFromEpoch(min), unit);
+  const limit = options.limit ?? 1000;
+  const from = partsFromEpoch(min);
+  let parts = startOfParts(from, unit);
   if (amount > 1 && unit === 'month') {
     // quarters and half-years start on month 1, 4, 7, 10 (or 1, 7)
     parts = { ...parts, month: Math.floor((parts.month - 1) / amount) * amount + 1 };
   }
   else if (amount > 1 && unit === 'year') {
     parts = { ...parts, year: Math.floor(parts.year / amount) * amount };
+  }
+  else if (unit === 'week') {
+    parts = { ...parts, ...weekStartDay(from, options.weekStart ?? 1) };
   }
   const ticks = [];
   let ms = epochOfRFC3339Parts(parts);
@@ -117,12 +159,26 @@ export function axisTicksTime(min, max, count = 4) {
   }
   // the step is never zero, so this terminates; the cap is a guard
   // against a pathological domain rather than an expected path
-  for (let i = 0; ms <= max && i < 1000; i++) {
+  for (let i = 0; ms <= max && i < limit; i++) {
     ticks.push(ms);
     parts = addToParts(parts, amount, unit);
     ms = epochOfRFC3339Parts(parts);
   }
   return ticks;
+}
+
+/**
+ * The civil date of the `weekStart`-day on or before `parts`' own day.
+ * @param {object} parts
+ * @param {number} weekStart - ISO weekday, 1 (Monday) to 7 (Sunday)
+ * @returns {{ year: number, month: number, day: number }}
+ */
+function weekStartDay(parts, weekStart) {
+  const start = weekStart >= 1 && weekStart <= 7 ? weekStart : 1;
+  const z = daysFromCivil(parts.year, parts.month, parts.day);
+  let back = isoWeekdayFromDays(z) - start;
+  if (back < 0) back += 7;
+  return civilFromDays(z - back);
 }
 
 //#endregion

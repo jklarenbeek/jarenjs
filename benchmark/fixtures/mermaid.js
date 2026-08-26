@@ -63,5 +63,54 @@ export function buildScaled(n) {
   return { flowchart: flow, sequence: seq };
 }
 
+/**
+ * A scaled Gantt schedule: sections of a hundred tasks, each section
+ * anchored by a date and each task inside it following the one before.
+ *
+ * The shape is deliberate. A single chain of ten thousand `after`
+ * dependencies is not a schedule anyone writes and it would measure the
+ * resolver's recursion depth rather than its work, so the dependency
+ * depth stays at a hundred while the task count scales. `excludes
+ * weekends` is on, because the working calendar is the part of the
+ * resolver worth measuring.
+ *
+ * @param {number} n number of tasks
+ * @returns {string} a gantt document
+ */
+export function buildGantt(n) {
+  const PER_SECTION = 100;
+  let out = 'gantt\ntitle Scaled plan\ndateFormat YYYY-MM-DD\nexcludes weekends\n';
+  for (let i = 0; i < n; i++) {
+    if (i % PER_SECTION === 0) {
+      out += `section Phase ${i / PER_SECTION}\n`;
+      // a fresh anchor per section: 2024-01-01 plus one week per section
+      const day = 1 + (i / PER_SECTION) * 7;
+      out += `Task ${i} : t${i}, ${isoDay(day)}, ${(i % 9) + 1}d\n`;
+      continue;
+    }
+    out += `Task ${i} : t${i}, after t${i - 1}, ${(i % 9) + 1}d\n`;
+  }
+  return out;
+}
+
+/**
+ * The `day`-th day of 2024, as `YYYY-MM-DD`. Written out rather than
+ * formatted so the fixture stays dependency-free.
+ * @param {number} day 1-based day of the year
+ * @returns {string}
+ */
+function isoDay(day) {
+  const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  let rest = ((day - 1) % 366) + 1;
+  let month = 0;
+  while (rest > MONTH_DAYS[month]) {
+    rest -= MONTH_DAYS[month];
+    month++;
+  }
+  const mm = month + 1 < 10 ? `0${month + 1}` : `${month + 1}`;
+  const dd = rest < 10 ? `0${rest}` : `${rest}`;
+  return `2024-${mm}-${dd}`;
+}
+
 /** The pie head-to-head corpus (both engines parse pie). */
 export const PIE_CORPUS = CORPUS.pie;

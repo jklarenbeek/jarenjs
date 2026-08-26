@@ -96,7 +96,10 @@ describe('parseMermaid: other types', function () {
     assert.equal(parseMermaid('stateDiagram-v2\n[*] --> S\nS --> [*]').diagram, 'state');
     assert.equal(parseMermaid('classDiagram\nclass Foo').diagram, 'class');
     assert.equal(parseMermaid('erDiagram\nA ||--o{ B : has').diagram, 'er');
-    assert.equal(parseMermaid('gantt\ntitle X\nsection S\nT : a, 1d').diagram, 'gantt');
+    // a Gantt task needs a dated anchor: this engine has no clock, so
+    // the undated form Mermaid would start "today" is an error (see
+    // test/mermaid/gantt.test.js)
+    assert.equal(parseMermaid('gantt\ntitle X\nsection S\nT : a, 2024-01-01, 1d').diagram, 'gantt');
   });
 
   it('parses ER relationships whose cardinality token contains a brace', function () {

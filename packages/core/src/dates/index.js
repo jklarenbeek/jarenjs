@@ -16,6 +16,7 @@
 //   rfc3339.js  validation, lexical decomposition, epoch conversion
 //   civil.js    proleptic Gregorian arithmetic over integers
 //   format.js   LDML pattern -> compiled formatter
+//   parse.js    LDML pattern -> compiled strict parser
 //   duration.js ISO 8601 duration decomposition and conversion
 //   ticks.js    the time-axis step ladder and its boundaries
 //
@@ -26,6 +27,7 @@
 export * from './rfc3339.js';
 export * from './civil.js';
 export * from './format.js';
+export * from './parse.js';
 export * from './duration.js';
 export * from './ticks.js';
 

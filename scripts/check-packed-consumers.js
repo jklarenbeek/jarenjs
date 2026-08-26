@@ -212,11 +212,18 @@ if (tree !== null && tree.session !== undefined) {
   '@jarenjs/locales': `
 import { nl, dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from '@jarenjs/locales';
 import { createIntlDateLocale } from '@jarenjs/locales/intl-dates';
-import { compileDateFormat, parseRFC3339Parts } from '@jarenjs/core/dates';
+import {
+  compileDateFormat, compileDateParser, parseRFC3339Parts, timeTicksEvery,
+} from '@jarenjs/core/dates';
 const dates = compileDateLocale(nl);
 const long: (parts: object) => string = compileDateFormat('EEEE d MMMM yyyy', dates.names);
 const parts = parseRFC3339Parts('2026-07-05T00:00:00Z');
 if (parts !== null) void long(parts);
+const read: (text: string) => object | null = compileDateParser('d MMMM yyyy', dates.names);
+const back = read('5 juli 2026');
+if (back !== null) void long(back);
+const ticks: number[] = timeTicksEvery(0, 86400000 * 30, 'week', 1, { weekStart: 7 });
+void ticks.length;
 const phrase: string = dates.relative(-3, 'day', { numeric: 'auto' });
 void phrase.length;
 const named: string | undefined = dates.formatName('date-time');
@@ -224,6 +231,27 @@ void named;
 void createIntlDateLocale('nl-NL').names.months[0];
 void Object.keys(dateMessagesEn).length;
 void RELATIVE_UNITS.join(',');
+`,
+  '@jarenjs/mermaid': `
+import { parseMermaid, toMermaid, layoutDiagram, renderMermaid } from '@jarenjs/mermaid';
+const source = [
+  'gantt', 'dateFormat YYYY-MM-DD', 'excludes weekends', 'tickInterval 1week',
+  'section Build', 'Design : done, a1, 2024-01-04, 3d',
+  'Ship : milestone, m1, after a1, 0d',
+].join('\\n');
+const doc = parseMermaid(source);
+const ast: any = doc.ast;
+const task: any = ast.sections[0].tasks[0];
+const span: number = task.end - task.start;
+void (span > 0 && task.id === 'a1' && task.line === 6);
+const flags: string[] = task.flags;
+void flags.join(',');
+void (ast.rules.tick.unit as string);
+void (ast.domain.start as number);
+const scene: any = layoutDiagram(doc);
+void (scene.kind === 'gantt' && scene.rows.length === 2);
+void toMermaid(doc).length;
+void renderMermaid(source, { dateNames: undefined })[0];
 `,
   '@jarenjs/linq': `
 import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';

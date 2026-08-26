@@ -158,11 +158,71 @@ flowchart LR
 Fully laid out: **flowchart**, **sequence**, **state** (through the
 flowchart engine via an adapter — states as rounded nodes, `[*]` as a
 filled start dot and an end ring, verbatim transition labels on the
-edges; composite states stay flattened in v1). Structured panels /
-chart: **class**, **ER**, **gantt**, **pie**. Parse-accepted with an
+edges; composite states stay flattened in v1) and **gantt** (a real time
+axis — see below). Structured panels / chart: **class**, **ER**,
+**pie**. Parse-accepted with an
 honest "not yet laid out" placeholder: mindmap, gitGraph, journey,
 timeline, quadrantChart, requirement. The benchmark's coverage scorecard reports this
 without hiding gaps.
+
+
+## Gantt: the date directives are interpreted
+
+A Gantt diagram is parsed into a **resolved schedule** and rendered as a
+timeline — an aligned time axis, section bands, bars, milestone
+diamonds, dependency connectors and shaded excluded days:
+
+```mermaid
+gantt
+title Release plan
+dateFormat YYYY-MM-DD
+excludes weekends
+tickInterval 1week
+section Build
+Design : done, a1, 2024-01-04, 3d
+Implement : active, a2, after a1, 5d
+section Ship
+Review : crit, a3, after a2, 2d
+Launch : milestone, m1, after a3, 0d
+```
+
+Every directive means something. `dateFormat` compiles to a strict date
+parser, `axisFormat` to the axis labels, `tickInterval` and `weekday` to
+the tick boundaries, and `excludes`/`weekend` to a working calendar that
+moves a duration-derived end past the days it skips. Tick positions come
+from `@jarenjs/core/dates` — the same ladder the chart component's time
+axis reads — so a timeline and a chart cannot disagree about where a
+week begins.
+
+Each task carries `{ id, flags, start, end, duration, after, line }`
+beside its raw `info`, with `start`/`end` as epoch milliseconds and the
+interval half-open. The grammar, the vendored conformance table and the
+three deliberate divergences from Mermaid are in
+[docs/MERMAID-FORMAT.md §4.4](./docs/MERMAID-FORMAT.md). The load-bearing
+one: **there is no clock here**, so a schedule with no dated anchor is a
+line-aware error rather than a diagram whose meaning changes daily.
+
+Mermaid's `dateFormat` is moment's grammar and its `axisFormat` is
+strftime; neither is LDML, so each has its own tokenizer and each token
+is mapped individually onto the core date kernel. An unsupported token
+is refused by name rather than passed through as text.
+
+**Localized labels take an injected provider.** This engine ships no
+month or weekday names, so `axisFormat %b %Y` (or a `dateFormat` with
+`MMMM`) needs one — the same `DateNames` record
+`@jarenjs/locales`' `compileDateLocale(pack).names` produces:
+
+```js
+import { compileDateLocale, nl } from '@jarenjs/locales';
+renderMermaid(source, { dateNames: compileDateLocale(nl).names });
+```
+
+Without a provider a name token is a compile error, not a silent English
+fallback. Task ids and dates stay ASCII data either way — an RTL name is
+text, not syntax.
+
+At scale, parse (which is also schedule resolution), layout and render
+are reported separately in the benchmark: <!--bm:mermaid.ganttScale-->at 10,000 tasks, ~34 ms to parse and resolve, ~3.8 ms to lay out and ~7.7 ms to render<!--/bm-->.
 
 
 ## Styling, notes and interaction
@@ -261,7 +321,7 @@ detection + Jison + validation — so it is heavy and noisy; these are
 representative, not a bare-grammar microbenchmark.)
 
 The headless **parse → layout → SVG string** rows are jaren-only
-(<!--bm:mermaid.svgMs-->~0.46 ms for a 25-node flowchart, ~1.4 ms at 100 nodes<!--/bm-->): mermaid.js
+(<!--bm:mermaid.svgMs-->~0.68 ms for a 25-node flowchart, ~1 ms at 100 nodes<!--/bm-->): mermaid.js
 needs a browser DOM (`getBBox`) to render, so there is no fair
 full-render head-to-head — producing a complete standalone SVG in pure
 Node is a capability it lacks.

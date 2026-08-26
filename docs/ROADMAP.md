@@ -306,7 +306,7 @@ delete it or fix it.
 ## @jarenjs/mermaid
 
 - [ ] **`foreignObject` / `htmlLabels:true`** — labels are SVG `<text>` in v1 because `@jarenjs/view` has no `foreignObject`/`setAttributeNS`; revisit alongside VIEW-FORMAT §6/§8 for HTML labels and pixel-closer parity.
-- [ ] **Full layout for the secondary types** — class/ER/state/gantt render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
+- [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction
   are the next levers. Edge labels now measure themselves and step aside from
@@ -815,15 +815,15 @@ theirs.
 ## Dates & times (cross-package)
 
 One program. The motivating observation is that the suite does not lack a
-date *library* — it lacks date *capability in its engines*: charts silently
-drops date strings, gantt stores its date directives without interpreting
-them, forms renders two of its three date formats as plain text boxes, and
-the locale packs contain no month names at all.
+date *library* — it lacked date *capability in its engines*: charts silently
+dropped date strings, gantt stored its date directives without interpreting
+them, forms rendered two of its three date formats as plain text boxes, and
+the locale packs contained no month names at all.
 
 The kernel (`@jarenjs/core/dates/*`), the query operators, the charts time
 axis, the forms date controls, the JOSL dedup, the allocation-free
-`formatMinimum`/`formatMaximum` comparators and the locale packs' calendar
-language are done; what they do is documented in
+`formatMinimum`/`formatMaximum` comparators, the locale packs' calendar
+language and the Mermaid Gantt timeline are done; what they do is documented in
 `packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.13 and the respective
 package READMEs — the date msgids and their compilation in
 `packages/locales/README.md`. Two entries are left.
@@ -846,25 +846,34 @@ delegate to Temporal internally once the baseline moves, without changing a
 public surface. Building a general-purpose date *library* is therefore the one
 thing to avoid.
 
-- [ ] **A time axis cannot be asked for a language.** All eleven packs now
+- [ ] **A chart time axis cannot be asked for a language.** All eleven packs
   carry month, weekday and meridiem names, signed relative-time phrases and
   translated date-format display names, and `compileDateLocale` reads them
   into the provider `compileDateFormat` takes (`packages/locales/README.md`).
-  What has no way to receive one is a rendered *axis*: the chart time axis
-  and the Mermaid Gantt panel compile their own numeric patterns
-  (`yyyy-MM-dd`, `HH:mm`) at module load, so nothing on them is
-  mistranslated and nothing on them can be localized either — a host cannot
-  ask for `MMM yyyy` in its own language. The open decision is where a
-  compiled `dateLocale` enters a chart spec and a Gantt directive without
-  making either renderer allocate per label; the Gantt half belongs with the
-  entry below, which needs the same names for `compileDateParser`.
-- [ ] **Mermaid gantt: interpret the date directives** — `dateFormat`,
-  `axisFormat`, `tickInterval`, `excludes` and `weekday` are parsed into
-  `meta` as strings and never interpreted, so gantt renders as a structured
-  panel rather than a timeline. This is the one place in the suite that needs
-  *parsing by pattern* (`dateFormat: DD-MM-YYYY`) rather than RFC 3339, which
-  is why the kernel owes a `compileDateParser` as well as a formatter.
-  `excludes: weekends` additionally needs working-day arithmetic.
+  The Mermaid Gantt half of this is done — a diagram's `dateFormat` and
+  `axisFormat` both take an injected `dateNames` record, which is exactly
+  `compileDateLocale(pack).names`, and a name token with no provider is a
+  refusal rather than a silent English fallback
+  (`components/mermaid/README.md`). What still has no way to receive one is
+  the **chart** time axis: it compiles its own numeric patterns
+  (`yyyy-MM-dd`, `HH:mm`) at module load, so nothing on it is mistranslated
+  and nothing on it can be localized either. The seam a chart spec should
+  reuse is the Gantt's — a plain `DateNames` record threaded to the
+  formatter, compiled once per render rather than per label; the open
+  decision is only where in a chart spec it enters.
+- [ ] **Mermaid gantt: the directives that are still only text.**
+  `dateFormat`, `axisFormat`, `tickInterval`, `excludes`, `weekday` and
+  `weekend` are interpreted, the tasks resolve to half-open intervals with
+  dependencies and working-day arithmetic, and gantt renders a real
+  timeline — the grammar, the vendored conformance table and the
+  divergences are in `components/mermaid/docs/MERMAID-FORMAT.md` §4.4, and
+  the kernel's half is `compileDateParser` in `packages/core/docs/DATES.md`.
+  What is left is the remaining header vocabulary: `includes` (the
+  exception list that overrides `excludes`), `inclusiveEndDates`, `topAxis`,
+  `displayMode: compact` and the `click` interaction statements. Note
+  `todayMarker` is **not** on this list and never will be — it needs a
+  clock, and there is none (see the constraint above); a host that wants
+  "now" on a diagram supplies the instant as data.
 
 ## Geospatial (cross-package)
 
