@@ -324,6 +324,17 @@ delete it or fix it.
 
 - [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
 - [ ] **Deeper treemap nesting** — one hierarchy level ships (groups squarify, children squarify under a naming band). Arbitrary depth needs a recursive layout and a header budget that does not eat the leaves.
+- [ ] **A sampled line session scans its input twice.** Above the 2,000-point
+  default the session rebuilds every frame, and `rebuild()` runs
+  `scanLineExtremes` and then lets `buildLineAST` scan the same input again —
+  so a 10,000-point time line patches at 3.25 ms against a 2.53 ms wholesale
+  render, the one shape where the incremental path is the slower one
+  (`sampling: false` restores the 4.44 µs patch exactly, and both rows are
+  published in the charts suite). Letting `buildLineAST` accept pre-scanned
+  extremes, or having the session read them back off the AST, removes the
+  second scan; the session's contract is byte equality with `compileChart` of
+  the same data, so whatever is passed forward has to be what the wholesale
+  path would have computed.
 
 ## @jarenjs/calc
 
@@ -625,6 +636,23 @@ what each does is its own documentation's job
   while a transaction is open JOINS it") flips from "pinned, not
   endorsed" to the regression for the new behavior. Raised by a
   consumer wanting one shared Fastify store; not started.
+- [ ] **An as-of join with no tolerance is bounded above and not below.**
+  The batched fetch is one statement whatever the probes number, which is the
+  bound it was built for — but a backward join with no `tolerance` can only
+  cap the far side, and at the benchmark's shape that is 99,129 of 100,000
+  rows, costing 1,424× fifty-one separate index reads (published beside the
+  win in the `@jarenjs/db` README). The tight lower limit is a BIND-time
+  scalar, and the plan algebra's external operand emits the guarded
+  two-branch text-OR-number comparison, which is not a seek: paying an OR to
+  save a range is the wrong trade. Closing it means a fourth `ParamSlot` kind
+  that binds a scalar of known type without the guard — a real change to a
+  documented closed set, and its own decision.
+- [ ] **`$overlaps` is not planned.** Two half-open spans over four declared
+  columns is a conjunction of four comparisons the emitter already spells,
+  and `createIntervalIndex` is the resident shape it would serve. It sits
+  outside the three temporal shapes the planner closes over (range, as-of,
+  fixed bucket), so adding it is a fourth recognizer rather than a widening
+  of one.
 
 ## @jarenjs/ai
 
@@ -870,10 +898,14 @@ thing to avoid.
   the kernel's half is `compileDateParser` in `packages/core/docs/DATES.md`.
   What is left is the remaining header vocabulary: `includes` (the
   exception list that overrides `excludes`), `inclusiveEndDates`, `topAxis`,
-  `displayMode: compact` and the `click` interaction statements. Note
-  `todayMarker` is **not** on this list and never will be — it needs a
-  clock, and there is none (see the constraint above); a host that wants
-  "now" on a diagram supplies the instant as data.
+  `displayMode: compact` and the `click` interaction statements — plus the
+  eight d3 axis specifiers the conformance table now names as refusals
+  rather than passing off as unknown (`%f`, `%g`, `%G`, `%q`, `%Q`, `%s`,
+  `%u`, `%V`): a week-based year and a week number are a second year field
+  and a derived one, so admitting them is a parts-record decision rather
+  than a table entry. Note `todayMarker` is **not** on this list and never
+  will be — it needs a clock, and there is none (see the constraint above);
+  a host that wants "now" on a diagram supplies the instant as data.
 
 ## Geospatial (cross-package)
 

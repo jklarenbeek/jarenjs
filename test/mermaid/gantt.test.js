@@ -96,6 +96,41 @@ describe('the Gantt conformance table is the code', () => {
       assert.ok(listed.has(spec), `%${spec} is implemented but not in the conformance table`);
   });
 
+  it('should cover every token the shipped Mermaid chunk actually parses', () => {
+    // The two checks above hold the TABLE and the CODE to each other,
+    // which is a closed loop: a token neither of them knows is invisible
+    // to both. This one opens it. dayjs' `customParseFormat` expression
+    // table is inlined in the very chunk `provenance.source` names, so
+    // the vocabulary Mermaid really accepts is READ rather than
+    // remembered — and `w`, `ww` and `Y` were missing from the table and
+    // from the adapter alike, which turned each of them into LITERAL
+    // text and then blamed every task's own start date for not matching.
+    const chunk = fs.readFileSync(
+      path.join(__dirname, '..', '..', GRAMMAR.provenance.source), 'utf8');
+    // `{A:[` opens the expression table and `Z:…,ZZ:…}` closes it
+    const open = chunk.indexOf('{A:[');
+    const last = chunk.indexOf('ZZ:', open);
+    const close = chunk.indexOf('}', last);
+    assert.ok(open > 0 && last > open && close > last,
+      'the dayjs parse table is no longer recognizable in '
+      + `${GRAMMAR.provenance.source}; read the new build and re-vendor the table`);
+    const parsed = new Set([...chunk.slice(open, close + 1)
+      .matchAll(/[,{]([A-Za-z]{1,4}):/g)].map((m) => m[1]));
+    // a broken extraction must fail here rather than pass vacuously
+    assert.ok(parsed.size >= 25,
+      `only ${parsed.size} tokens read out of the chunk — the extraction moved, not the table`);
+    for (const known of ['YYYY', 'MMMM', 'Do', 'ww', 'w', 'Y', 'ZZ'])
+      assert.ok(parsed.has(known), `${known} should be in the shipped parse table`);
+
+    const listed = new Set(GRAMMAR.dateFormat.tokens.map((e) => e.token));
+    for (const token of parsed) {
+      assert.ok(listed.has(token),
+        `mermaid ${GRAMMAR.provenance.version} parses '${token}' and the conformance table `
+        + 'does not mention it — an unlisted token becomes literal text, so every task '
+        + 'that uses it is reported as having a bad start date instead');
+    }
+  });
+
   it('should accept and reject exactly the tickIntervals the table lists', () => {
     for (const good of GRAMMAR.tickInterval.examples)
       assert.strictEqual(parseTickInterval(good).error, null, good);
@@ -630,3 +665,45 @@ describe('gantt labels are data or locale, never invented syntax', () => {
 });
 
 //#endregion
+
+describe('a directive is blamed for its own token', () => {
+  const diagram = (dateFormat) => `gantt
+dateFormat ${dateFormat}
+section S
+A :a, 2026-01-05, 1d`;
+
+  it('refuses an unreadable dateFormat token on the DIRECTIVE line, not the task', () => {
+    // the whole cost of the bug: an unlisted token becomes literal text,
+    // so the pattern can never match and every task in the diagram is
+    // reported as having a bad date while the directive looks innocent
+    for (const [pattern, token] of [['ww YYYY', 'ww'], ['w YYYY', 'w'],
+      ['DDD YYYY', 'DDD'], ['Q YYYY', 'Q']]) {
+      assert.throws(() => parseMermaid(diagram(pattern)), (error) => {
+        assert.strictEqual(/** @type {any} */ (error).name, 'MermaidParseError');
+        assert.strictEqual(/** @type {any} */ (error).line, 2, `${pattern}: the dateFormat line`);
+        assert.match(/** @type {Error} */ (error).message, new RegExp(`'${token}'`));
+        return true;
+      });
+    }
+  });
+
+  it("reads dayjs' signed year, because core spells the same field", () => {
+    const one = parseMermaid(`gantt
+dateFormat Y-MM-DD
+section S
+A :a, 2026-01-05, 1d`);
+    assert.strictEqual(one.ast.sections[0].tasks[0].start, Date.UTC(2026, 0, 5));
+    // and the wider spelling still wins the longest-token scan
+    const four = parseMermaid(diagram('YYYY-MM-DD'));
+    assert.strictEqual(four.ast.sections[0].tasks[0].start, Date.UTC(2026, 0, 5));
+  });
+
+  it('says a real d3 specifier is unsupported rather than unknown', () => {
+    for (const [spec, listed] of [['%V', true], ['%u', true], ['%Q', true], ['%n', false]]) {
+      const { error } = strftimeToLdml(`${spec}`);
+      assert.notStrictEqual(error, null, spec);
+      assert.strictEqual(/is not supported/.test(/** @type {string} */ (error)), listed,
+        `${spec}: a directive d3 has is 'not supported'; one it does not have is 'not a directive'`);
+    }
+  });
+});

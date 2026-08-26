@@ -46,6 +46,10 @@ const COUNT_SOURCES = [
     pattern: /a (\d+)-operator\n?library/m },
   { file: 'packages/linq/ARCHITECTURE.md', says: 'the not-IQueryable paragraph',
     pattern: /the operator set is the query engine's\n(\d+), closed and documented/m },
+  { file: 'README.md', says: 'the JSON stack paragraph — the first number a visitor reads',
+    pattern: /quantifiers, a (\d+)-operator library/m },
+  { file: 'packages/json/README.md', says: 'the spatial-share sentence',
+    pattern: /Thirteen of the (\d+) operators are spatial/m },
 ];
 
 /**

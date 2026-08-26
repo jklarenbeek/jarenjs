@@ -36,7 +36,7 @@ export const DEFAULT_AXIS_FORMAT = '%Y-%m-%d';
 
 /** dayjs token → the LDML token that reads and writes the same field. */
 const MOMENT_TO_LDML = Object.freeze({
-  YYYY: 'yyyy', YY: 'yy',
+  YYYY: 'yyyy', YY: 'yy', Y: 'y',
   MMMM: 'MMMM', MMM: 'MMM', MM: 'MM', M: 'M',
   DD: 'dd', D: 'd',
   HH: 'HH', H: 'H', hh: 'hh', h: 'h',
@@ -55,6 +55,8 @@ const MOMENT_REFUSED = Object.freeze({
   DDD: 'the day of the year is derived from a date, not a field of one',
   X: 'an epoch second is a whole value, not a calendar field',
   x: 'an epoch millisecond is a whole value, not a calendar field',
+  ww: 'the ISO week number is derived from a date, not a field of one',
+  w: 'the ISO week number is derived from a date, not a field of one',
 });
 
 /** strftime specifier → the LDML fragment that writes the same field. */
@@ -74,6 +76,14 @@ const STRFTIME_REFUSED = Object.freeze({
   U: 'd3 counts weeks from the first Sunday; the core week number is ISO, so the two disagree',
   W: 'd3 counts weeks from the first Monday; the core week number is ISO, so the two disagree',
   w: 'd3 numbers Sunday 0; the core weekday number is ISO, where 1 is Monday',
+  f: 'microseconds are below the millisecond this suite measures time in',
+  g: 'the week-based year is a second year field, and the core parts record has one',
+  G: 'the week-based year is a second year field, and the core parts record has one',
+  q: 'a quarter on a time axis is a label, not a tick this engine plans',
+  Q: 'an epoch is a whole value, not a calendar field',
+  s: 'an epoch is a whole value, not a calendar field',
+  u: 'the ISO weekday number is a tick label this engine does not plan',
+  V: 'the ISO week number is a tick label this engine does not plan',
 });
 
 /** The LDML tokens that need a `names` provider before they compile. */

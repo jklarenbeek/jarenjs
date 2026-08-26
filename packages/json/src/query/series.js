@@ -35,11 +35,31 @@
 
 import { parseJSONPath, JSONPathSyntaxError } from '../path.js';
 import { isSingularSegments, compileSingularGetter, NOTHING } from '../segments.js';
-import { resolveClock } from '@jarenjs/core/series';
+import {
+  resolveClock,
+  CLOCK_MEMBERS as KERNEL_CLOCK_MEMBERS,
+  RESAMPLE_MEMBERS as KERNEL_RESAMPLE_MEMBERS,
+  ROLLING_MEMBERS as KERNEL_ROLLING_MEMBERS,
+} from '@jarenjs/core/series';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 import { EMPTY, Seq, describeItem } from './runtime.js';
 
 const hasOwn = Object.hasOwn;
+
+/**
+ * The one member of a kernel specification a DOCUMENT cannot carry.
+ * `provider` is a pair of functions and JSON has no such value, so a
+ * named zone reaches the kernel through `options.zoneProvider` at
+ * compile time instead. Everything else these operators admit is
+ * whatever `@jarenjs/core/series` admits, read from the kernel rather
+ * than restated here — one list, one place, and a member added to a
+ * kernel reaches the language in the same change.
+ */
+const NOT_IN_A_DOCUMENT = Object.freeze(['provider']);
+
+/** @param {readonly string[]} members @returns {readonly string[]} */
+const spellable = (members) =>
+  Object.freeze(members.filter((name) => !NOT_IN_A_DOCUMENT.includes(name)));
 
 /**
  * The calendar context every clock-reading spec carries, and the one
@@ -48,19 +68,22 @@ const hasOwn = Object.hasOwn;
  * `offset` is minutes east of UTC, and `disambiguation` says what a
  * local time that happens twice, or never, resolves to.
  */
-export const CLOCK_MEMBERS = Object.freeze(['zone', 'offset', 'disambiguation']);
+export const CLOCK_MEMBERS = spellable(KERNEL_CLOCK_MEMBERS);
 
 /** `$resample`: the D5 bucket contract, plus where a row keeps its members. */
-export const RESAMPLE_MEMBERS = Object.freeze([
-  'every', 'origin', 'start', 'end', 'aggregate', 'fill', 'at', 'value', ...CLOCK_MEMBERS,
-]);
+export const RESAMPLE_MEMBERS = spellable(KERNEL_RESAMPLE_MEMBERS);
 
 /** `$rolling`: a window measured in time, and how much of one counts. */
-export const ROLLING_MEMBERS = Object.freeze([
-  'width', 'aggregate', 'minPeriods', 'at', 'value', ...CLOCK_MEMBERS,
-]);
+export const ROLLING_MEMBERS = spellable(KERNEL_ROLLING_MEMBERS);
 
-/** `$asof`: which way to look, how far, and what makes two rows comparable. */
+/**
+ * `$asof`: which way to look, how far, and what makes two rows
+ * comparable. The one list NOT read from the kernel: `asOfJoin` takes
+ * nested `left`/`right` selector records, and a spec that stays one
+ * flat literal is what makes "compiled once" true — so the document
+ * spells `by`, `leftAt` and `rightAt`, and `compileAsOfSpec` below is
+ * the single place that translation happens.
+ */
 export const ASOF_MEMBERS = Object.freeze([
   'direction', 'tolerance', 'by', 'leftAt', 'rightAt',
 ]);

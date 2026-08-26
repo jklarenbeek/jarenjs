@@ -92,6 +92,34 @@ import { quantile } from './lib/horizon.js';
 //#region flags
 
 const argv = process.argv.slice(2);
+
+/**
+ * Every option this suite reads, and whether it takes a value. A run
+ * that quietly ignored `--verifyy` would answer the full grid where the
+ * operator asked for equivalence alone, and the transcript would look
+ * like a benchmark somebody meant to run.
+ */
+const OPTIONS = Object.freeze({
+  '--quick': false, '--verify': false, '--help': false, '-h': false,
+  '--sizes': true, '--warmup': true, '--seed': true,
+  '--output': true, '--filepath': true,
+});
+for (let i = 0; i < argv.length; i++) {
+  const takesValue = OPTIONS[argv[i]];
+  if (takesValue === undefined) {
+    console.error(`Unknown option: ${argv[i]}`);
+    console.error(`This suite reads ${Object.keys(OPTIONS).join(', ')}.`);
+    process.exit(2);
+  }
+  if (takesValue) {
+    if (argv[i + 1] === undefined || OPTIONS[argv[i + 1]] !== undefined) {
+      console.error(`${argv[i]} needs a value.`);
+      process.exit(2);
+    }
+    i++;
+  }
+}
+
 const list = (name, fallback) => (argv.includes(name)
   ? argv[argv.indexOf(name) + 1].split(',').map((s) => parseInt(s.trim(), 10))
   : fallback);

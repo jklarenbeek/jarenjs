@@ -59,6 +59,13 @@ import { epochOfRFC3339Parts } from '../dates/rfc3339.js';
 const DISAMBIGUATION = Object.freeze(['reject', 'earlier', 'later']);
 
 /**
+ * The four members every calendar-aware specification carries, so
+ * a bucket ladder, a rolling window and a query document all spell
+ * the clock the same way.
+ */
+export const CLOCK_MEMBERS = Object.freeze(['zone', 'offset', 'provider', 'disambiguation']);
+
+/**
  * The clock an operation reads its calendar boundaries on.
  *
  * Defaults to UTC, which needs nothing: no provider, no zone name, no

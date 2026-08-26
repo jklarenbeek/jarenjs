@@ -502,12 +502,12 @@ as-of join over one seeded corpus by plain references, by the temporal
 kernel, by a generic query document, by hand-written SQL and by the
 store — every route checked against the others before a timing is
 taken. At <!--bm:series.corpus-->100,000 samples at 1-second spacing, Node v24.19.0<!--/bm-->,
-the store is measured three ways at once — <!--bm:series.storeShapes-->the planned range costs 3.5× the hand-written statement and 1673.7× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.5× FASTER than the generic query route, and 166.1× the one-pass loop<!--/bm-->.
+the store is measured three ways at once — <!--bm:series.storeShapes-->the planned range costs 4.2× the hand-written statement and 1535.5× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.6× FASTER than the generic query route, and 155.1× the one-pass loop<!--/bm-->.
 The range row is not the planner's price: the statement selects two
 COLUMNS where the store renders and parses a whole JSON document per
 row, which is what storing documents costs.
 
-And what a refinement costs, with the loss in it: <!--bm:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 6.0× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 99,129 rows in 1 statement and costs 2036.7× fifty-one separate index reads — a bound is what it buys, not a speed-up, and without a tolerance a backward join can only be bounded above.<!--/bm-->
+And what a refinement costs, with the loss in it: <!--bm:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 18.5× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 99,129 rows in 1 statement and costs 1424.3× fifty-one separate index reads — a bound is what it buys, not a speed-up, and without a tolerance a backward join can only be bounded above.<!--/bm-->
 
 **A refinement is named, never quiet.** `explain().series` reports
 `mode` — `native`, `hybrid` or `engine` — the declared index the fetch

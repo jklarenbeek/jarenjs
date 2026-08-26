@@ -14,6 +14,7 @@
     "tokens": [
       { "token": "YYYY", "means": "4 digit year", "ldml": "yyyy", "supported": true },
       { "token": "YY", "means": "2 digit year", "ldml": "yy", "supported": true },
+      { "token": "Y", "means": "year, signed and any width", "ldml": "y", "supported": true },
       { "token": "M", "means": "month, 1..12", "ldml": "M", "supported": true },
       { "token": "MM", "means": "month, 01..12", "ldml": "MM", "supported": true },
       { "token": "MMM", "means": "abbreviated month name", "ldml": "MMM", "supported": true },
@@ -40,7 +41,9 @@
       { "token": "DDD", "means": "day of the year, 1..365", "ldml": null, "supported": false, "reason": "derived from a date, not a field of one" },
       { "token": "DDDD", "means": "day of the year, 001..365", "ldml": null, "supported": false, "reason": "derived from a date, not a field of one" },
       { "token": "X", "means": "Unix seconds", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field; write it as a date instead" },
-      { "token": "x", "means": "Unix milliseconds", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field; write it as a date instead" }
+      { "token": "x", "means": "Unix milliseconds", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field; write it as a date instead" },
+      { "token": "w", "means": "week of year, 1..53", "ldml": null, "supported": false, "reason": "the ISO week number is derived from a date rather than a field of one, so a parser has nothing to read it into" },
+      { "token": "ww", "means": "week of year, 01..53", "ldml": null, "supported": false, "reason": "the ISO week number is derived from a date rather than a field of one, so a parser has nothing to read it into" }
     ]
   },
   "axisFormat": {
@@ -70,7 +73,15 @@
       { "token": "%c", "means": "the date and time, as %a %b %e %H:%M:%S %Y", "ldml": null, "supported": false, "reason": "it expands to %e, which is unsupported" },
       { "token": "%U", "means": "week of the year, Sunday first", "ldml": null, "supported": false, "reason": "the core week number is ISO (Monday first, week 1 holds January 4th) and is a different rule, so answering with it would be wrong rather than approximate" },
       { "token": "%W", "means": "week of the year, Monday first", "ldml": null, "supported": false, "reason": "d3 counts from the first Monday; ISO counts from the week holding January 4th, so the two disagree in January" },
-      { "token": "%w", "means": "weekday number, 0 is Sunday", "ldml": null, "supported": false, "reason": "the core weekday number is ISO (1 is Monday), so the same digit would mean a different day" }
+      { "token": "%w", "means": "weekday number, 0 is Sunday", "ldml": null, "supported": false, "reason": "the core weekday number is ISO (1 is Monday), so the same digit would mean a different day" },
+      { "token": "%f", "means": "microseconds", "ldml": null, "supported": false, "reason": "microseconds are below the millisecond this suite measures time in" },
+      { "token": "%g", "means": "ISO 8601 week-based year without century", "ldml": null, "supported": false, "reason": "the week-based year is a second year field, and the core parts record has one year" },
+      { "token": "%G", "means": "ISO 8601 week-based year with century", "ldml": null, "supported": false, "reason": "the week-based year is a second year field, and the core parts record has one year" },
+      { "token": "%q", "means": "quarter of the year", "ldml": null, "supported": false, "reason": "a quarter on a time axis is a label rather than a tick this engine plans" },
+      { "token": "%Q", "means": "milliseconds since the epoch", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field" },
+      { "token": "%s", "means": "seconds since the epoch", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field" },
+      { "token": "%u", "means": "ISO 8601 weekday number, Monday 1", "ldml": null, "supported": false, "reason": "the ISO weekday number is a tick label this engine does not plan" },
+      { "token": "%V", "means": "ISO 8601 week of the year", "ldml": null, "supported": false, "reason": "the ISO week number is a tick label this engine does not plan" }
     ]
   },
   "tickInterval": {

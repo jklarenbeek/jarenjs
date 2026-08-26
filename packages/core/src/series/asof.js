@@ -30,7 +30,7 @@
 // that has not is a forecast.
 
 import { canonicalSeries } from './normalize.js';
-import { selectorOf } from './selector.js';
+import { selectorOf, requireSpecMembers } from './selector.js';
 import { parseDuration, durationToMs } from '../dates/duration.js';
 
 /** @typedef {import('./normalize.js').Sample} Sample */
@@ -82,6 +82,19 @@ function lastAtSameInstant(rows) {
 }
 
 /**
+ * `asOfJoin`'s closed specification: which way to look, how far, what
+ * makes two rows comparable, and where each side keeps its members.
+ *
+ * This is the one series kernel whose spelling a query DOCUMENT cannot
+ * reuse: `left`/`right` are nested selector records, and §8.16 flattens
+ * them to `by`, `leftAt` and `rightAt` so the whole spec stays a
+ * literal. `@jarenjs/json` therefore keeps its own list, and says so.
+ */
+export const ASOF_MEMBERS = Object.freeze([
+  'direction', 'tolerance', 'key', 'left', 'right',
+]);
+
+/**
  * Join each left sample to the right sample that was current for it.
  *
  * The result is one record **per left row**, in the left series'
@@ -129,8 +142,7 @@ function lastAtSameInstant(rows) {
  * asOfJoin(readings, calibrations, { key: 'sensor' });   // per sensor
  */
 export function asOfJoin(left, right, spec = {}) {
-  if (spec === null || typeof spec !== 'object')
-    throw new TypeError('an as-of spec is an object');
+  requireSpecMembers(spec, ASOF_MEMBERS, 'asOfJoin', 'an as-of spec is an object');
   const direction = spec.direction ?? 'backward';
   if (typeof direction !== 'string' || !DIRECTIONS.includes(direction)) {
     throw new TypeError(`direction is ${DIRECTIONS.map((d) => `'${d}'`).join(', ')}, not ${

@@ -32,7 +32,8 @@
 import { addToParts } from '../dates/civil.js';
 import { parseDuration, durationToMs } from '../dates/duration.js';
 import { toEpoch, canonicalSeries, lowerBoundTime } from './normalize.js';
-import { resolveClock } from './zone.js';
+import { requireSpecMembers } from './selector.js';
+import { resolveClock, CLOCK_MEMBERS } from './zone.js';
 
 /** @typedef {import('./normalize.js').Sample} Sample */
 /** @typedef {import('./zone.js').Clock} Clock */
@@ -286,6 +287,15 @@ function requireMember(name, allowed, role) {
 }
 
 /**
+ * `resampleSeries`' closed specification: the D5 bucket contract, the
+ * clock it reads and where a row keeps its instant and its reading.
+ */
+export const RESAMPLE_MEMBERS = Object.freeze([
+  'every', 'origin', 'start', 'end', 'aggregate', 'fill', 'at', 'value',
+  ...CLOCK_MEMBERS,
+]);
+
+/**
  * Bucket a series, reduce each bucket to one number, and say what the
  * empty ones mean.
  *
@@ -353,8 +363,8 @@ function requireMember(name, allowed, role) {
  * resampleSeries(readings, { every: 'P1M', zone: 'Europe/Amsterdam', provider });
  */
 export function resampleSeries(rows, spec) {
-  if (spec === null || typeof spec !== 'object')
-    throw new TypeError('a resample spec is an object with an \'every\'');
+  requireSpecMembers(spec, RESAMPLE_MEMBERS, 'resampleSeries',
+    'a resample spec is an object with an \'every\'');
   const samples = canonicalSeries(rows, spec);
   const buckets = compileBuckets(spec, spec);
   const aggregate = requireMember(spec.aggregate ?? 'mean', AGGREGATES, 'aggregate');

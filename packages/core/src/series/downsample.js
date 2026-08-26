@@ -44,6 +44,7 @@
 // looking at.
 
 import { canonicalSeries } from './normalize.js';
+import { requireSpecMembers } from './selector.js';
 
 /** @typedef {import('./normalize.js').Sample} Sample */
 
@@ -58,6 +59,15 @@ import { canonicalSeries } from './normalize.js';
  */
 
 const METHODS = Object.freeze(['lttb', 'minmax']);
+
+/**
+ * `downsampleSeries`' closed specification: how many points may come
+ * back, which strategy chooses them, and where a row keeps its
+ * instant and its reading.
+ */
+export const DOWNSAMPLE_MEMBERS = Object.freeze([
+  'target', 'method', 'at', 'value',
+]);
 
 /**
  * Reduce a series to at most `target` points without bridging a gap or
@@ -80,8 +90,8 @@ const METHODS = Object.freeze(['lttb', 'minmax']);
  *   downsampleSeries(readings, { target: 800 });
  */
 export function downsampleSeries(rows, spec) {
-  if (spec === null || typeof spec !== 'object')
-    throw new TypeError('a downsample spec is an object with a \'target\'');
+  requireSpecMembers(spec, DOWNSAMPLE_MEMBERS, 'downsampleSeries',
+    'a downsample spec is an object with a \'target\'');
   const method = spec.method ?? 'lttb';
   if (typeof method !== 'string' || !METHODS.includes(method)) {
     throw new TypeError(`method is ${METHODS.map((m) => `'${m}'`).join(', ')}, not ${

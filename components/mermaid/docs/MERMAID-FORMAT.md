@@ -181,6 +181,16 @@ was read — is `test/mermaid/fixtures/gantt-grammar.json`, and
 `test/mermaid/gantt.test.js` pins the code against it in both
 directions.
 
+Both directions is a closed loop, so the table is also checked against
+the shipped chunk it was read from: dayjs' parse table is inlined there,
+and every token Mermaid really accepts must appear. A token in neither
+list is not refused — it becomes literal text, and then the diagram's
+own dates are what look wrong. `w`, `ww` and `Y` reached the tree that
+way; the week numbers are now refused by name (a week number is derived
+from a date rather than a field of one, which is why `compileDateParser`
+will not read one either) and `Y` is the signed variable-width year
+core's `y` already spells.
+
 #### Task forms and working days
 
 The field-count rule is Mermaid's own: one field is an end, two are a

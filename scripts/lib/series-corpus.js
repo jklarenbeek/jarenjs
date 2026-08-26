@@ -969,4 +969,50 @@ export function seriesCollectionCase(entry, samples) {
   }
 }
 
+/**
+ * One case, projected onto a SEQUENCE: the source `@jarenjs/linq`
+ * carries, the document to attach to it, and the answer
+ * `referenceAnswer` recorded. `null` for a case the fluent surface
+ * cannot be handed — there is none today, and the shape is kept so a
+ * later kind can say so.
+ *
+ * The fluent surface is a sequence, and the corpus documents are rooted
+ * at an OBJECT holding named members (`$.rows[*]`, `$.left[*]`,
+ * `$.a`). So the root object becomes the one item the sequence holds,
+ * and every operand `$.x` becomes `$[0].x` — the same question, spelled
+ * at the only root `fromDocument` can bind.
+ *
+ * Only the operator's own TOP-LEVEL string arguments are rebased. An
+ * OBJECT argument of these five operators is always a frozen literal —
+ * a resample/rolling/as-of spec, or `$time-bucket`'s calendar context —
+ * and `$` inside one of those reads as the ROW rather than as the
+ * document (QUERY-FORMAT §8.16), so descending into it would turn a row
+ * selector into a root path and answer a different question.
+ * @param {any} entry - a fixture case
+ * @param {Sample[]} samples
+ * @returns {{ source: any[], document: any, expected: any,
+ *   shape: string, refuses: string | null } | null}
+ */
+export function seriesSequenceCase(entry, samples) {
+  if (entry.doc === undefined)
+    return null;
+  const names = Object.keys(entry.doc);
+  if (names.length !== 1) {
+    throw new Error(`case '${entry.name}' is not a single-operator document; `
+      + 'the rebasing rule below only knows how to move an operator\'s own operands');
+  }
+  const operator = names[0];
+  const args = entry.doc[operator];
+  const rebased = (Array.isArray(args) ? args : [args])
+    .map((arg) => (typeof arg === 'string' && arg.startsWith('$.')
+      ? `$[0].${arg.slice(2)}` : arg));
+  return {
+    source: [entry.input ?? { rows: caseSeries(entry, samples) }],
+    document: { [operator]: Array.isArray(args) ? rebased : rebased[0] },
+    expected: entry.kind === 'invalid' ? undefined : referenceAnswer(entry, samples),
+    shape: entry.kind,
+    refuses: entry.kind === 'invalid' ? entry.code : null,
+  };
+}
+
 //#endregion

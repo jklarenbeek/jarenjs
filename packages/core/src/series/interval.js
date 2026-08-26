@@ -35,6 +35,7 @@
 // where a result IS a row.
 
 import { toEpoch, normalizeIntervals } from './normalize.js';
+import { requireSpecMembers } from './selector.js';
 import { parseDuration, durationToMs } from '../dates/duration.js';
 
 /** @typedef {import('./normalize.js').Interval} Interval */
@@ -158,6 +159,12 @@ export function intersectInterval(a, b) {
 }
 
 /**
+ * `mergeIntervals`' closed specification: whether spans that touch
+ * join, which availability normally wants and a handover does not.
+ */
+export const MERGE_MEMBERS = Object.freeze(['adjacent']);
+
+/**
  * The union of `intervals`, as the fewest disjoint spans that cover the
  * same instants, ascending.
  *
@@ -179,6 +186,8 @@ export function intersectInterval(a, b) {
  * // [{ start: 0, end: 10 }, { start: 10, end: 20 }]
  */
 export function mergeIntervals(intervals, options = {}) {
+  requireSpecMembers(options, MERGE_MEMBERS, 'mergeIntervals',
+    'a merge spec is an object with an \'adjacent\'');
   const adjacent = options.adjacent ?? true;
   const sorted = normalizeIntervals(intervals);
   /** @type {Interval[]} */
@@ -312,6 +321,12 @@ export function coverageOf(intervals, within) {
 }
 
 /**
+ * `findSlots`' closed specification: how long a slot is and how far
+ * apart two of them start. Enumeration, never a constraint solver.
+ */
+export const SLOTS_MEMBERS = Object.freeze(['duration', 'step']);
+
+/**
  * Every place a span of `duration` fits inside `availability`.
  *
  * Availability is merged first — two touching windows are one window,
@@ -342,8 +357,7 @@ export function coverageOf(intervals, within) {
  * // [{ start: 0, end: 60 }, { start: 30, end: 90 }]
  */
 export function findSlots(availability, spec) {
-  if (spec === null || typeof spec !== 'object')
-    throw new TypeError('a slot spec is an object with a duration');
+  requireSpecMembers(spec, SLOTS_MEMBERS, 'findSlots', 'a slot spec is an object with a duration');
   const duration = requireWidth(spec.duration, 'duration');
   const step = spec.step === undefined ? duration : requireWidth(spec.step, 'step');
   const windows = mergeIntervals(availability);

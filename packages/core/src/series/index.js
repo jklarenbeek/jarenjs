@@ -67,18 +67,20 @@ export {
   gapsWithin,
   coverageOf,
   findSlots,
+  MERGE_MEMBERS,
+  SLOTS_MEMBERS,
 } from './interval.js';
 
 export { createIntervalIndex } from './interval-index.js';
 
-export { resolveClock } from './zone.js';
+export { resolveClock, CLOCK_MEMBERS } from './zone.js';
 
-export { compileBuckets, resampleSeries } from './bucket.js';
+export { compileBuckets, resampleSeries, RESAMPLE_MEMBERS } from './bucket.js';
 
-export { rollingSeries } from './rolling.js';
+export { rollingSeries, ROLLING_MEMBERS } from './rolling.js';
 
-export { asOfJoin } from './asof.js';
+export { asOfJoin, ASOF_MEMBERS } from './asof.js';
 
-export { downsampleSeries } from './downsample.js';
+export { downsampleSeries, DOWNSAMPLE_MEMBERS } from './downsample.js';
 
 //#endregion

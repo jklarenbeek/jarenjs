@@ -43,6 +43,8 @@ const READERS = [
     'the validated query vocabulary'],
   ['test/db/series-oracle.test.js', /scripts\/lib\/series-corpus\.js/,
     'the indexed database, on Node and on real wasm'],
+  ['test/linq/series-corpus.test.js', /scripts\/lib\/series-corpus\.js/,
+    'the fluent surface, through fromDocument'],
 ];
 
 describe('the series corpus has one source', () => {
@@ -66,6 +68,15 @@ describe('the series corpus has one source', () => {
           `${file} names an unexpected corpus file: ${hit}`);
       }
     }
+  });
+
+  it('the sequence projection is the corpus reader\'s too', () => {
+    // one root per executor, one place that says how a case reaches it
+    const suite = read('test/linq/series-corpus.test.js');
+    assert.match(suite, /seriesSequenceCase/, 'the LINQ suite projects through the one reader');
+    assert.doesNotMatch(suite, /\.kind\s*===/,
+      'a second reading of `kind` is a corpus that can disagree with itself');
+    assert.doesNotMatch(suite, /\.source\s*===/, 'the same failure');
   });
 
   it('the collection projection is the corpus reader\'s, not a second reading of `kind`', () => {

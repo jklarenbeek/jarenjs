@@ -41,11 +41,22 @@
 import { addToParts } from '../dates/civil.js';
 import { canonicalSeries } from './normalize.js';
 import { compileSpan } from './bucket.js';
+import { requireSpecMembers } from './selector.js';
+import { CLOCK_MEMBERS } from './zone.js';
 
 /** @typedef {import('./normalize.js').Sample} Sample */
 
 /** What a window's rows can be reduced to — the seven of D5. */
 const AGGREGATES = Object.freeze(['sum', 'mean', 'min', 'max', 'first', 'last', 'count']);
+
+/**
+ * `rollingSeries`' closed specification: a window measured in time,
+ * how much of one counts, the clock a calendar width walks, and where
+ * a row keeps its instant and its reading.
+ */
+export const ROLLING_MEMBERS = Object.freeze([
+  'width', 'aggregate', 'minPeriods', 'at', 'value', ...CLOCK_MEMBERS,
+]);
 
 /**
  * A rolling aggregate over a time-width window.
@@ -93,8 +104,8 @@ const AGGREGATES = Object.freeze(['sum', 'mean', 'min', 'max', 'first', 'last', 
  * rollingSeries(readings, { width: 'PT1M', minPeriods: 60 });
  */
 export function rollingSeries(rows, spec) {
-  if (spec === null || typeof spec !== 'object')
-    throw new TypeError('a rolling spec is an object with a \'width\'');
+  requireSpecMembers(spec, ROLLING_MEMBERS, 'rollingSeries',
+    'a rolling spec is an object with a \'width\'');
   const samples = canonicalSeries(rows, spec);
   const span = compileSpan(spec.width, spec);
   const aggregate = spec.aggregate ?? 'mean';

@@ -16,6 +16,17 @@ every bound is data, and an operation that needs a window and was given
 none derives it from its own input, never from the clock. Import the
 barrel (`@jarenjs/core/series`) or a single module.
 
+**Every specification is closed.** `resampleSeries`, `rollingSeries`,
+`asOfJoin`, `downsampleSeries`, `findSlots` and `mergeIntervals` each
+publish the members they admit — `RESAMPLE_MEMBERS`, `ROLLING_MEMBERS`,
+`ASOF_MEMBERS`, `DOWNSAMPLE_MEMBERS`, `SLOTS_MEMBERS`, `MERGE_MEMBERS`
+— and anything else is a `TypeError` naming the near miss. `minPeriod`
+for `minPeriods` accepted and ignored is a window with no minimum and a
+plausible number; `timezone` for `zone` is the quiet fall back to UTC
+that the clock's own refusal exists to prevent. The query language
+reads these same lists (§8.16), minus `provider`, which is a pair of
+functions and therefore not something a document can carry.
+
 ## Normalization — `normalize.js`
 
 `toEpoch(value)` is the one door: a finite number passes through, a
@@ -306,20 +317,20 @@ unless the kernel answered the identical rows the references did.
 
 The kernel is not the ceiling and does not claim to be. A one-pass loop
 written for one question validates nothing, normalizes nothing and
-returns a bare pair. Against those loops the kernel costs <!--bm:series.kernelVsCeiling-->4.1× the one-pass bucket loop and 16.8× the one-pass ring sum<!--/bm-->,
-and against the vocabulary a consumer had instead it is <!--bm:series.kernelVsQuery-->60.6× faster than the generic query bucket and 26.3× faster than the labelled count window<!--/bm-->.
+returns a bare pair. Against those loops the kernel costs <!--bm:series.kernelVsCeiling-->3.4× the one-pass bucket loop and 6.2× the one-pass ring sum<!--/bm-->,
+and against the vocabulary a consumer had instead it is <!--bm:series.kernelVsQuery-->73.6× faster than the generic query bucket and 81.2× faster than the labelled count window<!--/bm-->.
 
 <!--bm:series.kernelTable-->
 | operation | median | rows | against | what that is | ratio |
 |---|---:|---:|---:|---|---:|
-| `resampleSeries`, 60 s buckets | 1.9 ms | 1,667 | 0.47 ms | one-pass loop | 4.1× |
-| `resampleSeries`, + linear fill | 1.3 ms | 1,657 | 1.2 ms | the same buckets, omitting | 1.0× |
-| `rollingSeries`, 60 s window | 25 ms | 100,000 | 1.5 ms | one-pass ring sum | 16.8× |
-| `asOfJoin`, one left row per 100 | 2.1 ms | 1,000 | 2.3 ms | one index read per row | 0.9× |
-| `downsampleSeries`, lttb, gap corpus | 1.8 ms | 2,000 | 2.1 ms | the same line with no holes in it | 0.9× |
+| `resampleSeries`, 60 s buckets | 1.5 ms | 1,667 | 0.45 ms | one-pass loop | 3.4× |
+| `resampleSeries`, + linear fill | 1.1 ms | 1,657 | 1 ms | the same buckets, omitting | 1.0× |
+| `rollingSeries`, 60 s window | 7.2 ms | 100,000 | 1.2 ms | one-pass ring sum | 6.2× |
+| `asOfJoin`, one left row per 100 | 1.7 ms | 1,000 | 2.2 ms | one index read per row | 0.8× |
+| `downsampleSeries`, lttb, gap corpus | 1.6 ms | 2,000 | 1.8 ms | the same line with no holes in it | 0.9× |
 <!--/bm-->
 
-A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--bm:series.asofShape-->The as-of join costs 23.6× a handful of index reads, and beats them by 1.1× once there is one left row per hundred right ones. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/bm-->
+A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--bm:series.asofShape-->The as-of join costs 14.7× a handful of index reads, and beats them by 1.3× once there is one left row per hundred right ones. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/bm-->
 
 And the seam has a price that this corpus cannot charge it. <!--bm:series.zoneCost-->Walking every boundary through an injected zone provider costs 1.0× the integer ladder over an identical answer — near parity because it is near nothing, since the benchmark corpus spans 28 hours and holds two daily boundaries. What the suite gates instead is that the provider is consulted per boundary rather than per sample.<!--/bm-->
 
