@@ -1,0 +1,1 @@
+{ "$rolling": ["$.rows[*]", { "width": 60000, "minPeriod": 2 }] }

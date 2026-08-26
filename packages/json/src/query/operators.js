@@ -58,6 +58,14 @@ import {
 } from '@jarenjs/core/dates';
 import { isVector, cosineSimilarity } from '@jarenjs/core/vector';
 import {
+  toEpoch,
+  overlapsInterval,
+  compileBuckets,
+  resampleSeries,
+  rollingSeries,
+  asOfJoin,
+} from '@jarenjs/core/series';
+import {
   isPosition,
   bboxOf,
   bboxIntersects,
@@ -83,6 +91,13 @@ import {
   CARD_ZERO, CARD_ONE, CARD_OPT, CARD_MANY, joinCard, sumCard,
 } from './normalize.js';
 import { compileExistsTest } from './compile.js';
+import {
+  CLOCK_MEMBERS, RESAMPLE_MEMBERS, ROLLING_MEMBERS, ASOF_MEMBERS,
+  AGGREGATES, FILLS, DIRECTIONS,
+  requireSpec, requireEnum, requireNumber, requireInstant, requireSpan,
+  compileSelector, compileClock, buildKernelSpec,
+  seriesArg, intervalArg, seriesRefusal,
+} from './series.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -99,6 +114,13 @@ const ARGS_0N = Object.freeze({ kinds: Object.freeze(['expr']), min: 0, variadic
 const ARGS_1N = Object.freeze({ kinds: Object.freeze(['expr']), min: 1, variadic: true });
 // the schema operators $valid/$assert: [expr, schema] (section 8.11)
 const ARGS_EXPR_SCHEMA = Object.freeze({ kinds: Object.freeze(['expr', 'schema']), min: 2 });
+// the series operators (section 8.16): the operand(s), then a spec
+// captured VERBATIM - a literal, so the width, the aggregate, the fill
+// and the clock are read once at compile time and never per row
+const ARGS_EXPR_SPEC = Object.freeze({ kinds: Object.freeze(['expr', 'raw']), min: 2 });
+const ARGS_ASOF = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'raw']), min: 2 });
+const ARGS_TIME_BUCKET = Object.freeze({
+  kinds: Object.freeze(['expr', 'expr', 'expr', 'raw']), min: 2 });
 
 const RESULT_ONE = () => CARD_ONE;
 const RESULT_OPT = () => CARD_OPT;
@@ -899,6 +921,120 @@ function vectorArg(v, docPath) {
     }
   }
   return v;
+}
+
+//#endregion
+
+//#region series operators (section 8.16)
+// Five operators, and not one loop among them. Interval overlap,
+// bucketing, resampling, a window measured in time and an as-of join all
+// exist once already, in `@jarenjs/core/series`, where the chart engine
+// and the database read them too; these entries carry a document's
+// literal spec across to that kernel and its answer back.
+//
+// The split between the two error families is the same one section 8.14
+// draws, moved one level up. Everything a document AUTHORED - the width,
+// the aggregate, the fill policy, the wall clock, the path a row keeps
+// its instant at - is checked when the query compiles (`JQ0003`), so a
+// misspelled member is a broken document rather than a surprise on the
+// ten-thousandth row. Everything the DATA decides - a row that is not a
+// sample, an instant that names none, a local time that never happened -
+// is `JQ2001` against the operand that carried it. An as-of row with no
+// match is neither: it is `right: null`, which is an answer.
+//
+// The instants in and out are epoch milliseconds, because that is what
+// D3 makes canonical and what an indexed column stores. `$epoch` and
+// `$datetime` are the two conversions, and they already exist.
+
+/** The default clock: UTC, which needs no context at all. */
+const EMPTY_CLOCK = Object.freeze({});
+
+/** The default spec: every kernel default, none of them restated here. */
+const EMPTY_SPEC = Object.freeze({});
+
+/** How each `$resample` spec member is read. */
+const RESAMPLE_RULES = Object.freeze({
+  every: requireSpan,
+  origin: requireInstant,
+  start: requireInstant,
+  end: requireInstant,
+  aggregate: (v, m, p) => requireEnum(v, AGGREGATES, m, p),
+  fill: (v, m, p) => requireEnum(v, FILLS, m, p),
+  at: null, value: null, // selectors; buildKernelSpec compiles these
+});
+
+/** How each `$rolling` spec member is read. */
+const ROLLING_RULES = Object.freeze({
+  width: requireSpan,
+  aggregate: (v, m, p) => requireEnum(v, AGGREGATES, m, p),
+  minPeriods: requireNumber,
+  at: null, value: null,
+});
+
+// The shared shape of $resample and $rolling: [series, spec]. The spec
+// compiles once, into the record the kernel takes, and the closure does
+// nothing per call but read its rows and hand them over.
+function seriesEntry(name, members, rules, required, kernel) {
+  return {
+    params: ARGS_EXPR_SPEC,
+    result: RESULT_MANY,
+    compile: (gets, args, docPath, node) => {
+      const seriesGet = gets[0];
+      const seriesPath = args[0].docPath;
+      const specNode = args[1];
+      const specPath = specNode.docPath;
+      const spec = requireSpec(specNode.value, members, name, specPath);
+      if (!hasOwn(spec, required)) {
+        throw new JsonQueryCompileError('JQ0003',
+          `'${name}' needs a spec member '${required}'`, specPath);
+      }
+      const kernelSpec = Object.freeze(
+        buildKernelSpec(spec, node.zoneProvider ?? null, specPath, rules));
+      // the kernel owns the remaining rules - a width mixing the
+      // calendar and clock families, a minPeriods that is not a whole
+      // number, a tolerance that is not a fixed width. Running it over
+      // no rows AT COMPILE TIME asks it all of them without copying one
+      // of them here, so a literal spec that cannot work is a broken
+      // document rather than a surprise on the first row
+      try {
+        kernel([], kernelSpec);
+      }
+      catch (e) {
+        if (!(e instanceof TypeError))
+          throw e;
+        throw new JsonQueryCompileError('JQ0003',
+          `'${name}' spec: ${e.message}`, specPath, { cause: e });
+      }
+      return (f) => {
+        const rows = seriesArg(seriesGet(f), seriesPath);
+        try {
+          return seqOf(kernel(rows, kernelSpec));
+        }
+        catch (e) {
+          throw seriesRefusal(e, specPath);
+        }
+      };
+    },
+  };
+}
+
+// $asof's spec in the kernel's spelling: `by` is one key for both sides,
+// and `leftAt`/`rightAt` say where each side keeps its instant when the
+// two documents disagree about the name.
+function asOfSpec(spec, docPath) {
+  /** @type {any} */
+  const out = {};
+  if (hasOwn(spec, 'direction'))
+    out.direction = requireEnum(spec.direction, DIRECTIONS, 'direction', docPath);
+  if (hasOwn(spec, 'tolerance'))
+    out.tolerance = requireSpan(spec.tolerance, 'tolerance', docPath);
+  if (hasOwn(spec, 'by'))
+    out.key = compileSelector(spec.by, 'by', docPath);
+  if (hasOwn(spec, 'leftAt'))
+    out.left = Object.freeze({ at: compileSelector(spec.leftAt, 'leftAt', docPath) });
+  if (hasOwn(spec, 'rightAt'))
+    out.right = Object.freeze({ at: compileSelector(spec.rightAt, 'rightAt', docPath) });
+  return Object.freeze(out);
 }
 
 //#endregion
@@ -2019,6 +2155,165 @@ export const OPERATORS = Object.freeze({
         if (!isDateTimeRFC3339(iso))
           throw runtimeError('JQ2001', `${v} is outside the range RFC 3339 can spell`, docPath);
         return iso;
+      };
+    },
+  },
+
+  //#endregion
+
+  //#region section 8.16 - time series
+
+  '$overlaps': { // do two half-open intervals share an instant?
+    params: ARGS_2,
+    result: (cards) => (cards[0] === CARD_ONE && cards[1] === CARD_ONE ? CARD_ONE : CARD_OPT),
+    resultType: RT_BOOLEAN,
+    compile: (gets, args) => {
+      const leftGet = gets[0];
+      const leftPath = args[0].docPath;
+      const rightGet = gets[1];
+      const rightPath = args[1].docPath;
+      return (f) => {
+        // a row with no span is not overlapping and not an error: the
+        // empty sequence propagates, as it does for every date operator
+        const left = leftGet(f);
+        if (left === EMPTY)
+          return EMPTY;
+        const right = rightGet(f);
+        if (right === EMPTY)
+          return EMPTY;
+        try {
+          return overlapsInterval(intervalArg(left, leftPath), intervalArg(right, rightPath));
+        }
+        catch (e) {
+          throw seriesRefusal(e, leftPath);
+        }
+      };
+    },
+  },
+
+  '$time-bucket': { // the instant labelling the bucket an instant falls in
+    params: ARGS_TIME_BUCKET,
+    // every EXPRESSION operand propagates the empty sequence, so the
+    // answer is exactly-one only when none of them can be empty - a
+    // CARD_ONE declaration over an optional width would let the internal
+    // empty marker escape into an array or object constructor
+    result: (cards) => (cards.every((c) => c === CARD_ONE) ? CARD_ONE : CARD_OPT),
+    resultType: RT_INTEGER,
+    compile: (gets, args, docPath, node) => {
+      const atGet = gets[0];
+      const atPath = args[0].docPath;
+      const everyGet = gets[1];
+      const everyPath = args[1].docPath;
+      const originGet = args.length >= 3 ? gets[2] : null;
+      // the calendar context is the one literal position: a clock read
+      // per row could not be resolved once, and a named zone needs a
+      // provider a JSON document has no way to carry
+      const clock = args.length === 4
+        ? compileClock(
+          requireSpec(args[3].value, CLOCK_MEMBERS, '$time-bucket', args[3].docPath),
+          node.zoneProvider ?? null, args[3].docPath)
+        : EMPTY_CLOCK;
+      // the ladder is a function of (every, origin) alone, and both are
+      // almost always literal - so the memo makes a computed width
+      // CORRECT, and costs a constant pair of comparisons when it is not
+      let lastEvery;
+      let lastOrigin;
+      let buckets = null;
+      // the common case is a literal width and a literal origin, and
+      // then the ladder belongs to the query rather than to a row: a
+      // duration neither family recognizes is a broken document
+      if (args[1].kind === 'literal' && (originGet === null || args[2].kind === 'literal')) {
+        lastEvery = args[1].value;
+        lastOrigin = originGet === null || args[2].value === null ? EMPTY : args[2].value;
+        try {
+          buckets = compileBuckets(
+            lastOrigin === EMPTY ? { every: lastEvery } : { every: lastEvery, origin: lastOrigin },
+            clock);
+        }
+        catch (e) {
+          if (!(e instanceof TypeError))
+            throw e;
+          throw new JsonQueryCompileError('JQ0003',
+            `'$time-bucket': ${e.message}`, everyPath, { cause: e });
+        }
+      }
+      return (f) => {
+        const at = atGet(f);
+        if (at === EMPTY)
+          return EMPTY;
+        const every = everyGet(f);
+        if (every === EMPTY)
+          return EMPTY;
+        // an absent origin is the ladder's own default; `null` spells it
+        // for a caller who has a fourth argument to give
+        let origin = originGet === null ? EMPTY : originGet(f);
+        if (origin === null)
+          origin = EMPTY;
+        if (buckets === null || every !== lastEvery || origin !== lastOrigin) {
+          if (typeof every !== 'string' && typeof every !== 'number') {
+            throw runtimeError('JQ2001',
+              `expected a bucket width, got ${describeItem(every)}`, everyPath);
+          }
+          try {
+            buckets = compileBuckets(origin === EMPTY ? { every } : { every, origin }, clock);
+          }
+          catch (e) {
+            buckets = null;
+            throw seriesRefusal(e, everyPath);
+          }
+          lastEvery = every;
+          lastOrigin = origin;
+        }
+        try {
+          return buckets.floor(toEpoch(at));
+        }
+        catch (e) {
+          throw seriesRefusal(e, atPath);
+        }
+      };
+    },
+  },
+
+  '$resample': seriesEntry('$resample', RESAMPLE_MEMBERS, RESAMPLE_RULES, 'every', resampleSeries),
+
+  '$rolling': seriesEntry('$rolling', ROLLING_MEMBERS, ROLLING_RULES, 'width', rollingSeries),
+
+  '$asof': { // the value that was current when this happened
+    params: ARGS_ASOF,
+    result: RESULT_MANY,
+    // no clock: a join is instant arithmetic, so there is no calendar
+    // boundary to fall on and no zone provider to resolve
+    compile: (gets, args, docPath) => {
+      const leftGet = gets[0];
+      const leftPath = args[0].docPath;
+      const rightGet = gets[1];
+      const rightPath = args[1].docPath;
+      const specNode = args.length === 3 ? args[2] : null;
+      const spec = specNode === null
+        ? EMPTY_SPEC
+        : asOfSpec(requireSpec(specNode.value, ASOF_MEMBERS, '$asof', specNode.docPath),
+          specNode.docPath);
+      const specPath = specNode === null ? docPath : specNode.docPath;
+      try { // the direction and the tolerance, asked of the kernel once
+        asOfJoin([], [], spec);
+      }
+      catch (e) {
+        if (!(e instanceof TypeError))
+          throw e;
+        throw new JsonQueryCompileError('JQ0003',
+          `'$asof' spec: ${e.message}`, specPath, { cause: e });
+      }
+      return (f) => {
+        const left = seriesArg(leftGet(f), leftPath);
+        const right = seriesArg(rightGet(f), rightPath);
+        try {
+          // a left row with nothing at or before it is `right: null`;
+          // no match is data, and the row stays in the answer
+          return seqOf(asOfJoin(left, right, spec));
+        }
+        catch (e) {
+          throw seriesRefusal(e, specPath);
+        }
       };
     },
   },

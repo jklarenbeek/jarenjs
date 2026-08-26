@@ -172,6 +172,43 @@ const unary = (op) => function (/** @type {any} */ record) {
 };
 
 /**
+ * `$date-add` / `$date-sub`: `[date, duration]` or `[date, amount, unit]`.
+ * @param {any} record
+ * @param {any} amount - an ISO 8601 duration, or a number of units
+ * @param {any} [unit] - the calendar unit, when `amount` is a number
+ * @returns {any[]}
+ */
+function shiftArgs(record, amount, unit) {
+  return unit === undefined
+    ? [record.doc, toExpression(amount)]
+    : [record.doc, toExpression(amount), toExpression(unit)];
+}
+
+/**
+ * A §8.16 spec: captured data, embedded verbatim.
+ *
+ * These are the one place this surface hands the compiler something it
+ * must NOT evaluate — a width, an aggregate, a fill policy and a row
+ * selector are read once when the query compiles, which is what makes
+ * them checkable at all. `toExpression` would turn `{ every: 'PT1H' }`
+ * into a map constructor and `{ at: '$.on' }` into a path; the spec is
+ * therefore embedded as it was written, and every rule about what it may
+ * contain stays where it already is, in the query compiler (`JQ0003`).
+ *
+ * @param {any} spec
+ * @param {string} method - for the message
+ * @returns {any} the spec, verbatim
+ */
+function literalSpec(spec, method) {
+  if (!isPlainJson(spec) || spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
+    throw new LinqBuildError('JL0005',
+      `${method}() takes a plain literal spec object; it is read once when the query`
+      + ' compiles, so it cannot be an expression or carry a captured value');
+  }
+  return spec;
+}
+
+/**
  * The operator methods, name → builder(record, ...args). One table so
  * the mapping in LINQ-FORMAT.md §4 has exactly one code counterpart.
  * Null prototype: `constructor`/`toString` must read as member access,
@@ -212,10 +249,65 @@ const METHODS = {
   // `(u, g) => ({ n: g.count() })`)
   count: unary('$count'), sum: unary('$sum'), avg: unary('$avg'),
   min: unary('$min'), max: unary('$max'),
-  // §8.13 dates (the scalar component family; the full date surface
-  // arrives with the relational order)
+  // §8.13 dates — the whole family, not a corner of it. A date in this
+  // suite is an RFC 3339 STRING, so every one of these is an ordinary
+  // string operator with a calendar's worth of rules behind it, and
+  // every one lowers to the operator of the same name: there is no
+  // LINQ-only date semantics to learn and nothing here a hand-written
+  // document could not have said.
+  //
+  // `dateFormat` rather than `format`, and `dateAdd`/`dateSub` rather
+  // than `add`/`sub`, because `add` is already `$add` on this surface —
+  // the same reason §8.14 spells `geoArea`. Where no method name is
+  // taken, the operator's own name is used unprefixed (`week`,
+  // `quarter`, `startOf`).
   year: unary('$year'), month: unary('$month'), day: unary('$day'),
-  epoch: unary('$epoch'),
+  hours: unary('$hours'), minutes: unary('$minutes'), seconds: unary('$seconds'),
+  offset: unary('$offset'), epoch: unary('$epoch'), datetime: unary('$datetime'),
+  week: unary('$week'), weekYear: unary('$week-year'),
+  quarter: unary('$quarter'), weekday: unary('$weekday'),
+  isDate: unary('$is-date'), isTime: unary('$is-time'),
+  isDatetime: unary('$is-datetime'), isDuration: unary('$is-duration'),
+  startOf: binary('$start-of'), endOf: binary('$end-of'),
+  dateFormat: binary('$date-format'),
+  dateAdd(record, amount, unit) {
+    return makeExpr({ '$date-add': shiftArgs(record, amount, unit) }, record.epoch, false);
+  },
+  dateSub(record, amount, unit) {
+    return makeExpr({ '$date-sub': shiftArgs(record, amount, unit) }, record.epoch, false);
+  },
+  dateDiff(record, to, unit) {
+    return makeExpr(
+      { '$date-diff': [record.doc, toExpression(to), toExpression(unit)] },
+      record.epoch, false);
+  },
+  // §8.16 time series. The three sequence-valued operators take a
+  // VERBATIM spec literal, so the argument is embedded with `$const`'s
+  // discipline - it is captured data, never an expression - and the
+  // compiler owns every rule about what it may say.
+  overlaps: binary('$overlaps'),
+  timeBucket(record, every, origin, context) {
+    const args = [record.doc, toExpression(every)];
+    if (origin !== undefined || context !== undefined)
+      args.push(origin === undefined ? null : toExpression(origin));
+    if (context !== undefined)
+      args.push(literalSpec(context, 'timeBucket'));
+    return makeExpr({ '$time-bucket': args }, record.epoch, false);
+  },
+  resample(record, spec) {
+    return makeExpr({ $resample: [record.doc, literalSpec(spec, 'resample')] },
+      record.epoch, false);
+  },
+  rolling(record, spec) {
+    return makeExpr({ $rolling: [record.doc, literalSpec(spec, 'rolling')] },
+      record.epoch, false);
+  },
+  asof(record, right, spec) {
+    const args = [record.doc, toExpression(right)];
+    if (spec !== undefined)
+      args.push(literalSpec(spec, 'asof'));
+    return makeExpr({ $asof: args }, record.epoch, false);
+  },
   // §8.14 spatial. `geoArea`/`geoLength` rather than `area`/`length`:
   // `length` is already `$string-length` on this surface and renaming a
   // shipped method for symmetry is a breaking change for a cosmetic

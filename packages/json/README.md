@@ -386,9 +386,9 @@ queryJson({
 }, [1, 2, 3, 4, 5]); // [2, 3, 4] — a 3-point moving average
 ```
 
-The operator library (99 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, the spatial family and `$similarity`) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
+The operator library (104 operators: comparisons, IEEE-double arithmetic, logic, strings with I-Regexp `$match`/`$search`/`$replace`, aggregates, sequence tools like `$distinct`/`$subsequence`/`$range`, type predicates and casts, `$coalesce`, the RFC 3339 date family, the spatial family, `$similarity` and the time-series family) is cataloged in [QUERY-FORMAT.md §8](./docs/QUERY-FORMAT.md#8-operators).
 
-**Extending the vocabulary (host opt-in).** The 99 are closed, but a host can add more the way `@jarenjs/validate` gains formats from `@jarenjs/formats`: `createJsltRegistry().use(mathPack).use(financePack)` composes packs of pure `@jarenjs/core` functions into a compiler, so `{ "$sqrt": "$.variance" }` and `{ "$npv": ["$.rate", "$.cashflows[*]"] }` work in a stylesheet, a bare query, and `@jarenjs/linq` — while a document compiled *without* the registry still rejects them. Aggregators fold a `seq` operand to an array before the pure call. See [JSLT-FORMAT.md §13](./docs/JSLT-FORMAT.md#13-registered-operators-host-opt-in-non-normative).
+**Extending the vocabulary (host opt-in).** The 104 are closed, but a host can add more the way `@jarenjs/validate` gains formats from `@jarenjs/formats`: `createJsltRegistry().use(mathPack).use(financePack)` composes packs of pure `@jarenjs/core` functions into a compiler, so `{ "$sqrt": "$.variance" }` and `{ "$npv": ["$.rate", "$.cashflows[*]"] }` work in a stylesheet, a bare query, and `@jarenjs/linq` — while a document compiled *without* the registry still rejects them. Aggregators fold a `seq` operand to an array before the pure call. See [JSLT-FORMAT.md §13](./docs/JSLT-FORMAT.md#13-registered-operators-host-opt-in-non-normative).
 
 **Dates are RFC 3339 strings** ([§8.13](./docs/QUERY-FORMAT.md#813-dates-and-times)): `$is-date`/`$is-time`/`$is-datetime`/`$is-duration` test the lexical forms, `$year`…`$seconds` and `$offset` read components *lexically, in the value's own offset* (so "group by month" means what you expect), `$week`/`$week-year`/`$quarter`/`$weekday` add the derived calendar fields, and `$epoch`/`$datetime` convert to and from epoch milliseconds — the one place a value is shifted to UTC, and therefore the way to compare instants across offsets. There is deliberately no `current-dateTime`: a compiled query is cached by document identity and saved as a rule, so it must answer the same for the same input forever.
 
@@ -480,6 +480,49 @@ queryJson({ $subsequence: [{
 breaks ties by identity, so the same document answers with the same rows every
 time it runs. `@jarenjs/linq` spells the whole chain fluently as
 `.orderByDescending(m => m.embedding.similarity(q), { empty: 'least' }).take(10)`.
+
+### Time series, in five operators
+
+A series is what a document already holds when something has been measured
+repeatedly — records with an instant and a reading — so five operators cover
+the questions a `$for` phrase can ask but cannot answer in one pass
+([§8.16](./docs/QUERY-FORMAT.md#816-time-series)):
+
+```javascript
+queryJson({ $resample: ['$.readings[*]',
+  { every: 'PT1H', aggregate: 'mean', fill: 'linear' }] }, data);
+// [{ at: 1767225600000, value: 4.5, count: 3600 }, …]
+```
+
+`$overlaps` tests two half-open `{start, end}` intervals (touching spans do
+*not* overlap), `$time-bucket` labels the bucket an instant falls in,
+`$resample` aggregates a series into buckets with an explicit fill policy,
+`$rolling` aggregates over a window measured in **time** rather than in rows,
+and `$asof` answers "what was current when this happened" for every left row.
+Each is a call into [`@jarenjs/core/series`](../core/README.md) and nothing
+else — the same kernel a chart and an indexed database read.
+
+The second operand is a **verbatim literal**, not an expression, and that is
+what makes it checkable: the width, the aggregate, the fill policy and the row
+selectors are read once when the query compiles, so an unknown member, a bad
+duration or a wildcard where a selector belongs is `JQ0003` with the near miss
+named. Only what the *data* decides — a row that is not a sample, an instant
+that names none — is `JQ2001`. A left row with no as-of match keeps
+`right: null` and **stays in the answer**: no match is data.
+
+```javascript
+queryJson({ $asof: ['$.trades[*]', '$.quotes[*]',
+  { by: '$.symbol', direction: 'backward', tolerance: 'PT1M' }] }, data);
+```
+
+Instants are epoch milliseconds on both sides; `$epoch` and `$datetime` are the
+conversions, and a row that spells its instant elsewhere is read with a
+selector (`{ at: '$.on' }`) rather than rewritten first. Calendar widths need a
+wall clock: UTC and `{ offset }` need nothing, and a **named zone needs an
+injected `zoneProvider`** — this suite bundles no time-zone database, and a
+document that asked for one without it is refused rather than quietly answered
+in UTC. Nothing here reads a clock: there is no `$now`, for the same reason
+§8.13 has no `current-dateTime`.
 
 ### External parameters
 

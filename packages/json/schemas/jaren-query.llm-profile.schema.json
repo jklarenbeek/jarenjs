@@ -160,6 +160,15 @@
         },
         {
           "$ref": "#/$defs/schemaOperatorPhrase"
+        },
+        {
+          "$ref": "#/$defs/seriesSpecPhrase"
+        },
+        {
+          "$ref": "#/$defs/asOfPhrase"
+        },
+        {
+          "$ref": "#/$defs/timeBucketPhrase"
         }
       ]
     },
@@ -606,6 +615,226 @@
         "minItems": 2,
         "maxItems": 2
       }
+    },
+    "seriesSpec": {
+      "description": "A $resample or $rolling spec (QUERY-FORMAT.md section 8.16): a VERBATIM literal, never an expression, so the width, the aggregate, the fill policy, the wall clock and the row selectors are read once when the query compiles. Closed: an unknown member is JQ0003. 'every'/'width' is an ISO 8601 duration or a count of milliseconds; 'origin'/'start'/'end' are epoch milliseconds or an RFC 3339 string; 'at'/'value' are singular paths where '$' reads as the ROW. A named 'zone' needs an injected zoneProvider - this suite bundles no time-zone database.",
+      "type": "object",
+      "properties": {
+        "every": {
+          "$ref": "#/$defs/seriesSpan"
+        },
+        "width": {
+          "$ref": "#/$defs/seriesSpan"
+        },
+        "origin": {
+          "$ref": "#/$defs/seriesInstant"
+        },
+        "start": {
+          "$ref": "#/$defs/seriesInstant"
+        },
+        "end": {
+          "$ref": "#/$defs/seriesInstant"
+        },
+        "aggregate": {
+          "enum": [
+            "sum",
+            "mean",
+            "min",
+            "max",
+            "first",
+            "last",
+            "count"
+          ]
+        },
+        "fill": {
+          "enum": [
+            "omit",
+            "null",
+            "zero",
+            "locf",
+            "linear"
+          ]
+        },
+        "minPeriods": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at": {
+          "$ref": "#/$defs/rowSelector"
+        },
+        "value": {
+          "$ref": "#/$defs/rowSelector"
+        },
+        "zone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "number"
+        },
+        "disambiguation": {
+          "enum": [
+            "reject",
+            "earlier",
+            "later"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "seriesSpan": {
+      "description": "A width: an ISO 8601 duration string ('PT1H', 'P1M') or a count of milliseconds. A duration mixing the calendar and clock families ('P1MT1H') is refused by the compiler.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      ]
+    },
+    "seriesInstant": {
+      "description": "An instant: epoch milliseconds, or an RFC 3339 string. A full-time names no instant and is refused by the compiler.",
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "rowSelector": {
+      "description": "Where a member lives in a source row: a singular JSONPath whose '$' is the ROW rather than the document ('$.on', \"$['recorded at']\", '$.meta.at'). Wildcards, descendants and filters are refused (JQ0003) - a selector names one member.",
+      "type": "string",
+      "pattern": "^\\$[.\\[]"
+    },
+    "seriesSpecPhrase": {
+      "description": "$resample / $rolling [series, spec]: an operand expression and a VERBATIM spec literal. $resample returns sorted {at, value, count} buckets one per 'every'; $rolling returns one row per input instant over a window measured in time. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/expression"
+          },
+          {
+            "$ref": "#/$defs/seriesSpec"
+          }
+        ],
+        "items": false,
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "asOfSpec": {
+      "description": "The $asof spec (QUERY-FORMAT.md section 8.16): a VERBATIM literal. 'by' joins within groups; 'leftAt'/'rightAt' say where each side keeps its instant when the two documents spell it differently. Closed: an unknown member is JQ0003.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "enum": [
+            "backward",
+            "forward",
+            "nearest"
+          ]
+        },
+        "tolerance": {
+          "$ref": "#/$defs/seriesSpan"
+        },
+        "by": {
+          "$ref": "#/$defs/rowSelector"
+        },
+        "leftAt": {
+          "$ref": "#/$defs/rowSelector"
+        },
+        "rightAt": {
+          "$ref": "#/$defs/rowSelector"
+        }
+      },
+      "additionalProperties": false
+    },
+    "asOfPhrase": {
+      "description": "$asof [left, right] or [left, right, spec]: two operand expressions and an optional VERBATIM spec literal. Answers one {left, right, distance} per left row; a left row with no match keeps right: null and stays in the answer.",
+      "type": "object",
+      "properties": {
+        "$asof": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "$ref": "#/$defs/asOfSpec"
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "$asof"
+      ],
+      "additionalProperties": false
+    },
+    "calendarContext": {
+      "description": "$time-bucket's optional fourth position: the wall clock its boundaries fall on. UTC is the default and needs nothing; a named 'zone' needs an injected zoneProvider.",
+      "type": "object",
+      "properties": {
+        "zone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "number"
+        },
+        "disambiguation": {
+          "enum": [
+            "reject",
+            "earlier",
+            "later"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "timeBucketPhrase": {
+      "description": "$time-bucket [at, every] / [at, every, origin] / [at, every, origin, context]: the instant labelling the bucket 'at' falls in. The first three positions are operand expressions ('origin' may be null for the ladder's own default); the fourth is a VERBATIM calendar context literal.",
+      "type": "object",
+      "properties": {
+        "$time-bucket": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "$ref": "#/$defs/calendarContext"
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 4
+        }
+      },
+      "required": [
+        "$time-bucket"
+      ],
+      "additionalProperties": false
     },
     "asClause": {
       "description": "The $as clause: variable-name to JSON Schema literal members, applied per tuple after $for/$let binding and before $where. Each name must be bound by the same phrase's $for (including $at names) or $let - a compiler rule (JQ0005); each binding validates per item at runtime (JQ2008). (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",

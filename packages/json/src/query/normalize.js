@@ -433,6 +433,25 @@ const OPERATOR_ALIASES = {
   "$nearest-neighbours": "$orderby on a $similarity key, then $subsequence",
   "$nearest-neighbors": "$orderby on a $similarity key, then $subsequence",
   "$top-k": "$orderby then $subsequence", $embed: null, $normalize: null,
+  // time series: the spellings a writer arrives with from Timescale,
+  // pandas, SQL and kdb+. The bucketing family all points at the two
+  // operators that exist - the scalar label and the aggregating one -
+  // and the fill policies point at `$resample`, because a fill is a
+  // MEMBER of a resample spec rather than an operation of its own
+  $time_bucket: "$time-bucket", "$date-bin": "$time-bucket",
+  $date_bin: "$time-bucket", $bucket: "$time-bucket",
+  "$time-bucket-gapfill": "$resample with a 'fill'",
+  $gapfill: "$resample with a 'fill'", $locf: "$resample with fill 'locf'",
+  $interpolate: "$resample with fill 'linear'",
+  $downsample: "$resample", $upsample: "$resample with a 'fill'",
+  $rollup: "$resample", $groupbytime: "$resample",
+  "$moving-average": "$rolling with aggregate 'mean'",
+  $rollingwindow: "$rolling", "$time-window": "$rolling",
+  "$as-of": "$asof", "$asof-join": "$asof", $aj: "$asof",
+  "$merge-asof": "$asof", "$latest-at": "$asof",
+  $overlap: "$overlaps", "$interval-overlaps": "$overlaps",
+  $during: "$overlaps", $meets: null, $abuts: null,
+  $now: null, "$current-timestamp": null,
 };
 
 // JQ0002 for an unknown $-key, with a "did you mean" suggestion. A
@@ -577,6 +596,11 @@ function argCards(args) {
   return cards;
 }
 
+// The operators that read a calendar boundary, and so may be given a
+// named zone. `$asof` and `$overlaps` are pure instant arithmetic and
+// have no clock to resolve.
+const CLOCK_OPERATORS = new Set(['$time-bucket', '$resample', '$rolling']);
+
 // A registry operator call: arity and shape come uniformly from the
 // table's `params` descriptor (JQ0003), the static cardinality from its
 // `result` - individual operators never re-check structure.
@@ -590,6 +614,11 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   // configurable through the compilation's limits (compileOp hands the
   // node through to the entry's compile)
   if (key === '$range' && ctx.limits !== null) node.limits = ctx.limits;
+  // the series operators resolve their wall clock when the query
+  // compiles, and a named zone needs the tzdb this suite does not bundle
+  // (SERIES D7). The provider is a compilation capability, like a
+  // collation, so it reaches the entry the same way $range's guard does
+  if (ctx.zoneProvider !== null && CLOCK_OPERATORS.has(key)) node.zoneProvider = ctx.zoneProvider;
   return Object.freeze(node);
 }
 
@@ -1258,6 +1287,19 @@ function validateNamedFunctions(value, what) {
   return value;
 }
 
+// Validate the injected time-zone provider (options.zoneProvider): the
+// two-question seam SERIES D7 fixes, because this suite bundles no
+// tzdb and a JSON document cannot carry one. Violations are host
+// programming errors (TypeError), like options.extensions.
+function validateZoneProvider(value) {
+  if (value === null || typeof value !== 'object'
+    || typeof value.toParts !== 'function' || typeof value.toEpoch !== 'function') {
+    throw new TypeError('options.zoneProvider must be an object with'
+      + ' toParts(epoch, zone) and toEpoch(parts, zone, disambiguation)');
+  }
+  return value;
+}
+
 // The known limits (section 8.12). Only limits the engine actually
 // enforces are accepted - an accepted-but-unenforced limit would be a
 // silent false guarantee.
@@ -1423,6 +1465,7 @@ export function normalizeQuery(doc, options = {}) {
   const extensions = options.extensions == null ? null : validateExtensions(options.extensions);
   const functions = options.functions == null ? null : validateNamedFunctions(options.functions, 'functions');
   const collations = options.collations == null ? null : validateNamedFunctions(options.collations, 'collations');
+  const zoneProvider = options.zoneProvider == null ? null : validateZoneProvider(options.zoneProvider);
   const limits = options.limits == null ? null : validateLimits(options.limits);
   const declaredExternals = options.externals == null
     ? null
@@ -1436,7 +1479,7 @@ export function normalizeQuery(doc, options = {}) {
     : { pathFunctions: options.pathFunctions };
   const ctx = {
     nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
-    functions, collations, limits, pathOptions, declaredExternals,
+    functions, collations, zoneProvider, limits, pathOptions, declaredExternals,
     // package-internal: set only by analyzeQuery (Appendix C.1); the
     // compile entry point never passes it
     analysis: options.analysis === true,

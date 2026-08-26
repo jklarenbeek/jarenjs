@@ -14,9 +14,9 @@
 
 /**
  * The nominal date-time brand: annotate a model property as `DateTime`
- * and the date operators (`year()`, `month()`, `day()`, `epoch()`)
- * become available on its expression without making EVERY string a
- * date. Purely a type-level marker — the runtime value is a plain
+ * and the whole §8.13 date family (`year()`, `startOf()`, `dateAdd()`,
+ * `timeBucket()`, …) becomes available on its expression without making
+ * EVERY string a date. Purely a type-level marker — the runtime value is a plain
  * RFC 3339 string; there is no constructor and no runtime cost.
  */
 export type DateTime = string & { readonly __jarenTag: 'date-time' };
@@ -59,6 +59,10 @@ export interface NumberExpr extends ExprBase<number>, EqExpr<number> {
   idiv(value: number | NumberExpr): NumberExpr;
   mod(value: number | NumberExpr): NumberExpr;
   neg(): NumberExpr;
+  /** An epoch is a number, so the two instant operators live here too. */
+  datetime(): DateTimeExpr;
+  timeBucket(every: string | number, origin?: string | number | null,
+    context?: CalendarContext): NumberExpr;
 }
 
 export interface StringExpr extends ExprBase<string>, EqExpr<string> {
@@ -79,25 +83,165 @@ export interface StringExpr extends ExprBase<string>, EqExpr<string> {
   replace(pattern: string, replacement: string): StringExpr;
 }
 
-/** A `DateTime`-branded string: the string surface plus the date
- * component operators. */
-export interface DateTimeExpr extends ExprBase<DateTime> {
+/** A calendar unit, as QUERY-FORMAT §8.13 fixes it. The unit is DATA
+ * rather than vocabulary, so an unknown one is a runtime `JQ2001`; this
+ * type is what keeps the common spelling mistake a compile error. */
+export type DateUnit =
+  | 'year' | 'quarter' | 'month' | 'week' | 'day'
+  | 'hour' | 'minute' | 'second' | 'millisecond';
+
+/** The date family (`$is-date` … `$date-format`), available on any
+ * expression whose value carries a date. Every method lowers to the §8.13
+ * operator of the same name; there is no LINQ-only date semantics. */
+export interface DateMethods {
+  /** Lexical date components; a value with no date half is `JQ2001`. */
+  year(): NumberExpr;
+  month(): NumberExpr;
+  day(): NumberExpr;
+  /** Lexical time components; `seconds` carries its fraction. */
+  hours(): NumberExpr;
+  minutes(): NumberExpr;
+  seconds(): NumberExpr;
+  /** Minutes east of UTC; a bare `full-date` yields the empty sequence. */
+  offset(): NumberExpr;
+  /** ISO 8601 week number, and its week-numbering year. */
+  week(): NumberExpr;
+  weekYear(): NumberExpr;
+  /** Calendar quarter 1-4; ISO weekday 1 (Monday) to 7 (Sunday). */
+  quarter(): NumberExpr;
+  weekday(): NumberExpr;
+  /** Epoch milliseconds (`$epoch`) — the one shift to UTC. */
+  epoch(): NumberExpr;
+  /** The inverse: epoch milliseconds → a canonical UTC `date-time`. */
+  datetime(): DateTimeExpr;
+  /** The RFC 3339 lexical-form predicates; these never raise. */
+  isDate(): BoolExpr;
+  isTime(): BoolExpr;
+  isDatetime(): BoolExpr;
+  isDuration(): BoolExpr;
+  /** Truncate to a unit, keeping the lexical form (`$start-of`/`$end-of`). */
+  startOf(unit: DateUnit): DateTimeExpr;
+  endOf(unit: DateUnit): DateTimeExpr;
+  /** Shift by an ISO 8601 duration, or by an amount and a unit. */
+  dateAdd(duration: string): DateTimeExpr;
+  dateAdd(amount: number | NumberExpr, unit: DateUnit): DateTimeExpr;
+  dateSub(duration: string): DateTimeExpr;
+  dateSub(amount: number | NumberExpr, unit: DateUnit): DateTimeExpr;
+  /** Whole units from this value to another; negative when it precedes. */
+  dateDiff(to: string | DateTimeExpr, unit: DateUnit): NumberExpr;
+  /** Render through a Unicode LDML pattern (`yyyy-MM-dd`). */
+  dateFormat(pattern: string): StringExpr;
+  /** The instant labelling the bucket this one falls in (`$time-bucket`). */
+  timeBucket(every: string | number, origin?: string | number | null,
+    context?: CalendarContext): NumberExpr;
+}
+
+/** A `DateTime`-branded string: the string surface plus the whole §8.13
+ * date family. */
+export interface DateTimeExpr extends ExprBase<DateTime>, DateMethods {
   eq(value: string | DateTimeExpr | null): BoolExpr;
   ne(value: string | DateTimeExpr | null): BoolExpr;
   lt(value: string | DateTimeExpr): BoolExpr;
   le(value: string | DateTimeExpr): BoolExpr;
   gt(value: string | DateTimeExpr): BoolExpr;
   ge(value: string | DateTimeExpr): BoolExpr;
-  year(): NumberExpr;
-  month(): NumberExpr;
-  day(): NumberExpr;
-  /** Epoch milliseconds (`$epoch`). */
-  epoch(): NumberExpr;
 }
 
-export interface ArrayExpr<E> extends ExprBase<E[]> {
+/** The wall clock a calendar boundary falls on (QUERY-FORMAT §8.16).
+ * UTC is the default; a named `zone` needs an injected `zoneProvider`. */
+export interface CalendarContext {
+  zone?: string;
+  offset?: number;
+  disambiguation?: 'reject' | 'earlier' | 'later';
+}
+
+/** The aggregates `$resample` and `$rolling` share. */
+export type SeriesAggregate =
+  'sum' | 'mean' | 'min' | 'max' | 'first' | 'last' | 'count';
+
+/** What an EMPTY bucket says, and nothing else. */
+export type SeriesFill = 'omit' | 'null' | 'zero' | 'locf' | 'linear';
+
+/** A width: an ISO 8601 duration, or a count of milliseconds. */
+export type SeriesSpan = string | number;
+
+/** An instant: epoch milliseconds, or an RFC 3339 string. */
+export type SeriesInstant = string | number;
+
+/** A row selector: a singular path whose `$` is the ROW rather than the
+ * document (`'$.on'`, `"$['recorded at']"`). */
+export type RowSelector = string;
+
+/** The `$resample` spec — a literal, read once when the query compiles. */
+export interface ResampleSpec extends CalendarContext {
+  every: SeriesSpan;
+  origin?: SeriesInstant;
+  start?: SeriesInstant;
+  end?: SeriesInstant;
+  aggregate?: SeriesAggregate;
+  fill?: SeriesFill;
+  at?: RowSelector;
+  value?: RowSelector;
+}
+
+/** The `$rolling` spec — a window measured in time, not in rows. */
+export interface RollingSpec extends CalendarContext {
+  width: SeriesSpan;
+  aggregate?: SeriesAggregate;
+  minPeriods?: number;
+  at?: RowSelector;
+  value?: RowSelector;
+}
+
+/** The `$asof` spec — every member optional: backward, unkeyed, unbounded. */
+export interface AsOfSpec {
+  direction?: 'backward' | 'forward' | 'nearest';
+  tolerance?: SeriesSpan;
+  by?: RowSelector;
+  leftAt?: RowSelector;
+  rightAt?: RowSelector;
+}
+
+/** One canonical sample the series operators answer with. */
+export interface SeriesBucket {
+  at: number;
+  value: number | null;
+  count: number;
+}
+
+/** One row of an as-of join; `right` is `null` when nothing matched, and
+ * the row stays in the answer. */
+export interface AsOfMatch {
+  left: unknown;
+  right: unknown;
+  distance: number | null;
+}
+
+/** A half-open interval: `[start, end)`, in epoch milliseconds. */
+export interface Interval {
+  start: SeriesInstant;
+  end: SeriesInstant;
+}
+
+/** The §8.16 operators that take a whole series and answer another one.
+ * Available wherever a MANY-cardinality expression is (an array member,
+ * or a fanned path). */
+export interface SeriesMethods {
+  /** Sorted `{at, value, count}` buckets, one per `every` (`$resample`). */
+  resample(spec: ResampleSpec): Expr<SeriesBucket[]> & AggregatableExpr;
+  /** One row per input instant, over a window measured in time. */
+  rolling(spec: RollingSpec): Expr<SeriesBucket[]> & AggregatableExpr;
+  /** The right row that was current when each left row happened. */
+  asof(right: ExprBase<unknown> | readonly unknown[], spec?: AsOfSpec):
+    Expr<AsOfMatch[]> & AggregatableExpr;
+}
+
+export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods {
   eq(value: readonly E[] | ArrayExpr<E> | null): BoolExpr;
   ne(value: readonly E[] | ArrayExpr<E> | null): BoolExpr;
+  /** Do two half-open `{start, end}` intervals share an instant?
+   * Touching spans do not. */
+  overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
   /** Fan the elements out (`[*]`) — a MANY-cardinality expression the
    * aggregates apply to (`u.tags.all().count()`). */
   all(): Expr<E> & AggregatableExpr;
@@ -126,7 +270,8 @@ export type ObjectExpr<T> = ExprBase<T> & EqExpr<T> & {
 /** The honest top: everything is available, nothing is precise. Used
  * where inference ends (dynamic `get`, post-operator members, unknown
  * elements) — wide, never wrong. */
-export interface UnknownExpr extends ExprBase<unknown>, AggregatableExpr {
+export interface UnknownExpr
+  extends ExprBase<unknown>, AggregatableExpr, DateMethods, SeriesMethods {
   eq(value: unknown): BoolExpr;
   ne(value: unknown): BoolExpr;
   lt(value: unknown): BoolExpr;
@@ -153,12 +298,10 @@ export interface UnknownExpr extends ExprBase<unknown>, AggregatableExpr {
   concat(value: unknown): UnknownExpr;
   substring(start: number, length?: number): UnknownExpr;
   replace(pattern: string, replacement: string): UnknownExpr;
-  year(): NumberExpr;
-  month(): NumberExpr;
-  day(): NumberExpr;
-  epoch(): NumberExpr;
   all(): UnknownExpr;
   at(index: number): UnknownExpr;
+  /** Do two half-open `{start, end}` intervals share an instant? */
+  overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
 }
 
 /** Value type → expression type. Order matters: the DateTime brand is

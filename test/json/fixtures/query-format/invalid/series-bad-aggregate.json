@@ -1,0 +1,1 @@
+{ "$resample": ["$.rows[*]", { "every": 60000, "aggregate": "median" }] }

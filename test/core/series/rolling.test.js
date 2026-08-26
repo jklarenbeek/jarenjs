@@ -216,9 +216,18 @@ describe('rollingSeries — complexity', () => {
   });
 
   it('should stay linear in the corpus when the window scales with it', () => {
-    // a self-calibrating ratio rather than a pinned millisecond: a
-    // scan-per-output implementation is quadratic and would land near
-    // 64x, not near 8x
+    // The claim is about the WINDOW, so the measurement is too: how the
+    // cost scales with the corpus at a wide window, divided by how it
+    // scales at a window of one row. The denominator is the same kernel
+    // over the same arrays doing the same allocation, and is linear by
+    // construction — a window one millisecond wide holds one instant —
+    // so a loaded host inflates both halves together and the quotient
+    // stays put. A scan-per-output implementation would make the
+    // numerator ~64x while the denominator stayed ~8x, and land near 8.
+    //
+    // The earlier form asserted the numerator alone against a fixed
+    // bound, and the site gate runs five stages at once: it measured the
+    // host and read 46.6x on a machine where it reads 8x idle.
     const small = corpus(90210, 4000);
     const large = corpus(90210, 32_000);
     const best = (rows, width) => {
@@ -228,10 +237,14 @@ describe('rollingSeries — complexity', () => {
         rollingSeries(rows, { width, aggregate: 'max' });
         fastest = Math.min(fastest, performance.now() - from);
       }
-      return fastest;
+      return Math.max(fastest, 0.001);
     };
-    const width = 500_000;
-    const ratio = best(large, width) / Math.max(best(small, width), 0.001);
-    assert.ok(ratio < 24, `8x the corpus cost ${ratio.toFixed(1)}x the time`);
+    const scaleAt = (width) => best(large, width) / best(small, width);
+    const widened = scaleAt(500_000);
+    const narrow = scaleAt(1);
+    const ratio = widened / narrow;
+    assert.ok(ratio < 3,
+      `widening the window made the corpus scale ${ratio.toFixed(1)}x worse `
+      + `(${widened.toFixed(1)}x at a 500 s window against ${narrow.toFixed(1)}x at one row)`);
   });
 });

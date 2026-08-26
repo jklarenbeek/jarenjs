@@ -81,6 +81,7 @@ import {
   generateSeries, asDocuments,
   filterRange, cutRange, bucketStart, bucketOnePass, bucketNaive,
   rollingMeanOnePass, rollingMeanNaive, asOfBackward, probeInstants, gappedSeries,
+  referenceAnswer,
 } from '../scripts/lib/series-corpus.js';
 
 import { formatNs } from './lib/fmt.js';
@@ -378,33 +379,23 @@ function verifyCommittedCorpus() {
   check('the fixture\'s samples are the ones the generator makes',
     JSON.stringify(samples) === JSON.stringify(corpus.samples),
     `${corpus.samples.length} samples under ${corpus.law}`);
+  let refused = 0;
   for (const entry of corpus.cases) {
-    let actual;
-    if (entry.kind === 'range') {
-      const rows = filterRange(samples, entry.start, entry.end);
-      const cut = cutRange(samples, entry.start, entry.end);
-      actual = {
-        lo: cut.lo,
-        hi: cut.hi,
-        count: rows.length,
-        firstAt: rows.length === 0 ? null : rows[0].at,
-        lastAt: rows.length === 0 ? null : rows[rows.length - 1].at,
-      };
-    }
-    else if (entry.kind === 'bucket')
-      actual = bucketOnePass(samples, entry.every, entry.origin);
-    else if (entry.kind === 'rolling')
-      actual = rollingMeanOnePass(samples, entry.width);
-    else if (entry.kind === 'asof')
-      actual = asOfBackward(samples, entry.at);
-    else {
-      check(`fixture case '${entry.name}'`, false, `unknown kind '${entry.kind}'`);
+    // a refusal is a compiler's answer, not a reference's: those cases
+    // carry an error CODE rather than a value, and the query suite is
+    // where they are executed. Counting them here says so out loud
+    // rather than silently walking past a third of the file.
+    if (entry.kind === 'invalid') {
+      refused++;
       continue;
     }
+    const actual = referenceAnswer(entry, samples);
     const agrees = JSON.stringify(actual) === JSON.stringify(entry.expected);
     check(`fixture case '${entry.name}'`, agrees,
       agrees ? `${entry.kind}, as committed` : `${entry.kind}: ${JSON.stringify(actual).slice(0, 160)}`);
   }
+  check('the fixture\'s refusals are the query compiler\'s to answer, not a reference\'s',
+    refused > 0, `${refused} cases carry a refusal code`);
   return { version: corpus.version, cases: corpus.cases.length, samples: corpus.samples.length };
 }
 

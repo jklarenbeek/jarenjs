@@ -1538,6 +1538,161 @@ A filter is the same key in a `$where`, and it composes with the ordering:
 threshold filter for free.
 
 
+### 8.16 Time series
+
+A time series is what a JSON document already holds when something has been
+measured repeatedly: **records with an instant and a reading**. There is no
+series type to construct and nothing to declare — `{"at": 1767225600000,
+"value": 4.5}` is a sample, and `{"start": …, "end": …}` is an interval.
+
+These five operators are the vocabulary for questions a `$for` phrase can ask
+but cannot answer in one pass: *do these two spans collide*, *which bucket
+does this instant fall in*, *what does an hour of this look like*, *what was
+the average over the last five minutes at every point*, and *what was the
+current value when this happened*. Each is a call into
+[`@jarenjs/core/series`](../../core/README.md) and nothing else — the same
+kernel a chart and an indexed database read — so a document, a fluent chain
+and a stored plan cannot answer the same question differently.
+
+| Operator | Definition |
+|---|---|
+| `$overlaps` | `[a, b]` → do two half-open `{start, end}` intervals share an instant; touching spans do **not** overlap |
+| `$time-bucket` | `[at, every, origin?, context?]` → the instant labelling the bucket `at` falls in |
+| `$resample` | `[series, spec]` → sorted `{at, value, count}` buckets, one per `every` |
+| `$rolling` | `[series, spec]` → one `{at, value, count}` per input instant, over a window measured in **time** |
+| `$asof` | `[left, right, spec?]` → one `{left, right, distance}` per left row: the right row that was current when it happened |
+
+**Instants are epoch milliseconds** on both sides of these operators — what an
+indexed column stores and what arithmetic wants. A source row may spell its
+instant as an RFC 3339 string and it is converted once, at the door; every
+`at` these operators *produce* is a number. `$epoch` and `$datetime` are the
+two conversions, and they already exist:
+`{"$datetime": {"$time-bucket": [{"$epoch": "$e.on"}, "PT1H"]}}`.
+
+**A series operand is either spelling.** A path that fans out (`$.rows[*]`)
+arrives as a sequence of rows; one that does not (`$.rows`) arrives as the
+array holding them. The empty sequence is an empty series — no rows is data.
+
+#### Specs are literals
+
+The second operand of `$resample`, `$rolling` and `$asof` — and the fourth of
+`$time-bucket` — is a **verbatim JSON literal**, not an expression. Nothing
+inside it is evaluated and nothing inside it can vary per row, which is what
+lets the width, the aggregate, the fill policy, the wall clock and the row
+selectors be read exactly once when the query compiles.
+
+Each spec is **closed**: it admits the members below and no others. An unknown
+member is `JQ0003` with the near miss named, because a `minPeriod` silently
+ignored is the bug that costs an afternoon. So is a bad duration, a bad
+aggregate, a bad path and a zone with no provider. Only what the *data*
+decides — a row that is not a sample, an instant that names none, a local time
+that never happened — is `JQ2001`, against the operand that carried it.
+
+| Spec | Members |
+|---|---|
+| `$resample` | `every` (required), `origin`, `start`, `end`, `aggregate`, `fill`, `at`, `value`, and the calendar context |
+| `$rolling` | `width` (required), `aggregate`, `minPeriods`, `at`, `value`, and the calendar context |
+| `$asof` | `direction`, `tolerance`, `by`, `leftAt`, `rightAt` |
+| calendar context | `zone`, `offset`, `disambiguation` |
+
+`every`, `width` and `tolerance` are an ISO 8601 duration (`"PT1H"`, `"P1M"`)
+or a count of milliseconds. `origin`, `start` and `end` are epoch milliseconds
+or an RFC 3339 string. `aggregate` is one of `sum`, `mean`, `min`, `max`,
+`first`, `last`, `count` (default `mean`); `fill` is one of `omit`, `null`,
+`zero`, `locf`, `linear` (default `omit`); `direction` is `backward` (default),
+`forward` or `nearest`.
+
+`at`, `value`, `by`, `leftAt` and `rightAt` are **row selectors**: a singular
+path where `$` reads as the *row* rather than as the document, so a series
+spelled `{"on": …, "reading": …}` is read with `{"at": "$.on", "value":
+"$.reading"}` and nothing has to be rewritten first. Wildcards, descendants
+and filters are refused (`JQ0003`) — a selector names one member.
+
+#### Buckets, fill and the count
+
+`$resample` labels every bucket at its **start** and reports `count`, the
+number of source rows that fell in it — duplicates and gaps included. The six
+value aggregates skip a `null` reading, so `value` is `null` exactly when
+there was nothing to measure and `count` says whether that was because nobody
+reported or everybody reported a gap. `aggregate: "count"` returns that same
+number as `value`.
+
+`fill` decides what an **empty** bucket says, and nothing else. `omit` leaves
+it out; `null` and `zero` emit it with that value; `locf` carries the last
+measured bucket forward; `linear` interpolates between its two neighbours.
+Neither `locf` nor `linear` extrapolates: with no measured bucket on the side
+it needs, the bucket stays `null`. A bucket that held rows and no numbers is a
+*measurement*, not an absence, and is never an anchor for either.
+
+```json
+{ "$resample": [ "$.readings[*]",
+                 { "every": "PT1H", "aggregate": "mean", "fill": "linear" } ] }
+```
+
+#### Windows measured in time
+
+`$rolling` answers one row per input instant, over the half-open window
+ending at it. `minPeriods` (default 1) withholds a value — `null`, with the
+real `count` — for a window that is short of that many readings, which is how
+a leading partial window stays visible instead of being quietly averaged.
+
+Rows sharing an instant share a window and share an answer: the window is a
+function of the instant it ends at, never of arrival order. That is the one
+place `$rolling` differs from `$for`'s `$window` (§6.4), which counts **rows**
+and is unchanged.
+
+```json
+{ "$rolling": [ "$.samples[*]", { "width": "PT5M", "aggregate": "mean", "minPeriods": 30 } ] }
+```
+
+#### As-of, and no-match as data
+
+`$asof` walks both sides once and answers `{left, right, distance}` per left
+row. `backward` takes the last right row at or before the left instant,
+`forward` the first at or after, `nearest` the closer of the two with ties
+going backward. At an equal instant the **last** right row wins, because "as
+of" means the later reading. `tolerance` is the furthest a match may be —
+beyond it there is no match, not a distant one — and `by` joins within groups.
+
+A left row with nothing to match is `{"left": …, "right": null, "distance":
+null}`. **It stays in the answer**: no match is data, and a join that dropped
+the row would be answering a question nobody asked.
+
+```json
+{ "$asof": [ "$.trades[*]", "$.quotes[*]",
+             { "by": "$.symbol", "direction": "backward", "tolerance": "PT1M" } ] }
+```
+
+#### Calendar boundaries and the zone seam
+
+A fixed width (`PT15M`, `P1D` on UTC or an offset) is integer arithmetic. A
+calendar width (`P1M`, `P1Y`, and a day on a *named* zone, where the day the
+clock changed is 23 or 25 hours long) walks a wall clock instead. A width
+mixing the two families (`P1MT1H`) is refused.
+
+UTC is the default and needs nothing. `{"offset": 120}` is a constant number
+of minutes east and is exact. A **named zone needs a time-zone database this
+suite deliberately does not bundle**, and a JSON document cannot carry one, so
+`{"zone": "Europe/Amsterdam"}` compiles only when the host injected
+`options.zoneProvider` — an object with `toParts(epoch, zone)` and
+`toEpoch(parts, zone, disambiguation)`. Without it the document is refused
+(`JQ0003`) naming the seam, rather than falling back to UTC and being right
+for eight months of the year.
+
+`disambiguation` says what a local time that happens twice, or never, resolves
+to: `reject` (the default — it is an error), `earlier` or `later`.
+
+```json
+{ "$resample": [ "$.readings[*]",
+                 { "every": "P1M", "zone": "Europe/Amsterdam", "aggregate": "sum" } ] }
+```
+
+**Nothing here reads a clock.** `$resample`'s window, when `start`/`end` are
+absent, derives from the data; there is no `$now`, for the same reason §8.13
+has no `current-dateTime`. A compiled query gives the same answer for the same
+document forever.
+
+
 ## 9. Variables, scoping, and external parameters
 
 1. Variables are introduced by `$for`, `$let`, `$at`, `$count`, `$groupby`

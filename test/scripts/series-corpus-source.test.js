@@ -28,6 +28,7 @@ import {
   SERIES_CORPUS_PATH, SERIES_ORIGIN, SERIES_STEP_MS, VALUE_SCALE,
   generateSeries, bucketOnePass, bucketNaive, rollingMeanOnePass, rollingMeanNaive,
   filterRange, cutRange, asOfBackward,
+  resampleNaive, rollingNaive, asOfNaive, overlapsNaive,
 } from '../../scripts/lib/series-corpus.js';
 import { generateSeriesCorpus, serializeCorpus } from '../../scripts/generate-series-corpus.js';
 
@@ -38,6 +39,8 @@ const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
 const READERS = [
   ['scripts/generate-series-corpus.js', /lib\/series-corpus\.js/, 'the fixture writer'],
   ['benchmark/series.js', /scripts\/lib\/series-corpus\.js/, 'the benchmark'],
+  ['test/json/query/series-corpus.test.js', /scripts\/lib\/series-corpus\.js/,
+    'the validated query vocabulary'],
 ];
 
 describe('the series corpus has one source', () => {
@@ -102,6 +105,42 @@ describe('the series corpus regenerates byte for byte', () => {
   });
 });
 
+describe('the corpus carries the vocabulary every executor is held to', () => {
+  const corpus = JSON.parse(read(SERIES_CORPUS_PATH));
+
+  it('holds a query document and an expected answer for every operator', () => {
+    // the corpus is what makes "the same operation in JSON, in an
+    // indexed database and in a browser" checkable rather than claimed:
+    // each case carries the DOCUMENT that spells the question, so a
+    // later executor runs the same one rather than writing its own
+    const documented = new Set();
+    for (const testCase of corpus.cases) {
+      if (testCase.doc === undefined)
+        continue;
+      for (const key of Object.keys(testCase.doc)) documented.add(key);
+      assert.ok(testCase.name.length > 0, 'every case is named');
+      assert.ok(testCase.kind === 'invalid'
+        ? typeof testCase.code === 'string'
+        : Object.hasOwn(testCase, 'expected'),
+      `${testCase.name} carries neither an expected answer nor a refusal code`);
+    }
+    assert.deepStrictEqual([...documented].sort(),
+      ['$asof', '$overlaps', '$resample', '$rolling', '$time-bucket']);
+  });
+
+  it('names every case exactly once, so a later order appends rather than forks', () => {
+    const names = corpus.cases.map((c) => c.name);
+    assert.deepStrictEqual(names.length, new Set(names).size,
+      'two cases share a name; `cases` is keyed by name and append-only');
+  });
+
+  it('refuses as often as it answers — both halves of a closed spec', () => {
+    const invalid = corpus.cases.filter((c) => c.kind === 'invalid');
+    assert.ok(invalid.some((c) => c.code === 'JQ0003'), 'the authored refusals');
+    assert.ok(invalid.some((c) => c.code === 'JQ2001'), 'the data refusals');
+  });
+});
+
 describe('the references agree with the plain implementations they replace', () => {
   const samples = generateSeries(500);
 
@@ -121,6 +160,38 @@ describe('the references agree with the plain implementations they replace', () 
     const end = start + 120000;
     const bounds = cutRange(samples, start, end);
     assert.deepStrictEqual(samples.slice(bounds.lo, bounds.hi), filterRange(samples, start, end));
+  });
+
+  it('the naive resample agrees with a hand-computed bucket', () => {
+    // the oracle's own oracle: three rows, two buckets, one of them
+    // holding a measured gap, written out rather than derived
+    assert.deepStrictEqual(
+      resampleNaive([{ at: 0, value: 2 }, { at: 500, value: 4 }, { at: 1500, value: null }],
+        { every: 1000, aggregate: 'mean' }),
+      [{ at: 0, value: 3, count: 2 }, { at: 1000, value: null, count: 1 }]);
+  });
+
+  it('the naive rolling window is measured in time, not in rows', () => {
+    assert.deepStrictEqual(
+      rollingNaive([{ at: 0, value: 1 }, { at: 10, value: 3 }, { at: 30, value: 5 }],
+        { width: 25, aggregate: 'sum' }),
+      [{ at: 0, value: 1, count: 1 },
+        { at: 10, value: 4, count: 2 },
+        { at: 30, value: 8, count: 2 }]);
+  });
+
+  it('the naive as-of takes the later row at an equal instant, and backward on a tie', () => {
+    const right = [{ at: 0, value: 1 }, { at: 0, value: 2 }, { at: 20, value: 3 }];
+    assert.strictEqual(asOfNaive([{ at: 0, value: 0 }], right)[0].right.value, 2,
+      "'as of' means the later reading");
+    assert.strictEqual(
+      asOfNaive([{ at: 10, value: 0 }], right, { direction: 'nearest' })[0].right.value, 2,
+      'a nearest tie chooses backward — and still the later of the two there');
+  });
+
+  it('the naive overlap is half-open at both ends', () => {
+    assert.strictEqual(overlapsNaive({ start: 0, end: 10 }, { start: 10, end: 20 }), false);
+    assert.strictEqual(overlapsNaive({ start: 0, end: 11 }, { start: 10, end: 20 }), true);
   });
 
   it('as-of is backward-looking and half-open at neither end', () => {

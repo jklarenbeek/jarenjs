@@ -1,0 +1,39 @@
+{
+  "$for": { "s": "$.sensors[*]" },
+  "$let": {
+    "hourly": { "$resample": ["$.readings[*]", {
+      "every": "PT1H",
+      "origin": 0,
+      "aggregate": "mean",
+      "fill": "linear",
+      "at": "$.on",
+      "value": "$.reading",
+      "zone": "UTC",
+      "disambiguation": "reject"
+    }] },
+    "trend": { "$rolling": ["$.readings[*]", {
+      "width": 900000,
+      "aggregate": "max",
+      "minPeriods": 3,
+      "offset": 120
+    }] },
+    "priced": { "$asof": ["$.trades[*]", "$.quotes[*]", {
+      "direction": "nearest",
+      "tolerance": "PT1M",
+      "by": "$.symbol",
+      "leftAt": "$.on",
+      "rightAt": "$['recorded at']"
+    }] },
+    "unspecified": { "$asof": ["$.a[*]", "$.b[*]"] }
+  },
+  "$where": { "$overlaps": ["$s.shift", "$.window"] },
+  "$return": {
+    "bucket": { "$time-bucket": ["$s.at", "PT15M"] },
+    "anchored": { "$time-bucket": ["$s.at", 900000, 0] },
+    "local": { "$time-bucket": ["$s.at", "P1D", null, { "offset": -300 }] },
+    "hourly": "$hourly",
+    "trend": "$trend",
+    "priced": "$priced",
+    "unspecified": "$unspecified"
+  }
+}

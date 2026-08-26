@@ -52,6 +52,13 @@ played by the provider seam below.
   spatial measurements are `geoArea`/`geoLength` because `length` on
   this surface is already `$string-length` — the mapping table says so
   in its own row.
+- **Time is spellable.** The whole RFC 3339 date family is on the surface —
+  `e.on.startOf('month')`, `e.on.dateAdd(3, 'day')`, `e.on.week()` — and so are
+  the five time-series operators: `rows.all().resample({ every: 'PT1H', fill:
+  'locf' })`, `rows.all().rolling({ width: 60000 })` and
+  `left.all().asof(right, { by: '$.symbol' })`. A series spec is a literal and
+  is embedded verbatim, so every rule about what it may say stays in the
+  compiler rather than being restated here.
 - **Meaning is spellable too.** `m.embedding.similarity(query)` emits
   §8.15's `$similarity`, and k-nearest is the chain it already looks
   like — `.orderByDescending(..., { empty: 'least' }).thenBy(m => m.id)

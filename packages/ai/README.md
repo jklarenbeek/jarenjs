@@ -252,12 +252,15 @@ writes a validated script per action (coder model), and a query node assembles t
 ### When the grammar is too big to decode (measured)
 
 The pattern above has a size limit, and the published JSLT grammar is past it. Asked for a
-stylesheet with `jaren-jslt.schema.json` (18,831 characters) as the `response_format`,
-`qwen3.6-35b-a3b` returns **an empty reply — three times out of three, in 14 seconds each**.
-Not a bad document: no document. The LLM-profile twin does not help, because a relaxation
-*restates* every constraint it removes and therefore **grows** the schema (19,158
-characters). That is the failure this section exists to fix, and `@jarenjs/ai/stylesheet`
-is the fix:
+stylesheet with `jaren-jslt.schema.json` as the `response_format`, `qwen3.6-35b-a3b`
+returns **an empty reply — three times out of three, in 14 seconds each**. Not a bad
+document: no document. The LLM-profile twin does not help, because a relaxation *restates*
+every constraint it removes and therefore **grows** the schema.
+
+Those runs were measured when the canonical grammar was 18,831 characters and its LLM
+profile 19,158. It is **23,515** today, and the profile **23,870**: every operator the
+vocabulary gains lands in the response format, so the gap this section is about widens
+rather than closes with time. That is the failure `@jarenjs/ai/stylesheet` fixes:
 
 ```javascript
 import { createStructuredOutput, createStylesheetAuthor } from '@jarenjs/ai';
@@ -286,12 +289,14 @@ Four changes, each one answering something that was measured rather than suspect
 **1. Narrow the response format; move the vocabulary to the prompt.**
 [`jaren-jslt.authoring.schema.json`](../json/schemas/jaren-jslt.authoring.schema.json) is
 the canonical grammar cut at the one `$ref` that pulls in the whole expression language —
-**18,831 → 3,491 characters**, the document shape intact and the body open. It is
-mechanically derived and the artifact test asserts the committed file *is* the derivation.
+**23,515 → 3,491 characters**, the document shape intact and the body open. The cut is
+where all the growth is, so the authoring profile has not moved a byte while the grammar
+it is cut from has grown by a quarter. It is mechanically derived and the artifact test
+asserts the committed file *is* the derivation.
 It is deliberately weaker than the canonical schema, which is why `canonical` is validated
 locally afterwards and the compiler still gates everything: the same validate-then-compile
 pipeline, with a smaller thing driving the decoder. What the cut removes goes into the
-system message instead, as **1,089 characters of operator names grouped by arity** —
+system message instead, as **1,303 characters of operator names grouped by arity** —
 `operatorCrib(querySchema)`, read off the injected artifact so it cannot rot. Arity is in
 there because leaving it out was measured too: on the small schema alone the model reached
 the right algorithm and wrote `{"$if": {"$gt": …, "then": …, "else": …}}` — named members
