@@ -9,7 +9,14 @@
  *
  *   data   = { series: [{ name, points: [{x, y}] }] }
  *   config = { type:'line', title?, x?: 'linear'|'time', log?,
- *              markers?, xLabel?, yLabel?, domain? }
+ *              markers?, xLabel?, yLabel?, domain?, sampling? }
+ *
+ * `config.sampling` (`core/sampling.js`) decides how many of those
+ * points are drawn: above two thousand a time line is reduced through
+ * `@jarenjs/core/series`'s downsampler by default, and the AST reports
+ * what that cost under `sampling`. The domain is always scanned from
+ * every source point, so what a reader is told about the range does not
+ * depend on what fitted on the line.
  *
  * `config.domain` declares a domain-stability policy (`core/domain.js`)
  * so most streaming ticks keep the scales still: a quantized sliding
@@ -41,6 +48,7 @@ import {
 } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
+import { normalizeSampling, sampleLineSeries } from '../core/sampling.js';
 
 /**
  * @typedef {object} LineAST
@@ -52,6 +60,9 @@ import { normalizeTooltip, markProps } from '../core/marks.js';
  * @property {{name: string, swatch: number}[]|null} legend
  * @property {{name: string, points: ({u:number,v:number}|null)[]}[]} series
  * @property {boolean} markers
+ * @property {{method: 'lttb'|'minmax', target: number, sourceCount: number,
+ *   renderedCount: number}|null} sampling what the downsampler did, or
+ *  `null` when every source point is drawn
  */
 
 /**
@@ -203,10 +214,24 @@ export function buildLineAST(data, config = {}) {
   const domains = resolveLineDomains(scanLineExtremes(input, policy, log), policy, time, log);
   const { xScale, yScale } = lineScales(domains, time, log);
 
-  const series = input.map((s) => ({
-    name: String(s.name ?? ''),
-    points: s.points.map((p) => lineVertex(p, domains.xDrop, xScale, yScale)),
-  }));
+  // Sampling chooses which points are DRAWN; it never moves a domain,
+  // which is scanned from every source point above. A series the policy
+  // leaves alone is mapped exactly as it always was.
+  const sampler = normalizeSampling(config.sampling);
+  let sourceCount = 0;
+  let renderedCount = 0;
+  let reduced = false;
+  const series = input.map((s) => {
+    sourceCount += s.points.length;
+    const sampled = sampler === null ? null
+      : sampleLineSeries(s.points, sampler, time, log, domains.xDrop, xScale, yScale);
+    const points = sampled === null
+      ? s.points.map((p) => lineVertex(p, domains.xDrop, xScale, yScale))
+      : sampled.vertices;
+    if (sampled !== null) reduced = true;
+    renderedCount += points.length;
+    return { name: String(s.name ?? ''), points };
+  });
 
   return {
     type: 'line',
@@ -226,6 +251,9 @@ export function buildLineAST(data, config = {}) {
     legend: series.length > 1 ? series.map((s, i) => ({ name: s.name, swatch: i })) : null,
     series,
     markers: config.markers === true,
+    sampling: !reduced || sampler === null ? null : {
+      method: sampler.method, target: sampler.target, sourceCount, renderedCount,
+    },
   };
 }
 

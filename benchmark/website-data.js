@@ -1096,12 +1096,23 @@ function buildHeadlines(generated, meta) {
     });
   }
   if (generated.charts !== undefined) {
-    const big = generated.charts.scaling?.[generated.charts.scaling.length - 1];
+    // the incremental claim is about a line the sampler is NOT choosing
+    // the points of; the sampled row beside it rebuilds by design, and
+    // reading a headline off it would state the opposite of the claim
+    const scaling = (generated.charts.scaling ?? []).filter((r) => r.sampled !== true);
+    const big = scaling[scaling.length - 1];
+    const sampling = generated.charts.sampling ?? [];
+    const drawn = sampling.find((r) => r.renderedCount < r.sourceCount);
     add('charts', 'Charts', {
       ratio: big !== undefined && big.sessionNs > 0 ? big.wholesaleNs / big.sessionNs : null,
       rival: 'a wholesale re-render',
       conformance: null,
-      note: big !== undefined ? `incremental tick at ${big.points}×${big.series} points` : '',
+      note: big === undefined ? ''
+        : `incremental tick at ${big.points}×${big.series} points`
+          + (drawn === undefined ? ''
+            : `; a static ${drawn.sourceCount}-point time line draws ${drawn.renderedCount}`
+              + ` by default (${drawn.method}) and renders `
+              + `${(drawn.wholeSvgNs / drawn.sampledSvgNs).toFixed(1)}× faster`),
     });
   }
   if (generated.geo !== undefined) {

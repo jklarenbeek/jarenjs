@@ -58,6 +58,24 @@ const MODEL = {
 const WHERE_BIG = [{ $for: { it: '$[*]' },
   $where: { $gt: ['$it.points', 50] }, $return: '$it' }];
 
+/** The event-time corpus: one reading a second from a fixed instant,
+ * values rounded to a multiple of 1/4096 so a maintained fold and a
+ * fresh one are equal bit for bit rather than nearly. */
+const SERIES_MODEL = {
+  $model: '0.1',
+  collections: {
+    readings: {
+      schema: { type: 'object', properties: {
+        id: { type: 'string' }, series: { type: 'string' },
+        at: { type: 'integer' }, value: { type: 'number' } } },
+      key: '/id',
+      indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+    },
+  },
+};
+const SERIES_T0 = 1_767_225_600_000;
+const seriesValue = (i) => Math.round(4096 * Math.sin(i / 31)) / 4096 + (i % 7);
+
 /** Median of per-call nanoseconds over `iterations`, warmed. */
 function timeMedian(fn, iterations) {
   fn();
@@ -135,6 +153,100 @@ async function incrementalVsRerun() {
     return { size, ratio: rer.results[0] / inc.results[0] };
   });
   return { title: 'Incremental vs re-run maintenance (per single-row write, median)', rows, ratios };
+}
+
+// ————— 1b. event-time views: maintained vs re-run —————
+
+/**
+ * The §13 claim, measured the same way §7's was: what does maintaining
+ * a `$resample` ladder or a `$rolling` window cost per write, against
+ * re-running the same document?
+ *
+ * The ANSWER is gated before the timing. A maintained view whose rows
+ * differ from `resampleSeries` / `rollingSeries` over the whole
+ * collection is not a fast live query, it is a wrong one — so each
+ * shape is checked against the kernel after a write and the run exits
+ * non-zero if it disagrees. Only then is anything timed.
+ */
+async function eventTimeViews() {
+  const { resampleSeries, rollingSeries } = await import('../packages/core/src/series/index.js');
+  const rows = [];
+  const ratios = [];
+  const SHAPES = [
+    { label: 'bucket (60 s ladder, mean)', kernel: resampleSeries,
+      spec: { every: 60_000, aggregate: 'mean' },
+      document: (spec) => [{ $resample: ['$[*]', spec] }] },
+    { label: 'rolling (5 min window, mean)', kernel: rollingSeries,
+      spec: { width: 300_000, aggregate: 'mean' },
+      document: (spec) => [{ $rolling: ['$[*]', spec] }] },
+  ];
+  for (const size of SIZES) {
+    for (const shape of SHAPES) {
+      for (const mode of ['auto', 'rerun']) {
+        // a bucket view holds one entry per reading PLUS one per
+        // bucket, so ten thousand readings on a 60 s ladder is 10,167
+        // entries — over §12's default ceiling. The bound is raised
+        // deliberately here, which is the only way it is ever raised.
+        const store = await openStore(SERIES_MODEL,
+          { driver: nodeDriver(), capture: true, live: { maxMaintained: 100_000 } });
+        const readings = store.sync.collection('readings');
+        store.sync.transaction(() => {
+          for (let i = 0; i < size; i++) {
+            readings.insert({ id: `r${i}`, series: 's', at: SERIES_T0 + i * 1000,
+              value: seriesValue(i) });
+          }
+        });
+        const async_ = store.collection('readings');
+        // the watermark is a NUMBER this program chose: the newest
+        // instant in the corpus, so every write below is punctual and
+        // this measures maintenance rather than the late-data re-read
+        const eventTime = { path: '$.at', watermark: SERIES_T0 + size * 1000,
+          allowedLateness: 60_000, retention: 3_600_000 };
+        const live = await async_.live(shape.document(shape.spec),
+          mode === 'rerun' ? { mode: 'rerun' } : { eventTime });
+        if (mode !== 'rerun' && live.mode.mode !== 'incremental') {
+          console.error(`\nEVENT TIME: ${shape.label} classified ${live.mode.mode} — ${live.mode.reason}`);
+          process.exit(1);
+        }
+        // every write lands inside the lateness this view allows —
+        // which is what a live view over a running series actually
+        // sees. The late path is a re-read by design and is measured
+        // by its own counter, not smuggled into this row's median.
+        const recent = Math.max(1, Math.floor(eventTime.allowedLateness / 1000) - 5);
+        let n = 0;
+        const write = async () => {
+          const i = size - 1 - (n % Math.min(recent, size));
+          n += 1;
+          await async_.put({ id: `r${i}`, series: 's', at: SERIES_T0 + i * 1000,
+            value: seriesValue(i + n) }, `r${i}`);
+        };
+        await write();
+        const all = await async_.execute([{ $for: { r: '$[*]' }, $return: '$r' }]);
+        const expected = shape.kernel(all, shape.spec);
+        if (JSON.stringify(live.result.rows) !== JSON.stringify(expected)) {
+          console.error(`\nEVENT TIME ANSWER WRONG: ${shape.label} (${mode}) at ${size} rows`);
+          process.exit(1);
+        }
+        const perWrite = await timeMedianAsync(write, ITERS);
+        rows.push({
+          name: `${mode === 'rerun' ? 're-run' : 'maintained'} — ${shape.label}, ${size} rows`,
+          results: [perWrite],
+          note: mode === 'rerun'
+            ? 'O(table): re-reads and re-folds the whole series per commit'
+            : `${live.mode.strategy} state; ${live.stats().recomputes} folds, `
+              + `${live.stats().lateData} late`,
+        });
+        if (mode === 'rerun') {
+          const maintained = rows[rows.length - 2].results[0];
+          ratios.push({ size, shape: shape.label, ratio: perWrite / maintained });
+        }
+        live.close();
+        await store.close();
+      }
+    }
+  }
+  return { title: 'Event-time views: maintained vs re-run (per single-row write, median)',
+    rows, ratios };
 }
 
 // ————— 2. capture overhead —————
@@ -337,6 +449,8 @@ async function main() {
   const tables = [];
   const incRerun = await incrementalVsRerun();
   tables.push(incRerun);
+  const eventTime = await eventTimeViews();
+  tables.push(eventTime);
   tables.push(await captureOverhead());
   const latency = await liveLatency();
   tables.push(latency);
@@ -357,12 +471,17 @@ async function main() {
   for (const { size, ratio } of incRerun.ratios) {
     console.log(`  ${size} rows: ${ratio.toFixed(1)}× vs re-run`);
   }
+  console.log('\nevent-time speedups (answer checked against the kernel first):');
+  for (const { size, shape, ratio } of eventTime.ratios) {
+    console.log(`  ${String(size).padEnd(6)} ${shape.padEnd(28)} ${ratio.toFixed(1)}× vs re-run`);
+  }
 
   if (flags.output === 'json' && flags.filepath) {
     const meta = {
       runtime: `node ${process.version}`,
       sizes: SIZES,
       incrementalRatios: incRerun.ratios,
+      eventTimeRatios: eventTime.ratios,
       liveLosses: latency.losses,
       omitted: ['LiveStore (electric-sql React peer conflict — ERESOLVE)'],
     };

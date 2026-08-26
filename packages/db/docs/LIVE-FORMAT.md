@@ -148,6 +148,7 @@ against its own result document (§9). Registration:
 const live = await store.collection('users').live(document, {
   externals: {},          // fixed at registration (§8)
   mode: 'auto',           // 'auto' | 'incremental' | 'rerun'
+  eventTime: undefined,   // a temporal view's watermark (§13)
 });
 live.result;              // the maintained result document
 live.mode;                // { strategy, mode: 'incremental'|'rerun', reason }
@@ -177,6 +178,8 @@ what the pushdown planner already means by it.
 | `orderBy` beside a refined spatial predicate — over `$distance` (not a path) or over a member (the set residual drops the planner's order terms) | **re-run on invalidation**, the ordering named as the reason | the previous result, for diffing |
 | a whole-query aggregate or a `groupBy` whose `where` is a refined spatial predicate | **re-run on invalidation** — the accumulator needs a fully translated selection and a refinement is not one; the reason says so | the previous result, for diffing |
 | a spatial predicate the planner **refused** (no `derive` index on the member, an untyped member, an unbounded probe) | **re-run on invalidation**, the refusal named — it never translated, so nothing narrows the fetch | the previous result, for diffing |
+| a `$resample` or `$rolling` document over the collection, with an explicit `eventTime` and a fixed width (§13) | **event-time bucket / rolling state**: rows kept by bucket, or in instant order; only what a write can reach is folded again, through `@jarenjs/core/series` itself | the contributing rows, plus one fold per bucket |
+| the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, or a retention that does not cover the window | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
 | joins, multi-entity roots, graph loads, every entity query | **re-run on invalidation — declared, not attempted** in this version | the previous result, for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
@@ -376,3 +379,103 @@ the signal), no maintenance over asynchronous connections in this
 version (every current driver is synchronous; the browser driver's
 order owns that story), no replication, and no ordering guarantee for
 unordered queries beyond §9's determinism.
+
+## 13. Event time
+
+A live view over time needs to know what "now" is — which reading counts
+as late — and the machine's clock is a different quantity from the
+instant a reading carries. So there is no clock in this layer and none
+under it: the **watermark arrives**.
+
+```js
+const live = await store.collection('readings').live(
+  [{ $resample: ['$[*]', { every: 60_000, aggregate: 'mean' }] }],
+  { eventTime: {
+      path: '$.at',              // the instant member, as a row selector
+      watermark: 1767225600000,  // a finite epoch the HOST supplies
+      allowedLateness: 300_000,  // how late a reading may still be
+      retention: 900_000,        // the horizon this view claims
+  } });
+
+live.advance(1767225660000);     // the only way a watermark moves
+live.stats().watermark;          // what it is now
+```
+
+`eventTime` is a **closed** member set: `path`, `watermark`,
+`allowedLateness` (default 0) and `retention`. Anything else — a
+misspelling, a non-finite epoch, a negative lateness, a `path` that is
+not a singular row selector — is `JD0053` at registration, not a member
+quietly ignored. `advance()` refuses a value that is not finite or that
+goes backwards (a `TypeError`), and it is absent on every view
+registered without an `eventTime`. An entity document has no collection
+to place rows in and re-runs, so an `eventTime` on `store.live` is
+`JD0053` too.
+
+### 13.1 What is maintained
+
+Two documents, and only these two shapes: `$resample` and `$rolling`
+whose series operand is the collection (`"$[*]"`, or a FLWOR over it
+whose `$where` narrows and whose `$return` is the bare binding).
+
+- **A bucket view keeps its rows by bucket.** A write touches one bucket
+  — two, when it moves a reading across a boundary — and exactly those
+  are folded again by calling `resampleSeries` over that bucket's own
+  rows. The aggregate is therefore the kernel's, and cannot drift from
+  what a fresh query would answer.
+- **A rolling view keeps its rows in instant order.** A write at `t` can
+  only change the windows ending in `[t, t + width)`, so exactly that
+  stretch is recomputed — again by the kernel, over the slice those
+  windows can see.
+
+`retention` is the horizon the view claims, and it is checked rather
+than assumed: it must cover the width plus `allowedLateness`, which is
+the span a single repair can read. A shorter one is a re-run with the
+numbers printed. It is **not** a compaction policy — the maintained
+state is bounded by `live.maxMaintained` exactly as every other
+strategy's is (§12), and nothing an answer still depends on is dropped.
+That is the honest statement of what this version buys: bounded repair
+work and a visible lateness contract, not a smaller heap.
+
+### 13.2 What re-runs, and why
+
+| Refused | Because |
+|---|---|
+| no `eventTime` | a temporal view maintains event time, and a hidden clock is the one source this suite will not use |
+| a calendar `every`/`width` (`P1M`, `P1D` on a zone) | a calendar ladder walks a wall clock and a month has no width, so its boundaries move with the data rather than with arithmetic |
+| a named `zone` | it resolves through the injected provider, which maintenance would have to consult per boundary |
+| `fill: 'locf'` / `'linear'` | they fill an empty bucket from its neighbours, so one late reading moves buckets it never belonged to |
+| `aggregate: 'first'` / `'last'` | they name a row by its position in the series, which a per-key state does not preserve — the same refusal the pushdown planner makes |
+| a `retention` under `width + allowedLateness` | a repair could read outside the horizon the view claims |
+| a `$subsequence` window, a projecting operand, a collection with no document key | there is no row a key can be tracked through |
+| a spec whose `at` selector is not `eventTime.path` | the state would place a row by one instant and aggregate it by another |
+
+Each of those is `live.mode.reason`, and `mode: 'incremental'` still
+refuses them at registration with `JD0051`.
+
+### 13.3 Late data is visible, never lost
+
+A reading is **late** when its instant — before the write, after it, or
+both — is behind `watermark - allowedLateness`. Late readings are not
+dropped and not quietly folded in. The view **re-reads** from the store,
+so the answer still equals what a fresh query would give, and the
+emission carries the reason:
+
+```js
+live.subscribe(({ patch, seq, lateData }) => {
+  if (lateData !== undefined) {
+    // { reason: 'late-data', at, key, watermark, allowedLateness, boundary }
+  }
+});
+```
+
+`stats().lateData` counts them and `stats().reruns` counts the re-reads
+they forced. A reading outside the view's own `start`/`end` window is
+not late data: it belongs to no bucket this view maintains, so there is
+nothing to be late for.
+
+The maintained answer is **equal to a full recomputation after every
+mutation** — not approximately, and not eventually. `test/db/live-time.test.js`
+holds a shuffled stream of inserts, in-place updates, instant moves and
+deletes against `resampleSeries` / `rollingSeries` over the whole
+collection after each one, which is the only oracle that cannot drift
+with the implementation.

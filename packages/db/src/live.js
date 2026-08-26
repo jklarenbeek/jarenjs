@@ -26,6 +26,7 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
 import { planQuery } from './plan.js';
 import { createSortedWindow } from './window.js';
+import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
  * never silent). */
@@ -238,9 +239,11 @@ const SPATIAL_RERUN = {
  *   columnByCanonical)
  * @param {boolean} keyed - whether documents carry their key (a
  *   declared key pointer); unkeyed rows cannot be tracked by key
+ * @param {any} [eventTime] - the normalized `eventTime` option
+ *   (`live-time.js`), or null when the caller declared none
  * @returns {any}
  */
-export function classifyLiveQuery(document, queryShape, keyed) {
+export function classifyLiveQuery(document, queryShape, keyed, eventTime = null) {
   const rerun = (reason) => ({ strategy: 'rerun', reason });
   // the reason named is the first one that is NOT a spatial refinement:
   // a refinement narrows and never forces a re-run by itself
@@ -250,6 +253,12 @@ export function classifyLiveQuery(document, queryShape, keyed) {
     return `'${forcing.construct}' — ${forcing.reason}`;
   };
   const { inner, whole, windowed, offset, limit, aggregate } = unwrapDocument(document);
+
+  // §13: a document that IS a temporal operator over the collection
+  // answers to event time or re-runs, and never to the §7 table — the
+  // planner's own residual for it is a fetch, not a maintainable shape
+  const temporal = classifyEventTime(inner, windowed, keyed, eventTime);
+  if (temporal !== null) return temporal;
 
   if (aggregate !== null) {
     if (windowed) return rerun('a windowed aggregate maintains no accumulator');
@@ -865,13 +874,17 @@ export function createLiveRegistry(bounds) {
       execute: definition.execute,
       readRow: definition.readRow,
       keyOf: definition.keyOf,
+      // §8's touched-key reader, handed to the strategies rather than
+      // imported by them: `live-time.js` maintains its own state and
+      // must not become a second implementation of the pointer walk
+      touchedKeys: (record, deps) => touchedKeys(record, definition.name, deps),
     };
-    const strategy = classification.strategy === 'rows' ? rowsStrategy(classification, context)
-      : classification.strategy === 'window' ? windowStrategy(classification, context)
-        : classification.strategy === 'accumulator'
-          ? accumulatorStrategy(classification, context)
-          : classification.strategy === 'group' ? groupStrategy(classification, context)
-            : rerunStrategy(classification, context);
+    const STRATEGIES = {
+      rows: rowsStrategy, window: windowStrategy, accumulator: accumulatorStrategy,
+      group: groupStrategy, bucket: bucketStrategy, rolling: rollingStrategy,
+    };
+    const strategy = (STRATEGIES[classification.strategy] ?? rerunStrategy)(
+      classification, context);
 
     /** @type {Set<Function>} */
     const observers = new Set();
@@ -906,6 +919,19 @@ export function createLiveRegistry(bounds) {
         let outcome;
         try {
           outcome = strategy.apply(record, state.result.rows);
+          if (outcome !== null && outcome.ops === undefined) {
+            // §13: a reading behind the lateness boundary is never
+            // folded in silently — the view re-reads from the store,
+            // and the emission carries the reason EVEN when the rows
+            // did not move, because "nothing changed" is exactly what
+            // a reader must not conclude on its own here
+            const late = outcome.rebuild === true;
+            const fresh = late ? strategy.rebuild() : outcome.rows;
+            const rows = shareByValue(state.result.rows, fresh);
+            const ops = diffRows(state.result.rows, rows);
+            outcome = ops.length === 0 && !late ? null
+              : { ops, rows, ...(late ? { late: outcome.late } : {}) };
+          }
           if (outcome !== null) checkBound(strategy.entries(outcome.rows));
         }
         catch (error) {
@@ -926,7 +952,8 @@ export function createLiveRegistry(bounds) {
         state.stats.matched += 1;
         state.stats.emissions += 1;
         state.result = { rows: outcome.rows };
-        const event = { patch: outcome.ops, seq: record.seq };
+        const event = { patch: outcome.ops, seq: record.seq,
+          ...(outcome.late === undefined ? {} : { lateData: outcome.late }) };
         for (const observer of observers) {
           try {
             observer(event);
@@ -956,6 +983,12 @@ export function createLiveRegistry(bounds) {
         get error() { return state.error; },
         mode,
         stats: () => ({ ...state.stats, ...(strategy.stats?.() ?? {}) }),
+        ...(strategy.advance === undefined ? {} : {
+          advance(watermark) {
+            if (state.status !== 'live') throw new TypeError('the live query is closed');
+            strategy.advance(watermark);
+          },
+        }),
         subscribe(observer) {
           if (state.status !== 'live') throw new TypeError('the live query is closed');
           observers.add(observer);

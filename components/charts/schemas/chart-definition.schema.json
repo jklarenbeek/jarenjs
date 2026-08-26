@@ -62,6 +62,7 @@
           "xLabel": { "type": ["string", "null"] },
           "yLabel": { "type": ["string", "null"] },
           "domain": { "$ref": "#/$defs/domainPolicy" },
+          "sampling": { "$ref": "#/$defs/samplingPolicy" },
           "series": {
             "type": "array",
             "items": { "$ref": "#/$defs/lineSeries" }
@@ -417,6 +418,30 @@
         "label": { "type": "string" },
         "value": { "type": "number" }
       }
+    },
+    "samplingPolicy": {
+      "description": "how many of a line's points are drawn: false never samples, a method name or object samples whatever the count, and an omitted member samples a TIME line above 2000 points through @jarenjs/core/series. Distinct from stream.maxPoints, which decides what exists rather than what is drawn.",
+      "anyOf": [
+        { "const": false },
+        { "enum": ["lttb", "minmax"] },
+        {
+          "type": "object",
+          "properties": {
+            "method": { "enum": ["lttb", "minmax"] },
+            "target": {
+              "description": "the most points one series may draw; an explicit target makes the rendered line independent of any layout",
+              "type": "integer",
+              "minimum": 2
+            },
+            "width": {
+              "description": "the width the derived target assumes, in CSS pixels (default 560)",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "pixelRatio": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      ]
     },
     "domainPolicy": {
       "description": "domain-stability policy: a quantized sliding x window and/or pinned or step-quantized y bounds, so most streaming ticks keep the scales still",

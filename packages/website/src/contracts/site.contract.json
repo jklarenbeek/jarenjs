@@ -241,9 +241,9 @@
       "additionalProperties": false
     },
     "SuiteCharts": {
-      "description": "charts.json — the chart-type render table and the two scaling series (points/series, then bar categories) behind the incremental-render claim.",
+      "description": "charts.json — the chart-type render table, the static line sampling rows (source vs rendered counts, AST and svg), and the two scaling series (points/series, then bar categories) behind the incremental-render claim.",
       "type": "object",
-      "required": ["date", "node", "points", "series", "iterations", "types", "scaling", "barScaling"],
+      "required": ["date", "node", "points", "series", "iterations", "types", "sampling", "scaling", "barScaling"],
       "properties": {
         "date": { "type": "string" },
         "node": { "type": "string" },
@@ -259,6 +259,7 @@
             "additionalProperties": false
           }
         },
+        "sampling": { "type": "array", "items": { "type": "object" } },
         "scaling": { "type": "array", "items": { "type": "object" } },
         "barScaling": { "type": "array", "items": { "type": "object" } }
       },
@@ -707,13 +708,13 @@
       "additionalProperties": false
     },
     "SuiteLive": {
-      "description": "live.json — the live-query layer: one meta block naming the runtime, the sizes and the published losses, and the timing tables.",
+      "description": "live.json — the live-query layer: one meta block naming the runtime, the sizes, the incremental and event-time speedups and the published losses, and the timing tables.",
       "type": "object",
       "required": ["meta", "tables"],
       "properties": {
         "meta": {
           "type": "object",
-          "required": ["suite", "title", "description", "runtime", "sizes", "incrementalRatios", "liveLosses", "omitted"],
+          "required": ["suite", "title", "description", "runtime", "sizes", "incrementalRatios", "eventTimeRatios", "liveLosses", "omitted"],
           "properties": {
             "suite": { "type": "string" },
             "title": { "type": "string" },
@@ -721,6 +722,7 @@
             "runtime": { "type": "string" },
             "sizes": { "type": "array" },
             "incrementalRatios": { "type": "array" },
+            "eventTimeRatios": { "type": "array" },
             "liveLosses": { "type": "object" },
             "omitted": { "type": "array" }
           },

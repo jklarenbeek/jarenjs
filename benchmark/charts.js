@@ -19,7 +19,7 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { compileChart, createChartSession } from '@jarenjs/charts';
+import { compileChart, createChartSession, buildLineAST } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
 import { formatNs as fmt } from './lib/fmt.js';
@@ -106,9 +106,9 @@ console.log(`\nstreaming budget: line ${POINTS}×${SERIES} compile+toVnode = ${f
  * prove it; the wholesale row beside it is what the identity-memo
  * component pays for the same tick.
  */
-function sessionBench(points) {
+function sessionBench(points, sampling) {
   const config = {
-    type: 'line', title: 'Live', x: 'time',
+    type: 'line', title: 'Live', x: 'time', sampling,
     domain: { y: { min: 0, max: 200 }, x: { window: 1e15, slide: 1e15 } },
   };
   const adapter = createStreamAdapter('line', {
@@ -129,30 +129,130 @@ function sessionBench(points) {
   const session = createChartSession(config, adapter);
   session.tick();
   const modes = { unchanged: 0, incremental: 0, rebuilt: 0 };
-  const tickRow = measure(`line session tick @ ${points}×${SERIES} (1 append)`, (i) => {
+  const label = sampling === false ? '' : ' sampled';
+  const tickRow = measure(`line session tick @ ${points}×${SERIES}${label} (1 append)`, (i) => {
     feed('s0', 100 + (i % 50));
     x += 1000;
     modes[session.tick().mode]++;
   });
-  const wholesaleRow = measure(`line wholesale tick @ ${points}×${SERIES}`,
+  const wholesaleRow = measure(`line wholesale tick @ ${points}×${SERIES}${label}`,
     () => compileChart(config, adapter.getData()).toVnode());
   return { tickRow, wholesaleRow, modes };
 }
 
+// The last row is the SAME corpus with sampling left at its default.
+// Above two thousand points the sampler chooses which vertices are
+// drawn, and one append can change that choice anywhere on the line —
+// so the frame is not still and the session rebuilds. That is the
+// price of the default, printed rather than avoided: a consumer who
+// wants a flat tick at ten thousand points declares `sampling: false`,
+// which is what the three rows above it are.
 const sessionRows = [];
 const sessionResults = [];
-for (const points of [100, 1000, 10000]) {
-  const result = sessionBench(points);
-  sessionResults.push({ points, ...result });
+for (const [points, sampling] of [[100, false], [1000, false], [10000, false], [10000, undefined]]) {
+  const result = sessionBench(points, sampling);
+  sessionResults.push({ points, sampled: sampling !== false, ...result });
   sessionRows.push(result.tickRow, result.wholesaleRow);
 }
 printTable('incremental session (adapter feed + tick)', sessionRows);
 for (const r of sessionResults) {
-  console.log(`  @ ${String(r.points).padEnd(5)} modes: ${r.modes.incremental} incremental / ${r.modes.rebuilt} rebuilt`);
+  console.log(`  @ ${String(r.points).padEnd(5)}${r.sampled ? ' sampled' : '        '} modes: ${r.modes.incremental} incremental / ${r.modes.rebuilt} rebuilt`);
 }
 const flat = sessionResults[2].tickRow.ns / sessionResults[0].tickRow.ns;
 console.log(`\nsession flatness: tick @10000 ÷ tick @100 = ${flat.toFixed(2)}× `
   + `(wholesale grows ${(sessionResults[2].wholesaleRow.ns / sessionResults[0].wholesaleRow.ns).toFixed(1)}×)`);
+
+//#endregion
+
+//#region line sampling
+
+/**
+ * What a big static time line costs, and what it draws.
+ *
+ * Each size is built twice — every point mapped (`sampling: false`) and
+ * the default policy, which above two thousand points hands the series
+ * to `@jarenjs/core/series`'s downsampler and maps what comes back —
+ * and each pair is measured twice: the AST alone, and the whole way to
+ * an SVG string. Source and rendered counts are printed beside the
+ * times, because a render that is faster only because it drew less of
+ * the data is not faster until you say so.
+ *
+ * The two rows disagree, and that disagreement is the result. Choosing
+ * the points costs about what mapping them costs — the sampler reads
+ * every reading either way — so the AST row shows sampling as a small
+ * LOSS. What it buys is the render: a path string and a vnode tree
+ * over five hundred vertices instead of a hundred thousand.
+ *
+ * The INVARIANTS are checked before anything is timed, and a failure
+ * exits non-zero: the sampled line has to start and end where the data
+ * does, keep every run of gaps as a gap, and carry no vertex that is
+ * not a source reading. A sampler that is quick and lies is a
+ * regression, and a stopwatch cannot see it.
+ */
+const samplingSeries = (n) => Array.from({ length: n }, (_, i) => ({
+  x: 1_721_556_000_000 + i * 1000,
+  // a gap run in the middle, so the gap invariant has something to hold
+  y: (i > n * 0.4 && i < n * 0.4 + 12) ? null
+    : Math.round(4096 * Math.sin(i / 31)) / 4096 + (i % 7),
+}));
+
+const samplingResults = [];
+const samplingRows = [];
+for (const points of [2000, 20000, 100000]) {
+  const data = { series: [{ name: 'readings', points: samplingSeries(points) }] };
+  const config = { type: 'line', title: 'Readings', x: 'time' };
+  const whole = buildLineAST(data, { ...config, sampling: false });
+  const sampled = buildLineAST(data, config);
+  const vertices = (ast) => ast.series[0].points;
+
+  const expectSampled = points > 2000;
+  const seen = new Set(vertices(whole).map((p) => (p === null ? 'gap' : `${p.u}|${p.v}`)));
+  const drawn = vertices(sampled);
+  const fabricated = drawn.filter((p) => p !== null && !seen.has(`${p.u}|${p.v}`)).length;
+  const gaps = drawn.filter((p) => p === null).length;
+  const sourceGaps = vertices(whole).filter((p) => p === null).length;
+  const ends = JSON.stringify([drawn[0], drawn[drawn.length - 1]])
+    === JSON.stringify([vertices(whole)[0], vertices(whole)[vertices(whole).length - 1]]);
+  const failures = [
+    fabricated !== 0 && `${fabricated} vertices were not source readings`,
+    gaps !== (expectSampled ? 1 : sourceGaps)
+      && `the one gap run left ${gaps} markers, not ${expectSampled ? 1 : sourceGaps}`,
+    !ends && 'the drawn line does not start and end where the data does',
+    expectSampled !== (sampled.sampling !== null)
+      && `sampling was ${sampled.sampling === null ? 'not ' : ''}applied at ${points} points`,
+    sampled.sampling !== null && sampled.sampling.renderedCount > sampled.sampling.target
+      && 'more points were drawn than the target allows',
+  ].filter(Boolean);
+  if (failures.length !== 0) {
+    console.error(`\nSAMPLING INVARIANT FAILED at ${points} points: ${failures.join('; ')}`);
+    process.exit(1);
+  }
+
+  // fewer iterations here: a hundred thousand points is not a 1000-run
+  const runs = makeMeasure(3, Math.max(5, Math.round(ITERATIONS / 40)));
+  const wholeRow = runs(`line ${points} whole → AST`,
+    () => buildLineAST(data, { ...config, sampling: false }));
+  const sampledRow = runs(`line ${points} sampled → AST`, () => buildLineAST(data, config));
+  const wholeSvg = runs(`line ${points} whole → svg`,
+    () => compileChart({ ...config, sampling: false }, data).toSvgString());
+  const sampledSvg = runs(`line ${points} sampled → svg`,
+    () => compileChart(config, data).toSvgString());
+  samplingRows.push(wholeRow, sampledRow, wholeSvg, sampledSvg);
+  samplingResults.push({
+    points, wholeRow, sampledRow, wholeSvg, sampledSvg,
+    sourceCount: points,
+    renderedCount: drawn.length,
+    method: sampled.sampling === null ? 'none' : sampled.sampling.method,
+  });
+}
+printTable('static line: source → AST → svg', samplingRows);
+for (const r of samplingResults) {
+  const ast = r.wholeRow.ns / r.sampledRow.ns;
+  const svg = r.wholeSvg.ns / r.sampledSvg.ns;
+  console.log(`  @ ${String(r.points).padEnd(6)} ${r.method.padEnd(5)} `
+    + `${r.sourceCount} source → ${r.renderedCount} rendered, `
+    + `AST ${ast.toFixed(2)}× · svg ${svg.toFixed(2)}×`);
+}
 
 //#endregion
 
@@ -225,9 +325,20 @@ if (OUTPUT === 'json') {
     series: SERIES,
     iterations: ITERATIONS,
     types: rows.map((r) => ({ label: r.label, ns: r.ns })),
+    sampling: samplingResults.map((r) => ({
+      points: r.points,
+      wholeNs: r.wholeRow.ns,
+      sampledNs: r.sampledRow.ns,
+      wholeSvgNs: r.wholeSvg.ns,
+      sampledSvgNs: r.sampledSvg.ns,
+      sourceCount: r.sourceCount,
+      renderedCount: r.renderedCount,
+      method: r.method,
+    })),
     scaling: sessionResults.map((r) => ({
       points: r.points,
       series: SERIES,
+      sampled: r.sampled,
       sessionNs: r.tickRow.ns,
       wholesaleNs: r.wholesaleRow.ns,
       incremental: r.modes.incremental,

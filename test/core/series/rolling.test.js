@@ -216,35 +216,40 @@ describe('rollingSeries — complexity', () => {
   });
 
   it('should stay linear in the corpus when the window scales with it', () => {
-    // The claim is about the WINDOW, so the measurement is too: how the
-    // cost scales with the corpus at a wide window, divided by how it
-    // scales at a window of one row. The denominator is the same kernel
-    // over the same arrays doing the same allocation, and is linear by
-    // construction — a window one millisecond wide holds one instant —
-    // so a loaded host inflates both halves together and the quotient
-    // stays put. A scan-per-output implementation would make the
-    // numerator ~64x while the denominator stayed ~8x, and land near 8.
+    // The claim is about the WINDOW: a wider one must not make the
+    // kernel read more. So COUNT the reads rather than time them.
     //
-    // The earlier form asserted the numerator alone against a fixed
-    // bound, and the site gate runs five stages at once: it measured the
-    // host and read 46.6x on a machine where it reads 8x idle.
-    const small = corpus(90210, 4000);
-    const large = corpus(90210, 32_000);
-    const best = (rows, width) => {
-      let fastest = Infinity;
-      for (let round = 0; round < 5; round++) {
-        const from = performance.now();
-        rollingSeries(rows, { width, aggregate: 'max' });
-        fastest = Math.min(fastest, performance.now() - from);
-      }
-      return Math.max(fastest, 0.001);
+    // `canonicalSeries` hands a canonical array straight back, and
+    // `typeof` is satisfied by an accessor — so a corpus whose `value`
+    // is a counting getter is the kernel's own working array, and every
+    // read the aggregation loop makes is visible. A ring or a deque
+    // reads each row a bounded number of times whatever the window
+    // holds; a scan-per-output implementation reads it once per output
+    // it is still inside, which a thousand-fold wider window multiplies.
+    //
+    // The earlier form was a stopwatch, and the site gate runs five
+    // stages at once: it measured the HOST, reading 46.6x and then 25.1x
+    // on a machine where it reads ~1x idle. A counter cannot be
+    // descheduled (order 02's rule, applied where a counter reaches).
+    const counting = (rows) => {
+      let reads = 0;
+      const array = rows.map((row) => ({
+        at: row.at,
+        get value() { reads++; return row.value; },
+      }));
+      return { array, reads: () => reads };
     };
-    const scaleAt = (width) => best(large, width) / best(small, width);
-    const widened = scaleAt(500_000);
-    const narrow = scaleAt(1);
+    const readsAt = (width) => {
+      const rows = corpus(90210, 4000);
+      const { array, reads } = counting(rows);
+      rollingSeries(array, { width, aggregate: 'max' });
+      return reads();
+    };
+    const narrow = readsAt(1);
+    const widened = readsAt(500_000);
     const ratio = widened / narrow;
     assert.ok(ratio < 3,
-      `widening the window made the corpus scale ${ratio.toFixed(1)}x worse `
-      + `(${widened.toFixed(1)}x at a 500 s window against ${narrow.toFixed(1)}x at one row)`);
+      `widening the window multiplied the kernel's reads ${ratio.toFixed(1)}x `
+      + `(${widened} reads at a 500 s window against ${narrow} at one row, over 4000 rows)`);
   });
 });

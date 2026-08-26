@@ -1130,11 +1130,18 @@ const chartsSuiteCharts = memo1((data) => ({
   })),
   scaling: chartNode(profileBars(
     (data.scaling ?? []).map((s) => ({
-      name: `${s.points} × ${s.series}`,
+      name: `${s.points} × ${s.series}${s.sampled ? ' sampled' : ''}`,
       results: { 'incremental session': s.sessionNs, 'wholesale re-render': s.wholesaleNs },
     })),
     ['incremental session', 'wholesale re-render'],
     { title: 'One appended point — session vs wholesale (log)', log: true, valLabel: 'ns/tick (log)' })),
+  sampling: chartNode(profileBars(
+    (data.sampling ?? []).map((s) => ({
+      name: `${s.points} points`,
+      results: { 'every point drawn': s.wholeSvgNs, 'sampled': s.sampledSvgNs },
+    })),
+    ['every point drawn', 'sampled'],
+    { title: 'Static time line — source → svg (log)', log: true, valLabel: 'ns/render (log)' })),
   barScaling: chartNode(profileBars(
     (data.barScaling ?? []).map((s) => ({
       name: `${s.categories} categories`,
@@ -1148,8 +1155,12 @@ const chartsSuiteCharts = memo1((data) => ({
 function chartsSuite(data) {
   const c = chartsSuiteCharts(data);
   const scaling = data.scaling ?? [];
-  const first = scaling[0];
-  const last = scaling[scaling.length - 1];
+  // the incremental claim is about a line whose points the sampler is
+  // NOT choosing; the sampled row rebuilds by design and reading the
+  // flatness card off it would state the opposite of the claim
+  const flat = scaling.filter((s) => s.sampled !== true);
+  const first = flat[0];
+  const last = flat[flat.length - 1];
   const out = [];
   if (first !== undefined && last !== undefined) {
     out.push(cards([
@@ -1179,7 +1190,7 @@ function chartsSuite(data) {
     ['Points × series', 'Session tick', 'Wholesale tick', 'Ratio', 'Frames incremental'],
     scaling.map((s) => ({
       cells: [
-        `${s.points} × ${s.series}`,
+        `${s.points} × ${s.series}${s.sampled ? ' (sampled)' : ''}`,
         formatNs(s.sessionNs),
         formatNs(s.wholesaleNs),
         formatRatio(s.sessionNs > 0 ? s.wholesaleNs / s.sessionNs : null),
@@ -1187,7 +1198,31 @@ function chartsSuite(data) {
       ],
       strong: true,
     })),
-    'The session column is flat in the point count; the wholesale column is linear in it.'));
+    'The session column is flat in the point count; the wholesale column is linear in it. '
+    + 'The last row is the same ten thousand points with sampling left at its default: above '
+    + 'two thousand points the downsampler chooses which vertices are drawn, one append can '
+    + 'change that choice anywhere on the line, and every frame therefore rebuilds — costing '
+    + 'MORE than the wholesale render beside it, because the session rebuild scans the extremes '
+    + 'a second time. A long live line declares `sampling: false`; that is what the rows above it are.'));
+  const sampling = data.sampling ?? [];
+  if (sampling.length !== 0) {
+    out.push(c.sampling);
+    out.push(table('Static time line — every point drawn vs sampled',
+      ['Source points', 'Drawn', 'Method', 'AST', 'AST sampled', 'Svg', 'Svg sampled'],
+      sampling.map((s) => ({
+        cells: [
+          String(s.sourceCount), String(s.renderedCount), s.method,
+          formatNs(s.wholeNs), formatNs(s.sampledNs),
+          formatNs(s.wholeSvgNs), formatNs(s.sampledSvgNs),
+        ],
+        strong: true,
+      })),
+      'Choosing the points costs about what mapping them costs — the sampler reads every '
+      + 'reading either way — so the AST column shows sampling as a small loss. What it buys is '
+      + 'the render: a path and a vnode tree over five hundred vertices instead of a hundred '
+      + 'thousand. Endpoints, gap markers and the required extrema are checked before anything '
+      + 'is timed, and the run fails if a sampled line drew a vertex no reading produced.'));
+  }
   const barScaling = data.barScaling ?? [];
   if (barScaling.length !== 0) {
     out.push(c.barScaling);

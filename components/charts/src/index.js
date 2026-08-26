@@ -36,5 +36,9 @@ export { buildTreemapAST, renderTreemapAST } from './types/treemap.js';
 export { buildStreamgraphAST, renderStreamgraphAST } from './types/streamgraph.js';
 export { buildSankeyAST, renderSankeyAST } from './types/sankey.js';
 export { buildMapAST, renderMapAST } from './types/map.js';
+export {
+  normalizeSampling, SAMPLING_THRESHOLD, SAMPLING_WIDTH,
+  SAMPLING_TARGET_MIN, SAMPLING_TARGET_MAX,
+} from './core/sampling.js';
 export { createStreamAdapter } from './core/stream-adapter.js';
 export { createChartSession } from './core/session.js';

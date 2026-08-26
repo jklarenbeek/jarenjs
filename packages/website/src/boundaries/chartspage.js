@@ -274,8 +274,28 @@ const DEMOS = [
   },
 ];
 
+/**
+ * A big event series: twenty thousand readings one second apart, with a
+ * five-minute outage in the middle. Deterministic — every value is a
+ * multiple of 1/4096, so this page draws the same line on every engine
+ * and `Math.sin`'s implementation freedom cannot move a pixel.
+ *
+ * Nothing about it is special except its size, which is the point: a
+ * time line above two thousand points is sampled by default, and the
+ * definition below says nothing about that.
+ */
+function eventSeries() {
+  const t0 = Date.UTC(2026, 0, 1);
+  return Array.from({ length: 20_000 }, (_, i) => ({
+    x: t0 + i * 1000,
+    y: i >= 9000 && i < 9300 ? null : Math.round(4096 * Math.sin(i / 613)) / 4096 + (i % 5) / 8,
+  }));
+}
+
 /** @type {any[]|null} built once — configs are constants */
 let demoNodes = null;
+/** @type {any[]|null} */
+let samplingNodes = null;
 
 /** The static demo nodes (chart + its definition source, per type). */
 export function chartsPageDemos() {
@@ -289,6 +309,54 @@ export function chartsPageDemos() {
     ]);
   }
   return demoNodes;
+}
+
+/**
+ * The sampling demo: one large event series drawn three ways, with what
+ * the sampler did printed under each. The metadata is the AST's own
+ * (`ast.sampling`), read out of the compiled chart rather than restated
+ * — a page that typed the numbers would be able to disagree with the
+ * chart above them.
+ */
+export function chartsPageSampling() {
+  if (samplingNodes === null) {
+    const points = eventSeries();
+    const base = {
+      type: 'line', x: 'time', markers: false,
+      xLabel: 'event time', yLabel: 'reading',
+    };
+    const data = { series: [{ name: 'sensor', points }] };
+    const cases = [
+      ['Default — LTTB above 2 000 points', {}],
+      ['`sampling: \'minmax\'` — the envelope, exactly', { sampling: 'minmax' }],
+      ['`sampling: false` — every reading drawn', { sampling: false }],
+    ];
+    samplingNodes = [
+      { kind: 'p', text: 'Twenty thousand readings a second apart, with a five-minute outage '
+        + 'in the middle. The definition says nothing about sampling — a time line above two '
+        + 'thousand points is reduced through the same @jarenjs/core/series kernel a query and '
+        + 'a database call, and the AST says so.' },
+      ...cases.flatMap(([label, extra]) => {
+        const config = { ...base, ...extra, title: 'Sensor readings' };
+        const compiled = charts.compile(config, data);
+        const s = compiled.ast.sampling;
+        return [
+          { kind: 'p', text: label },
+          chart(null, compiled.toVnode()),
+          { kind: 'p', text: s === null
+            ? `ast.sampling: null — all ${points.length.toLocaleString('en-US')} readings drawn.`
+            : `ast.sampling: { method: '${s.method}', target: ${s.target}, sourceCount: `
+              + `${s.sourceCount.toLocaleString('en-US')}, renderedCount: ${s.renderedCount} } — `
+              + 'the outage is still a gap and the line still ends where the data does.' },
+        ];
+      }),
+      callout('Sampling is not retention',
+        'A stream adapter\'s maxPoints decides what EXISTS; sampling decides what is DRAWN, '
+        + 'over whatever exists. Changing one leaves the other alone — the three lines above '
+        + 'are one array of readings, rendered three ways.'),
+    ];
+  }
+  return samplingNodes;
 }
 
 /** The streaming pointer under the demos. */

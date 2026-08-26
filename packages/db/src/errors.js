@@ -34,6 +34,7 @@ export const DB_CODES = Object.freeze({
   JD0050: 'live queries require change capture',
   JD0051: 'the demanded live mode is unavailable',
   JD0052: 'the live-query bound was reached',
+  JD0053: 'the live event-time declaration is invalid',
   JD0020: "the migration's from-shape does not match the database",
   JD0021: 'the migration is missing a required data transform',
   JD0022: 'an applied migration disagrees with the history record',
@@ -94,6 +95,8 @@ export const DB_CODES = Object.freeze({
  *    classifies as re-run; the reason names the forcing construct
  *  - `JD0052` — registering would exceed the store's `live.maxQueries`
  *    bound; the bound is printed, never silent
+ *  - `JD0053` — a live query's `eventTime` names a member it does not
+ *    admit, or a watermark/retention that is not a finite span
  *  - `JD0020` — a migration's `from` hash does not match the
  *    database's recorded shape; running it would corrupt
  *  - `JD0021` — a draft transform was not filled in, or a document no

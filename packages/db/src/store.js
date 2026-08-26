@@ -34,6 +34,7 @@ import { entityCore } from './entity.js';
 import { createTracker } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
+import { normalizeEventTime } from './live-time.js';
 import { createJobEngine } from './jobs.js';
 import { collectEntityRoots } from './plan.js';
 import {
@@ -1157,9 +1158,10 @@ export function openStore(model, options) {
           const registerCollectionLive = (core, document, liveOptions) => {
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
+            const eventTime = normalizeEventTime(liveOptions, core.model.name);
             const classification = liveOptions?.mode === 'rerun'
               ? { strategy: 'rerun', reason: 'rerun was requested' }
-              : classifyLiveQuery(document, core.queryShape, keyed);
+              : classifyLiveQuery(document, core.queryShape, keyed, eventTime);
             return /** @type {any} */ (liveRegistry).register({
               name: core.model.name,
               tables: new Set([core.model.name]),
@@ -1467,6 +1469,11 @@ export function openStore(model, options) {
                 if (liveRegistry === null) {
                   throw new DbCompileError('JD0050',
                     'live queries require change capture — open the store with { capture: true }');
+                }
+                if (liveOptions?.eventTime !== undefined) {
+                  throw new DbCompileError('JD0053',
+                    'live eventTime maintains a collection view — an entity document re-runs, '
+                    + 'so a watermark would describe nothing (LIVE-FORMAT §13)');
                 }
                 const roots = collectEntityRoots(document, entities);
                 if (roots.size === 0) {

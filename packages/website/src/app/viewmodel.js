@@ -13,7 +13,7 @@ import { HOME_CONTENT } from '../content/home.js';
 import { HERO_DEMO } from '../content/hero.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
 import { md, mdArticle, rewriteReadmeLinks, readmeUrl, TRUSTED, UNTRUSTED } from '../boundaries/markdown.js';
-import { chartsPageDemos, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
+import { chartsPageDemos, chartsPageSampling, chartsPageStreamingCallout } from '../boundaries/chartspage.js';
 import { binanceInvitation } from '../boundaries/binance.js';
 import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { PROVIDER_OPTIONS, isConfigured } from '../boundaries/assistant.js';
@@ -396,7 +396,7 @@ const composeBench = memo1((suites, nodes) => ({ suites, nodes }));
 const chartsPage = (state) => composeChartsPage(state.chartsLive);
 const composeChartsPage = memo1((live) => ({
   live: live ?? binanceInvitation(),
-  demos: [...chartsPageDemos(), chartsPageStreamingCallout()],
+  demos: [...chartsPageDemos(), ...chartsPageSampling(), chartsPageStreamingCallout()],
 }));
 
 function benchPage(state) {

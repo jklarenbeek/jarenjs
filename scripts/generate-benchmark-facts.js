@@ -79,6 +79,9 @@ const ms1 = (x) => x.toFixed(1);
 const ns = (x) => String(Math.round(x));
 /** Microseconds from nanoseconds, two significant figures. */
 const us = (x) => Number((x / 1000).toPrecision(3)).toString();
+/** A duration in nanoseconds, in the unit a reader would have used. */
+const dur = (x) => (x >= 1e6 ? `${Number((x / 1e6).toPrecision(3))} ms`
+  : x >= 1e3 ? `${Number((x / 1e3).toPrecision(3))} µs` : `${Math.round(x)} ns`);
 /** The min and max of a list, as a `lo–hi` band. */
 const band = (xs, fmt) => `${fmt(Math.min(...xs))}–${fmt(Math.max(...xs))}`;
 /** A count with thousand separators, the one grouping the docs use. */
@@ -999,6 +1002,88 @@ const FACTS = {
     ];
     return `\n${lines.join('\n')}\n`;
   },
+
+  // ————— charts: what a big static time line draws —————
+
+  /** The static-line sampling table: source vs rendered, AST vs svg.
+   * The AST column is a small LOSS and stays in the table for that
+   * reason — sampling buys the render, not the mapping. */
+  'charts.samplingTable': () => {
+    const rows = data('charts').sampling ?? [];
+    const lines = [
+      '| source points | drawn | method | source → AST | source → svg |',
+      '|---:|---:|---|---:|---:|',
+      ...rows.map((/** @type {any} */ r) => `| ${r.sourceCount.toLocaleString('en-US')} `
+        + `| ${r.renderedCount.toLocaleString('en-US')} | ${r.method} `
+        + `| ${dur(r.wholeNs)} → ${dur(r.sampledNs)} `
+        + `| ${dur(r.wholeSvgNs)} → ${dur(r.sampledSvgNs)} |`),
+    ];
+    return `\n${lines.join('\n')}\n`;
+  },
+  /** The session-vs-wholesale table: the three unsampled rows carry the
+   * flatness claim, and the sampled row beside them carries its price. */
+  'charts.sessionTable': () => {
+    const rows = data('charts').scaling ?? [];
+    const lines = [
+      '| points × series | session tick | wholesale tick | frames incremental |',
+      '|---|---:|---:|---:|',
+      ...rows.map((/** @type {any} */ r) =>
+        `| ${r.points.toLocaleString('en-US')} × ${r.series}`
+        + `${r.sampled ? ' *(sampled)*' : ''} | ${dur(r.sessionNs)} `
+        + `| ${dur(r.wholesaleNs)} | ${r.incremental} of ${r.incremental + r.rebuilt} |`),
+    ];
+    return `\n${lines.join('\n')}\n`;
+  },
+  /** How much the wholesale tick grows across the unsampled rows — the
+   * other half of the flatness claim. */
+  'charts.sessionFlatness': () => {
+    const rows = (data('charts').scaling ?? []).filter((/** @type {any} */ r) => !r.sampled);
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    if (first === undefined || last === undefined) return 'not measured';
+    return `${ratio(last.sessionNs / first.sessionNs)}× while the wholesale tick grows `
+      + `${ratio(last.wholesaleNs / first.wholesaleNs)}×`;
+  },
+  /** The one number the default is for: what sampling saves on the
+   * whole render at the largest measured line. */
+  'charts.samplingWin': () => {
+    const rows = (data('charts').sampling ?? []).filter(
+      (/** @type {any} */ r) => r.renderedCount < r.sourceCount);
+    const last = rows[rows.length - 1];
+    return last === undefined ? 'not measured'
+      : `${last.sourceCount.toLocaleString('en-US')} points draw as `
+        + `${last.renderedCount.toLocaleString('en-US')} and render `
+        + `${ratio(last.wholeSvgNs / last.sampledSvgNs)}× faster`;
+  },
+  // ————— live: event-time views —————
+
+  /** The maintained-vs-re-run table for the two event-time shapes. */
+  'live.eventTimeTable': () => {
+    const table = data('live').tables.find((/** @type {any} */ t) =>
+      t.title.startsWith('Event-time views'));
+    const lines = [
+      '| view | maintained | re-run | ratio |',
+      '|---|---:|---:|---:|',
+    ];
+    for (const row of table.rows) {
+      if (!row.name.startsWith('maintained')) continue;
+      const rerun = table.rows.find((/** @type {any} */ r) =>
+        r.name === row.name.replace('maintained', 're-run'));
+      lines.push(`| ${row.name.replace('maintained — ', '')} `
+        + `| ${dur(row.results[0])} | ${dur(rerun.results[0])} `
+        + `| ${ratio(rerun.results[0] / row.results[0])}× |`);
+    }
+    return `\n${lines.join('\n')}\n`;
+  },
+  /** The two headline event-time speedups at the larger corpus. */
+  'live.eventTimeBand': () => {
+    const ratios = (data('live').meta.eventTimeRatios ?? []);
+    const size = Math.max(...ratios.map((/** @type {any} */ r) => r.size));
+    const at = ratios.filter((/** @type {any} */ r) => r.size === size);
+    const parts = at.map((/** @type {any} */ r) =>
+      `${ratio(r.ratio)}× for the ${r.shape.split(' ')[0]}`);
+    return `${parts.join(' and ')} at ${size.toLocaleString('en-US')} readings`;
+  },
 };
 
 /** One named row of the vector suite's flat rows at the largest leg. */
@@ -1068,6 +1153,7 @@ const DOCS = [
   'docs/ROADMAP.md',
   'benchmark/README.md',
   'packages/contract/README.md',
+  'components/charts/README.md',
   'components/md/README.md',
   'components/mermaid/README.md',
   'packages/flow/README.md',

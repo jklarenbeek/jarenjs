@@ -251,17 +251,29 @@ property-tested over thousands of random frames rather than assumed.
 
 Measured (`npm run benchmark:charts`, one appended point):
 
-| points × series | session tick | wholesale tick |
-|---|---|---|
-| 100 × 5 | ~8 µs | ~319 µs |
-| 1 000 × 5 | ~4.6 µs | ~1.03 ms |
-| 10 000 × 5 | ~4.2 µs | ~11.3 ms |
+<!--bm:charts.sessionTable-->
+| points × series | session tick | wholesale tick | frames incremental |
+|---|---:|---:|---:|
+| 100 × 5 | 6.26 µs | 301 µs | 1100 of 1100 |
+| 1,000 × 5 | 4.84 µs | 1.1 ms | 1100 of 1100 |
+| 10,000 × 5 | 4.44 µs | 8.61 ms | 1100 of 1100 |
+| 10,000 × 5 *(sampled)* | 3.25 ms | 2.53 ms | 0 of 1100 |
+<!--/bm-->
 
-The session tick is *flat* in n (10 000 points cost no more than 100)
-while the wholesale tick grows 35×. Supported types: `line` (appends
+The session tick is *flat* in n — it
+moves <!--bm:charts.sessionFlatness-->0.7× while the wholesale tick grows 28.6×<!--/bm-->. Supported types: `line` (appends
 and ring-buffer evictions), `bar` (live counts and sums) and
 `candlestick` (keyed kline upserts — one candle group re-renders). The
 website's Binance demo runs on it.
+
+The first three rows are lines the **sampler is not choosing the points
+of** (see below). A session over a time line above two thousand points
+rebuilds every frame by design — one appended reading can change which
+vertices the downsampler picks, anywhere on the line — and that rebuild
+costs *more* than the wholesale render it replaces, because it scans the
+extremes a second time. That is the last row, and it is the price of the
+default: a long live line declares `sampling: false`, which is exactly
+what the three rows before it are.
 
 A bar chart's stillness test is the nice-number top rather than a
 declared policy: a count below it repaints one rect, a count that
@@ -281,6 +293,61 @@ and the adapter rebuilds its snapshot arrays, so the bar session's tick
 does grow with the category count. It grows about 2× where the
 wholesale render grows about 4×; the line session's flatness is the
 stronger claim, and this is deliberately the weaker one.
+
+## Sampling a big line
+
+A hundred thousand readings on a line five hundred pixels wide is two
+hundred readings per column. Something has to choose, and the only
+question is whether the choosing is visible.
+
+Above **two thousand source points** a **time** line is reduced through
+`downsampleSeries` from `@jarenjs/core/series` — the same kernel a query
+and a database call, so a chart cannot disagree with the rest of the
+suite about what a gap is or where a series ends. Everything smaller,
+and every non-time line, is the AST the previous version built, point
+for point.
+
+```js
+compileChart({ type: 'line', x: 'time' }, data);                  // LTTB above 2 000
+compileChart({ type: 'line', x: 'time', sampling: false }, data); // draw every point
+compileChart({ type: 'line', x: 'time', sampling: 'minmax' }, data);
+compileChart({ type: 'line', x: 'time',
+  sampling: { method: 'lttb', target: 800 } }, data);             // an explicit budget
+```
+
+The default budget is a function of the **declared** width
+(`sampling: { width, pixelRatio }`, default 560 × 1, clamped to
+64…8 192) and never of a measured element — nothing in this package
+reads a layout, so an SSR render and a browser render of one definition
+are the same bytes. An explicit `target` fixes it outright.
+
+`ast.sampling` reports what happened: `{ method, target, sourceCount,
+renderedCount }`, or `null` when every point is drawn. What the sampled
+line still promises is the kernel's: every segment's **ends** survive,
+every run of gaps keeps a marker and is never bridged, `minmax` keeps
+the envelope exactly, and no vertex carries an instant that no reading
+had. The domain is scanned from every **source** point, so the axis
+reports the data rather than the drawing.
+
+Measured (`npm run benchmark:charts`, one series):
+
+<!--bm:charts.samplingTable-->
+| source points | drawn | method | source → AST | source → svg |
+|---:|---:|---|---:|---:|
+| 2,000 | 2,000 | none | 73.4 µs → 72.3 µs | 587 µs → 515 µs |
+| 20,000 | 560 | lttb | 838 µs → 1.28 ms | 5.84 ms → 1.05 ms |
+| 100,000 | 560 | lttb | 4.35 ms → 5.36 ms | 27.8 ms → 5.42 ms |
+<!--/bm-->
+
+Choosing the points costs about what mapping them costs — the sampler
+reads every reading either way — so the AST column is a small **loss**.
+What it buys is the render — <!--bm:charts.samplingWin-->100,000 points draw as 560 and render 5.1× faster<!--/bm-->. The invariants above are asserted in the benchmark
+before a single timing is printed.
+
+**Sampling is not retention.** `createStreamAdapter`'s `maxPoints`
+decides what *exists*; sampling decides what is *drawn*, over whatever
+exists. Changing one leaves the other untouched, and a chart can switch
+method or turn sampling off without the adapter noticing.
 
 ## Mermaid interop
 

@@ -589,7 +589,7 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   journal where it does not (`bun:sqlite`, the wasm build). One diff
   format runs store → patch → live query → O(k) render. Capture is
   opt-in; the overhead is published, not waved away.
-- **Live queries** (LIVE-FORMAT §§7–12): `collection.live(document)`
+- **Live queries** (LIVE-FORMAT §§7–13): `collection.live(document)`
   maintains a result as writes arrive and emits patches — incremental
   for `where`/`select`/`orderBy`+`limit`/aggregates/single-level
   `groupBy` and a spatial `where` over a derived index (the geofence;
@@ -597,6 +597,11 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   **declared, never silent** (`live.mode` names the reason).
   Unaffected rows stay reference-identical; a seeded oracle holds the
   maintained result equal to a fresh re-query after every mutation.
+- **Event time** (LIVE-FORMAT §13): a `$resample` or `$rolling` view
+  over a fixed width maintains exact event-time buckets and windows
+  against a watermark the HOST supplies — never a clock — and a reading
+  behind the declared lateness re-reads and emits a `lateData` record
+  rather than being folded in as though it had arrived on time.
 - **Durable runs and the job queue** (JOBS-FORMAT, FLOW-FORMAT §7.6):
   a `@jarenjs/flow` DAG run checkpoints declared nodes and RESUMES
   after a crash; `store.jobs` leases work in one guarded statement
@@ -607,6 +612,35 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   over the header-free OPFS SAH-pool VFS — one tab owns the
   connection, others are clients. Proven in the `#/data` studio across
   Chromium, Firefox and WebKit.
+
+### What an event-time view costs
+
+`benchmark/live.js` maintains a 60 s bucket ladder and a 5 minute
+rolling window over a seeded series and rewrites one reading per commit,
+inside the lateness the view allows. The maintained rows are checked
+against `resampleSeries` / `rollingSeries` over the **whole** collection
+before a single timing is printed — a fast live view with the wrong
+answer is not a fast live view — and the run exits non-zero if they
+disagree.
+
+<!--bm:live.eventTimeTable-->
+| view | maintained | re-run | ratio |
+|---|---:|---:|---:|
+| bucket (60 s ladder, mean), 1000 rows | 119 µs | 1.09 ms | 9.2× |
+| rolling (5 min window, mean), 1000 rows | 407 µs | 3.86 ms | 9.5× |
+| bucket (60 s ladder, mean), 10000 rows | 136 µs | 10.9 ms | 80.2× |
+| rolling (5 min window, mean), 10000 rows | 13.7 ms | 62.7 ms | 4.6× |
+<!--/bm-->
+
+The gain is <!--bm:live.eventTimeBand-->80.2× for the bucket and 4.6× for the rolling at 10,000 readings<!--/bm-->. A bucket
+view is nearly flat in the series length, because a write folds one
+bucket again and the rest of the ladder is untouched. A rolling view is
+not, and the table says so: its answer is one row per reading, so the
+emitted diff walks every one of them whatever changed. A bucket view
+also holds one maintained entry per reading *plus* one per bucket, which
+is over §12's default `maxMaintained` at ten thousand readings — the
+bound errors rather than degrading, and raising it is a decision
+somebody makes.
 
 ## Sync-readiness — what exists and what does not
 
@@ -636,6 +670,10 @@ replication on these primitives is a roadmap item, not a hint.
   priority classes, no cron, no workflow compensation.
 - **Live-query maintenance is limited to the declared table** (§7);
   joins, entity queries and non-canonical shapes re-run, reported.
+- **`eventTime.retention` bounds repair work, not memory.** It is the
+  horizon a view claims and is checked against the window it maintains;
+  the maintained state is still bounded by `live.maxMaintained`, and no
+  version of this compacts a bucket's rows away.
 - **The wasm build journals** (its session extension is not yet
   adapted); OPFS needs a secure context, and where it is absent the
   store runs in memory with the durability difference stated.
@@ -650,7 +688,7 @@ profile §8, entities §9, relational translation §10, the unit of work
 §11), [docs/MIGRATION-FORMAT.md](docs/MIGRATION-FORMAT.md) (documents
 §§1–8, relational changes §§9–12),
 [docs/LIVE-FORMAT.md](docs/LIVE-FORMAT.md) (capture §§1–6, live queries
-§§7–12) and [docs/JOBS-FORMAT.md](docs/JOBS-FORMAT.md) (the durable
+§§7–12, event time §13) and [docs/JOBS-FORMAT.md](docs/JOBS-FORMAT.md) (the durable
 queue §§1–9); the seams, the pushdown contract and every engine are in
 [ARCHITECTURE.md](ARCHITECTURE.md); the benchmark methodology is in
 [benchmark/README.md](../../benchmark/README.md).

@@ -665,7 +665,7 @@ rollback truncates the journal buffer to its checkpoint. Overhead is
 measured and published: capture off ~6µs, journal ~17µs, session ~69µs
 per single-op commit, amortizing across a transaction.
 
-## Live queries (`src/live.js`, `src/window.js`)
+## Live queries (`src/live.js`, `src/live-time.js`, `src/window.js`)
 
 A live query classifies its document against the normative maintenance
 table by reading the COMPILED PLAN — translated filters, order terms
@@ -691,6 +691,23 @@ reference identity for untouched rows — the O(k) renderer's contract —
 proven by a seeded oracle that holds the maintained result equal to a
 fresh re-query after every mutation. Incremental beats re-run 13× at
 1k rows, 51× at 10k.
+
+**Event time** (`src/live-time.js`) adds two more strategies for the
+one document shape whose answer is a function of instants rather than
+of rows: a `$resample` bucket state and a `$rolling` window state, both
+over a FIXED width. There is no clock under either — the watermark is a
+finite epoch the host supplies and `advance()` is the only way it moves
+— and both fold through `@jarenjs/core/series` itself rather than
+carrying a second aggregate, so a maintained answer cannot drift from
+what a fresh query gives. A write touches one bucket (two when it
+crosses a boundary) or the windows ending in `[t, t + width)`, and
+exactly those are recomputed. Everything a per-key state cannot place
+exactly re-runs with its member named: a calendar ladder, a named zone,
+a `locf`/`linear` fill, a `first`/`last` aggregate, a retention under
+`width + allowedLateness`. A reading behind the lateness boundary is
+never folded in silently — the view re-reads and the emission carries a
+`lateData` record — which is the one place this layer spends a full
+re-query to keep a promise rather than a number.
 
 ## Durable runs and the job queue (`src/jobs.js`, `src/dag-job.js`)
 

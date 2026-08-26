@@ -301,10 +301,30 @@ export interface LiveOptions {
   /** 'incremental' DEMANDS incrementality (JD0051 when the shape
    * re-runs); 'rerun' forces the re-run strategy. */
   mode?: 'auto' | 'incremental' | 'rerun';
+  /** Event time for a `$resample` / `$rolling` view (LIVE-FORMAT §13).
+   * Its members are closed: anything else is JD0053. */
+  eventTime?: LiveEventTime;
+}
+
+export interface LiveEventTime {
+  /** A singular row selector naming the instant member, e.g. '$.at'.
+   * It must be the member the spec aggregates by. */
+  path: string;
+  /** A finite epoch in milliseconds. Never a clock reading — the host
+   * supplies it, and `advance()` is the only way it moves. */
+  watermark: number;
+  /** How far behind the watermark a reading may still be applied
+   * (default 0). Older readings emit `lateData` and re-run. */
+  allowedLateness?: number;
+  /** The horizon this view claims, in milliseconds. It must cover the
+   * window (or bucket) width plus `allowedLateness`, or the view is
+   * classified as a re-run. */
+  retention: number;
 }
 
 export interface LiveMode {
-  readonly strategy: 'rows' | 'window' | 'accumulator' | 'group' | 'rerun';
+  readonly strategy: 'rows' | 'window' | 'accumulator' | 'group'
+    | 'bucket' | 'rolling' | 'rerun';
   readonly mode: 'incremental' | 'rerun';
   /** Present exactly when the strategy is 'rerun': the named reason. */
   readonly reason?: string;
@@ -316,6 +336,17 @@ export interface LiveEvent {
   seq?: number;
   /** A maintenance failure (JD2060 …): the query closed after this. */
   error?: unknown;
+  /** Present when a reading behind the lateness boundary forced this
+   * emission: the view re-read, and the row was never folded in as
+   * though it had arrived on time (LIVE-FORMAT §13). */
+  lateData?: {
+    reason: 'late-data';
+    at: number;
+    key: string;
+    watermark: number;
+    allowedLateness: number;
+    boundary: number;
+  };
 }
 
 export interface LiveStats {
@@ -324,8 +355,15 @@ export interface LiveStats {
   emissions: number;
   /** min/max extremum-removal recomputes (accumulator strategy). */
   fallbacks?: number;
-  /** whole-query re-executions (re-run strategy). */
+  /** whole-query re-executions (re-run strategy, and the re-read a
+   * late reading forces). */
   reruns?: number;
+  /** readings that arrived behind the lateness boundary (event time). */
+  lateData?: number;
+  /** buckets or window stretches folded again (event time). */
+  recomputes?: number;
+  /** the current watermark (event time). */
+  watermark?: number;
 }
 
 export interface LiveQuery {
@@ -337,6 +375,10 @@ export interface LiveQuery {
   readonly mode: LiveMode;
   stats(): LiveStats;
   subscribe(observer: (event: LiveEvent) => void): () => void;
+  /** Move the event-time watermark forward. Present only on a view
+   * registered with `eventTime`; a non-finite or backward value is a
+   * TypeError. */
+  advance?(watermark: number): void;
   close(): void;
 }
 
