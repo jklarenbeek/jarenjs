@@ -194,6 +194,35 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.ok(!data.rows.some((r) => r.policy === 'near-live'));
   });
 
+  it('derives the series suite, publishing the ceiling and the loss beside the win', function () {
+    const data = loadBench('series');
+    const state = { benchStatus: { series: 'loaded' }, bench: { series: data }, benchUi: {} };
+    const nodes = deriveSuite(state, 'series');
+    const text = JSON.stringify(nodes);
+    assert.ok(Array.isArray(nodes) && nodes.length > 0);
+    assert.match(text, /sorted binary cut/, 'the row a range read has to beat renders');
+    assert.match(text, /declared epoch column/, 'and the stored route beside it');
+    assert.match(text, /date functions over the document/, 'and the route it exists to beat');
+    assert.match(text, /SEARCH sample USING INDEX/, 'the plan renders, read rather than asserted');
+    // the ceiling stays on the page: a durable range is slower than an
+    // array already in memory, and the suite has to say so out loud
+    assert.match(text, /ceiling/, 'the resident rows are named as a ceiling, not as a rival');
+    // every timing on this page is gated, so the checks have to be all
+    // green in the published file — a red one withholds the whole run
+    assert.strictEqual(data.meta.equivalenceFailures, 0);
+    assert.ok(data.checks.length > 0 && data.checks.every((/** @type {any} */ c) => c.agrees),
+      'a published series file cannot carry a failed equivalence check');
+    // and no row claims a kernel that does not exist yet
+    assert.ok(!data.rows.some((/** @type {any} */ r) => /core|kernel/.test(r.route)),
+      'the suite publishes only routes a consumer can run today');
+    for (const leg of data.meta.legs) {
+      const routes = data.rows.filter((/** @type {any} */ r) => r.n === leg.n);
+      assert.ok(routes.length > 0, `no rows for the ${leg.label} leg`);
+      for (const row of routes)
+        assert.ok(row.results > 0, `${row.route} at ${leg.label} answered nothing`);
+    }
+  });
+
   it('derives the long-horizon suite, keeping both tasks and both shapes', function () {
     const data = loadBench('long-horizon');
     const state = { benchStatus: { 'long-horizon': 'loaded' }, bench: { 'long-horizon': data }, benchUi: {} };

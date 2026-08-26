@@ -110,6 +110,7 @@ flowchart TB
             DatesCivil["civil.js<br/>Gregorian day-number math"]
             DatesFormat["format.js<br/>LDML pattern compiler"]
             DatesDuration["duration.js<br/>ISO 8601 durations"]
+            DatesTicks["ticks.js<br/>Time-axis step ladder"]
         end
 
         subgraph GeoModule["Spatial"]
@@ -191,6 +192,7 @@ flowchart TB
     DatesIndex --> DatesCivil
     DatesIndex --> DatesFormat
     DatesIndex --> DatesDuration
+    DatesIndex --> DatesTicks
 
     GeoIndex --> GeoPred
     GeoIndex --> GeoDist
@@ -463,6 +465,7 @@ intermediate and is plain data, never an opaque handle.
 | `civil.js` | proleptic Gregorian arithmetic over integers |
 | `format.js` | LDML pattern → compiled formatter |
 | `duration.js` | ISO 8601 duration decomposition and date arithmetic |
+| `ticks.js` | the time-axis step ladder and its calendar boundaries |
 
 Calendar math goes through day numbers (`daysFromCivil`/`civilFromDays`),
 never through `Date`: the conversions are ~10 integer operations and allocate
@@ -532,6 +535,7 @@ import {
 const parts = parseRFC3339Parts('2026-01-31');
 addToParts(parts, 1, 'month');          // 2026-02-28 — month math clamps
 startOfParts(parts, 'week');            // the Monday of that week (ISO 8601)
+addToParts(parts, 3, 'hour');           // TypeError — a full-date has no clock
 
 const fmt = compileDateFormat("yyyy-'W'ww");  // compile once…
 fmt(parts);                             // …call many: '2026-W05'

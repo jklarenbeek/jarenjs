@@ -17,6 +17,7 @@
 //   civil.js    proleptic Gregorian arithmetic over integers
 //   format.js   LDML pattern -> compiled formatter
 //   duration.js ISO 8601 duration decomposition and conversion
+//   ticks.js    the time-axis step ladder and its boundaries
 //
 // Locale-dependent presentation (month and weekday names, relative
 // phrasing) is NOT here: it belongs to @jarenjs/locales, so this module
@@ -26,5 +27,6 @@ export * from './rfc3339.js';
 export * from './civil.js';
 export * from './format.js';
 export * from './duration.js';
+export * from './ticks.js';
 
 //#endregion

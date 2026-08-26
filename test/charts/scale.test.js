@@ -7,6 +7,10 @@ import {
   niceStep, axisTicksLinear, axisTicksLog, axisTicksOrdinal,
   axisTicksTime, niceTimeStep, formatTimeTick,
 } from '@jarenjs/charts';
+import {
+  axisTicksTime as coreAxisTicksTime,
+  niceTimeStep as coreNiceTimeStep,
+} from '@jarenjs/core/dates';
 
 // numOf is adapter-internal; the test reaches it by source path
 import { numOf } from '../../components/charts/src/core/stream-adapter.js';
@@ -157,6 +161,20 @@ describe('time ticks land on calendar boundaries', function () {
     assert.deepEqual(axisTicksTime(Number.NaN, 5), []);
     const lo = Date.UTC(2026, 0, 1), hi = Date.UTC(2026, 0, 5);
     assert.deepEqual(axisTicksTime(hi, lo), axisTicksTime(lo, hi), 'reversed reads the same');
+  });
+
+  it('should step by aligned multi-year amounts over a millennial domain', function () {
+    // four ticks from 1970 to 5000 used to hit the 1,000-tick guard near
+    // 2969 and leave the last two thirds of the axis blank
+    assert.deepEqual(labels(Date.UTC(1970, 0, 1), Date.UTC(5000, 0, 1)),
+      ['2000', '3000', '4000', '5000']);
+  });
+
+  it('should delegate to the kernel rather than be a second planner', function () {
+    // the time-axis planner lives in core so a non-chart consumer can
+    // reach it without importing this component; these are those names
+    assert.equal(axisTicksTime, coreAxisTicksTime);
+    assert.equal(niceTimeStep, coreNiceTimeStep);
   });
 });
 

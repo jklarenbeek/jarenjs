@@ -1018,6 +1018,153 @@
       },
       "additionalProperties": false
     },
+    "SuiteSeries": {
+      "description": "series.json — the temporal ground, measured before a kernel exists: the run meta (the corpus and its law, the rounds per row, the SQLite plans read from the host, the derived ratios and the notes), the equivalence checks that gate every timing, the timing and plan tables, and one flat row per route per leg with the answer size it produced.",
+      "type": "object",
+      "required": ["meta", "headline", "checks", "tables", "rows"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["suite", "title", "description", "date", "node", "platform", "seed", "origin", "stepMs", "law", "corpus", "corpusVersion", "corpusCases", "warmup", "rounds", "quick", "engine", "legs", "plans", "figures", "notes", "equivalenceFailures"],
+          "properties": {
+            "suite": { "type": "string" },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "date": { "type": "string" },
+            "node": { "type": "string" },
+            "platform": { "type": "string" },
+            "seed": { "type": "number" },
+            "origin": {
+              "description": "The instant the corpus starts at, in epoch milliseconds — the origin every bucket boundary is measured from.",
+              "type": "number"
+            },
+            "stepMs": { "type": "number" },
+            "law": {
+              "description": "The closed form every sample's value comes from, so a reader can regenerate the corpus rather than trust it.",
+              "type": "string"
+            },
+            "corpus": { "type": "string" },
+            "corpusVersion": { "type": "number" },
+            "corpusCases": { "type": "number" },
+            "warmup": { "type": "number" },
+            "rounds": {
+              "description": "Measured rounds per row family: the default, the fewer a tens-of-milliseconds query row needs, and the many a microsecond index read needs before the clock can see it.",
+              "type": "object",
+              "required": ["default", "query", "asof"],
+              "properties": {
+                "default": { "type": "number" },
+                "query": { "type": "number" },
+                "asof": { "type": "number" }
+              },
+              "additionalProperties": false
+            },
+            "quick": { "type": "boolean" },
+            "engine": { "type": "string" },
+            "legs": {
+              "description": "One entry per corpus size measured.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["n", "label"],
+                "properties": { "n": { "type": "number" }, "label": { "type": "string" } },
+                "additionalProperties": false
+              }
+            },
+            "plans": {
+              "description": "What SQLite said it would do, read from EXPLAIN QUERY PLAN on the measuring host rather than asserted — a search against a scan is the whole claim of the declared-column row.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key", "plan"],
+                "properties": { "key": { "type": "string" }, "plan": { "type": "string" } },
+                "additionalProperties": false
+              }
+            },
+            "figures": {
+              "description": "The ratios the notes and the published prose are derived from, so a verdict can never outlive the number it was drawn from. Every one is taken at the leg `largest` names.",
+              "type": "object",
+              "required": ["largest", "cutVsFilter", "columnVsDocument", "storedRangeVsResident", "storedBucketVsResident", "queryBucketVsResident", "queryWindowVsResident", "labelCost", "asOfVsRange", "noisiestRoute", "noisiestSpread"],
+              "properties": {
+                "largest": { "type": "string" },
+                "cutVsFilter": { "type": ["null", "number"] },
+                "columnVsDocument": { "type": ["null", "number"] },
+                "storedRangeVsResident": { "type": ["null", "number"] },
+                "storedBucketVsResident": { "type": ["null", "number"] },
+                "queryBucketVsResident": { "type": ["null", "number"] },
+                "queryWindowVsResident": { "type": ["null", "number"] },
+                "labelCost": { "type": ["null", "number"] },
+                "asOfVsRange": { "type": ["null", "number"] },
+                "noisiestRoute": {
+                  "description": "The route whose own rounds disagreed most at the largest leg — the tolerance every ratio above is read with.",
+                  "type": "string"
+                },
+                "noisiestSpread": { "type": "number" }
+              },
+              "additionalProperties": false
+            },
+            "notes": { "type": "array" },
+            "equivalenceFailures": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "headline": {
+          "type": "object",
+          "required": ["title", "text"],
+          "properties": { "title": { "type": "string" }, "text": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "agrees", "detail"],
+            "properties": {
+              "name": { "type": "string" },
+              "agrees": { "type": "boolean" },
+              "detail": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "head", "rows", "note"],
+            "properties": {
+              "title": { "type": "string" },
+              "head": { "type": "array" },
+              "rows": { "type": "array" },
+              "note": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["n", "route", "label", "ns", "spread", "results"],
+            "properties": {
+              "n": { "type": "number" },
+              "route": { "type": "string" },
+              "label": { "type": "string" },
+              "ns": { "type": "number" },
+              "spread": {
+                "description": "p75/p25 over that row's own measured rounds — the tolerance it was drawn with, so two runs can be compared against a published number rather than an invented one.",
+                "type": "number"
+              },
+              "results": {
+                "description": "How many rows that route answered — a timing beside an answer size, so a faster row that answered less is visible as one.",
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "SuiteSpatial": {
       "description": "spatial.json — spatial storage in @jarenjs/db: one meta block (the corpus, the probe, the corpus gate, the derived figures and the notes that name the rivals), the equivalence checks, and the timing tables — one row per way the same predicate can run.",
       "type": "object",
@@ -1555,6 +1702,7 @@
           { "$ref": "#/$defs/SuiteMermaid" },
           { "$ref": "#/$defs/SuiteOrm" },
           { "$ref": "#/$defs/SuiteRetrieval" },
+          { "$ref": "#/$defs/SuiteSeries" },
           { "$ref": "#/$defs/SuiteSpatial" },
           { "$ref": "#/$defs/SuiteToml" },
           { "$ref": "#/$defs/SuiteValidate" },
@@ -1563,7 +1711,7 @@
         ]
       },
       "errors": { "unavailable": { "schema": { "$ref": "#/$defs/Unavailable" } } },
-      "doc": "One benchmark suite's payload. The twenty-four suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
+      "doc": "One benchmark suite's payload. The twenty-five suites are genuinely heterogeneous — a per-test table, a compliance matrix, a scenario grid — so each has its own shape here and the output is exactly one of them: every published file matches a single member, which is what makes oneOf the honest connective rather than anyOf. Each shape is closed at its root and closed again over every record the page iterates, so a suite whose generator adds, renames or retypes a member settles as a typed refusal instead of a wrong render — and the fix is one edit to this document in the same commit as the generator's. Depth stops where the page stops reading: a table's columns and rows stay open, because their contents are cells, not a declaration. Measured values are declared number, never integer: a rounded timing that lands on a whole value is an accident of the run."
     },
     "readme.fetch": {
       "kind": "read",

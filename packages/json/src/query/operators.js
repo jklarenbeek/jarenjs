@@ -676,6 +676,17 @@ function unitArg(v, docPath) {
   return v;
 }
 
+// The kernel refuses an operation whose unit reads a half the value has
+// not got, and a fraction of a unit that has no exact length. Those are
+// data-level refusals here - the operand decided them, not the query -
+// so they surface as JQ2001 against the date operand, the same way a
+// dynamic `$date-format` pattern does.
+function dateRefusal(e, docPath) {
+  if (!(e instanceof TypeError))
+    throw e;
+  return runtimeError('JQ2001', e.message, docPath);
+}
+
 // The shared shape of $date-add / $date-sub: [date, duration] applies an
 // ISO 8601 duration, [date, amount, unit] applies one unit. Both return
 // the same lexical form they were given, so a full-date stays a
@@ -707,12 +718,22 @@ function dateShiftEntry(sign) {
               + (typeof second === 'string' ? JSON.stringify(second) : describeItem(second)),
             secondPath);
           }
-          return formatRFC3339Parts(addDuration(parts, duration, sign));
+          try {
+            return formatRFC3339Parts(addDuration(parts, duration, sign));
+          }
+          catch (e) {
+            throw dateRefusal(e, datePath);
+          }
         }
         if (typeof second !== 'number')
           throw runtimeError('JQ2001', `expected a number of units, got ${describeItem(second)}`, secondPath);
         const unit = unitArg(unitGet(f), unitPath);
-        return formatRFC3339Parts(addToParts(parts, sign * second, unit));
+        try {
+          return formatRFC3339Parts(addToParts(parts, sign * second, unit));
+        }
+        catch (e) {
+          throw dateRefusal(e, datePath);
+        }
       };
     },
   };
@@ -735,7 +756,13 @@ function dateTruncEntry(truncate) {
         if (value === EMPTY)
           return EMPTY;
         const parts = dateParts(value, datePath);
-        return formatRFC3339Parts(truncate(parts, unitArg(unitGet(f), unitPath)));
+        const unit = unitArg(unitGet(f), unitPath);
+        try {
+          return formatRFC3339Parts(truncate(parts, unit));
+        }
+        catch (e) {
+          throw dateRefusal(e, datePath);
+        }
       };
     },
   };
@@ -1845,6 +1872,13 @@ export const OPERATORS = Object.freeze({
         // months, quarters and years have no fixed width, so they are
         // counted on the calendar; everything else divides an exact span
         if (unit === 'month' || unit === 'quarter' || unit === 'year') {
+          if (from.year < 0 || to.year < 0) {
+            // the fixed-width branch below refuses this through NaN; the
+            // calendar branch has to say so itself, or a full-time pair
+            // measures zero months apart
+            throw runtimeError('JQ2001', 'cannot measure a span from a value with no date',
+              from.year < 0 ? fromPath : toPath);
+          }
           const months = monthsBetween(from, to);
           return unit === 'month' ? months
             : Math.trunc(months / (unit === 'quarter' ? 3 : 12));

@@ -42,6 +42,34 @@ start Monday, per ISO). **Month math clamps**: 31 Jan + 1 month =
 28 Feb, which is what makes add and diff behave as inverses in the
 query operators built on this.
 
+Two refusals keep those answers honest, both `TypeError`:
+
+- **A unit reads a half, and a value may not carry it.** `year` through
+  `day` read the calendar; `hour` through `millisecond` read the clock.
+  Adding hours to a full-date, adding a day to a full-time, or
+  truncating either to the unit it has not got has no answer to give.
+  `day` and coarser truncations are the boundary both forms have, so
+  `startOfParts` / `endOfParts` of a `day` on a full-time is midnight and
+  `23:59:59.999`.
+- **A fraction is a quantity only where it converts exactly.** A
+  fractional fixed-width amount becomes whole milliseconds — `1.5 day` is
+  thirty-six hours, and needs a value with a clock to land on. A
+  fractional calendar unit is refused unless it lands on a whole month:
+  half a year is six months, half a month is nothing.
+
+## Time-axis ticks — `ticks.js`
+
+`niceTimeStep(span, count)` picks the `[unit, amount]` a domain should be
+read in — from 1/5/15/30 seconds and minutes through 1/3/6/12 hours, 1/2
+days, 1/2 weeks and 1/3/6 months, then whole years on the 1/2/5 × 10^k
+ladder, so a millennial domain steps by centuries rather than running out
+of axis. `axisTicksTime(min, max, count)` lays the boundaries down: each
+tick is a multiple of the step's own amount, so an axis reads
+`1850 1900 1950 2000` rather than offsets from wherever the data began.
+Below a second the calendar has nothing to say and the numeric ladder
+answers instead. The chart component re-exports both rather than
+carrying its own copy.
+
 ## Durations — `duration.js`
 
 `parseDuration('P3DT4H')` — ISO 8601 duration decomposition into

@@ -141,6 +141,62 @@ describe('addToParts', () => {
   it('should reject a unit it does not know', () => {
     assert.throws(() => addToParts(P('2026-07-27'), 1, 'fortnight'), TypeError);
   });
+
+  it('should keep the half of a fractional fixed-width amount', () => {
+    // the fraction is real time: truncating it to whole days silently
+    // loses twelve hours, which is the shape of a scheduling bug
+    assert.strictEqual(show(addToParts(P('2026-01-01T00:00:00Z'), 1.5, 'day')),
+      '2026-01-02T12:00:00');
+    assert.strictEqual(show(addToParts(P('2026-01-01T00:00:00Z'), -1.5, 'day')),
+      '2025-12-30T12:00:00');
+    assert.strictEqual(show(addToParts(P('2026-01-01T00:00:00Z'), 0.5, 'week')),
+      '2026-01-04T12:00:00');
+    assert.strictEqual(show(addToParts(P('2026-01-01T06:00:00Z'), 0.25, 'day')),
+      '2026-01-01T12:00:00');
+  });
+
+  it('should refuse a fraction of a unit that has no exact length', () => {
+    // half of January is not a quantity; the alternative to refusing is
+    // to answer 31 January, which is what truncation did
+    assert.throws(() => addToParts(P('2026-01-31'), 0.5, 'month'), TypeError);
+    assert.throws(() => addToParts(P('2026-01-31'), 0.5, 'quarter'), TypeError);
+    assert.throws(() => addToParts(P('2026-01-31'), 0.1, 'year'), TypeError);
+    // a fraction that IS exactly a whole number of months stands: a year
+    // is twelve months wherever it is applied
+    assert.strictEqual(show(addToParts(P('2026-01-15'), 0.5, 'year')), '2026-07-15');
+    assert.strictEqual(show(addToParts(P('2026-01-15'), 2 / 3, 'quarter')), '2026-03-15');
+  });
+
+  it('should refuse arithmetic that needs a half the value has not got', () => {
+    // adding hours to a full-date used to grow a time half out of
+    // nowhere, and adding a day to a full-time was a silent no-op
+    assert.throws(() => addToParts(P('2026-01-31'), 3, 'hour'), TypeError);
+    assert.throws(() => addToParts(P('2026-01-31'), 90, 'minute'), TypeError);
+    assert.throws(() => addToParts(P('2026-01-31'), 1.5, 'day'), TypeError);
+    assert.throws(() => addToParts(P('12:00:00Z'), 1, 'day'), TypeError);
+    assert.throws(() => addToParts(P('12:00:00Z'), 1, 'month'), TypeError);
+    assert.throws(() => addToParts(P('12:00:00Z'), 1, 'week'), TypeError);
+  });
+
+  it('should keep a full-time a full-time across a clock unit', () => {
+    const out = addToParts(P('23:00:00Z'), 3, 'hour');
+    assert.strictEqual(out.year, -1, 'no date half is invented');
+    assert.strictEqual(out.hours, 2, 'the clock wraps inside the day');
+    assert.strictEqual(out.offset, 0);
+    const back = addToParts(P('02:00:00+02:00'), -3, 'hour');
+    assert.strictEqual(back.hours, 23, 'and wraps the other way');
+    assert.strictEqual(back.offset, 120, 'the offset rides along untouched');
+  });
+
+  it('should keep negative-epoch and offset arithmetic exact', () => {
+    assert.strictEqual(show(addToParts(P('1960-06-15'), 1, 'day')), '1960-06-16');
+    assert.strictEqual(show(addToParts(P('1960-06-15'), 1, 'month')), '1960-07-15');
+    assert.strictEqual(show(addToParts(P('1900-01-01T00:00:00Z'), 1.5, 'day')),
+      '1900-01-02T12:00:00');
+    const out = addToParts(P('1960-06-15T14:30:00+02:00'), 12, 'hour');
+    assert.strictEqual(show(out), '1960-06-16T02:30:00');
+    assert.strictEqual(out.offset, 120);
+  });
 });
 
 describe('startOfParts and endOfParts', () => {
@@ -182,6 +238,27 @@ describe('startOfParts and endOfParts', () => {
       '2026-02-28T23:59:59.999');
     assert.strictEqual(show(endOfParts(P('2026-07-27T14:35:45Z'), 'hour')),
       '2026-07-27T14:59:59.999');
+  });
+
+  it('should refuse a truncation that needs a half the value has not got', () => {
+    // end-of hour on a full-date used to answer the PREVIOUS day
+    assert.throws(() => endOfParts(P('2026-01-31'), 'hour'), TypeError);
+    assert.throws(() => startOfParts(P('2026-01-31'), 'hour'), TypeError);
+    assert.throws(() => endOfParts(P('2026-01-31'), 'minute'), TypeError);
+    assert.throws(() => startOfParts(P('12:00:00Z'), 'month'), TypeError);
+    assert.throws(() => endOfParts(P('12:00:00Z'), 'week'), TypeError);
+    assert.throws(() => endOfParts(P('12:00:00Z'), 'year'), TypeError);
+  });
+
+  it('should truncate a full-time to the boundaries a clock has', () => {
+    // midnight and the last millisecond of a day are both expressible
+    // in the time half alone, so neither needs a date
+    assert.strictEqual(show(startOfParts(P('12:34:56Z'), 'day')).slice(11), '00:00:00');
+    assert.strictEqual(show(endOfParts(P('12:34:56Z'), 'day')).slice(11), '23:59:59.999');
+    assert.strictEqual(show(endOfParts(P('12:34:56Z'), 'hour')).slice(11), '12:59:59.999');
+    assert.strictEqual(show(endOfParts(P('12:34:56.250Z'), 'second')).slice(11), '12:34:56.999');
+    assert.strictEqual(startOfParts(P('12:34:56Z'), 'day').year, -1, 'no date half is invented');
+    assert.strictEqual(endOfParts(P('12:34:56+02:00'), 'day').offset, 120);
   });
 
   it('should bracket every value it is given', () => {

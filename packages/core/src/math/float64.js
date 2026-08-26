@@ -492,6 +492,35 @@ export function niceStep(span, count = 1) {
 }
 
 /**
+ * Ticks on the {@link niceStep} ladder inside `[min, max]`: every whole
+ * multiple of the step the domain contains, rounded to the step's own
+ * precision so an axis never shows `0.30000000000000004`. A degenerate
+ * domain yields a single tick, a reversed one reads the same as its
+ * forward twin, and a non-finite bound yields nothing.
+ *
+ * @param {number} min - Domain minimum
+ * @param {number} max - Domain maximum
+ * @param {number} [count] - Desired tick count (approximate)
+ * @returns {number[]}
+ */
+export function axisTicksLinear(min, max, count = 5) {
+  if (!Number.isFinite(min) || !Number.isFinite(max))
+    return [];
+  if (min === max)
+    return [min];
+  if (min > max)
+    return axisTicksLinear(max, min, count);
+  const step = niceStep(max - min, count);
+  const decimals = Math.max(0, -Math.floor(Math.log10(step)));
+  const ticks = [];
+  const first = Math.ceil(min / step);
+  const last = Math.floor(max / step);
+  for (let i = first; i <= last; ++i)
+    ticks.push(Number((i * step).toFixed(decimals)));
+  return ticks;
+}
+
+/**
  * Clamp a value into the unit interval `[0, 1]` — the fraction every
  * unit-space geometry stage emits. `NaN` passes through as `NaN` rather
  * than collapsing to a boundary, so a non-finite input stays visible to

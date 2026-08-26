@@ -205,7 +205,26 @@ export function fixedUnitMs(unit) {
 
 //#endregion
 
-//#region arithmetic over parts
+//#region lexical precision
+
+// A parts record spells one of three lexical families (rfc3339.js): a
+// full-date with no clock, a full-time with no calendar, or both. An
+// operation that reads a half the value has not got has no answer, and
+// the alternative to refusing is to guess one - which is how `end-of`
+// hour on a full-date used to answer the day BEFORE it, and how adding
+// a day to a full-time used to be a silent no-op.
+//
+// Which half an operation reads follows from its unit:
+//
+//   year, quarter, month     the calendar; a full-time has none
+//   week, day                the calendar, plus the clock when the
+//                            amount carries a fraction of a day
+//   hour .. millisecond      the clock; a full-date has none
+//
+// `day` and coarser truncate to a boundary a calendar has, so
+// `start-of` day of a full-time is midnight and needs no date. A
+// sub-day truncation names a boundary INSIDE a day, which a value with
+// no clock does not have.
 
 // A parts record with no time half reads -1 for hours/minutes/seconds;
 // arithmetic treats that as midnight but must not *introduce* a time, so
@@ -213,6 +232,48 @@ export function fixedUnitMs(unit) {
 function hasTime(parts) {
   return parts.hours >= 0;
 }
+
+/** Whether a parts record carries a calendar half. */
+function hasDate(parts) {
+  return parts.year >= 0;
+}
+
+function requireDate(parts, unit) {
+  if (!hasDate(parts))
+    throw new TypeError(`'${unit}' needs a date half, and this value has none`);
+}
+
+function requireTime(parts, unit) {
+  if (!hasTime(parts))
+    throw new TypeError(`'${unit}' needs a time half, and this value has none`);
+}
+
+/**
+ * Split a millisecond offset into a day into clock fields. `seconds`
+ * carries the fraction, as everywhere else in this module.
+ * @param {number} rest - milliseconds since midnight, [0, 86400000)
+ * @returns {{ hours: number, minutes: number, seconds: number }}
+ */
+function clockFromDayMs(rest) {
+  const hours = Math.floor(rest / 3600000);
+  rest -= hours * 3600000;
+  const minutes = Math.floor(rest / 60000);
+  rest -= minutes * 60000;
+  return { hours, minutes, seconds: rest / 1000 };
+}
+
+/** Milliseconds since midnight for a parts record that carries a clock. */
+function dayMsOf(parts) {
+  return parts.hours * 3600000 + parts.minutes * 60000 + Math.round(parts.seconds * 1000);
+}
+
+//#endregion
+
+//#region arithmetic over parts
+
+// how many months each calendar unit is worth; a fraction of one of
+// these is only a quantity when it converts to a whole month
+const CALENDAR_MONTHS = Object.freeze({ year: 12, quarter: 3, month: 1 });
 
 function withTime(out, parts, hours, minutes, seconds) {
   if (hasTime(parts)) {
@@ -233,68 +294,91 @@ function withTime(out, parts, hours, minutes, seconds) {
 /**
  * Add a signed amount of calendar units to a parts record, returning a
  * new one. The input is never mutated and its lexical shape is kept: a
- * full-date stays a full-date, and a value keeps its own UTC offset
- * rather than being normalized.
+ * full-date stays a full-date, a full-time stays a full-time, and a
+ * value keeps its own UTC offset rather than being normalized.
  *
  * Month and year arithmetic **clamps** to the end of the target month —
  * 2026-01-31 plus one month is 2026-02-28 — which is the rule every
  * mainstream date library uses, because the alternative (overflowing
  * into March) makes `add(1, 'month')` non-monotonic.
  *
+ * A fraction is a quantity only where the unit has an exact conversion.
+ * A fixed-width fraction becomes whole milliseconds, so `1.5 day` is
+ * thirty-six hours; a calendar fraction is refused unless it lands on a
+ * whole month, because half of January is not a length. The clock those
+ * milliseconds land on has to exist: a full-date can be moved by whole
+ * days but not by half of one.
+ *
  * @param {object} parts - a parts record from `parseRFC3339Parts`
- * @param {number} amount - signed count, may be fractional only for
- *   fixed-width units (a fractional month has no meaning)
+ * @param {number} amount - signed count, fractional only where the unit
+ *   converts exactly and the value has the half to carry it
  * @param {string} unit - a {@link DATE_UNITS} member
  * @returns {object} a new parts record
+ * @throws {TypeError} for an unknown unit, a fraction with no exact
+ *   conversion, or a value missing a half the operation reads
  */
 export function addToParts(parts, amount, unit) {
   if (amount === 0)
     return { ...parts };
-  if (unit === 'year' || unit === 'quarter' || unit === 'month') {
-    const months = unit === 'year' ? amount * 12 : unit === 'quarter' ? amount * 3 : amount;
-    const total = (parts.year * 12 + (parts.month - 1)) + Math.trunc(months);
+  const perMonth = CALENDAR_MONTHS[unit];
+  if (perMonth !== undefined) {
+    const months = amount * perMonth;
+    if (!Number.isInteger(months))
+      throw new TypeError(`a fraction of a '${unit}' has no exact calendar length`);
+    requireDate(parts, unit);
+    const total = (parts.year * 12 + (parts.month - 1)) + months;
     const year = Math.floor(total / 12);
     const month = total - year * 12 + 1;
     const day = Math.min(parts.day, daysInMonth(year, month)); // clamp
     return withTime({ year, month, day }, parts, parts.hours, parts.minutes, parts.seconds);
   }
-  if (unit === 'day' || unit === 'week') {
-    const days = unit === 'week' ? amount * 7 : amount;
-    const z = daysFromCivil(parts.year, parts.month, parts.day) + Math.trunc(days);
-    const civil = civilFromDays(z);
-    return withTime(civil, parts, parts.hours, parts.minutes, parts.seconds);
-  }
-  // fixed sub-day units: carry through the day number so a time crossing
-  // midnight moves the date with it
-  const ms = FIXED_MS[unit];
-  if (ms === undefined)
+  const width = FIXED_MS[unit];
+  if (width === undefined)
     throw new TypeError(`'${unit}' is not a calendar unit`);
-  const z = daysFromCivil(parts.year, parts.month, parts.day);
-  const dayMs = hasTime(parts)
-    ? parts.hours * 3600000 + parts.minutes * 60000 + Math.round(parts.seconds * 1000)
-    : 0;
-  const moved = z * 86400000 + dayMs + amount * ms;
+  if (unit === 'day' || unit === 'week') {
+    requireDate(parts, unit);
+    if (Number.isInteger(amount)) {
+      // whole days move the day number rather than a span of
+      // milliseconds: that keeps a full-date a full-date, and stays
+      // exact past the range milliseconds can count
+      const z = daysFromCivil(parts.year, parts.month, parts.day)
+        + amount * (unit === 'week' ? 7 : 1);
+      return withTime(civilFromDays(z), parts, parts.hours, parts.minutes, parts.seconds);
+    }
+  }
+  // a span of milliseconds: the sub-day units, and the fraction of a day
+  // or week that only a clock can hold
+  requireTime(parts, unit);
+  const ms = Math.round(amount * width);
+  if (!hasDate(parts)) {
+    // no calendar to carry into, so the clock wraps inside its own day
+    const dayMs = ((dayMsOf(parts) + ms) % 86400000 + 86400000) % 86400000;
+    return { year: -1, month: -1, day: -1, ...clockFromDayMs(dayMs), offset: parts.offset };
+  }
+  // carry through the day number, so a time crossing midnight moves the
+  // date with it
+  const moved = daysFromCivil(parts.year, parts.month, parts.day) * 86400000
+    + dayMsOf(parts) + ms;
   const dz = Math.floor(moved / 86400000);
-  let rest = moved - dz * 86400000;
-  const civil = civilFromDays(dz);
-  const hours = Math.floor(rest / 3600000);
-  rest -= hours * 3600000;
-  const minutes = Math.floor(rest / 60000);
-  rest -= minutes * 60000;
-  // a value with no time half acquires one as soon as a sub-day unit
-  // moves it - there is nowhere else for the result to live
-  const out = { ...civil, hours, minutes, seconds: rest / 1000, offset: parts.offset };
-  if (out.offset === null && !hasTime(parts))
-    out.offset = 0; // a bare full-date is UTC midnight by rfc3339.js's rule
-  return out;
+  return {
+    ...civilFromDays(dz), ...clockFromDayMs(moved - dz * 86400000), offset: parts.offset,
+  };
 }
 
 /**
  * Truncate a parts record to the start of a calendar unit, returning a
  * new one. `week` starts on Monday (ISO 8601).
+ *
+ * `day` and coarser name a boundary the calendar has, so the start of
+ * the day of a full-time is midnight. A sub-day unit names a boundary
+ * inside a day, which a value with no clock does not have, and is
+ * refused rather than answered from a clock that is not there.
+ *
  * @param {object} parts - a parts record
  * @param {string} unit - a {@link DATE_UNITS} member
  * @returns {object} a new parts record
+ * @throws {TypeError} for an unknown unit, or a value missing a half
+ *   the truncation reads
  */
 export function startOfParts(parts, unit) {
   let { year, month, day } = parts;
@@ -303,12 +387,14 @@ export function startOfParts(parts, unit) {
   let seconds = parts.seconds;
   switch (unit) {
     case 'year':
-      month = 1; day = 1; break;
+      requireDate(parts, unit); month = 1; day = 1; break;
     case 'quarter':
+      requireDate(parts, unit);
       month = (quarterOfYear(parts) - 1) * 3 + 1; day = 1; break;
     case 'month':
-      day = 1; break;
+      requireDate(parts, unit); day = 1; break;
     case 'week': {
+      requireDate(parts, unit);
       const z = daysFromCivil(year, month, day);
       ({ year, month, day } = civilFromDays(z - (isoWeekdayFromDays(z) - 1)));
       break;
@@ -316,12 +402,13 @@ export function startOfParts(parts, unit) {
     case 'day':
       break;
     case 'hour':
-      minutes = 0; seconds = 0; break;
+      requireTime(parts, unit); minutes = 0; seconds = 0; break;
     case 'minute':
-      seconds = 0; break;
+      requireTime(parts, unit); seconds = 0; break;
     case 'second':
-      seconds = Math.trunc(seconds); break;
+      requireTime(parts, unit); seconds = Math.trunc(seconds); break;
     case 'millisecond':
+      requireTime(parts, unit);
       return { ...parts };
     default:
       throw new TypeError(`'${unit}' is not a calendar unit`);
@@ -339,16 +426,24 @@ export function startOfParts(parts, unit) {
  * The last representable instant inside a calendar unit: the start of
  * the next unit less one millisecond. A value with no time half is
  * truncated to the unit's last *day* instead, so a full-date stays a
- * full-date.
+ * full-date, and it refuses the same sub-day units `startOfParts` does.
  * @param {object} parts - a parts record
  * @param {string} unit - a {@link DATE_UNITS} member
  * @returns {object} a new parts record
+ * @throws {TypeError} for an unknown unit, or a value missing a half
+ *   the truncation reads
  */
 export function endOfParts(parts, unit) {
   const start = startOfParts(parts, unit);
   if (unit === 'millisecond')
     return start;
-  const next = addToParts(start, 1, unit === 'quarter' ? 'quarter' : unit);
+  if (!hasDate(parts)) {
+    // a clock has no next day to step back from, so the end is the
+    // unit's own width less a millisecond, inside the day it lives in
+    const rest = dayMsOf(start) + FIXED_MS[unit] - 1;
+    return { year: -1, month: -1, day: -1, ...clockFromDayMs(rest), offset: parts.offset };
+  }
+  const next = addToParts(start, 1, unit);
   if (!hasTime(parts)) {
     // date-only: step back one whole day rather than one millisecond
     const z = daysFromCivil(next.year, next.month, next.day) - 1;

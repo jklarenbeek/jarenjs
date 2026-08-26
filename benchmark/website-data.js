@@ -33,6 +33,7 @@
  *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
  *   retrieval.json    retrieval.js      — did the right memory reach the prompt: recall@k + MRR per policy, oracle-gated
  *   vector.json       vector.js         — k-nearest over a stored vector column every way it runs, vs sqlite-vec, equivalence-gated
+ *   series.json       series.js         — one temporal question every route a consumer has today, corpus-gated (no kernel row yet)
  *   meta.json                          — run metadata, conformance summary, QT3 scorecard
  *
  * meta.json is the one file here whose shape the website declares: it is
@@ -109,7 +110,7 @@ function parseArgs(argv) {
       }
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, long-horizon, retrieval, vector, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, long-horizon, retrieval, vector, series, qt3');
         process.exit(0);
         break;
       default:
@@ -872,7 +873,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'contract', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'spatial', 'orm', 'live', 'long-horizon', 'retrieval', 'vector',
+  'spatial', 'orm', 'live', 'long-horizon', 'retrieval', 'vector', 'series',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -1265,6 +1266,33 @@ function buildHeadlines(generated, meta) {
       });
     }
   }
+  if (generated.series !== undefined) {
+    // No rival library is measured here, so no ratio: the row's number
+    // is what a declared epoch column buys over the document it was
+    // derived from, which is a comparison inside one database rather
+    // than a race against another one. Publishing it as a ratio on the
+    // overview chart would put it on an axis it does not belong on.
+    const meta = generated.series.meta ?? {};
+    const figures = meta.figures ?? {};
+    const failures = meta.equivalenceFailures ?? 0;
+    if (figures.largest !== undefined) {
+      const times = (/** @type {number} */ r) => `${r.toFixed(2)}×`;
+      add('series', 'Series', {
+        ratio: null,
+        rival: 'no library rival — the routes a consumer already has',
+        conformance: `${(generated.series.checks ?? []).length - failures} `
+          + `/ ${(generated.series.checks ?? []).length} checks`,
+        note: `The temporal ground at ${figures.largest}, measured before a kernel exists so a`
+          + ' later fast path arrives with a number to beat. A sorted cut answers a one-hour range'
+          + ` ${times(figures.cutVsFilter)} a full filter, and a declared epoch column under an`
+          + ` index answers it ${times(figures.columnVsDocument)} the same range read back out of`
+          + ' the stored JSON with date functions. The generic query route costs'
+          + ` ${times(figures.queryBucketVsResident)} the one-pass bucket loop; the durable range`
+          + ` costs ${times(figures.storedRangeVsResident)} the resident cut, which is the price of`
+          + ' never having read the rest of the corpus — see the suite page',
+      });
+    }
+  }
   return out;
 }
 
@@ -1443,6 +1471,31 @@ function generateVector(tmp, options) {
   }
   catch (e) {
     console.warn(`  warning: vector run failed (${e.message}); the suite will be omitted.`);
+    return null;
+  }
+  return readJson(file);
+}
+
+/**
+ * The series suite: one range, one bucketing, one rolling window and one
+ * as-of read answered by the plain references, by a generic query
+ * document and by stock SQLite over a declared epoch column. Every route
+ * is checked against the committed series corpus and against the others
+ * before a timing is taken, so the tool exits non-zero and writes
+ * nothing when one disagrees — an omitted suite here is a withheld
+ * table, never a wrong one.
+ */
+function generateSeries(tmp, options) {
+  const file = path.join(tmp, 'series.json');
+  try {
+    runTool([
+      'benchmark/series.js',
+      ...(options.quick ? ['--quick'] : []),
+      '--output', 'json', '--filepath', file,
+    ]);
+  }
+  catch (e) {
+    console.warn(`  warning: series run failed (${e.message}); the suite will be omitted.`);
     return null;
   }
   return readJson(file);
@@ -1685,6 +1738,11 @@ async function main() {
     const vector = generateVector(tmp, options);
     if (vector !== null)
       generated.vector = vector;
+  }
+  if (!options.skip.has('series')) {
+    const series = generateSeries(tmp, options);
+    if (series !== null)
+      generated.series = series;
   }
 
   // Skipped suites keep their previous meta entries (when a meta.json

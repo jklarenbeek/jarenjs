@@ -1003,6 +1003,41 @@ describe('section 8.13 — date arithmetic', () => {
       (e) => e.code === 'JQ2001' && /no date/.test(e.message));
   });
 
+  it('should keep a fixed-width fraction, and refuse a calendar one', () => {
+    // the query and the kernel answer the same question the same way:
+    // a day and a half is thirty-six hours, and half a month is nothing
+    const ts = { $const: '2026-01-01T00:00:00Z' };
+    assert.strictEqual(run({ '$date-add': [ts, 1.5, 'day'] }), '2026-01-02T12:00:00Z');
+    assert.strictEqual(run({ '$date-add': [ts, 'P1.5D'] }), '2026-01-02T12:00:00Z');
+    assert.strictEqual(run({ '$date-sub': [ts, 'PT1.5H'] }), '2025-12-31T22:30:00Z');
+    assert.throws(() => run({ '$date-add': ['$.start', 0.5, 'month'] }),
+      (e) => e.code === 'JQ2001' && /fraction/.test(e.message));
+    assert.throws(() => run({ '$date-add': ['$.start', 'P0.5M'] }),
+      (e) => e.code === 'JQ2001' && /fraction/.test(e.message));
+    // a fraction with an exact month conversion still applies
+    assert.strictEqual(run({ '$date-add': ['$.start', 0.5, 'year'] }), '2026-07-31');
+  });
+
+  it('should refuse an operation the value has no half for', () => {
+    const time = { $const: '14:30:00Z' };
+    assert.throws(() => run({ '$date-add': ['$.start', 3, 'hour'] }),
+      (e) => e.code === 'JQ2001' && /time half/.test(e.message));
+    assert.throws(() => run({ '$date-add': ['$.start', 'P1.5D'] }),
+      (e) => e.code === 'JQ2001' && /time half/.test(e.message));
+    assert.throws(() => run({ '$end-of': ['$.start', 'hour'] }),
+      (e) => e.code === 'JQ2001' && /time half/.test(e.message));
+    assert.throws(() => run({ '$date-add': [time, 1, 'day'] }),
+      (e) => e.code === 'JQ2001' && /date half/.test(e.message));
+    assert.throws(() => run({ '$start-of': [time, 'month'] }),
+      (e) => e.code === 'JQ2001' && /date half/.test(e.message));
+    assert.throws(() => run({ '$date-diff': [time, time, 'month'] }),
+      (e) => e.code === 'JQ2001' && /no date/.test(e.message));
+    // and the operations that ARE defined still answer
+    assert.strictEqual(run({ '$date-add': [time, 3, 'hour'] }), '17:30:00Z');
+    assert.strictEqual(run({ '$end-of': [time, 'day'] }), '23:59:59.999Z');
+    assert.strictEqual(run({ '$date-add': ['$.start', 1, 'day'] }), '2026-02-01');
+  });
+
   it('should bucket a series by week — the shape that needed all of this', () => {
     const events = [
       { on: '2026-01-05' }, { on: '2026-01-08' }, { on: '2026-01-14' }, { on: '2026-01-20' },

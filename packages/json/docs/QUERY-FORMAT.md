@@ -1233,7 +1233,7 @@ by an ISO 8601 duration (`[date, "P1M"]`) or by an amount and a unit
 `hour`, `minute`, `second`, `millisecond` — so an unknown one is `JQ2001`
 rather than a compile error.
 
-Two rules make these predictable:
+Three rules make these predictable:
 
 - **The lexical form is preserved.** A `full-date` shifted by a day is still
   a `full-date`, and a `date-time` keeps its own offset rather than being
@@ -1245,6 +1245,19 @@ Two rules make these predictable:
   because the alternative — overflowing into March — makes adding a month
   non-monotonic. `$date-diff` counts months to match, so adding its result
   back never overshoots: `2026-01-31` to `2026-02-28` is **one** month.
+- **An operation that needs a half the value has not got is refused.** A unit
+  names a half: `year` through `day` read the calendar, `hour` through
+  `millisecond` read the clock. Adding hours to a `full-date`, adding a day
+  to a `full-time`, or truncating either to the unit it does not carry is
+  `JQ2001` — there is no answer to give, and the alternative to refusing is
+  to invent one. `$start-of`/`$end-of` `day` is the boundary both forms have:
+  a `full-time` truncates to midnight and to `23:59:59.999`.
+
+A **fraction** is a quantity only where the unit converts exactly.
+`[date, 1.5, "day"]` and `[date, "P1.5D"]` are thirty-six hours, applied as
+whole milliseconds — so both need a value with a clock to land on. Half a
+month is not a length and is `JQ2001`; half a *year* is six months exactly,
+and applies.
 
 `$date-format` renders a value through a **Unicode LDML** pattern
 (`yyyy-MM-dd`, not moment's `YYYY-MM-DD`); a literal pattern compiles once
@@ -1264,9 +1277,9 @@ the presentation layer, not to a query.
 | `$quarter` `$weekday` | calendar quarter 1-4; ISO weekday 1 (Monday) to 7 (Sunday) |
 | `$epoch` | date or date-time → milliseconds since the epoch (UTC); a `full-time` → `JQ2001` |
 | `$datetime` | epoch milliseconds → canonical UTC `date-time`; out of RFC 3339 range → `JQ2001` |
-| `$date-add` `$date-sub` | `[date, duration]` or `[date, amount, unit]` → a value of the same lexical form |
-| `$start-of` `$end-of` | `[date, unit]` → the unit's first / last instant, in the same lexical form |
-| `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from` |
+| `$date-add` `$date-sub` | `[date, duration]` or `[date, amount, unit]` → a value of the same lexical form; a fraction that has no exact conversion, or a unit the value has no half for, is `JQ2001` |
+| `$start-of` `$end-of` | `[date, unit]` → the unit's first / last instant, in the same lexical form; a sub-day unit on a `full-date`, or `week` and coarser on a `full-time`, is `JQ2001` |
+| `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from`; a value with no date half is `JQ2001` for every unit |
 | `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern |
 
 Every operator that *produces* a date produces it in the same canonical

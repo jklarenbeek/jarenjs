@@ -192,6 +192,38 @@ describe('duration arithmetic over dates', () => {
     assert.strictEqual(show(addDuration(P('2026-07-27'), parseDuration('-P1M'), -1)), '2026-08-27');
   });
 
+  it('should keep a fractional fixed-width component', () => {
+    // P1.5D is thirty-six hours; ISO 8601 spells the fraction and the
+    // parser reads it, so applying it must not round the half away
+    const full = (q) => `${show(q)}T${String(q.hours).padStart(2, '0')}`
+      + `:${String(q.minutes).padStart(2, '0')}`;
+    assert.strictEqual(full(addDuration(P('2026-01-01T00:00:00Z'), parseDuration('P1.5D'))),
+      '2026-01-02T12:00');
+    assert.strictEqual(full(addDuration(P('2026-01-01T00:00:00Z'), parseDuration('PT1.5H'))),
+      '2026-01-01T01:30');
+    assert.strictEqual(full(addDuration(P('2026-01-01T00:00:00Z'), parseDuration('P0.5W'))),
+      '2026-01-04T12:00');
+    // and subtracting it is its exact inverse
+    assert.strictEqual(full(addDuration(P('2026-01-02T12:00:00Z'), parseDuration('P1.5D'), -1)),
+      '2026-01-01T00:00');
+  });
+
+  it('should refuse a fractional calendar component', () => {
+    // P0.5M on 31 January used to answer 31 January
+    assert.throws(() => addDuration(P('2026-01-31'), parseDuration('P0.5M')), TypeError);
+    assert.throws(() => addDuration(P('2026-01-31T00:00:00Z'), parseDuration('P0.1Y')), TypeError);
+    // a fraction with an exact month conversion still applies
+    assert.strictEqual(show(addDuration(P('2026-01-15'), parseDuration('P0.5Y'))), '2026-07-15');
+  });
+
+  it('should refuse a fixed-width fraction a full-date cannot carry', () => {
+    // half a day has nowhere to live in a value with no time half
+    assert.throws(() => addDuration(P('2026-01-01'), parseDuration('P1.5D')), TypeError);
+    assert.throws(() => addDuration(P('2026-01-01'), parseDuration('PT1H')), TypeError);
+    // whole days still apply, and stay a full-date
+    assert.strictEqual(show(addDuration(P('2026-01-01'), parseDuration('P1D'))), '2026-01-02');
+  });
+
   it('should count months so that adding them back never overshoots', () => {
     const cases = [
       ['2026-01-31', '2026-02-28', 1],
