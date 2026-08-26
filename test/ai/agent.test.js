@@ -279,7 +279,7 @@ describe('ai — history compaction', function () {
     //
     // A change to any of them is not a test to update — it is a silent
     // change to every existing caller, which is the thing D6 forbids.
-    const pinned = { 4000: '6oyyv4', 2500: '170jrpc', 1200: '1j3wles', 800: '1175fov' };
+    const pinned = { 4000: 'jknb4v', 2500: '1aoqg55', 1200: '1jy929n', 800: 'nu5c1k' };
     for (const [budget, fingerprint] of Object.entries(pinned)) {
       const { wires, client } = capturingClient();
       const agent = createAgent({

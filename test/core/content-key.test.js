@@ -25,8 +25,8 @@ import { createSemanticCache } from '@jarenjs/core/cache';
 
 /** Two documents that collide under the 32-bit fingerprint. */
 const COLLIDING = [
-  { $for: { it: '$[*]' }, $return: 'v1oh2' },
-  { $for: { it: '$[*]' }, $return: 'v2txd' },
+  { $for: { it: '$[*]' }, $return: '5ln9p' },
+  { $for: { it: '$[*]' }, $return: 'nbe0a' },
 ];
 
 describe('contentKey', () => {

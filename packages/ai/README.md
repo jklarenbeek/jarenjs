@@ -715,7 +715,7 @@ const { memories, scores, skipped } = await ledger.recall({
   `explain()` naming the mode (its ARCHITECTURE, "The k-nearest plan").
 - **Measured, whichever way it fell.** `benchmark/retrieval.js` scores the ranked path beside the
   default over the same seeded corpus, through the deterministic reference embedder
-  (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+  (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
   A real model's number is the host's to measure through the same instrument's `--live` tier.
 
 #### A durable ledger over `@jarenjs/db`
@@ -1325,7 +1325,7 @@ are collected here so nobody has to rediscover them the hard way.
   model, no tokenizer and no download ship here, so no default can rank, and this package
   publishes no opinion on which model should. What it does publish is the instrument:
   `benchmark/retrieval.js` scores the default and the ranked path over one seeded corpus,
-  through the deterministic reference embedder, whichever way it falls — <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+  through the deterministic reference embedder, whichever way it falls — <!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
   That is a mechanism score (the reference embedder is lexical); a real model's number is the
   host's to measure through the same instrument's `--live` tier, never this package's to claim.
 - **On the cheap tier, the transport is the fragile part, not the reasoning.** In the

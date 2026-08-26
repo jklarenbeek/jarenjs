@@ -24,8 +24,8 @@ import { nodeDriver } from '@jarenjs/db/node';
 
 /** Two collection documents that collide under the fingerprint. */
 const COLLIDING = [
-  { $for: { it: '$[*]' }, $return: 'v1oh2' },
-  { $for: { it: '$[*]' }, $return: 'v2txd' },
+  { $for: { it: '$[*]' }, $return: '5ln9p' },
+  { $for: { it: '$[*]' }, $return: 'nbe0a' },
 ];
 
 const MODEL = {
@@ -89,7 +89,7 @@ describe('the fingerprint collision these caches must survive', () => {
     await users.insert({ id: 'u1', name: 'a' });
     await Promise.resolve(users.execute(COLLIDING[0]));
     // a fresh object, structurally equal, and with the keys reordered
-    await Promise.resolve(users.execute({ $return: 'v1oh2', $for: { it: '$[*]' } }));
+    await Promise.resolve(users.execute({ $return: '5ln9p', $for: { it: '$[*]' } }));
     assert.strictEqual(store.stats().statementCache.hits, 1);
     await store.close();
   });

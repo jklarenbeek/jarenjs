@@ -731,7 +731,7 @@ a prefix design: the first 1 000 records are the small corpus and all 10 000 the
 large one, so one question set scores both sizes.
 
 What it measured, for the default, is that over <!--bm:retrieval.incumbent-->10,000 memories today's recall puts a gold memory in the top 10 for 1.3% of questions (recency alone 0.0%, a random draw 0.0%); at 1,000 memories the same policy reaches 17.5%<!--/bm-->.
-The ranked path, through the reference embedder, reaches <!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+The ranked path, through the reference embedder, reaches <!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
 Read the rows as mechanism, not language: they say whether a POLICY can find the
 right record among distractors, and nothing about whether any model understands
 a question — no deterministic row involves one.

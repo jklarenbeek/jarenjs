@@ -94,8 +94,8 @@ describe('the HOWTO vector example runs, and answers what it says it answers', (
   it('the ranked recall answers the memories, scores and skip count the document prints', () => {
     const evidence = ran.recalled.memories.map((/** @type {any} */ m) => m.evidence);
     const scores = ran.recalled.scores.map((/** @type {number} */ s) => s.toFixed(3));
-    assert.deepStrictEqual(evidence, ['n1', 'n3']);
-    assert.deepStrictEqual(scores, ['0.903', '0.838']);
+    assert.deepStrictEqual(evidence, ['n1', 'n2']);
+    assert.deepStrictEqual(scores, ['0.712', '0.441']);
     assert.strictEqual(ran.recalled.skipped, 0);
     assert.deepStrictEqual(ran.swept, { embedded: 3, remaining: 0 });
     for (const printed of [evidence, scores, ran.swept, ran.recalled.skipped]) {

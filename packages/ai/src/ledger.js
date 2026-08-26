@@ -72,6 +72,7 @@ import { LEDGER_SCHEMAS } from './schemas/ledger.js';
 /** @typedef {import('./schemas/ledger.js').LedgerSkill} LedgerSkill */
 /** @typedef {import('./schemas/ledger.js').LedgerSlot} LedgerSlot */
 /** @typedef {import('./schemas/ledger.js').LedgerRejection} LedgerRejection */
+/** @typedef {import('./schemas/ledger.js').LedgerEmbeddingPair} LedgerEmbeddingPair */
 /** @typedef {import('./schemas/ledger.js').LedgerEmbeddedBy} LedgerEmbeddedBy */
 /** @typedef {import('./embed.js').Embedder} Embedder */
 
@@ -549,10 +550,10 @@ export function createLedger(options = {}) {
    * never silently dropped. A write that quietly stored less than it
    * was handed would let "it was accepted" and "it is there" diverge.
    * @param {{ id?: string, text: string, evidence: string,
-   *   tags?: string[], at?: string, embedding?: number[],
-   *   embeddedBy?: LedgerEmbeddedBy }} input
+   *   tags?: string[], at?: string } & LedgerEmbeddingPair} input
    *   `embedding` + `embeddedBy` travel together (plain numbers, never a
-   *   typed array); the vector must be exactly `embeddedBy.dims` finite
+   *   typed array — the pair type says so, and an orphan does not
+   *   compile); the vector must be exactly `embeddedBy.dims` finite
    *   numbers or the write is rejected
    * @returns {Promise<(LedgerMemory & { embedError?: string }) | LedgerRejection>}
    *   the record as stored (defaults filled, undefined members
@@ -610,8 +611,8 @@ export function createLedger(options = {}) {
    * Store a reusable recipe. Built and validated exactly as a memory is:
    * every input member, defaults filled, the whole record checked.
    * @param {{ id?: string, name: string, when: string,
-   *   instructions: string, tools?: string[], at?: string,
-   *   embedding?: number[], embeddedBy?: LedgerEmbeddedBy }} input
+   *   instructions: string, tools?: string[], at?: string }
+   *   & LedgerEmbeddingPair} input
    * @returns {Promise<(LedgerSkill & { embedError?: string }) | LedgerRejection>}
    *   as `addMemory`; under `embedOnWrite` the skill is embedded from its
    *   name, when and instructions

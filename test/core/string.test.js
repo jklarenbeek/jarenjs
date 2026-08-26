@@ -380,7 +380,7 @@ describe('codePointPrefixSuccessor', () => {
 
 describe('hashContent', () => {
   it('should be a deterministic base-36 FNV-1a fingerprint', () => {
-    assert.deepEqual(hashContent('abc'), '7aigb0');
+    assert.deepEqual(hashContent('abc'), '7aigaz');
     assert.deepEqual(hashContent('abc'), hashContent('abc'));
     assert.deepEqual(hashContent(''), 'ztntfp');
   });
@@ -447,6 +447,17 @@ describe('fnv1a', () => {
   it('is the mixing step hashContent renders', () => {
     assert.isTrue(fnv1a('abc').toString(36) === hashContent('abc'));
     assert.isTrue(fnv1a('').toString(36) === hashContent(''));
+  });
+
+  it('is exact FNV-1a: the published 32-bit test vectors', () => {
+    // the reference vectors of the FNV-1a 32-bit function; a multiply in
+    // doubles instead of Math.imul once rounded the low bits away above
+    // 2^53 and passed every other test here while missing all of these
+    assert.isTrue(fnv1a('') === 0x811c9dc5);
+    assert.isTrue(fnv1a('a') === 0xe40c292c);
+    assert.isTrue(fnv1a('foobar') === 0xbf9cf968);
+    assert.isTrue(fnv1a('hello') === 0x4f9f2cab);
+    assert.isTrue(fnv1a('abc') === 0x1a47e90b);
   });
 
   it('returns an unsigned 32-bit number', () => {

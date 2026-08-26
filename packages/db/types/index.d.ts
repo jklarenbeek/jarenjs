@@ -48,6 +48,35 @@ export declare class DbRuntimeError extends Error {
 /** A single-column key, or the `{ prop: value, … }` composite form. */
 export type EntityKeyArg = string | number | Readonly<Record<string, string | number>>;
 
+/**
+ * What `execute` answers: the ENGINE's result shape (QUERY-FORMAT §1,
+ * "singleton ≡ item"). The empty sequence is `undefined`, a sequence of
+ * exactly one item IS that item, and anything longer is an array. A
+ * single array-valued item is therefore indistinguishable from many
+ * items — a consumer whose items may themselves be arrays reads them
+ * through `query()`, which answers one item per pull and never
+ * unwraps.
+ */
+export type SequenceResult<T = unknown> = T[] | T | undefined;
+
+/** The D2 provider contract: a synchronous driver answers the value
+ * itself and an asynchronous one a promise of it, so a linq chain over
+ * a synchronous driver stays synchronous; `await` reads both. */
+export type ValueOrPromise<T> = T | Promise<T>;
+
+/**
+ * The item cursor `query()` answers: one result item per `next()`,
+ * never singleton-unwrapped, so `for await` walks a result whose
+ * shape `SequenceResult` cannot say. `return()` releases the
+ * underlying statement early. Native and row modes stream row by row;
+ * a set residual materializes first (a barrier `explain()` names).
+ */
+export interface QueryCursor<T = unknown> {
+  next(): Promise<IteratorResult<T, undefined>>;
+  return(): Promise<IteratorResult<T, undefined>>;
+  [Symbol.asyncIterator](): QueryCursor<T>;
+}
+
 export interface ExecuteOptions {
   externals?: Readonly<Record<string, unknown>>;
   strict?: boolean;
@@ -126,10 +155,15 @@ export interface Collection<T = unknown> {
   put(doc: T, key?: string | number): Promise<string | number>;
   patch(key: string | number, ops: readonly unknown[]): Promise<T>;
   delete(key: string | number): Promise<boolean>;
-  /** The D2 provider: value-or-promise so a linq chain over a
-   * synchronous driver stays synchronous. */
-  execute(document: unknown, options?: ExecuteOptions): unknown;
-  query(document: unknown, options?: ExecuteOptions): unknown;
+  /** Run a query document and answer in the engine's result shape.
+   * `R` is what the document's `$return` produces — a document, a
+   * projected value, an aggregate's number — and only the caller knows
+   * it, so it is stated per call and defaults to `unknown` rather than
+   * to a guess. The D2 provider: value-or-promise so a linq chain over
+   * a synchronous driver stays synchronous. */
+  execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  /** The same document as an item cursor — one item per pull. */
+  query<R = unknown>(document: unknown, options?: ExecuteOptions): QueryCursor<R>;
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** Register a live query (LIVE-FORMAT §7); requires capture. */
   live(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
@@ -142,7 +176,7 @@ export interface SyncCollection<T = unknown> {
   put(doc: T, key?: string | number): string | number;
   patch(key: string | number, ops: readonly unknown[]): T;
   delete(key: string | number): boolean;
-  execute(document: unknown, options?: ExecuteOptions): unknown;
+  execute<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain(document: unknown, options?: ExecuteOptions): unknown;
 }
 
@@ -193,10 +227,12 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
 // ————— the store —————
 
 export interface SyncStore {
-  collection(name: string): SyncCollection;
+  /** `T` is the collection's document shape — the model's schema in
+   * the consumer's words; the handle's writes take it and reads answer it. */
+  collection<T = unknown>(name: string): SyncCollection<T>;
   entity(name: string): SyncEntitySet;
   transaction<R>(fn: (store: Store) => R): R;
-  execute?(document: unknown, options?: ExecuteOptions): unknown;
+  execute?<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   saveChanges?(): SaveReport;
 }
 
@@ -204,11 +240,14 @@ export interface Store {
   readonly capabilities: StoreCapabilities;
   readonly dialect: Dialect;
   stats(): StoreStats;
-  collection(name: string): Collection;
+  /** `T` is the collection's document shape — the model's schema in
+   * the consumer's words; the handle's writes take it and reads answer it. */
+  collection<T = unknown>(name: string): Collection<T>;
   entity(name: string): EntitySet;
   /** Entity documents over the multi-entity root (§10.1); present
-   * only when the model declares entities. Value-or-promise (D2). */
-  execute?(document: unknown, options?: ExecuteOptions): unknown;
+   * only when the model declares entities. Value-or-promise (D2),
+   * in the engine's result shape. */
+  execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** The unit of work (§11); present only with entities. */
   saveChanges?(): Promise<SaveReport>;
@@ -222,7 +261,10 @@ export interface Store {
   /** Register a live query over an entity-root document (re-run
    * strategy in this version); present only with entities. */
   live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
-  close(): Promise<void>;
+  /** Close the store. Job workers are asked to stop and given
+   * `graceMs` to wind up; the connection closes whether or not they
+   * did, and a handler still in flight is reported as JD2062. */
+  close(options?: { graceMs?: number }): Promise<void>;
   /** The queue surface; present when opened with `jobs` (JOBS-FORMAT). */
   readonly jobs?: JobsApi;
   /** Present exactly when the driver is synchronous — never stubs. */

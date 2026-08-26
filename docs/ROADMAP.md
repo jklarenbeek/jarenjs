@@ -31,36 +31,6 @@ delete it or fix it.
   - [ ] compileAsync for asynchronous schema loading
   - [ ] JSON.parse reviver / JSON.stringify replacer integration
 
-## @jarenjs/core
-
-- [ ] **`fnv1a` loses its low bits, and fixing it would be faster** — the
-  suite's one hash step multiplies with `(hash * 0x01000193) >>> 0`, and that
-  product exceeds 2^53 for any hash above 2^29, so the float mantissa drops
-  bits the 32-bit result was supposed to keep. It is deterministic and
-  distributes well enough that nothing has ever misbehaved, but it is **not**
-  FNV-1a, and `Math.imul` is both correct and **2.1x faster** (0.38 ms to
-  0.18 ms per 100 kB, measured). The blast radius is why it is still here,
-  and it is **not only a sweep**. The in-process hashes — vnode block keys,
-  `meta.hash`, the md/mermaid hydration keys, the mermaid SVG cache,
-  `data-md-hash` attributes, every `contentKey` memo and every pinned hash in
-  the tests — all change and can all be swept in one pass. Two places
-  **persist** one, and a sweep cannot reach them: `@jarenjs/db` writes
-  `shapeHash`/`migrationChecksum` (`hashContent(canonicalizeJson(…))`) into
-  every database's `_jaren_migrations` rows (`from_hash`, `to_hash`,
-  `checksum`) and into the `from`/`to` literals of every migration document
-  a user has planned and saved, so a changed function makes `migrate()`
-  refuse every already-applied migration as "edited" (JD0022) and every
-  existing chain as the wrong shape (JD0020); and the `@jarenjs/ai` ledger
-  content-addresses its archived rounds (`r-<hash>-<length>`) for idempotent
-  re-compaction, so a ledger compacted across the change stores the same
-  round twice (old addresses stay readable — nothing goes dark, but the
-  idempotence the naming was chosen for is lost once). The pass therefore
-  needs a decision *before* the sweep: a hash-version marker the migration
-  history and the round addresses carry (rows verified with the function that
-  wrote them, new rows written with the new one), or an accepted and stated
-  break for pre-1.0 stores. That decision — not the `Math.imul` line — is
-  the work.
-
 ## @jarenjs/json — JSONPath & addressing
 
 *The current focus.* JSON Pointer (RFC 6901), the JSONPath engine
@@ -755,7 +725,7 @@ theirs.
   through an injected embedder and refuses without one, and
   `benchmark/retrieval.js` scores both — recall@k and MRR over a seeded corpus,
   the ranked row through the deterministic hashed-trigram reference embedder,
-  published whichever way it falls (<!--bm:retrieval.ranked-->1.9% of questions at 10,000 memories through the hash-trigram-64 reference embedder (10.0% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->).
+  published whichever way it falls (<!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->).
   What is open is what that instrument cannot say. The corpus is synthetic and the
   reference embedder is lexical, so the numbers are mechanism scores: they prove
   the sweep, the identity check and the ranking work over the shipped code path

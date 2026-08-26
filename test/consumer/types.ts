@@ -934,7 +934,7 @@ queue.end();
 // seam (all three bindings importable anywhere; builtins load lazily
 // inside open()), the dialect seam, and the coded errors
 import {
-  openStore, normalizeModel, sqliteDialect, createDialect,
+  openStore, normalizeModel, sqliteDialect, createDialect, type SequenceResult, type QueryCursor,
   DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR,
 } from '@jarenjs/db';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
@@ -973,7 +973,39 @@ async function dbBlock(): Promise<void> {
   void removed;
   const inTx = await store.transaction(async () => 'done');
   void inTx;
-  await store.close();
+
+  // the handle binds the document shape; a read answers it and a write
+  // takes it — a wrong document never types
+  interface DbUser { id: string; name?: string }
+  const typedUsers = store.collection<DbUser>('users');
+  const one: DbUser | undefined = await typedUsers.get('u1');
+  void one?.name;
+  await typedUsers.insert({ id: 'u2' });
+  // @ts-expect-error — `email` is not a DbUser member
+  await typedUsers.insert({ id: 'u3', email: 'x' });
+
+  // execute answers the engine's result shape, `R` stated per call:
+  // undefined for none, the item for one, an array for more
+  const listed = await typedUsers.execute<DbUser>({ $for: { it: '$[*]' }, $return: '$it' });
+  const rows: DbUser[] = listed === undefined ? [] : Array.isArray(listed) ? listed : [listed];
+  void rows;
+  const asSequence: SequenceResult<DbUser> = listed;
+  void asSequence;
+  const unstated = await typedUsers.execute({ $for: { it: '$[*]' }, $return: '$it' });
+  // @ts-expect-error — an unstated R is unknown, never a guess: nothing reads off it
+  void unstated.id;
+  const counted = await typedUsers.execute<number>({ $count: { $for: { it: '$[*]' }, $return: '$it' } });
+  void counted;
+
+  // the item cursor never unwraps: one item per pull, for-await walks it
+  const cursor: QueryCursor<DbUser> = typedUsers.query<DbUser>({ $for: { it: '$[*]' }, $return: '$it' });
+  for await (const item of cursor) {
+    const id: string = item.id;
+    void id;
+  }
+  await cursor.return();
+
+  await store.close({ graceMs: 100 });
 }
 void dbBlock;
 
@@ -1147,7 +1179,17 @@ async function ledgerTypedBlock() {
     const record: LedgerMemory = stored;
     const evidence: string = record.evidence;
     void evidence;
+    // the vector pair is both-or-neither in the TYPE: narrowing on one
+    // member settles the other, the way the schema's dependencies rule
+    // settles it at the write
+    if (record.embedding !== undefined) {
+      const width: number = record.embeddedBy.dims;
+      void width;
+    }
   }
+  // @ts-expect-error — an orphan vector does not type, just as the ledger refuses it
+  void ledger.addMemory({ text: 'a fact', evidence: 'a source', embedding: [1, 2] });
+  void ledger.addMemory({ text: 'a fact', evidence: 'a source', embedding: [1, 2], embeddedBy: { model: 'm', dims: 2 } });
 
   const recalled = await ledger.recall({ tags: ['t'] });
   if (Array.isArray(recalled)) {

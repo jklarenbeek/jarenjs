@@ -79,8 +79,8 @@ suite('classifyChange — reboot vs. hot-update', () => {
     // classification decides reboot-vs-hot-update, so it must use the
     // collision-free semanticKey: this edit is 'structural', not 'none'.
     const colliding = [
-      { $for: { it: '$[*]' }, $return: 'v1oh2' },
-      { $for: { it: '$[*]' }, $return: 'v2txd' },
+      { $for: { it: '$[*]' }, $return: '5ln9p' },
+      { $for: { it: '$[*]' }, $return: 'nbe0a' },
     ];
     assert.strictEqual(contentKey(colliding[0]), contentKey(colliding[1]), 'the fixture still collides');
     const q1 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: JSON.stringify(colliding[0]) }] });

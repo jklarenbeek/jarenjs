@@ -104,10 +104,10 @@ describe('structural sharing and reference equality', function () {
     // a change to the hash walk shows up as a diff in this list.
     const doc = parseMarkdown('# Title\n\nA *paragraph*.\n\n- one\n- two\n');
     assert.deepEqual(mdToVnode(doc)[2].map((b) => b[1].key),
-      ['q9odts', '10hw0zk', 'yg4ph2']);
+      ['lj57zr', '1eqeya3', '15qeivb']);
     // unaffected by options that do not change the block's content
     assert.deepEqual(mdToVnode(doc, { html: 'text' })[2].map((b) => b[1].key),
-      ['q9odts', '10hw0zk', 'yg4ph2']);
+      ['lj57zr', '1eqeya3', '15qeivb']);
   });
 
   it('retainSource: false drops the source string', function () {

@@ -246,28 +246,48 @@ export const LEDGER_SCHEMAS = {
  */
 
 /**
- * A stored memory — see {@link MEMORY_SCHEMA}.
- * @typedef {object} LedgerMemory
+ * The vector pair, both-or-neither — the schemas' `dependencies` rule
+ * (see {@link EMBEDDING_PAIR}) stated in the type: a record either
+ * carries `embedding` AND `embeddedBy`, or neither. `embedding` is the
+ * vector `recall({ near })` ranks by — plain numbers, never a typed
+ * array — and `embeddedBy` its identity. Narrow on either member and
+ * the other follows: `if (record.embedding) record.embeddedBy.dims`.
+ * An orphan vector does not type, just as the ledger refuses it.
+ * @typedef {{ embedding?: undefined, embeddedBy?: undefined }
+ *   | { embedding: number[], embeddedBy: LedgerEmbeddedBy }} LedgerEmbeddingPair
+ */
+
+/**
+ * A stored memory's own members — see {@link MEMORY_SCHEMA}; the
+ * record is these plus {@link LedgerEmbeddingPair}.
+ * @typedef {object} LedgerMemoryFields
  * @property {string} id
  * @property {string} text
  * @property {string} evidence
  * @property {string[]} tags
  * @property {string} at RFC 3339
- * @property {number[]} [embedding] the vector `recall({ near })` ranks by — plain numbers, never a typed array
- * @property {LedgerEmbeddedBy} [embeddedBy] the vector's identity; present exactly when `embedding` is
  */
 
 /**
- * A stored skill — see {@link SKILL_SCHEMA}.
- * @typedef {object} LedgerSkill
+ * A stored memory — see {@link MEMORY_SCHEMA}.
+ * @typedef {LedgerMemoryFields & LedgerEmbeddingPair} LedgerMemory
+ */
+
+/**
+ * A stored skill's own members — see {@link SKILL_SCHEMA}; the record
+ * is these plus {@link LedgerEmbeddingPair}.
+ * @typedef {object} LedgerSkillFields
  * @property {string} id
  * @property {string} name
  * @property {string} when
  * @property {string} instructions
  * @property {string[]} tools
  * @property {string} at RFC 3339
- * @property {number[]} [embedding] the vector `recallSkills({ near })` ranks by
- * @property {LedgerEmbeddedBy} [embeddedBy] the vector's identity; present exactly when `embedding` is
+ */
+
+/**
+ * A stored skill — see {@link SKILL_SCHEMA}.
+ * @typedef {LedgerSkillFields & LedgerEmbeddingPair} LedgerSkill
  */
 
 /**

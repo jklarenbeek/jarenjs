@@ -14,7 +14,7 @@
 
 import type {
   EntityKeyArg, LoadExplanation, SaveReport, Store, StoreCapabilities,
-  StoreStats, Collection, ExecuteOptions,
+  StoreStats, Collection, ExecuteOptions, SequenceResult, ValueOrPromise,
 } from '@jarenjs/db';
 
 /** The self-referential constraint an interface can satisfy: generated
@@ -91,12 +91,12 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
 export interface TypedStore<E extends MetaMap<E>> {
   readonly capabilities: StoreCapabilities;
   stats(): StoreStats;
-  collection(name: string): Collection;
+  collection<T = unknown>(name: string): Collection<T>;
   entity<K extends keyof E & string>(name: K): TypedEntitySet<E, E[K]>;
-  execute?(document: unknown, options?: ExecuteOptions): unknown;
+  execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
-  close(): Promise<void>;
+  close(options?: { graceMs?: number }): Promise<void>;
 }
 
 /**

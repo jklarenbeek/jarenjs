@@ -941,17 +941,19 @@ const swept = await ledger.embedMissing();         // → { embedded: 3, remaini
 const recalled = await ledger.recall({
   near: 'how does the deploy check what it published?', limit: 2,
 });
-recalled.memories.map((m) => m.evidence);          // → [ 'n1', 'n3' ]
-recalled.scores.map((s) => s.toFixed(3));          // → [ '0.903', '0.838' ]
+recalled.memories.map((m) => m.evidence);          // → [ 'n1', 'n2' ]
+recalled.scores.map((s) => s.toFixed(3));          // → [ '0.712', '0.441' ]
 recalled.skipped;                                  // → 0 — none was un-embedded
 ```
 
-The second result is the honest one: `n3` is about vectors, not about
-deploys, and it places second because the reference embedder matches
-*words*. That is what a mechanism score looks like — the sweep, the
-identity check and the ranking all worked. Whether the *right* memory
-comes back is the embedding model's job, which is why this suite ships a
-seam and a benchmark rather than an opinion about models.
+Read the scores, not just the order: `n1` shares *deploy* and
+*published* with the question and lands at 0.712; `n2` is the other
+deploy note but shares almost no letters with it, so it places second at
+0.441 — a gap the reference embedder earns by matching *words*, not by
+knowing what a deploy is. That is what a mechanism score looks like — the
+sweep, the identity check and the ranking all worked. Whether the *right*
+memory comes back is the embedding model's job, which is why this suite
+ships a seam and a benchmark rather than an opinion about models.
 
 ---
 

@@ -56,6 +56,15 @@ const adults = await users.execute({
 });
 ```
 
+`execute` answers in the ENGINE's result shape (QUERY-FORMAT §1,
+"singleton ≡ item"): `undefined` for no rows, the document itself for
+exactly one, an array for more — typed `SequenceResult<R>`, with `R`
+stated per call (`users.execute<User>(…)`) because only the caller
+knows what its `$return` produces. `query()` answers the same document
+as an item cursor (`for await`), one item per pull and never unwrapped —
+the read to use when an item may itself be an array. The handle's own
+shape binds at `store.collection<User>('users')`.
+
 - **The pushdown planner with `explain()`.** A query compiles through
   the engine's published AST into a dialect-neutral plan and renders
   to guarded, parameter-bound SQL; whatever cannot be proven
