@@ -131,6 +131,14 @@ flowchart TB
             VectorIndex["vector/index.js<br/>Similarity kernels, normalization, packed form"]
         end
 
+        subgraph SeriesModule["Temporal"]
+            SeriesIndex["series/index.js"]
+            SeriesSelector["selector.js<br/>Where a member lives in a row"]
+            SeriesNormalize["normalize.js<br/>Instants, stable sort, binary bounds"]
+            SeriesInterval["interval.js<br/>Half-open set algebra"]
+            SeriesTree["interval-index.js<br/>Prefix-max-end interval index"]
+        end
+
         subgraph MathModules["Mathematics"]
             MathIndex["math/index.js"]
             Int32Math["int32.js<br/>Fixed-point math"]
@@ -724,6 +732,60 @@ once, at the boundary — and they keep their loops tight for the sweep that is
 their reason to exist; they guarantee a finite answer. The fixed-arity vector
 classes in `math/` (`Vec2f64`, `Vec3f64`) are 2D/3D geometry with a
 different convention and a different job, and they stay where they are.
+
+### 5d. Series Module (`series/`)
+
+The temporal kernel: one meaning for an instant, one for a sorted series of
+readings, one for an interval, and the set algebra over them. As with dates,
+**there is no type** — an instant is epoch milliseconds or an RFC 3339 string,
+a sample is `{ at, value }`, an interval is `{ start, end }` — and, as with
+dates, **there is no `now`**: every bound is data, so every answer here is
+reproducible and cacheable.
+
+| File | Owns |
+|---|---|
+| `selector.js` | where a member lives in a caller's row — a property name or a function, so `on`/`recorded_at`/`from`/`to` are read where they are |
+| `normalize.js` | `toEpoch`, `normalizeSeries`, `normalizeIntervals` and the `lowerBoundTime`/`upperBoundTime` cuts a sorted array is read through |
+| `interval.js` | `containsInstant`, `overlapsInterval`, `intersectInterval`, `mergeIntervals`, `subtractIntervals`, `gapsWithin`, `coverageOf`, `findSlots` |
+| `interval-index.js` | `createIntervalIndex` — build once, query many, by point or by range |
+
+Four decisions carry it. **Half-open `[start, end)`**: an interval holds its
+start and not its end, so touching intervals neither overlap nor double-count
+and a boundary instant belongs to exactly one of them — while `mergeIntervals`
+*joins* touching spans by default, because availability means continuous cover,
+with `{ adjacent: false }` as the explicit other answer. **Nothing is dropped**:
+a member that names no instant, or an interval that is empty, reversed or
+non-finite, is a refusal naming the row rather than a silently shorter result,
+and the sort is stable so duplicate instants keep their order and both count.
+**No clock**: `gapsWithin` and `coverageOf` derive their window from the input's
+own hull when given none, because the only other default would be "now".
+
+And **the index cuts on both ends**. Sorting by start alone is the bug: a span
+that began long before a query sits far to the left of the query's own
+neighbourhood and still overlaps it, so a binary search around the query loses
+it while looking plausible. `createIntervalIndex` therefore carries a prefix
+maximum end beside the starts — non-decreasing by construction, hence
+binary-searchable — and the first position where it passes the query's start is
+the first position where anything can still be live. A query is two binary cuts
+and a walk between them, O(log n + k), returning the caller's own rows in a
+fresh array. Like the packed-Hilbert box index it is **static**: bounds are
+copied into flat typed arrays at build time, so a query reads no source object
+and a row mutated afterwards cannot change what the index answers.
+
+Buckets, resampling, rolling windows and as-of joins are the layer above this
+one; named zones, recurrence grammars and scheduling solvers are outside it.
+`findSlots` enumerates where a fixed-width span fits — choosing among the
+answers is a solver's job, deliberately not this kernel's.
+
+```javascript
+import { createIntervalIndex, mergeIntervals, findSlots } from '@jarenjs/core/series';
+
+const shifts = [{ start: 0, end: 4 * 3600_000 }, { start: 4 * 3600_000, end: 8 * 3600_000 }];
+mergeIntervals(shifts);                         // one span — touching IS continuous cover
+mergeIntervals(shifts, { adjacent: false });    // two — a handover is two shifts
+findSlots(shifts, { duration: 'PT30M' }).length; // 16
+createIntervalIndex(shifts).at(4 * 3600_000);   // the second shift only: [start, end)
+```
 
 ### 6. Text Module (`text/`)
 

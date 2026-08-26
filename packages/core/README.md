@@ -1,6 +1,6 @@
 # @jarenjs/core
 
-The zero-dependency foundation of [Jaren](https://github.com/jklarenbeek/jarenjs). Everything the rest of the suite is built on lives here — type guards, Unicode-aware string handling, a large text-validation toolbox, number range helpers, fixed-point and vector math, the calendar kernel, the spatial kernel, the vector kernel, the message-catalog compiler, unit/currency conversion and a finance library.
+The zero-dependency foundation of [Jaren](https://github.com/jklarenbeek/jarenjs). Everything the rest of the suite is built on lives here — type guards, Unicode-aware string handling, a large text-validation toolbox, number range helpers, fixed-point and vector math, the calendar kernel, the spatial kernel, the vector kernel, the interval kernel, the message-catalog compiler, unit/currency conversion and a finance library.
 
 None of it depends on JSON Schema: every module can be used standalone in any JavaScript project.
 
@@ -24,6 +24,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/dates` | RFC 3339 / ISO 8601 validation, plus the calendar kernel: integer date arithmetic, compiled formatting, durations |
 | `@jarenjs/core/geo` | the spatial kernel over GeoJSON: robust orientation, great-circle measurement, rings, bounding boxes, geohash, GeoJSON/WKT validity, a packed-Hilbert box index, Web Mercator and Douglas-Peucker simplification |
 | `@jarenjs/core/vector` | the vector kernel over plain arrays: dot, cosine and Euclidean similarity (higher-is-better; a malformed pair scores 0), l2 normalization, the packed little-endian Float32 form and the one shape guard (`isVector`) |
+| `@jarenjs/core/series` | the temporal kernel over plain records: instant/sample/interval normalization with a stable sort, half-open `[start, end)` set algebra (overlap, merge, subtract, gaps, coverage, slot enumeration) and a static interval index |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the linear `remap` and unit-interval `clamp01` |
 | `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
@@ -65,7 +66,7 @@ Grouped by file: `email` (RFC 5321 + internationalized addresses), `host` (hostn
 
 ## Dates, numbers and math
 
-- `dates` — RFC 3339 date/time/date-time validation and parsing (leap years and month lengths included), the more lenient ISO date-time forms, and the suite's calendar kernel: proleptic Gregorian arithmetic over integer day numbers (`addToParts`, `startOfParts`, `endOfParts` — month math clamps, so 31 Jan plus a month is 28 Feb, and an operation reading a half the value has not got is refused rather than guessed), ISO 8601 duration decomposition, the locale-free time-axis step ladder (`niceTimeStep`, `axisTicksTime`) a chart and a timeline both read, and `compileDateFormat`, which turns an LDML pattern into a formatter once instead of re-scanning it per call. Dates stay JSON: an RFC 3339 string or epoch milliseconds, never a wrapper object. Locale names live in `@jarenjs/locales`, so a pattern needing `MMMM` takes a names provider. The full module reference is [docs/DATES.md](./docs/DATES.md).
+- `dates` — RFC 3339 date/time/date-time validation and parsing (leap years and month lengths included), the more lenient ISO date-time forms, and the suite's calendar kernel: proleptic Gregorian arithmetic over integer day numbers (`addToParts`, `startOfParts`, `endOfParts` — month math clamps, so 31 Jan plus a month is 28 Feb, and an operation reading a half the value has not got is refused rather than guessed), ISO 8601 duration decomposition, the locale-free time-axis step ladder (`niceTimeStep`, `axisTicksTime`) a chart and a timeline both read, and `compileDateFormat`, which turns an LDML pattern into a formatter once instead of re-scanning it per call. Dates stay JSON: an RFC 3339 string or epoch milliseconds, never a wrapper object. Locale names live in `@jarenjs/locales`, so a pattern needing `MMMM` takes a names provider. The full module reference is [docs/DATES.md](./docs/DATES.md); the interval algebra built on top of it is [`series`](#intervals-and-series).
 - `integer`/`float`/`bigint` — range constants and validators for every fixed-width type from `int8` to `uint64` and `float16` to `float64`, including float increment/decrement in representable steps.
 - `math` — asm.js-style typed math (`Int32`, `Float64`) and vector classes (`Vec2i32`, `Vec2f64`, `Vec3f64`) with a fast integer sine approximation; reference in [docs/MATH.md](./docs/MATH.md).
 
@@ -122,6 +123,34 @@ Three rules, kept by every function so that no caller has to check them again:
 - **Refuse, never fix.** `packVector` and `l2Normalize` answer `null` for anything `isVector` refuses, the way a bounding box refuses a position it cannot bound; nothing truncates, pads or zero-fills a vector into the shape it was supposed to have.
 
 The packed form is `4·d` bytes of little-endian binary32 — the value a database column stores; components round to `Math.fround` and come back exactly. Unpacking aligned bytes on a little-endian host is a *view*, not a copy, which is what a sweep over ten thousand fetched rows is paid for by; misaligned bytes (a pooled `Buffer`, an odd offset into a record) and big-endian hosts take the copy path to the same values. The client that produces embeddings — and a deterministic reference embedder for tests — lives in [`@jarenjs/ai`](../ai/README.md#embeddings).
+
+## Intervals and series
+
+`@jarenjs/core/series` is the suite's temporal kernel: one meaning for an interval, one meaning for a sorted series of timestamped readings, and the set algebra over them. As with dates, there is no type — an instant is epoch milliseconds or an RFC 3339 string, a sample is `{ at, value }`, an interval is `{ start, end }` — so every value stays a plain JSON item, and nothing here reads a clock.
+
+```javascript
+import { createIntervalIndex, mergeIntervals, gapsWithin, findSlots } from '@jarenjs/core/series';
+
+const shifts = [
+  { from: '2026-03-02T09:00:00Z', to: '2026-03-02T13:00:00Z', who: 'ada' },
+  { from: '2026-03-02T13:00:00Z', to: '2026-03-02T17:00:00Z', who: 'grace' },
+];
+const index = createIntervalIndex(shifts, { start: 'from', end: 'to' });
+index.at('2026-03-02T13:00:00Z');        // [grace] — half-open, so the handover belongs to one shift
+
+const cover = shifts.map((s) => ({ start: s.from, end: s.to }));
+mergeIntervals(cover);                    // one span, 09:00–17:00 — touching IS continuous cover
+findSlots(cover, { duration: 'PT30M' });  // sixteen half-hour slots, one straddling the handover
+```
+
+Four decisions carry the module:
+
+- **Half-open, everywhere.** `[start, end)` holds its start and not its end, so a day ends exactly where the next begins, a boundary instant belongs to exactly one of two touching intervals, and nothing is counted twice. Touching intervals therefore do *not* overlap — back-to-back bookings are not a double booking — while `mergeIntervals` joins them by default, because availability asks whether there is continuous cover. `{ adjacent: false }` is the other answer, spelled out rather than guessed.
+- **A row is never dropped, and a duplicate is never merged away.** A member that cannot become a finite instant is a refusal naming the row, not a silently shorter result; an empty (`[t, t)`), reversed or non-finite interval is refused at the point it was written. The sort is stable, so two readings in the same millisecond keep their input order and both count.
+- **Nothing reads a clock.** `gapsWithin` and `coverageOf` derive their window from the input's own hull when given none, because the only other default would be "now" — and an operation that read the clock could not be cached, reproduced or run in a test twice.
+- **The index cuts on both ends, and cannot lose a long span.** Sorting by start alone is the bug: a conference week that began before an hourly meeting sits far to the left of that meeting's neighbourhood and still overlaps it. `createIntervalIndex` carries a prefix maximum end beside the starts — non-decreasing, so binary-searchable — and a query becomes two binary cuts and a walk between them, O(log n + k), returning the caller's own rows. It is static: bounds are copied at build time, so a query reads no source object and a row mutated afterwards changes nothing.
+
+Bucketing, resampling, rolling windows and as-of joins are the layer above this one; named time zones, recurrence grammars and scheduling solvers are deliberately outside it. The full module reference is [docs/SERIES.md](./docs/SERIES.md).
 
 ## Messages
 

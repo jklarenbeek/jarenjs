@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.47.0",
+  "version": "0.47.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -111,6 +111,14 @@
     "./schema": {
       "types": "./dist/types/schema.d.ts",
       "default": "./src/schema.js"
+    },
+    "./series": {
+      "types": "./dist/types/series/index.d.ts",
+      "default": "./src/series/index.js"
+    },
+    "./series/*": {
+      "types": "./dist/types/series/*.d.ts",
+      "default": "./src/series/*.js"
     },
     "./string": {
       "types": "./dist/types/string.d.ts",
