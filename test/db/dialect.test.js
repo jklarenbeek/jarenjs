@@ -1,18 +1,22 @@
 //@ts-check
 /**
  * @file The dialect seam: golden SQL for the SQLite dialect (every
- * statement kind the store runs), the JSON-path text rules, and — the
- * proof the seam is real — a test-double dialect with different
- * quoting, parameter style and type names producing correspondingly
- * different SQL from the SAME model. No SQL text is spelled outside a
- * dialect, so different spelling primitives MUST surface in every
- * emitted statement.
+ * statement kind the store runs) and the JSON-path text rules, plus a
+ * first look at the seam being real — the SAME model through a foreign
+ * spelling spec, producing correspondingly different DDL and writes.
+ *
+ * That look is deliberately small here. The whole-surface version — every
+ * DDL and DML builder, every plan mode, and a scan proving no SQLite
+ * spelling reaches the foreign corpus — is `dialect-mirror.test.js`,
+ * over the same spec.
  */
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { createDialect, sqliteDialect, planCollection, normalizeModel } from '@jarenjs/db';
+
+import { fullDoubleDialect } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -38,48 +42,14 @@ const MODEL = {
 
 const SHAPE = { table: 'users', keyColumn: 'key', docColumn: 'doc' };
 
-/** A deliberately foreign spelling: brackets, named refs, other types. */
-const doubleDialect = createDialect({
-  name: 'double',
-  capabilities: { jsonb: false },
-  tableSuffix: '',
-  docColumnType: 'JSONDOC',
-  quoteIdentifier: (s) => `[${s}]`,
-  parameterRef: (i) => `@p${i}`,
-  stringLiteral: (s) => `'${String(s).replace(/'/g, "''")}'`,
-  booleanLiteral: (b) => (b ? 'TRUE' : 'FALSE'),
-  typeFor: (schemaType, hint) => (hint === 'key' ? 'KEYTYPE' : 'VALTYPE'),
-  limitClause: (limit, offset) => `FETCH ${limit} SKIP ${offset ?? 0}`,
-  jsonPathText: (segments) => segments
-    .map((s) => ('name' in s ? `/${s.name}` : `/#${s.index}`)).join(''),
-  jsonExtract: (column, pathText) => `JX(${column}, '${pathText}')`,
-  jsonSet: (expr, pathText, value) => `JS(${expr}, '${pathText}', ${value})`,
-  jsonRemove: (expr, pathText) => `JR(${expr}, '${pathText}')`,
-  jsonAppend: (expr, pathText, value) => `JA(${expr}, '${pathText}', ${value})`,
-  jsonEncode: (param) => `JENC(${param})`,
-  jsonText: (column) => `JTEXT(${column})`,
-  jsonAgg: (expr) => `JAGG(${expr})`,
-  excludedRef: (column) => `NEW.${column}`,
-  tx: {
-    begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK',
-    savepoint: (n) => `MARK ${n}`,
-    release: (n) => `UNMARK ${n}`,
-    rollbackTo: (n) => `BACKTO ${n}`,
-  },
-  pragma: {
-    busyTimeout: (ms) => `SET busy ${ms}`,
-    journalMode: (mode) => `SET journal ${mode}`,
-    foreignKeys: (on) => `SET fk ${on ? 1 : 0}`,
-  },
-  introspect: {
-    version: () => 'GET version',
-    compileOptions: () => 'GET options',
-    tableExists: () => 'GET table @p1',
-    columns: (t) => `GET columns ${t}`,
-    indexes: (t) => `GET indexes ${t}`,
-    indexColumns: (i) => `GET indexcolumns ${i}`,
-  },
-});
+/**
+ * The one foreign spelling spec this suite has: brackets, named
+ * parameter refs, other type names. It lives in `helpers.js` because
+ * `dialect-mirror.test.js` drives the WHOLE statement surface through
+ * it — two doubles would be two answers to "what does a second spelling
+ * look like", and the weaker one is always the one a proof reaches for.
+ */
+const doubleDialect = fullDoubleDialect(createDialect);
 
 describe('SQLite dialect goldens', () => {
   const plan = planCollection('users',

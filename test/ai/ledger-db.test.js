@@ -298,7 +298,7 @@ describe('the db-backed ledger adapter — rank, and the same answer without it'
   it('rank runs the k-nearest plan, and a sweep runs none', async function () {
     const { adapter, ledger, swept } = await seeded();
     const slots = adapter.store.collection('slots');
-    assert.deepStrictEqual(slots.stats().knn, { queries: 0, rows: 0, candidates: 0, fullFetches: 0 },
+    assert.deepStrictEqual(slots.stats().knn, { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 },
       'nothing has ranked yet');
     await ledger.recall({ near: 'alpha beta gamma delta', limit: 2 });
     const ranked = slots.stats().knn;

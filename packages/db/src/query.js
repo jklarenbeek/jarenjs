@@ -155,8 +155,14 @@ export function createQueryEngine(context) {
   };
   /** The k-nearest counters `stats()` reports: how many rows the
    * fetch scored and how many candidates the cut kept, so a
-   * duplicate-heavy collection is visible rather than merely slow. */
-  const knnStats = { queries: 0, rows: 0, candidates: 0, fullFetches: 0 };
+   * duplicate-heavy collection is visible rather than merely slow —
+   * plus `diverted`, the calls whose plan WAS the cut and whose bound
+   * probe was not a vector of the column's width, so the whole
+   * collection was read instead. A plan is recognized once and bound
+   * many times; without that counter a probe of the wrong width turns
+   * a k-nearest query into a full scan that `explain()` still calls
+   * `knn`, which is the one thing this mode may not do quietly. */
+  const knnStats = { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 };
   /** The by-identities fetch statements, one per batch size. */
   const identityFetch = new Map();
 
@@ -455,6 +461,7 @@ export function createQueryEngine(context) {
    */
   const candidatesOf = (entry, externals, diverted) => {
     if (diverted) {
+      if (entry.planned.mode === 'knn') knnStats.diverted++;
       return chain(fullScanOf(entry), (statement) =>
         chain(statement.all(fullScanParams(entry)), (rows) =>
           rowsToDocs(checkRowBound(entry, rows))));

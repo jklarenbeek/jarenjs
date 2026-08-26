@@ -192,6 +192,12 @@ describe('vector — the packed form', function () {
     assert.strictEqual(packVector([1, Infinity]), null);
     assert.strictEqual(packVector(null), null);
     assert.strictEqual(packVector(/** @type {any} */ (new Uint8Array(4))), null, 'bytes are not a vector');
+    // a finite double with no finite binary32 nearest it: packing it
+    // would answer bytes that unpack to Infinity — a vector `isVector`
+    // refuses, made out of one it accepted, with nothing said about it
+    assert.strictEqual(packVector([1e39, 0]), null, 'a component that overflows binary32');
+    assert.strictEqual(packVector([1, -3.5e38]), null);
+    assert.notStrictEqual(packVector([3.4e38]), null, 'the largest binary32 still packs');
 
     const bytes = /** @type {Uint8Array} */ (packVector([1, 2, 3]));
     assert.strictEqual(unpackVector(bytes, 2), null, 'too many bytes for the width');

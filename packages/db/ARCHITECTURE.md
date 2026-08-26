@@ -398,6 +398,14 @@ everywhere (empty keys, so the secondary keys order every row; or its
 own `JQ2001` for a non-array). The plan never raises on the engine's
 behalf.
 
+That diversion is correct and it is expensive: the residual reads every
+document, and `explain()` still reports `knn`, because the plan is the
+shape and the bound value is not part of it. So the fallback is
+COUNTED — `collection.stats().knn.diverted` — which is the only surface
+on which a probe arriving at the wrong width from a model or a form is
+distinguishable from a query that ran the cut. A rising `diverted` beside
+a flat `queries` is a caller embedding through the wrong model.
+
 **Preconditions, each named in `explain()`.** The selection must be
 pushed whole — every `$where` conjunct exact, nothing before it — because
 a conjunct left to the residual could drop a candidate the cut counted,

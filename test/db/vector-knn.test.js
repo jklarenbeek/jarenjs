@@ -300,7 +300,7 @@ describe('execution — the column cuts, the engine decides', () => {
       assert.strictEqual(stats.queries, 36);
       assert.ok(stats.candidates >= 36, 'a candidate count per query, at least the window');
       assert.ok(stats.fullFetches > 0, 'the windows past the scored rows fetched everything');
-      assert.deepStrictEqual(plain.rows.stats().knn, { queries: 0, rows: 0, candidates: 0, fullFetches: 0 });
+      assert.deepStrictEqual(plain.rows.stats().knn, { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 });
     }
     finally {
       await indexed.store.close();
@@ -373,6 +373,14 @@ describe('execution — the column cuts, the engine decides', () => {
       assert.strictEqual(rows.stats().knn.queries, 0, 'a diverted call never ran the cut');
       const nonFinite = await rows.execute(topK(2), { externals: { q: [1, Infinity, 0] } });
       assert.deepStrictEqual(nonFinite, ['east', 'narrow']);
+      // and every one of those calls read the whole collection, which is
+      // the number a consumer needs: the plan is still `knn` in
+      // `explain()`, so a probe bound at the wrong width would otherwise
+      // turn a k-nearest query into a full scan with nothing said
+      assert.strictEqual(rows.stats().knn.diverted, 4,
+        'a knn plan that diverted at bind time is counted, not silent');
+      const explained = await rows.explain(topK(3), { externals: { q: [1, 0] } });
+      assert.strictEqual(explained.mode, 'knn', 'the PLAN is the shape; the bound value is not');
     }
     finally {
       await store.close();
@@ -400,7 +408,7 @@ describe('execution — the column cuts, the engine decides', () => {
       await rows.insert({ id: 'far', embedding: [0, 1, 0] });
       const answer = await rows.execute(topK(2), { externals: { q: Q } });
       assert.deepStrictEqual(answer, ['d00', 'd01']);
-      assert.deepStrictEqual(rows.stats().knn, { queries: 1, rows: 21, candidates: 20, fullFetches: 0 });
+      assert.deepStrictEqual(rows.stats().knn, { queries: 1, rows: 21, candidates: 20, fullFetches: 0, diverted: 0 });
     }
     finally {
       await store.close();
@@ -417,6 +425,32 @@ describe('execution — the column cuts, the engine decides', () => {
       assert.deepStrictEqual(answer, [String(n - 3).padStart(4, '0'), String(n - 2).padStart(4, '0'),
         String(n - 1).padStart(4, '0')]);
       assert.strictEqual(rows.stats().knn.candidates, n);
+    }
+    finally {
+      await store.close();
+    }
+  });
+
+  it('a profile bounds the candidate scan, not the window: maxRows below the collection refuses', async () => {
+    // the candidate fetch reads every narrowed row to score it, so the
+    // safe profile's row bound applies to THAT count and not to `k` — a
+    // consumer asking for the two nearest of seven under maxRows 3 is
+    // refused whole rather than answered from a truncated candidate set,
+    // which is the same rule a residual's candidate fetch obeys
+    const { store, rows } = await storeOver(INDEXED);
+    try {
+      const drain = async (maxRows) => {
+        const out = [];
+        for await (const item of await rows.query(topK(2),
+          { externals: { q: Q }, profile: { maxRows, externals: ['q'] } })) out.push(item);
+        return out;
+      };
+      await assert.rejects(drain(3), (/** @type {any} */ error) => {
+        assert.strictEqual(error.code, 'JD2007');
+        assert.match(error.message, /maxRows bound of 3/);
+        return true;
+      });
+      assert.deepStrictEqual(await drain(100), ['east', 'tie-a']);
     }
     finally {
       await store.close();

@@ -755,8 +755,15 @@ of the store's collections, no mandatory predicates, no scan refusal.
 2. **The mandatory row bound.** Every non-aggregate fetch carries a
    database-side `LIMIT` of `maxRows + 1`. A fetch that crosses
    `maxRows` — a result set, a residual's candidate set, a diverted
-   full scan — is the coded `JD2007` and the result is refused WHOLE.
-   It is never silently truncated.
+   full scan, or a k-nearest plan's candidate scan — is the coded
+   `JD2007` and the result is refused WHOLE. It is never silently
+   truncated. The k-nearest case is worth stating on its own, because
+   the number bounded is not the one the query asked for: the plan
+   scores every row the pushed `WHERE` admits before it can know which
+   `k` are nearest, so "the two nearest" over an unfiltered collection
+   of ten thousand is a ten-thousand-row fetch and a profile at
+   `maxRows: 1000` refuses it. Narrow it with a predicate, or raise the
+   bound for that query deliberately.
 3. **Reference containment.** The document may reference only the
    externals, host functions and collations the profile declares, and
    only collections the profile allows; an undeclared reference is the

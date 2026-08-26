@@ -193,12 +193,19 @@ export function l2Normalize(a) {
  * The packed form: `4·d` bytes of little-endian binary32, the value a
  * database column stores. Components round to their nearest binary32
  * (`Math.fround`); `unpackVector` returns exactly those.
+ *
+ * A component too large for binary32 has no nearest one — it rounds to
+ * an infinity — so such a vector is REFUSED rather than stored as bytes
+ * that unpack into something `isVector` would reject. Normalized
+ * vectors, which is what a column holds, can never meet it.
  * @param {Vector | null | undefined} a
  * @returns {Uint8Array | null} the bytes — null for anything `isVector`
- *   refuses (empty, non-finite), never a partial or zero-filled record
+ *   refuses (empty, non-finite) and for a component that overflows
+ *   binary32, never a partial or zero-filled record
  * @example
  * packVector([1]);                 // Uint8Array [0, 0, 128, 63]
  * packVector([1, NaN]);            // null
+ * packVector([1e39]);              // null — no finite binary32 is nearest
  */
 export function packVector(a) {
   if (!isVector(a))
@@ -206,13 +213,23 @@ export function packVector(a) {
   const n = a.length;
   const bytes = new Uint8Array(n * 4);
   if (LITTLE_ENDIAN) {
-    // a fresh buffer is aligned, and the host's byte order is the packed one
-    new Float32Array(bytes.buffer).set(a);
+    // a fresh buffer is aligned, and the host's byte order is the packed
+    // one — so the rounded components are readable back through the view
+    const floats = new Float32Array(bytes.buffer);
+    floats.set(a);
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(floats[i]))
+        return null;
+    }
   }
   else {
     const view = new DataView(bytes.buffer);
-    for (let i = 0; i < n; i++)
-      view.setFloat32(i * 4, a[i], true);
+    for (let i = 0; i < n; i++) {
+      const rounded = Math.fround(a[i]);
+      if (!Number.isFinite(rounded))
+        return null;
+      view.setFloat32(i * 4, rounded, true);
+    }
   }
   return bytes;
 }

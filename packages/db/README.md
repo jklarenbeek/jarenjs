@@ -346,7 +346,7 @@ how.rank;                       // { column: 'gx_embedding_v768', dims: 768,
                                 //   margin: 1e-6, decides: 'engine' }
 how.sql;                        // SELECT "rowid", "gx_embedding_v768" … WHERE …
                                 // — no ORDER BY, no LIMIT, no similarity call
-memories.stats().knn;           // { queries, rows, candidates, fullFetches }
+memories.stats().knn;           // { queries, rows, candidates, fullFetches, diverted }
 ```
 
 The pushed `$where` narrows in SQL exactly as in any other mode; the
@@ -361,8 +361,12 @@ cannot rank still appear where `$empty: 'least'` puts them. `strict: true`
 refuses the shape with `JD0010` naming the rank, because the ordering is
 engine work — the same honesty the spatial refinement gets. A probe of
 the wrong width, or one that is not an array of numbers, **diverts** to
-the residual with the reason in `explain()`, so a query can never quietly
-become an O(table) scan nobody counted (ARCHITECTURE, "The k-nearest plan").
+the residual, so a query can never quietly become an O(table) scan nobody
+counted (ARCHITECTURE, "The k-nearest plan"). A *literal* probe of the
+wrong width is refused at plan time and `explain()` says why; an
+**external** one is only knowable when it is bound, so the plan stays
+`knn` and the fallback is counted instead — `stats().knn.diverted` is
+that count, and a consumer who binds probes from a model should watch it.
 
 **The numbers, the losses included.** `benchmark/vector.js` measures one
 k-nearest query every physical way it can run — over <!--bm:vector.grid-->10,000 and 50,000 vectors at 384 and 768 dimensions, k = 10, the median of 10 probes<!--/bm--> —

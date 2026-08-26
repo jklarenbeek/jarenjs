@@ -199,9 +199,26 @@ export function fullDoubleDialect(createDialect) {
     jsonPathText: (segments) => segments
       .map((s) => ('name' in s ? `/${s.name}` : `/#${s.index}`)).join(''),
     jsonExtract: (column, pathText) => `JX(${column}, '${pathText}')`,
-    derivedExpression: (member, column) => (column.derive === 'geohash'
-      ? `CELL(${member}, ${column.precision})`
-      : `BOX_${column.component.toUpperCase()}(${member})`),
+    // exhaustive over the kind, exactly as the real spec is: a spelling
+    // spec that answers SOMETHING for a kind it does not know is how a
+    // new derive kind ships as silently wrong SQL, and a double that did
+    // not mirror the refusal would hide that shape from every test that
+    // uses it
+    derivedExpression: (member, column) => {
+      switch (column.derive) {
+        case 'geohash':
+          return `CELL(${member}, ${column.precision})`;
+        case 'bbox':
+          return `BOX_${column.component.toUpperCase()}(${member})`;
+        case 'vector':
+          throw new TypeError(
+            'double dialect: a derive: \'vector\' column is stored on every driver'
+            + ' and has no generated expression');
+        default:
+          throw new TypeError(
+            `double dialect: no generated-column expression for derive kind '${column.derive}'`);
+      }
+    },
     jsonSet: (expr, pathText, value) => `JS(${expr}, '${pathText}', ${value})`,
     jsonRemove: (expr, pathText) => `JR(${expr}, '${pathText}')`,
     jsonAppend: (expr, pathText, value) => `JA(${expr}, '${pathText}', ${value})`,
@@ -241,6 +258,7 @@ export function fullDoubleDialect(createDialect) {
       indexColumns: (i) => `GET indexcolumns ${i}`,
       foreignKeysOn: () => 'GET fkon',
       foreignKeyList: (t) => `GET fklist ${t}`,
+      declaredSql: (t) => `GET declared ${t}`,
       dataVersion: () => 'GET data-version',
       schemaDump: () => 'GET schema-dump',
     },

@@ -687,4 +687,82 @@ describe('one home for vector arithmetic (D2), one home for SQL text (D12)', () 
     assert.deepStrictEqual(spellers.map(posix).filter((file) => !file.startsWith(`${root}/dialects/`)),
       []);
   });
+
+  it('the k-nearest statement spells no row identity of its own', () => {
+    // the plan projects (row identity, packed column) and then fetches
+    // the winners BY identity: two statements whose every dialect-
+    // specific token has to come from the spec, or a second spelling of
+    // the seam would have to re-derive them
+    const outside = files.filter((file) => !posix(file).startsWith(`${root}/dialects/`));
+    const spelled = outside.filter((file) => /"rowid"/.test(fs.readFileSync(file, 'utf8')));
+    assert.deepStrictEqual(spelled.map(posix), [],
+      'row identity is spelled by the dialect; a caller asks for it');
+    const emit = fs.readFileSync(path.join(root, 'emit.js'), 'utf8');
+    assert.match(emit, /dialect\.rowIdentity\(\)/,
+      'the candidate projection no longer asks the dialect for row identity');
+    const query = fs.readFileSync(path.join(root, 'query.js'), 'utf8');
+    assert.match(query, /dialect\.dml\.selectByIdentities/,
+      'the winners fetch no longer goes through the dialect\'s composed statement');
+  });
+});
+
+describe('one home for vector arithmetic, across every package (D2)', () => {
+  // the db gate above proves it for one package; a second dot product
+  // anywhere in the suite is the drift the rule exists to prevent, and
+  // the packages that could grow one are the four that consume vectors
+  const KERNELS = ['isVector', 'dotProduct', 'cosineSimilarity', 'euclideanSimilarity',
+    'l2Normalize', 'packVector', 'unpackVector'];
+  const HOME = 'packages/core/src/vector/index.js';
+
+  /** @param {string} dir @returns {string[]} */
+  const walk = (dir) => (fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
+      ? walk(path.join(dir, entry.name))
+      : [path.join(dir, entry.name)]))
+    : []);
+  const posix = (file) => file.split(path.sep).join('/');
+  /**
+   * A file's CODE: comments stripped, so a kernel named in a docblock
+   * (which is documentation doing its job) is not read as a second
+   * implementation.
+   * @param {string} file @returns {string}
+   */
+  const code = (file) => fs.readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+  const sources = ['packages', 'components']
+    .flatMap((group) => (fs.existsSync(group)
+      ? fs.readdirSync(group).map((name) => path.join(group, name, 'src'))
+      : []))
+    .flatMap(walk)
+    .filter((file) => file.endsWith('.js'));
+
+  it('every kernel is declared exactly once, in core', () => {
+    assert.ok(sources.length > 0, 'no package sources were read');
+    for (const kernel of KERNELS) {
+      const declared = sources.filter((file) =>
+        new RegExp(`(?:export )?(?:function|const|let|var) ${kernel}\\b`).test(code(file)));
+      assert.deepStrictEqual(declared.map(posix), [HOME],
+        `${kernel} is declared somewhere other than the suite's one home`);
+    }
+  });
+
+  it('every consumer imports them, and none computes one of its own', () => {
+    const consumers = sources
+      .filter((file) => posix(file) !== HOME)
+      .filter((file) => KERNELS.some((k) => new RegExp(`\\b${k}\\b`).test(code(file))));
+    assert.ok(consumers.length > 0, 'nothing consumes the kernels — the gate would be vacuous');
+    for (const file of consumers) {
+      assert.match(code(file), /from '@jarenjs\/core\/vector'/,
+        `${posix(file)} names a vector kernel without importing it from core`);
+    }
+    // and nobody writes the arithmetic by hand: an accumulation of
+    // `a[i] * b[i]` is a dot product whatever it is called
+    const handRolled = sources
+      .filter((file) => posix(file) !== HOME)
+      .filter((file) => /\+=\s*[A-Za-z_$][\w$]*\[\w+\]\s*\*\s*[A-Za-z_$][\w$]*\[\w+\]/
+        .test(code(file)));
+    assert.deepStrictEqual(handRolled.map(posix), [],
+      'a second dot product exists — collapse it onto @jarenjs/core/vector');
+  });
 });

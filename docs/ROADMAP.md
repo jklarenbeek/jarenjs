@@ -528,6 +528,31 @@ what each does is its own documentation's job
   already probed and reported, so the driver gate is in place; whole-
   series functions like `$irr` are never index-eligible — the ceiling is
   stated, not hidden.
+- [ ] **No projection pushdown, and `$count` pushes only over a bare
+  binding.** A FLWOR whose `$return` is a single path over the binding
+  plans as `mode: 'row'` and its statement still selects the whole
+  document, so reading or `$distinct`-ing one member costs a full
+  document read of every row the predicate admits. The visible edge of
+  the same gap is `$count`: over `$return: "$r"` it emits `SELECT
+  COUNT(*) … WHERE …`, while the identical document with
+  `$return: "$r.key"` plans as a set and reads every document — correct,
+  and not distinguishable from `explain().mode` alone. It is why the
+  durable ledger adapter (the recipe `packages/ai`'s README publishes)
+  answers its identity check from pushed counts and pays the scan only
+  when the counts prove a mixture. Closing it means projecting a
+  declared scalar path into the statement when the `$return` is a single
+  path over the binding, with the residual rules thought through in the
+  same change: a projection that drops a member a residual conjunct
+  still needs is a wrong answer, not a slow one.
+- [ ] **A k-nearest probe cannot pick its column at bind time.** Two
+  `derive: 'vector'` widths over one member path are two columns, and a
+  plan carries one of them; an external probe of the other width
+  diverts to the engine with the reason named rather than selecting the
+  column that would fit it. Choosing from the probe's width at bind time
+  is possible and unbuilt — the plan would have to carry both columns
+  and the diversion reason would have to name which widths were on
+  offer. A single-width collection, which is what an embedding model
+  gives you, never meets it.
 - [ ] **The `jaren-migration` artifact omits two shipped step kinds.** The
   committed schema's `step` union carries `ddl`, `jslt`, `query` and `derive`,
   but not `sql` (the directly-spelled data step, MIGRATION-FORMAT §9.4) or
@@ -635,15 +660,21 @@ what each does is its own documentation's job
 
 The package now has three paths — a bounded tool loop, a ledger-backed agent that
 survives a closed tab, and a recursive entry point that works a corpus larger than
-the context by addressing it instead of reading it. All three are documented in
-`packages/ai/README.md`, which is where shipped capability lives; what follows is
-only what is genuinely still open.
+the context by addressing it instead of reading it — and, across all three, an
+embedder seam: an OpenAI-compatible `/embeddings` client and a deterministic
+reference embedder, memories and skills that carry a vector with its identity, and
+`recall({ near })` ranking by meaning through an embedder the host injects. All of
+it is documented in `packages/ai/README.md`, which is where shipped capability
+lives; what follows is only what is genuinely still open.
 
 Most of these entries share a shape worth naming: the missing thing is a
-**measurement**, not an implementation. This package has repeatedly refused to add
-a ranker, an evictor or a de-duplicator before the number that would say whether it
-helps — and every time that refusal was tested, the instrument turned out to be the
-harder and more valuable half.
+**measurement**, not an implementation. This package refuses to add a ranker, an
+evictor or a de-duplicator before the number that would say whether it helps, and
+the ranker is the case that has now run its course: the instrument was committed
+first, scored the policies that already existed, and only then was the ranked path
+added and published whichever way it fell. It turned out to be the harder and more
+valuable half both times. The evictor and the de-duplicator are still waiting on
+theirs.
 
 - [ ] **A program is authored per question, and nothing reuses one.** A question
   over everything at once — which two of forty records are closest — is
@@ -654,12 +685,17 @@ harder and more valuable half.
   single run: an authored program is thrown away after it answers, so a session
   that asks forty similar questions authors forty similar plans and pays the
   authoring call every time. The ledger already stores *skills*, and a program
-  that compiled and answered is exactly the evidence a skill wants — but
-  "the same question again" is a similarity judgement, and this package has
-  deliberately refused to add a relevance model without a measurement first (the
-  retrieval entry below is the same refusal). The missing input is a benchmark
-  over a question STREAM rather than a single question: how often is a stored
-  plan the right plan, and what does re-running a wrong one cost?
+  that compiled and answered is exactly the evidence a skill wants — and
+  "the same question again" is a similarity judgement, which is the half that
+  has since been built. `recallSkills({ near })` ranks stored skills by meaning
+  through the injected embedder and refuses across model identities, and
+  `benchmark/retrieval.js` is the instrument that scores a ranking rather than
+  asserting it (the retrieval entry below carries its numbers). What is still
+  missing is the measurement for THIS question, which is a different one: a
+  benchmark over a question STREAM rather than a single question — how often is
+  a stored plan the right plan, and what does re-running a wrong one cost?
+  Without it a reuse threshold is a guess, and a wrongly reused plan is more
+  expensive than the authoring call it saved.
 
 - [ ] **A program's reduce shape is a convention the compiler cannot check.** A map
   element is `{ slot, value }` whether that value came from a leaf model call or a
@@ -727,11 +763,23 @@ harder and more valuable half.
   QUALITY needs a real-language dataset with human-labelled relevance, embedded
   through the `--live` tier by a model a host injects — and this suite publishes
   no model's number as its own, so the dataset and the run are a host's to bring.
-  The other open edge is scale: ranked recall is an exact sweep over every
-  candidate in process (one adapter scan plus one cosine per embedded record),
-  which is the right tool up to some tens of thousands of memories and the wrong
-  one past it; an approximate index is a different design with its own
-  measurement, and the committed instrument is what would score it.
+  The other open edge is scale, and it now has numbers instead of an intuition.
+  Ranked recall is EXACT on both of its paths — an in-process sweep of one
+  cosine per embedded record, or, when the storage adapter offers the optional
+  `rank` capability (the `@jarenjs/db` one does, over a packed vector column),
+  a cut the store performs and the ledger re-scores; `benchmark/retrieval.js
+  --store=db` runs both and asserts their quality columns equal, so only
+  latency moves. Both are linear in candidates times dimensions, and the
+  constant is fitted rather than guessed: <!--bm:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/bm-->.
+  Past that ceiling the answer is an approximate index, and it is deliberately
+  not built: approximation trades the exactness that lets one query document
+  answer identically in the JavaScript engine, in SQLite through the Node
+  driver and in a real wasm build for a recall number nobody here has
+  measured. If it is ever built, the terms are the ones
+  already on the table — it starts by benchmarking against the extension this
+  design already publishes itself against (<!--bm:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/bm-->),
+  it publishes the RECALL it loses against exact top-k and not only the
+  latency it wins, and the committed instrument above is what scores it.
 
 - [ ] **The goal section has no ceiling.** Progress is appended and never
   rewritten, and every entry composes into the system prompt of every request —
@@ -749,10 +797,30 @@ harder and more valuable half.
   no identifier-shaped token (`REC0007`, `v4.19.2`, a region). Nothing measures
   whether a stored memory was *worth* storing, or what happens to a ledger
   refined after fifty runs: near-duplicates accumulate, and the prompt asks the
-  model not to add one but nothing enforces it. The instrument that is missing is
-  a duplicate-pressure measurement over repeated refinements against one ledger;
-  a de-duplication rule written before that measurement would be a guess about
-  which of two similar memories is the better one.
+  model not to add one but nothing enforces it. What that measurement needed now
+  exists: a memory can carry an `embedding` with its `embeddedBy` identity, the
+  kernels score a pair without throwing, and `benchmark/retrieval.js` is a
+  committed harness that loads a corpus through the real ledger and scores what
+  came back. What does not exist is the measurement itself — duplicate pressure
+  over repeated refinements against ONE ledger: how many near-duplicates a run
+  adds, at what similarity, and what recall they cost the questions that follow.
+  A de-duplication rule written before those numbers would still be a guess
+  about which of two similar memories is the better one, and the similarity
+  score alone cannot tell them apart: two records at 0.95 may be one redundant
+  restatement or two facts that differ in the one detail that matters.
+
+- [ ] **The site's own ledger adapter sits outside the single-writer
+  contract.** A storage adapter is four async methods, not a transaction, and
+  the ledger's header says so — but the website's assistant keeps its ledger in
+  one browser storage slot that it caches in memory and rewrites whole on every
+  write, so two tabs are two writers over one adapter and the last one to write
+  wins wholesale. It predates the contract sentence rather than regressing
+  against it, and a durable adapter does not close it either: an immediate
+  transaction narrows the cross-process race but cannot end it, because minting
+  an id is a read and then a write across two adapter calls. Closing it means
+  either electing one writer (a lock, an owner tab) or moving the mint into the
+  adapter as an atomic operation — which is a fifth method, and the fact that
+  there are only four is what makes an adapter cheap enough to write.
 
 - [ ] **Nothing evicts an archived round.** Compaction writes every dropped
   round to a slot and never deletes one, which is exactly the property that makes
@@ -893,6 +961,22 @@ still open is listed here, each with its reason.
 
 ## Benchmarks & tooling
 
+- [ ] **A benchmark suite cannot be registered with a green `npm test`.** The
+  drift guard asserts the tracked `packages/website/public/benchmarks/*.json`
+  match HEAD and it runs inside `npm test`, while the manifest gate asserts the
+  suite order equals those tracked files exactly — so a change that ADDS a suite
+  must generate the file (for the manifest) and have already committed it (for
+  the guard) to make one `npm test` green, and every re-measure is red until its
+  commit. Two fixes exist and choosing between them is a judgement about where
+  the guard belongs: move the clean-checkout assertion out of `npm test` into
+  `predeploy`, where it already runs, or teach it that an untracked new file
+  whose key is in the suite order is registration rather than drift.
+- [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
+  in-memory SQLite database of roughly a gigabyte beside a 153 MB resident
+  matrix, and finishes in about ninety seconds; a memory-constrained runner
+  wants `--sizes 10000`. Backing the largest leg with a file would buy the
+  headroom at the price of measuring a page cache instead of a database, which
+  is only worth trading once a runner actually fails.
 - [ ] **Compile-mean coverage in `jslt.js`** — `COMPILE_KEYS` is `['identity', 'surgical', 'annotate']`, so the compile row's stylesheet set omits the reshape stylesheet.
 - [ ] **`--cell-order` shuffle** — the 4-book singular cell reads higher than the 1000-book one run to run (JIT/IC noise across the cell sequence); a shuffle option would pin it down if it ever matters.
 - [ ] **Saxon-JS as an optional competitor** — noted and deliberately excluded so far (heavyweight SEF/XSLT toolchain for a zero-build workspace).
