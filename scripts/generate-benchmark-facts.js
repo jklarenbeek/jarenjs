@@ -756,6 +756,59 @@ const FACTS = {
     const list = losses.map((row) => `${row.name} at ${ratio(row.rival / row.ours)}× (${row.rivalName})`);
     return `${word} row${losses.length === 1 ? ' loses' : 's lose'} to a rival: ${list.join(', ')}`;
   },
+  // -- series: the temporal kernel against the ground published before
+  // it existed. Two ratios per row on purpose — what the kernel costs
+  // against a loop written for one question, and what it saves against
+  // the vocabulary a consumer had instead — because quoting only the
+  // second would be a win with its price left out.
+  'series.kernelVsCeiling': () => {
+    const { figures } = data('series').meta;
+    return `${ratio(figures.kernelBucketVsOnePass)}× the one-pass bucket loop and `
+      + `${ratio(figures.kernelRollingVsOnePass)}× the one-pass ring sum`;
+  },
+  'series.kernelVsQuery': () => {
+    const { figures } = data('series').meta;
+    return `${ratio(figures.kernelBucketVsQuery)}× faster than the generic query bucket and `
+      + `${ratio(figures.kernelRollingVsQuery)}× faster than the labelled count window`;
+  },
+  'series.corpus': () => {
+    const { meta } = data('series');
+    const leg = seriesLargest();
+    return `${leg.label} at ${meta.stepMs / 1000}-second spacing, Node ${meta.node}`;
+  },
+  'series.kernelTable': () => {
+    const rows = [
+      ['`resampleSeries`, 60 s buckets', 'kernelBucket', 'bucket', 'one-pass loop'],
+      ['`resampleSeries`, + linear fill', 'kernelFill', 'kernelSparse', 'the same buckets, omitting'],
+      ['`rollingSeries`, 60 s window', 'kernelRolling', 'rolling', 'one-pass ring sum'],
+      ['`asOfJoin`, one left row per 100', 'kernelAsOfDense', 'sqlAsOfDense', 'one index read per row'],
+      ['`downsampleSeries`, lttb, gap corpus', 'kernelRenderGaps', 'kernelRender', 'the same line with no holes in it'],
+    ].map(([name, route, against, what]) => {
+      const ours = seriesMs(route);
+      const theirs = seriesMs(against);
+      return `| ${name} | ${ms(ours)} ms | ${thousands(seriesRows(route))} | ${ms(theirs)} ms `
+        + `| ${what} | ${ratio(ours / theirs)}× |`;
+    });
+    return ['', '| operation | median | rows | against | what that is | ratio |',
+      '|---|---:|---:|---:|---|---:|', ...rows, ''].join('\n');
+  },
+  'series.asofShape': () => {
+    const { figures } = data('series').meta;
+    return `The as-of join costs ${ratio(figures.kernelAsOfVsStored)}× a handful of index reads, `
+      + `and beats them by ${ratio(1 / figures.kernelAsOfDenseVsStored)}× once there is one left `
+      + 'row per hundred right ones. The reason is the shape rather than the engine: a b-tree pays '
+      + 'per probe, and a sorted walk pays for the whole right side whether it was asked one '
+      + 'question or a thousand.';
+  },
+  'series.zoneCost': () => {
+    const { figures } = data('series').meta;
+    return `Walking every boundary through an injected zone provider costs `
+      + `${ratio(figures.providerCost)}× the integer ladder over an identical answer — near `
+      + 'parity because it is near nothing, since the benchmark corpus spans 28 hours and holds '
+      + 'two daily boundaries. What the suite gates instead is that the provider is consulted '
+      + 'per boundary rather than per sample.';
+  },
+
   'geo.pip2000': () => `${ratio(geoRatio('point in polygon (2000-vertex)'))}×`,
   'geo.bbox2000': () => `${ratio(geoRatio('bounding box (2000-vertex)'))}×`,
   'geo.indexBuild': () => `${ratio(geoRatio('index build (100k boxes)'))}×`,
@@ -966,6 +1019,25 @@ function verdict(figure) {
   return '~even';
 }
 
+/** The series suite's largest leg, and one route's median there, in ms. */
+function seriesLargest() {
+  const { legs } = data('series').meta;
+  return legs[legs.length - 1];
+}
+function seriesMs(route) {
+  const leg = seriesLargest();
+  const row = data('series').rows.find((r) => r.route === route && r.n === leg.n);
+  if (row === undefined) {
+    throw new Error(`series.json has no '${route}' row at ${leg.n} — regenerate it before quoting one`);
+  }
+  return row.ns / 1e6;
+}
+/** One route's answer size at the largest leg. */
+function seriesRows(route) {
+  const leg = seriesLargest();
+  return /** @type {any} */ (data('series').rows.find((r) => r.route === route && r.n === leg.n)).results;
+}
+
 //#region rewriting
 
 const DOCS = [
@@ -984,6 +1056,7 @@ const DOCS = [
   'packages/core/README.md',
   'packages/core/ARCHITECTURE.md',
   'packages/core/docs/GEO.md',
+  'packages/core/docs/SERIES.md',
 ];
 
 /**

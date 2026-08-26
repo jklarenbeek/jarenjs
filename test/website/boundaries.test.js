@@ -212,9 +212,22 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.strictEqual(data.meta.equivalenceFailures, 0);
     assert.ok(data.checks.length > 0 && data.checks.every((/** @type {any} */ c) => c.agrees),
       'a published series file cannot carry a failed equivalence check');
-    // and no row claims a kernel that does not exist yet
-    assert.ok(!data.rows.some((/** @type {any} */ r) => /core|kernel/.test(r.route)),
-      'the suite publishes only routes a consumer can run today');
+    // the kernel is on the page now, and it is on it with BOTH ratios:
+    // what it costs against a loop written for one question, and what
+    // it saves against the vocabulary a consumer had instead. A page
+    // carrying only the second would be a win with its price left out.
+    assert.ok(data.rows.some((/** @type {any} */ r) => r.route.startsWith('kernel')),
+      'the kernel rows the campaign added are published');
+    assert.match(text, /core resampleSeries/, 'the kernel row renders beside the loop it is measured against');
+    assert.ok(data.meta.figures.kernelBucketVsOnePass > 1,
+      'the kernel is published as costing more than the one-pass ceiling, because it does');
+    assert.ok(data.meta.figures.kernelBucketVsQuery > 1,
+      'and as answering faster than the generic route, because it does');
+    // the as-of join loses at one shape and wins at the other, and the
+    // file carries both rather than the flattering one
+    assert.ok(data.meta.figures.kernelAsOfVsStored > 1
+      && data.meta.figures.kernelAsOfDenseVsStored < 1,
+      'both shapes of the as-of join are published, the losing one included');
     for (const leg of data.meta.legs) {
       const routes = data.rows.filter((/** @type {any} */ r) => r.n === leg.n);
       assert.ok(routes.length > 0, `no rows for the ${leg.label} leg`);

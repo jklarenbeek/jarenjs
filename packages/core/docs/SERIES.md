@@ -140,11 +140,192 @@ gapsWithin(cover, { start: '2026-03-02T08:00:00Z', end: '2026-03-02T18:00:00Z' }
 findSlots(cover, { duration: 'PT30M' });  // sixteen half-hour slots, one straddling the handover
 ```
 
+## The clock — `zone.js`
+
+Where a calendar boundary falls depends on a wall clock, and a wall
+clock that is not UTC is data this suite refuses to bundle: a tzdb is
+megabytes that go stale on a government's timetable, a Temporal
+polyfill is a runtime dependency, and reading the host's zone is the
+hidden clock this kernel exists without. So `resolveClock(options)` is a
+**seam**:
+
+| options | the clock |
+|---|---|
+| *(nothing)* | UTC. Nothing to configure, and no local time is ever ambiguous |
+| `{ offset: -300 }` | minutes east of UTC, constant. Exact integer arithmetic |
+| `{ zone, provider }` | the caller's tzdb, in whatever form they already have one |
+
+A provider answers two questions, and the second is the hard one:
+`toParts(epoch, zone)` is the wall clock at an instant, and
+`toEpoch(parts, zone, disambiguation)` is the instant at a wall clock —
+hard because a local time is not a function of the clock. On a
+spring-forward day 02:30 never happens; on a fall-back day it happens
+twice. `disambiguation` is `'reject'` (the default: an error, not an
+hour nobody notices), `'earlier'` or `'later'`. Asking for a named zone
+with no provider is a refusal, never a quiet fall back to UTC — which is
+right for Amsterdam for none of the year and *looks* right for eight
+months of it.
+
+## Buckets, resampling and fill — `bucket.js`
+
+Two questions that are always asked together and are not the same
+question. **Bucketing** is "which span does this instant fall in", and
+it is arithmetic. **Filling** is "what does a span with no readings
+say", and it is a policy. An average over an empty hour is not zero, and
+it is not yesterday's average, and it is not nothing.
+
+`compileBuckets(spec, options?)` validates a ladder once —
+`compileBuckets('PT15M')`, or `{ every, origin }` — and returns
+`floor`, `startOf`, `indexOf` and the shape it resolved to. Boundaries
+come in two flavours, and the difference is physical:
+
+- **fixed** — `PT15M`, `PT1H`, `P1D`, or a number of milliseconds. The
+  boundary is `origin + k × width`, integer arithmetic all the way down,
+  and it *floors*, so an instant before 1970 lands in its own bucket
+  rather than the one after it.
+- **calendar** — `P1M`, `P1Y`, and a whole number of days *on a named
+  zone*. A month has no width, so the boundary is walked by the calendar
+  kernel from the anchor; on a named zone a day that the clock changed
+  on is 23 or 25 hours long, and a ladder multiplying by 86,400,000
+  would drift off local midnight for the rest of the year.
+
+A width that mixes the two families (`P1MT1H`) is refused: a month and
+an hour share no boundary. The default `origin` is local
+`1970-01-01T00:00:00` **on the clock**, so a daily bucket in `+02:00`
+falls on local midnight rather than on UTC's.
+
+`resampleSeries(rows, spec)` returns ascending `{ at, value, count }`
+labelled at each bucket's **start**. `count` is the number of source
+rows — duplicates and measured gaps included — so it is the honest
+denominator of what was *seen*. All six value aggregates (`sum`, `mean`,
+`min`, `max`, `first`, `last`) skip `null` readings, so `value` is
+`null` exactly when there was nothing to measure and `count` says
+whether that was because nobody reported or because everybody reported a
+gap. `aggregate: 'count'` returns that row count as the value.
+
+With no `start`/`end` the window is the data's own — the bucket holding
+the first sample through the bucket holding the last — because the only
+other default would be a clock. Pass them when an empty *edge* matters.
+
+The five fill policies decide what an **empty** bucket says, and nothing
+else; a bucket that held rows and no numbers reports `null`, because
+that is a measurement:
+
+| fill | an empty bucket |
+|---|---|
+| `omit` | is not emitted — the default: a gap is not a row |
+| `null` | is emitted as `null` |
+| `zero` | is emitted as `0` |
+| `locf` | repeats the last value before it |
+| `linear` | is interpolated between its two neighbours |
+
+Neither `locf` nor `linear` invents a value at the leading edge, and
+`linear` needs a value on **both** sides. To seed one, widen the window
+until the earlier reading falls inside it: the seed is then a bucket
+with data, which is the only anchor either policy will extrapolate from.
+
+## Rolling windows — `rolling.js`
+
+`rollingSeries(rows, spec)` aggregates over a *duration* rather than a
+count of rows, which is the whole point: sixty rows of a sensor
+reporting every second is a minute, and sixty rows of a sensor that
+dropped half its readings is two minutes. One of those is a
+specification.
+
+The window is `(at − width, at]` — exactly `width` wide, holding the
+current instant and not the one a full width behind it. Two samples at
+one instant share that window and therefore share an answer: a span of
+time is a function of the instant it ends at, not of which simultaneous
+reading arrived first. `minPeriods` is how many source rows the window
+must hold before a value is reported at all.
+
+The complexity is per aggregate and is structural rather than hopeful:
+`sum`/`mean`/`count` carry a running total, `min`/`max` use a monotone
+deque, and `first`/`last` are two pointers that only move forward. A
+carried total is not a fresh sum in the last bits when the values are
+not exactly representable — that is what carrying one costs, and the
+suite's corpora use exact binary fractions so the difference is zero and
+equality is the check.
+
+## As-of joins — `asof.js`
+
+`asOfJoin(left, right, spec?)` answers "what was the price when this
+trade printed" for two series that share a timeline and nothing else.
+One record per left row, in the left series' order, unmatched included
+as `{ left, right: null, distance: null }` — a join that quietly returns
+fewer rows than it was given is how a report loses the events nothing
+explained.
+
+| direction | the right row chosen |
+|---|---|
+| `backward` | the last one at or before the left instant (default) |
+| `forward` | the last one at or after it |
+| `nearest` | whichever is closer; a tie chooses `backward` |
+
+At an equal instant the **last** right-side row wins in every direction,
+because duplicates are two readings and "as of" means the later one. A
+`nearest` tie chooses backward because a value already observed is
+evidence and one that has not been is a forecast. `tolerance` is the
+furthest a match may be; beyond it there is no match, not a distant one.
+`key` joins within groups — the right side is partitioned **once**, and
+no left row ever filters it.
+
+## Downsampling — `downsample.js`
+
+A hundred thousand points on a line eight hundred pixels wide is a
+hundred and twenty five points per pixel. `downsampleSeries(rows, spec)`
+supplies `lttb` (largest-triangle-three-buckets: keeps the shape a
+reader recognizes) and `minmax` (keeps the envelope exactly), and
+reports `{ points, sourceCount, renderedCount, method }` so a consumer
+can always say how much of the data it is looking at.
+
+Three rules stop either from lying. **A gap is never bridged** — the
+series is cut at every run of `null`s, each run keeps a marker, and each
+segment is sampled on its own budget. **The ends stay** — and a series
+ending in gaps keeps its last instant as that run's marker, so the
+rendered domain still reaches the end of the data. **An impossible
+target is refused** — those markers and endpoints are the minimum a
+faithful picture needs, and a prettier lie is worse than a `RangeError`
+naming the number.
+
+```javascript
+import { resampleSeries, rollingSeries, asOfJoin, downsampleSeries } from '@jarenjs/core/series';
+
+resampleSeries(readings, { every: 'PT1H', aggregate: 'mean', fill: 'linear' });
+resampleSeries(readings, { every: 'P1M', zone: 'Europe/Amsterdam', provider });
+rollingSeries(readings, { width: 'PT5M', aggregate: 'max', minPeriods: 3 });
+asOfJoin(trades, quotes, { direction: 'nearest', tolerance: 'PT1S', key: 'symbol' });
+downsampleSeries(readings, { target: 2000 });   // → { points, sourceCount, renderedCount, method }
+```
+
+## What it costs
+
+Measured by `benchmark/series.js` over <!--bm:series.corpus-->100,000 samples at 1-second spacing, Node v24.19.0<!--/bm-->,
+which gates every timing on equivalence first: no number below is printed
+unless the kernel answered the identical rows the references did.
+
+The kernel is not the ceiling and does not claim to be. A one-pass loop
+written for one question validates nothing, normalizes nothing and
+returns a bare pair. Against those loops the kernel costs <!--bm:series.kernelVsCeiling-->2.0× the one-pass bucket loop and 1.8× the one-pass ring sum<!--/bm-->,
+and against the vocabulary a consumer had instead it is <!--bm:series.kernelVsQuery-->121.6× faster than the generic query bucket and 99.8× faster than the labelled count window<!--/bm-->.
+
+<!--bm:series.kernelTable-->
+| operation | median | rows | against | what that is | ratio |
+|---|---:|---:|---:|---|---:|
+| `resampleSeries`, 60 s buckets | 0.9 ms | 1,667 | 0.44 ms | one-pass loop | 2.0× |
+| `resampleSeries`, + linear fill | 0.63 ms | 1,657 | 0.61 ms | the same buckets, omitting | 1.0× |
+| `rollingSeries`, 60 s window | 5.9 ms | 100,000 | 3.4 ms | one-pass ring sum | 1.8× |
+| `asOfJoin`, one left row per 100 | 1.3 ms | 1,000 | 2 ms | one index read per row | 0.6× |
+| `downsampleSeries`, lttb, gap corpus | 1 ms | 2,000 | 1.3 ms | the same line with no holes in it | 0.8× |
+<!--/bm-->
+
+A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--bm:series.asofShape-->The as-of join costs 13.0× a handful of index reads, and beats them by 1.6× once there is one left row per hundred right ones. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/bm-->
+
+And the seam has a price that this corpus cannot charge it. <!--bm:series.zoneCost-->Walking every boundary through an injected zone provider costs 1.0× the integer ladder over an identical answer — near parity because it is near nothing, since the benchmark corpus spans 28 hours and holds two daily boundaries. What the suite gates instead is that the provider is consulted per boundary rather than per sample.<!--/bm-->
+
 ## Not here
 
-Calendar-width buckets, resampling and fill policies, rolling windows,
-as-of joins and downsampling are the layer above this one. So are named
-time zones (a zone provider is injected, never bundled), recurrence
-grammars (RRULE, iCalendar), and any kind of scheduling solver. This
-module supplies the algebra those are built from, and nothing that needs
-a clock, a locale or a zone database to be correct.
+Named time zones are injected, never bundled; recurrence grammars
+(RRULE, iCalendar) and any kind of scheduling solver are somebody else's
+layer. This module supplies the algebra those are built from, and
+nothing that needs a clock, a locale or a zone database to be correct.

@@ -24,7 +24,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/dates` | RFC 3339 / ISO 8601 validation, plus the calendar kernel: integer date arithmetic, compiled formatting, durations |
 | `@jarenjs/core/geo` | the spatial kernel over GeoJSON: robust orientation, great-circle measurement, rings, bounding boxes, geohash, GeoJSON/WKT validity, a packed-Hilbert box index, Web Mercator and Douglas-Peucker simplification |
 | `@jarenjs/core/vector` | the vector kernel over plain arrays: dot, cosine and Euclidean similarity (higher-is-better; a malformed pair scores 0), l2 normalization, the packed little-endian Float32 form and the one shape guard (`isVector`) |
-| `@jarenjs/core/series` | the temporal kernel over plain records: instant/sample/interval normalization with a stable sort, half-open `[start, end)` set algebra (overlap, merge, subtract, gaps, coverage, slot enumeration) and a static interval index |
+| `@jarenjs/core/series` | the temporal kernel over plain records: instant/sample/interval normalization with a stable sort, half-open `[start, end)` set algebra (overlap, merge, subtract, gaps, coverage, slot enumeration), a static interval index, and the series operations built on them — fixed and calendar buckets with five fill policies, time-width rolling aggregates, as-of joins and gap-aware downsampling, on an injected zone seam |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the linear `remap` and unit-interval `clamp01` |
 | `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
@@ -126,7 +126,7 @@ The packed form is `4·d` bytes of little-endian binary32 — the value a databa
 
 ## Intervals and series
 
-`@jarenjs/core/series` is the suite's temporal kernel: one meaning for an interval, one meaning for a sorted series of timestamped readings, and the set algebra over them. As with dates, there is no type — an instant is epoch milliseconds or an RFC 3339 string, a sample is `{ at, value }`, an interval is `{ start, end }` — so every value stays a plain JSON item, and nothing here reads a clock.
+`@jarenjs/core/series` is the suite's temporal kernel: one meaning for an interval, one meaning for a sorted series of timestamped readings, the set algebra over them, and the five operations every consumer of a timeline otherwise rebuilds by hand — bucket, fill, roll, join as-of, downsample. As with dates, there is no type — an instant is epoch milliseconds or an RFC 3339 string, a sample is `{ at, value }`, an interval is `{ start, end }` — so every value stays a plain JSON item, and nothing here reads a clock.
 
 ```javascript
 import { createIntervalIndex, mergeIntervals, gapsWithin, findSlots } from '@jarenjs/core/series';
@@ -143,14 +143,28 @@ mergeIntervals(cover);                    // one span, 09:00–17:00 — touchin
 findSlots(cover, { duration: 'PT30M' });  // sixteen half-hour slots, one straddling the handover
 ```
 
-Four decisions carry the module:
+```javascript
+import { resampleSeries, rollingSeries, asOfJoin, downsampleSeries } from '@jarenjs/core/series';
+
+resampleSeries(readings, { every: 'PT1H', aggregate: 'mean', fill: 'linear' });
+resampleSeries(readings, { every: 'P1M', zone: 'Europe/Amsterdam', provider });
+rollingSeries(readings, { width: 'PT5M', aggregate: 'max', minPeriods: 3 });
+asOfJoin(trades, quotes, { direction: 'nearest', tolerance: 'PT1S', key: 'symbol' });
+downsampleSeries(readings, { target: 2000 });   // → { points, sourceCount, renderedCount, method }
+```
+
+Seven decisions carry the module:
 
 - **Half-open, everywhere.** `[start, end)` holds its start and not its end, so a day ends exactly where the next begins, a boundary instant belongs to exactly one of two touching intervals, and nothing is counted twice. Touching intervals therefore do *not* overlap — back-to-back bookings are not a double booking — while `mergeIntervals` joins them by default, because availability asks whether there is continuous cover. `{ adjacent: false }` is the other answer, spelled out rather than guessed.
 - **A row is never dropped, and a duplicate is never merged away.** A member that cannot become a finite instant is a refusal naming the row, not a silently shorter result; an empty (`[t, t)`), reversed or non-finite interval is refused at the point it was written. The sort is stable, so two readings in the same millisecond keep their input order and both count.
 - **Nothing reads a clock.** `gapsWithin` and `coverageOf` derive their window from the input's own hull when given none, because the only other default would be "now" — and an operation that read the clock could not be cached, reproduced or run in a test twice.
 - **The index cuts on both ends, and cannot lose a long span.** Sorting by start alone is the bug: a conference week that began before an hourly meeting sits far to the left of that meeting's neighbourhood and still overlaps it. `createIntervalIndex` carries a prefix maximum end beside the starts — non-decreasing, so binary-searchable — and a query becomes two binary cuts and a walk between them, O(log n + k), returning the caller's own rows. It is static: bounds are copied at build time, so a query reads no source object and a row mutated afterwards changes nothing.
 
-Bucketing, resampling, rolling windows and as-of joins are the layer above this one; named time zones, recurrence grammars and scheduling solvers are deliberately outside it. The full module reference is [docs/SERIES.md](./docs/SERIES.md).
+- **Bucketing is arithmetic; filling is a policy.** An average over an empty hour is not zero, and it is not yesterday's average, and it is not nothing — it is whichever of `omit | null | zero | locf | linear` the caller asked for, and the aggregate had no opinion. `count` reports source rows (duplicates and measured gaps included) beside every value, so `null` and "nobody reported" are distinguishable. Neither `locf` nor `linear` invents a value at the leading edge.
+- **A rolling window is a duration, not a row count.** Sixty rows of a sensor reporting every second is a minute; sixty rows of a sensor that dropped half its readings is two minutes. The window is `(at − width, at]`, so two readings in the same millisecond share it and therefore share an answer. `sum`/`mean`/`count` carry a running total, `min`/`max` use a monotone deque, `first`/`last` are forward-only pointers — the complexity is structural, and the tests count the reads rather than the milliseconds.
+- **Time zones are injected, never bundled.** UTC and fixed offsets work with no setup; a named zone takes the caller's own `provider`, because a bundled tzdb is megabytes that go stale on a government's timetable. A local time that never happened, or happened twice, is a refusal unless `disambiguation` says `earlier` or `later`. A sampler never bridges a gap, never moves an end, and refuses a target too small to hold both rather than drawing a prettier line.
+
+The kernel is measured against one-pass loops written for one question and against the query vocabulary a consumer had instead, and both ratios are published: it costs about twice a hand-written loop and answers about a hundred times faster than the generic route. Named time zones' data, recurrence grammars and scheduling solvers are deliberately outside it. The full module reference is [docs/SERIES.md](./docs/SERIES.md).
 
 ## Messages
 

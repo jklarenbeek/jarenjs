@@ -1083,7 +1083,7 @@
             "figures": {
               "description": "The ratios the notes and the published prose are derived from, so a verdict can never outlive the number it was drawn from. Every one is taken at the leg `largest` names.",
               "type": "object",
-              "required": ["largest", "cutVsFilter", "columnVsDocument", "storedRangeVsResident", "storedBucketVsResident", "queryBucketVsResident", "queryWindowVsResident", "labelCost", "asOfVsRange", "noisiestRoute", "noisiestSpread"],
+              "required": ["largest", "cutVsFilter", "columnVsDocument", "storedRangeVsResident", "storedBucketVsResident", "queryBucketVsResident", "queryWindowVsResident", "labelCost", "asOfVsRange", "kernelBucketVsOnePass", "kernelRollingVsOnePass", "kernelBucketVsQuery", "kernelRollingVsQuery", "providerCost", "fillCost", "kernelAsOfVsStored", "kernelAsOfDenseVsStored", "gapRenderCost", "renderReduction", "noisiestRoute", "noisiestSpread"],
               "properties": {
                 "largest": { "type": "string" },
                 "cutVsFilter": { "type": ["null", "number"] },
@@ -1094,6 +1094,37 @@
                 "queryWindowVsResident": { "type": ["null", "number"] },
                 "labelCost": { "type": ["null", "number"] },
                 "asOfVsRange": { "type": ["null", "number"] },
+                "kernelBucketVsOnePass": {
+                  "description": "What the kernel's fixed-bucket resample costs against the one-pass loop written for that one question. The loop is the ceiling, not a rival: it validates nothing, normalizes nothing and answers one shape.",
+                  "type": ["null", "number"]
+                },
+                "kernelRollingVsOnePass": { "type": ["null", "number"] },
+                "kernelBucketVsQuery": {
+                  "description": "How much faster the kernel answers than the generic query route a consumer had before it — the gap the temporal kernel exists to close, measured against the ground published before it existed.",
+                  "type": ["null", "number"]
+                },
+                "kernelRollingVsQuery": { "type": ["null", "number"] },
+                "providerCost": {
+                  "description": "What routing every bucket boundary through an injected zone provider costs against the integer ladder, over an identical answer.",
+                  "type": ["null", "number"]
+                },
+                "fillCost": {
+                  "description": "What the fill pass costs on its own: the same corpus and the same ladder, emitting the empty buckets against omitting them.",
+                  "type": ["null", "number"]
+                },
+                "kernelAsOfVsStored": {
+                  "description": "The resident as-of join against one index read per left row, with a left side of a few dozen rows — the shape the index wins, published as the loss it is.",
+                  "type": ["null", "number"]
+                },
+                "kernelAsOfDenseVsStored": {
+                  "description": "The same pair at one left row per hundred right ones — the shape the sorted walk wins.",
+                  "type": ["null", "number"]
+                },
+                "gapRenderCost": { "type": ["null", "number"] },
+                "renderReduction": {
+                  "description": "How many source points each rendered point stands for at the largest leg.",
+                  "type": ["null", "number"]
+                },
                 "noisiestRoute": {
                   "description": "The route whose own rounds disagreed most at the largest leg — the tolerance every ratio above is read with.",
                   "type": "string"

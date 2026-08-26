@@ -174,6 +174,60 @@ function compareAt(a, b) {
 }
 
 /**
+ * The same canonical samples, without the copy when there is nothing to
+ * convert.
+ *
+ * {@link normalizeSeries} always builds a new array of new records,
+ * which is the right answer at the door and the wrong one three kernels
+ * later: bucketing, rolling and joining all take a series that a caller
+ * usually normalized once already, and re-copying a hundred thousand
+ * rows per operation costs more than the operation. So this checks
+ * instead of converting — one pass, no allocation — and hands the
+ * caller's own array straight back when every row is already
+ * `{ at: <finite number>, value: <number | null> }` and ascending.
+ *
+ * Nothing is trusted: a row that fails the check sends the whole array
+ * through {@link normalizeSeries}, which refuses it there with the row
+ * named. The fast path is a measurement, not a promise.
+ *
+ * @param {any[]} rows
+ * @param {Object} [options]
+ * @param {string | ((item: any, index: number) => any)} [options.at]
+ * @param {string | ((item: any, index: number) => any)} [options.value]
+ * @returns {(Sample & Record<string, any>)[]} `rows` itself, or a new
+ *   normalized array
+ * @throws {TypeError} exactly where {@link normalizeSeries} does
+ */
+export function canonicalSeries(rows, options = {}) {
+  if (Array.isArray(rows) && options.at === undefined && options.value === undefined
+    && isCanonical(rows))
+    return rows;
+  return normalizeSeries(rows, options);
+}
+
+/**
+ * Is every row already a canonical sample, and the whole ascending?
+ * @param {any[]} rows
+ * @returns {boolean}
+ */
+function isCanonical(rows) {
+  let previous = -Infinity;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row === null || typeof row !== 'object')
+      return false;
+    const at = row.at;
+    if (typeof at !== 'number' || !Number.isFinite(at) || at < previous)
+      return false;
+    const value = row.value;
+    if (value !== null && (typeof value !== 'number' || !Number.isFinite(value)))
+      return false;
+    previous = at;
+  }
+  return true;
+}
+
+/**
  * Sorted canonical intervals: every bound converted once, the direction
  * checked, other members kept, and the whole ascending by start.
  *

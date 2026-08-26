@@ -298,6 +298,31 @@ export function asOfBackward(series, at) {
 
 //#endregion
 
+//#region gaps
+
+/**
+ * The same corpus with runs of readings replaced by measured gaps —
+ * `null` values at instants that still exist, which is what a sensor
+ * that stopped reporting for five minutes actually leaves behind.
+ *
+ * The runs are deterministic in the corpus rather than random: every
+ * `period` samples, `run` of them are gaps. A fill policy, a rolling
+ * window and a downsampler all have to be measured against a series
+ * that has holes in it, because the dense corpus never exercises the
+ * branch that decides what a hole means.
+ *
+ * @param {Sample[]} series
+ * @param {number} period - how often a run of gaps begins
+ * @param {number} run - how many consecutive samples the run covers
+ * @returns {Sample[]} a new array of new records
+ */
+export function gappedSeries(series, period, run) {
+  return series.map((sample, i) => (
+    (i % period) < run ? { at: sample.at, value: null } : { at: sample.at, value: sample.value }));
+}
+
+//#endregion
+
 //#region probes
 
 /**
