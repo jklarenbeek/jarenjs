@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-25T22:16:30+02:00",
-  "commit": "3f9b5e79d2bce2594f22fd60972bd6b36a11a10c",
+  "generated": "2026-08-26T10:42:59+02:00",
+  "commit": "0df1ef3a27b39e1408acf1ba2e63eed34b1c8621",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -206,7 +206,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/core/site.md",
-          "hash": "v1kjem",
+          "hash": "2f61l4",
           "frontmatterLang": "yaml"
         }
       },
@@ -1556,7 +1556,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/json/site.md",
-          "hash": "1rshb8o",
+          "hash": "1padns0",
           "frontmatterLang": "yaml"
         }
       },
@@ -2065,7 +2065,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/validate/site.md",
-          "hash": "1b5zipc",
+          "hash": "mv5dxs",
           "frontmatterLang": "yaml"
         }
       },
@@ -2159,7 +2159,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/formats/site.md",
-          "hash": "nd8a1k",
+          "hash": "2imafe",
           "frontmatterLang": "yaml"
         }
       },
@@ -2372,7 +2372,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/refs/site.md",
-          "hash": "y4yao0",
+          "hash": "jfzq57",
           "frontmatterLang": "yaml"
         }
       },
@@ -2673,7 +2673,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/emit/site.md",
-          "hash": "ukw5wg",
+          "hash": "1f7jchu",
           "frontmatterLang": "yaml"
         }
       },
@@ -3281,7 +3281,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/contract/site.md",
-          "hash": "13ny9gc",
+          "hash": "camjax",
           "frontmatterLang": "yaml"
         }
       },
@@ -3420,7 +3420,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/forms/site.md",
-          "hash": "1op08w6",
+          "hash": "1v0kgej",
           "frontmatterLang": "yaml"
         }
       },
@@ -3594,7 +3594,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/locales/site.md",
-          "hash": "1xk6lic",
+          "hash": "y4law5",
           "frontmatterLang": "yaml"
         }
       },
@@ -3726,7 +3726,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/view/site.md",
-          "hash": "1ri0ckm",
+          "hash": "ustp5k",
           "frontmatterLang": "yaml"
         }
       },
@@ -3837,7 +3837,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/app/site.md",
-          "hash": "2z23s4",
+          "hash": "bvqbp5",
           "frontmatterLang": "yaml"
         }
       },
@@ -4238,7 +4238,7 @@
         ],
         "meta": {
           "sourceUrl": "components/md/site.md",
-          "hash": "1w98sgg",
+          "hash": "15vgatq",
           "frontmatterLang": "yaml"
         }
       },
@@ -4517,7 +4517,7 @@
         ],
         "meta": {
           "sourceUrl": "components/mermaid/site.md",
-          "hash": "rh9kmr",
+          "hash": "1ttcerk",
           "frontmatterLang": "yaml"
         }
       },
@@ -4715,7 +4715,7 @@
         ],
         "meta": {
           "sourceUrl": "components/calc/site.md",
-          "hash": "1j3qqp2",
+          "hash": "1nbk9vz",
           "frontmatterLang": "yaml"
         }
       },
@@ -4924,7 +4924,7 @@
         ],
         "meta": {
           "sourceUrl": "components/charts/site.md",
-          "hash": "1stttfi",
+          "hash": "lfdzbr",
           "frontmatterLang": "yaml"
         }
       },
@@ -5406,7 +5406,7 @@
         ],
         "meta": {
           "sourceUrl": "components/studio/site.md",
-          "hash": "1xbusns",
+          "hash": "ld9q0c",
           "frontmatterLang": "yaml"
         }
       },
@@ -5687,7 +5687,7 @@
         ],
         "meta": {
           "sourceUrl": "components/play/site.md",
-          "hash": "1gp2jwu",
+          "hash": "139wwfx",
           "frontmatterLang": "yaml"
         }
       },
@@ -6287,7 +6287,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/josl/site.md",
-          "hash": "1fqwoeq",
+          "hash": "144ue32",
           "frontmatterLang": "yaml"
         }
       },
@@ -6711,7 +6711,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/ai/site.md",
-          "hash": "10j90gc",
+          "hash": "deox3u",
           "frontmatterLang": "yaml"
         }
       },
@@ -7134,7 +7134,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/flow/site.md",
-          "hash": "1ohlcgi",
+          "hash": "1vc0j9q",
           "frontmatterLang": "yaml"
         }
       },
@@ -7324,7 +7324,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/linq/site.md",
-          "hash": "ksci70",
+          "hash": "1vgi3em",
           "frontmatterLang": "yaml"
         }
       },
@@ -8161,7 +8161,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/db/site.md",
-          "hash": "xeldq0",
+          "hash": "11ycpq6",
           "frontmatterLang": "yaml"
         }
       },
