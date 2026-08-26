@@ -61,6 +61,9 @@ const MODEL = {
           tag: { type: 'string' },
           n: { type: 'integer' },
           at: { type: 'array', items: { type: 'number' } },
+          series: { type: 'string' },
+          on: { type: 'integer' },
+          reading: { type: 'number' },
           area: { type: 'object' },
           embedding: { type: 'array', items: { type: 'number' } },
         },
@@ -71,6 +74,7 @@ const MODEL = {
         { name: 'by_cell', path: '$.at', derive: 'geohash', precision: 6 },
         { name: 'by_box', path: '$.area', derive: 'bbox', physical: 'rtree' },
         { name: 'by_vec', path: '$.embedding', derive: 'vector', dims: 3 },
+        { name: 'by_series_on', path: ['$.series', '$.on'] },
       ],
     },
   },
@@ -91,6 +95,19 @@ const DOCUMENTS = {
   'knn, the candidate projection': { $subsequence: [{ $for: { r: '$[*]' },
     $orderby: [{ $key: { $similarity: ['$r.embedding', '$q'] }, $dir: 'desc', $empty: 'least' },
       '$r.id'], $return: '$r' }, 0, 2] },
+  'native, the temporal bucket': { $for: { r: '$[*]' },
+    $where: { $and: [{ $eq: ['$r.series', 's'] }, { $ge: ['$r.on', 0] },
+      { $lt: ['$r.on', 60000] }] },
+    $groupby: { b: { '$time-bucket': ['$r.on', 1000, 0] } },
+    $orderby: ['$b'],
+    $return: { at: '$b', mean: { $avg: '$r.reading' }, n: { $count: '$r' } } },
+  'native, the temporal bucket in first-appearance order': { $for: { r: '$[*]' },
+    $where: { $and: [{ $eq: ['$r.series', 's'] }, { $ge: ['$r.on', 0] }] },
+    $groupby: { b: { '$time-bucket': ['$r.on', 1000] } },
+    $return: { at: '$b', total: { $sum: '$r.reading' } } },
+  'native, the resample ladder': { $resample: [{ $for: { r: '$[*]' },
+    $where: { $eq: ['$r.series', 's'] }, $return: '$r' },
+  { every: 1000, at: '$.on', value: '$.reading' }] },
 };
 
 /**
@@ -174,6 +191,11 @@ function corpusOf(dialect) {
 
   out['limitClause'] = dialect.limitClause(10, 5);
   out['orderNulls'] = dialect.orderNulls(false);
+  out['timeBucket'] = dialect.timeBucket(dialect.quoteIdentifier('gx_on'),
+    dialect.parameterRef(1, 'origin'), dialect.parameterRef(2, 'every'),
+    dialect.parameterRef(3, 'every'), dialect.parameterRef(4, 'every'));
+  out['groupAggregate.rows'] = dialect.groupAggregate('rows', null);
+  out['groupAggregate.avg'] = dialect.groupAggregate('avg', dialect.quoteIdentifier('gx_on'));
   out['jsonTypeOf'] = dialect.jsonTypeOf(dialect.quoteIdentifier('doc'), '/tag');
   out['valueTypeOf'] = dialect.valueTypeOf(dialect.parameterRef(1, 'v'));
   out['jsonAgg'] = dialect.jsonAgg(dialect.quoteIdentifier('doc'));
@@ -222,6 +244,8 @@ const SQLITE_SPELLINGS = [
   [/\bEXPLAIN QUERY PLAN\b/, 'the plan narrative'],
   [/\brtree\b/, 'the R*Tree module name'],
   [/\bjaren_(geohash|bbox)/, 'the derived-column function names'],
+  [/\bAVG\(|\bSUM\(|\bMIN\(|\bMAX\(/, 'the grouped aggregate function names'],
+  [/%/, 'the modulo operator of the bucket ladder'],
   [/\bNEW\.|\bOLD\./i, null],
 ];
 
@@ -243,6 +267,8 @@ const MIRROR_SPELLINGS = [
   [/\bBOXTREE\b/, 'the mirror R*Tree module'],
   [/\bCELL\(|\bBOX_/, 'the mirror derived-column functions'],
   [/\bAMONG\b/, 'the mirror identity membership'],
+  [/\bLADDER\(/, 'the mirror bucket ladder'],
+  [/\bTALLY\(|\bROLLUP_/, 'the mirror grouped aggregates'],
 ];
 
 describe('the dialect contract is closed: a mirror spec renders every statement', () => {

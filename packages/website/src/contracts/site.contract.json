@@ -1071,7 +1071,7 @@
               }
             },
             "plans": {
-              "description": "What SQLite said it would do, read from EXPLAIN QUERY PLAN on the measuring host rather than asserted — a search against a scan is the whole claim of the declared-column row.",
+              "description": "What SQLite said it would do, read from EXPLAIN QUERY PLAN on the measuring host rather than asserted — a search against a scan is the whole claim of the declared-column row. The store rows carry the plan MODE the planner chose in front of it, so a refinement that quietly stopped being one is visible here.",
               "type": "array",
               "items": {
                 "type": "object",
@@ -1083,7 +1083,7 @@
             "figures": {
               "description": "The ratios the notes and the published prose are derived from, so a verdict can never outlive the number it was drawn from. Every one is taken at the leg `largest` names.",
               "type": "object",
-              "required": ["largest", "cutVsFilter", "columnVsDocument", "storedRangeVsResident", "storedBucketVsResident", "queryBucketVsResident", "queryWindowVsResident", "labelCost", "asOfVsRange", "kernelBucketVsOnePass", "kernelRollingVsOnePass", "kernelBucketVsQuery", "kernelRollingVsQuery", "providerCost", "fillCost", "kernelAsOfVsStored", "kernelAsOfDenseVsStored", "gapRenderCost", "renderReduction", "noisiestRoute", "noisiestSpread"],
+              "required": ["largest", "cutVsFilter", "columnVsDocument", "storedRangeVsResident", "storedBucketVsResident", "queryBucketVsResident", "queryWindowVsResident", "labelCost", "asOfVsRange", "kernelBucketVsOnePass", "kernelRollingVsOnePass", "kernelBucketVsQuery", "kernelRollingVsQuery", "providerCost", "fillCost", "kernelAsOfVsStored", "kernelAsOfDenseVsStored", "gapRenderCost", "renderReduction", "noisiestRoute", "noisiestSpread", "storeRangeVsSql", "storeRangeVsResident", "storeBucketVsSql", "storeBucketVsQuery", "storeBucketVsResident", "storeRollingVsResident", "storeAsOfVsIndexReads", "storeAsOfCandidates", "storeAsOfStatements", "storeRollingCandidates"],
               "properties": {
                 "largest": { "type": "string" },
                 "cutVsFilter": { "type": ["null", "number"] },
@@ -1129,7 +1129,47 @@
                   "description": "The route whose own rounds disagreed most at the largest leg — the tolerance every ratio above is read with.",
                   "type": "string"
                 },
-                "noisiestSpread": { "type": "number" }
+                "noisiestSpread": { "type": "number" },
+                "storeRangeVsSql": {
+                  "description": "The planned range through the store against the same range as a hand-written statement. The store renders and parses a whole JSON document per row where the statement selects two columns, so this prices storing DOCUMENTS rather than planning them.",
+                  "type": ["null", "number"]
+                },
+                "storeRangeVsResident": {
+                  "description": "The planned range against the resident sorted cut — the durability price, published rather than netted out.",
+                  "type": ["null", "number"]
+                },
+                "storeBucketVsSql": {
+                  "description": "The pushed bucket ladder against the same GROUP BY written by hand.",
+                  "type": ["null", "number"]
+                },
+                "storeBucketVsQuery": {
+                  "description": "How much FASTER the pushed bucket is than the generic query route the vocabulary had before it — the native-against-document figure.",
+                  "type": ["null", "number"]
+                },
+                "storeBucketVsResident": {
+                  "description": "The pushed bucket against the one-pass loop in memory.",
+                  "type": ["null", "number"]
+                },
+                "storeRollingVsResident": {
+                  "description": "A window measured in time is a named refinement, never pushed: the index bounds the fetch and the temporal kernel decides. This is what that costs against the same kernel over an array already in memory.",
+                  "type": ["null", "number"]
+                },
+                "storeAsOfVsIndexReads": {
+                  "description": "The batched as-of join against one index read per left row. Above 1 the batch is SLOWER and the row says so: with no tolerance a backward join can only be bounded above.",
+                  "type": ["null", "number"]
+                },
+                "storeAsOfCandidates": {
+                  "description": "How many rows the batched join actually read — an ACTUAL count taken from the run, never an estimate.",
+                  "type": ["null", "number"]
+                },
+                "storeAsOfStatements": {
+                  "description": "How many statements the batched join issued, whatever the probes numbered. The bound is the claim.",
+                  "type": ["null", "number"]
+                },
+                "storeRollingCandidates": {
+                  "description": "How many rows the rolling refinement handed to the kernel.",
+                  "type": ["null", "number"]
+                }
               },
               "additionalProperties": false
             },

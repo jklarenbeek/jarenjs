@@ -3,8 +3,8 @@
  * @file The temporal-series corpus has one source, and generating it
  * twice writes the same bytes.
  *
- * `test/json/fixtures/series-corpus.json` is the oracle later executors
- * are held to: the same bucketing as a query document, the same range as
+ * `test/json/fixtures/series-corpus.json` is the oracle every executor
+ * is held to: the same bucketing as a query document, the same range as
  * an indexed database plan, the same rolling window somewhere that is
  * not Node. A second copy — a fixture pasted beside a runner, a
  * reference re-implemented in a benchmark — is a corpus that can
@@ -41,6 +41,8 @@ const READERS = [
   ['benchmark/series.js', /scripts\/lib\/series-corpus\.js/, 'the benchmark'],
   ['test/json/query/series-corpus.test.js', /scripts\/lib\/series-corpus\.js/,
     'the validated query vocabulary'],
+  ['test/db/series-oracle.test.js', /scripts\/lib\/series-corpus\.js/,
+    'the indexed database, on Node and on real wasm'],
 ];
 
 describe('the series corpus has one source', () => {
@@ -64,6 +66,18 @@ describe('the series corpus has one source', () => {
           `${file} names an unexpected corpus file: ${hit}`);
       }
     }
+  });
+
+  it('the collection projection is the corpus reader\'s, not a second reading of `kind`', () => {
+    // a store executes a SEQUENCE of documents rather than a member of
+    // one, so every case has to be rebased — and the rebasing reads the
+    // case's `kind` exactly once, here, beside the dispatcher
+    const suite = read('test/db/series-oracle.test.js');
+    assert.match(suite, /seriesCollectionCase/, 'the DB suite projects through the one reader');
+    assert.doesNotMatch(suite, /\.kind\s*===/,
+      'a second reading of `kind` is a corpus that can disagree with itself');
+    assert.doesNotMatch(suite, /\.source\s*===/,
+      'a second reading of `source` is the same failure');
   });
 
   it('the benchmark times the shared references rather than its own copies', () => {

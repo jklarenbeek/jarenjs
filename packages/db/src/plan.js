@@ -41,6 +41,7 @@ import { analyzeQuery, AST_VERSION, NODE_KINDS } from '@jarenjs/json/query';
 import {
   getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
 } from '@jarenjs/core/dates/rfc3339';
+import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
 import { selectPlan, conjoin, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
@@ -50,6 +51,11 @@ import {
   probeBox, probePosition, probeCircleBox, cellNeighbourhood, probeVector,
 } from './derive.js';
 import { KNN_MARGIN } from './knn.js';
+import {
+  SERIES_ROOT_OPS, NATIVE_AGGREGATES, seriesReason,
+  instantIndexesOver, seekingIndexFor, filterFacts, fixedLadder, instantRefusal,
+  valueRefusal, seriesRecord, singularSelector,
+} from './series.js';
 
 /** Comparison operator names → plan ops. */
 const COMPARISONS = new Map([
@@ -1010,6 +1016,608 @@ function planPredicate(node, itSlot, shape) {
     'no native spelling of this operator is proven equivalent') };
 }
 
+// ————— Time series: the three closed shapes over a declared index —————
+//
+// The physical feature is one a model already has: a composite index
+// over `[$.series, $.at]`. There is no `derive: 'series'`, no column
+// type and no host function — D9's whole point is that a declared
+// numeric epoch column is already 52× reading the instant back out of
+// the document, so the work here is recognizing which questions that
+// index can answer rather than inventing a place to put time.
+//
+// Three shapes are recognized, and they are CLOSED:
+//
+//  1. **range** — every leading column of an instant index pinned by an
+//     equality, a half-open range on the instant column, ordered by it.
+//     Already a native selection; what this adds is the NAME of the
+//     operation, the index it seeks, and the honest reason when the
+//     prefix is missing.
+//  2. **as-of** — the same prefix with ONE instant bound, ordered by
+//     the instant, cut to a finite window. §2.2's 0.003 ms row.
+//  3. **bucket** — a fixed-width ladder over the instant column with
+//     the exact `sum|mean|min|max|count` aggregates, in both spellings
+//     the language has for it: a `$groupby` whose key is
+//     `$time-bucket`, and a `$resample` whose spec asks for nothing a
+//     `GROUP BY` cannot do.
+//
+// Everything else is a NAMED core refinement: the fetch narrows through
+// the index and the residual — which is the engine running the caller's
+// own document — decides. That is what keeps a refinement idempotent,
+// and it is why a calendar ladder, a fill policy, a rolling window and
+// an as-of JOIN cost a bounded fetch rather than a wrong answer.
+
+/** Is this node the whole collection — `$[*]` over the input document? */
+function isCollectionSource(node) {
+  return node?.kind === 'path' && node.name === '$' && node.external !== true
+    && node.rootSlot === 0 && node.singular !== true
+    && node.segments.length === 1 && node.segments[0].descendant !== true
+    && node.segments[0].selectors.length === 1
+    && node.segments[0].selectors[0].kind === 'wildcard';
+}
+
+/**
+ * The collection-side operand of a root series operator: the bare
+ * `$[*]`, or a FLWOR over it whose `$where` is the narrowing.
+ * @param {any} node
+ * @returns {{ flwor: any } | null}
+ */
+function collectionOperand(node) {
+  if (isCollectionSource(node)) return { flwor: null };
+  if (node?.kind === 'flwor' && node.forBindings.length === 1
+    && isCollectionSource(node.forBindings[0]?.expr))
+    return { flwor: node };
+  return null;
+}
+
+/**
+ * A typed reference to one top-level member of the collection's
+ * documents — what a spec's row selector ultimately names.
+ * @param {any} shape
+ * @param {string} name
+ * @returns {import('./algebra.js').PlanRef}
+ */
+function memberRef(shape, name) {
+  const segments = [{ name }];
+  return {
+    segments,
+    type: typeOfPath(shape.schema, segments),
+    column: shape.columnByCanonical.get(`.${name}`) ?? null,
+  };
+}
+
+/**
+ * The instants a plan-time literal series carries, under one selector.
+ * `null` when the operand is not a literal array of records, or when
+ * one of them names no instant — either way the planner has no bound to
+ * add and says so rather than guessing one.
+ * @param {any} node
+ * @param {any} selector - the spec's `leftAt`/`rightAt`, or undefined
+ * @returns {{ min: number, max: number, keys: any[] | null } | null}
+ */
+function literalInstants(node, selector, keySelector) {
+  const constant = constantOf(node);
+  if (constant === null || !Array.isArray(constant.value) || constant.value.length === 0)
+    return null;
+  const at = selector === undefined ? 'at' : singularSelector(selector);
+  const by = keySelector === undefined ? null : singularSelector(keySelector);
+  if (at === null || (keySelector !== undefined && by === null)) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  const keys = by === null ? null : [];
+  for (const row of constant.value) {
+    if (row === null || typeof row !== 'object') return null;
+    const instant = row[at];
+    if (typeof instant !== 'number' || !Number.isFinite(instant)) return null;
+    if (instant < min) min = instant;
+    if (instant > max) max = instant;
+    if (keys !== null) {
+      const key = row[by];
+      if (typeof key !== 'string' && typeof key !== 'number') return null;
+      if (!keys.includes(key)) keys.push(key);
+    }
+  }
+  return { min, max, keys };
+}
+
+/**
+ * The native bucket a `$resample` spec asks for, or the FIRST reason it
+ * is a refinement instead. The rules are asked in one fixed order, so a
+ * spec always names the same reason on every host.
+ * @param {any} spec - the frozen literal
+ * @param {any} shape
+ * @returns {{ bucket: import('./algebra.js').PlanBucket } | { code: string }}
+ */
+function resampleBucket(spec, shape) {
+  // the clock first, because a named zone is resolved by HOST code the
+  // planner does not have: asking the kernel about it would report the
+  // missing provider rather than the reason a ladder is not native
+  if (spec.zone !== undefined && spec.zone !== 'UTC') return { code: 'named-zone' };
+  // The kernel's own rules, asked once, by running it over NO rows —
+  // order 04's trick, for order 04's reason. `analyzeQuery` does not
+  // compile an operator, so a spec the kernel refuses reaches the
+  // planner before the engine has had its say, and a plan that answered
+  // where the engine raises is the one thing a pushdown may never do.
+  try {
+    resampleSeries([], spec);
+  }
+  catch {
+    return { code: 'invalid-spec' };
+  }
+  if (spec.fill !== undefined && spec.fill !== 'omit') return { code: 'fill-policy' };
+  const fn = NATIVE_AGGREGATES[spec.aggregate ?? 'mean'];
+  if (fn === undefined) return { code: 'unsupported-aggregate' };
+  const ladder = fixedLadder(spec, compileBuckets);
+  if ('code' in ladder) return ladder;
+  // a row selector is a singular path whose `$` is the ROW, so it names
+  // a member — and a member is what a declared column stands for. One
+  // that names a path INTO a member names no column, and says so
+  const atName = spec.at === undefined ? 'at' : singularSelector(spec.at);
+  const valueName = spec.value === undefined ? 'value' : singularSelector(spec.value);
+  if (atName === null || valueName === null) return { code: 'row-selector' };
+  const at = memberRef(shape, atName);
+  const instantBad = instantRefusal(at);
+  if (instantBad !== null) return { code: instantBad };
+  const value = memberRef(shape, valueName);
+  if (fn !== 'rows') {
+    const valueBad = valueRefusal(value);
+    if (valueBad !== null) return { code: valueBad };
+  }
+  // D5's shape, exactly: the bucket's start, its reading, and the count
+  // of SOURCE rows — which is `COUNT(*)` whether or not it is also the
+  // answer, because `aggregate: 'count'` returns that same number
+  return { bucket: {
+    ref: at,
+    every: ladder.every,
+    origin: ladder.origin,
+    as: 'at',
+    order: 'asc',
+    aggregates: [
+      { fn: /** @type {any} */ (fn), ref: fn === 'rows' ? null : value, as: 'value' },
+      { fn: /** @type {any} */ ('rows'), ref: null, as: 'count' },
+    ],
+  } };
+}
+
+/**
+ * The ladder a `$groupby` key spells, when the key is a `$time-bucket`
+ * over a member path with literal width and origin.
+ * @param {any} key - the grouping key expression node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {{ ref: any, every: number, origin: number } | { code: string } | null}
+ *   `null` when the key is not a `$time-bucket` at all
+ */
+function groupLadder(key, itSlot, shape) {
+  if (key?.kind !== 'op' || key.name !== '$time-bucket') return null;
+  const [atNode, everyNode, originNode, contextNode] = key.args;
+  if (everyNode.kind !== 'literal') return { code: 'nonliteral-spec' };
+  if (originNode !== undefined && originNode.kind !== 'literal')
+    return { code: 'nonliteral-spec' };
+  /** @type {any} */
+  const spec = { every: everyNode.value };
+  if (originNode !== undefined && originNode.value !== null) spec.origin = originNode.value;
+  if (contextNode !== undefined) {
+    if (contextNode.kind !== 'raw') return { code: 'nonliteral-spec' };
+    const context = contextNode.value;
+    if (context?.zone !== undefined) return { code: 'named-zone' };
+    if (context?.offset !== undefined) spec.offset = context.offset;
+  }
+  const ladder = fixedLadder(spec, compileBuckets);
+  if ('code' in ladder) return ladder;
+  const ref = pathRef(atNode, itSlot, shape);
+  const instantBad = instantRefusal(ref);
+  if (instantBad !== null) return { code: instantBad };
+  return { ref, every: ladder.every, origin: ladder.origin };
+}
+
+/**
+ * The closed projection of a bucket grouping: one member per answered
+ * value, each of them the group key, a `$count` of the whole binding,
+ * or one of the four value aggregates over a schema-typed numeric path.
+ * @param {any} ret - the `$return` node
+ * @param {number} itSlot
+ * @param {number} keySlot
+ * @param {any} shape
+ * @returns {{ as: string, aggregates: any[] } | { code: string }}
+ */
+function bucketProjection(ret, itSlot, keySlot, shape) {
+  if (ret?.kind !== 'object') return { code: 'nonnative-grouping' };
+  let as = null;
+  const aggregates = [];
+  for (const entry of ret.entries) {
+    const expr = entry.expr;
+    if (expr.kind === 'var' && expr.external !== true && expr.slot === keySlot) {
+      if (as !== null) return { code: 'nonnative-grouping' };
+      as = entry.name;
+      continue;
+    }
+    if (expr.kind !== 'op') return { code: 'nonnative-grouping' };
+    if (expr.name === '$count') {
+      // `$count` over the BINDING is the group's row count; over a path
+      // it counts the rows that HAVE the member, which SQL's
+      // `COUNT(column)` does not reproduce for a JSON `null`
+      if (!isItVar(expr.args[0], itSlot)) return { code: 'nonnative-grouping' };
+      aggregates.push({ fn: 'rows', ref: null, as: entry.name, empty: 'null' });
+      continue;
+    }
+    const fn = { $sum: 'sum', $avg: 'avg', $min: 'min', $max: 'max' }[expr.name];
+    if (fn === undefined) return { code: 'nonnative-grouping' };
+    const ref = pathRef(expr.args[0], itSlot, shape);
+    const valueBad = valueRefusal(ref);
+    if (valueBad !== null) return { code: valueBad };
+    // what an aggregate over NO numbers says, in the ENGINE's words:
+    // `$sum` of an empty sequence is 0 and the other three are the
+    // empty sequence, which an object constructor leaves the member out
+    // for. SQL answers `NULL` for all four, so the mapping is the plan's
+    aggregates.push({ fn, ref, as: entry.name, empty: fn === 'sum' ? 'zero' : 'omit' });
+  }
+  if (as === null || aggregates.length === 0) return { code: 'nonnative-grouping' };
+  return { as, aggregates };
+}
+
+/**
+ * Which way the groups come out. The engine's own rule is order of
+ * FIRST APPEARANCE (§6.5), which over a collection is the earliest row
+ * identity in each group; an `$orderby` on the key alone replaces it.
+ * @param {any} orderby
+ * @param {number} keySlot
+ * @returns {'asc' | 'desc' | 'first-seen' | null} `null` when the
+ *   ordering is one this plan cannot reproduce
+ */
+function bucketOrder(orderby, keySlot) {
+  if (orderby === null) return 'first-seen';
+  if (orderby.specs.length !== 1) return null;
+  const spec = orderby.specs[0];
+  if (spec.collation !== null || spec.collationName !== null) return null;
+  const key = spec.key;
+  if (key.kind !== 'var' || key.external === true || key.slot !== keySlot) return null;
+  return spec.desc === true ? 'desc' : 'asc';
+}
+
+/**
+ * The record a refused grouping leaves behind: the same question, named
+ * and reasoned, over whatever the fetch still narrows.
+ * @param {import('./algebra.js').Plan} plan
+ * @param {any} shape
+ * @param {string} code
+ * @param {string} construct
+ * @returns {any}
+ */
+function refinedGrouping(plan, shape, code, construct) {
+  const facts = filterFacts(plan.filter);
+  let column = null;
+  for (const [name] of facts.bounds) {
+    if (instantIndexesOver(shape, name, 2).length > 0) column = name;
+  }
+  const index = seekingIndexFor(shape, column, facts, 2);
+  const bound = column === null ? null : facts.bounds.get(column);
+  return seriesRecord({
+    mode: plan.filter === null ? 'engine' : 'hybrid',
+    operation: 'bucket',
+    index: index === null ? null : index.name,
+    prefix: index === null ? [] : index.prefix,
+    range: bound === undefined || bound === null ? null : { column, ...bound },
+    refinement: 'resampleSeries',
+    reasons: [seriesReason(code, construct)],
+  });
+}
+
+/**
+ * Classify a planned selection as a temporal range or as-of lookup, or
+ * answer `null` when the document asked no such question. The plan is
+ * NOT changed: this names what the selection already is, and which
+ * declared index it seeks through.
+ * @param {import('./algebra.js').Plan} plan
+ * @param {any} shape
+ * @param {boolean} ordered - the ordering was pushed whole
+ * @returns {any} the series record, or null
+ */
+function classifySelection(plan, shape, ordered) {
+  const facts = filterFacts(plan.filter);
+  // the instant column is the one a DECLARED index ends with; without
+  // such an index the collection has no instant and the question was
+  // an ordinary one
+  const candidates = [];
+  for (const [column, bound] of facts.bounds) {
+    if (instantIndexesOver(shape, column, 2).length === 0) continue;
+    candidates.push([column, bound]);
+  }
+  if (candidates.length !== 1) return null;
+  const [column, bound] = candidates[0];
+  const index = seekingIndexFor(shape, column, facts, 2);
+  const bounded = bound.from !== null || bound.to !== null;
+  const twoSided = bound.from !== null && bound.to !== null;
+  const orderedByInstant = ordered && plan.order !== null && plan.order.length === 1
+    && plan.order[0].ref.column === column;
+  const operation = twoSided ? 'range'
+    : (orderedByInstant && plan.window !== null && plan.window.limit !== null) ? 'asof'
+      : bounded ? 'range' : null;
+  if (operation === null) return null;
+  const reasons = index === null ? [seriesReason('missing-series-prefix', '$where')] : [];
+  return seriesRecord({
+    mode: index === null ? 'engine' : 'native',
+    operation,
+    index: index === null ? null : index.name,
+    prefix: index === null ? [] : index.prefix,
+    range: {
+      from: bound.from, fromOp: bound.fromOp, to: bound.to, toOp: bound.toOp, column,
+    },
+    reasons,
+  });
+}
+
+
+/**
+ * The bucket a `$groupby` phrase spells, or the reason it is not one.
+ * @param {any} node - the flwor node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {{ bucket: any } | { code: string }}
+ */
+function planBucketGrouping(node, itSlot, shape) {
+  if (node.groupby.keys.length !== 1) return { code: 'nonnative-grouping' };
+  const key = node.groupby.keys[0];
+  const ladder = groupLadder(key.expr, itSlot, shape);
+  if (ladder === null) return { code: 'nonnative-grouping' };
+  if ('code' in ladder) return ladder;
+  const projection = bucketProjection(node.ret, itSlot, key.slot, shape);
+  if ('code' in projection) return projection;
+  const order = bucketOrder(node.orderby, key.slot);
+  if (order === null) return { code: 'nonnative-grouping' };
+  return { bucket: {
+    ref: ladder.ref,
+    every: ladder.every,
+    origin: ladder.origin,
+    as: projection.as,
+    order,
+    aggregates: projection.aggregates,
+  } };
+}
+
+/**
+ * The tolerance of an as-of spec in milliseconds, or `null` for one
+ * that bounds nothing. A NEGATIVE tolerance is a broken document the
+ * engine refuses, and narrowing by it would move the bounds INWARD —
+ * so it bounds nothing here and the engine raises, which is the same
+ * rule `safeEpoch` follows for an instant that names none.
+ */
+function toleranceMs(tolerance) {
+  if (tolerance === undefined) return null;
+  if (typeof tolerance === 'number')
+    return Number.isFinite(tolerance) && tolerance >= 0 ? tolerance : null;
+  try {
+    const span = compileBuckets({ every: tolerance }, {});
+    return span.calendar || span.width < 0 ? null : span.width;
+  }
+  catch {
+    return null;
+  }
+}
+
+/**
+ * The epoch a spec member names, or `null` when it names none.
+ *
+ * A planner may never raise on the ENGINE's behalf: `analyzeQuery` does
+ * not compile an operator, so a spec whose `start` is not an instant
+ * reaches here before the engine has had its say. Refusing to narrow is
+ * the right answer — the residual compiles the caller's own document
+ * and raises the `JQ0003` it would have raised anyway.
+ * @param {any} value
+ * @returns {number | null}
+ */
+function safeEpoch(value) {
+  if (value === undefined) return null;
+  try {
+    const at = toEpoch(value);
+    return Number.isFinite(at) ? at : null;
+  }
+  catch {
+    return null;
+  }
+}
+
+/** An instant bound as a pushable conjunct over the instant column. */
+function instantBound(ref, op, value) {
+  return { p: 'cmp', op, ref, operand: { lit: value } };
+}
+
+/**
+ * The bounds a frozen spec implies for the collection side, as pushable
+ * conjuncts. Every one of them is an IMPLIED conjunct: it narrows the
+ * fetch and decides nothing, because the residual re-runs the caller's
+ * own document — the whole operator — over what comes back.
+ * @returns {{ preds: any[], range: any }}
+ */
+function impliedInstantBounds(ref, from, to) {
+  const preds = [];
+  if (from !== null) preds.push(instantBound(ref, 'ge', from));
+  if (to !== null) preds.push(instantBound(ref, 'le', to));
+  return { preds, range: { column: ref.column, from, fromOp: from === null ? null : 'ge',
+    to, toOp: to === null ? null : 'le' } };
+}
+
+/**
+ * Plan a document that IS a series operator over the collection.
+ *
+ * The collection is one of the operator's operands, so the narrowing is
+ * that operand's own `$where` plus what the frozen spec implies, and
+ * the kernel — the engine running the caller's document over the
+ * fetched candidates — decides. A `$resample` whose spec asks for
+ * nothing a `GROUP BY` cannot do is the one exception: it is native,
+ * and answers the bucket records itself.
+ * @param {any} root
+ * @param {any} shape
+ * @returns {any} `null` when the operator is not over this collection
+ */
+function planSeriesOperator(root, shape) {
+  const name = root.name;
+  /** @type {any} */
+  let operandNode = null;
+  /** @type {any} */
+  let probesNode = null;
+  /** @type {any} */
+  let spec = null;
+  if (name === '$resample' || name === '$rolling') {
+    operandNode = root.args[0];
+    spec = root.args[1]?.kind === 'raw' ? root.args[1].value : null;
+  }
+  else {
+    spec = root.args.length === 3
+      ? (root.args[2].kind === 'raw' ? root.args[2].value : null) : {};
+    // narrowing is only sound on the RIGHT side: an as-of join answers
+    // once per LEFT row, so every left row is needed whatever it matches
+    if (collectionOperand(root.args[1]) !== null) {
+      operandNode = root.args[1];
+      probesNode = root.args[0];
+    }
+    else if (collectionOperand(root.args[0]) !== null) {
+      operandNode = root.args[0];
+    }
+  }
+  const operand = operandNode === null ? null : collectionOperand(operandNode);
+  if (operand === null || spec === null || typeof spec !== 'object') return null;
+
+  const inner = operand.flwor === null
+    ? { plan: selectPlan(shape.collection), reasons: [], prefilters: [] }
+    : planFlwor(operand.flwor, shape, undefined, undefined);
+  const plan = inner.plan;
+  // the operand's own clauses stay the engine's: the residual runs the
+  // WHOLE document, so a projection or an ordering inside it is applied
+  // there and only its pushed conjuncts narrow
+  plan.order = null;
+  plan.window = null;
+
+  const reasons = [];
+  const prefilters = [...(inner.prefilters ?? [])];
+  const at = memberRef(shape,
+    spec.at !== undefined ? (singularSelector(spec.at) ?? 'at')
+      : (name === '$asof' && probesNode !== null && spec.rightAt !== undefined
+        ? (singularSelector(spec.rightAt) ?? 'at') : 'at'));
+
+  if (name === '$resample') {
+    const outcome = resampleBucket(spec, shape);
+    if ('bucket' in outcome) {
+      // native: the ladder, the aggregate and the count are the plan's
+      const bucket = outcome.bucket;
+      bucket.aggregates[0].empty = 'null';
+      bucket.aggregates[1].empty = 'null';
+      plan.bucket = bucket;
+      const windowFrom = safeEpoch(spec.start);
+      const windowTo = safeEpoch(spec.end);
+      if (windowFrom !== null) plan.filter = conjoin(plan.filter,
+        instantBound(bucket.ref, 'ge', windowFrom));
+      if (windowTo !== null) plan.filter = conjoin(plan.filter,
+        instantBound(bucket.ref, 'lt', windowTo));
+      const facts = filterFacts(plan.filter);
+      const index = seekingIndexFor(shape, bucket.ref.column, facts);
+      const bound = facts.bounds.get(bucket.ref.column) ?? null;
+      return {
+        plan,
+        native: inner.reasons.length === 0,
+        reasons: inner.reasons,
+        prefilters,
+        series: seriesRecord({
+          mode: 'native',
+          operation: 'resample',
+          index: index === null ? null : index.name,
+          prefix: index === null ? [] : index.prefix,
+          range: bound === null ? null : { column: bucket.ref.column, ...bound },
+          ladder: { every: bucket.every, origin: bucket.origin, calendar: false },
+          aggregates: bucket.aggregates.map((a) => a.as),
+          reasons: index === null ? [seriesReason('missing-series-prefix', name)] : [],
+        }),
+      };
+    }
+    reasons.push(seriesReason(outcome.code, name));
+  }
+  else if (name === '$rolling') {
+    reasons.push(seriesReason('rolling-refinement', name));
+  }
+  else {
+    reasons.push(seriesReason('asof-refinement', name));
+  }
+
+  // the refinement: narrow through the index by whatever the spec makes
+  // provable, and let the engine's own kernel decide over what comes back
+  let range = null;
+  if (name === '$resample' && at.column !== null) {
+    const from = safeEpoch(spec.start);
+    const to = safeEpoch(spec.end);
+    if (from !== null || to !== null) {
+      if (from !== null) plan.filter = conjoin(plan.filter, instantBound(at, 'ge', from));
+      if (to !== null) plan.filter = conjoin(plan.filter, instantBound(at, 'lt', to));
+      range = { column: at.column, from, fromOp: from === null ? null : 'ge',
+        to, toOp: to === null ? null : 'lt' };
+      prefilters.push({ construct: name, via: 'columns', columns: [at.column], exact: false });
+    }
+  }
+  else if (name === '$asof' && probesNode !== null) {
+    const probes = literalInstants(probesNode, spec.leftAt, spec.by);
+    if (probes !== null && at.column !== null) {
+      const tolerance = toleranceMs(spec.tolerance);
+      const direction = spec.direction ?? 'backward';
+      let from = null;
+      let to = null;
+      if (direction === 'backward') {
+        to = probes.max;
+        if (tolerance !== null) from = probes.min - tolerance;
+      }
+      else if (direction === 'forward') {
+        from = probes.min;
+        if (tolerance !== null) to = probes.max + tolerance;
+      }
+      else if (tolerance !== null) {
+        from = probes.min - tolerance;
+        to = probes.max + tolerance;
+      }
+      const bounds = impliedInstantBounds(at, from, to);
+      for (const pred of bounds.preds) plan.filter = conjoin(plan.filter, pred);
+      if (bounds.preds.length > 0) {
+        range = bounds.range;
+        prefilters.push({ construct: name, via: 'columns', columns: [at.column], exact: false });
+      }
+    }
+    // and the keys, whether or not the instant has a column of its own:
+    // a right row whose group no left row names can match nothing, so a
+    // membership test over the probes' own keys narrows and never drops
+    if (probes !== null && probes.keys !== null && probes.keys.length > 0) {
+      const byRef = memberRef(shape, /** @type {string} */ (singularSelector(spec.by)));
+      if (byRef.column !== null) {
+        plan.filter = conjoin(plan.filter, probes.keys.length === 1
+          ? { p: 'cmp', op: 'eq', ref: byRef, operand: { lit: probes.keys[0] } }
+          : { p: 'or', items: probes.keys.map((key) =>
+            ({ p: 'cmp', op: 'eq', ref: byRef, operand: { lit: key } })) });
+        prefilters.push({ construct: name, via: 'columns',
+          columns: [byRef.column], exact: false });
+      }
+    }
+  }
+
+  const facts = filterFacts(plan.filter);
+  const index = seekingIndexFor(shape, at.column, facts);
+  // one code, once: an instant with no column of its own already said
+  // this when the ladder refused, and saying it twice reads as two facts
+  if (index === null && !reasons.some((r) => r.code === 'missing-series-prefix'))
+    reasons.push(seriesReason('missing-series-prefix', name));
+  const narrowed = plan.filter !== null;
+  return {
+    plan,
+    native: false,
+    reasons: [...reasons, ...inner.reasons],
+    prefilters,
+    series: seriesRecord({
+      mode: narrowed ? 'hybrid' : 'engine',
+      operation: { $resample: 'resample', $rolling: 'rolling', $asof: 'asof-join' }[name],
+      index: narrowed && index !== null ? index.name : null,
+      prefix: narrowed && index !== null ? index.prefix : [],
+      range,
+      refinement: { $resample: 'resampleSeries', $rolling: 'rollingSeries',
+        $asof: 'asOfJoin' }[name],
+      reasons,
+    }),
+  };
+}
+
 /**
  * Plan a FLWOR node into a select plan, recording refusals. When a
  * conjunct refuses native translation, the injected `udf` hook may
@@ -1048,7 +1656,8 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     reasons.push(refusal('$for',
       'only a single plain binding over the whole collection is translated'));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, itSlot: -1, itName: null, udfs: [], prefilters: [], knn: null };
+      projectionNative: false, itSlot: -1, itName: null, udfs: [], prefilters: [],
+      knn: null, bucket: null, bucketRefusal: null };
   }
   const itSlot = binding.slot;
   // the document's own name for the collection binding. The residual and
@@ -1060,7 +1669,22 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   if (node.fold !== null) reasons.push(refusal('$fold', KIND_REASONS.let));
   if (node.letBindings.length > 0) reasons.push(refusal('$let', KIND_REASONS.let));
   if (node.asChecks !== null) reasons.push(refusal('$as', 'type assertions run in the engine'));
-  if (node.groupby !== null) reasons.push(refusal('$groupby', KIND_REASONS.let));
+  // A grouping is an unconditional residual EXCEPT in one closed shape:
+  // a fixed-width `$time-bucket` key with the exact aggregates, which
+  // is a `GROUP BY` over integer arithmetic. The bucket then owns the
+  // ordering and the projection too, so it is decided before either.
+  let bucket = null;
+  let bucketRefusal = null;
+  if (node.groupby !== null && node.fold === null && node.letBindings.length === 0
+    && node.asChecks === null && node.count === null) {
+    const grouped = planBucketGrouping(node, itSlot, shape);
+    if ('bucket' in grouped) bucket = grouped.bucket;
+    else {
+      bucketRefusal = grouped.code;
+      reasons.push(seriesReason(grouped.code, '$groupby'));
+    }
+  }
+  else if (node.groupby !== null) reasons.push(refusal('$groupby', KIND_REASONS.let));
   if (node.count !== null) reasons.push(refusal('$count clause', KIND_REASONS.let));
   const structureClean = reasons.length === 0;
   // $let and $as run BEFORE $where in clause order: a row our pushed
@@ -1116,9 +1740,10 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   // caller's to name once the window is known)
   let orderPushed = false;
   let knn = null;
-  const ranked = node.orderby === null ? null
+  const ranked = bucket !== null || node.orderby === null ? null
     : planKnnOrder(node.orderby, itSlot, shape, whereFullyPushed && structureClean);
-  if (ranked !== null) {
+  if (bucket !== null) orderPushed = true; // the groups' order is the bucket's
+  else if (ranked !== null) {
     if ('rank' in ranked) knn = ranked.rank;
     else reasons.push(ranked.refusal);
   }
@@ -1152,7 +1777,8 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   // RETURN: the bare binding is the native whole-document projection
   let projectionNative = false;
   assertDecidedKind(node.ret);
-  if (isItVar(node.ret, itSlot)) projectionNative = true;
+  if (bucket !== null) projectionNative = true; // the bucket IS the projection
+  else if (isItVar(node.ret, itSlot)) projectionNative = true;
   else {
     reasons.push(refusal('$return',
     'projections other than the bare binding run per row (the row residual)'));
@@ -1169,6 +1795,8 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     udfs,
     prefilters,
     knn,
+    bucket,
+    bucketRefusal,
   };
 }
 
@@ -1212,7 +1840,10 @@ function composeWindows(windows) {
  *   udfs: string[],
  *   prefilters: { construct: string, via: 'columns' | 'rtree',
  *     columns: string[], exact: boolean }[],
+ *   series: any,
  * }}
+ *   `series` is the temporal record (`series.js`) when the document
+ *   asked a §8.16 question, and `null` when it did not.
  */
 function planCollectionCore(document, shape, options = undefined) {
   const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
@@ -1230,7 +1861,7 @@ function planCollectionCore(document, shape, options = undefined) {
       return {
         analysis, plan: null, mode: 'set',
         reasons: [refusal('$subsequence', 'window bounds must be literal numbers to push')],
-        rowReturn: null, udfs: [], prefilters: [],
+        rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
     windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
@@ -1246,7 +1877,7 @@ function planCollectionCore(document, shape, options = undefined) {
       return {
         analysis, plan: null, mode: 'set',
         reasons: [refusal(root.name, 'a windowed aggregate is not translated')],
-        rowReturn: null, udfs: [], prefilters: [],
+        rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
     aggregate = { name: root.name, fn: AGGREGATES.get(root.name) };
@@ -1255,12 +1886,37 @@ function planCollectionCore(document, shape, options = undefined) {
     assertDecidedKind(root);
   }
 
+  // a document that IS a series operator over the collection: the
+  // operand's own conjuncts (and what the frozen spec implies) narrow
+  // through the index, and the kernel decides over what comes back
+  if (aggregate === null && root.kind === 'op' && SERIES_ROOT_OPS.includes(root.name)) {
+    const temporal = planSeriesOperator(root, shape);
+    if (temporal !== null) {
+      // a peeled `$subsequence` composes as it does everywhere — over a
+      // NATIVE bucket it is a LIMIT on the ascending groups, which is
+      // the same items the kernel's own window would have kept; over a
+      // refinement the residual applies it, so the plan keeps none
+      const window = windows.length === 0 ? null : composeWindows(windows);
+      if (temporal.native && window !== null) temporal.plan.window = window;
+      return {
+        analysis,
+        plan: temporal.plan,
+        mode: temporal.native ? 'native' : 'set',
+        reasons: temporal.native ? [] : temporal.reasons,
+        rowReturn: null,
+        udfs: [],
+        prefilters: temporal.prefilters,
+        series: temporal.series,
+      };
+    }
+  }
+
   if (root.kind !== 'flwor') {
     return {
       analysis, plan: null, mode: 'set',
       reasons: [refusal(root.kind, KIND_REASONS[root.kind]
         ?? 'only a FLWOR over the collection is translated')],
-      rowReturn: null, udfs: [], prefilters: [],
+      rowReturn: null, udfs: [], prefilters: [], series: null,
     };
   }
 
@@ -1279,7 +1935,7 @@ function planCollectionCore(document, shape, options = undefined) {
         margin: KNN_MARGIN };
       return { analysis, plan, mode: 'knn',
         reasons: [refusal('$orderby', KNN_REASONS.rank), ...flwor.reasons],
-        rowReturn: null, udfs: flwor.udfs, prefilters: flwor.prefilters };
+        rowReturn: null, udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
     }
     flwor.reasons.unshift(refusal('$subsequence', KNN_REASONS.window));
   }
@@ -1289,7 +1945,7 @@ function planCollectionCore(document, shape, options = undefined) {
     // full sequence, not a narrowed candidate set)
     if (!fullyPushed) {
       return { analysis, plan: null, mode: 'set', reasons: flwor.reasons,
-        rowReturn: null, udfs: [], prefilters: flwor.prefilters };
+        rowReturn: null, udfs: [], prefilters: flwor.prefilters, series: null };
     }
     if (aggregate.fn === 'count') {
       if (!flwor.projectionNative) {
@@ -1297,12 +1953,13 @@ function planCollectionCore(document, shape, options = undefined) {
           analysis, plan: null, mode: 'set',
           reasons: [refusal('$count',
             'count translates only over the bare binding (a projected return can change the item count)')],
-          rowReturn: null, udfs: [], prefilters: [],
+          rowReturn: null, udfs: [], prefilters: [], series: null,
         };
       }
       plan.aggregate = { fn: 'count', ref: null };
       return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-        udfs: flwor.udfs, prefilters: flwor.prefilters };
+        udfs: flwor.udfs, prefilters: flwor.prefilters,
+        series: classifySelection(plan, shape, true) };
     }
     const ref = pathRef(root.ret, flwor.itSlot, shape);
     const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg';
@@ -1313,20 +1970,46 @@ function planCollectionCore(document, shape, options = undefined) {
         analysis, plan: null, mode: 'set',
         reasons: [refusal(aggregate.name,
           'aggregates translate only over a singular schema-typed path (the engine ERRORS on non-conforming operands)')],
-        rowReturn: null, udfs: [], prefilters: [],
+        rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
     plan.aggregate = { fn: /** @type {any} */ (aggregate.fn), ref };
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs, prefilters: flwor.prefilters };
+      udfs: flwor.udfs, prefilters: flwor.prefilters,
+      series: classifySelection(plan, shape, true) };
   }
 
   // windows push only onto a fully pushed selection
   if (windows.length > 0 && fullyPushed) plan.window = composeWindows(windows);
 
+  // the temporal bucket: only over a WHOLE pushed selection, because a
+  // conjunct the residual would still apply would arrive after the rows
+  // were already summed
+  if (flwor.bucket !== null && fullyPushed && (windows.length === 0 || plan.window !== null)) {
+    plan.bucket = flwor.bucket;
+    const facts = filterFacts(plan.filter);
+    const index = seekingIndexFor(shape, plan.bucket.ref.column, facts);
+    const bound = facts.bounds.get(plan.bucket.ref.column) ?? null;
+    return {
+      analysis, plan, mode: 'native', reasons: [], rowReturn: null,
+      udfs: flwor.udfs, prefilters: flwor.prefilters,
+      series: seriesRecord({
+        mode: 'native',
+        operation: 'bucket',
+        index: index === null ? null : index.name,
+        prefix: index === null ? [] : index.prefix,
+        range: bound === null ? null : { column: plan.bucket.ref.column, ...bound },
+        ladder: { every: plan.bucket.every, origin: plan.bucket.origin, calendar: false },
+        aggregates: plan.bucket.aggregates.map((a) => a.as),
+        reasons: index === null ? [seriesReason('missing-series-prefix', '$groupby')] : [],
+      }),
+    };
+  }
+
   if (fullyPushed && flwor.projectionNative && (windows.length === 0 || plan.window !== null)) {
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs, prefilters: flwor.prefilters };
+      udfs: flwor.udfs, prefilters: flwor.prefilters,
+      series: classifySelection(plan, shape, flwor.orderPushed) };
   }
 
   // the row residual: everything but the projection pushed
@@ -1348,14 +2031,20 @@ function planCollectionCore(document, shape, options = undefined) {
       },
       udfs: flwor.udfs,
       prefilters: flwor.prefilters,
+      series: flwor.bucketRefusal == null
+        ? classifySelection(plan, shape, flwor.orderPushed)
+        : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby'),
     };
   }
 
   // the set residual: pushed conjuncts narrow, the engine answers
+  const narrowing = flwor.bucketRefusal == null
+    ? classifySelection(plan, shape, false)
+    : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby');
   plan.order = null;
   plan.window = null;
   return { analysis, plan, mode: 'set', reasons: flwor.reasons, rowReturn: null,
-    udfs: flwor.udfs, prefilters: flwor.prefilters };
+    udfs: flwor.udfs, prefilters: flwor.prefilters, series: narrowing };
 }
 
 /**
@@ -1376,6 +2065,7 @@ function planCollectionCore(document, shape, options = undefined) {
  *   udfs: string[],
  *   prefilters: { construct: string, via: 'columns' | 'rtree',
  *     columns: string[], exact: boolean }[],
+ *   series: any,
  * }}
  */
 export function planQuery(document, shape, options = undefined) {

@@ -109,6 +109,7 @@ describe('recognition — the k-nearest shape, and every reason it is not one', 
       order: null,
       window: null,
       rank: { column: COLUMN, dims: DIMS, probe: { ext: 'q' }, offset: 0, limit: 3, margin: KNN_MARGIN },
+      bucket: null,
       aggregate: null,
       project: 'document',
     });

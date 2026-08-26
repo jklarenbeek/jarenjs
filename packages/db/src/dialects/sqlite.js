@@ -82,6 +82,9 @@ export const sqliteDialect = createDialect({
     upsert: true,
     savepoints: true,
     alterTableFull: false,
+    // a GROUP BY / ORDER BY term may name a result alias, so a bucket
+    // ladder is written once rather than three times
+    groupByAlias: true,
   },
   tableSuffix: ' STRICT',
   // RFC 3339 text → epoch milliseconds, in SQL: the migration planner
@@ -152,6 +155,22 @@ export const sqliteDialect = createDialect({
     `(length(${patternA}) = 0 OR substr(${valueSql}, -length(${patternB})) = ${patternC})`,
   strContains: (valueSql, patternSql) => `instr(${valueSql}, ${patternSql}) > 0`,
   orderNulls: (nullsFirst) => (nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
+  // the fixed bucket ladder, in integer arithmetic all the way down.
+  // `origin + floor((at - origin) / every) * every` is `at` less the
+  // NON-NEGATIVE remainder, and `((x % m) + m) % m` is how a language
+  // whose `%` truncates towards zero (C's, and SQLite's) spells one —
+  // which is the whole of why an instant before 1970 lands in its own
+  // bucket rather than the one after it. The column is declared
+  // INTEGER, so nothing here converts and nothing rounds.
+  timeBucket: (instantSql, originSql, everyA, everyB, everyC) =>
+    `(${instantSql} - (((${instantSql} - ${originSql}) % ${everyA} + ${everyB}) % ${everyC}))`,
+  // `rows` is COUNT(*) — the D5 count of SOURCE rows, which is not
+  // COUNT(value): a measured gap is a row that reported nothing, and
+  // the difference between "nobody reported" and "everybody reported a
+  // gap" is exactly what the count is for
+  groupAggregate: (fn, valueSql) => (valueSql === null
+    ? 'COUNT(*)'
+    : `${{ sum: 'SUM', avg: 'AVG', min: 'MIN', max: 'MAX' }[fn]}(${valueSql})`),
   rowIdentity: () => '"rowid"',
   // membership of the row identity in a bound list — the fetch of a
   // k-nearest plan's candidates. `IN` over the rowid is a primary-key

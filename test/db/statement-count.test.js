@@ -6,6 +6,14 @@
  * include depth, parent count, per-relation clauses or repetition.
  * The contrast case runs the same shape as per-parent queries and
  * counts the N+1 the include machinery exists to avoid.
+ *
+ * The as-of join has the same failure mode and the same test. An as-of
+ * answers once per LEFT row, so the naive shape is one indexed lookup
+ * per probe — fast per probe and linear in probes. The batched plan
+ * bounds the fetch by the probes' own span and their keys and issues
+ * exactly ONE statement, whatever the probe count, which is what makes
+ * "cannot degenerate to a full scan per left row" checkable rather
+ * than asserted.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -167,5 +175,90 @@ describe('exactly one statement per graph load', () => {
     }
     assert.strictEqual(counters.executed, 1 + parents.length,
       'ten parents cost eleven statements the include path collapses to one');
+  });
+});
+
+
+// ————— the as-of join's statement bound —————
+
+const SAMPLES = {
+  $model: '0.1',
+  collections: {
+    sample: {
+      schema: {
+        type: 'object',
+        properties: {
+          series: { type: 'string' },
+          at: { type: 'integer' },
+          value: { type: 'number' },
+        },
+      },
+      key: null,
+      identity: 'integer',
+      indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+    },
+  },
+};
+
+const ORIGIN = 1767225600000;
+/** Two series, one row a second, for two thousand seconds. */
+const RIGHT = Array.from({ length: 2000 }, (_, i) =>
+  ({ series: i % 2 === 0 ? 'a' : 'b', at: ORIGIN + i * 1000, value: i + 0.5 }));
+/** Probes inside a narrow window, so a bounded fetch is visibly small. */
+const probes = (n) => Array.from({ length: n }, (_, i) =>
+  ({ series: 'a', at: ORIGIN + 1000000 + i * 137, value: i }));
+
+describe('an as-of join costs one statement, whatever the probes number', () => {
+  /** @type {any} */
+  let seriesStore = null;
+  /** @type {any} */
+  let samples = null;
+
+  before(async () => {
+    const db = new DatabaseSync(':memory:');
+    seriesStore = await openStore(SAMPLES, {
+      driver: { open: () => adaptNodeDatabase(countedDatabase(db)) },
+    });
+    samples = seriesStore.collection('sample');
+    await seriesStore.transaction(async () => {
+      for (const row of RIGHT) await samples.insert(row);
+    });
+  });
+  after(async () => {
+    if (seriesStore !== null) await seriesStore.close();
+  });
+
+  for (const count of [1, 10, 200]) {
+    it(`${count} probes: one statement, and the candidates are bounded`, async () => {
+      counters.executed = 0;
+      const left = probes(count);
+      const answer = await samples.execute(
+        { $asof: [{ $const: left }, '$[*]', { by: '$.series', tolerance: 2000 }] });
+      assert.strictEqual(counters.executed, 1,
+        'a fetch per probe is exactly the shape the bound exists to refuse');
+      const items = Array.isArray(answer) ? answer : [answer];
+      assert.strictEqual(items.length, count, 'every left row stays in the answer');
+      const explained = await samples.explain(
+        { $asof: [{ $const: left }, '$[*]', { by: '$.series', tolerance: 2000 }] });
+      assert.ok(explained.series.counts.candidates < RIGHT.length / 4,
+        `the fetch read ${explained.series.counts.candidates} of ${RIGHT.length} rows`);
+      assert.strictEqual(explained.series.counts.statements, 1);
+      assert.match(explained.scanNarrative, /USING INDEX sample_by_series_at/);
+    });
+  }
+
+  it('the contrast: one indexed lookup per probe is the N+1 the batch collapses', async () => {
+    counters.executed = 0;
+    const left = probes(10);
+    for (const probe of left) {
+      await samples.execute({ $subsequence: [{
+        $for: { s: '$[*]' },
+        $where: { $and: [{ $eq: ['$s.series', 'a'] }, { $le: ['$s.at', probe.at] }] },
+        $orderby: [{ $key: '$s.at', $dir: 'desc' }],
+        $return: '$s',
+      }, 0, 1] });
+    }
+    assert.strictEqual(counters.executed, left.length,
+      'ten probes cost ten statements the batched plan answers with one');
   });
 });

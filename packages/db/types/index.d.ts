@@ -143,6 +143,10 @@ export interface StoreCapabilities {
   readonly captureLog: boolean;
   readonly live: boolean;
   readonly jobs: boolean;
+  /** Whether a temporal spec naming a ZONE compiles here (D7's
+   * injected clock was supplied at open). Without it such a document
+   * is refused rather than answered in UTC. */
+  readonly zoneProvider: boolean;
   readonly [capability: string]: unknown;
 }
 
@@ -356,6 +360,12 @@ export interface OpenStoreOptions {
   /** The injected validation hook (D10); absent means unvalidated,
    * declared through `capabilities.validated`. */
   compileSchema?: (schema: unknown) => (doc: unknown) => unknown;
+  /** D7's injected clock — `{ toParts(epoch, zone), toEpoch(parts, zone,
+   * disambiguation) }`. A temporal spec naming a zone
+   * (`{ "every": "P1M", "zone": "Europe/Amsterdam" }`) compiles only
+   * where one was injected; without it the document is refused rather
+   * than answered in UTC. No time-zone database is bundled. */
+  zoneProvider?: unknown;
   busyTimeout?: number;
   journalMode?: string;
   statementCacheBound?: number;

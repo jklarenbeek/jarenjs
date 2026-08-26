@@ -72,6 +72,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import { queryJson } from '@jarenjs/json/query';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
 import {
   resampleSeries, rollingSeries, asOfJoin, downsampleSeries,
 } from '@jarenjs/core/series';
@@ -81,7 +83,7 @@ import {
   generateSeries, asDocuments,
   filterRange, cutRange, bucketStart, bucketOnePass, bucketNaive,
   rollingMeanOnePass, rollingMeanNaive, asOfBackward, probeInstants, gappedSeries,
-  referenceAnswer,
+  referenceAnswer, seriesMappings, SERIES_COLLECTION,
 } from '../scripts/lib/series-corpus.js';
 
 import { formatNs } from './lib/fmt.js';
@@ -454,6 +456,16 @@ const SQL = Object.freeze({
     + ' FROM sample WHERE series = ? GROUP BY b ORDER BY b',
 });
 
+// The same four questions, asked of the STORE rather than of raw SQL.
+// These go through the planner: a document, a plan, a dialect and the
+// same `(series, at)` index the raw statements above read by hand — so
+// the pair of rows prices what recognizing a shape costs against
+// writing the statement yourself, and the store rows against the
+// resident ones price durability.
+
+const STORE_SERIES = { $for: { s: '$[*]' }, $where: { $eq: ['$s.series', SERIES_KEY] },
+  $return: '$s' };
+
 /** The query documents, compiled once by the engine's own literal cache. */
 const CALENDAR_BUCKET_QUERY = {
   $for: { s: '$[*]' },
@@ -490,7 +502,7 @@ const LABELLED_WINDOW_QUERY = {
  * the run stops at `--verify` — every timing.
  * @param {number} n
  */
-function runLeg(n) {
+async function runLeg(n) {
   const label = `${n.toLocaleString('en-US')} samples`;
   const series = generateSeries(n);
   const gapped = gappedSeries(series, GAP_PERIOD, GAP_RUN);
@@ -511,6 +523,15 @@ function runLeg(n) {
     insert.run(SERIES_KEY, series[i].at, series[i].value, JSON.stringify(documents[i]));
   db.exec('COMMIT');
   db.exec('CREATE INDEX sample_series_at ON sample (series, at)');
+
+  // the same rows again, through the store: one collection, the same
+  // composite index, and every question asked as a DOCUMENT
+  const store = await openStore(seriesMappings().indexed, { driver: nodeDriver() });
+  const samples = store.collection(SERIES_COLLECTION);
+  await store.transaction(async () => {
+    for (let i = 0; i < n; i++)
+      await samples.insert({ series: SERIES_KEY, at: series[i].at, value: series[i].value });
+  });
 
   const rangeStmt = db.prepare(SQL.range);
   const jsonRangeStmt = db.prepare(SQL.jsonRange);
@@ -713,6 +734,92 @@ function runLeg(n) {
       === JSON.stringify(renderedGaps.points),
     'two runs, one answer');
 
+  //#region the store, over the same rows
+
+  // Four documents, four plans. The first three are what the planner
+  // recognizes — an indexed range, a fixed bucket ladder and an as-of
+  // join bounded by the probes it was given — and the fourth is what it
+  // deliberately does NOT: a window measured in time is a refinement,
+  // so the index bounds the fetch and the kernel decides. Each one is
+  // checked against the answer its resident twin gives before it is
+  // timed, and the plan the database took is read from the store's own
+  // `explain()` rather than asserted.
+
+  const STORE_RANGE = {
+    $for: { s: '$[*]' },
+    $where: { $and: [
+      { $eq: ['$s.series', SERIES_KEY] },
+      { $ge: ['$s.at', rangeStart] },
+      { $lt: ['$s.at', rangeEnd] },
+    ] },
+    $orderby: [{ $key: '$s.at' }],
+    $return: '$s',
+  };
+  const STORE_BUCKET = { $resample: [STORE_SERIES,
+    { every: BUCKET_MS, origin: SERIES_ORIGIN, aggregate: 'mean' }] };
+  const STORE_ROLLING = { $rolling: [STORE_SERIES,
+    { width: ROLLING_WIDTH * SERIES_STEP_MS, aggregate: 'mean', minPeriods: ROLLING_WIDTH }] };
+  const storeProbes = probes.map((at) => ({ series: SERIES_KEY, at, value: null }));
+  const STORE_ASOF = { $asof: [{ $const: storeProbes }, '$[*]', { by: '$.series' }] };
+
+  const stored = (document) => {
+    const answer = samples.execute(document);
+    if (typeof answer?.then === 'function')
+      throw new Error('the node driver answered a promise; a benchmark cannot time one');
+    return answer === undefined ? [] : (Array.isArray(answer) ? answer : [answer]);
+  };
+
+  const storeRange = stored(STORE_RANGE);
+  check(`${label}: the store's indexed range answers the rows the sorted cut finds`,
+    firstDisagreement(storeRange.map((row) => ({ at: row.at, value: row.value })), cutRows) === null,
+    firstDisagreement(storeRange.map((row) => ({ at: row.at, value: row.value })), cutRows)
+      ?? `${storeRange.length} rows`);
+
+  const storeBucket = stored(STORE_BUCKET);
+  check(`${label}: the store's native bucket answers the one-pass loop, value for value`,
+    firstBucketDisagreement(storeBucket, buckets) === null,
+    firstBucketDisagreement(storeBucket, buckets) ?? `${storeBucket.length} buckets`);
+
+  const storeRolling = stored(STORE_ROLLING);
+  check(`${label}: the store's rolling refinement answers the kernel it hands the rows to`,
+    firstDisagreement(storeRolling, /** @type {any[]} */ (kernelRolling)) === null,
+    firstDisagreement(storeRolling, /** @type {any[]} */ (kernelRolling))
+      ?? `${storeRolling.length} windows`);
+
+  const storeAsOf = stored(STORE_ASOF);
+  let storeJoinMismatch = null;
+  for (let i = 0; i < storeAsOf.length; i++) {
+    const expected = asOfBackward(series, storeAsOf[i].left.at);
+    const actual = storeAsOf[i].right;
+    if ((actual === null) !== (expected === null)
+      || (actual !== null && (actual.at !== expected.at || actual.value !== expected.value))) {
+      storeJoinMismatch = `probe at ${storeAsOf[i].left.at}`;
+      break;
+    }
+  }
+  check(`${label}: the store's batched as-of join answers the reference on all ${probes.length} probes`,
+    storeJoinMismatch === null, storeJoinMismatch ?? `${storeAsOf.length} matches`);
+
+  /** What the store said it would do, and what it actually read. */
+  const storePlans = {};
+  const storeCounts = {};
+  for (const [key, document] of Object.entries({
+    storeRange: STORE_RANGE, storeBucket: STORE_BUCKET,
+    storeRolling: STORE_ROLLING, storeAsOfJoin: STORE_ASOF,
+  })) {
+    const explained = await samples.explain(document);
+    storePlans[key] = `${explained.series.mode}: ${explained.scanNarrative}`;
+    storeCounts[key] = explained.series.counts;
+  }
+  // the whole point of the batched join, as a number: one statement,
+  // whatever the probes number, and a fetch the index bounded
+  check(`${label}: the batched join costs ONE statement for ${probes.length} probes`,
+    storeCounts.storeAsOfJoin.statements === 1,
+    `${storeCounts.storeAsOfJoin.statements} statement(s), `
+      + `${storeCounts.storeAsOfJoin.candidates} candidates of ${n} rows`);
+
+  //#endregion
+
   //#endregion
 
   const plans = Object.fromEntries(Object.entries({
@@ -723,6 +830,7 @@ function runLeg(n) {
   }).map(([key, [sql, args]]) => [key,
     /** @type {any[]} */ (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(.../** @type {any[]} */ (args)))
       .map((row) => row.detail).join(' | ')]));
+  Object.assign(plans, storePlans);
 
   const results = {
     filter: filtered.length,
@@ -748,11 +856,16 @@ function runLeg(n) {
     sqlJsonRange: sqlJsonRange.length,
     sqlAsOf: 1,
     sqlBucket: sqlBuckets.length,
+    storeRange: storeRange.length,
+    storeBucket: storeBucket.length,
+    storeRolling: storeRolling.length,
+    storeAsOfJoin: storeAsOf.length,
   };
 
   if (flags.verify || failures !== 0) {
     db.close();
-    return { n, label, rows: {}, results, plans };
+    await store.close();
+    return { n, label, rows: {}, results, plans, counts: storeCounts };
   }
 
   let probe = 0;
@@ -797,9 +910,14 @@ function runLeg(n) {
     sqlAsOfDense: medianNs(() => denseLeft.map((row) => asOfStmt.all(SERIES_KEY, row.at)),
       ROUNDS.default),
     sqlBucket: medianNs(() => bucketStmt.all(SERIES_ORIGIN, BUCKET_MS, SERIES_KEY), ROUNDS.default),
+    storeRange: medianNs(() => samples.execute(STORE_RANGE), ROUNDS.default),
+    storeBucket: medianNs(() => samples.execute(STORE_BUCKET), ROUNDS.default),
+    storeRolling: medianNs(() => samples.execute(STORE_ROLLING), ROUNDS.default),
+    storeAsOfJoin: medianNs(() => samples.execute(STORE_ASOF), ROUNDS.default),
   };
   db.close();
-  return { n, label, rows, results, plans };
+  await store.close();
+  return { n, label, rows, results, plans, counts: storeCounts };
 }
 
 //#endregion
@@ -810,7 +928,7 @@ const corpusMeta = verifyCommittedCorpus();
 
 const legs = [];
 for (const n of SIZES)
-  legs.push(runLeg(n));
+  legs.push(await runLeg(n));
 
 const width = Math.max(...checks.map((c) => c.name.length)) + 2;
 console.log(`\nEquivalence — ${checks.length} checks, every one before a timing`);
@@ -862,6 +980,10 @@ const ORDER = [
   ['sqlAsOfJoin', 'the same 51-row join — SQLite, one index read per left row'],
   ['sqlAsOfDense', 'the same dense join — SQLite, one index read per left row'],
   ['sqlBucket', `fixed ${BUCKET_MS / 1000} s aggregate — SQLite, integer bucket + GROUP BY`],
+  ['storeRange', `${RANGE_MS / 3600_000} h range — the store, a document over the (series, at) index`],
+  ['storeBucket', `fixed ${BUCKET_MS / 1000} s buckets — the store, $resample pushed to GROUP BY`],
+  ['storeRolling', `rolling mean, ${ROLLING_WIDTH} s window — the store, index-bounded + core kernel`],
+  ['storeAsOfJoin', `as-of join, ${ROUNDS.asof} left rows — the store, one batched fetch + core kernel`],
 ];
 
 const largest = legs[legs.length - 1];
@@ -901,10 +1023,18 @@ const planTable = {
     ['jsonRange', 'the same range through json_extract + strftime'],
     ['asOf', 'the index read backwards, one row'],
     ['bucket', 'integer bucket key, GROUP BY'],
+    ['storeRange', 'the store\'s range document, planned'],
+    ['storeBucket', 'the store\'s $resample, planned'],
+    ['storeRolling', 'the store\'s $rolling — a named refinement'],
+    ['storeAsOfJoin', 'the store\'s $asof — one batched fetch'],
   ].map(([key, name]) => ({ cells: [name, largest.plans[key]], strong: false })),
   note: 'Read from EXPLAIN QUERY PLAN on the measuring host rather than asserted. The declared'
     + ' column is the difference between a search and a scan, and the scan is what a consumer'
-    + ' storing instants only inside the document is paying for every range read.',
+    + ' storing instants only inside the document is paying for every range read. The four store'
+    + ' rows carry the plan MODE the planner chose in front of the plan the database took, so a'
+    + ' refinement that quietly stopped being one would show here: `native` means the statement'
+    + ' alone answered, and `hybrid` means the index bounded the fetch and the temporal kernel'
+    + ' decided over what came back.',
 };
 
 const tables = [timingTable, planTable];
@@ -949,6 +1079,16 @@ const figures = {
   kernelAsOfVsStored: ratio(largest.rows.kernelAsOf, largest.rows.sqlAsOfJoin),
   kernelAsOfDenseVsStored: ratio(largest.rows.kernelAsOfDense, largest.rows.sqlAsOfDense),
   gapRenderCost: ratio(largest.rows.kernelRenderGaps, largest.rows.kernelRender),
+  storeRangeVsSql: ratio(largest.rows.storeRange, largest.rows.sqlRange),
+  storeRangeVsResident: ratio(largest.rows.storeRange, largest.rows.cut),
+  storeBucketVsSql: ratio(largest.rows.storeBucket, largest.rows.sqlBucket),
+  storeBucketVsQuery: ratio(largest.rows.queryBucket, largest.rows.storeBucket),
+  storeBucketVsResident: ratio(largest.rows.storeBucket, largest.rows.bucket),
+  storeRollingVsResident: ratio(largest.rows.storeRolling, largest.rows.kernelRolling),
+  storeAsOfVsIndexReads: ratio(largest.rows.storeAsOfJoin, largest.rows.sqlAsOfJoin),
+  storeAsOfCandidates: largest.counts?.storeAsOfJoin?.candidates ?? null,
+  storeAsOfStatements: largest.counts?.storeAsOfJoin?.statements ?? null,
+  storeRollingCandidates: largest.counts?.storeRolling?.candidates ?? null,
   renderReduction: largest.results.kernelRender === undefined ? null
     : Math.round((largest.n / largest.results.kernelRender) * 100) / 100,
   noisiestRoute: noisiest.route,
@@ -998,6 +1138,28 @@ const notes = [
     + ' probe, and a sorted walk pays for the whole right side whether it was asked one question or'
     + ' a thousand. Few questions of a large series belong to the index; a join of two series'
     + ' belongs to the walk. Both rows stay in.',
+  `The store answers the same range at ${times(figures.storeRangeVsSql)} the hand-written`
+    + ' statement — which selects two COLUMNS where the store renders and parses a whole JSON'
+    + ' document per row. That is the price of storing documents rather than columns, and it is'
+    + ` not the planner's: the same ladder as a GROUP BY costs ${times(figures.storeBucketVsSql)}`
+    + ' the hand-written one, where the extra is a guarded predicate and one member read out of'
+    + ` the document. Against the generic query route the vocabulary had before, the pushed bucket`
+    + ` is ${times(figures.storeBucketVsQuery)} FASTER. Against a decoded array in memory the`
+    + ` range is ${times(figures.storeRangeVsResident)} and the bucket`
+    + ` ${times(figures.storeBucketVsResident)}: durability and a selective read are what that`
+    + ' buys, and both numbers are published rather than netted out.',
+  `A window measured in time is NOT pushed — it is a named refinement — and the store answers it`
+    + ` at ${times(figures.storeRollingVsResident)} the resident kernel over`
+    + ` ${figures.storeRollingCandidates?.toLocaleString('en-US')} candidates the index bounded.`
+    + ' The database contributes the fetch; `rollingSeries` contributes the answer, and'
+    + " `explain()` says so rather than calling the result native.",
+  `The batched as-of join costs ${times(figures.storeAsOfVsIndexReads)} ${ROUNDS.asof} separate`
+    + ` index reads, in ${figures.storeAsOfStatements} statement rather than ${ROUNDS.asof} — and`
+    + ` it read ${figures.storeAsOfCandidates?.toLocaleString('en-US')} of ${largest.label}. That`
+    + ' is the trade stated plainly: with no tolerance a backward join can only be bounded ABOVE,'
+    + ' so the fetch is one seek over most of the history where fifty-one seeks each touch a page.'
+    + ' What the batch buys is the bound — one statement whatever the probes number — and a'
+    + ' tolerance, or a key with few rows behind it, is what makes the candidate set small.',
   `Downsampling ${largest.label} to ${RENDER_TARGET} points is a ${figures.renderReduction}x`
     + ` reduction, and doing it over the gap corpus costs ${times(figures.gapRenderCost)} the dense`
     + ' one: the holes are segment boundaries, and each segment is sampled on its own budget so'

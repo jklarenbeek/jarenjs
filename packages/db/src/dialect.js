@@ -58,6 +58,9 @@
  *   strEndsWith: (valueSql: string, patternA: string, patternB: string, patternC: string) => string,
  *   strContains: (valueSql: string, patternSql: string) => string,
  *   orderNulls: (nullsFirst: boolean) => string,
+ *   timeBucket: (instantSql: string, originSql: string, everyA: string,
+ *     everyB: string, everyC: string) => string,
+ *   groupAggregate: (fn: string, valueSql: string | null) => string,
  *   rowIdentity: () => string,
  *   identityIn: (identitySql: string, paramSqls: string[]) => string,
  *   rtree?: { module: string, columns: readonly string[] },
@@ -473,6 +476,16 @@ export function createDialect(spec) {
     strEndsWith: spec.strEndsWith,
     strContains: spec.strContains,
     orderNulls: spec.orderNulls,
+    /**
+     * The instant a fixed-width bucket ladder labels one row with:
+     * `origin + floor((at - origin) / every) * every`, which reduces to
+     * `at` less the non-negative remainder. The parameters appear in
+     * TEXT order — the origin once, the width three times — because a
+     * positional dialect numbers them by where they are written.
+     */
+    timeBucket: spec.timeBucket,
+    /** One grouped aggregate; `null` counts ROWS rather than values. */
+    groupAggregate: spec.groupAggregate,
     rowIdentity: spec.rowIdentity,
     /**
      * The R\*Tree spelling: the module name and the virtual table's own

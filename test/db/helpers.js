@@ -232,6 +232,10 @@ export function fullDoubleDialect(createDialect) {
     strEndsWith: (value, a, b, c) => `EW(${value}, ${a}, ${b}, ${c})`,
     strContains: (value, p) => `CT(${value}, ${p})`,
     orderNulls: (nullsFirst) => (nullsFirst ? ' EMPTIES HIGH' : ' EMPTIES LOW'),
+    timeBucket: (at, origin, everyA, everyB, everyC) =>
+      `LADDER(${at}, ${origin}, ${everyA}, ${everyB}, ${everyC})`,
+    groupAggregate: (fn, value) => (value === null
+      ? 'TALLY(*)' : `ROLLUP_${fn.toUpperCase()}(${value})`),
     rowIdentity: () => '[rid]',
     identityIn: (identity, params) => `${identity} AMONG (${params.join(', ')})`,
     rtree: { module: 'BOXTREE', columns: ['rid', 'x0', 'x1', 'y0', 'y1'] },

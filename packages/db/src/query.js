@@ -58,15 +58,22 @@ import {
  * residual.
  * @param {number} [bound]
  * @param {{ functions?: any, extensions?: any } | null} [operators]
+ * @param {any} [zoneProvider] - D7's injected clock, or absent
  * @returns {any}
  */
-export function createQueryState(bound = undefined, operators = null) {
+export function createQueryState(bound = undefined, operators = null,
+  zoneProvider = undefined) {
   return {
     cache: createSemanticCache(bound ?? 128),
     counters: { hits: 0, misses: 0, evictions: 0 },
     /** Fragment identity → the SQL function name registered for it. */
     registered: new Map(),
     operators: operators ?? null,
+    // D7's injected clock: a named zone is host code a database does
+    // not have, so a calendar ladder over one walks in the residual —
+    // and the residual is the caller's OWN document, so the frozen spec
+    // reaches the kernel unchanged rather than being rebuilt in UTC
+    zoneProvider: zoneProvider ?? null,
   };
 }
 
@@ -135,11 +142,16 @@ export function createQueryEngine(context) {
   // residual compilation here. `null` when the store opened with no
   // registry — the whole engine is then byte-identical to before.
   const operators = state.operators ?? null;
+  const zoneProvider = state.zoneProvider ?? null;
   const dialect = connection.dialect;
   const shape = {
     collection: collection.name,
     schema: collection.schema,
     columnByCanonical: physicalPlan.columnByCanonical,
+    // the DECLARED indexes, in their declared column order: a temporal
+    // plan is recognized by the index a model already has, so the
+    // planner needs to see the list rather than guess a column's role
+    indexes: physicalPlan.expected?.indexes ?? [],
     // the R*Tree virtual tables this collection's `bbox` column sets are
     // realized as, by stem — empty under `physical: 'columns'`, and
     // empty on a driver whose build carries no R*Tree module, because
@@ -163,6 +175,14 @@ export function createQueryEngine(context) {
    * a k-nearest query into a full scan that `explain()` still calls
    * `knn`, which is the one thing this mode may not do quietly. */
   const knnStats = { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 };
+  /** The temporal counters `stats()` reports, and the ONLY place a
+   * candidate or a result count comes from: `explain()` reads the LAST
+   * ACTUAL run's numbers off the cache entry rather than estimating
+   * any of them. `statements` is what makes the as-of bound checkable —
+   * one narrowing fetch per call, whatever the probes number — and
+   * `diverted` counts the calls whose native bucket met a group with no
+   * instant and handed the whole question back to the engine. */
+  const seriesStats = { queries: 0, statements: 0, candidates: 0, results: 0, diverted: 0 };
   /** The by-identities fetch statements, one per batch size. */
   const identityFetch = new Map();
 
@@ -171,13 +191,15 @@ export function createQueryEngine(context) {
   const residualCompileOptions = (limits) => {
     const functions = operators?.functions;
     const extensions = operators?.extensions;
-    if (limits === undefined && functions === undefined && extensions === undefined)
+    if (limits === undefined && functions === undefined && extensions === undefined
+      && zoneProvider === null)
       return undefined;
     /** @type {any} */
     const options = {};
     if (limits !== undefined) options.limits = limits;
     if (functions !== undefined) options.functions = functions;
     if (extensions !== undefined) options.extensions = extensions;
+    if (zoneProvider !== null) options.zoneProvider = zoneProvider;
     return options;
   };
 
@@ -302,10 +324,13 @@ export function createQueryEngine(context) {
       setResidual: null,
       packedResidual: null,
       rowResidual: planned.mode === 'row'
-        ? compileRowResidual(planned.rowReturn, limits, operators)
+        ? compileRowResidual(planned.rowReturn, limits, operators, zoneProvider)
         : null,
       fullScanSql: null,
       fullScanShape: () => shapePlan(selectPlan(collection.name)),
+      // the LAST actual execution's numbers, never an estimate: `null`
+      // until this document has run once
+      seriesCounts: null,
     };
 
     const sizeBefore = state.cache.size();
@@ -320,7 +345,8 @@ export function createQueryEngine(context) {
   };
   const setResidualOf = (entry, document) => {
     if (entry.setResidual === null)
-      entry.setResidual = compileSetResidual(document, entry.residualLimits, operators);
+      entry.setResidual = compileSetResidual(document, entry.residualLimits, operators,
+        zoneProvider);
     return entry.setResidual;
   };
   /** The item-packing variant for cursors: `[document]` packs the
@@ -396,6 +422,68 @@ export function createQueryEngine(context) {
     });
 
   const rowsToDocs = (rows) => rows.map((row) => JSON.parse(row.doc));
+
+  /**
+   * The bucket records a native temporal group answers: the ladder's
+   * start under the name the document asked for it by, then one member
+   * per aggregate with the caller's own word for "no numbers".
+   *
+   * `null` when a group has no instant at all — a row whose instant
+   * member is missing or is not a number groups under SQL `NULL`, and
+   * the kernel REFUSES such a row (`JQ2001`). SQL cannot refuse, so the
+   * call diverts and the engine answers, exactly as it does everywhere.
+   * @param {any} entry
+   * @param {any[]} rows
+   * @returns {any[] | null}
+   */
+  const bucketItems = (entry, rows) => {
+    const bucket = entry.plan.bucket;
+    const items = [];
+    for (const row of rows) {
+      const start = row[bucket.as] ?? null;
+      if (start === null) return null;
+      /** @type {any} */
+      const item = { [bucket.as]: start };
+      for (const aggregate of bucket.aggregates) {
+        const value = row[aggregate.as] ?? null;
+        if (value === null && aggregate.empty === 'omit') continue;
+        item[aggregate.as] = value === null && aggregate.empty === 'zero' ? 0 : value;
+      }
+      items.push(item);
+    }
+    return items;
+  };
+
+  /** How many ITEMS an engine result carries (its own shape rule). */
+  const itemCount = (answer) => (answer === undefined ? 0
+    : Array.isArray(answer) ? answer.length : 1);
+
+  /**
+   * A native bucket met a group with no instant. The kernel refuses
+   * such a row, and SQL cannot, so the whole question goes back to the
+   * engine over the whole collection — the same diversion a k-nearest
+   * probe of the wrong width takes, and counted the same way.
+   */
+  const divertBucket = (entry, document, externals) => {
+    seriesStats.diverted++;
+    return chain(fullScanOf(entry), (statement) =>
+      chain(statement.all(fullScanParams(entry)), (rows) => {
+        const docs = rowsToDocs(checkRowBound(entry, rows));
+        const answer = setResidualOf(entry, document)(docs, externals);
+        countSeries(entry, 2, docs.length, itemCount(answer));
+        return answer;
+      }));
+  };
+
+  /** Record one actual execution against the entry and the store. */
+  const countSeries = (entry, statements, candidates, results) => {
+    if (entry.planned.series === null) return;
+    seriesStats.queries++;
+    seriesStats.statements += statements;
+    seriesStats.candidates += candidates;
+    seriesStats.results += results;
+    entry.seriesCounts = { statements, candidates, results };
+  };
 
   /**
    * The documents of the given row identities, in identity order,
@@ -512,8 +600,11 @@ export function createQueryEngine(context) {
         // the k-nearest cut — and the full document over them, which
         // re-applies its own predicates and ordering (idempotent
         // narrowing: the fetch decided nothing)
-        return chain(candidatesOf(entry, externals, diverted), (docs) =>
-          setResidualOf(entry, document)(docs, externals));
+        return chain(candidatesOf(entry, externals, diverted), (docs) => {
+          const answer = setResidualOf(entry, document)(docs, externals);
+          countSeries(entry, 1, docs.length, itemCount(answer));
+          return answer;
+        });
       }
       if (entry.planned.mode === 'row') {
         return chain(statementOf(entry), (statement) =>
@@ -529,8 +620,19 @@ export function createQueryEngine(context) {
           return chain(statement.get(bindParams(entry, externals)),
             (row) => aggregateResult(entry, row));
         }
-        return chain(statement.all(bindParams(entry, externals)),
-          (rows) => sequenceResult(rowsToDocs(checkRowBound(entry, rows))));
+        if (entry.plan.bucket !== null) {
+          return chain(statement.all(bindParams(entry, externals)), (rows) => {
+            const items = bucketItems(entry, checkRowBound(entry, rows));
+            if (items === null) return divertBucket(entry, document, externals);
+            countSeries(entry, 1, rows.length, items.length);
+            return sequenceResult(items);
+          });
+        }
+        return chain(statement.all(bindParams(entry, externals)), (rows) => {
+          const docs = rowsToDocs(checkRowBound(entry, rows));
+          countSeries(entry, 1, docs.length, docs.length);
+          return sequenceResult(docs);
+        });
       });
     });
   };
@@ -571,7 +673,35 @@ export function createQueryEngine(context) {
             chain(candidatesOf(entry, externals, diverted), (docs) => {
               buffered = packedResidualOf(entry, document)(docs, externals);
               bufferedAt = 0;
+              countSeries(entry, 1, docs.length, buffered.length);
             })));
+        }
+        return materialized.then(() => {
+          if (bufferedAt < buffered.length) return nextFromBuffer();
+          done = true;
+          return { done: true, value: undefined };
+        });
+      }
+      if (entry.plan.bucket !== null) {
+        // a native bucket is a barrier: the groups are the answer
+        if (materialized === null) {
+          materialized = Promise.resolve(chain(guardScan(entry), () =>
+            chain(statementOf(entry), (statement) =>
+              chain(statement.all(bindParams(entry, externals)), (rows) => {
+                const items = bucketItems(entry, checkRowBound(entry, rows));
+                if (items === null) {
+                  const answer = divertBucket(entry, document, externals);
+                  return chain(answer, (value) => {
+                    buffered = value === undefined ? []
+                      : Array.isArray(value) ? value : [value];
+                    bufferedAt = 0;
+                  });
+                }
+                countSeries(entry, 1, rows.length, items.length);
+                buffered = items;
+                bufferedAt = 0;
+                return null;
+              }))));
         }
         return materialized.then(() => {
           if (bufferedAt < buffered.length) return nextFromBuffer();
@@ -639,7 +769,9 @@ export function createQueryEngine(context) {
    * The explanation record: the engine explain shape plus the pushdown
    * facts. `estimatedRows` is deliberately ABSENT — the capability
    * slot is empty on SQLite and no number is fabricated; the
-   * database's own plan prose rides in `scanNarrative` instead.
+   * database's own plan prose rides in `scanNarrative` instead. So is
+   * every count in `series`: they are the LAST ACTUAL execution's, and
+   * `null` until this document has run once.
    * @param {any} document
    * @param {{ externals?: any, strict?: boolean }} [options]
    */
@@ -668,6 +800,12 @@ export function createQueryEngine(context) {
       if (term.ref.column !== null) touchedColumns.add(term.ref.column);
     }
     if (entry.plan.aggregate?.ref?.column) touchedColumns.add(entry.plan.aggregate.ref.column);
+    if (entry.plan.bucket !== null) {
+      if (entry.plan.bucket.ref.column) touchedColumns.add(entry.plan.bucket.ref.column);
+      for (const aggregate of entry.plan.bucket.aggregates) {
+        if (aggregate.ref?.column) touchedColumns.add(aggregate.ref.column);
+      }
+    }
     const indexes = [
       ...physicalPlan.expected.indexes
         .filter((index) => index.columns.some((column) => touchedColumns.has(column)))
@@ -718,11 +856,21 @@ export function createQueryEngine(context) {
           ? entry.planned.reasons.map((r) => ({ operator: r.construct, reason: r.reason }))
           : [],
         udfs: [...entry.planned.udfs],
+        // the temporal record: what the document asked, which declared
+        // index the fetch seeks through, and which kernel finished it.
+        // The counts are the LAST ACTUAL execution's — `null` before
+        // this document has run — because an estimate mislabelled as a
+        // count is exactly the thing an honest explain may not print
+        series: entry.planned.series === null ? null : {
+          ...entry.planned.series,
+          counts: entry.seriesCounts === null ? null : { ...entry.seriesCounts },
+        },
         scanNarrative: rows.map((row) => String(row.detail)).join('; '),
       })));
   };
 
-  return { execute, query, explain, shape, stats: () => ({ knn: { ...knnStats } }) };
+  return { execute, query, explain, shape,
+    stats: () => ({ knn: { ...knnStats }, series: { ...seriesStats } }) };
 }
 
 // ————— The entity query surface (the second document kind) —————
@@ -745,6 +893,7 @@ export const INCLUDE_DEPTH_DEFAULT = 3;
 export function createEntityQueryEngine(context) {
   const { connection, entities, mapping, state } = context;
   const operators = state.operators ?? null;
+  const zoneProvider = state.zoneProvider ?? null;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const physicalOf = (name) => ({ table: mapping.entities[name].table });
@@ -810,7 +959,7 @@ export function createEntityQueryEngine(context) {
 
   const runResidual = (entry, document, externals) => {
     if (entry.setResidual === null)
-      entry.setResidual = compileSetResidual(document, undefined, operators);
+      entry.setResidual = compileSetResidual(document, undefined, operators, zoneProvider);
     return chain(fetchRoot(entry), (root) => entry.setResidual(root, externals));
   };
 

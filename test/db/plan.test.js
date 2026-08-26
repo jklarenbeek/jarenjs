@@ -61,6 +61,7 @@ describe('golden plans (algebra, no SQL anywhere)', () => {
       order: null,
       window: null,
       rank: null,
+      bucket: null,
       aggregate: null,
       project: 'document',
     });

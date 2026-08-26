@@ -71,6 +71,24 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
 
+**A time series needs no new declaration.** A composite index whose
+LAST path is a finite numeric epoch member is the whole physical
+feature a temporal plan reads:
+
+```json
+{ "indexes": [{ "name": "by_series_at", "path": ["$.series", "$.at"] }] }
+```
+
+There is no `derive` kind for it, no column type and no host function.
+The columns before the instant are the prefix an equality has to pin
+for the index to seek, exactly as for any other composite index, and
+the schema is the type source as always: type the instant `integer` and
+a bucket ladder is pushed as integer arithmetic; type it `number` and
+the ladder stays a core refinement, because a truncating division over
+a real would put an instant in the wrong bucket. Which shapes are
+pushed, and the reason each refinement is one, are in ARCHITECTURE.md's
+"The temporal plan".
+
 ### 2.1 Derived indexes (spatial and vector storage)
 
 A generated column must be a scalar (§3), and a GeoJSON position is an

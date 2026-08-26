@@ -33,7 +33,7 @@
  *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
  *   retrieval.json    retrieval.js      — did the right memory reach the prompt: recall@k + MRR per policy, oracle-gated
  *   vector.json       vector.js         — k-nearest over a stored vector column every way it runs, vs sqlite-vec, equivalence-gated
- *   series.json       series.js         — one temporal question every route a consumer has today, corpus-gated (no kernel row yet)
+ *   series.json       series.js         — one temporal question every route a consumer has today, corpus-gated (references, kernel, query, raw SQL and the planned store)
  *   meta.json                          — run metadata, conformance summary, QT3 scorecard
  *
  * meta.json is the one file here whose shape the website declares: it is
@@ -1282,14 +1282,16 @@ function buildHeadlines(generated, meta) {
         rival: 'no library rival — the routes a consumer already has',
         conformance: `${(generated.series.checks ?? []).length - failures} `
           + `/ ${(generated.series.checks ?? []).length} checks`,
-        note: `The temporal ground at ${figures.largest}, measured before a kernel exists so a`
-          + ' later fast path arrives with a number to beat. A sorted cut answers a one-hour range'
+        note: `The temporal ground at ${figures.largest}, measured before a kernel existed and`
+          + ' re-measured against every route since. A sorted cut answers a one-hour range'
           + ` ${times(figures.cutVsFilter)} a full filter, and a declared epoch column under an`
           + ` index answers it ${times(figures.columnVsDocument)} the same range read back out of`
-          + ' the stored JSON with date functions. The generic query route costs'
-          + ` ${times(figures.queryBucketVsResident)} the one-pass bucket loop; the durable range`
-          + ` costs ${times(figures.storedRangeVsResident)} the resident cut, which is the price of`
-          + ' never having read the rest of the corpus — see the suite page',
+          + ' the stored JSON with date functions. A bucket ladder pushed into a stored GROUP BY is'
+          + ` ${times(figures.storeBucketVsQuery)} the generic query route; a rolling window is a`
+          + ` named refinement instead, costing ${times(figures.storeRollingVsResident)} the kernel`
+          + ' over an array already in memory. The durable range costs'
+          + ` ${times(figures.storedRangeVsResident)} the resident cut, which is the price of never`
+          + ' having read the rest of the corpus — see the suite page',
       });
     }
   }
@@ -1478,9 +1480,11 @@ function generateVector(tmp, options) {
 
 /**
  * The series suite: one range, one bucketing, one rolling window and one
- * as-of read answered by the plain references, by a generic query
- * document and by stock SQLite over a declared epoch column. Every route
- * is checked against the committed series corpus and against the others
+ * as-of read answered by the plain references, by the core kernel, by a
+ * generic query document, by stock SQLite over a declared epoch column
+ * and by the STORE — where the same questions are documents the planner
+ * either pushes whole or bounds and hands to the kernel. Every route is
+ * checked against the committed series corpus and against the others
  * before a timing is taken, so the tool exits non-zero and writes
  * nothing when one disagrees — an omitted suite here is a withheld
  * table, never a wrong one.

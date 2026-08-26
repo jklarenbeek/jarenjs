@@ -11,9 +11,10 @@
  * One plan shape covers this version: a guarded selection over ONE
  * collection with optional ordering, window, aggregate and a
  * whole-document projection — or, instead of an ordering and a window,
- * a k-nearest RANK the engine finishes over the rows the plan fetches.
- * Constructs beyond it are residuals by design (see ARCHITECTURE.md's
- * deliberate-residual table).
+ * a k-nearest RANK the engine finishes over the rows the plan fetches,
+ * or, instead of a projection, a fixed-width temporal BUCKET the plan
+ * groups and aggregates itself. Constructs beyond it are residuals by
+ * design (see ARCHITECTURE.md's deliberate-residual table).
  */
 
 /** The plan format version, carried on every plan. */
@@ -57,6 +58,21 @@ export const PLAN_VERSION = 2;
  *
  * @typedef {{ ref: PlanRef, desc: boolean, emptyGreatest: boolean }} PlanOrderTerm
  *
+ * @typedef {{ ref: PlanRef, every: number, origin: number, as: string,
+ *   order: 'asc' | 'desc' | 'first-seen',
+ *   aggregates: { fn: 'rows' | 'sum' | 'avg' | 'min' | 'max',
+ *     ref: PlanRef | null, as: string,
+ *     empty: 'null' | 'zero' | 'omit' }[] }} PlanBucket
+ *   The fixed-width temporal GROUP BY: the instant column, the ladder's
+ *   width and anchor in epoch milliseconds, the name the bucket's start
+ *   is answered under, how the groups are ordered, and one aggregate
+ *   per answered member. `rows` is `COUNT(*)` — the D5 count of SOURCE
+ *   rows, duplicates and measured gaps included — and the four value
+ *   aggregates skip a `NULL` reading exactly as the kernel skips a
+ *   `null` one. `first-seen` order is the group's earliest row identity,
+ *   which is the engine's own "order of first appearance" (§6.5).
+ *   A plan carrying a bucket carries no `aggregate` and no `rank`.
+ *
  * @typedef {{ column: string, dims: number,
  *   probe: { lit: number[] } | { ext: string },
  *   offset: number, limit: number, margin: number }} PlanRank
@@ -79,6 +95,7 @@ export const PLAN_VERSION = 2;
  *   order: PlanOrderTerm[] | null,
  *   window: { offset: number, limit: number | null } | null,
  *   rank: PlanRank | null,
+ *   bucket: PlanBucket | null,
  *   aggregate: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null } | null,
  *   project: 'document',
@@ -99,6 +116,7 @@ export function selectPlan(collection) {
     order: null,
     window: null,
     rank: null,
+    bucket: null,
     aggregate: null,
     project: 'document',
   };
@@ -123,6 +141,7 @@ export function conjoin(filter, predicate) {
 const SQL_TOKENS = [
   'SELECT', 'WHERE', 'ORDER BY', 'LIMIT ', 'INSERT', 'FROM ',
   'jsonb_extract', 'json_type', 'substr(', 'instr(', '"doc"', '@p1', ' AS ',
+  'GROUP BY', 'COUNT(',
 ];
 
 /**

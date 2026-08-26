@@ -153,6 +153,17 @@ member the schema types as an array or an object. Those are exact; the
 spatial predicates that only NARROW are rows in the residual table, and
 the implied-conjunct table below carries every proof.
 
+Plus one GROUPING a composite instant index makes exact: the
+fixed-width temporal bucket. A `$groupby` whose single key is
+`$time-bucket` over a schema-typed integer epoch path with a literal
+width and origin, projected to the group key plus `$count` of the
+binding and `$sum`/`$avg`/`$min`/`$max` over singular schema-typed
+numeric paths, becomes a `GROUP BY` over integer arithmetic. So does a
+`$resample` whose frozen spec asks for nothing that ladder cannot do —
+a fixed width, `fill: 'omit'`, and one of `sum|mean|min|max|count`.
+Everything else about time is a NAMED refinement ("The temporal plan"
+below).
+
 Plus one ORDERING a **`derive: 'vector'`** column makes cheap without
 making it native: the k-nearest composition — `$orderby` on a
 `$similarity` key, descending, `$empty: 'least'`, under a `$subsequence`
@@ -181,6 +192,7 @@ mode, `knn`, beside native, row and set.
 | the k-nearest ordering over a `derive: 'vector'` column | the column cuts the candidates; the engine orders them (mode `knn`, "The k-nearest plan" below) — engine work, so `strict: true` refuses it |
 | `$similarity` anywhere else — a threshold in `$where`, a score in `$return`, a second ordering key | no native spelling; runs in the residual over whatever the rest of the document pushed |
 | the k-nearest shape with no finite window, ascending, `$empty: 'greatest'`, a probe that is neither a literal vector nor an external, a literal probe of another width, or a selection not pushed whole (a residual conjunct, an implied one, a `$let` before the where) | nothing is proven; the whole document runs in the engine, and `explain()` names which precondition failed — a k-nearest query never falls to the full scan silently |
+| `$resample` with a fill policy other than `omit`, `$rolling`, `$asof`, `first`/`last`, a calendar width, a named zone, a `$time-bucket` whose width or origin is an EXPRESSION, or an instant the schema does not type as an integer | the index bounds the fetch and `@jarenjs/core/series` decides over what comes back; `explain().series.reasons` carries the CODE — `fill-policy`, `rolling-refinement`, `asof-refinement`, `unsupported-aggregate`, `calendar-width`, `named-zone`, `nonliteral-spec`, `instant-not-integer` — and `strict: true` refuses every one of them |
 
 ### The type truth table
 
@@ -418,6 +430,79 @@ engine's business. With `strict: true` the shape is `JD0010` naming the
 rank: the order is engine work, the same honesty as a spatial
 refinement.
 
+### The temporal plan (series)
+
+Time needs no storage kind here. The physical declaration is the
+composite JSONPath index a model already has —
+`{ "name": "by_series_at", "path": ["$.series", "$.at"] }` — over a
+numeric epoch member, and the whole of `src/series.js` is deciding
+which questions that index answers. There is no `derive: 'series'`, no
+column type, no host function and no extension.
+
+A B-tree seeks exactly as far as its leading columns are decided: a run
+of equalities, then at most one range. So the index that a temporal
+plan reports is the declared one with the longest leading run of
+columns an equality PINNED whose next column is the instant the query
+ranges over. Three shapes follow from that, and they are closed:
+
+| shape | the document | the plan |
+|---|---|---|
+| **range** | every leading column pinned, a half-open range on the instant, ordered by it | native — `SEARCH … (series=? AND at>? AND at<?)` |
+| **as-of** | the same prefix with ONE instant bound, ordered by the instant, under a finite window | native — the index read backwards, one row |
+| **bucket** | a `$groupby` over `$time-bucket`, or a `$resample` whose spec asks for nothing more | native — `GROUP BY` over `at - (((at - origin) % every + every) % every)` |
+
+The ladder is integer arithmetic all the way down, and the non-negative
+remainder is why: a truncating division puts an instant before 1970 in
+the bucket AFTER its own. The width and the anchor are read through the
+kernel's own `compileBuckets`, so `'PT1H'` and `3600000` are the same
+ladder and the default anchor is the kernel's rather than a second
+guess at it; an `{ offset }` calendar context folds into the anchor,
+because a constant number of minutes east is arithmetic. A named zone
+never does: its clock is host code the database does not have.
+
+Everything else is a **named refinement** — the implied-conjunct
+pattern again, applied to a whole operator. The planner narrows the
+fetch by whatever the frozen spec makes provable and the residual, which
+is the ENGINE running the caller's own document, decides:
+
+| operator | what bounds the fetch |
+|---|---|
+| `$resample` (fill, calendar, `first`/`last`) | the spec's own `start`/`end`, plus the operand's `$where` |
+| `$rolling` | the operand's `$where` alone — a window measured in time answers once per input instant |
+| `$asof` with the collection on the RIGHT | the probes' own span (`at <= max` backward, `at >= min` forward, both sides under a `tolerance`) and a membership test over the probes' `by` keys |
+| `$asof` with the collection on the LEFT | nothing — a join answers once per LEFT row, so every left row is needed |
+
+The as-of bound is one STATEMENT, whatever the probes number, which is
+what `test/db/statement-count.test.js` pins: the failure mode a batch
+exists to refuse is one seek per left row. Without a `tolerance` a
+backward join can only be bounded ABOVE, so that one statement can read
+most of a long history — `benchmark/series.js` publishes the candidate
+count beside the timing rather than netting it out.
+
+**A group with no instant.** A row whose instant member is missing or
+is not a number groups under SQL `NULL`; the kernel REFUSES such a row
+(`JQ2001`). SQL cannot refuse, so a native bucket that meets one hands
+the whole question back — the full-collection residual, where the engine
+answers what it answers everywhere — and the fallback is COUNTED as
+`collection.stats().series.diverted`, the same honesty the k-nearest
+divert has.
+
+**`explain().series`** is `null` unless the document asked a temporal
+question, which it does by naming a §8.16 operator or by being the
+closed range/as-of shape over a COMPOSITE instant index. (A singular
+index over an ordinary member cannot make a query temporal: nothing in
+a column says "instant", and inventing one would make every `age > 21`
+a temporal plan.) It carries `{ mode, operation, index, prefix, range,
+ladder, aggregates, refinement, reasons, counts }`. `mode` is
+`'native'` (the statement alone answers), `'hybrid'` (the database
+narrows and a kernel decides) or `'engine'` (the database narrowed
+nothing). `reasons` is `{ code, reason }` where the code is the first
+word of the sentence, so the machine-readable code and the sentence
+`strict: true` prints cannot drift apart. `counts` is the LAST ACTUAL
+execution's `{ statements, candidates, results }` and is `null` before
+the document has run once — an estimate mislabelled as a count is
+exactly what an honest explain may not print.
+
 ### The two residual modes
 
 - **Row residual** — only the projection is untranslated: predicates,
@@ -465,7 +550,9 @@ and this is where it says so (MODEL-FORMAT §4). Under `'rtree'` the
 names the virtual table. `rank` is `null` or the k-nearest stage —
 `{ column, dims, probe, limit, offset, margin, decides: 'engine' }` —
 what the fetch reads, the window the cut serves, the margin it keeps,
-and who decides the order (always the engine). `estimatedRows` is ABSENT on SQLite drivers — the capability slot
+and who decides the order (always the engine). `series` is `null` or
+the temporal record ("The temporal plan" above), whose `counts` are the
+last ACTUAL run's rather than an estimate. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
 is empty and no number is fabricated. `residual` is `null` or
 `{ mode: 'row' | 'set' | 'knn', reasons: [{ construct, reason }] }` with
 reasons drawn from the deliberate-residual table. With

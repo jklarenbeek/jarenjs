@@ -273,6 +273,17 @@ export function emitPlan(plan, dialect, physical) {
     }
   };
 
+  // The temporal bucket's ladder, written ONCE and named: the SELECT
+  // list carries it, and the grouping and the ordering name the alias.
+  // Writing it three times would triple its parameters, and a bucket
+  // start is exactly the kind of value the caller wants to read back.
+  const bucketSql = plan.bucket === null ? null
+    : dialect.timeBucket(valueOf(plan.bucket.ref),
+      param({ literal: plan.bucket.origin }),
+      param({ literal: plan.bucket.every }),
+      param({ literal: plan.bucket.every }),
+      param({ literal: plan.bucket.every }));
+
   const selection = plan.rank !== null
     // the k-nearest fetch: the row identity and the packed column
     // under the pushed WHERE, and nothing that orders or limits — the
@@ -280,15 +291,30 @@ export function emitPlan(plan, dialect, physical) {
     // the rank loses to fetching the column and ranking in the engine,
     // and none of them runs where no function can be registered)
     ? `${dialect.rowIdentity()} AS ${q('rid')}, ${q(plan.rank.column)} AS ${q('vec')}`
-    : plan.aggregate === null
-      ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
-      : plan.aggregate.fn === 'count'
-        ? `COUNT(*) AS ${q('value')}`
-        : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
+    : plan.bucket !== null
+      ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
+        ...plan.bucket.aggregates.map((entry) =>
+          `${dialect.groupAggregate(entry.fn,
+            entry.ref === null ? null : valueOf(entry.ref))} AS ${q(entry.as)}`)].join(', ')
+      : plan.aggregate === null
+        ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
+        : plan.aggregate.fn === 'count'
+          ? `COUNT(*) AS ${q('value')}`
+          : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
 
   let sql = `SELECT ${selection} FROM ${q(physical.table)}`;
   if (plan.filter !== null) sql += ` WHERE ${emitPred(plan.filter)}`;
-  if (plan.aggregate === null && plan.rank === null) {
+  if (plan.bucket !== null) {
+    // `first-seen` is the engine's own group order (§6.5, first
+    // appearance), which over a collection is the group's earliest row
+    // identity — the same tiebreaker the ungrouped fetch appends
+    const alias = q(plan.bucket.as);
+    const order = plan.bucket.order === 'first-seen'
+      ? dialect.groupAggregate('min', dialect.rowIdentity())
+      : `${alias} ${plan.bucket.order === 'desc' ? 'DESC' : 'ASC'}`;
+    sql += ` GROUP BY ${alias} ORDER BY ${order}`;
+  }
+  if (plan.aggregate === null && plan.rank === null && plan.bucket === null) {
     const terms = (plan.order ?? []).map((term) => {
       // Jaren's default sorts an empty key least: NULLS FIRST when
       // ascending, NULLS LAST when descending — and mirrored for

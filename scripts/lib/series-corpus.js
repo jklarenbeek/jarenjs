@@ -30,6 +30,8 @@
  * real disagreement hides.
  */
 
+import { readFileSync } from 'node:fs';
+
 /** The instant the corpus starts at — `2026-01-01T00:00:00Z`. */
 export const SERIES_ORIGIN = 1767225600000;
 
@@ -772,6 +774,199 @@ export function probeInstants(count, min, max, seed = SERIES_SEED) {
   for (let i = 0; i < count; i++)
     out[i] = min + Math.floor(random() * span);
   return out;
+}
+
+//#endregion
+
+//#region the collection projection
+
+// The same corpus, asked of a DATABASE. A collection is a sequence of
+// documents rather than a member of one, so a case's question has to be
+// rebased: `$.rows[*]` becomes `$[*]`, and the rows gain the one member
+// a `(series, at)` index needs as its leading column. Nothing else
+// moves — the spec is the case's own frozen literal, and the expected
+// answer is the one `referenceAnswer` recorded.
+//
+// The projection lives HERE, beside the dispatcher, for the reason the
+// whole file exists: a second reading of a case's `kind` is a corpus
+// that can disagree with itself while every runner stays green.
+
+/**
+ * The fixture, as committed. Every executor reads it here, so a second
+ * reading of the path is a corpus that can disagree with itself.
+ * @param {string} [root] - the repository to read; this one by default
+ * @returns {any}
+ */
+export function readSeriesCorpus(root = undefined) {
+  const url = root === undefined
+    ? new URL(`../../${SERIES_CORPUS_PATH}`, import.meta.url)
+    : new URL(SERIES_CORPUS_PATH, `file://${root.endsWith('/') ? root : `${root}/`}`);
+  return JSON.parse(readFileSync(url, 'utf8'));
+}
+
+/** The collection every projected case is stored in. */
+export const SERIES_COLLECTION = 'sample';
+
+/** The series key every projected sample carries. */
+export const SERIES_KEY = 'sensor-a';
+
+/**
+ * The schema the projection stores under: every member the corpus's
+ * own cases spell, typed where a column has to be able to seek. `at` is
+ * a whole epoch (D3) and `value` admits the measured gap a `null`
+ * reading is; `on` and `recorded at` are the two other spellings the
+ * as-of selector cases use.
+ */
+export const SERIES_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: {
+    series: { type: 'string' },
+    k: { type: 'string' },
+    at: { type: 'integer' },
+    on: { type: 'integer' },
+    'recorded at': { type: 'integer' },
+    value: { type: ['number', 'null'] },
+  },
+});
+
+/**
+ * The model one mapping stores the corpus under. The indexed mapping
+ * declares exactly what D9 fixes — a composite `(series, at)` — plus
+ * the `(k, at)` twin the keyed as-of cases group by; the unindexed one
+ * declares nothing, and both must answer what the references recorded.
+ * @param {any[]} indexes
+ * @returns {any}
+ */
+export function seriesModel(indexes) {
+  return {
+    $model: '0.1',
+    collections: {
+      [SERIES_COLLECTION]: {
+        schema: SERIES_SCHEMA, key: null, identity: 'integer', indexes,
+      },
+    },
+  };
+}
+
+/** The two mappings every store runner answers under. */
+export function seriesMappings() {
+  return Object.freeze({
+    indexed: seriesModel([
+      { name: 'by_series_at', path: ['$.series', '$.at'] },
+      { name: 'by_k_at', path: ['$.k', '$.at'] },
+    ]),
+    unindexed: seriesModel([]),
+  });
+}
+
+/** One sample, wearing the series key its index seeks by. */
+const keyed = (row) => ({ series: SERIES_KEY, ...row });
+
+/**
+ * The narrowed collection operand: the rows of one series, which is the
+ * equality that pins a composite index's leading column. Every series
+ * operand of a projected case is spelled this way, so the corpus
+ * exercises the seek rather than the scan.
+ */
+const NARROWED = Object.freeze({
+  $for: { s: '$[*]' },
+  $where: { $eq: ['$s.series', SERIES_KEY] },
+  $return: '$s',
+});
+
+/**
+ * One case, projected onto a collection: the documents to store, the
+ * query document to run, and the answer `referenceAnswer` recorded.
+ * `null` for a case a collection cannot carry — an interval pair, a
+ * scalar instant, or a refusal that belongs to the language rather than
+ * to a store.
+ *
+ * Version 1's `range`, `bucket` and `asof` cases carry a question
+ * without a document, because the language has no operator for them:
+ * they are the three shapes an INDEX answers, and this is where they
+ * become the FLWOR that asks each one.
+ * @param {any} entry - a fixture case
+ * @param {Sample[]} samples
+ * @returns {{ documents: any[], query: any, expected: any,
+ *   shape: string } | null}
+ */
+export function seriesCollectionCase(entry, samples) {
+  switch (entry.kind) {
+    case 'range': {
+      const { lo, hi } = cutRange(samples, entry.start, entry.end);
+      return {
+        documents: samples.map(keyed),
+        query: {
+          $for: { s: '$[*]' },
+          $where: { $and: [
+            { $eq: ['$s.series', SERIES_KEY] },
+            { $ge: ['$s.at', entry.start] },
+            { $lt: ['$s.at', entry.end] },
+          ] },
+          $orderby: [{ $key: '$s.at' }],
+          $return: '$s',
+        },
+        expected: samples.slice(lo, hi).map(keyed),
+        shape: 'range',
+      };
+    }
+    case 'asof': {
+      const answer = referenceAnswer(entry, samples);
+      return {
+        documents: samples.map(keyed),
+        query: { $subsequence: [{
+          $for: { s: '$[*]' },
+          $where: { $and: [
+            { $eq: ['$s.series', SERIES_KEY] },
+            { $le: ['$s.at', entry.at] },
+          ] },
+          $orderby: [{ $key: '$s.at', $dir: 'desc' }],
+          $return: '$s',
+        }, 0, 1] },
+        expected: answer === null ? undefined : keyed(answer),
+        shape: 'asof',
+      };
+    }
+    case 'bucket':
+      return {
+        documents: samples.map(keyed),
+        query: {
+          $for: { s: '$[*]' },
+          $where: { $and: [
+            { $eq: ['$s.series', SERIES_KEY] },
+            { $ge: ['$s.at', entry.origin] },
+            { $lt: ['$s.at', samples[samples.length - 1].at + 1] },
+          ] },
+          $groupby: { b: { '$time-bucket': ['$s.at', entry.every, entry.origin] } },
+          $orderby: ['$b'],
+          $return: { at: '$b', value: { $avg: '$s.value' }, count: { $count: '$s' } },
+        },
+        expected: referenceAnswer(entry, samples),
+        shape: 'bucket',
+      };
+    case 'resample':
+    case 'rolling': {
+      if (entry.doc === undefined) return null; // version 1's row-counted window
+      const operator = entry.kind === 'resample' ? '$resample' : '$rolling';
+      return {
+        documents: caseSeries(entry, samples).map(keyed),
+        query: { [operator]: [NARROWED, entry.spec] },
+        expected: entry.expected,
+        shape: entry.kind,
+      };
+    }
+    case 'asof-join':
+      // the RIGHT side is the collection: an as-of join answers once per
+      // LEFT row, so the left side stays a literal the query carries
+      return {
+        documents: entry.input.right,
+        query: { $asof: [{ $const: entry.input.left }, '$[*]', entry.spec] },
+        expected: entry.expected,
+        shape: 'asof-join',
+      };
+    default: // 'overlaps', 'time-bucket', 'invalid': not a collection question
+      return null;
+  }
 }
 
 //#endregion

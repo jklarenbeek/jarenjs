@@ -800,6 +800,29 @@ const FACTS = {
       + 'per probe, and a sorted walk pays for the whole right side whether it was asked one '
       + 'question or a thousand.';
   },
+  // -- series: the STORE's own rows, against the statement a hand would
+  // have written, against the vocabulary the store replaces, and
+  // against the array already in memory. Three ratios per shape,
+  // because quoting only the flattering one is the thing D15 forbids.
+  'series.storeShapes': () => {
+    const { figures } = data('series').meta;
+    return `the planned range costs ${ratio(figures.storeRangeVsSql)}× the hand-written `
+      + `statement and ${ratio(figures.storeRangeVsResident)}× the resident cut, and the pushed `
+      + `bucket ladder ${ratio(figures.storeBucketVsSql)}× the hand-written GROUP BY, `
+      + `${ratio(figures.storeBucketVsQuery)}× FASTER than the generic query route, and `
+      + `${ratio(figures.storeBucketVsResident)}× the one-pass loop`;
+  },
+  'series.storeRefinement': () => {
+    const { figures } = data('series').meta;
+    return `A window measured in time is not pushed: the store answers it at `
+      + `${ratio(figures.storeRollingVsResident)}× the kernel over an array already in memory, `
+      + `over ${thousands(figures.storeRollingCandidates)} candidates the index bounded. The `
+      + `batched as-of join reads ${thousands(figures.storeAsOfCandidates)} rows in `
+      + `${figures.storeAsOfStatements} statement and costs `
+      + `${ratio(figures.storeAsOfVsIndexReads)}× fifty-one separate index reads — a bound is `
+      + 'what it buys, not a speed-up, and without a tolerance a backward join can only be '
+      + 'bounded above.';
+  },
   'series.zoneCost': () => {
     const { figures } = data('series').meta;
     return `Walking every boundary through an injected zone provider costs `

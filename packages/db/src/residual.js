@@ -36,16 +36,22 @@ import { compileJsonQuery } from '@jarenjs/json/query';
  * @param {{ functions?: any, extensions?: any } | null} [operators]
  * @returns {any}
  */
-function residualOptions(limits, operators) {
+function residualOptions(limits, operators, zoneProvider) {
   const functions = operators?.functions;
   const extensions = operators?.extensions;
-  if (limits === undefined && functions === undefined && extensions === undefined)
+  const clock = zoneProvider ?? null;
+  if (limits === undefined && functions === undefined && extensions === undefined
+    && clock === null)
     return undefined;
   /** @type {any} */
   const options = {};
   if (limits !== undefined) options.limits = limits;
   if (functions !== undefined) options.functions = functions;
   if (extensions !== undefined) options.extensions = extensions;
+  // D7's injected clock: without it a named zone is a compile refusal,
+  // which is what the language wants — being right for eight months of
+  // the year is exactly what a silent UTC fallback would be
+  if (clock !== null) options.zoneProvider = clock;
   return options;
 }
 
@@ -57,10 +63,12 @@ function residualOptions(limits, operators) {
  * @param {any} [limits]
  * @param {{ functions?: any, extensions?: any } | null} [operators] -
  *   the store's registered operators, so the residual can evaluate them
+ * @param {any} [zoneProvider] - D7's injected clock, so a calendar
+ *   ladder on a named zone compiles rather than being refused
  * @returns {(candidates: any[], externals: any) => any}
  */
-export function compileSetResidual(document, limits, operators) {
-  const compiled = compileJsonQuery(document, residualOptions(limits, operators));
+export function compileSetResidual(document, limits, operators, zoneProvider) {
+  const compiled = compileJsonQuery(document, residualOptions(limits, operators, zoneProvider));
   return (candidates, externals) => compiled(candidates, externals);
 }
 
@@ -73,10 +81,11 @@ export function compileSetResidual(document, limits, operators) {
  *   the only place that knows the name.
  * @param {any} [limits]
  * @param {{ functions?: any, extensions?: any } | null} [operators]
+ * @param {any} [zoneProvider] - D7's injected clock
  * @returns {(row: any, externals: any) => any[]} the row's items
  */
-export function compileRowResidual(rowDocument, limits, operators) {
-  const compiled = compileJsonQuery(rowDocument, residualOptions(limits, operators));
+export function compileRowResidual(rowDocument, limits, operators, zoneProvider) {
+  const compiled = compileJsonQuery(rowDocument, residualOptions(limits, operators, zoneProvider));
   return (row, externals) => {
     const packed = compiled([row], externals);
     // one binding → exactly one packed array of that row's items

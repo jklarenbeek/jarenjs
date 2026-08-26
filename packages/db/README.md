@@ -113,6 +113,17 @@ shape binds at `store.collection<User>('users')`.
   decided or merely narrowed. The worked example, the geofence and the
   measured numbers are in [Spatial storage](#spatial-storage--the-model-the-plan-the-fence-the-numbers)
   below.
+- **A time series is a composite index, not a storage kind.** Declare
+  `{ "path": ["$.series", "$.at"] }` over a numeric epoch member and the
+  planner recognizes three shapes over it: a half-open range under a
+  series equality, an as-of lookup (the index read backwards, one row),
+  and a fixed-width bucket ladder — a `$groupby` over `$time-bucket`, or
+  a `$resample` whose spec asks for nothing a `GROUP BY` cannot do — as
+  integer arithmetic in SQL. A fill policy, a calendar width, a rolling
+  window and an as-of JOIN are **named refinements**: the index bounds
+  the fetch and `@jarenjs/core/series` decides, with `explain().series`
+  carrying the reason code and the last run's actual candidate and
+  result counts. See [Time series](#time-series--the-index-the-ladder-the-refinement).
 - **Migrations are documents.** `planMigration` diffs two models into
   rendered-DDL + JSLT-transform + assertion steps; a shadow database
   replays the whole chain before the real store is touched; a
@@ -444,6 +455,91 @@ engine, SQLite through the Node driver, and a real wasm build — indexed
 and unindexed — and every entry must answer identically, including a
 deliberate one-binary32-ulp near-tie and the windows that reach past the
 scored rows into the tail the column cannot rank.
+
+## Time series — the index, the ladder, the refinement
+
+The physical declaration is one a model already has:
+
+```json
+{ "name": "by_series_at", "path": ["$.series", "$.at"] }
+```
+
+No `derive` kind, no column type, no host function, no extension. What
+the planner adds is the reading of that index — a B-tree seeks as far
+as its leading columns are decided, so a query that pins `series` with
+an equality and ranges over `at` is a SEARCH, and one that only bounds
+`at` is a scan the plan says so about.
+
+```js
+// native: SEARCH sample USING INDEX sample_by_series_at (gx_series=? AND gx_at>? AND gx_at<?)
+await sample.execute({
+  $for: { s: '$[*]' },
+  $where: { $and: [
+    { $eq: ['$s.series', 'sensor-a'] },
+    { $ge: ['$s.at', from] },
+    { $lt: ['$s.at', to] },
+  ] },
+  $orderby: [{ $key: '$s.at' }],
+  $return: '$s',
+});
+
+// native: the same index, GROUP BY over integer bucket arithmetic
+await sample.execute({ $resample: [
+  { $for: { s: '$[*]' }, $where: { $eq: ['$s.series', 'sensor-a'] }, $return: '$s' },
+  { every: 'PT1M', aggregate: 'mean' },
+] });
+
+// hybrid: the index bounds the fetch, rollingSeries decides
+await sample.execute({ $rolling: [
+  { $for: { s: '$[*]' }, $where: { $eq: ['$s.series', 'sensor-a'] }, $return: '$s' },
+  { width: 'PT1M', aggregate: 'mean', minPeriods: 30 },
+] });
+```
+
+**The numbers, the loss included.** `benchmark/series.js` answers the
+same range, the same buckets, the same rolling window and the same
+as-of join over one seeded corpus by plain references, by the temporal
+kernel, by a generic query document, by hand-written SQL and by the
+store — every route checked against the others before a timing is
+taken. At <!--bm:series.corpus-->100,000 samples at 1-second spacing, Node v24.19.0<!--/bm-->,
+the store is measured three ways at once — <!--bm:series.storeShapes-->the planned range costs 3.5× the hand-written statement and 1673.7× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.5× FASTER than the generic query route, and 166.1× the one-pass loop<!--/bm-->.
+The range row is not the planner's price: the statement selects two
+COLUMNS where the store renders and parses a whole JSON document per
+row, which is what storing documents costs.
+
+And what a refinement costs, with the loss in it: <!--bm:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 6.0× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 99,129 rows in 1 statement and costs 2036.7× fifty-one separate index reads — a bound is what it buys, not a speed-up, and without a tolerance a backward join can only be bounded above.<!--/bm-->
+
+**A refinement is named, never quiet.** `explain().series` reports
+`mode` — `native`, `hybrid` or `engine` — the declared index the fetch
+seeks through, the instant bounds it used, which kernel finished the
+answer, and a reason code for every thing the database could not do:
+`fill-policy`, `calendar-width`, `named-zone`, `rolling-refinement`,
+`asof-refinement`, `unsupported-aggregate`, `nonliteral-spec`,
+`instant-not-integer`, `missing-series-prefix`. `strict: true` refuses
+every one of them before a statement runs, and the counts `explain()`
+prints are the LAST ACTUAL execution's — `null` until the document has
+run, because an estimate wearing a count's name is worse than no
+number.
+
+**The as-of join is bounded, and the bound is the claim.** `$asof` with
+the collection on the right reads the probes it was given, bounds the
+fetch by their own span and by a membership test over their `by` keys,
+and issues exactly ONE statement whatever the probes number — the
+failure mode a batch exists to refuse is one seek per left row, and
+`test/db/statement-count.test.js` pins it at 1, 10 and 200 probes.
+Without a `tolerance` a backward join can only be bounded ABOVE, so
+that one statement can read most of a long history: the benchmark
+publishes the candidate count beside the timing rather than netting it
+out, and at fifty-one probes over a hundred thousand rows the batch
+LOSES to fifty-one separate index reads. Few questions of a large
+series belong to a batch; a join of two series does.
+
+**One corpus, five executors, proven to agree.** The committed temporal
+corpus (`test/json/fixtures/series-corpus.json`) runs through the plain
+references, the query vocabulary, `node:sqlite`, a real wasm build and
+both drivers again with pushdown forced off — indexed and unindexed —
+and every case must answer identically, plan mode and reason codes
+included.
 
 ## What SQLite-only means, frankly
 

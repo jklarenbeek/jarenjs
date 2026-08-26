@@ -794,8 +794,14 @@ function resolveOperators(options) {
  * @param {{ driver: any, path?: string, compileSchema?: Function,
  *   busyTimeout?: number, queueTimeout?: number, journalMode?: string,
  *   statementCacheBound?: number, profile?: any, operators?: any,
- *   functions?: any, extensions?: any,
+ *   functions?: any, extensions?: any, zoneProvider?: any,
  *   readOnly?: boolean }} options
+ *   `zoneProvider` is D7's injected clock: a named zone in a temporal
+ *   spec (`{ "every": "P1M", "zone": "Europe/Amsterdam" }`) is host code
+ *   the database cannot have, so a store that never received one refuses
+ *   such a document (`JQ0003`) rather than answering it in UTC. It
+ *   reaches every residual compilation, which is where the calendar
+ *   ladder actually walks.
  * @returns {Promise<any>}
  */
 export function openStore(model, options) {
@@ -1295,6 +1301,11 @@ export function openStore(model, options) {
             pushableOperators: operators === null || connection.capabilities.userFunctions !== true
               ? Object.freeze([])
               : Object.freeze([...operators.pushableScalar]),
+            // D7's injected clock: whether a temporal spec naming a
+            // ZONE will compile at all here. Without one the document is
+            // refused (`JQ0003`) rather than answered in UTC, and a
+            // consumer that wants to know before it asks reads this
+            zoneProvider: options.zoneProvider !== undefined && options.zoneProvider !== null,
             capture: captureMode,
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true
@@ -1304,7 +1315,8 @@ export function openStore(model, options) {
               || (options.jobs !== undefined && options.jobs !== false),
           });
 
-          const queryState = createQueryState(options.statementCacheBound, operators);
+          const queryState = createQueryState(options.statementCacheBound, operators,
+            options.zoneProvider);
           const entityEngine = entities.size > 0
             ? createEntityQueryEngine({ connection, entities, mapping, state: queryState })
             : null;
