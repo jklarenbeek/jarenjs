@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-26T19:03:12+02:00",
-  "commit": "ef8d272c5b5c6ee61b781697141fed8b8abc4b96",
+  "generated": "2026-08-26T20:07:27+02:00",
+  "commit": "1a9ba4f621d11f3a114032a5b4849ea64984b0bb",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -191,7 +191,7 @@
       "name": "@jarenjs/locales",
       "card": {
         "title": "Locale packs",
-        "blurb": "Message catalogs for the validator's and the form model's errors, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing.",
+        "blurb": "Message catalogs for the validator's and the form model's errors plus the calendar language the date kernel refuses to invent, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing.",
         "perf": null
       },
       "engines": [],

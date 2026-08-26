@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-26T19:03:12+02:00",
-  "commit": "ef8d272c5b5c6ee61b781697141fed8b8abc4b96",
+  "generated": "2026-08-26T20:07:27+02:00",
+  "commit": "1a9ba4f621d11f3a114032a5b4849ea64984b0bb",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -3458,7 +3458,7 @@
       "name": "@jarenjs/locales",
       "card": {
         "title": "Locale packs",
-        "blurb": "Message catalogs for the validator's and the form model's errors, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing.",
+        "blurb": "Message catalogs for the validator's and the form model's errors plus the calendar language the date kernel refuses to invent, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing.",
         "perf": null
       },
       "engines": [],
@@ -3468,7 +3468,7 @@
           "package": "@jarenjs/locales",
           "card": {
             "title": "Locale packs",
-            "blurb": "Message catalogs for the validator's and the form model's errors, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing."
+            "blurb": "Message catalogs for the validator's and the form model's errors plus the calendar language the date kernel refuses to invent, one pack per language, over the stable msgids and raw params every error carries — so switching language re-renders the text and re-validates nothing."
           }
         },
         "ast": [
@@ -3601,6 +3601,133 @@
             "children": [
               {
                 "type": "text",
+                "value": "Every pack also carries the calendar language "
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/core/dates"
+              },
+              {
+                "type": "text",
+                "value": " refuses to"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "invent — month, weekday and meridiem names, relative-time phrases, and the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "display names that turn "
+              },
+              {
+                "type": "emphasis",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\"Moet een geldige date-time zijn\""
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " into "
+              },
+              {
+                "type": "emphasis",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\"Moet een"
+                  },
+                  {
+                    "type": "softBreak"
+                  },
+                  {
+                    "type": "text",
+                    "value": "geldige datum en tijd zijn\""
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": ". "
+              },
+              {
+                "type": "inlineCode",
+                "value": "compileDateLocale(pack)"
+              },
+              {
+                "type": "text",
+                "value": " reads a pack once into"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "the arrays a compiled date pattern takes and a "
+              },
+              {
+                "type": "inlineCode",
+                "value": "relative(amount, unit)"
+              },
+              {
+                "type": "text",
+                "value": " that is"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "handed its amount rather than reading a clock. The text is repository data, not"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "Intl"
+              },
+              {
+                "type": "text",
+                "value": ", because this site is server-rendered under byte-comparison tests and ICU"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "output moves between Node versions; "
+              },
+              {
+                "type": "inlineCode",
+                "value": "createIntlDateLocale"
+              },
+              {
+                "type": "text",
+                "value": " is there for a host"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "that would rather have a hundred locales than stable bytes."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
                 "value": "Arabic is a right-to-left pack, and the site's own language switcher is where"
               },
               {
@@ -3622,7 +3749,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/locales/site.md",
-          "hash": "y4law5",
+          "hash": "wu1o2u",
           "frontmatterLang": "yaml"
         }
       },
