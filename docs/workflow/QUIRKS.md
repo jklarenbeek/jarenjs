@@ -231,7 +231,7 @@ report written; every doc the fixes touched repaired; no scratch planning file c
 
 **Default: stop for review** with the three-list report; leave the work uncommitted on the
 current branch. Only when explicitly asked to commit, run [`CONVENTIONS.md`](CONVENTIONS.md) §6
-unchanged (gates → patch bump → deploy → single one-line commit → tag → push with tags). A quirk
+unchanged (gates → patch bump → single one-line commit → deploy → tag → push with tags). A quirk
 hunt's one-liner names the theme, not the list
 (`Made imports idempotent and unified API error status mapping`).
 

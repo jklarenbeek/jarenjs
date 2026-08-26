@@ -265,8 +265,8 @@ logical parent.
 **Default: stop for review** — leave everything in the working tree on the current branch and
 hand it back; do not commit, tag, push, branch or deploy on your own initiative, even when green,
 and do not create a `PROGRESS*.md`. Only when explicitly asked to commit, run
-[`CONVENTIONS.md`](CONVENTIONS.md) §6 unchanged (gates → patch bump → deploy → single one-line
-commit → tag → push with tags). A refactor's one-liner names the consolidation
+[`CONVENTIONS.md`](CONVENTIONS.md) §6 unchanged (gates → patch bump → single one-line commit →
+deploy → tag → push with tags). A refactor's one-liner names the consolidation
 (`Deduplicated shared helpers into core and view`).
 
 ## Out of scope

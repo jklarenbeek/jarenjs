@@ -184,13 +184,34 @@ code — a step that exists only as prose is a step that gets skipped:
 
 1. **Prove it green:** `npm run site:gate` (§2), plus `npm run test:packed` and
    `npm run test:tree-shaking` if exports moved.
+
+   **The one expected red, and only for a close-out that re-measured.** A tracked
+   `packages/website/public/benchmarks/*.json` that is new or regenerated is an
+   *unreviewed* measurement until a commit carries it, and the repo says so in
+   three places at once: `test/scripts/release-tooling.test.js` fails
+   (`checkBenchmarkDrift()` is not clean), `npm run benchmark:coverage` then exits
+   non-zero downstream of that single failing test — with zero dead-code findings
+   of its own — and `website:deploy` would refuse for the same reason. So this run
+   has **exactly one** failing assertion and it is that one; everything else must
+   be green, a second failure stops the close-out, and the gate is re-run at
+   step 4 where it can pass.
 2. **Bump the version:** `npm run release:bump` — `patch` by default,
    `npm run release:bump -- minor` for a phase-opening campaign order or a new
    capability line. It refuses under an npm that is not the `packageManager` pin
    (a lockfile written by another npm is one the pinned npm then rejects, in CI
    rather than here), bumps every manifest and internal range, syncs the
    lockfile, runs `npm run test:lock` and rebuilds.
-3. **Deploy the website — when this close-out deploys.** A close-out deploys
+3. **Commit**, as the repo user, with a **single short one-line message**
+   describing the change (`Deduplicated shared helpers into core and view`). ONE
+   line: no body, no `Co-authored-by`, no "Generated with", no AI attribution, no
+   person's name, no version. `git add -A` stages the work; confirm gitignored
+   scratch is excluded and never force-add it.
+4. **Re-run `npm run site:gate` when step 1 had its expected red.** It must now be
+   green with nothing expected to fail — the measurement is committed, so the
+   interlock is satisfied and every stage answers for the tree that is about to be
+   published. This is the run the release lands on. A close-out that did not
+   re-measure had that run at step 1 and skips this one.
+5. **Deploy the website — when this close-out deploys.** A close-out deploys
    when the work is visible on the published site (site content, published
    figures, a registered benchmark suite) and always at a phase close and at
    a campaign close-out; a close-out whose changes are invisible on the site
@@ -201,25 +222,30 @@ code — a step that exists only as prose is a step that gets skipped:
    **refuses before building** when the tracked
    `packages/website/public/benchmarks/*.json` differ from HEAD, because a deploy
    publishes figures derived from them and those must be the ones a commit
-   carries; the refusal names the two commands that resolve it. Re-measuring as
-   part of publishing is a separate, named act: `npm run deploy:remeasure` from
-   `packages/website` is the only script on the deploy path that regenerates
-   timings. The live publish then verifies **itself** — `postdeploy` polls the
-   published `build.json` until its commit and version match this checkout, and
-   exits non-zero if they never do. The branch push is not the publish.
-4. **Only then commit**, as the repo user, with a **single short one-line
-   message** describing the change (`Deduplicated shared helpers into core and
-   view`). ONE line: no body, no `Co-authored-by`, no "Generated with", no AI
-   attribution, no person's name, no version. `git add -A` stages the work;
-   confirm gitignored scratch is excluded and never force-add it.
-5. **Tag before pushing:** `git tag v<new-version>`. The version lives only in the
+   carries; the refusal names the two commands that resolve it. Reaching that
+   refusal here means a measurement was regenerated *after* step 3 — commit it or
+   `git checkout --` it, and deploy again. Re-measuring as part of publishing is a
+   separate, named act: `npm run deploy:remeasure` from `packages/website` is the
+   only script on the deploy path that regenerates timings, and because it is the
+   one path that leaves regenerated figures in the tree it is finished by a commit
+   carrying them, not by the publish. The live publish then verifies **itself** —
+   `postdeploy` polls the published `build.json` until its commit and version
+   match this checkout, and exits non-zero if they never do. The branch push is
+   not the publish.
+6. **Tag before pushing:** `git tag v<new-version>`. The version lives only in the
    tag.
-6. **Push with tags:** `git push && git push --tags`.
+7. **Push with tags:** `git push && git push --tags`.
 
-The order of 2–4 is load-bearing: the bump lands in the working tree, the site is
-built and deployed from it, and only then is the work committed — which is why the
-deployed `build.json` records the revision that HEAD still points at when
-`postdeploy` checks it.
+The order of 2–5 is load-bearing, and **the commit precedes the deploy**. A deploy
+publishes figures derived from the tracked measurements, so those must already be
+the ones a commit carries — the drift guard enforces exactly that and its own
+refusal names the resolution ("the re-measure was deliberate — commit it, then
+deploy"). Deploying first would make a re-measuring close-out unable to publish at
+all, and it would leave the published `build.json` naming the revision *before* the
+one that produced the deployed bytes. Committing first costs nothing and makes
+`build.json` name the commit that built it, which is what `postdeploy` then
+verifies against this checkout. The bump still lands in the working tree before the
+commit, so the deployed site and the commit carry one version between them.
 
 ## 7. Running a program
 
