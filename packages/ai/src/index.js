@@ -22,7 +22,7 @@ export {
   RECALL_TOOL_NAME, createRecallTool, roundSlotName, indexSlotName,
   slotRef, slotAddress, slotAddressesIn,
 } from './recall.js';
-export { createLedger } from './ledger.js';
+export { createLedger, sameIdentity, describeIdentity } from './ledger.js';
 export {
   createEnvironment, environmentTools, chunkSlotName, chunkFamily, CHUNK_KIND,
 } from './environment.js';

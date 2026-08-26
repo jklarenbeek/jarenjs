@@ -691,6 +691,10 @@ const { memories, scores, skipped } = await ledger.recall({
   embedder's `{ model, dims }` before any arithmetic. Two models in the ledger, or a ledger
   embedded by one model and queried through another, answer `{ error }` naming every identity
   found — never the matching subset, because a silent subset is a silent wrong answer.
+  The comparison is `sameIdentity(a, b)` and the wording is `describeIdentity(identity)`,
+  both exported, because the rule is not the ledger's alone: a storage adapter that
+  ranks applies the same comparison where the records live, and so does a host with a
+  vector store of its own beside the ledger.
 - **Skipped, reported.** The candidates are the records that pass `tags`/`where` AND carry a
   vector; the ones that pass and carry none are counted in `skipped`, never scored (a fabricated
   score poisons a ranking) and never hidden (a silent drop poisons trust). The result is
@@ -865,6 +869,33 @@ store reports the distinct `embeddedBy` it holds under the prefix, and the wordi
 order and the decision stay in one place. Above, that report is two pushed `COUNT(*)`
 statements on the hot path — the naming scan is paid only when the counts prove a mixture,
 which is the one case about to refuse anyway.
+
+Selecting "the records whose `embeddedBy` is `{ model, dims }`" is the one piece of the
+ledger's rule an adapter has to apply itself, so it is exported rather than left to be
+re-derived:
+
+```js
+import { sameIdentity, describeIdentity } from '@jarenjs/ai';
+
+rank: async ({ prefix, vector, model, dims, limit }) => {
+  const query = { model, dims };
+  const under = await readUnder(prefix);
+  const mine = under.filter((record) => sameIdentity(record.embeddedBy, query));
+  const identities = [...new Map(under
+    .filter((record) => record.embedding !== undefined)
+    .map((record) => [describeIdentity(record.embeddedBy), record.embeddedBy])).values()];
+  return { hits: score(mine, vector).slice(0, limit), skipped: under.length - mine.length, identities };
+},
+```
+
+The SQL adapter above cannot call it — a predicate that pushes to the database has to be
+written as a query document — which is exactly why the JavaScript form is published: every
+other adapter, and every host keeping its own vector store beside the ledger, applies one
+implementation instead of writing a second. Two edges make that worth insisting on:
+`sameIdentity(undefined, undefined)` is **false** (a record with no identity has no space
+to share, so "unknown" must never rank against "unknown"), and matching `dims` alone is
+never enough (two models at 768 produce vectors whose cosine is arithmetic without
+meaning).
 
 Each dropped round is archived to a slot **before** the synopsis is written, and every
 synopsis line carries its address:

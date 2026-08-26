@@ -209,17 +209,52 @@ function recencyOrder(a, b) {
 const skillText = (skill) => `${skill.name}\n${skill.when}\n${skill.instructions}`;
 
 /**
- * Whether two vector identities are the same model at the same width.
- * @param {LedgerEmbeddedBy | undefined} a
- * @param {LedgerEmbeddedBy} b
+ * Whether two vector identities name the same space: the same model at
+ * the same width. The rule the ledger applies before any arithmetic
+ * happens, exported because it is not the ledger's alone — a storage
+ * adapter's optional `rank` selects the records whose `embeddedBy` is
+ * the query's, and a host keeping its own vector store beside the
+ * ledger has to refuse the same mixtures. A second implementation of a
+ * one-line predicate is a second chance to get its edges wrong, and
+ * both edges below are ones a re-derivation usually misses.
+ *
+ * Total, and false rather than a throw for anything malformed, so it
+ * can be applied straight to what a store handed back.
+ *
+ * **Two absent identities are NOT the same.** A record with no identity
+ * has no space to share; "unknown" must never rank against "unknown",
+ * or an un-embedded record would compare equal to every other one.
+ * **A width alone is not an identity either** — two models at 768 dims
+ * produce vectors whose cosine is arithmetic without meaning, which is
+ * why `dims` matching is necessary and never sufficient.
+ *
+ * @param {LedgerEmbeddedBy | undefined | null} a
+ * @param {LedgerEmbeddedBy | undefined | null} b
+ * @returns {boolean} whether both are identities naming one space
+ * @example
+ * sameIdentity({ model: 'm', dims: 4 }, { model: 'm', dims: 4 });  // true
+ * sameIdentity({ model: 'm', dims: 4 }, { model: 'm', dims: 8 });  // false — a re-embed, not a match
+ * sameIdentity(undefined, undefined);                              // false — no space is not a shared space
  */
-const sameIdentity = (a, b) => a !== undefined && a.model === b.model && a.dims === b.dims;
+export function sameIdentity(a, b) {
+  return a !== undefined && a !== null && b !== undefined && b !== null
+    && a.model === b.model && a.dims === b.dims;
+}
 
 /**
- * An identity as a refusal names it.
+ * An identity as a refusal names it — `"text-embedding-3-small (1536
+ * dims)"`. Exported for the same reason as {@link sameIdentity}: it is
+ * the wording the ledger's mixture refusals use, so a host reporting
+ * the same condition reports it in the same words, and it is a stable
+ * key for collecting the DISTINCT identities a `rank` adapter owes its
+ * caller.
+ *
  * @param {LedgerEmbeddedBy} identity
+ * @returns {string}
  */
-const describeIdentity = (identity) => `${identity.model} (${identity.dims} dims)`;
+export function describeIdentity(identity) {
+  return `${identity.model} (${identity.dims} dims)`;
+}
 
 /** The seam refusal, shared by every entry point that needs the embedder. */
 const SEAM_REFUSAL = 'needs the embedder seam — inject createEmbeddingClient(...) or any { embed, model, dims }';

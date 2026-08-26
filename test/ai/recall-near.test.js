@@ -17,7 +17,8 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { createLedger, createHashEmbedder, AiError } from '@jarenjs/ai';
+import { createLedger, createHashEmbedder, sameIdentity, describeIdentity, AiError } from '@jarenjs/ai';
+import { sameIdentity as sameIdentitySubpath } from '@jarenjs/ai/ledger';
 import { MEMORY_SCHEMA, SKILL_SCHEMA } from '@jarenjs/ai/schemas/ledger';
 import { compileJsonQuery } from '@jarenjs/json/query';
 
@@ -495,5 +496,46 @@ describe('ai ledger — auto-embedding on write is opt-in', function () {
       err instanceof AiError && err.code === 'AI0001' && /embedder/.test(err.message));
     assert.throws(() => createLedger({ embedder: { embed: async () => [] } }), (err) =>
       err instanceof AiError && err.code === 'AI0001' && /model/.test(err.message));
+  });
+});
+
+describe('ai ledger — the identity rule is published, not private', function () {
+  // a rank adapter selects the records whose embeddedBy is the query's,
+  // and a host with its own vector store refuses the same mixtures — so
+  // the predicate the ledger applies has to be reachable, or each of
+  // them re-derives it and one of them gets an edge wrong
+  it('is one space only when the model and the width both agree', function () {
+    assert.strictEqual(sameIdentity({ model: 'm', dims: 4 }, { model: 'm', dims: 4 }), true);
+    assert.strictEqual(sameIdentity({ model: 'm', dims: 4 }, { model: 'm', dims: 8 }), false,
+      'a re-embed at another width is another space');
+    assert.strictEqual(sameIdentity({ model: 'a', dims: 4 }, { model: 'b', dims: 4 }), false,
+      'one width, two models — arithmetic without meaning');
+  });
+
+  it('refuses to call two absent identities the same', function () {
+    // the edge a re-derivation misses: an un-embedded record has no
+    // space to share, so "unknown" must not rank against "unknown"
+    assert.strictEqual(sameIdentity(undefined, undefined), false);
+    assert.strictEqual(sameIdentity(null, null), false);
+    assert.strictEqual(sameIdentity(undefined, { model: 'm', dims: 4 }), false);
+    assert.strictEqual(sameIdentity({ model: 'm', dims: 4 }, undefined), false);
+  });
+
+  it('names an identity the way a refusal does', async function () {
+    assert.strictEqual(describeIdentity({ model: 'hash-trigram-16', dims: 16 }),
+      'hash-trigram-16 (16 dims)');
+
+    // the same string the ledger puts in front of a reader, so a host
+    // reporting the mixture reports it in the ledger's words
+    const ledger = createLedger({ now: clock(), embedder: hash16() });
+    const wide = createHashEmbedder({ dims: 32 });
+    await ledger.addMemory(memory('narrow', 'alpha beta', await embeddingOf(hash16(), 'alpha beta')));
+    await ledger.addMemory(memory('wide', 'alpha beta', await embeddingOf(wide, 'alpha beta')));
+    const mixed = await ledger.recall({ near: 'alpha beta' });
+    assert.ok(mixed.error.includes(describeIdentity({ model: 'hash-trigram-32', dims: 32 })));
+  });
+
+  it('reaches a consumer through the package and the subpath alike', function () {
+    assert.strictEqual(sameIdentitySubpath, sameIdentity);
   });
 });

@@ -1133,6 +1133,26 @@ import { createMemoryStorage as memoryStorageSubpath } from '@jarenjs/ai/storage
 
 void [createLedgerSubpath, memoryStorageSubpath, MEMORY_SCHEMA];
 
+// The identity rule, reachable. A storage adapter's optional `rank`
+// selects the records whose `embeddedBy` is the query's, and a host
+// keeping its own vector store beside the ledger refuses the same
+// mixtures — both need the predicate the ledger applies, typed against
+// the same `LedgerEmbeddedBy` the records carry.
+import { sameIdentity, describeIdentity } from '@jarenjs/ai';
+import { sameIdentity as sameIdentitySubpath } from '@jarenjs/ai/ledger';
+import type { LedgerEmbeddedBy } from '@jarenjs/ai/schemas/ledger';
+
+function identityBlock(stored: LedgerEmbeddedBy | undefined, query: LedgerEmbeddedBy) {
+  // total on both sides: what a store hands back may carry no identity
+  const comparable: boolean = sameIdentity(stored, query);
+  const bothAbsent: boolean = sameIdentity(undefined, undefined);
+  const named: string = describeIdentity(query);
+  void [comparable, bothAbsent, named, sameIdentitySubpath];
+  // @ts-expect-error — a width is not an identity
+  void sameIdentity(768, query);
+}
+void identityBlock;
+
 async function ledgerBlock() {
   // no arguments at all: in-memory storage, no query seam
   const bare = createLedger();
