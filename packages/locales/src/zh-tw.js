@@ -26,6 +26,7 @@ import {
   formatMessageValue,
   makeNumberRenderer,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -164,5 +165,53 @@ export const zhTW = {
   'contract/seq-regression': '操作 {op} 的串流違反了其 seq 順序',
   'contract/stream-error': '操作 {op} 的串流以伺服器錯誤結束({code})',
   'contract/heartbeat-missed': '操作 {op} 的串流沉默了 {ms} 毫秒',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // No plural, and the wide and abbreviated month names are the same
+  // string - as CLDR has them.
+  ...dateNameEntries({
+    months: [
+      '1月', '2月', '3月', '4月', '5月', '6月',
+      '7月', '8月', '9月', '10月', '11月', '12月',
+    ],
+    monthsShort: [
+      '1月', '2月', '3月', '4月', '5月', '6月',
+      '7月', '8月', '9月', '10月', '11月', '12月',
+    ],
+    weekdays: [
+      '星期日', '星期一', '星期二', '星期三',
+      '星期四', '星期五', '星期六',
+    ],
+    weekdaysShort: [
+      '週日', '週一', '週二', '週三', '週四', '週五', '週六',
+    ],
+    meridiem: ['上午', '下午'],
+  }),
+  'date/relative/second/past': (p) => `${num(p.value)} 秒前`,
+  'date/relative/second/future': (p) => `${num(p.value)} 秒後`,
+  'date/relative/minute/past': (p) => `${num(p.value)} 分鐘前`,
+  'date/relative/minute/future': (p) => `${num(p.value)} 分鐘後`,
+  'date/relative/hour/past': (p) => `${num(p.value)} 小時前`,
+  'date/relative/hour/future': (p) => `${num(p.value)} 小時後`,
+  'date/relative/day/past': (p) => `${num(p.value)} 天前`,
+  'date/relative/day/future': (p) => `${num(p.value)} 天後`,
+  'date/relative/week/past': (p) => `${num(p.value)} 週前`,
+  'date/relative/week/future': (p) => `${num(p.value)} 週後`,
+  'date/relative/month/past': (p) => `${num(p.value)} 個月前`,
+  'date/relative/month/future': (p) => `${num(p.value)} 個月後`,
+  'date/relative/year/past': (p) => `${num(p.value)} 年前`,
+  'date/relative/year/future': (p) => `${num(p.value)} 年後`,
+  'date/relative/now': '現在',
+  'date/relative/yesterday': '昨天',
+  'date/relative/today': '今天',
+  'date/relative/tomorrow': '明天',
+  'format/name/date': '日期',
+  'format/name/time': '時間',
+  'format/name/date-time': '日期與時間',
+  'format/name/iso-date': 'ISO 日期',
+  'format/name/iso-time': 'ISO 時間',
+  'format/name/iso-date-time': 'ISO 日期與時間',
   //#endregion
 };

@@ -24,6 +24,7 @@ import {
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -166,5 +167,51 @@ export const pt = {
   'contract/seq-regression': 'o fluxo da operação {op} violou a ordem de seus seq',
   'contract/stream-error': 'o fluxo da operação {op} terminou com um erro do servidor ({code})',
   'contract/heartbeat-missed': 'o fluxo da operação {op} ficou em silêncio por {ms} ms',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  ...dateNameEntries({
+    months: [
+      'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+      'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+    ],
+    monthsShort: [
+      'jan.', 'fev.', 'mar.', 'abr.', 'mai.', 'jun.',
+      'jul.', 'ago.', 'set.', 'out.', 'nov.', 'dez.',
+    ],
+    weekdays: [
+      'domingo', 'segunda-feira', 'terça-feira', 'quarta-feira',
+      'quinta-feira', 'sexta-feira', 'sábado',
+    ],
+    weekdaysShort: [
+      'dom.', 'seg.', 'ter.', 'qua.', 'qui.', 'sex.', 'sáb.',
+    ],
+    meridiem: ['a.m.', 'p.m.'],
+  }),
+  'date/relative/second/past': (p) => `há ${num(p.value)} ${plural(p.value, 'segundo', 'segundos')}`,
+  'date/relative/second/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'segundo', 'segundos')}`,
+  'date/relative/minute/past': (p) => `há ${num(p.value)} ${plural(p.value, 'minuto', 'minutos')}`,
+  'date/relative/minute/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'minuto', 'minutos')}`,
+  'date/relative/hour/past': (p) => `há ${num(p.value)} ${plural(p.value, 'hora', 'horas')}`,
+  'date/relative/hour/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'hora', 'horas')}`,
+  'date/relative/day/past': (p) => `há ${num(p.value)} ${plural(p.value, 'dia', 'dias')}`,
+  'date/relative/day/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'dia', 'dias')}`,
+  'date/relative/week/past': (p) => `há ${num(p.value)} ${plural(p.value, 'semana', 'semanas')}`,
+  'date/relative/week/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'semana', 'semanas')}`,
+  'date/relative/month/past': (p) => `há ${num(p.value)} ${plural(p.value, 'mês', 'meses')}`,
+  'date/relative/month/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'mês', 'meses')}`,
+  'date/relative/year/past': (p) => `há ${num(p.value)} ${plural(p.value, 'ano', 'anos')}`,
+  'date/relative/year/future': (p) => `dentro de ${num(p.value)} ${plural(p.value, 'ano', 'anos')}`,
+  'date/relative/now': 'agora',
+  'date/relative/yesterday': 'ontem',
+  'date/relative/today': 'hoje',
+  'date/relative/tomorrow': 'amanhã',
+  'format/name/date': 'data',
+  'format/name/time': 'hora',
+  'format/name/date-time': 'data e hora',
+  'format/name/iso-date': 'data ISO',
+  'format/name/iso-time': 'hora ISO',
+  'format/name/iso-date-time': 'data e hora ISO',
   //#endregion
 };

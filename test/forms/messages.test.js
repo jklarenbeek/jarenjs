@@ -21,6 +21,8 @@ import {
   formRulesToQueryAssertions,
   formsMessagesEn,
   formChromeLabels,
+  formatDisplayName,
+  buildFormViewModel,
   compileMessageCatalog,
   compileMessageTemplate,
 } from '@jarenjs/forms';
@@ -32,7 +34,7 @@ import {
   compileMessageCatalog as compileValidateCatalog,
 } from '@jarenjs/validate';
 
-import { nl } from '@jarenjs/locales';
+import { nl, ja, ar } from '@jarenjs/locales';
 
 const nlForms = compileMessageCatalog(nl);
 const nlValidate = compileValidateCatalog(nl);
@@ -374,6 +376,23 @@ describe('forms message utilities', () => {
     assert.deepStrictEqual(Object.keys(formsMessagesEn).sort(), expected.sort());
   });
 
+  it('formatDisplayName reads a format the catalog names, and keeps the rest', () => {
+    // the six date and time formats are the ones a catalog names
+    assert.strictEqual(formatDisplayName(nlForms, 'date-time'), 'datum en tijd');
+    assert.strictEqual(formatDisplayName(nlForms, 'iso-time'), 'ISO-tijd');
+    // a format name that is already a word keeps it, in every language
+    assert.strictEqual(formatDisplayName(nlForms, 'email'), 'email');
+    assert.strictEqual(formatDisplayName(nlForms, 'ipv6'), 'ipv6');
+    // and so does one this repository has never heard of
+    assert.strictEqual(formatDisplayName(nlForms, 'x-invoice-line'), 'x-invoice-line');
+    // no catalog is the English path, which is the wire name itself
+    assert.strictEqual(formatDisplayName(undefined, 'date-time'), 'date-time');
+    // an entry that renders nothing usable does not erase the name
+    assert.strictEqual(
+      formatDisplayName(compileMessageCatalog({ 'format/name/date': () => '' }), 'date'),
+      'date');
+  });
+
   it('formChromeLabels resolves the array buttons through a catalog', () => {
     assert.deepStrictEqual(formChromeLabels(),
       { addItem: 'Add item', removeItem: 'Remove item' });
@@ -384,5 +403,59 @@ describe('forms message utilities', () => {
     // a catalog missing the keys still yields the English chrome
     assert.deepStrictEqual(formChromeLabels(compileMessageCatalog({})),
       { addItem: 'Add item', removeItem: 'Remove item' });
+  });
+});
+
+describe('the date formats read as words', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      when: { type: 'string', format: 'date-time' },
+      day: { type: 'string', format: 'date' },
+      mail: { type: 'string', format: 'email' },
+      line: { type: 'string', format: 'x-invoice-line' },
+    },
+  };
+  const model = buildFormModel(schema);
+  const [when, day, mail] = model.children;
+
+  it('renders the display name in the message and keeps the wire name in the params', () => {
+    const dutch = validateField(when, 'nope', nlForms)[0];
+    assert.strictEqual(dutch.message, 'Moet een geldige datum en tijd zijn');
+    // the params stay STRUCTURAL, so the same error re-renders in a
+    // second language rather than repeating the first one's noun
+    assert.strictEqual(dutch.params.format, 'date-time');
+    assert.strictEqual(dutch.msgid, 'form/format');
+
+    assert.strictEqual(validateField(day, 'nope', nlForms)[0].message,
+      'Moet een geldige datum zijn');
+    assert.strictEqual(
+      validateField(when, 'nope', compileMessageCatalog(ja))[0].message,
+      '有効な 日時 形式で入力してください');
+    assert.strictEqual(
+      validateField(when, 'nope', compileMessageCatalog(ar))[0].message,
+      'يجب أن تكون القيمة بتنسيق تاريخ ووقت صالح');
+  });
+
+  it('a format the catalog cannot name keeps its own, and English is unchanged', () => {
+    assert.strictEqual(validateField(mail, 'nope', nlForms)[0].message,
+      'Moet een geldige email zijn');
+    assert.strictEqual(validateField(when, 'nope')[0].message,
+      'Must be a valid date-time');
+    // an unknown format has no tester, so nothing asserts on it at all
+    assert.deepStrictEqual(validateField(model.children[3], 'anything', nlForms), []);
+  });
+
+  it('the accessible error text a screen reader announces carries the name', () => {
+    const tree = buildFormViewModel(model, { when: 'nope' }, {
+      catalog: nlForms,
+      validateFields: true,
+      session: { initial: {}, touched: ['/when'], idPrefix: 'f' },
+    });
+    const field = tree.children[0];
+    assert.deepStrictEqual(field.errors, ['Moet een geldige datum en tijd zijn']);
+    // the text is wired to the control by id, so the announcement is the
+    // translated sentence rather than the wire name
+    assert.strictEqual(field.describedBy, `${field.id}-error`);
   });
 });

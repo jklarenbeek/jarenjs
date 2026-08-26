@@ -259,6 +259,29 @@ const errors = validateAllFields(model, data, catalog);
 // errors['/name'][0].message === 'Dit veld is verplicht'
 ```
 
+### A format's name, in the reader's language
+
+A format's name is its wire name — `date-time`, `iso-time` — which is
+English by construction and reads as gibberish inside a translated
+sentence (*"Moet een geldige date-time zijn"*). A catalog that carries
+`format/name/<format>` says how that format is called in its own
+language, and `renderFormsMessage` swaps it in before `form/format`
+renders. The error's own `params.format` stays the raw wire name, so the
+same error re-rendered through a second catalog answers in *that*
+language rather than repeating the first one's noun:
+
+```javascript
+const error = validateField(whenField, 'nope', catalog)[0];
+error.message;       // 'Moet een geldige datum en tijd zijn'
+error.params.format; // 'date-time'
+formatDisplayName(catalog, 'email');  // 'email' — already a word
+```
+
+`@jarenjs/locales` carries the six date and time names in every pack; a
+format the catalog cannot name keeps its own, which is the readable
+answer for the names that are already words and the only possible one for
+a format nobody has heard of.
+
 ### MessageSpec in `x-form.message`
 
 A rule's `message` may be a plain string (backward compatible — an inline

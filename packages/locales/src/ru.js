@@ -13,10 +13,10 @@
  * Globalization mechanics (the pack-authoring pattern - see
  * packages/validate/docs/ERROR-MESSAGES.md):
  * - `Intl.PluralRules` picks plural categories. Russian counts split
- *   one/few/many, but every counted noun here follows "менее/более"
- *   and therefore reads in the genitive - where only the 'one'
- *   category differs ("21 символа" / "22 символов"), so a two-form
- *   helper suffices,
+ *   one/few/many; every counted noun following "менее/более" reads in
+ *   the genitive, where only the 'one' category differs ("21 символа" /
+ *   "22 символов") and a two-form helper suffices, while the
+ *   relative-time nouns take the accusative and need all three,
  * - `Intl.NumberFormat` renders numeric limits the Russian way,
  * - `Intl.ListFormat` renders enum alternatives ("a, b или c"),
  * all held as module-level singletons (allocation discipline).
@@ -25,8 +25,10 @@
 import {
   formatMessageValue,
   makeNumberRenderer,
+  makePluralForms,
   makePluralPicker,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -41,6 +43,13 @@ const listFormat = new Intl.ListFormat('ru', { style: 'long', type: 'disjunction
  * N ..." message needs.
  */
 const plural = makePluralPicker(pluralRules);
+
+/**
+ * Pick the accusative form a counted relative-time noun takes: 'one'
+ * recurs at 21, 31 ... and 'few' at 22-24, so the three forms follow the
+ * CLDR category rather than the number's last digit.
+ */
+const caseForms = makePluralForms(pluralRules);
 
 /**
  * Render a numeric limit through the Russian number format; non-numbers
@@ -176,5 +185,55 @@ export const ru = {
   'contract/seq-regression': 'поток операции {op} нарушил порядок своих seq',
   'contract/stream-error': 'поток операции {op} завершился ошибкой сервера ({code})',
   'contract/heartbeat-missed': 'поток операции {op} молчал {ms} мс',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // The month names are the FORMAT (genitive) forms, because the array
+  // feeds a date pattern ('d MMMM yyyy' reads '27 июля 2026'), not a
+  // standalone label. Both 'назад' and 'через' take the accusative, so
+  // one set of counted forms serves past and future alike.
+  ...dateNameEntries({
+    months: [
+      'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+    ],
+    monthsShort: [
+      'янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.',
+      'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.',
+    ],
+    weekdays: [
+      'воскресенье', 'понедельник', 'вторник', 'среда',
+      'четверг', 'пятница', 'суббота',
+    ],
+    weekdaysShort: [
+      'вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб',
+    ],
+    meridiem: ['AM', 'PM'],
+  }),
+  'date/relative/second/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'секунду', few: 'секунды', other: 'секунд' })} назад`,
+  'date/relative/second/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'секунду', few: 'секунды', other: 'секунд' })}`,
+  'date/relative/minute/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'минуту', few: 'минуты', other: 'минут' })} назад`,
+  'date/relative/minute/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'минуту', few: 'минуты', other: 'минут' })}`,
+  'date/relative/hour/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'час', few: 'часа', other: 'часов' })} назад`,
+  'date/relative/hour/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'час', few: 'часа', other: 'часов' })}`,
+  'date/relative/day/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'день', few: 'дня', other: 'дней' })} назад`,
+  'date/relative/day/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'день', few: 'дня', other: 'дней' })}`,
+  'date/relative/week/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'неделю', few: 'недели', other: 'недель' })} назад`,
+  'date/relative/week/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'неделю', few: 'недели', other: 'недель' })}`,
+  'date/relative/month/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'месяц', few: 'месяца', other: 'месяцев' })} назад`,
+  'date/relative/month/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'месяц', few: 'месяца', other: 'месяцев' })}`,
+  'date/relative/year/past': (p) => `${num(p.value)} ${caseForms(p.value, { one: 'год', few: 'года', other: 'лет' })} назад`,
+  'date/relative/year/future': (p) => `через ${num(p.value)} ${caseForms(p.value, { one: 'год', few: 'года', other: 'лет' })}`,
+  'date/relative/now': 'сейчас',
+  'date/relative/yesterday': 'вчера',
+  'date/relative/today': 'сегодня',
+  'date/relative/tomorrow': 'завтра',
+  'format/name/date': 'дата',
+  'format/name/time': 'время',
+  'format/name/date-time': 'дата и время',
+  'format/name/iso-date': 'дата ISO',
+  'format/name/iso-time': 'время ISO',
+  'format/name/iso-date-time': 'дата и время ISO',
   //#endregion
 };

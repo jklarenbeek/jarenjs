@@ -26,6 +26,7 @@ import {
   formatMessageValue,
   makeNumberRenderer,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -164,5 +165,53 @@ export const ko = {
   'contract/seq-regression': '작업 {op}의 스트림이 seq 순서를 위반했습니다',
   'contract/stream-error': '작업 {op}의 스트림이 서버 오류로 종료되었습니다 ({code})',
   'contract/heartbeat-missed': '작업 {op}의 스트림이 {ms}ms 동안 침묵했습니다',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // Korean has no plural and sets no space between a numeral and its
+  // counter, the way the rest of this pack already counts characters.
+  ...dateNameEntries({
+    months: [
+      '1월', '2월', '3월', '4월', '5월', '6월',
+      '7월', '8월', '9월', '10월', '11월', '12월',
+    ],
+    monthsShort: [
+      '1월', '2월', '3월', '4월', '5월', '6월',
+      '7월', '8월', '9월', '10월', '11월', '12월',
+    ],
+    weekdays: [
+      '일요일', '월요일', '화요일', '수요일',
+      '목요일', '금요일', '토요일',
+    ],
+    weekdaysShort: [
+      '일', '월', '화', '수', '목', '금', '토',
+    ],
+    meridiem: ['오전', '오후'],
+  }),
+  'date/relative/second/past': (p) => `${num(p.value)}초 전`,
+  'date/relative/second/future': (p) => `${num(p.value)}초 후`,
+  'date/relative/minute/past': (p) => `${num(p.value)}분 전`,
+  'date/relative/minute/future': (p) => `${num(p.value)}분 후`,
+  'date/relative/hour/past': (p) => `${num(p.value)}시간 전`,
+  'date/relative/hour/future': (p) => `${num(p.value)}시간 후`,
+  'date/relative/day/past': (p) => `${num(p.value)}일 전`,
+  'date/relative/day/future': (p) => `${num(p.value)}일 후`,
+  'date/relative/week/past': (p) => `${num(p.value)}주 전`,
+  'date/relative/week/future': (p) => `${num(p.value)}주 후`,
+  'date/relative/month/past': (p) => `${num(p.value)}개월 전`,
+  'date/relative/month/future': (p) => `${num(p.value)}개월 후`,
+  'date/relative/year/past': (p) => `${num(p.value)}년 전`,
+  'date/relative/year/future': (p) => `${num(p.value)}년 후`,
+  'date/relative/now': '지금',
+  'date/relative/yesterday': '어제',
+  'date/relative/today': '오늘',
+  'date/relative/tomorrow': '내일',
+  'format/name/date': '날짜',
+  'format/name/time': '시간',
+  'format/name/date-time': '날짜 및 시간',
+  'format/name/iso-date': 'ISO 날짜',
+  'format/name/iso-time': 'ISO 시간',
+  'format/name/iso-date-time': 'ISO 날짜 및 시간',
   //#endregion
 };

@@ -3,10 +3,10 @@ package: "@jarenjs/locales"
 card:
   title: Locale packs
   blurb: >-
-    Message catalogs for the validator's and the form model's errors, one
-    pack per language, over the stable msgids and raw params every error
-    carries — so switching language re-renders the text and re-validates
-    nothing.
+    Message catalogs for the validator's and the form model's errors plus
+    the calendar language the date kernel refuses to invent, one pack per
+    language, over the stable msgids and raw params every error carries —
+    so switching language re-renders the text and re-validates nothing.
 ---
 
 Jaren never bakes prose into a hot path. A failing check carries a stable
@@ -32,6 +32,16 @@ subpath (`@jarenjs/locales/nl`), so a bundle carries only the languages it
 imports. Because localization happens after the check, switching language
 re-renders the text and re-validates nothing — the same result object answers
 in a second language without the validator running again.
+
+Every pack also carries the calendar language `@jarenjs/core/dates` refuses to
+invent — month, weekday and meridiem names, relative-time phrases, and the
+display names that turn *"Moet een geldige date-time zijn"* into *"Moet een
+geldige datum en tijd zijn"*. `compileDateLocale(pack)` reads a pack once into
+the arrays a compiled date pattern takes and a `relative(amount, unit)` that is
+handed its amount rather than reading a clock. The text is repository data, not
+`Intl`, because this site is server-rendered under byte-comparison tests and ICU
+output moves between Node versions; `createIntlDateLocale` is there for a host
+that would rather have a hundred locales than stable bytes.
 
 Arabic is a right-to-left pack, and the site's own language switcher is where
 that is proven: the messages are isolated for bidirectional text so an

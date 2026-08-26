@@ -68,9 +68,47 @@ export const formsMessagesEn = {
 /** The compiled built-in English catalog (module-level singleton). */
 export const formsMessages = compileMessageCatalog(formsMessagesEn);
 
+/** Shared empty params for the entries that interpolate nothing. */
+const NO_PARAMS = Object.freeze({});
+
+/**
+ * The display name of a format, as the catalog in hand spells it.
+ *
+ * A format's name is its wire name - `date-time`, `iso-time` - which is
+ * English by construction and reads as gibberish inside a translated
+ * sentence ("Moet een geldige date-time zijn"). A catalog that carries
+ * `format/name/<format>` says how that format is called in its own
+ * language; the date catalog of `@jarenjs/locales` carries the six date
+ * and time ones. A format the catalog has no name for keeps its own,
+ * which is the readable answer for the format names that are already
+ * words ("email", "hostname") and the only possible one for a format
+ * this repository has never heard of.
+ *
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>|undefined} catalog - A compiled catalog, or undefined for English
+ * @param {string} format - The format name
+ * @returns {string} The display name, or the format name itself
+ * @example
+ * formatDisplayName(dutch, 'date-time'); // 'datum en tijd'
+ * formatDisplayName(dutch, 'email');     // 'email'
+ */
+export function formatDisplayName(catalog, format) {
+  if (typeof format !== 'string' || catalog === undefined) return format;
+  const render = catalog[`format/name/${format}`];
+  if (render === undefined) return format;
+  const name = render(NO_PARAMS);
+  return typeof name === 'string' && name !== '' ? name : format;
+}
+
 /**
  * Resolve a message key through a caller catalog with built-in English
  * fallback and render it.
+ *
+ * A format failure is the one message whose params are prepared here
+ * rather than at the call site: the error's own `params.format` stays
+ * the raw wire name, so re-rendering the same error through a second
+ * catalog answers in that catalog's language instead of repeating the
+ * first one's noun.
+ *
  * @param {Readonly<Record<string, (params: object, error?: object) => string>>|undefined} catalog - A compiled catalog, or undefined for English
  * @param {string} msgid - The message key
  * @param {object} params - The structured params
@@ -80,6 +118,10 @@ export function renderFormsMessage(catalog, msgid, params) {
   let render = catalog !== undefined ? catalog[msgid] : undefined;
   if (render === undefined) render = formsMessages[msgid];
   if (render === undefined) return msgid;
+  if (msgid === 'form/format') {
+    const format = formatDisplayName(catalog, /** @type {any} */ (params).format);
+    return render({ ...params, format });
+  }
   return render(params);
 }
 

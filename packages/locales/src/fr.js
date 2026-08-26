@@ -24,6 +24,7 @@ import {
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -166,5 +167,53 @@ export const fr = {
   'contract/seq-regression': "le flux de l'opération {op} a violé l'ordre de ses seq",
   'contract/stream-error': "le flux de l'opération {op} s'est terminé par une erreur serveur ({code})",
   'contract/heartbeat-missed': "le flux de l'opération {op} est resté silencieux pendant {ms} ms",
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // French keeps the singular at zero as well as at one, which is what
+  // the pack's CLDR plural rules already say; 'mois' has no plural mark.
+  ...dateNameEntries({
+    months: [
+      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+    ],
+    monthsShort: [
+      'janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+      'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.',
+    ],
+    weekdays: [
+      'dimanche', 'lundi', 'mardi', 'mercredi',
+      'jeudi', 'vendredi', 'samedi',
+    ],
+    weekdaysShort: [
+      'dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.',
+    ],
+    meridiem: ['AM', 'PM'],
+  }),
+  'date/relative/second/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'seconde', 'secondes')}`,
+  'date/relative/second/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'seconde', 'secondes')}`,
+  'date/relative/minute/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'minute', 'minutes')}`,
+  'date/relative/minute/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'minute', 'minutes')}`,
+  'date/relative/hour/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'heure', 'heures')}`,
+  'date/relative/hour/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'heure', 'heures')}`,
+  'date/relative/day/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'jour', 'jours')}`,
+  'date/relative/day/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'jour', 'jours')}`,
+  'date/relative/week/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'semaine', 'semaines')}`,
+  'date/relative/week/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'semaine', 'semaines')}`,
+  'date/relative/month/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'mois', 'mois')}`,
+  'date/relative/month/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'mois', 'mois')}`,
+  'date/relative/year/past': (p) => `il y a ${num(p.value)} ${plural(p.value, 'an', 'ans')}`,
+  'date/relative/year/future': (p) => `dans ${num(p.value)} ${plural(p.value, 'an', 'ans')}`,
+  'date/relative/now': 'maintenant',
+  'date/relative/yesterday': 'hier',
+  'date/relative/today': 'aujourd\'hui',
+  'date/relative/tomorrow': 'demain',
+  'format/name/date': 'date',
+  'format/name/time': 'heure',
+  'format/name/date-time': 'date et heure',
+  'format/name/iso-date': 'date ISO',
+  'format/name/iso-time': 'heure ISO',
+  'format/name/iso-date-time': 'date et heure ISO',
   //#endregion
 };

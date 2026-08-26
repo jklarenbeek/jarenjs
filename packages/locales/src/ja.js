@@ -23,6 +23,7 @@ import {
   formatMessageValue,
   makeNumberRenderer,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -161,5 +162,53 @@ export const ja = {
   'contract/seq-regression': '操作 {op} のストリームが seq の順序に違反しました',
   'contract/stream-error': '操作 {op} のストリームはサーバーエラーで終了しました ({code})',
   'contract/heartbeat-missed': '操作 {op} のストリームが {ms} ミリ秒間沈黙しました',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // Japanese counts through counters and has no plural, so the wide and
+  // abbreviated month names are the same string - as CLDR has them.
+  ...dateNameEntries({
+    months: [
+      '1月', '2月', '3月', '4月', '5月', '6月',
+      '7月', '8月', '9月', '10月', '11月', '12月',
+    ],
+    monthsShort: [
+      '1月', '2月', '3月', '4月', '5月', '6月',
+      '7月', '8月', '9月', '10月', '11月', '12月',
+    ],
+    weekdays: [
+      '日曜日', '月曜日', '火曜日', '水曜日',
+      '木曜日', '金曜日', '土曜日',
+    ],
+    weekdaysShort: [
+      '日', '月', '火', '水', '木', '金', '土',
+    ],
+    meridiem: ['午前', '午後'],
+  }),
+  'date/relative/second/past': (p) => `${num(p.value)} 秒前`,
+  'date/relative/second/future': (p) => `${num(p.value)} 秒後`,
+  'date/relative/minute/past': (p) => `${num(p.value)} 分前`,
+  'date/relative/minute/future': (p) => `${num(p.value)} 分後`,
+  'date/relative/hour/past': (p) => `${num(p.value)} 時間前`,
+  'date/relative/hour/future': (p) => `${num(p.value)} 時間後`,
+  'date/relative/day/past': (p) => `${num(p.value)} 日前`,
+  'date/relative/day/future': (p) => `${num(p.value)} 日後`,
+  'date/relative/week/past': (p) => `${num(p.value)} 週間前`,
+  'date/relative/week/future': (p) => `${num(p.value)} 週間後`,
+  'date/relative/month/past': (p) => `${num(p.value)} か月前`,
+  'date/relative/month/future': (p) => `${num(p.value)} か月後`,
+  'date/relative/year/past': (p) => `${num(p.value)} 年前`,
+  'date/relative/year/future': (p) => `${num(p.value)} 年後`,
+  'date/relative/now': '今',
+  'date/relative/yesterday': '昨日',
+  'date/relative/today': '今日',
+  'date/relative/tomorrow': '明日',
+  'format/name/date': '日付',
+  'format/name/time': '時刻',
+  'format/name/date-time': '日時',
+  'format/name/iso-date': 'ISO 日付',
+  'format/name/iso-time': 'ISO 時刻',
+  'format/name/iso-date-time': 'ISO 日時',
   //#endregion
 };

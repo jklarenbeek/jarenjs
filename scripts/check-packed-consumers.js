@@ -209,6 +209,22 @@ if (tree !== null && tree.session !== undefined) {
   void (tree.session.errorCount + tree.session.serverErrorCount);
 }
 `,
+  '@jarenjs/locales': `
+import { nl, dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from '@jarenjs/locales';
+import { createIntlDateLocale } from '@jarenjs/locales/intl-dates';
+import { compileDateFormat, parseRFC3339Parts } from '@jarenjs/core/dates';
+const dates = compileDateLocale(nl);
+const long: (parts: object) => string = compileDateFormat('EEEE d MMMM yyyy', dates.names);
+const parts = parseRFC3339Parts('2026-07-05T00:00:00Z');
+if (parts !== null) void long(parts);
+const phrase: string = dates.relative(-3, 'day', { numeric: 'auto' });
+void phrase.length;
+const named: string | undefined = dates.formatName('date-time');
+void named;
+void createIntlDateLocale('nl-NL').names.months[0];
+void Object.keys(dateMessagesEn).length;
+void RELATIVE_UNITS.join(',');
+`,
   '@jarenjs/linq': `
 import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
 const rows = [{ id: 1, name: 'ada' }, { id: 2, name: 'lin' }];

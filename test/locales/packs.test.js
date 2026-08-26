@@ -13,7 +13,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { fr, es, pt, de, ja, ko, zhTW, ru, tr, ar } from '@jarenjs/locales';
+import {
+  fr, es, pt, de, ja, ko, zhTW, ru, tr, ar,
+  dateMessagesEn,
+  compileDateLocale,
+} from '@jarenjs/locales';
+import { compileDateFormat, parseRFC3339Parts } from '@jarenjs/core/dates';
 import {
   JarenValidator,
   ValidatorOptions,
@@ -24,8 +29,19 @@ import {
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
 
+
+/**
+ * The date msgids take either no parameter or an absolute `{ value }`,
+ * so their sample params are DERIVED from the English key set rather
+ * than typed out again: a hand-copied list of a mechanical key set is a
+ * list that drifts away from it.
+ */
+const DATE_SAMPLE_PARAMS = Object.fromEntries(
+  Object.keys(dateMessagesEn).map((key) => [key, { value: 2 }]));
+
 /** Representative params per message key, for renders and the sweep. */
 const SAMPLE_PARAMS = {
+  ...DATE_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -120,8 +136,10 @@ const SAMPLE_PARAMS = {
 /**
  * Per-pack demonstration renders: the plural pair (or the counter form
  * for Japanese), a type name, the required property, the document-voice
- * minLength/minimum a real validator produces, and the enum-list
- * connector word of the pack's Intl.ListFormat.
+ * minLength/minimum a real validator produces, the enum-list connector
+ * word of the pack's Intl.ListFormat, and the calendar language - a
+ * pattern through the pack's own month and weekday names, both relative
+ * directions and a translated format name.
  */
 const PACKS = [
   {
@@ -133,6 +151,11 @@ const PACKS = [
     minLength: 'ne doit pas contenir moins de 2 caractères',
     minimum: 'doit être >= 18',
     enumConnector: / ou /,
+    dates: {
+      long: 'dimanche 5 juillet 2026', short: 'dim. 5 juil.',
+      past3days: 'il y a 3 jours', future21months: 'dans 21 mois',
+      yesterday: 'hier', dateTime: 'date et heure',
+    },
   },
   {
     code: 'es', pack: es,
@@ -143,6 +166,11 @@ const PACKS = [
     minLength: 'no debe tener menos de 2 caracteres',
     minimum: 'debe ser >= 18',
     enumConnector: / o /,
+    dates: {
+      long: 'domingo 5 julio 2026', short: 'dom 5 jul',
+      past3days: 'hace 3 días', future21months: 'dentro de 21 meses',
+      yesterday: 'ayer', dateTime: 'fecha y hora',
+    },
   },
   {
     code: 'pt', pack: pt,
@@ -153,6 +181,11 @@ const PACKS = [
     minLength: 'não deve ter menos de 2 caracteres',
     minimum: 'deve ser >= 18',
     enumConnector: / ou /,
+    dates: {
+      long: 'domingo 5 julho 2026', short: 'dom. 5 jul.',
+      past3days: 'há 3 dias', future21months: 'dentro de 21 meses',
+      yesterday: 'ontem', dateTime: 'data e hora',
+    },
   },
   {
     code: 'de', pack: de,
@@ -163,6 +196,11 @@ const PACKS = [
     minLength: 'darf nicht weniger als 2 Zeichen enthalten',
     minimum: 'muss >= 18 sein',
     enumConnector: / oder /,
+    dates: {
+      long: 'Sonntag 5 Juli 2026', short: 'So 5 Jul',
+      past3days: 'vor 3 Tagen', future21months: 'in 21 Monaten',
+      yesterday: 'gestern', dateTime: 'Datum und Uhrzeit',
+    },
   },
   {
     code: 'ja', pack: ja,
@@ -173,6 +211,11 @@ const PACKS = [
     minLength: '2 文字以上でなければなりません',
     minimum: '>= 18 でなければなりません',
     enumConnector: /または/,
+    dates: {
+      long: '日曜日 5 7月 2026', short: '日 5 7月',
+      past3days: '3 日前', future21months: '21 か月後',
+      yesterday: '昨日', dateTime: '日時',
+    },
   },
   {
     code: 'ko', pack: ko,
@@ -183,6 +226,11 @@ const PACKS = [
     minLength: '2자 이상이어야 합니다',
     minimum: '>= 18 이어야 합니다',
     enumConnector: /또는/,
+    dates: {
+      long: '일요일 5 7월 2026', short: '일 5 7월',
+      past3days: '3일 전', future21months: '21개월 후',
+      yesterday: '어제', dateTime: '날짜 및 시간',
+    },
   },
   {
     code: 'zh-TW', pack: zhTW,
@@ -193,6 +241,11 @@ const PACKS = [
     minLength: '不得少於 2 個字元',
     minimum: '必須 >= 18',
     enumConnector: /或/,
+    dates: {
+      long: '星期日 5 7月 2026', short: '週日 5 7月',
+      past3days: '3 天前', future21months: '21 個月後',
+      yesterday: '昨天', dateTime: '日期與時間',
+    },
   },
   {
     // the 'one' category recurs at 21, 31, ... - the genitive pair must
@@ -205,6 +258,11 @@ const PACKS = [
     minLength: 'не должно содержать менее 2 символов',
     minimum: 'должно быть >= 18',
     enumConnector: / или /,
+    dates: {
+      long: 'воскресенье 5 июля 2026', short: 'вс 5 июл.',
+      past3days: '3 дня назад', future21months: 'через 21 месяц',
+      yesterday: 'вчера', dateTime: 'дата и время',
+    },
   },
   {
     code: 'tr', pack: tr,
@@ -215,6 +273,11 @@ const PACKS = [
     minLength: 'en az 2 karakter içermelidir',
     minimum: '>= 18 olmalıdır',
     enumConnector: / veya /,
+    dates: {
+      long: 'Pazar 5 Temmuz 2026', short: 'Paz 5 Tem',
+      past3days: '3 gün önce', future21months: '21 ay sonra',
+      yesterday: 'dün', dateTime: 'tarih ve saat',
+    },
   },
   {
     code: 'ar', pack: ar,
@@ -227,8 +290,16 @@ const PACKS = [
     // renders reordered ("=<"), flipping the comparison visually
     minimum: 'يجب ألا تقل القيمة عن 18',
     enumConnector: / أو /,
+    dates: {
+      long: 'الأحد 5 يوليو 2026', short: 'الأحد 5 يوليو',
+      past3days: 'قبل 3 أيام', future21months: 'خلال 21 شهرًا',
+      yesterday: 'أمس', dateTime: 'تاريخ ووقت',
+    },
   },
 ];
+
+/** 2026-07-05 is a Sunday, so weekday index 0 renders too. */
+const SUNDAY = parseRFC3339Parts('2026-07-05T14:30:05Z');
 
 describe('@jarenjs/locales fr/es/pt/de/ja', () => {
   for (const { code, pack, ...expected } of PACKS) {
@@ -245,6 +316,9 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
         }
         for (const key of Object.keys(contractMessagesEn)) {
           assert.ok(keys.has(key), `${code} is missing contract key '${key}'`);
+        }
+        for (const key of Object.keys(dateMessagesEn)) {
+          assert.ok(keys.has(key), `${code} is missing date key '${key}'`);
         }
         assert.ok(keys.has('x-form/assert'));
       });
@@ -276,6 +350,18 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
           result.errors.find(e => e.keyword === 'minLength').message, expected.minLength);
         assert.strictEqual(
           result.errors.find(e => e.keyword === 'minimum').message, expected.minimum);
+      });
+
+      it('renders its calendar language', () => {
+        const dates = compileDateLocale(pack);
+        assert.strictEqual(
+          compileDateFormat('EEEE d MMMM yyyy', dates.names)(SUNDAY), expected.dates.long);
+        assert.strictEqual(
+          compileDateFormat('EEE d MMM', dates.names)(SUNDAY), expected.dates.short);
+        assert.strictEqual(dates.relative(-3, 'day'), expected.dates.past3days);
+        assert.strictEqual(dates.relative(21, 'month'), expected.dates.future21months);
+        assert.strictEqual(dates.relative(-1, 'day', { numeric: 'auto' }), expected.dates.yesterday);
+        assert.strictEqual(dates.formatName('date-time'), expected.dates.dateTime);
       });
 
       it('every entry renders without throwing (no-throw sweep)', () => {

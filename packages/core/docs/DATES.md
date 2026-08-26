@@ -93,6 +93,10 @@ ISO tokens work bare; name tokens (`MMMM`, `EEE`, `a`) require a
 `names` provider, which is where `@jarenjs/locales` plugs in — the
 kernel ships no month names, so server-rendered output stays
 byte-stable across Node/ICU versions.
+`compileDateLocale(pack).names` is that provider: five arrays (12 months
+wide and short, 7 weekdays wide and short from Sunday, the two day-period
+markers), read once out of a locale pack's own msgids and frozen, so a
+pattern compiled against them costs no lookup per date.
 
 ## Not here
 
@@ -100,7 +104,9 @@ byte-stable across Node/ICU versions.
 Node ≥ 24 baseline); the string/number representation is exactly what
 `Temporal.Instant.from()` consumes, so the kernel can delegate
 internally later without a surface change. Relative-time phrasing and
-month-name catalogs are `@jarenjs/locales`' job; `formatMinimum`/
+month-name catalogs are `@jarenjs/locales`' job — including the decision
+that a relative phrase is handed its signed amount rather than working
+one out, which is the same "no `now`" rule this kernel keeps; `formatMinimum`/
 `formatMaximum` bound comparison lives in `@jarenjs/formats`; time
 *axes* (charts) and date *controls* (forms) consume this kernel from
 their own packages.

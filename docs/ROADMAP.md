@@ -821,10 +821,12 @@ them, forms renders two of its three date formats as plain text boxes, and
 the locale packs contain no month names at all.
 
 The kernel (`@jarenjs/core/dates/*`), the query operators, the charts time
-axis, the forms date controls, the JOSL dedup and the allocation-free
-`formatMinimum`/`formatMaximum` comparators are done; what they do is
-documented in `packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.13 and the
-respective package READMEs. Two entries are left.
+axis, the forms date controls, the JOSL dedup, the allocation-free
+`formatMinimum`/`formatMaximum` comparators and the locale packs' calendar
+language are done; what they do is documented in
+`packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.13 and the respective
+package READMEs — the date msgids and their compilation in
+`packages/locales/README.md`. Two entries are left.
 
 Two constraints shape every entry. **There is no date type**: dates are RFC
 3339 strings (lexical, interchange) and epoch milliseconds (arithmetic), both
@@ -844,18 +846,18 @@ delegate to Temporal internally once the baseline moves, without changing a
 public surface. Building a general-purpose date *library* is therefore the one
 thing to avoid.
 
-- [ ] **Locale month/weekday names and relative time** — the 11 packs carry no
-  date content, and `form/format` interpolates the format name untranslated
-  (a Dutch user reads *"Moet een geldige date-time zijn"*). Month, weekday and
-  meridiem names plus relative-time phrasing ("3 dagen geleden") belong on the
-  existing msgid machinery, which already handles the hard plural cases
-  (Russian's genitive second form, Turkish's fixed-noun suffixes, the
-  no-plural languages). The constraint is why this is *not* delegated to
-  `Intl.RelativeTimeFormat` despite it being free: ICU output drifts between
-  Node versions, and the site is server-rendered with byte-comparison tests,
-  so rendered text must come from data the repo owns. An `Intl`-backed
-  provider stays available as an opt-in for hosts that want 100+ locales and
-  do not need byte-stable SSR.
+- [ ] **A time axis cannot be asked for a language.** All eleven packs now
+  carry month, weekday and meridiem names, signed relative-time phrases and
+  translated date-format display names, and `compileDateLocale` reads them
+  into the provider `compileDateFormat` takes (`packages/locales/README.md`).
+  What has no way to receive one is a rendered *axis*: the chart time axis
+  and the Mermaid Gantt panel compile their own numeric patterns
+  (`yyyy-MM-dd`, `HH:mm`) at module load, so nothing on them is
+  mistranslated and nothing on them can be localized either — a host cannot
+  ask for `MMM yyyy` in its own language. The open decision is where a
+  compiled `dateLocale` enters a chart spec and a Gantt directive without
+  making either renderer allocate per label; the Gantt half belongs with the
+  entry below, which needs the same names for `compileDateParser`.
 - [ ] **Mermaid gantt: interpret the date directives** — `dateFormat`,
   `axisFormat`, `tickInterval`, `excludes` and `weekday` are parsed into
   `meta` as strings and never interpreted, so gantt renders as a structured

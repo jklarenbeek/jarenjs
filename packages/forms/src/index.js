@@ -39,6 +39,7 @@ export {
 export {
   formsMessagesEn,
   formChromeLabels,
+  formatDisplayName,
   compileMessageTemplate,
   compileMessageCatalog,
 } from './messages.js';

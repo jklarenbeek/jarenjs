@@ -73,7 +73,17 @@ One flat namespace:
 | query runtime via `$query` | the `JQ2xxx` code (`JQ2001`, `JQ2003`, ...) | `{ code, docPath }` |
 | forms field checks | `form/` + the emitted keyword: `form/required`, `form/type`, `form/const`, `form/enum`, `form/minLength`, `form/maxLength`, `form/pattern`, `form/format`, `form/minimum`, `form/maximum`, `form/exclusiveMinimum`, `form/exclusiveMaximum`, `form/multipleOf`, `form/minItems`, `form/maxItems`, `form/uniqueItems`, `form/minProperties`, `form/maxProperties` | per branch: `limit`, `len`, `type`, `format`, `enumValues`, `constValue`, `pattern`, `multipleOf` |
 | forms rules | `x-form/assert` (the default), else the author's `$msgid` | `{ pointer, ...spec.params }` |
+| calendar language | `date/month/01`…`12` and `date/weekday/0`…`6`, each `/wide` and `/short`; `date/meridiem/am|pm`; `date/relative/<unit>/past|future` over `second`…`year`; `date/relative/{now,yesterday,today,tomorrow}`; `format/name/<format>` | names take none; a relative entry takes the ABSOLUTE `{ value }` |
 | applications | any `$msgid` they invent — recommend dotted names (`checkout.total-too-low`) | error params + spec params |
+
+The calendar family is data rather than a failure: `@jarenjs/core/dates`
+is locale-free, so its `MMMM`/`EEE`/`a` tokens need a names provider, and
+`@jarenjs/locales`' `compileDateLocale` reads that family into one.
+`format/name/<format>` is the one entry a message *resolves through*: the
+forms layer swaps a format's wire name for the catalog's display name
+before rendering `form/format`, leaving `params.format` structural so the
+same error re-renders in a second language. See the
+[`@jarenjs/locales` README](../../locales/README.md).
 
 Keywords without a built-in English entry (`const`, `enum`,
 `dependentRequired`, `dependencies`, `unevaluatedProperties`, ...) render

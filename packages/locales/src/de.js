@@ -24,6 +24,7 @@ import {
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -166,5 +167,53 @@ export const de = {
   'contract/seq-regression': 'der Stream der Operation {op} hat seine seq-Reihenfolge verletzt',
   'contract/stream-error': 'der Stream der Operation {op} endete mit einem Serverfehler ({code})',
   'contract/heartbeat-missed': 'der Stream der Operation {op} blieb {ms} ms lang still',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // Both 'vor' and 'in' govern the dative, so the counted nouns are the
+  // dative forms ('vor 2 Tagen', not 'vor 2 Tage').
+  ...dateNameEntries({
+    months: [
+      'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+      'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+    ],
+    monthsShort: [
+      'Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez',
+    ],
+    weekdays: [
+      'Sonntag', 'Montag', 'Dienstag', 'Mittwoch',
+      'Donnerstag', 'Freitag', 'Samstag',
+    ],
+    weekdaysShort: [
+      'So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa',
+    ],
+    meridiem: ['AM', 'PM'],
+  }),
+  'date/relative/second/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Sekunde', 'Sekunden')}`,
+  'date/relative/second/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Sekunde', 'Sekunden')}`,
+  'date/relative/minute/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Minute', 'Minuten')}`,
+  'date/relative/minute/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Minute', 'Minuten')}`,
+  'date/relative/hour/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Stunde', 'Stunden')}`,
+  'date/relative/hour/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Stunde', 'Stunden')}`,
+  'date/relative/day/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Tag', 'Tagen')}`,
+  'date/relative/day/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Tag', 'Tagen')}`,
+  'date/relative/week/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Woche', 'Wochen')}`,
+  'date/relative/week/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Woche', 'Wochen')}`,
+  'date/relative/month/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Monat', 'Monaten')}`,
+  'date/relative/month/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Monat', 'Monaten')}`,
+  'date/relative/year/past': (p) => `vor ${num(p.value)} ${plural(p.value, 'Jahr', 'Jahren')}`,
+  'date/relative/year/future': (p) => `in ${num(p.value)} ${plural(p.value, 'Jahr', 'Jahren')}`,
+  'date/relative/now': 'jetzt',
+  'date/relative/yesterday': 'gestern',
+  'date/relative/today': 'heute',
+  'date/relative/tomorrow': 'morgen',
+  'format/name/date': 'Datum',
+  'format/name/time': 'Uhrzeit',
+  'format/name/date-time': 'Datum und Uhrzeit',
+  'format/name/iso-date': 'ISO-Datum',
+  'format/name/iso-time': 'ISO-Uhrzeit',
+  'format/name/iso-date-time': 'ISO-Datum und -Uhrzeit',
   //#endregion
 };

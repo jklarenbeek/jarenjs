@@ -15,7 +15,9 @@
  * - Arabic pluralizes across six categories, so counted messages phrase
  *   around a fixed "عدد" (count-of) noun ("يجب ألا يقل عدد الأحرف عن 2")
  *   instead of agreeing the noun with the number - the standard
- *   software-string convention; no plural helper is needed,
+ *   software-string convention. The relative-time phrases are the
+ *   exception, because there the counted noun IS the message, so they
+ *   agree through `Intl.PluralRules`,
  * - `Intl.NumberFormat` is pinned to Latin digits (`numberingSystem:
  *   'latn'`): the limits describe JSON documents, which are written in
  *   Latin digits regardless of UI language,
@@ -26,11 +28,14 @@
 import {
   formatMessageValue,
   makeNumberRenderer,
+  makePluralForms,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
 
+const pluralRules = new Intl.PluralRules('ar');
 const numberFormat = new Intl.NumberFormat('ar', { numberingSystem: 'latn' });
 const listFormat = new Intl.ListFormat('ar', { style: 'long', type: 'disjunction' });
 
@@ -53,6 +58,28 @@ const TYPE_NAMES = {
 
 /** Type keyword values under their Arabic display name. */
 const typeName = makeTypeNamer(TYPE_NAMES);
+
+/** Pick the form a counted noun takes across Arabic's six categories. */
+const plural = makePluralForms(pluralRules);
+
+/**
+ * Count a noun the Arabic way: one and two are carried by the noun's own
+ * forms and take no numeral at all ("ثانية واحدة", "ثانيتين"), three to
+ * ten take the broken plural after the numeral, eleven to ninety-nine
+ * take the accusative singular ("21 يومًا") and a hundred or more the
+ * bare singular. This is the one place the pack
+ * cannot phrase around a fixed noun - a relative-time phrase IS the
+ * counted noun.
+ * @param {number} value - The absolute amount
+ * @param {Record<string, string>} forms - The noun's forms by CLDR category
+ * @returns {string}
+ */
+function counted(value, forms) {
+  const category = pluralRules.select(value);
+  return (category === 'one' || category === 'two')
+    ? plural(value, forms)
+    : `${num(value)} ${plural(value, forms)}`;
+}
 
 /**
  * The limit comparisons in words: an ASCII operator between RTL text
@@ -197,5 +224,53 @@ export const ar = {
   'contract/seq-regression': 'خالف دفق العملية ⁨{op}⁩ ترتيب seq الخاص به',
   'contract/stream-error': 'انتهى دفق العملية ⁨{op}⁩ بخطأ من الخادم (⁨{code}⁩)',
   'contract/heartbeat-missed': 'ظل دفق العملية ⁨{op}⁩ صامتًا لمدة {ms} مللي ثانية',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // Arabic abbreviates neither month nor weekday names, so the wide and
+  // short arrays hold the same strings - as CLDR has them.
+  ...dateNameEntries({
+    months: [
+      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+    ],
+    monthsShort: [
+      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+    ],
+    weekdays: [
+      'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء',
+      'الخميس', 'الجمعة', 'السبت',
+    ],
+    weekdaysShort: [
+      'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت',
+    ],
+    meridiem: ['ص', 'م'],
+  }),
+  'date/relative/second/past': (p) => `قبل ${counted(p.value, { one: 'ثانية واحدة', two: 'ثانيتين', few: 'ثوانٍ', many: 'ثانيةً', other: 'ثانية' })}`,
+  'date/relative/second/future': (p) => `خلال ${counted(p.value, { one: 'ثانية واحدة', two: 'ثانيتين', few: 'ثوانٍ', many: 'ثانيةً', other: 'ثانية' })}`,
+  'date/relative/minute/past': (p) => `قبل ${counted(p.value, { one: 'دقيقة واحدة', two: 'دقيقتين', few: 'دقائق', many: 'دقيقةً', other: 'دقيقة' })}`,
+  'date/relative/minute/future': (p) => `خلال ${counted(p.value, { one: 'دقيقة واحدة', two: 'دقيقتين', few: 'دقائق', many: 'دقيقةً', other: 'دقيقة' })}`,
+  'date/relative/hour/past': (p) => `قبل ${counted(p.value, { one: 'ساعة واحدة', two: 'ساعتين', few: 'ساعات', many: 'ساعةً', other: 'ساعة' })}`,
+  'date/relative/hour/future': (p) => `خلال ${counted(p.value, { one: 'ساعة واحدة', two: 'ساعتين', few: 'ساعات', many: 'ساعةً', other: 'ساعة' })}`,
+  'date/relative/day/past': (p) => `قبل ${counted(p.value, { one: 'يوم واحد', two: 'يومين', few: 'أيام', many: 'يومًا', other: 'يوم' })}`,
+  'date/relative/day/future': (p) => `خلال ${counted(p.value, { one: 'يوم واحد', two: 'يومين', few: 'أيام', many: 'يومًا', other: 'يوم' })}`,
+  'date/relative/week/past': (p) => `قبل ${counted(p.value, { one: 'أسبوع واحد', two: 'أسبوعين', few: 'أسابيع', many: 'أسبوعًا', other: 'أسبوع' })}`,
+  'date/relative/week/future': (p) => `خلال ${counted(p.value, { one: 'أسبوع واحد', two: 'أسبوعين', few: 'أسابيع', many: 'أسبوعًا', other: 'أسبوع' })}`,
+  'date/relative/month/past': (p) => `قبل ${counted(p.value, { one: 'شهر واحد', two: 'شهرين', few: 'أشهر', many: 'شهرًا', other: 'شهر' })}`,
+  'date/relative/month/future': (p) => `خلال ${counted(p.value, { one: 'شهر واحد', two: 'شهرين', few: 'أشهر', many: 'شهرًا', other: 'شهر' })}`,
+  'date/relative/year/past': (p) => `قبل ${counted(p.value, { one: 'سنة واحدة', two: 'سنتين', few: 'سنوات', many: 'سنةً', other: 'سنة' })}`,
+  'date/relative/year/future': (p) => `خلال ${counted(p.value, { one: 'سنة واحدة', two: 'سنتين', few: 'سنوات', many: 'سنةً', other: 'سنة' })}`,
+  'date/relative/now': 'الآن',
+  'date/relative/yesterday': 'أمس',
+  'date/relative/today': 'اليوم',
+  'date/relative/tomorrow': 'غدًا',
+  'format/name/date': 'تاريخ',
+  'format/name/time': 'وقت',
+  'format/name/date-time': 'تاريخ ووقت',
+  'format/name/iso-date': 'تاريخ ISO',
+  'format/name/iso-time': 'وقت ISO',
+  'format/name/iso-date-time': 'تاريخ ووقت ISO',
   //#endregion
 };

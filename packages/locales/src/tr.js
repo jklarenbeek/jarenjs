@@ -25,6 +25,7 @@ import {
   formatMessageValue,
   makeNumberRenderer,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -163,5 +164,53 @@ export const tr = {
   'contract/seq-regression': '{op} işleminin akışı seq sırasını ihlal etti',
   'contract/stream-error': '{op} işleminin akışı bir sunucu hatasıyla sona erdi ({code})',
   'contract/heartbeat-missed': '{op} işleminin akışı {ms} ms boyunca sessiz kaldı',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // Turkish nouns stay singular after a numeral, and 'once'/'sonra'
+  // follow the noun, so no suffix ever attaches to interpolated text.
+  ...dateNameEntries({
+    months: [
+      'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+      'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+    ],
+    monthsShort: [
+      'Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz',
+      'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara',
+    ],
+    weekdays: [
+      'Pazar', 'Pazartesi', 'Salı', 'Çarşamba',
+      'Perşembe', 'Cuma', 'Cumartesi',
+    ],
+    weekdaysShort: [
+      'Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt',
+    ],
+    meridiem: ['ÖÖ', 'ÖS'],
+  }),
+  'date/relative/second/past': (p) => `${num(p.value)} saniye önce`,
+  'date/relative/second/future': (p) => `${num(p.value)} saniye sonra`,
+  'date/relative/minute/past': (p) => `${num(p.value)} dakika önce`,
+  'date/relative/minute/future': (p) => `${num(p.value)} dakika sonra`,
+  'date/relative/hour/past': (p) => `${num(p.value)} saat önce`,
+  'date/relative/hour/future': (p) => `${num(p.value)} saat sonra`,
+  'date/relative/day/past': (p) => `${num(p.value)} gün önce`,
+  'date/relative/day/future': (p) => `${num(p.value)} gün sonra`,
+  'date/relative/week/past': (p) => `${num(p.value)} hafta önce`,
+  'date/relative/week/future': (p) => `${num(p.value)} hafta sonra`,
+  'date/relative/month/past': (p) => `${num(p.value)} ay önce`,
+  'date/relative/month/future': (p) => `${num(p.value)} ay sonra`,
+  'date/relative/year/past': (p) => `${num(p.value)} yıl önce`,
+  'date/relative/year/future': (p) => `${num(p.value)} yıl sonra`,
+  'date/relative/now': 'şimdi',
+  'date/relative/yesterday': 'dün',
+  'date/relative/today': 'bugün',
+  'date/relative/tomorrow': 'yarın',
+  'format/name/date': 'tarih',
+  'format/name/time': 'saat',
+  'format/name/date-time': 'tarih ve saat',
+  'format/name/iso-date': 'ISO tarih',
+  'format/name/iso-time': 'ISO saat',
+  'format/name/iso-date-time': 'ISO tarih ve saat',
   //#endregion
 };

@@ -23,6 +23,7 @@ import {
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
+  dateNameEntries,
 } from './helpers.js';
 
 //#region Intl singletons
@@ -165,5 +166,53 @@ export const nl = {
   'contract/seq-regression': 'de stream van operatie {op} heeft de seq-volgorde geschonden',
   'contract/stream-error': 'de stream van operatie {op} is geëindigd met een serverfout ({code})',
   'contract/heartbeat-missed': 'de stream van operatie {op} is {ms} ms stil gebleven',
+  //#endregion
+
+  //#region calendar language (the date names, relative phrasing and
+  //   format display names of @jarenjs/locales' date adapter)
+  // 'uur' and 'jaar' do not take a plural after a numeral, so those two
+  // units repeat the same noun rather than pretending to agree.
+  ...dateNameEntries({
+    months: [
+      'januari', 'februari', 'maart', 'april', 'mei', 'juni',
+      'juli', 'augustus', 'september', 'oktober', 'november', 'december',
+    ],
+    monthsShort: [
+      'jan', 'feb', 'mrt', 'apr', 'mei', 'jun',
+      'jul', 'aug', 'sep', 'okt', 'nov', 'dec',
+    ],
+    weekdays: [
+      'zondag', 'maandag', 'dinsdag', 'woensdag',
+      'donderdag', 'vrijdag', 'zaterdag',
+    ],
+    weekdaysShort: [
+      'zo', 'ma', 'di', 'wo', 'do', 'vr', 'za',
+    ],
+    meridiem: ['a.m.', 'p.m.'],
+  }),
+  'date/relative/second/past': (p) => `${num(p.value)} ${plural(p.value, 'seconde', 'seconden')} geleden`,
+  'date/relative/second/future': (p) => `over ${num(p.value)} ${plural(p.value, 'seconde', 'seconden')}`,
+  'date/relative/minute/past': (p) => `${num(p.value)} ${plural(p.value, 'minuut', 'minuten')} geleden`,
+  'date/relative/minute/future': (p) => `over ${num(p.value)} ${plural(p.value, 'minuut', 'minuten')}`,
+  'date/relative/hour/past': (p) => `${num(p.value)} ${plural(p.value, 'uur', 'uur')} geleden`,
+  'date/relative/hour/future': (p) => `over ${num(p.value)} ${plural(p.value, 'uur', 'uur')}`,
+  'date/relative/day/past': (p) => `${num(p.value)} ${plural(p.value, 'dag', 'dagen')} geleden`,
+  'date/relative/day/future': (p) => `over ${num(p.value)} ${plural(p.value, 'dag', 'dagen')}`,
+  'date/relative/week/past': (p) => `${num(p.value)} ${plural(p.value, 'week', 'weken')} geleden`,
+  'date/relative/week/future': (p) => `over ${num(p.value)} ${plural(p.value, 'week', 'weken')}`,
+  'date/relative/month/past': (p) => `${num(p.value)} ${plural(p.value, 'maand', 'maanden')} geleden`,
+  'date/relative/month/future': (p) => `over ${num(p.value)} ${plural(p.value, 'maand', 'maanden')}`,
+  'date/relative/year/past': (p) => `${num(p.value)} ${plural(p.value, 'jaar', 'jaar')} geleden`,
+  'date/relative/year/future': (p) => `over ${num(p.value)} ${plural(p.value, 'jaar', 'jaar')}`,
+  'date/relative/now': 'nu',
+  'date/relative/yesterday': 'gisteren',
+  'date/relative/today': 'vandaag',
+  'date/relative/tomorrow': 'morgen',
+  'format/name/date': 'datum',
+  'format/name/time': 'tijd',
+  'format/name/date-time': 'datum en tijd',
+  'format/name/iso-date': 'ISO-datum',
+  'format/name/iso-time': 'ISO-tijd',
+  'format/name/iso-date-time': 'ISO-datum en -tijd',
   //#endregion
 };

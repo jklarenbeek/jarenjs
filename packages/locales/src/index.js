@@ -11,7 +11,19 @@
  * own translations and `Intl` singletons, and imports nothing but the
  * rendering helpers of `./helpers.js` - never a consumer package, so
  * either consumer can serve any pack.
+ *
+ * Beside the error messages, every pack carries the calendar language
+ * `@jarenjs/core/dates` refuses to invent: month, weekday and meridiem
+ * names, relative-time phrases and date-format display names.
+ * `compileDateLocale` (`./dates`) turns a pack into the frozen record a
+ * formatter and a UI read; importing that subpath directly costs no
+ * `Intl` construction at all, which is what keeps server-rendered output
+ * byte-stable. `createIntlDateLocale` (`./intl-dates`) is the opt-in
+ * provider for hosts that want the platform's locales instead.
  */
+
+export { dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from './dates.js';
+export { createIntlDateLocale } from './intl-dates.js';
 
 export { ar } from './ar.js';
 export { de } from './de.js';

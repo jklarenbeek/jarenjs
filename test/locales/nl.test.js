@@ -10,7 +10,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { nl } from '@jarenjs/locales';
+import { nl, dateMessagesEn, compileDateLocale } from '@jarenjs/locales';
+import { compileDateFormat, parseRFC3339Parts } from '@jarenjs/core/dates';
 import {
   JarenValidator,
   ValidatorOptions,
@@ -23,8 +24,19 @@ import { contractMessagesEn } from '@jarenjs/contract';
 
 const compiled = compileMessageCatalog(nl);
 
+
+/**
+ * The date msgids take either no parameter or an absolute `{ value }`,
+ * so their sample params are DERIVED from the English key set rather
+ * than typed out again: a hand-copied list of a mechanical key set is a
+ * list that drifts away from it.
+ */
+const DATE_SAMPLE_PARAMS = Object.fromEntries(
+  Object.keys(dateMessagesEn).map((key) => [key, { value: 2 }]));
+
 /** Representative params per message key, for renders and the sweep. */
 const SAMPLE_PARAMS = {
+  ...DATE_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -128,6 +140,9 @@ describe('@jarenjs/locales nl', () => {
     for (const key of Object.keys(contractMessagesEn)) {
       assert.ok(nlKeys.has(key), `nl is missing contract key '${key}'`);
     }
+    for (const key of Object.keys(dateMessagesEn)) {
+      assert.ok(nlKeys.has(key), `nl is missing date key '${key}'`);
+    }
     assert.ok(nlKeys.has('x-form/assert'));
   });
 
@@ -171,6 +186,40 @@ describe('@jarenjs/locales nl', () => {
     // and back to English
     localizeErrors(result.errors, compileMessageCatalog(messagesEn));
     assert.strictEqual(minLength.message, 'must NOT have fewer than 2 characters');
+  });
+
+  it('renders its calendar language, plural quirks and all', () => {
+    // 2026-07-05 is a Sunday, so weekday index 0 renders too
+    const sunday = parseRFC3339Parts('2026-07-05T14:30:05Z');
+    const dates = compileDateLocale(nl);
+    assert.strictEqual(
+      compileDateFormat('EEEE d MMMM yyyy', dates.names)(sunday), 'zondag 5 juli 2026');
+    assert.strictEqual(
+      compileDateFormat('EEE d MMM yy', dates.names)(sunday), 'zo 5 jul 26');
+    assert.strictEqual(compileDateFormat('h:mm a', dates.names)(sunday), '2:30 p.m.');
+
+    // 'uur' and 'jaar' take no plural after a numeral; every other unit does
+    assert.strictEqual(dates.relative(-1, 'second'), '1 seconde geleden');
+    assert.strictEqual(dates.relative(-2, 'second'), '2 seconden geleden');
+    assert.strictEqual(dates.relative(-1, 'hour'), '1 uur geleden');
+    assert.strictEqual(dates.relative(-5, 'hour'), '5 uur geleden');
+    assert.strictEqual(dates.relative(21, 'year'), 'over 21 jaar');
+    assert.strictEqual(dates.relative(0, 'week'), 'over 0 weken');
+    assert.strictEqual(dates.relative(-1, 'day', { numeric: 'auto' }), 'gisteren');
+    assert.strictEqual(dates.relative(1, 'day', { numeric: 'auto' }), 'morgen');
+  });
+
+  it('reads the date formats as words, which is the whole point', () => {
+    const dates = compileDateLocale(nl);
+    assert.strictEqual(dates.formatName('date'), 'datum');
+    assert.strictEqual(dates.formatName('time'), 'tijd');
+    assert.strictEqual(dates.formatName('date-time'), 'datum en tijd');
+    assert.strictEqual(dates.formatName('iso-date-time'), 'ISO-datum en -tijd');
+    // the raw wire name is what a Dutch reader used to be shown
+    assert.strictEqual(compiled['form/format']({ format: 'date-time' }),
+      'Moet een geldige date-time zijn');
+    assert.strictEqual(compiled['form/format']({ format: 'datum en tijd' }),
+      'Moet een geldige datum en tijd zijn');
   });
 
   it('every entry renders without throwing (no-throw sweep)', () => {

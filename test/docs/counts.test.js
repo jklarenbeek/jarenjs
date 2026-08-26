@@ -44,8 +44,10 @@ function statedCount(text, before, after) {
 }
 
 const chartTypes = listDir('components/charts/src/types').filter((f) => f.endsWith('.js'));
+// a pack is named by its locale tag, which is what tells it apart from
+// the package's shared modules without a growing exclusion list
 const localePacks = listDir('packages/locales/src')
-  .filter((f) => f.endsWith('.js') && !['index.js', 'helpers.js'].includes(f));
+  .filter((f) => /^[a-z]{2}(-[a-z]{2})?\.js$/.test(f));
 const benchmarkSuites = listDir('packages/website/public/benchmarks')
   .filter((f) => f.endsWith('.json') && f !== 'meta.json');
 
