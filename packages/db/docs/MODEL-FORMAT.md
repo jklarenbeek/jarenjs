@@ -617,6 +617,15 @@ returns a validation function; the function returns `true`/`false` or
 and `store.capabilities.validated === false` — a declared downgrade.
 The cost of running without one: the database constraints only see the
 key and the indexed members; everything else is stored as given.
+Stated more sharply, because it changes ANSWERS and not only what is
+stored: a typed generated column carries SQLite affinity, so a value
+that violates the collection schema — the string `'020'` under an
+`integer` path — reads as the integer `20` in the column while the
+document still holds text, and a pushed `$eq: ['$it.n', '20']` finds
+a row the engine, which compares the JSON value, does not. On an
+unvalidated store the native and residual paths agree only over
+documents that conform to the schema; with the hook injected no other
+document is ever stored.
 `@jarenjs/db` never runs a validator of its own; what it imports from
 `@jarenjs/validate` is only the pure same-document `$ref`/`$anchor`
 resolution in `@jarenjs/validate/normalize`, for model compilation.
@@ -639,6 +648,13 @@ and may itself call `transaction`; each level is one savepoint. A
 throw rolls back exactly its own level and rethrows — an outer
 transaction that catches the error continues and its own work
 commits. There is no implicit retry.
+
+**On an asynchronous driver a refused write rejects.** Every write —
+`insert`, `put`, `patch`, `delete`, the entity set's `create`/`update`/
+`delete` and the queue's `enqueue` — answers its coded error (`JD2001`,
+`JD2003`, `JD2005`, …) through the promise it returned: never a
+synchronous throw, and never an unhandled rejection beside a result
+that looks like success.
 
 ### 5.1 Transaction ownership
 
@@ -727,6 +743,7 @@ error.
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
+| `JD0033` | an entity query names no entity array |
 | `JD0040` | the save spans a relation cycle |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
@@ -745,6 +762,7 @@ error.
 | `JD2060` | the maintained live state exceeded its bound |
 | `JD2061` | another context owns the database |
 | `JD2062` | the store closed with job handlers still in flight |
+| `JD2063` | the store is closed |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
@@ -763,7 +781,11 @@ collection.query(doc, { profile: { maxRows: 200, externals: ['min'] } });
 ```
 
 `'safe'` is the default table; a profile object overrides members over
-it. The defaults: engine limits
+it. A per-call `profile` REPLACES the store's for that call — it is
+normalized over the `'safe'` defaults, not over the store's profile —
+so a store-level mandatory predicate or allow-list does not carry into
+`execute(doc, { profile: { maxRows: 50 } })`: spell the whole profile
+per call, or set it once on the store and pass none. The defaults: engine limits
 `{ sequenceItems: 100000, resultItems: 10000, steps: 1000000, depth: 32 }`,
 `maxRows: 1000`, no externals, no host functions, no collations, all
 of the store's collections, no mandatory predicates, no scan refusal.
@@ -1033,6 +1055,13 @@ happen, so this vocabulary is deliberately stricter than the
 validator's ignore-unknown posture — the strictness is local to the
 one namespace this package owns.
 
+The vocabulary is closed in POSITION as well as in name: `x-entity` is
+read on an entity's top-level properties (and through their `allOf`,
+`$defs` and `definitions` blocks) only. A block nested anywhere else —
+under a property's `properties`, `items`, `anyOf`, … — is never walked
+for mapping directives, so one found there is `JD0030` at its `docPath`
+rather than a key, an index or a relation that silently never existed.
+
 ### 9.3 The hybrid mapping
 
 Stated once, mechanically applied, and returned as data by
@@ -1042,7 +1071,8 @@ Stated once, mechanically applied, and returned as data by
 |---|---|
 | scalar (`string`/`number`/`integer`/`boolean`) at the top level | a real typed column |
 | `format: date-time`/`date` with `column: "integer"` | an epoch-milliseconds `INTEGER` column; the document keeps the RFC 3339 string, the column carries the derived epoch |
-| `enum` of scalars | a column plus a `CHECK (column IN (…))` |
+| `enum` of scalars | a column plus a `CHECK (column IN (…))` — a `null` member of the enum is left to the column's nullability, never written into the list |
+| a union of several scalar types (`['string', 'integer']`) | the JSONB document — a column has one affinity and a union has several; `['integer', 'null']` is that scalar, nullable |
 | nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |
 | relation | a foreign-key column, or a join table for many-to-many (§9.4) |
 
@@ -1058,6 +1088,19 @@ the document.
 
 Declared on one side, inferred on the other; when both sides declare,
 the inverses MUST agree (`JD0031` on any contradiction).
+
+What counts as "the same edge" is decided by `via`, not by the pair of
+entity names. Two declarations pointing at each other pair up when
+they name the same foreign-key property, and a pair is one `many` side
+and one `one` side — two `many` sides, or two `one` sides, on one
+`via` is `JD0031`, and a paired edge must agree on `onDelete`. A
+`many` declaration facing a `one` declaration with a DIFFERENT `via`
+is a contradiction too (`JD0031`: the pair disagrees on its key),
+while two declarations of the SAME kind with different `via`s are two
+independent edges — which is how a legitimate cycle is written
+(`Post.author` by `authorId` and `User.featured` by `featuredPostId`,
+one-to-one each way). Many-to-many pairs must agree on the join
+table, and a many-to-many facing a foreign-key relation is `JD0031`.
 
 - **one-to-many** — `{ to, many: true, via, onDelete }`: `via` names
   the foreign-key property on the TARGET entity (`authorId` on
@@ -1096,19 +1139,29 @@ reads and deletes take `{ prop: value, … }`.
 Applied on write in JavaScript, never by SQL `DEFAULT`, so the value
 the application sees and the value stored are the same — and the
 behaviour is identical on every driver. `"now"` stamps an RFC 3339
-UTC string on insert when the property is absent; `"updated"` stamps
+UTC string on insert when the property is absent — the calendar date
+alone (`YYYY-MM-DD`) on a `format: date` property, so the stamp
+validates against its own format; `"updated"` stamps
 on insert AND on every update, always; `{ "value": … }` fills a
 literal when absent; `{ "query": … }` evaluates a query document over
 the document being written. Defaults run BEFORE validation, so the
-injected hook sees the completed document.
+injected hook sees the completed document. A `version` property is
+engine-owned and never defaulted by the caller: an insert without one
+writes `0` — not SQL `NULL`, which no `WHERE version = ?` guard could
+match — and every successful write bumps it (§11.5).
 
 ### 9.7 Error-code additions
 
-The entity engine adds two codes to the package's single table (§7):
-`JD0030` — an unknown `x-entity` member; `JD0031` — relation
-declarations whose inverses contradict. Everything else raises the
-existing codes (`JD0005` for structural model defects, `JD2005` for
-database-refused writes including foreign-key violations).
+The entity engine adds three codes to the package's single table (§7):
+`JD0030` — an unknown or unread `x-entity` member; `JD0031` — relation
+declarations whose inverses contradict; `JD0033` — an entity query
+document that binds no entity array (§10.1). Everything else raises the
+existing codes: `JD0005` for structural model defects (a key, index or
+version property without a column of its own, a default on a relation,
+`default: "auto"` off the key, a self-referencing many-to-many, a
+foreign key onto a composite key), `JD2001` for a duplicate key on
+`create()` exactly as on a collection `insert`, and `JD2005` for
+database-refused writes including foreign-key violations.
 
 ## 10. Relational translation
 
@@ -1122,7 +1175,14 @@ translatable runs the set residual over the fetched entity root,
 
 `store.execute(document)` queries the **multi-entity root**: the
 engine-side value is `{ <EntityName>: [documents…], … }` and bindings
-range over `$.<Entity>[*]`. This is the shape the differential oracle
+range over `$.<Entity>[*]`. A document that binds no entity array at
+all — a `$for` over a member the model does not name, or over a
+scalar — is `JD0033` at compile, never an empty answer. The
+array-constructor spelling `["$.<Entity>[*]"]`, which `@jarenjs/linq`
+emits so that an item that is itself an array stays one item
+(LINQ-FORMAT §5), names the same whole-entity source; the planner
+reads through it for collections (`["$[*]"]`) and entities alike.
+This is the shape the differential oracle
 can actually prove — the in-memory engine sees exactly the documents
 the entity sets return (`test/db/oracle/relations/`). Relation-NAME
 navigation (`$.author.name`) is deliberately not query-document sugar:
@@ -1242,13 +1302,32 @@ a number appears only where `capabilities.rowEstimates` is filled):
 
 - three or more bindings;
 - non-equality join predicates, and disjunctions spanning bindings;
-- `$groupby` (the engine's post-group cardinality rebinding deserves
-  its own order; the count-of-related-rows case ORMs are bad at is
-  already native via `count: true` includes);
+- `$groupby`, except the `$time-bucket` ladder the series plan pushes
+  (README, *Time series*) — the engine's post-group cardinality
+  rebinding deserves its own order; the count-of-related-rows case
+  ORMs are bad at is already native via `count: true` includes;
 - projections (`$return` objects) — over one binding or across a join;
 - externals against document paths; booleans and `null` at bind time;
 - everything phase A already listed (§8 of `QUERY-FORMAT.md`
   notwithstanding, the truth table is the contract).
+
+Two deviations between a pushed answer and the engine's are DECLARED
+rather than refused, because in both the database is right by its own
+arithmetic:
+
+- `$sum`/`$avg` over `number` paths — SQLite sums with Kahan–Babuška
+  compensation and the engine sums naively, so over `0.1, 0.2, 0.3`
+  the store answers `0.6` and the residual `0.6000000000000001`: equal
+  to within an ulp, never equal by `===` (the differential oracle
+  draws dyadic fractions, which are exact on both sides).
+- a `$time-bucket` `$groupby` whose aggregated path admits `null`
+  (`['number', 'null']`): the pushed `AVG` skips a `null` reading
+  exactly as the series kernel — and therefore the `$resample`
+  spelling — does, while the engine's `$avg` over a sequence holding
+  `null` raises `JQ2001`; under this one spelling the store answers
+  where the in-memory engine refuses. Everywhere else an ordering or
+  an aggregate over a path that admits `null`, or over a boolean path,
+  is a named residual, so the two paths keep answering alike.
 
 
 ## 11. The unit of work
@@ -1293,8 +1372,19 @@ const report = await store.saveChanges();     // one transaction
 
 ### 11.2 Explicit updates (the other mode)
 
-`set.update(key, changes)` and `set.delete(key)` skip tracking: one
-immediate statement, last-write-wins by contract. An explicit update
+`set.create(doc)`, `set.update(key, changes)` and `set.delete(key)`
+skip tracking: one immediate statement, last-write-wins by contract.
+`create` applies defaults, validates, inserts, and — for a
+many-to-many relation whose member the document carries as an array
+of target keys — writes the join rows in the same transaction, which
+rolls back whole when a membership names a row that does not exist; a
+duplicate key is `JD2001`. `update` takes the document's own members
+only: a relation member (`posts`) is `JD2003` exactly as on `create`,
+and a membership array (`labels`) — which `create` writes — is
+`JD2003` on `update` as well, because an explicit update never writes
+join rows or child rows and never echoes back a member it did not
+store; a change to a key member is `JD2003` too (the key column would
+go stale — delete and create). An explicit update
 still bumps a declared version property, so optimistic savers observe
 the row changed. This is the path reactive layers and job runners use.
 
@@ -1337,7 +1427,10 @@ the 100× statement reduction is the point for anything remote.
 
 ### 11.5 Optimistic concurrency
 
-Declare a token with `version: true` (§9.2). Every `saveChanges()`
+Declare a token with `version: true` (§9.2). A row inserted without
+one starts at `0` — never SQL `NULL`, which no guard could match
+(§9.6) — so the first tracked save after `create()`/`add()` carries
+`WHERE version = 0`. Every `saveChanges()`
 update and guarded delete carries `WHERE version = ?` (the SNAPSHOT
 version) and writes snapshot + 1; a zero-row result is **`JD2040`**
 carrying the entity and key, and the whole save rolls back. Without a

@@ -21,7 +21,7 @@ export {
 } from './ddl.js';
 export {
   planQuery, assertDecidedKind, entityShape, entityPathRef,
-  planEntityPredicate, planEntityQuery,
+  planEntityPredicate, planEntityQuery, collectEntityRoots,
 } from './plan.js';
 export { emitPlan, createEntityPredicateEmitters, emitEntityPlan } from './emit.js';
 export { mergeEntityRow, parseGraphRow } from './graph.js';

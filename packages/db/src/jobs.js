@@ -32,7 +32,8 @@
  *    timer, and its abandoned job recovers by lease expiry (§5).
  */
 
-import { chain } from './driver.js';
+import { chain, attempt } from './driver.js';
+import { DbCompileError, DbRuntimeError } from './errors.js';
 
 export const JOBS_TABLE = '_jaren_jobs';
 export const JOB_CHECKPOINTS_TABLE = '_jaren_job_checkpoints';
@@ -147,12 +148,25 @@ export function createJobEngine(options) {
   const random = options.random ?? Math.random;
   const defaults = { ...JOB_DEFAULTS, ...options.defaults };
 
+  /** Every queue statement failure rides the store's own wrap (§9):
+   * a read-only file, a locked database, a constraint — never the
+   * driver's raw error. */
+  const wrapJobs = (error) => (typeof error?.code === 'string' && error.code.startsWith('JD')
+    ? error
+    : new DbRuntimeError('JD2005',
+      `the database rejected the operation: ${error?.message ?? String(error)}`,
+      { docPath: '/jobs', collection: JOBS_TABLE, cause: error }));
   /** @type {Map<string, any>} */
   const statements = new Map();
   const prepared = (key, sql) => {
     let statement = statements.get(key);
     if (statement === undefined) {
-      statement = connection.prepare(sql);
+      const raw = connection.prepare(sql);
+      statement = {
+        run: (params) => attempt(() => raw.run(params), wrapJobs),
+        get: (params) => attempt(() => raw.get(params), wrapJobs),
+        all: (params) => attempt(() => raw.all(params), wrapJobs),
+      };
       statements.set(key, statement);
     }
     return statement;
@@ -164,13 +178,27 @@ export function createJobEngine(options) {
     for (const wake of [...wakers]) wake();
   };
 
-  const ready = connection.exec(CREATE_JOBS);
+  // the tables are created here, or refused here: a read-only store
+  // leaked the driver's "attempt to write a readonly database"
+  const ready = attempt(() => connection.exec(CREATE_JOBS), (error) => new DbCompileError('JD0002',
+    `the job tables could not be created (${error?.message ?? String(error)}) — `
+    + 'a read-only store creates nothing; open it read-write once, or without jobs',
+    '/jobs', error));
 
   const enqueue = (kind, payload, enqueueOptions) => {
     if (typeof kind !== 'string' || kind === '') {
       throw new TypeError('enqueue: "kind" must be a non-empty string');
     }
     const id = enqueueOptions?.id ?? crypto.randomUUID();
+    // a `runAt` that is not a number stored as NaN and left the job
+    // pending forever; a Date could not even be bound
+    if (enqueueOptions?.runAt !== undefined && !Number.isFinite(enqueueOptions.runAt)) {
+      throw new TypeError('enqueue: "runAt" is an epoch in milliseconds (a finite number)');
+    }
+    if (enqueueOptions?.maxAttempts !== undefined
+      && !(Number.isInteger(enqueueOptions.maxAttempts) && enqueueOptions.maxAttempts >= 1)) {
+      throw new TypeError('enqueue: "maxAttempts" is a positive integer');
+    }
     const at = now();
     return chain(prepared('enqueue', `INSERT INTO "${JOBS_TABLE}"
       (id, kind, payload, state, run_at, max_attempts, created_at, updated_at)
@@ -341,8 +369,12 @@ export function createJobEngine(options) {
     const kinds = Object.keys(handlers);
     const owner = workerOptions.owner ?? crypto.randomUUID();
     const concurrency = workerOptions.concurrency ?? 1;
+    if (!(Number.isInteger(concurrency) && concurrency >= 1)) {
+      // `Array.from({ length: 0 })` started a worker that never claimed
+      throw new TypeError('createWorker: "concurrency" is a positive integer');
+    }
     const pollInterval = workerOptions.pollInterval ?? defaults.pollInterval;
-    const stats = { claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0 };
+    const stats = { claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0, claimErrors: 0 };
 
     let running = false;
     /** @type {Promise<void>[]} */
@@ -448,7 +480,10 @@ export function createJobEngine(options) {
             kinds, owner, leaseMs: workerOptions.leaseMs }));
         }
         catch {
-          job = undefined; // a transient storage failure: back off to the poll
+          // a storage failure backs off to the poll — COUNTED, so a
+          // worker on a read-only store is not silently idle forever
+          stats.claimErrors += 1;
+          job = undefined;
         }
         if (!running || loopSession.cancelled) return;
         if (job === undefined) {

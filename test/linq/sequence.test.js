@@ -155,7 +155,7 @@ describe('fromDocument', () => {
     const chained = q.select((n) => n.add(1));
     assert.deepStrictEqual(chained.toArray(), [6]);
     assert.deepStrictEqual(chained.toDocument(), {
-      $for: { it: stored },
+      $for: { it: [stored] },
       $return: { $add: ['$it', 1] },
     });
   });

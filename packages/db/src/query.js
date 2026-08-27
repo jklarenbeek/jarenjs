@@ -39,7 +39,7 @@ import { chain } from './driver.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
 } from './plan.js';
-import { emitPlan, emitEntityPlan, createEntityPredicateEmitters } from './emit.js';
+import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath } from './emit.js';
 import { selectPlan } from './algebra.js';
 import { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
 import { derivedSlotValue, probeBox, probeVector, columnScore } from './derive.js';
@@ -299,8 +299,26 @@ export function createQueryEngine(context) {
       return out;
     };
 
-    const plan = shapePlan(planned.plan ?? selectPlan(collection.name));
-    const emitted = emitPlan(plan, dialect, physical);
+    let plan = shapePlan(planned.plan ?? selectPlan(collection.name));
+    let emitted;
+    try {
+      emitted = emitPlan(plan, dialect, physical);
+    }
+    catch (error) {
+      if (!(error instanceof UnrepresentablePath)) throw error;
+      // a member name the dialect cannot spell: the whole document runs
+      // in the set residual, named — and strict mode refuses it by name
+      if (strict) {
+        throw new DbCompileError('JD0010',
+          `strict mode refused a residual: 'path' — ${error.message}`, collection.docPath);
+      }
+      planned = {
+        ...planned, plan: null, mode: 'set', rowReturn: null, udfs: [], prefilters: [],
+        series: null, reasons: [{ construct: 'path', reason: error.message }, ...planned.reasons],
+      };
+      plan = shapePlan(selectPlan(collection.name));
+      emitted = emitPlan(plan, dialect, physical);
+    }
     const externalNames = planned.analysis.externals.map((e) => e.name);
     const limits = profile === null ? undefined : profile.limits;
     const entry = {
@@ -549,6 +567,12 @@ export function createQueryEngine(context) {
    */
   const candidatesOf = (entry, externals, diverted) => {
     if (diverted) {
+      // a diversion IS a full-table scan; the plan-shape check above
+      // only ever saw the native statement
+      if (entry.needsScanCheck) {
+        throw profileRefusal(`the profile refuses a full-table scan of '${collection.name}' `
+          + '(a bound external the database cannot take diverted the call to the whole collection)');
+      }
       if (entry.planned.mode === 'knn') knnStats.diverted++;
       return chain(fullScanOf(entry), (statement) =>
         chain(statement.all(fullScanParams(entry)), (rows) =>
@@ -831,7 +855,7 @@ export function createQueryEngine(context) {
         operators: [...entry.dependencies.operators],
         functions: [...entry.dependencies.functions],
         collations: [...entry.dependencies.collations],
-        limits: entry.limits,
+        limits: entry.residualLimits ?? entry.limits,
         sql: entry.sql,
         params,
         indexes,
@@ -907,6 +931,14 @@ export function createEntityQueryEngine(context) {
     }
     state.counters.misses++;
     let planned = planEntityQuery(document, entities, mapping, operators);
+    if (planned.referenced.length === 0) {
+      // `$[*]` over the entity MAP answered the rows of every entity,
+      // mixed, and explain() named no table read; the root is the map
+      // of entity arrays, and a query ranges over one of them by name
+      throw new DbCompileError('JD0033',
+        'an entity query ranges over a declared entity array ($.<Entity>[*]); this '
+        + 'document names none, so it has no rows to answer', '/entities');
+    }
     if (!pushdown) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: 'disabled by the harness switch' }] };
@@ -1048,6 +1080,7 @@ export function createLoadEngine(context, entityName) {
   const refuse = (reason, path) => new DbCompileError('JD0032',
     `${reason} (include path: ${path.join('.') || '<root>'})`,
     entities.get(entityName)?.docPath);
+  const isWindowBound = (value) => Number.isSafeInteger(value) && value >= 0;
 
   /** Compile a where EXPRESSION over `$it` against one entity. */
   const compileWhere = (expression, entity, path) => {
@@ -1133,6 +1166,20 @@ export function createLoadEngine(context, entityName) {
           [...path, relationName]);
       }
       const childSpec = includeSpec[relationName] === true ? {} : includeSpec[relationName];
+      if (childSpec.count === true) {
+        // a count counts EVERY related row; a where/take beside it was
+        // dropped without a word, and the number answered was the total
+        const dropped = ['where', 'orderBy', 'take', 'skip', 'include', 'after']
+          .filter((member) => childSpec[member] !== undefined);
+        if (dropped.length > 0) {
+          throw refuse(`count: true counts every related row and takes no ${dropped.join('/')} — `
+            + 'load the rows to count a subset', [...path, relationName]);
+        }
+      }
+      for (const member of ['take', 'skip']) {
+        if (childSpec[member] !== undefined && !isWindowBound(childSpec[member]))
+          throw refuse(`${member} must be a non-negative integer`, [...path, relationName]);
+      }
       const childName = relation.to;
       const include = {
         name: relationName,
@@ -1186,6 +1233,17 @@ export function createLoadEngine(context, entityName) {
     const parentKey = parentNode.entityMapping.keys[0];
     if (include.count === true) {
       const childTable = mapping.entities[relation.to].table;
+      if (relation.kind === 'manyToMany') {
+        const join = mapping.joinTables[relation.joinTable];
+        const own = join.left.entity === parentNode.entity.name ? join.left : join.right;
+        return `(SELECT COUNT(*) FROM ${q(relation.joinTable)} AS ${q(childAlias)} `
+          + `WHERE ${q(childAlias)}.${q(own.column)} = ${q(parentAlias)}.${q(parentKey)})`;
+      }
+      if (relation.kind === 'oneToOne') {
+        const childKey = mapping.entities[relation.to].keys[0];
+        return `(SELECT COUNT(*) FROM ${q(childTable)} AS ${q(childAlias)} `
+          + `WHERE ${q(childAlias)}.${q(childKey)} = ${q(parentAlias)}.${q(relation.via)})`;
+      }
       return `(SELECT COUNT(*) FROM ${q(childTable)} AS ${q(childAlias)} `
         + `WHERE ${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)})`;
     }
@@ -1250,6 +1308,11 @@ export function createLoadEngine(context, entityName) {
     };
     const emitters = createEntityPredicateEmitters(dialect, param);
     const maxDepth = spec?.maxDepth ?? INCLUDE_DEPTH_DEFAULT;
+    for (const member of ['take', 'skip']) {
+      // interpolated into LIMIT/OFFSET as written: a string ran as SQL
+      if (spec?.[member] !== undefined && !isWindowBound(spec[member]))
+        throw refuse(`${member} must be a non-negative integer`, []);
+    }
     const tree = buildTree(entityName, spec ?? {}, 0, maxDepth, [], new Set());
     const rendered = render(tree, 'r', param, emitters);
 

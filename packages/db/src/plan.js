@@ -45,7 +45,7 @@ import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
 import { selectPlan, conjoin, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
-import { schemaNodeAt } from './ddl.js';
+import { schemaNodeAt, canonicalOf } from './ddl.js';
 import {
   BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
   probeBox, probePosition, probeCircleBox, cellNeighbourhood, probeVector,
@@ -125,6 +125,31 @@ for (const kind of NODE_KINDS) {
  * @param {string} reason
  * @returns {{ construct: string, reason: string }}
  */
+/** Whether a literal window bound is one SQL takes as written: a
+ * non-negative safe integer. A negative, fractional or non-finite bound
+ * is the ENGINE's to interpret (it answers `[]`, a truncation or a
+ * refusal), and interpolated into `LIMIT`/`OFFSET` it answered other
+ * rows or a raw database error. */
+function isWindowBound(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Whether a schema node admits `null` beside its scalar type. A present
+ * null orders and aggregates in SQL (NULLS FIRST, skipped by SUM) where
+ * the engine refuses it (`JQ2005`, `JQ2001`), so a promotion over such a
+ * path answers where the reference semantics throw. */
+function admitsNull(schema, segments) {
+  const node = schemaNodeAt(schema, segments);
+  return Array.isArray(node?.type) && node.type.includes('null');
+}
+
+/** Whether a typed reference orders natively: numbers and strings that
+ * cannot hold a null. A boolean orders as 0/1 in SQL and is `JQ2005` in
+ * the engine. */
+function orderable(ref, schema) {
+  return ref.type !== 'unknown' && ref.type !== 'boolean' && !admitsNull(schema, ref.segments);
+}
+
 function refusal(construct, reason) {
   return { construct, reason };
 }
@@ -268,9 +293,7 @@ function memberPath(node, itSlot) {
     else return null;
   }
   if (segments.length === 0) return null;
-  const canonical = segments
-    .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`)).join('');
-  return { segments, canonical };
+  return { segments, canonical: canonicalOf(segments) };
 }
 
 /**
@@ -634,6 +657,10 @@ function planDistanceBound(node, itSlot, shape) {
   if (constant === null) return { refusal: refusal('$distance', SPATIAL_REASONS.operand) };
   const at = probePosition(constant.value);
   if (at === null) return { refusal: refusal('$distance', SPATIAL_REASONS.unbounded) };
+  if (!Number.isFinite(radius.value) || radius.value < 0) {
+    return { refusal: refusal('$distance',
+      'a distance bound is a finite, non-negative number of metres') };
+  }
   const box = probeCircleBox(at, radius.value);
   if (box === null) return { refusal: refusal('$distance', SPATIAL_REASONS.pole) };
   if (box[0] < -180 || box[2] > 180)
@@ -1046,13 +1073,30 @@ function planPredicate(node, itSlot, shape) {
 // and it is why a calendar ladder, a fill policy, a rolling window and
 // an as-of JOIN cost a bounded fetch rather than a wrong answer.
 
-/** Is this node the whole collection — `$[*]` over the input document? */
+/**
+ * The source a packed spelling stands for. `["$[*]"]` — an array
+ * constructor of exactly one element — is what a `$for` unpacks back
+ * into the rows (QUERY-FORMAT §6.2, D4): `@jarenjs/linq` binds every
+ * iterated source that way so an array-valued ROW stays one item. Over
+ * a collection or an entity array the rows are objects, so the packed
+ * and the bare spelling are the same rows, and the planner reads
+ * through the packing rather than sending the document to the residual.
+ * @param {any} node
+ * @returns {any}
+ */
+function unpacked(node) {
+  return node?.kind === 'array' && node.elements?.length === 1 ? node.elements[0] : node;
+}
+
+/** Is this node the whole collection — `$[*]` over the input document,
+ * bare or packed? */
 function isCollectionSource(node) {
-  return node?.kind === 'path' && node.name === '$' && node.external !== true
-    && node.rootSlot === 0 && node.singular !== true
-    && node.segments.length === 1 && node.segments[0].descendant !== true
-    && node.segments[0].selectors.length === 1
-    && node.segments[0].selectors[0].kind === 'wildcard';
+  const path = unpacked(node);
+  return path?.kind === 'path' && path.name === '$' && path.external !== true
+    && path.rootSlot === 0 && path.singular !== true
+    && path.segments.length === 1 && path.segments[0].descendant !== true
+    && path.segments[0].selectors.length === 1
+    && path.segments[0].selectors[0].kind === 'wildcard';
 }
 
 /**
@@ -1081,7 +1125,7 @@ function memberRef(shape, name) {
   return {
     segments,
     type: typeOfPath(shape.schema, segments),
-    column: shape.columnByCanonical.get(`.${name}`) ?? null,
+    column: shape.columnByCanonical.get(canonicalOf(segments)) ?? null,
   };
 }
 
@@ -1643,13 +1687,10 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   const plan = selectPlan(shape.collection);
 
   // the one recognised source shape: a single plain binding over $[*]
+  // (bare or packed — one check, `isCollectionSource`, for every site)
   const binding = node.forBindings[0];
-  const source = binding?.expr;
   const sourceIsCollection = node.forBindings.length === 1
-    && source?.kind === 'path' && source.name === '$' && source.external !== true
-    && source.segments.length === 1 && source.segments[0].descendant !== true
-    && source.segments[0].selectors.length === 1
-    && source.segments[0].selectors[0].kind === 'wildcard'
+    && isCollectionSource(binding?.expr)
     && binding.window === null && binding.atSlot === -1
     && binding.allowingEmpty === false;
   if (!sourceIsCollection) {
@@ -1752,9 +1793,9 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     let refused = null;
     for (const spec of node.orderby.specs) {
       const ref = pathRef(spec.key, itSlot, shape);
-      if (ref === null || ref.type === 'unknown') {
+      if (ref === null || !orderable(ref, shape.schema)) {
         refused = refusal('$orderby',
-          'ordering translates only over singular schema-typed paths');
+          'ordering translates only over singular schema-typed paths (numbers and strings that cannot hold null)');
         break;
       }
       if (spec.collation !== null || spec.collationName !== null) {
@@ -1855,12 +1896,12 @@ function planCollectionCore(document, shape, options = undefined) {
   const windows = [];
   while (root.kind === 'op' && root.name === '$subsequence') {
     const [inner, start, length] = root.args;
-    if (start?.kind !== 'literal' || typeof start.value !== 'number'
-      || (length !== undefined && (length.kind !== 'literal' || typeof length.value !== 'number'))) {
+    if (start?.kind !== 'literal' || !isWindowBound(start.value)
+      || (length !== undefined && (length.kind !== 'literal' || !isWindowBound(length.value)))) {
       // non-literal bounds: the whole document is a set residual
       return {
         analysis, plan: null, mode: 'set',
-        reasons: [refusal('$subsequence', 'window bounds must be literal numbers to push')],
+        reasons: [refusal('$subsequence', 'window bounds must be literal numbers to push (non-negative integers)')],
         rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
@@ -1947,6 +1988,16 @@ function planCollectionCore(document, shape, options = undefined) {
       return { analysis, plan: null, mode: 'set', reasons: flwor.reasons,
         rowReturn: null, udfs: [], prefilters: flwor.prefilters, series: null };
     }
+    if (flwor.bucket !== null || flwor.bucketRefusal != null) {
+      // the phrase's items are its GROUPS; a COUNT(*) over the rows
+      // answered the row count for a `$count` of the groups
+      return {
+        analysis, plan: null, mode: 'set',
+        reasons: [refusal(aggregate.name,
+          'an aggregate over a grouped phrase folds its groups, which the engine does')],
+        rowReturn: null, udfs: [], prefilters: [], series: null,
+      };
+    }
     if (aggregate.fn === 'count') {
       if (!flwor.projectionNative) {
         return {
@@ -1964,7 +2015,8 @@ function planCollectionCore(document, shape, options = undefined) {
     const ref = pathRef(root.ret, flwor.itSlot, shape);
     const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg';
     const acceptable = ref !== null
-      && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown');
+      && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
+      && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments);
     if (!acceptable) {
       return {
         analysis, plan: null, mode: 'set',
@@ -2090,7 +2142,7 @@ export function entityShape(entity, entityMapping) {
   const flavors = new Map();
   for (const column of entityMapping.columns) {
     const epoch = column.source === 'epoch(document)';
-    flavors.set(`.${column.name}`, {
+    flavors.set(canonicalOf([{ name: column.name }]), {
       column: column.name,
       flavor: epoch ? 'entity-epoch' : 'entity-column',
       storage: column.storage,
@@ -2098,8 +2150,9 @@ export function entityShape(entity, entityMapping) {
     });
   }
   for (const fk of entityMapping.foreignKeys) {
-    if (!flavors.has(`.${fk.column}`))
-      flavors.set(`.${fk.column}`, { column: fk.column, flavor: 'entity-column', storage: 'string' });
+    const fkCanonical = canonicalOf([{ name: fk.column }]);
+    if (!flavors.has(fkCanonical))
+      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: 'string' });
   }
   return {
     collection: entity.name,
@@ -2120,8 +2173,7 @@ export function entityShape(entity, entityMapping) {
 export function entityPathRef(node, slot, shape) {
   const ref = pathRef(node, slot, shape);
   if (ref === null) return null;
-  const canonical = ref.segments
-    .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`)).join('');
+  const canonical = canonicalOf(ref.segments);
   const flavored = shape.entityFlavors.get(canonical);
   if (flavored !== undefined) {
     return {
@@ -2157,8 +2209,7 @@ export function planEntityPredicate(node, slot, shape) {
       return { ...pred, items: pred.items.map(reflavor) };
     if (pred.p === 'not') return { ...pred, item: reflavor(pred.item) };
     if (!('ref' in pred) || pred.ref === null) return pred;
-    const canonical = pred.ref.segments
-      .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`)).join('');
+    const canonical = canonicalOf(pred.ref.segments);
     const flavored = shape.entityFlavors.get(canonical);
     if (flavored === undefined) {
       // externals against DOC paths are not translated here (the
@@ -2228,9 +2279,9 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   const windows = [];
   while (root.kind === 'op' && root.name === '$subsequence') {
     const [inner, start, length] = root.args;
-    if (start?.kind !== 'literal' || typeof start.value !== 'number'
-      || (length !== undefined && (length.kind !== 'literal' || typeof length.value !== 'number')))
-      return residual('$subsequence', 'window bounds must be literal numbers to push');
+    if (start?.kind !== 'literal' || !isWindowBound(start.value)
+      || (length !== undefined && (length.kind !== 'literal' || !isWindowBound(length.value))))
+      return residual('$subsequence', 'window bounds must be literal numbers to push (non-negative integers)');
     windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
     root = inner;
     assertDecidedKind(root);
@@ -2250,7 +2301,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // bindings must each range over one entity's array
   const bindings = [];
   for (const binding of root.forBindings) {
-    const source = binding.expr;
+    const source = unpacked(binding.expr);
     const sourceEntity = source?.kind === 'path' && source.name === '$'
       && source.external !== true && source.segments.length === 2
       && source.segments[0].descendant !== true
@@ -2344,11 +2395,16 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       const binding = byName.get(slot);
       const ref = binding === undefined
         ? null : entityPathRef(spec.key, slot, binding.shape);
+      // a boolean orders in SQL and is `JQ2005` in the engine on either
+      // flavor; a document path that admits null stores a present null
+      // (a COLUMN stores it absent, §9.3, so a nullable column pushes)
       if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown')
+        || ref.type === 'boolean'
+        || (ref.flavor === 'entity-doc' && admitsNull(binding.shape.schema, ref.segments))
         || spec.collation !== null || spec.collationName !== null) {
         orderPushed = false;
         reasons.push({ construct: '$orderby',
-          reason: 'ordering translates only over typed entity paths' });
+          reason: 'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)' });
         break;
       }
       terms.push({ binding, ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });

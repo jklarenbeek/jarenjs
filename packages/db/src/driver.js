@@ -32,7 +32,7 @@
 
 import { isThenable, chain, toPromise } from '@jarenjs/core/function';
 
-import { DbCompileError } from './errors.js';
+import { DbCompileError, DbRuntimeError } from './errors.js';
 
 /** The minimum SQLite the store accepts, asserted at open. */
 export const SQLITE_FLOOR = '3.45.0';
@@ -96,16 +96,41 @@ export function lazyOpen(specifier, reason, use, args) {
  * @returns {{ run: Function, get: Function, all: Function,
  *   iterate: Function }}
  */
-export function wrapStatement(statement) {
+export function wrapStatement(statement, guard = undefined) {
+  const before = guard ?? (() => {});
   return {
-    run: (params = []) => statement.run(params),
-    get: (params = []) => statement.get(params),
-    all: (params = []) => statement.all(params),
+    run: (params = []) => { before(); return statement.run(params); },
+    get: (params = []) => { before(); return statement.get(params); },
+    all: (params = []) => { before(); return statement.all(params); },
     iterate: typeof statement.iterate === 'function'
-      ? (params = []) => /** @type {Function} */ (statement.iterate)(params)
-      : (params = []) => chain(statement.all(params),
-        (rows) => rows[Symbol.iterator]()),
+      ? (params = []) => { before(); return /** @type {Function} */ (statement.iterate)(params); }
+      : (params = []) => { before(); return chain(statement.all(params),
+        (rows) => rows[Symbol.iterator]()); },
   };
+}
+
+/**
+ * Run a driver call and map its failure — thrown OR rejected — through
+ * `wrap`. A `try/catch` around a value-or-promise call saw only the
+ * synchronous throw: on an asynchronous driver the failure arrived as a
+ * rejection nothing handled, so a rejected write resolved as a success
+ * and surfaced later as an unhandled rejection.
+ * @template T
+ * @param {() => T | Promise<T>} call
+ * @param {(error: any) => Error} wrap
+ * @returns {T | Promise<T>}
+ */
+export function attempt(call, wrap) {
+  let out;
+  try {
+    out = call();
+  }
+  catch (error) {
+    throw wrap(error);
+  }
+  return isThenable(out)
+    ? /** @type {Promise<T>} */ (out).then(undefined, (error) => { throw wrap(error); })
+    : out;
 }
 
 /**
@@ -223,6 +248,16 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
   let onStack = false;
   /** @type {Array<() => void>} FIFO of work waiting for the owner. */
   const waiting = [];
+  /** Set by `close()`: every later call is refused by name rather than
+   * leaking the binding's own error (or, on a build that tolerates it,
+   * running against a closed handle). */
+  let closed = false;
+  const requireOpen = () => {
+    if (closed) {
+      throw new DbRuntimeError('JD2063',
+        'the store is closed — a call after close() has no connection to run on');
+    }
+  };
 
   /** Hand the connection to the next waiter, in arrival order. */
   const release = () => {
@@ -315,9 +350,9 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
     capabilities,
     dialect,
     /** @param {string} sql */
-    exec: (sql) => raw.exec(sql),
+    exec: (sql) => { requireOpen(); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql) => chain(raw.prepare(sql), wrapStatement),
+    prepare: (sql) => { requireOpen(); return chain(raw.prepare(sql), (s) => wrapStatement(s, requireOpen)); },
     /** A nested savepoint inside this transaction.
      * @param {(scope: any) => any} fn */
     transaction: (fn) => savepointAround(fn),
@@ -338,9 +373,14 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
     // two apart — give each concurrent writer its own store to separate
     // them). What the gate below does guarantee is that two TRANSACTIONS
     // never interleave, which is what made commits report failure.
-    exec: (sql) => raw.exec(sql),
+    exec: (sql) => { requireOpen(); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql) => chain(raw.prepare(sql), wrapStatement),
+    prepare: (sql) => { requireOpen(); return chain(raw.prepare(sql), (s) => wrapStatement(s, requireOpen)); },
+    /** Whether a transaction issued NOW would have to queue: an owner
+     * holds the connection and no owning callback is on the stack (a
+     * synchronous call from inside the callback nests instead). What a
+     * synchronous surface must know before it would hand back a Promise. */
+    get mustQueue() { return owned && !onStack; },
     /**
      * A transaction. `fn`'s value is returned; a throw rolls back exactly
      * this level and rethrows. No implicit retry.
@@ -363,6 +403,7 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
      * @param {(scope: any) => any} fn
      */
     transaction(fn) {
+      requireOpen();
       if (onStack) return savepointAround(fn);
       return whenFree(() => {
         owned = true;
@@ -383,15 +424,21 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
           (error) => { release(); throw error; });
       }, 'a transaction');
     },
-    close: () => raw.close(),
+    // idempotent: the second close is a no-op on every driver, not a
+    // raw error on one and a resolved promise on another
+    close: () => {
+      if (closed) return undefined;
+      closed = true;
+      return raw.close();
+    },
     registerFunction: typeof raw.registerFunction === 'function'
-      ? (name, functionOptions, fn) => raw.registerFunction(name, functionOptions, fn)
+      ? (name, functionOptions, fn) => { requireOpen(); return raw.registerFunction(name, functionOptions, fn); }
       : null,
     registerAggregate: typeof raw.registerAggregate === 'function'
-      ? (name, spec) => raw.registerAggregate(name, spec)
+      ? (name, spec) => { requireOpen(); return raw.registerAggregate(name, spec); }
       : null,
     session: typeof raw.session === 'function'
-      ? (table) => raw.session(table)
+      ? (table) => { requireOpen(); return raw.session(table); }
       : null,
   });
 }

@@ -881,6 +881,52 @@ void linqFrom(linqUsers).params({ minAge: 1 }).where((u, p) => u.age.ge(p.maxAge
 // @ts-expect-error — arithmetic on a boolean expression
 void linqFrom(linqUsers).where((u) => u.active.add(1));
 
+// the spatial and vector families type on positions, GeoJSON objects and
+// WKT strings; the series operators on a fanned path; the §8.1
+// registries on the options bag
+interface LinqPlace {
+  id: number;
+  at: [number, number];
+  region: { type: string; coordinates: number[][][] };
+  wkt: string;
+  embedding: number[];
+}
+const linqPlaces: LinqPlace[] = [];
+const linqCells: string[] = linqFrom(linqPlaces)
+  .where((p) => p.at.within(p.region))
+  .select((p) => p.at.geohash(6)).toArray();
+void linqCells;
+const linqDistances: number[] = linqFrom(linqPlaces)
+  .select((p) => p.region.distance([4.9, 52.3])).toArray();
+void linqDistances;
+const linqTexts: string[] = linqFrom(linqPlaces).select((p) => p.wkt.geoParse().geoText()).toArray();
+void linqTexts;
+const linqScores: number[] = linqFrom(linqPlaces)
+  .params({ query: [0.1, 0.2] })
+  .select((p, q) => p.embedding.similarity(q.query)).toArray();
+void linqScores;
+void linqFrom(linqPlaces).select((p) => p.embedding.all().resample({ every: 60000 })).toArray();
+void linqFrom(linqUsers, {
+  collations: { nl: (a: string, b: string) => a.localeCompare(b) },
+  limits: { steps: 1000 },
+  registry: {},
+});
+// selectMany over an array member really is Seq<string>
+const linqTags: string[] = linqFrom(linqUsers).selectMany((u) => u.tags).toArray();
+void linqTags;
+// the groupJoin group is an array value: index it, fan it, aggregate it
+const linqJoined: { id: number; first: string; n: number }[] = linqFrom(linqUsers)
+  .groupJoin(linqFrom(linqUsers), (u) => u.name, (v) => v.name,
+    (u, g) => ({ id: u.id, first: g.at(0).name, n: g.count() }))
+  .toArray();
+void linqJoined;
+// @ts-expect-error — only a numeric array is a vector
+void linqFrom(linqUsers).select((u) => u.tags.similarity([1]));
+// @ts-expect-error — a spatial method is not on a number expression
+void linqFrom(linqUsers).where((u) => u.age.within([1, 2]));
+// @ts-expect-error — an unknown registry key
+void linqFrom(linqUsers, { collation: {} });
+
 // providers keep the element type the caller declares; unknown otherwise
 const linqProvider = { execute: (_d: unknown, _o: { externals: Record<string, unknown> }) => [] as unknown };
 const typedRemote: Sequence<LinqUser> = linqFrom<LinqUser>(linqProvider);
@@ -1121,6 +1167,8 @@ void genStore.entity('Ghost');
 void genStore.entity('User').load({ include: { ghosts: true } });
 // @ts-expect-error — add() takes the INPUT shape, checked
 void genStore.entity('User').add({ email: 7 });
+// @ts-expect-error — a relation member is a projection, never an updatable column
+void genStore.entity('User').update('u1', { posts: [] });
 
 // @jarenjs/ai — the ledger: durable state over an injected storage
 // adapter. Both entry points are exercised (the index re-export and the

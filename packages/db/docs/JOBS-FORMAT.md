@@ -49,7 +49,10 @@ restarting.
 `_jaren_job_checkpoints` holds `(run_id, node_id, value)` rows — the
 flow checkpoint store of §7, keyed by the JOB id (the run id IS the
 job id). Both tables are created on open when `jobs` is requested;
-neither appears in the model.
+neither appears in the model. `enqueue`'s options are validated as
+they are stored: `runAt` must be a finite epoch in milliseconds and
+`maxAttempts` a positive integer (`TypeError`) — a `NaN` eligibility
+was once stored, and that job was pending forever.
 
 ## 3. Leasing and exactly-once execution
 
@@ -113,22 +116,31 @@ reclaimed — size `leaseMs` to the slowest honest handler.
 ## 6. Workers and concurrency
 
 `createWorker({ handlers, concurrency, pollInterval, leaseMs, owner,
-maxAttempts, backoff, random })` returns `{ start(), stop(),
+backoffBase, backoffCap, stopGraceMs })` returns `{ start(), stop(),
 stats() }`:
 
-- `concurrency` (default 1) independent claim-execute loops share one
-  worker registration;
+- `concurrency` (default 1, a positive integer — `TypeError`
+  otherwise, because a worker with zero loops would `start()` and never
+  claim) independent claim-execute loops share one worker registration;
 - an idle loop sleeps `pollInterval` (default 500 ms — at most
   2 claims/s of idle cost per loop, stated). An `enqueue` on the SAME
   store wakes every idle local loop immediately, so same-process
   latency is not poll-bound; **cross-process wake-up is polling**,
   plainly (§8);
+- retry backoff is `min(backoffCap, backoffBase × 2^(attempts − 1))`,
+  jittered to between half and all of itself (defaults 1 s and 60 s);
+  `maxAttempts` belongs to the JOB (`enqueue(kind, payload,
+  { maxAttempts })`, default 5), not to the worker;
 - `stop({ graceMs })` aborts in-flight handlers and resolves once they
-  settle **or** the grace period expires (default 5 s), answering
+  settle **or** the grace period expires (default `stopGraceMs`, 5 s),
+  answering
   `{ drained, inFlight }`; a loop the grace period could not drain is
   **cancelled**, not left running — see §6.1;
-- `stats()` reports claims, completions, failures, wakes, polls and the
-  in-flight handler count.
+- `stats()` reports claims, completions, failures, wakes, polls, the
+  in-flight handler count and `claimErrors` — a claim statement the
+  database refused (a read-only file, a closed store), counted rather
+  than swallowed, so a worker that can never claim is visible instead
+  of silently idle.
 
 ### 6.1 A handler cannot break the loop, and cannot hold shutdown
 
@@ -224,6 +236,10 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 This format adds NO codes. API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the
 call, matching the capture and live precedents; storage failures ride
-the existing `JD2005` wrap; a job's own failure is DATA — recorded in
+the existing `JD2005` wrap and a coded error passes through it
+unchanged (`JD2063` after `close()`); `store.jobs` on a read-only
+store is `JD0002` at first use, because the queue tables cannot be
+created — named there, not a raw `SQLITE_READONLY` at the first
+enqueue; a job's own failure is DATA — recorded in
 `last_error` and the state machine of §4 — because a queue that
 throws away its failure story has failed twice.

@@ -45,18 +45,29 @@ shape change is a **transformation of values**, not a table rebuild.
 - `kind: "jslt"` rewrites every document of a collection through a
   compiled JSLT stylesheet, in batches, inside the migration's
   transaction. The empty stylesheet (`[]`) is the identity transform.
-  A step carrying `"draft": true` is a planner placeholder and MUST
-  refuse to run (`JD0021`) until the author fills it in.
+  Over an ENTITY table the stylesheet sees the whole row — the mapped
+  columns merged into the document under the TARGET model's mapping —
+  and what it returns is split back into columns and document by that
+  mapping; the key member is kept from the row (a stylesheet that
+  omits it loses nothing) and a stylesheet that changes it is
+  `JD0023`. A step carrying `"draft": true` is a planner placeholder
+  and MUST refuse to run (`JD0021`) until the author fills it in.
 - `kind: "query"` is an assertion: the query runs over the
   collection's documents and MUST answer an empty sequence (`expect:
   "empty"`, the default) or an EBV-true value (`expect: "ebv"`) for
   the migration to proceed. This is how a migration states its own
   precondition — "no user has a null email before the NOT NULL
-  index" — and it is checked on the shadow first.
+  index" — and it is checked on the shadow first. Over an entity table
+  the assertion reads the same merged rows a `jslt` step sees.
 - `kind: "derive"` recomputes named STORED derived index columns from
   the documents already in a collection — the backfill described in
   §2.1. It is idempotent: a derived value is a pure function of the
   document, so a replay writes what the first run wrote.
+- `kind: "sql"` executes one rendered DATA statement — a fold of a
+  column into the document, a backfill, an `INSERT … SELECT` — §9.4; a
+  dry run always prints it with its note.
+- `kind: "rebuild"` is the entity restructure of §10, self-contained:
+  the `CREATE` of the new shape, the copy and the index DDL.
 - Steps are ordered, and the order is the contract.
 
 ### 2.1 Derived spatial columns and the backfill
@@ -107,7 +118,16 @@ and the column entry carries the width the value is packed to:
   `"x-rename": "oldName"` on the target collection; the planner emits
   the rename first and rebuilds the indexes (a renamed SQLite table
   keeps its old index names — probed). Without the hint, a rename is
-  a drop plus a create and the report says so.
+  a drop plus a create and the report says so. The hint is not part of
+  the shape: `x-rename` is stripped before the shape hash is computed,
+  so a model that keeps carrying a satisfied hint hashes the same as
+  one without it and plans nothing — a rename is idempotent across
+  `plan` runs. An entity rename carries its join tables with it, by
+  the endpoints the mapping records rather than by splitting the
+  table's name (an entity name may itself contain `_`); where the
+  rename flips the sorted endpoint order the join table is rebuilt
+  (create, `INSERT … SELECT`, drop) under its new name and no
+  membership is lost.
 - Added, removed and changed indexes become index DDL — reusing the
   store's own DDL generator, never a second implementation. A changed
   generated column (type or path) is a drop plus an add, with its
@@ -123,7 +143,10 @@ and the column entry carries the width the value is packed to:
   schema through the injected `compileSchema` hook. A document that no
   longer validates is `JD0021` and the whole migration rolls back — a
   narrowing without an adequate transform cannot land. A widening
-  needs no transform, and passes this check by fact.
+  needs no transform, and passes this check by fact. For an entity
+  the validated document is the whole row — columns merged back under
+  the target mapping — so a pure widening of a column-mapped member
+  passes and a narrowing of one is caught.
 - Changing a collection's key declaration is not planned (a rebuild);
   the planner refuses with a `TypeError` naming the non-goal.
 
@@ -139,10 +162,11 @@ store untouched.
 
 The shadow runs over an empty data set; the real-data facts (the
 widening check, key consistency, the assertions over real rows) run on
-the real store inside its transaction. The model format declares no
-UDF-expression indexes, so there is no function set to re-register on
-the shadow — stated here because a dialect that allowed such indexes
-would make the shadow fail on a schema the real store accepts.
+the real store inside its transaction. The shadow registers the same
+functions as the real run: `migrate(…, { registerFunctions })` runs on
+the shadow, the real and the reference connections before any DDL
+(§10), so a hand-created index over a registered deterministic
+function neither fails the shadow nor is silently dropped by it.
 
 ## 5. History and checksums
 
@@ -173,6 +197,10 @@ hash of the `baseline` model when no migration has run.
 - `dryRun: true` prints every statement and the affected document
   counts, validates the chain on the shadow, and writes NOTHING. The
   API default is to run; a CLI SHOULD default to the dry run.
+- `migrationStatus` (and the CLI's `status`/`check`) create the empty
+  history table on a database that has none — the one write a reading
+  command makes, so a fresh file answers `applied: (none)` rather than
+  a missing-table error.
 - Each pending migration runs in ONE exclusive transaction
   (`BEGIN IMMEDIATE` on SQLite — concurrent writers wait or time out
   under the busy timeout) with a savepoint per step; any failure rolls
@@ -225,13 +253,13 @@ every row has a shadow-verified test that migrates seeded data:
 | Change | Strategy |
 |---|---|
 | add mapped column (property added, or moved out of the document) | `ALTER TABLE ADD COLUMN` — always nullable (absent reads back absent, MODEL-FORMAT §9.3) — plus a `sql` data step when the property's values already live in the document |
-| drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
+| drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives — a `NULL` column folds to ABSENT, never to JSON `null`, so §9.3's rule survives the fold, in the rebuild copy too; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
 | change type / enum CHECK / key / epoch flavor | **rebuild** (§10) |
 | add or drop an index (`unique`/`index`/version) | plain DDL |
-| add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder; join tables create/drop directly |
-| entity added / dropped | create / `DROP TABLE` (destructive, named) |
+| add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create/drop directly |
+| entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
 | entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints |
-| scalar ⇄ JSONB move (`column: "json"` toggled, shape change) | rebuild + a data step |
+| scalar ⇄ JSONB move (`column: "json"` toggled) | the first two rows: `ADD COLUMN` plus a `sql` lift out of the document, or a `sql` fold plus `DROP COLUMN` — a rebuild only where SQLite cannot drop the column in place |
 
 Two rules keep the diff honest:
 
@@ -279,12 +307,13 @@ the transaction** — a broken reference fails the migration rather
 than shipping.
 
 Two deviations from the cited twelve steps, recorded: (1) the
-procedure brackets itself with `PRAGMA foreign_keys=OFF/ON`, which is
-a no-op inside a transaction — the migration connection never enables
-the pragma (SQLite's default is off; `openStore` enables AND verifies
-it per connection), so enforcement during the rebuild is off exactly
-as the procedure wants, and `foreign_key_check` provides the
-guarantee; (2) triggers and views are not re-created because this
+procedure's `PRAGMA foreign_keys=OFF/ON` bracket is honoured
+literally, OUTSIDE the transaction (inside one the pragma is a no-op):
+`node:sqlite` enables enforcement by default, and with it on a parent
+table could not even be dropped, so a migration holding a rebuild
+step turns enforcement off before `BEGIN IMMEDIATE` and back on after
+it settles, and `foreign_key_check` inside the transaction provides
+the guarantee the bracket suspended; (2) triggers and views are not re-created because this
 store creates none — a hand-added trigger is outside the model and
 outside the diff, which drift (§12) will name.
 
@@ -316,14 +345,21 @@ jaren-db shape  --model <model>
 
 - `plan` diffs two model FILES (a database stores shape hashes, not
   models — the from-model is the previous model file); with `--store`
-  it first verifies the from-model's hash matches the database's
-  recorded shape.
+  it first compares the from-model's physical shape with the database
+  itself — never with the history, which would refuse every database
+  that has applied a migration.
 - `check` is the CI command: exit 1 when migrations are pending OR the
-  database drifted; 0 in sync.
-- `apply` prints every statement before running; destructive steps
-  (drop table/column, rebuild) require `--yes` or an interactive
-  confirmation that NAMES what is lost. Default is dry-run + ask.
-- `status` lists applied/pending and reports drift (§12).
+  database drifted; 0 in sync. `--model` is required — without it
+  drift cannot be measured, and `check` refuses rather than print
+  `in sync`.
+- `apply` prints every statement, then asks; destructive steps (drop
+  table/column, rebuild) print what is lost and ask for that
+  separately. `--yes` answers both, `--dry-run` stops after the
+  printout. Without an interactive terminal there is nobody to ask, so
+  `apply` without `--yes` exits 1 after the printout with nothing
+  applied — a CI job passes `--yes` deliberately, never by default.
+- `status` lists applied/pending and reports drift (§12); on a
+  database without a history table it creates the empty one (§6).
 - `shape` prints the physical mapping a model produces.
 
 ## 12. Drift

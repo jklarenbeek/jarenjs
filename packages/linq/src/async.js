@@ -32,19 +32,20 @@
  */
 
 import { compileDocument } from './provider.js';
-import { emitDocument, wrapTerminal } from './document.js';
+import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
-import { captureExpression, toExpression } from './expression.js';
+import { captureExpression, toExpression, requireJsonBinding } from './expression.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { semanticKey } from '@jarenjs/core/object';
 
-/** Barrier stage kinds and the reason each materialises. */
+/** Barrier stage kinds and the reason each materialises. There is no
+ * `join` here: a join's inner side re-reads the source, and an async
+ * source is single-pass (LINQ-FORMAT.md §10). */
 const BARRIERS = {
   orderBy: '$orderby materialises the tuple stream to sort it',
   thenBy: '$orderby materialises the tuple stream to sort it',
   groupBy: '$groupby materialises the tuple stream to group it',
-  join: 'a join needs the whole inner side',
   aggregate: '$fold folds the whole stream into one value',
   reverse: '$reverse needs the last item first',
 };
@@ -88,10 +89,12 @@ export class AsyncSequence {
 
   /**
    * @param {{ kind: 'source', iterate: () => AsyncIterator<any> }
-   *   | { kind: 'sequence', runPrefix: () => any[], prefixDocument: () => any }} origin
+   *   | { kind: 'sequence', runPrefix: (params: ReadonlyMap<string, any>) => any[],
+   *       prefixDocument: () => any }} origin
    * @param {readonly any[]} stages
    * @param {ReadonlyMap<string, any>} params
-   * @param {{ compileTypeTest?: any }} options
+   * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
+   *   pathFunctions?: any, limits?: any, registry?: object }} options
    */
   constructor(origin, stages, params, options) {
     this.#origin = origin;
@@ -124,7 +127,12 @@ export class AsyncSequence {
 
   where(predicate) { return this.#chainCaptured('where', 'predicate', predicate); }
   select(projection) { return this.#chainCaptured('select', 'projection', projection); }
-  selectMany(selector) { return this.#chainCaptured('select', 'projection', selector); }
+  selectMany(selector) {
+    return this.#with({
+      kind: 'select', name: 'selectMany',
+      projection: fanProjection(captureFor(this.#params, selector)),
+    });
+  }
 
   /** @param {string} kind @param {string} slot @param {any} fn */
   #chainCaptured(kind, slot, fn) {
@@ -145,7 +153,7 @@ export class AsyncSequence {
       if (options.empty !== undefined) spec.$empty = options.empty;
       if (options.collation !== undefined) spec.$collation = options.collation;
     }
-    return this.#with({ kind, spec });
+    return this.#with({ kind, name: desc ? `${kind}Descending` : kind, spec });
   }
 
   groupBy(key) { return this.#with({ kind: 'groupBy', key: captureFor(this.#params, key) }); }
@@ -170,15 +178,19 @@ export class AsyncSequence {
       throw new LinqBuildError('JL0005',
         'concat on an async sequence takes a constant array — an async source cannot be re-iterated for a second sequence');
     }
+    // the JSON boundary (§5) and one copy at build time: the stage owns
+    // its constants, and hands out a fresh copy per enumeration
+    const items = toExpression(other).$const;
     return this.#with({
       kind: 'concat',
-      other: { $for: { it: { $const: other } }, $return: '$it' },
-      items: other,
+      other: { $for: { it: { $const: items } }, $return: '$it' },
+      items,
     });
   }
 
   defaultIfEmpty(fallback = null) {
-    return this.#with({ kind: 'defaultIfEmpty', fallback: toExpression(fallback), value: fallback });
+    const expr = toExpression(fallback);
+    return this.#with({ kind: 'defaultIfEmpty', fallback: expr, value: expr?.$const ?? fallback });
   }
 
   ofType(schema) { return this.#with({ kind: 'ofType', schema }); }
@@ -200,7 +212,10 @@ export class AsyncSequence {
   params(bindings) {
     validateParams(bindings);
     const merged = new Map(this.#params);
-    for (const name of Object.keys(bindings)) merged.set(name, bindings[name]);
+    for (const name of Object.keys(bindings)) {
+      requireJsonBinding(name, bindings[name]);
+      merged.set(name, bindings[name]);
+    }
     return new AsyncSequence(this.#origin, this.#stages, merged, this.#options);
   }
 
@@ -209,7 +224,10 @@ export class AsyncSequence {
   //#region documents and reporting
 
   /** The chain as one query document — refuses when a `mapAsync` sits
-   * in the chain, because a host callback has no document form. */
+   * in the chain, because a host callback has no document form. A deep
+   * snapshot, as on the sync surface: the emitted tree embeds the
+   * stages' captured expressions, and handing those out by reference
+   * made the document a live window into an immutable sequence. */
   toDocument() {
     if (this.#stages.some((s) => s.kind === 'mapAsync')) {
       throw new LinqBuildError('JL0005',
@@ -218,15 +236,18 @@ export class AsyncSequence {
     const root = this.#origin.kind === 'sequence'
       ? this.#origin.prefixDocument()
       : '$[*]';
-    return emitDocument(root, this.#stages);
+    return snapshot(emitDocument(root, this.#stages));
   }
 
-  /** Barriers, the split, and — when representable — the document. */
+  /** Barriers, the split, and — when representable — the document.
+   * Stages are named by the OPERATOR the caller wrote (`selectMany`,
+   * `orderByDescending`), and a `thenBy` is part of the `$orderby`
+   * barrier it extends, not a barrier of its own. */
   explain() {
     const barriers = [];
     for (const stage of this.#stages) {
-      if (BARRIERS[stage.kind] !== undefined) {
-        barriers.push({ operator: stage.kind, reason: BARRIERS[stage.kind] });
+      if (BARRIERS[stage.kind] !== undefined && stage.kind !== 'thenBy') {
+        barriers.push({ operator: stage.name ?? stage.kind, reason: BARRIERS[stage.kind] });
       }
     }
     const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
@@ -237,10 +258,10 @@ export class AsyncSequence {
     else {
       const prefix = this.#stages.slice(0, firstMap);
       out.split = {
-        pushed: this.#origin.kind === 'sequence'
+        pushed: snapshot(this.#origin.kind === 'sequence'
           ? this.#origin.prefixDocument()
-          : emitDocument('$[*]', prefix),
-        residual: this.#stages.slice(firstMap).map((s) => s.kind),
+          : emitDocument('$[*]', prefix)),
+        residual: this.#stages.slice(firstMap).map((s) => s.name ?? s.kind),
       };
     }
     return out;
@@ -255,7 +276,7 @@ export class AsyncSequence {
   async* [Symbol.asyncIterator]() {
     const { names, values } = this.#externals();
     let stream = this.#origin.kind === 'sequence'
-      ? arrayStream(this.#origin.runPrefix())
+      ? arrayStream(this.#origin.runPrefix(this.#params))
       : this.#origin.iterate();
 
     const stages = this.#stages;
@@ -360,9 +381,12 @@ export class AsyncSequence {
         })();
       }
       case 'concat': {
+        // a fresh copy per enumeration: a consumer that writes into a
+        // yielded constant must not rewrite what the next enumeration
+        // answers (the sync surface hands out the engine's frozen values)
         return (async function* () {
           yield* iterateAndClose(stream);
-          yield* stage.items;
+          for (const item of stage.items) yield snapshot(item);
         })();
       }
       default: { // 'defaultIfEmpty'
@@ -373,7 +397,7 @@ export class AsyncSequence {
             any = true;
             yield item;
           }
-          if (!any) yield stage.value ?? null;
+          if (!any) yield snapshot(stage.value ?? null);
         })();
       }
     }
@@ -569,7 +593,9 @@ function validateParams(bindings) {
  * Build an async sequence over an async source (LINQ-FORMAT.md §10).
  * @param {any} source - async iterable, sync iterable, cursor or push
  *   queue
- * @param {{ compileTypeTest?: any }} [options]
+ * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
+ *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
+ *   the engine registries, as `from()` takes them
  * @returns {AsyncSequence}
  */
 export function fromAsync(source, options = {}) {
@@ -583,8 +609,9 @@ export function fromAsync(source, options = {}) {
  * PREFIX (compiled in memory or pushed WHOLE to its provider), and the
  * async surface continues locally from its rows. `explain()` reports
  * the split (D8's residual honesty, applied to the async boundary).
- * @param {{ runPrefix: () => any[], prefixDocument: () => any,
- *   params: ReadonlyMap<string, any>, options: { compileTypeTest?: any } }} carrier
+ * @param {{ runPrefix: (params: ReadonlyMap<string, any>) => any[],
+ *   prefixDocument: () => any, params: ReadonlyMap<string, any>,
+ *   options: { compileTypeTest?: any } }} carrier
  * @param {any} fn
  * @param {any} options
  * @returns {AsyncSequence}

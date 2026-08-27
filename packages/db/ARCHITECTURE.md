@@ -247,14 +247,21 @@ index-usable spelling and read every row of the collection.
 
 The guards make the forms sound for typed AND untyped paths alike —
 the schema type's job is choosing the generated COLUMN (the index),
-never weakening the guard. Two documented preconditions: string
-operators, aggregates AND ordering are only promoted on schema-typed
-paths because the engine ERRORS on non-conforming operands where SQL
-would coerce or sort — a stored `null` under an ordered key, a
-non-string under a string operator — so on an unvalidated store, rows
-violating the collection schema can make the engine throw where the
-database answers; keep `compileSchema` injected if that distinction
-matters to you.
+never weakening the guard. Two documented preconditions. String
+operators, aggregates and ordering are only promoted on schema-typed
+paths that cannot hold `null` and are not boolean, because the engine
+ERRORS on non-conforming operands where SQL would coerce or sort — a
+`null` under an ordered key, a non-string under a string operator —
+so a path whose schema admits `null` is a named residual for those
+forms and the two engines keep answering alike over conforming data.
+And the guards protect the JSON TYPE, not the VALUE: a typed
+generated column carries SQLite affinity, so on an unvalidated store a
+row that violates the schema — the string `'020'` under an `integer`
+path — reads as the integer `20` in the column while `json_type` still
+says text, and a pushed comparison answers rows the engine (comparing
+the JSON value) does not. Keep `compileSchema` injected: with the hook
+no such row is ever stored, and without it the pushdown is exact only
+over documents that happen to conform.
 
 **Bind-time diversion.** SQLite cannot bind a boolean, and a
 `null`-valued external needs Jaren's null semantics, not SQL's. At
@@ -571,8 +578,9 @@ collection binding, so the planner passes that binding's **name** in:
 wrapped under any other name every reference would read as an external,
 the determinism rule would reject the fragment, and the hatch would
 silently not engage — no error and no reason in `explain()`.
-Registration is keyed by `contentKey(fragment)`
-so identical fragments share one registration, and the planner MUST
+Registration is keyed by `semanticKey(fragment)` (the
+order-insensitive identity from `@jarenjs/core/object`) so identical
+fragments share one registration, and the planner MUST
 produce a correct plan with the capability disabled (tested that way).
 Preference order: native SQL → deterministic function → residual, and
 `explain()` names the choice. **Index-form UDFs are deliberately not
@@ -585,11 +593,15 @@ UDF-expression indexes.
 ### The statement cache
 
 A caller of the core primitives, not an eighth implementation:
-`createBoundedCache` keyed by `contentKey(document)` plus collection,
-dialect and strictness. `contentKey` is the memo-grade key
-(`hashContent(stableStringify(x) ?? '')` — drops `undefined` members,
-no cycle guard; both properties acceptable for a cache key), never
-`canonicalizeJson` (signature-grade, throws on `undefined`).
+`createSemanticCache` keyed by the whole discriminating tuple — the
+document plus collection, dialect, strictness, the pushdown switch and
+the profile — where the identity is the tuple's COMPLETE
+serialization, never a fingerprint of it: a 32-bit content hash
+collides after tens of thousands of documents, and a collision here
+answers one query with another query's plan and rows (the
+cache-identity test exists to keep that key abolished).
+`store.stats()` exposes hits, misses and evictions so the cache is
+proven rather than assumed.
 `store.stats()` exposes hits, misses and evictions, so the cache is
 proven rather than assumed.
 

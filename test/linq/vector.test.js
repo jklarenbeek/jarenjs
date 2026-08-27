@@ -57,16 +57,16 @@ describe('the vector family emits §8.15', () => {
       .take(2)
       .select((m) => m.id);
     assert.deepStrictEqual(query.toDocument(), {
-      $for: { it: {
+      $for: { it: [{
         $subsequence: [{
-          $for: { it: '$[*]' },
+          $for: { it: ['$[*]'] },
           $orderby: [
             { $key: { $similarity: ['$it.embedding', '$query'] }, $dir: 'desc', $empty: 'least' },
             { $key: '$it.id' },
           ],
           $return: '$it',
         }, 0, 2],
-      } },
+      }] },
       $return: '$it.id',
     });
     assert.deepStrictEqual(query.toArray(), ['a', 'e']);
@@ -133,5 +133,13 @@ describe('the vector surface is documented exactly once, in LINQ-FORMAT §4', ()
       assert.ok(row.includes(`\`${name}(`), `§4's row does not name ${name}`);
     // and the row says what the surface deliberately does NOT have
     assert.ok(/no `?knn`? method/i.test(row), "§4's row does not record that there is no knn method");
+  });
+
+  it('and the one method is declared on the typed surface', () => {
+    const types = readFileSync(new URL('../../packages/linq/types/index.d.ts', import.meta.url), 'utf8');
+    for (const name of methods) {
+      assert.ok(new RegExp(`\\b${name}\\(`).test(types),
+        `the typed surface does not declare ${name}()`);
+    }
   });
 });

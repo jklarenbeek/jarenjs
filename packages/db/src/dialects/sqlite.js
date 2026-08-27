@@ -33,7 +33,8 @@ function jsonPathText(segments) {
   let text = '$';
   for (const segment of segments) {
     if ('index' in segment) {
-      text += `[${segment.index}]`;
+      // SQLite counts from the end as `[#-1]`; a bare `[-1]` is a bad path
+      text += segment.index < 0 ? `[#${segment.index}]` : `[${segment.index}]`;
       continue;
     }
     // eslint-disable-next-line no-control-regex

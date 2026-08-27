@@ -30,7 +30,7 @@ const adults = from(users)
   .select((u) => ({ id: u.id, name: u.name }));
 
 adults.toArray();    // deferred until a terminal
-adults.toDocument(); // { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 21] }, … }
+adults.toDocument(); // { $for: { it: ['$[*]'] }, $where: { $gt: ['$it.age', 21] }, … }
 ```
 
 The async surface runs the SAME operator set over cursors: streamable stages go

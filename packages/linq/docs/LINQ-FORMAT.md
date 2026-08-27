@@ -31,11 +31,15 @@ const adults = from(users)
 
 adults.toArray();     // executes in memory
 adults.toDocument();  // the SAME query, as one JSON document:
-// { "$for": { "it": "$[*]" },
+// { "$for": { "it": ["$[*]"] },
 //   "$where": { "$gt": ["$it.age", 21] },
 //   "$orderby": { "$key": "$it.name" },
 //   "$return": { "id": "$it.id", "name": "$it.name" } }
 ```
+
+(The source is bound through an array constructor, `["$[*]"]`, so that
+an array-valued row stays one item — §5 says why; a provider's own root
+is bound bare.)
 
 - `from(source, options?)` — `source` is any iterable (arrays,
   strings, generators, Sets…) or a provider (§8); anything else is
@@ -45,7 +49,11 @@ adults.toDocument();  // the SAME query, as one JSON document:
   the message.
 - `fromDocument(source, document, options?)` — attach a hand-written
   or stored query document; its result is the item sequence and every
-  operator chains over it (a `{$query, $expr}` envelope is unwrapped).
+  operator chains over it. Exactly the `{ "$query": "0.1", "$expr": … }`
+  envelope is unwrapped; any other envelope — an unknown version, a
+  stray member, a missing half — is compiled first so the ENGINE's
+  verdict (`JQ0006`, `JQ0001`, `JQ0003`) is what surfaces, never a
+  silent run under this version.
 - Every operator returns a NEW immutable sequence (§5); terminal
   operations execute (§6).
 
@@ -71,8 +79,22 @@ value becomes the expression:
 - A proxy belongs to exactly ONE capture. Storing one and replaying
   it into a later operator is `JL0002` — the emitted document would
   silently reference the wrong binding, so the build fails instead.
-  (`===` between proxies is untrappable and therefore undetectable;
-  do not compare proxies.)
+  Captures NEST: a chain built and run inside a callback is ordinary
+  (`select((u) => ({ id: u.id, n: from(rows).count() }))`); an
+  enclosing capture's proxy used inside the nested one is `JL0002` by
+  name — the inner document rebinds `$it`, so a correlated subquery
+  cannot be spelled this way. (`===` between proxies is untrappable and
+  therefore undetectable; do not compare proxies.)
+- **JavaScript's own operators are not trappable, and they do not
+  fail loudly.** A proxy is an object, so `&&`, `||`, `!`, `?:`, `in`,
+  `typeof`, `Object.keys` and `===` evaluate against the PROXY and
+  yield a silently wrong document: `u.age.gt(21) && u.name.eq('x')`
+  captures only the right operand, `!u.deleted` is the constant
+  `false`, `u.deleted ? 'a' : 'b'` is always `'a'`. Use the expression
+  surface — `.and()`, `.or()`, `.not()` — for logic. Arithmetic and
+  comparison operators (`u.age > 21`, `u.age + 1`, `${u.name}`) throw a
+  plain `TypeError` (a proxy cannot be converted to a primitive): loud,
+  but not coded.
 - The item binding is always named `it` in the emitted document
   (nested phrases shadow it legally), so captured expressions read
   `$it.…` at every depth and the document stays hand-readable.
@@ -91,20 +113,20 @@ is part of THIS design.
 |---|---|---|---|
 | `Where` | FLWOR `$where` | native | `(e: Expr<T>) => Expr<boolean>` → `Seq<T>` |
 | `Select` | `$return` constructor | native | `(e: Expr<T>) => Expr<R>` → `Seq<R>` |
-| `SelectMany` | `$return` (a multi-item projection flattens per tuple) | native | `(e: Expr<T>) => Expr<R[]>` → `Seq<R>` |
+| `SelectMany` | `$return` of a `$for` phrase over the projection — the projected value is iterated ONE level (an array member's elements, a constructed array's members; a scalar is itself), and the FLWOR `$return` concatenates per tuple. Emitted as `{ "$for": { "it": <projection> }, "$return": "$it" }` (the nested phrase rebinds `it` legally) | native | `(e: Expr<T>) => Expr<R[]>` → `Seq<R>` |
 | `OrderBy` / `OrderByDescending` | `$orderby` key spec (`$dir`; `$empty`/`$collation` via `options`) | native | `(e: Expr<T>) => Expr<K>` → `Seq<T>` |
 | `ThenBy` / `ThenByDescending` | appended `$orderby` spec; must directly follow `orderBy*` (`JL0005`) | native | as `OrderBy` |
 | `GroupBy` | `$groupby`; downstream items are `{ key, items }` | native | `(e: Expr<T>) => Expr<K>` → `Seq<{key: K, items: T[]}>` |
-| `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast. Both sides MUST derive from the same source in 0.1 (`JL0005`): a query document reads one input; the relational order lifts this | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
-| `GroupJoin` | projection over a correlated inner phrase (the matching group as an expression: `(u, g) => ({ n: g.count() })`); same-source rule as `Join` | emulated | `(inner: Seq<U>, ok, ik, (o: Expr<T>, g: Expr<U[]>) => Expr<R>)` → `Seq<R>` |
+| `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast **when both keys are plain member paths** (`o => o.pid`, `i => i.id`); a key with an operator in it (`o => o.name.lower()`, `o => o.p.add(0)`) is not a probe key and the join runs as a nested loop. Both sides MUST derive from the same source in 0.1 (`JL0005`): a query document reads one input; the relational order lifts this. The inner side's declared parameters ride along (§7) | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
+| `GroupJoin` | the matching group bound as an ARRAY value — `$let: { g: [ <correlated inner phrase> ] }` — so the result selector can index it (`g.at(0)`), fan it (`g.all()`), place it in a member (`{ matches: g }`) and aggregate over its members (`(u, g) => ({ n: g.count() })` counts the matches, `g.exists()` is whether there are any); same-source rule and parameter merge as `Join` | emulated | `(inner: Seq<U>, ok, ik, (o: Expr<T>, g: ArrayExpr<U> & AggregatableExpr) => Expr<R>)` → `Seq<R>` |
 | `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>` |
 | `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>` |
 | `Reverse` | `$reverse` | native | `()` → `Seq<T>` |
 | `Count` / `Sum` / `Average` / `Min` / `Max` | §8.8 aggregates (`Average` → `$avg`) | native | `count(): number`; `sum(): number`; `average/min/max(): number` (throw `JL2001` on empty; `min`/`max` follow the operand family) |
 | `Any()` | `$exists` | native | `(): boolean` |
 | `Any(pred)` / `All(pred)` | `$some` / `$every` quantifier phrase | native | `(pred): boolean` (`all` vacuously true on empty) |
-| `Aggregate(seed, fn)` | `$fold` — the accumulator clause | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>): A` |
-| `Aggregate(fn)` (unseeded) | — JSON cannot spell "the implicit first element" as a lambda seed | unsupported (`JL0005`) | — |
+| `Aggregate(seed, fn)` | `$fold` — the accumulator clause; the result is a sequence of exactly ONE accumulated value (`.first()` reads it) | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>)` → `Seq<A>` |
+| `Aggregate(fn)` (unseeded) | — JSON cannot spell "the implicit first element" as a lambda seed | unsupported (`JL0006`) | — |
 | `First` / `FirstOrDefault` | `[ $subsequence [expr, 0, 1] ]` window | native | `(): T` (`JL2001` on empty) / `(d?): T \| D` |
 | `Single` / `SingleOrDefault` | `[ $subsequence [expr, 0, 2] ]` window | native | `(): T` (`JL2001`/`JL2002`) / `(d?): T \| D` (`JL2002` on 2+) |
 | `Last` / `LastOrDefault` | `[ $subsequence [$reverse expr, 0, 1] ]` | native | as `First` |
@@ -175,17 +197,42 @@ q.toArray(); // [2, 3, 4] — the source was read AGAIN
 ```
 
 The compiled query is shared through a bounded cache keyed by the
-document's COMPLETE structural identity (`semanticKey`), so
+document's exact JSON text — COLLISION-FREE and ORDER-SENSITIVE — so
 re-enumeration is cheap without pretending the results are frozen.
 A 32-bit fingerprint would not do here: it collides after tens of
 thousands of documents, and a collision means one query runs another
 query's compiled program — wrong rows, cache hit reported, nothing said.
+Nor would an order-insensitive identity: a constructor's member order is
+part of a document's meaning, and `{ id, name }` and `{ name, id }` must
+each answer in their own order however the cache is warmed.
 `for…of` a sequence iterates `toArray()`'s result (one enumeration per
 loop).
 
-**`toDocument()` is a deep snapshot.** A sequence is immutable, so the
-document it hands out is an independent tree: writing into a returned
-document cannot change what a later enumeration answers.
+**`toDocument()` is a deep snapshot**, on both surfaces. A sequence is
+immutable, so the document it hands out is an independent tree: writing
+into a returned document (or into `explain()`'s) cannot change what a
+later enumeration answers.
+
+**An item is an item.** The engine's `$for` unpacks an item that is an
+array into its members, one level (QUERY-FORMAT §6.2, D4) — right for a
+path like `$.tags`, wrong for a chain, where an array-valued ROW (a CSV
+record, a pair) is one item that `where`, `select` and `count` never
+split. So the emitter binds every source a phrase iterates through an
+array constructor — `{ "$for": { "it": ["$[*]"] } }` — whose one array
+item is unpacked exactly once, into the rows as they are; a reseated
+phrase and a join side are packed the same way. `from([[1, 2], [3]])
+.where(() => true).count()` is `2` on both surfaces, and the streaming
+async surface agrees by construction. The one source left bare is a
+PROVIDER's own root (`$.Post[*]`): a stored document is an object, so D4
+never applies there, and the bare root is the shape the provider's
+planner pushes.
+
+**Constants come back frozen and shared on the sync surface.** A
+literal object or array in a projection, a `defaultIfEmpty` fallback or
+a `concat` array is engine data: every row that yields it yields the
+SAME frozen value (`rows[0] === rows[1]`, and writing into it throws).
+The async surface hands out a fresh copy per enumeration instead —
+same values, no shared identity — because a streamed row is yours.
 
 **A `null` a callback returns is a VALUE, not an absent clause.**
 `where(() => null)` filters everything out (null is not true),
@@ -201,7 +248,10 @@ an empty object. `NaN` and `±Infinity` are refused for the same reason
 (JSON has neither, and lenient serialization folds them into `null`), and
 so is `-0`, which shares its JSON text with `0` while dividing to the
 opposite infinity. Convert first — a `Date` to its ISO string or epoch
-number — or bind through `params()`.
+number. The boundary is the same for a `concat` array and for a
+`params()` binding (`JL0004`): a parameter becomes an external and, on a
+provider, a bound SQL parameter, so a `Date` there would compare against
+nothing and answer `[]` with no error anywhere.
 
 ## 6. Terminal semantics
 
@@ -246,6 +296,17 @@ Undeclared use is `JL0004` at BUILD time with the fix in the message
 (the engine would say JQ0005 at compile time; earlier and clearer
 wins). The names `it`, `it2`, `acc` and `g` are RESERVED — they are the
 emitted document's own binding names — and declaring them is `JL0004`.
+A binding must be query data (§5): a `Date`, `Map`, `NaN` or `-0` is
+`JL0004` with the conversion named.
+
+The inner side of a `join`, `groupJoin` or `concat` contributes its
+document WHOLE, so its declared parameters ride along into the new
+sequence (`explain().externals` lists the union); a name both sides
+bind to different values is `JL0004` — one document carries one binding
+per name. Rebinding a name later (`.params({ k: 3 })`) re-runs the
+whole document under the new value, on the async surface too: a
+`params()` after a `mapAsync` rebinds the pushed prefix as well as the
+residual.
 
 ## 8. The provider contract
 
@@ -288,7 +349,7 @@ executable in memory:
 | `collations` | `orderBy(…, { collation })` — a `nl` sort is `JQ0010` without it |
 | `functions` | `$call` in a hand-written or saved document |
 | `pathFunctions` | custom RFC 9535 path function extensions |
-| `limits` | step, sequence and result bounds — the reason a SAVED document can be run at all |
+| `limits` | step, depth and sequence bounds — the reason a SAVED document can be run at all. `resultItems` does not bind a chain: a terminal reads ONE packed window (§6), so the bound that guards a chain's size is `sequenceItems` on its phrases; on the async surface only `steps`/`depth` and a barrier phase's `sequenceItems` apply, because streaming stages evaluate one item at a time |
 | `registry` | an explicit cache-partition key, when the hooks above are rebuilt per call |
 
 Compiled documents are cached per registry COMBINATION, not per document
@@ -318,19 +379,26 @@ Runtime errors (`LinqRuntimeError`):
 | `JL2002` | `single` found more than one element |
 | `JL2003` | `elementAt` is out of range |
 | `JL2004` | an asynchronous provider cannot back the synchronous surface |
+| `JL2005` | a push queue was fed after it ended |
+| `JL2006` | a provider answered an element terminal with something other than one array |
 
 Engine errors (`JQ…`) from a hand-written `fromDocument` document pass
-through unwrapped — they already carry their own code and `docPath`.
+through unwrapped — they already carry their own code and `docPath` —
+with one exception: `JQ0008` (a schema operator with no type-test
+compiler) is reported as `JL0003`, because the fix is the same
+`compileTypeTest` hook whether `ofType`/`cast` or the document spelled
+the operator.
 
 ## 10. The asynchronous surface: streaming and barriers
 
-`fromAsync(source, options?)` gives the SAME operator surface over
-async sources, emitting the SAME query documents — the same chain
-through `from` and `fromAsync` MUST emit byte-identical documents (the
-one-operator-set proof) — with terminals returning promises. The rule:
-**the pipeline is synchronous, the boundaries are async.** A compiled
-query never awaits; what is asynchronous is where rows come from and
-where element-wise host work happens (§11).
+`fromAsync(source, options?)` gives the same operator surface over
+async sources — joins excepted, see the table — emitting the SAME query
+documents: the same chain through `from` and `fromAsync` MUST emit
+byte-identical documents (the one-operator-set proof), with terminals
+returning promises. The rule: **the pipeline is synchronous, the
+boundaries are async.** A compiled query never awaits; what is
+asynchronous is where rows come from and where element-wise host work
+happens (§11).
 
 Per operator, whether it STREAMS (per-item evaluation, flat memory) or
 is a BARRIER (materialises the stream so far and runs the maximal run
@@ -345,7 +413,8 @@ because the engine itself materialises for `$orderby`/`$groupby`):
 | `defaultIfEmpty` | stream (an emptiness flag) |
 | `concat` | stream for a CONSTANT array; another sequence is refused (`JL0005`) — an async source is single-pass and cannot be re-iterated for a second chain |
 | | on the SYNC surface, `concat` also requires the same source: a query document reads one input, so the other sequence contributes its EXPRESSION, and a foreign sequence would have that expression evaluated against THIS source — reading the wrong rows twice instead of concatenating two inputs |
-| `orderBy`/`thenBy`, `groupBy`, `join`, `aggregate`, `reverse` | BARRIER, named by `explain()` with the reason |
+| `orderBy`/`thenBy`, `groupBy`, `aggregate`, `reverse` | BARRIER, named by `explain()` with the reason (a `thenBy` is part of the `$orderby` barrier it extends) |
+| `join`, `groupJoin` | NOT on the async surface: a join's inner side re-reads the source, and an async source is single-pass. Join on the sync surface, or collect the stream first |
 | `count`, `any`, `all`, `first`, `single`, `elementAt` | stream with early exit where semantics allow |
 | `sum`, `average`, `min`, `max`, `last` | consume the stream; the aggregate itself runs through the ENGINE over the collected items, so its semantics (type errors included) are identical to the sync surface |
 
@@ -361,7 +430,9 @@ the report says which operator forced it.
 
 Re-enumeration follows the sync contract: each enumeration calls the
 source's iterator method again. A one-shot generator object simply
-exhausts — the same way it does under `from`.
+exhausts — the same way it does under `from`. Streamed constants
+(`concat`, `defaultIfEmpty`) are handed out as a fresh copy per
+enumeration (§5).
 
 ## 11. The concurrency boundary
 

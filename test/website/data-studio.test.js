@@ -118,7 +118,7 @@ describe('the spatial round trip — the pure half, and what the page makes of t
     // the query is the chain's document: a $within over the geometry,
     // the region bound as an external — the shape an index is probed with
     assert.deepStrictEqual(trip.query, {
-      $for: { it: '$[*]' },
+      $for: { it: ['$[*]'] },
       $where: { $within: ['$it.geometry', '$region'] },
       $return: '$it',
     });

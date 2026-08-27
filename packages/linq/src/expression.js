@@ -26,14 +26,57 @@ const NODE = Symbol('jaren-linq-node');
  * goes through a bracketed, single-quoted selector. */
 const SHORTHAND_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-let activeEpoch = 0;
+let epochCounter = 0;
+
+/**
+ * The captures in progress, innermost last. A proxy is LIVE while its
+ * capture is on this stack and CURRENT only at the top: a nested
+ * capture (a chain built and run inside another callback) leaves the
+ * enclosing proxies usable once it returns, while a proxy of the
+ * enclosing capture used INSIDE the nested one is refused by name —
+ * the inner document would rebind `$it`, so the outer reference would
+ * silently point at the wrong item.
+ * @type {number[]}
+ */
+const captureStack = [];
 
 /** @param {any} record */
 function assertLive(record) {
-  if (record.epoch !== activeEpoch) {
+  if (record.epoch === captureStack[captureStack.length - 1]) return;
+  if (captureStack.includes(record.epoch)) {
     throw new LinqBuildError('JL0002',
-      'an expression proxy escaped its capture callback; expressions cannot be stored and replayed across operators');
+      'an expression proxy of an enclosing capture was used inside a nested capture — '
+      + 'a correlated subquery cannot be spelled this way (the inner document rebinds the '
+      + 'item); compute the inner query first and use its result');
   }
+  throw new LinqBuildError('JL0002',
+    'an expression proxy escaped its capture callback; expressions cannot be stored and replayed across operators');
+}
+
+/**
+ * A member name as an RFC 9535 bracketed name selector. Backslashes and
+ * quotes are escaped, and so are the control characters the grammar
+ * forbids unescaped (U+0000–U+001F): without this a key holding a tab
+ * emitted a path the engine refused at RUN time (`JQ0004`), while
+ * `get()` is documented as the way to reach any key at all.
+ * @param {string} name
+ * @returns {string}
+ */
+function bracketName(name) {
+  let escaped = '';
+  for (const c of name) {
+    const code = c.charCodeAt(0);
+    if (c === '\\') escaped += '\\\\';
+    else if (c === "'") escaped += "\\'";
+    else if (code >= 0x20) escaped += c;
+    else if (c === '\b') escaped += '\\b';
+    else if (c === '\f') escaped += '\\f';
+    else if (c === '\n') escaped += '\\n';
+    else if (c === '\r') escaped += '\\r';
+    else if (c === '\t') escaped += '\\t';
+    else escaped += '\\u' + code.toString(16).padStart(4, '0');
+  }
+  return `['${escaped}']`;
 }
 
 /**
@@ -63,7 +106,7 @@ function embedString(s) {
  * where the caller can see which value it was.
  * @param {any} value
  */
-function isPlainJson(value) {
+export function isPlainJson(value) {
   if (value === null) return true;
   const type = typeof value;
   if (type === 'string' || type === 'boolean') return true;
@@ -79,6 +122,25 @@ function isPlainJson(value) {
     if (!isPlainJson(value[key])) return false;
   }
   return true;
+}
+
+/**
+ * Refuse a parameter value that is not query data. A binding travels
+ * into a document as an external, and later into a provider as a bound
+ * SQL parameter, so a `Date`, `Map`, `NaN` or `-0` here would compare
+ * against nothing and answer `[]` with no error anywhere. One check for
+ * both surfaces, one message.
+ * @param {string} name
+ * @param {any} value
+ */
+export function requireJsonBinding(name, value) {
+  if (isPlainJson(value)) return;
+  const what = value !== null && typeof value === 'object'
+    ? `a ${value.constructor?.name ?? 'non-plain'} instance`
+    : typeof value === 'number' ? String(value) : `a ${typeof value}`;
+  throw new LinqBuildError('JL0004',
+    `parameter '${name}' is bound to ${what}, which is not query data — convert it `
+    + 'first (a Date to its ISO string or epoch number, a Map to an object, NaN or -0 to a number)');
 }
 
 /**
@@ -172,6 +234,18 @@ const unary = (op) => function (/** @type {any} */ record) {
 };
 
 /**
+ * A unary operator that ranges over ITEMS: on a root that stands for
+ * an array value with a fanned twin (`groupJoin`'s group is bound as an
+ * array so `at`/`all`/member position work, and its aggregates count
+ * the members, not the array), the operator applies to the fanned
+ * path; elsewhere it is `unary`.
+ * @param {string} op
+ */
+const fanned = (op) => function (/** @type {any} */ record) {
+  return makeExpr({ [op]: record.seq ?? record.doc }, record.epoch, false);
+};
+
+/**
  * `$date-add` / `$date-sub`: `[date, duration]` or `[date, amount, unit]`.
  * @param {any} record
  * @param {any} amount - an ISO 8601 duration, or a number of units
@@ -227,7 +301,7 @@ const METHODS = {
   div: binary('$div'), idiv: binary('$idiv'), mod: binary('$mod'),
   neg: unary('$neg'),
   // §8.2 existence
-  exists: unary('$exists'), isEmpty: unary('$empty'),
+  exists: fanned('$exists'), isEmpty: fanned('$empty'),
   // §8.7 strings
   startsWith: binary('$starts-with'), endsWith: binary('$ends-with'),
   contains: binary('$contains'), matches: binary('$match'),
@@ -247,8 +321,8 @@ const METHODS = {
   },
   // §8.8 aggregates as EXPRESSIONS (a group inside a projection:
   // `(u, g) => ({ n: g.count() })`)
-  count: unary('$count'), sum: unary('$sum'), avg: unary('$avg'),
-  min: unary('$min'), max: unary('$max'),
+  count: fanned('$count'), sum: fanned('$sum'), avg: fanned('$avg'),
+  min: fanned('$min'), max: fanned('$max'),
   // §8.13 dates — the whole family, not a corner of it. A date in this
   // suite is an RFC 3339 STRING, so every one of these is an ordinary
   // string operator with a calendar's worth of rules behind it, and
@@ -342,6 +416,7 @@ const METHODS = {
     return makeExpr({ $get: [record.doc, toExpression(index)] }, record.epoch, false);
   },
   all(record) {
+    if (record.seq !== undefined) return makeExpr(record.seq, record.epoch, true);
     if (!record.pathable) {
       throw new LinqBuildError('JL0005',
         "all() fans out a PATH ('$it.tags[*]'); it cannot follow an operator result");
@@ -350,8 +425,7 @@ const METHODS = {
   },
   get(record, name) {
     if (typeof name === 'string' && record.pathable) {
-      return makeExpr(`${record.doc}['${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}']`,
-        record.epoch, true);
+      return makeExpr(`${record.doc}${bracketName(name)}`, record.epoch, true);
     }
     return makeExpr({ $get: [record.doc, toExpression(name)] }, record.epoch, false);
   },
@@ -363,10 +437,12 @@ const METHODS = {
  * @param {number} epoch - the owning capture
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
+ * @param {string} [seq] - for a root standing for an array VALUE: the
+ *   fanned path its aggregates range over (`'$g[*]'`)
  * @returns {any}
  */
-function makeExpr(doc, epoch, pathable) {
-  const record = { doc, epoch, pathable };
+function makeExpr(doc, epoch, pathable, seq = undefined) {
+  const record = { doc, epoch, pathable, seq };
   return new Proxy(record, {
     get(target, prop) {
       if (prop === NODE) return target;
@@ -382,7 +458,7 @@ function makeExpr(doc, epoch, pathable) {
       if (target.pathable) {
         const step = SHORTHAND_RE.test(prop)
           ? `${target.doc}.${prop}`
-          : `${target.doc}['${prop.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}']`;
+          : `${target.doc}${bracketName(prop)}`;
         return makeExpr(step, target.epoch, true);
       }
       return makeExpr({ $get: [target.doc, prop] }, target.epoch, false);
@@ -415,24 +491,27 @@ function makeParams(declared, epoch) {
  * Run one capture: `fn` receives a proxy per root (plus the parameters
  * proxy last) and its result becomes an expression via
  * {@link toExpression}. A root is a binding NAME (`'it'` → the pathable
- * `$it`) or a `{ doc, pathable }` record for an expression-valued root
- * (groupJoin's inner group). Proxies die with the capture — reuse is
- * `JL0002`.
+ * `$it`) or a `{ doc, pathable, seq? }` record for a bound root
+ * (groupJoin's group: the `$g` array, whose aggregates fan over
+ * `$g[*]`). Captures nest — a chain built and run inside a callback is
+ * ordinary — but a proxy used outside its capture, or an enclosing
+ * capture's proxy used inside a nested one, is `JL0002`.
  * @param {(...roots: any[]) => any} fn - the user callback
- * @param {readonly (string | { doc: any, pathable: boolean })[]} roots
+ * @param {readonly (string | { doc: any, pathable: boolean, seq?: string })[]} roots
  * @param {Set<string>} declaredParams
  * @returns {any} the captured expression (plain JSON)
  */
 export function captureExpression(fn, roots, declaredParams) {
-  const epoch = ++activeEpoch;
+  const epoch = ++epochCounter;
   const proxies = roots.map((root) => (typeof root === 'string'
     ? makeExpr('$' + root, epoch, true)
-    : makeExpr(root.doc, epoch, root.pathable)));
+    : makeExpr(root.doc, epoch, root.pathable, root.seq)));
   proxies.push(makeParams(declaredParams, epoch));
+  captureStack.push(epoch);
   try {
     return toExpression(fn(...proxies));
   }
   finally {
-    activeEpoch++; // every proxy of this capture is now dead
+    captureStack.pop(); // every proxy of this capture is now dead
   }
 }

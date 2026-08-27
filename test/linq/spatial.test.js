@@ -77,7 +77,7 @@ describe('the spatial family runs', () => {
   it('filters by containment and projects — document and answer', () => {
     const query = from(PLACES).where((p) => p.location.within(REGION)).select((p) => p.name);
     assert.deepStrictEqual(query.toDocument(), {
-      $for: { it: '$[*]' },
+      $for: { it: ['$[*]'] },
       $where: { $within: ['$it.location', { $const: REGION }] },
       $return: '$it.name',
     });
@@ -93,7 +93,7 @@ describe('the spatial family runs', () => {
       .where((p, params) => p.location.within(params.region))
       .select((p) => p.name);
     assert.deepStrictEqual(query.toDocument(), {
-      $for: { it: '$[*]' },
+      $for: { it: ['$[*]'] },
       $where: { $within: ['$it.location', '$region'] },
       $return: '$it.name',
     });
@@ -191,5 +191,16 @@ describe('the spatial surface is documented exactly once, in LINQ-FORMAT §4', (
     }
     assert.deepStrictEqual([...spatialOperators].filter((op) => ![...emitted.values()].includes(op)), [],
       'a §8.14 operator with no method on the fluent surface');
+  });
+
+  it('and every one is declared on the typed surface', () => {
+    // the series gate has always checked the d.ts; the spatial and
+    // vector gates checked source↔format only, which is how a whole
+    // family stayed undeclared while its README examples were typed
+    const types = readFileSync(new URL('../../packages/linq/types/index.d.ts', import.meta.url), 'utf8');
+    for (const name of spatialMethods) {
+      assert.ok(new RegExp(`\\b${name}\\(`).test(types),
+        `the typed surface does not declare ${name}()`);
+    }
   });
 });

@@ -58,6 +58,12 @@
         },
         {
           "$ref": "#/definitions/deriveStep"
+        },
+        {
+          "$ref": "#/definitions/sqlStep"
+        },
+        {
+          "$ref": "#/definitions/rebuildStep"
         }
       ]
     },
@@ -214,6 +220,73 @@
         "kind",
         "collection",
         "columns"
+      ],
+      "additionalProperties": false
+    },
+    "sqlStep": {
+      "description": "A DATA step spelled directly as one SQL statement (MIGRATION-FORMAT §9.4): the planner's fold of a dropped column into the document, the move of a document member into its new column, an R*Tree backfill. Executed exactly as a ddl step; distinct in kind so a reviewer reads intent and a dry run shows it as data.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "sql"
+        },
+        "sql": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sql"
+      ],
+      "additionalProperties": false
+    },
+    "rebuildStep": {
+      "description": "The ALTER TABLE procedure SQLite lacks (MIGRATION-FORMAT §10), self-contained: create the target shape under `<table>__rebuild`, copy the rows through the rendered column mapping, drop the old table, rename, recreate the indexes, then `PRAGMA foreign_key_check` inside the transaction.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "rebuild"
+        },
+        "table": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "create": {
+          "description": "The CREATE statements of the temporary table.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "copy": {
+          "description": "The INSERT … SELECT that carries every row across the column mapping.",
+          "type": "string",
+          "minLength": 1
+        },
+        "indexes": {
+          "description": "The index statements recreated under the final name.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "table",
+        "create",
+        "copy",
+        "indexes"
       ],
       "additionalProperties": false
     }

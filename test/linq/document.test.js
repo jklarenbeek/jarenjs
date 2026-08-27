@@ -28,7 +28,7 @@ describe('emission — the worked example is byte-reproducible (D2 proof)', () =
       .select((u) => ({ id: u.id, name: u.name }));
     const doc = q.toDocument();
     assert.deepStrictEqual(doc, {
-      $for: { it: '$[*]' },
+      $for: { it: ['$[*]'] },
       $where: { $gt: ['$it.age', 21] },
       $orderby: { $key: '$it.name' },
       $return: { id: '$it.id', name: '$it.name' },
@@ -45,7 +45,7 @@ describe('the mapping table, native row by native row', () => {
   it('where → $where', () => {
     const q = from(USERS).where((u) => u.age.ge(36));
     assert.deepStrictEqual(q.toDocument(),
-      { $for: { it: '$[*]' }, $where: { $ge: ['$it.age', 36] }, $return: '$it' });
+      { $for: { it: ['$[*]'] }, $where: { $ge: ['$it.age', 36] }, $return: '$it' });
     assert.deepStrictEqual(q.toArray().map((u) => u.id), [1, 3]);
   });
 
@@ -59,15 +59,24 @@ describe('the mapping table, native row by native row', () => {
   it('select → $return constructor', () => {
     const q = from(USERS).select((u) => u.name.upper());
     assert.deepStrictEqual(q.toDocument(),
-      { $for: { it: '$[*]' }, $return: { $upper: '$it.name' } });
+      { $for: { it: ['$[*]'] }, $return: { $upper: '$it.name' } });
     assert.deepStrictEqual(q.toArray(), ['ADA', 'KID', 'LIN']);
   });
 
-  it('selectMany → flattening $return', () => {
-    const q = from(USERS).selectMany((u) => u.tags.all());
+  it('selectMany → a $for phrase over the projection, flattened per tuple', () => {
+    // the projected value is iterated ONE level: an array member's
+    // elements become items (C# SelectMany over a collection member)
+    const q = from(USERS).selectMany((u) => u.tags);
     assert.deepStrictEqual(q.toDocument(),
-      { $for: { it: '$[*]' }, $return: '$it.tags[*]' });
+      { $for: { it: ['$[*]'] }, $return: { $for: { it: '$it.tags' }, $return: '$it' } });
     assert.deepStrictEqual(q.toArray(), ['dev', 'lead', 'dev']);
+    // a fanned path is already items; the phrase iterates them as they are
+    assert.deepStrictEqual(from(USERS).selectMany((u) => u.tags.all()).toArray(),
+      ['dev', 'lead', 'dev']);
+    // a constructed array's members flatten too; a scalar is itself
+    assert.deepStrictEqual(from(USERS).selectMany((u) => [u.id, u.age]).toArray(),
+      [1, 36, 2, 8, 3, 64]);
+    assert.deepStrictEqual(from(USERS).selectMany((u) => u.id).toArray(), [1, 2, 3]);
   });
 
   it('orderBy/orderByDescending/thenBy → $orderby specs in order', () => {
@@ -97,7 +106,7 @@ describe('the mapping table, native row by native row', () => {
     const q = from(USERS).orderBy((u) => u.age).where((u) => u.age.gt(10));
     assert.deepStrictEqual(q.toDocument(), {
       $for: {
-        it: { $for: { it: '$[*]' }, $orderby: { $key: '$it.age' }, $return: '$it' },
+        it: [{ $for: { it: ['$[*]'] }, $orderby: { $key: '$it.age' }, $return: '$it' }],
       },
       $where: { $gt: ['$it.age', 10] },
       $return: '$it',
@@ -108,7 +117,7 @@ describe('the mapping table, native row by native row', () => {
   it('groupBy → $groupby with the documented { key, items } shape', () => {
     const q = from(USERS).groupBy((u) => u.tags.at(0).exists());
     assert.deepStrictEqual(q.toDocument(), {
-      $for: { it: '$[*]' },
+      $for: { it: ['$[*]'] },
       $groupby: { g: { $exists: '$it.tags[0]' } },
       $return: { key: { $default: ['$g', null] }, items: ['$it'] },
     });
@@ -126,12 +135,12 @@ describe('the mapping table, native row by native row', () => {
       (u, v) => ({ a: u.name, b: v.name }));
     assert.deepStrictEqual(q.toDocument(), {
       $for: {
-        it: '$[*]',
-        it2: {
-          $for: { it: '$[*]' },
+        it: ['$[*]'],
+        it2: [{
+          $for: { it: ['$[*]'] },
           $where: { $exists: '$it.tags[0]' },
           $return: '$it',
-        },
+        }],
       },
       $where: { $eq: ['$it.tags[0]', '$it2.tags[0]'] },
       $return: { a: '$it.name', b: '$it2.name' },
@@ -163,7 +172,7 @@ describe('the mapping table, native row by native row', () => {
     assert.deepStrictEqual(q.toDocument(), {
       $subsequence: [
         { $subsequence: [
-          { $for: { it: '$[*]' }, $orderby: { $key: '$it.age' }, $return: '$it' },
+          { $for: { it: ['$[*]'] }, $orderby: { $key: '$it.age' }, $return: '$it' },
           1,
         ] },
         0, 1,
@@ -187,7 +196,7 @@ describe('the mapping table, native row by native row', () => {
     assert.strictEqual(ages.min(), 8);
     assert.strictEqual(ages.max(), 64);
     assert.deepStrictEqual(from(USERS).select((u) => u.age).toDocument(),
-      { $for: { it: '$[*]' }, $return: '$it.age' });
+      { $for: { it: ['$[*]'] }, $return: '$it.age' });
   });
 
   it('any/all → $exists and the quantifiers', () => {
@@ -202,7 +211,7 @@ describe('the mapping table, native row by native row', () => {
     const q = from(USERS).aggregate(0, (acc, u) => acc.add(u.age));
     assert.deepStrictEqual(q.toDocument(), {
       $fold: { acc: 0 },
-      $for: { it: '$[*]' },
+      $for: { it: ['$[*]'] },
       $return: { $add: ['$acc', '$it.age'] },
     });
     assert.deepStrictEqual(q.toArray(), [108]);

@@ -15,6 +15,7 @@
 import type {
   EntityKeyArg, LoadExplanation, SaveReport, Store, StoreCapabilities,
   StoreStats, Collection, ExecuteOptions, SequenceResult, ValueOrPromise,
+  Dialect, ChangeRecord, LiveOptions, LiveQuery, JobsApi, SyncStore,
 } from '@jarenjs/db';
 
 /** The self-referential constraint an interface can satisfy: generated
@@ -76,7 +77,9 @@ export interface TypedUntrackedReads<E extends MetaMap<E>, M extends EntityMeta>
 export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   create(doc: M['input']): Promise<Readonly<M['doc']>>;
   get(key: EntityKeyArg): Promise<Readonly<M['doc']> | undefined>;
-  update(key: EntityKeyArg, changes: Partial<M['doc']>): Promise<Readonly<M['doc']>>;
+  /** A relation member is a projection, never stored state: `update()`
+   * refuses it (`JD2003`), and the type does not offer it. */
+  update(key: EntityKeyArg, changes: Partial<Omit<M['doc'], keyof M['relations']>>): Promise<Readonly<M['doc']>>;
   delete(key: EntityKeyArg): Promise<boolean>;
   load<const S extends TypedLoadSpec<E, M>>(spec?: S):
     Promise<Array<Readonly<Loaded<E, M, S>>>>;
@@ -88,15 +91,25 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   asNoTracking(): TypedUntrackedReads<E, M>;
 }
 
+/** The typed store: every member of `Store` (a typed store is the same
+ * object, identity at runtime), with the entity sets typed. */
 export interface TypedStore<E extends MetaMap<E>> {
   readonly capabilities: StoreCapabilities;
+  readonly dialect: Dialect;
   stats(): StoreStats;
   collection<T = unknown>(name: string): Collection<T>;
   entity<K extends keyof E & string>(name: K): TypedEntitySet<E, E[K]>;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
+  observe(fn: (record: ChangeRecord) => void): () => void;
+  changesSince?(after: number): Promise<ChangeRecord[]>;
+  dataVersion(): Promise<number>;
+  live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
   close(options?: { graceMs?: number }): Promise<void>;
+  readonly jobs?: JobsApi;
+  readonly sync?: SyncStore;
 }
 
 /**

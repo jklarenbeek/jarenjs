@@ -12,7 +12,7 @@
  * for feed/end-style readers that have no pull protocol of their own.
  */
 
-import { LinqBuildError } from './errors.js';
+import { LinqBuildError, LinqRuntimeError } from './errors.js';
 
 /**
  * Normalize an async source into an iterator factory, or throw
@@ -25,6 +25,10 @@ export function adaptAsyncSource(source) {
     if (typeof source[Symbol.asyncIterator] === 'function') {
       return () => source[Symbol.asyncIterator]();
     }
+    // a string is refused on purpose: on this surface a string is a
+    // CHUNK source (feed it through a push queue), never a character
+    // stream — `from('abc')` iterates characters, and the twins differ
+    // here by design (LINQ-FORMAT.md §12)
     if (typeof source[Symbol.iterator] === 'function' && typeof source !== 'string') {
       return () => (async function* () { yield* source; })();
     }
@@ -71,7 +75,10 @@ export function createPushQueue(options = {}) {
 
   return {
     feed(value) {
-      if (ended) throw new LinqBuildError('JL0005', 'feed() after end()');
+      if (ended) {
+        throw new LinqRuntimeError('JL2005',
+          'feed() after end(): the push queue is closed and takes no more values');
+      }
       buffer.push(value);
       signal();
       return buffer.length <= highWaterMark;

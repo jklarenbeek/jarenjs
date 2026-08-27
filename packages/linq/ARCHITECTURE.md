@@ -18,8 +18,10 @@ table of recordable methods (`METHODS`) is null-prototyped so
 `constructor` and `toString` read as member access; methods shadow
 members by design, with `get('name')` as the escape for collisions and
 non-identifier keys. A proxy that escapes its callback (stored and
-reused later) is detected by an epoch counter and refused (`JL0002`) —
-the emitted document would be nonsense, so the build fails instead.
+reused later) is detected by a stack of capture epochs and refused
+(`JL0002`) — the emitted document would be nonsense, so the build fails
+instead; captures nest, and an enclosing capture's proxy used inside a
+nested one is refused by name for the same reason.
 
 ## The emitter (`src/document.js`)
 
@@ -27,7 +29,10 @@ A `Sequence` is an immutable stage list. Emission folds the stages
 into FLWOR phrases with clause-order segmentation: a `where` after an
 `orderBy` opens a new nested document, consecutive `where`s conjoin
 into one `$and`, and the item binding is always `it` (nested documents
-shadow it deliberately, so emitted documents stay hand-readable).
+shadow it deliberately, so emitted documents stay hand-readable). Every
+iterated source is bound through an array constructor so an
+array-valued row stays one item under the engine's `$for` unpacking
+(the format doc's §5); only a provider's own root is bound bare.
 Element terminals emit `[window]` array wrappers because the engine's
 result shape is `undefined | item | items` — the wrapper is what keeps
 an array-VALUED item unambiguous. Aggregate terminals wrap the whole
@@ -48,10 +53,11 @@ nothing else would notice drift.
 
 Async is a boundary, not a colour (D5). `fromAsync` streams a
 single-pass source through per-item compiled evaluators; a barrier
-operator (`orderBy`, `groupBy`, `aggregate`, `reverse`, `join`)
-collects the buffer and runs the MAXIMAL document slice through the
-sync engine in one call — so async answers are sync answers by
-construction, proven by a byte-identical-document test. `mapAsync` is
+operator (`orderBy`, `groupBy`, `aggregate`, `reverse`) collects the
+buffer and runs the MAXIMAL document slice through the sync engine in
+one call — so async answers are sync answers by construction, proven by
+a byte-identical-document test. There is no async `join`: the inner
+side re-reads the source, and a single-pass source cannot be. `mapAsync` is
 the one place element-wise asynchronous work happens: `concurrency`
 is required, the modes reuse the `createTaskEffect` vocabulary
 (`parallel`/`concat`/`switch`/`exhaust`), and failure is fail-closed —
@@ -67,11 +73,12 @@ residual runs locally, and `explain()` reports the split.
 
 ## The decisions that cost something
 
-- **Capture re-runs per call.** A chain re-captures and re-emits its
-  document on every terminal by design (the `Sequence` is immutable
-  and cheap to build; the benchmark publishes the price beside the
-  hand-written loop). Hold the `Sequence` — or the compiled document —
-  when the same query runs hot.
+- **Emission re-runs per call.** A callback is captured ONCE, when
+  its operator is called; the document is re-emitted and the compiled
+  program looked up on every terminal by design (the `Sequence` is
+  immutable and cheap to walk; the benchmark publishes the price beside
+  the hand-written loop). Hold the compiled document when the same
+  query runs hot.
 - **Same-source joins only (0.1).** One document has one root, so
   `join`/`groupJoin` across different sources is refused (`JL0005`)
   rather than silently materialised; the relational order lifts it.

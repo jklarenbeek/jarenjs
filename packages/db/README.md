@@ -48,7 +48,8 @@ const store = await openStore({
 const users = store.collection('users');
 await users.insert({ id: 'u1', email: 'ada@example.test', age: 36 });
 
-// a query document — here written by hand; linq writes the same thing
+// a query document — here written by hand; linq writes the same one,
+// its source wrapped as ['$[*]'] so an item that is an array stays one item
 const adults = await users.execute({
   $for: { it: '$[*]' },
   $where: { $ge: ['$it.age', 21] },
@@ -71,9 +72,12 @@ shape binds at `store.collection<User>('users')`.
   equivalent runs as a real compiled Jaren query (the residual), and
   `explain()` always says which is which — the SQL, the bound
   parameters, the indexes used (verified against the database's own
-  plan output), and the residual's named reasons. A 418-run
-  differential oracle keeps both paths agreeing. `strict: true` turns
-  any residual into a compile error.
+  plan output), and the residual's named reasons. A differential
+  oracle — a committed corpus and a seeded generator, every case run
+  in both modes — keeps both paths agreeing, with the one arithmetic
+  deviation declared rather than hidden (MODEL-FORMAT §10.6: SQLite's
+  compensated `SUM` and the engine's naive one differ in the last
+  bit). `strict: true` turns any residual into a compile error.
 - **Registered operators, correct in the residual, pushed where it
   pays.** Open with a registry (`operators:
   createJsltRegistry().use(mathPack).use(financePack)`) and a query may
@@ -515,7 +519,8 @@ seeks through, the instant bounds it used, which kernel finished the
 answer, and a reason code for every thing the database could not do:
 `fill-policy`, `calendar-width`, `named-zone`, `rolling-refinement`,
 `asof-refinement`, `unsupported-aggregate`, `nonliteral-spec`,
-`instant-not-integer`, `missing-series-prefix`. `strict: true` refuses
+`instant-not-integer`, `missing-series-prefix`, `row-selector`,
+`value-not-numeric`, `nonnative-grouping`, `invalid-spec`. `strict: true` refuses
 every one of them before a statement runs, and the counts `explain()`
 prints are the LAST ACTUAL execution's — `null` until the document has
 run, because an estimate wearing a count's name is worse than no
@@ -611,7 +616,12 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   queries, the same live updates run on the official SQLite wasm build
   over the header-free OPFS SAH-pool VFS — one tab owns the
   connection, others are clients. Proven in the `#/data` studio across
-  Chromium, Firefox and WebKit.
+  Chromium, Firefox and WebKit. The subpath exports the two helpers
+  that studio is built on: `sqlite3Handle(sqlite3, { DbClass })` builds
+  the injected handle from a loaded wasm module and the database class
+  the host picks (`sqlite3.oo1.DB` in memory, the SAH-pool
+  `OpfsSAHPoolDb` for OPFS), and `adaptOo1Database(sqlite3, db)` wraps
+  an oo1 database the host already opened.
 
 ### What an event-time view costs
 
@@ -677,8 +687,8 @@ replication on these primitives is a roadmap item, not a hint.
 - **The wasm build journals** (its session extension is not yet
   adapted); OPFS needs a secure context, and where it is absent the
   store runs in memory with the durability difference stated.
-- **Named future work, not silent gaps**: `$groupby` pushdown,
-  relation-name query sugar, a many-to-many membership API, incremental
+- **Named future work, not silent gaps**: `$groupby` pushdown beyond
+  the `$time-bucket` ladder, relation-name query sugar, a many-to-many membership API, incremental
   joins, other SQL dialects, replication, database introspection
   (MODEL-FORMAT §10.6, the roadmap).
 

@@ -21,22 +21,110 @@
  * not tell an absent clause from a null-valued one, and silently emitted
  * the document WITHOUT the clause. Every such query then returned its
  * unfiltered, unprojected source.
+ *
+ * An item is an item. The engine's `$for` unpacks an item that is an
+ * array into its members, one level (QUERY-FORMAT §6.2, D4) — the
+ * ergonomic default for a path like `$.tags`, and the wrong default for
+ * a chain, where an array-valued ROW (a CSV record, a pair) is one item
+ * the C# contract never splits. So every source a phrase iterates is
+ * bound through an ARRAY CONSTRUCTOR — `{ "$for": { "it": ["$[*]"] } }`
+ * — whose one array item is unpacked exactly once, into the rows as
+ * they are; a reseated phrase is packed the same way, because a `$for`
+ * over an inner phrase's result would unpack again. The one source left
+ * bare is a PROVIDER's own root (`'$.Post[*]'`): a stored document is an
+ * object, so D4 never applies there, and the bare root is the shape the
+ * provider's planner pushes. The streaming async surface keeps items by
+ * construction, so the two surfaces agree on every row shape.
  */
 
 import { LinqBuildError } from './errors.js';
 
 /** The fixed clause order a phrase may fill left-to-right. */
-const SLOT_ORDER = ['where', 'groupby', 'orderby', 'return'];
+const SLOT_ORDER = ['bindings', 'where', 'groupby', 'orderby', 'return'];
 
 /** The "this clause slot is unfilled" sentinel: a fresh object, so no
  * value a caller can express is ever mistaken for it. */
 const EMPTY = Symbol('linq.emptySlot');
 
-/** An open FLWOR phrase under construction. */
-function openPhrase(source) {
+/**
+ * An open FLWOR phrase under construction. `bare` marks a source the
+ * phrase iterates WITHOUT packing (a provider's root); every other
+ * source is packed so an array item stays one item.
+ * @param {any} source
+ * @param {boolean} [bare]
+ */
+function openPhrase(source, bare = false) {
   return {
-    source, fold: EMPTY, where: EMPTY, groupby: EMPTY, orderby: EMPTY, ret: EMPTY,
+    source, bare,
+    fold: EMPTY, bindings: EMPTY, where: EMPTY, groupby: EMPTY, orderby: EMPTY, ret: EMPTY,
   };
+}
+
+/** Whether no clause of the phrase has been filled. */
+function untouched(phrase) {
+  return phrase.fold === EMPTY && phrase.bindings === EMPTY && phrase.where === EMPTY
+    && phrase.groupby === EMPTY && phrase.orderby === EMPTY && phrase.ret === EMPTY;
+}
+
+/**
+ * The expression a phrase's items come from, as a `$for` source: packed
+ * (D4 unpacks the one array item back into the rows) unless the source
+ * is a bare provider root.
+ * @param {any} phrase
+ */
+function iterated(phrase) {
+  return phrase.bare ? phrase.source : [phrase.source];
+}
+
+/**
+ * A closed phrase as the SOURCE of another `$for` (a join side): a bare
+ * untouched root stays bare; anything else is packed.
+ * @param {any} phrase
+ */
+function packed(phrase) {
+  return phrase.bare && untouched(phrase) ? phrase.source : [closePhrase(phrase)];
+}
+
+/**
+ * A `selectMany` projection: the projected value iterated one level —
+ * an array member's elements, a constructed array's members, a scalar
+ * as itself — so `Seq<R[]>` really flattens to `Seq<R>`. The nested
+ * phrase rebinds `it` legally: its source is evaluated in the enclosing
+ * scope (the row), its body sees the element.
+ * @param {any} projection - a captured expression
+ * @returns {any}
+ */
+export function fanProjection(projection) {
+  return { $for: { it: projection }, $return: '$it' };
+}
+
+/**
+ * A deep, independent copy of an emitted query document. Plain data
+ * only, which is exactly what a document is — every captured expression
+ * has already passed the JSON-domain boundary in `expression.js`, so
+ * there is nothing here a structural copy would lose.
+ * @param {any} node
+ * @returns {any}
+ */
+export function snapshot(node) {
+  if (node === null || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(snapshot);
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const key of Object.keys(node)) defineOwn(out, key, snapshot(node[key]));
+  return out;
+}
+
+/**
+ * Assign an OWN property, so a `__proto__` member stays a member instead
+ * of silently replacing the object's prototype and vanishing.
+ * @param {Record<string, any>} target
+ * @param {string} key
+ * @param {any} value
+ */
+function defineOwn(target, key, value) {
+  Object.defineProperty(target, key,
+    { value, writable: true, enumerable: true, configurable: true });
 }
 
 /** Whether every slot AFTER `slot` is still empty — chain order must
@@ -57,12 +145,11 @@ function slotFree(phrase, slot) {
 
 /** Close a phrase into a query expression. */
 function closePhrase(phrase) {
-  const untouched = phrase.fold === EMPTY && phrase.where === EMPTY
-    && phrase.groupby === EMPTY && phrase.orderby === EMPTY && phrase.ret === EMPTY;
-  if (untouched) return phrase.source;
+  if (untouched(phrase)) return phrase.source;
   const doc = {};
   if (phrase.fold !== EMPTY) doc.$fold = { acc: phrase.fold };
-  doc.$for = { it: phrase.source };
+  doc.$for = { it: iterated(phrase) };
+  if (phrase.bindings !== EMPTY) doc.$let = phrase.bindings;
   if (phrase.where !== EMPTY) doc.$where = phrase.where;
   if (phrase.groupby !== EMPTY) doc.$groupby = { g: phrase.groupby };
   if (phrase.orderby !== EMPTY) {
@@ -86,10 +173,12 @@ const andJoin = (a, b) => (a === EMPTY ? b : { $and: [a, b] });
  *   (`'$[*]'` for a plain source; a stripped document for
  *   `fromDocument`)
  * @param {readonly any[]} stages
+ * @param {{ bareRoot?: boolean }} [options] - `bareRoot` iterates the
+ *   root without packing (a provider's own root; see the header)
  * @returns {any} the emitted query document (plain JSON)
  */
-export function emitDocument(root, stages) {
-  let phrase = openPhrase(root);
+export function emitDocument(root, stages, options = undefined) {
+  let phrase = openPhrase(root, options?.bareRoot === true);
   /** Close the open phrase and reopen over its result. */
   const reseat = () => { phrase = openPhrase(closePhrase(phrase)); };
 
@@ -125,12 +214,23 @@ export function emitDocument(root, stages) {
         break;
       case 'join':
         // the hash-join shape: nested bindings + equality (the engine's
-        // compile-time rewrite turns exactly this into a hash probe)
+        // compile-time rewrite turns exactly this into a hash probe;
+        // packed sources keep it — the probe is keyed on the bindings,
+        // not on the sources' spelling)
         phrase = openPhrase({
-          $for: { it: closePhrase(phrase), it2: stage.inner },
+          $for: { it: packed(phrase), it2: stage.innerBare ? stage.inner : [stage.inner] },
           $where: stage.on,
           $return: stage.result,
         });
+        break;
+      case 'groupJoin':
+        // the matching group bound as an ARRAY value (`$let`, one item)
+        // so the projection can index it, fan it and place it in a
+        // member; its aggregates fan over the members (expression.js)
+        if (!slotFree(phrase, 'bindings')) reseat();
+        phrase.bindings = { g: [stage.group] };
+        phrase.ret = stage.projection;
+        reseat();
         break;
       case 'aggregate': {
         // the seeded fold: its own phrase, closed immediately — the

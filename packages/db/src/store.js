@@ -23,15 +23,15 @@
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
-import { DbCompileError, DbRuntimeError } from './errors.js';
-import { chain, toPromise, isThenable } from './driver.js';
+import { DbCompileError, DbRuntimeError, isDuplicateKeyError } from './errors.js';
+import { chain, toPromise, isThenable, attempt } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
 import { normalizeProfile } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
-import { createTracker } from './tracker.js';
+import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
 import { normalizeEventTime } from './live-time.js';
@@ -369,13 +369,6 @@ function requireKey(key, collection, docPath) {
  * @param {string} keyColumn
  * @returns {boolean}
  */
-function isDuplicateKey(error, table, keyColumn) {
-  if (error?.errcode === 1555) return true;
-  return typeof error?.message === 'string'
-    && error.message.includes('UNIQUE constraint failed')
-    && error.message.includes(`${table}.${keyColumn}`);
-}
-
 /**
  * Wrap a database failure for one collection operation.
  * @param {any} error
@@ -386,7 +379,10 @@ function isDuplicateKey(error, table, keyColumn) {
  * @returns {DbRuntimeError}
  */
 function wrapWriteError(error, plan, collection, docPath, key) {
-  if (isDuplicateKey(error, plan.table, plan.keyColumn)) {
+  // an error that already carries a code (a closed store, a refused
+  // document) is the error; only the driver's own failures are wrapped
+  if (typeof error?.code === 'string' && error.code.startsWith('JD')) return error;
+  if (isDuplicateKeyError(error, plan.table, plan.keyColumn)) {
     return new DbRuntimeError('JD2001',
       `a document already exists under key '${String(key)}'`,
       { docPath, collection, key, cause: error });
@@ -594,16 +590,9 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   };
 
   const runWrite = (statementName, sql, params, key, reads) => {
-    return chain(prepared(statementName, sql), (statement) => {
-      let out;
-      try {
-        out = reads ? statement.get(params) : statement.run(params);
-      }
-      catch (error) {
-        throw wrapWriteError(error, plan, collection.name, collection.docPath, key);
-      }
-      return out;
-    });
+    return chain(prepared(statementName, sql), (statement) =>
+      attempt(() => (reads ? statement.get(params) : statement.run(params)),
+        (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)));
   };
 
   const core = {
@@ -673,15 +662,10 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         const { expression, params } = translated.build(
           dialect.quoteIdentifier(plan.docColumn), 1);
         const sql = dialect.dml.updateDoc(shape, expression, params.length + 1);
-        return chain(prepared(`patch:${sql}`, sql), (statement) => {
-          try {
-            statement.run([...params, ...derivedFor(next), key]);
-          }
-          catch (error) {
-            throw wrapWriteError(error, plan, collection.name, collection.docPath, key);
-          }
-          return next;
-        });
+        return chain(prepared(`patch:${sql}`, sql), (statement) =>
+          chain(attempt(() => statement.run([...params, ...derivedFor(next), key]),
+            (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)),
+          () => next));
       });
     },
     delete(key) {
@@ -1114,8 +1098,9 @@ export function openStore(model, options) {
               });
             }
             for (const joinName of Object.keys(mapping?.joinTables ?? {})) {
-              const pair = joinName.split('_');
-              const columns = pair.map((part) => ({ name: `${part}_key`, role: 'key' }));
+              const join = mapping.joinTables[joinName];
+              const columns = [join.left, join.right]
+                .map((side) => ({ name: side.column, role: 'key' }));
               captureShapes.set(joinName, {
                 kind: 'join', columns,
                 keyIndexes: columns.map((_, i) => i), docIndex: -1,
@@ -1155,7 +1140,15 @@ export function openStore(model, options) {
             defaults: typeof options.jobs === 'object' ? options.jobs : undefined,
           });
           /** Register a collection live query (LIVE-FORMAT §7). */
+          const refuseAsyncLive = () => {
+            if (connection.synchronous !== true) {
+              throw new DbCompileError('JD0051',
+                'live queries are not maintained over an asynchronous connection — a '
+                + 'synchronous driver (node, bun, a synchronous wasm handle) keeps them');
+            }
+          };
           const registerCollectionLive = (core, document, liveOptions) => {
+            refuseAsyncLive();
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
             const eventTime = normalizeEventTime(liveOptions, core.model.name);
@@ -1193,26 +1186,39 @@ export function openStore(model, options) {
           const captureJoinDelete = capture === null || capture.mode !== 'journal'
             ? null
             : (entityName, keyParts) => {
-              const joins = Object.keys(mapping?.joinTables ?? {})
-                .filter((joinName) => joinName.split('_').includes(entityName));
+              const joins = Object.entries(mapping?.joinTables ?? {})
+                .filter(([, join]) => join.left.entity === entityName
+                  || join.right.entity === entityName);
               const nextJoin = (i) => {
                 if (i >= joins.length) return null;
-                const joinName = joins[i];
-                const pair = joinName.split('_');
-                const sql = `SELECT ${pair.map((part) => dialect.quoteIdentifier(`${part}_key`)).join(', ')} `
+                const [joinName, join] = joins[i];
+                const columns = [join.left.column, join.right.column];
+                const own = join.left.entity === entityName ? join.left : join.right;
+                const sql = `SELECT ${columns.map(dialect.quoteIdentifier).join(', ')} `
                   + `FROM ${dialect.quoteIdentifier(joinName)} `
-                  + `WHERE ${dialect.quoteIdentifier(`${entityName}_key`)} = ${dialect.parameterRef(1, 'v')}`;
+                  + `WHERE ${dialect.quoteIdentifier(own.column)} = ${dialect.parameterRef(1, 'v')}`;
                 return chain(connection.prepare(sql), (statement) =>
                   chain(statement.all([keyParts[0]]), (rows) => {
                     for (const row of rows) {
-                      capture.record(joinName,
-                        pair.map((part) => row[`${part}_key`]), undefined, null);
+                      capture.record(joinName, columns.map((column) => row[column]), undefined, null);
                     }
                     return nextJoin(i + 1);
                   }));
               };
               return nextJoin(0);
             };
+          /** The document a keyed `put` replaces, for the journal's
+           * before-image: resolved through the collection's own key when
+           * the caller passed none — a plain upsert recorded as an
+           * `add` of the whole document, and a no-op put as a record. */
+          const readBefore = (core, doc, key) => {
+            const resolved = key !== undefined ? key
+              : core.model.keySegments !== null
+                ? extractKey(doc, core.model.keySegments, core.model.key,
+                  core.model.name, core.model.docPath)
+                : undefined;
+            return resolved === undefined ? undefined : core.get(resolved);
+          };
           /** Journal-mode write wrappers for a collection core. */
           const captureCollection = (collectionName, core) => {
             if (capture === null) return core;
@@ -1224,7 +1230,7 @@ export function openStore(model, options) {
                 return key;
               })),
               put: (doc, key) => guard(() => (journal
-                ? chain(key === undefined ? undefined : core.get(key), (before) =>
+                ? chain(readBefore(core, doc, key), (before) =>
                   chain(core.put(doc, key), (storedKey) => {
                     capture.record(collectionName, [storedKey], before ?? null, doc);
                     return storedKey;
@@ -1312,7 +1318,9 @@ export function openStore(model, options) {
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true
                 || (captureRequested.log !== undefined && captureRequested.log !== false)),
-            live: captureMode !== 'none',
+            // maintenance reads rows synchronously; an asynchronous
+            // connection is never maintained (LIVE-FORMAT §12) and says so
+            live: captureMode !== 'none' && connection.synchronous === true,
             jobs: options.jobs === true
               || (options.jobs !== undefined && options.jobs !== false),
           });
@@ -1352,6 +1360,8 @@ export function openStore(model, options) {
               const validate = options.compileSchema !== undefined
                 ? options.compileSchema(entity.schema)
                 : null;
+              if (validate !== null && typeof validate !== 'function')
+                throw new TypeError('openStore: compileSchema must return a validation function');
               core = captureEntity(name, entityCore(connection, entity,
                 mapping.entities[name], validate));
               entityCores.set(name, core);
@@ -1381,9 +1391,78 @@ export function openStore(model, options) {
             if (ops !== undefined) return ops;
             const core = entityCoreFor(name);
             const loads = loadEngineFor(name);
+            /**
+             * The many-to-many memberships a document carries, as join
+             * rows: `create()` attaches them after the insert, in the
+             * same transaction — the `<Name>Input` type and `add()` say
+             * a membership array is writable, and `create()` refusing it
+             * made the generated type a lie.
+             * @param {any} doc
+             */
+            const membershipsOf = (doc) => {
+              const out = [];
+              for (const property of entities.get(name).properties.values()) {
+                const relation = property.relation;
+                if (relation?.kind !== 'manyToMany') continue;
+                const join = mapping.joinTables[relation.joinTable];
+                const own = join.left.entity === name ? join.left : join.right;
+                const target = own === join.left ? join.right : join.left;
+                const keys = [...new Set(membershipKeys(doc?.[property.name],
+                  target.referencesKey, property.name,
+                  (reason) => new DbRuntimeError('JD2003', reason,
+                    { docPath: entities.get(name).docPath, collection: name })))];
+                if (keys.length > 0) out.push({ table: relation.joinTable, join, own, target, keys });
+              }
+              return out;
+            };
+            const attach = (made, memberships) => {
+              const ownKey = made[mapping.entities[name].keys[0]];
+              const next = (i) => {
+                if (i >= memberships.length) return null;
+                const { table, join, own, target, keys } = memberships[i];
+                const sql = `INSERT INTO ${dialect.quoteIdentifier(table)} `
+                  + `(${dialect.quoteIdentifier(own.column)}, ${dialect.quoteIdentifier(target.column)}) `
+                  + `VALUES (${dialect.parameterRef(1, 'v')}, ${dialect.parameterRef(2, 'v')})`;
+                return chain(connection.prepare(sql), (statement) => {
+                  const row = (j) => {
+                    if (j >= keys.length) return next(i + 1);
+                    let ran;
+                    try {
+                      ran = statement.run([ownKey, keys[j]]);
+                    }
+                    catch (error) {
+                      throw new DbRuntimeError('JD2005',
+                        `the database rejected the operation: ${/** @type {any} */ (error)?.message ?? String(error)}`,
+                        { docPath: entities.get(name).docPath, collection: name, key: ownKey, cause: error });
+                    }
+                    return chain(ran, () => {
+                      if (capture !== null && capture.mode === 'journal') {
+                        const value = { [own.column]: ownKey, [target.column]: keys[j] };
+                        const ordered = {};
+                        for (const column of [join.left.column, join.right.column])
+                          ordered[column] = value[column];
+                        capture.record(table, Object.values(ordered), null, ordered);
+                      }
+                      return row(j + 1);
+                    });
+                  };
+                  return row(0);
+                });
+              };
+              return next(0);
+            };
             ops = {
-              create: (doc) => chain(core.create(doc),
-                (made) => tracker.register(name, made)),
+              create: (doc) => {
+                const memberships = membershipsOf(doc);
+                if (memberships.length === 0)
+                  return chain(core.create(doc), (made) => tracker.register(name, made));
+                // one capture scope and one transaction around the row and
+                // its join rows: a membership the database refuses rolls the
+                // row back too, and journal capture records the join rows
+                return chain(guard(() => connection.transaction(() =>
+                  chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)))),
+                (made) => tracker.register(name, made));
+              },
               get: (key) => chain(core.get(key), (doc) =>
                 (doc === undefined ? undefined : tracker.register(name, doc))),
               update: (key, changes) => chain(core.update(key, changes),
@@ -1470,6 +1549,7 @@ export function openStore(model, options) {
                   throw new DbCompileError('JD0050',
                     'live queries require change capture — open the store with { capture: true }');
                 }
+                refuseAsyncLive();
                 if (liveOptions?.eventTime !== undefined) {
                   throw new DbCompileError('JD0053',
                     'live eventTime maintains a collection view — an entity document re-runs, '
@@ -1602,7 +1682,18 @@ export function openStore(model, options) {
                 }
                 return handle;
               },
-              transaction: (fn) => topLevelTransaction(fn),
+              transaction: (fn) => {
+                // the synchronous surface answers values: while a
+                // transaction owns the connection it could only QUEUE,
+                // which handed a Promise back under a value's type
+                if (opened.mustQueue) {
+                  throw new DbCompileError('JD0012',
+                    'the synchronous transaction cannot wait for the open transaction to '
+                    + 'settle — nest through the store the callback received, or use the '
+                    + 'asynchronous store.transaction()');
+                }
+                return topLevelTransaction(fn);
+              },
               entity(name) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({

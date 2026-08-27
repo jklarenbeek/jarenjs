@@ -19,6 +19,14 @@
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
 
 /**
+ * A promoted path the dialect's JSON path grammar cannot spell (a
+ * member name holding a double quote or a control character). The
+ * planner promotes by SCHEMA, not by grammar, so the query engine
+ * catches this and runs the document in the set residual instead.
+ */
+export class UnrepresentablePath extends Error {}
+
+/**
  * @typedef {{ external: string } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } }} ParamSlot
@@ -117,9 +125,8 @@ export function emitPlan(plan, dialect, physical) {
   const pathTextOf = (ref) => {
     const text = dialect.jsonPathText(ref.segments);
     if (text === null) {
-      // the planner never promotes an unrepresentable path; reaching
-      // this is an internal inconsistency, not a user error
-      throw new Error('emit: a promoted path is not representable in the dialect JSON path grammar');
+      throw new UnrepresentablePath('a member name the dialect\'s JSON path grammar cannot '
+        + 'carry (a double quote or a control character) runs in the residual');
     }
     return text;
   };

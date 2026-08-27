@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 
 import {
-  planModelMigration, migrate, migrationStatus, shapeHash,
+  planModelMigration, migrate, migrationStatus, shapeHash, compareShapeToModel,
   sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE,
 } from './index.js';
@@ -110,12 +110,17 @@ async function commandPlan(options) {
   const fromModel = readJson(options.from, 'from-model');
   const toModel = readJson(options.to, 'to-model');
   if (options.store !== null) {
-    const status = await migrationStatus(
-      { driver: nodeDriver(), path: options.store }, [], {
-        baseline: fromModel, model: fromModel,
-      }).catch((error) => fail(error.message));
-    if (status.drift !== null) {
-      fail(`the store does not match the from-model (${status.drift}) — `
+    // the from-model is compared with the database's SHAPE directly:
+    // asking the history with an empty chain refused every database
+    // that had applied a migration (JD0022), which is every database
+    // one plans a second migration for
+    const driver = nodeDriver();
+    const connection = await driver.open(options.store, {}).catch((error) => fail(error.message));
+    const drift = await Promise.resolve(compareShapeToModel(driver, connection, fromModel, undefined))
+      .catch((error) => fail(error.message));
+    await connection.close();
+    if (drift !== null) {
+      fail(`the store does not match the from-model (${drift}) — `
         + 'is this really the previous model?');
     }
   }
@@ -141,6 +146,9 @@ async function commandPlan(options) {
 async function commandStatus(options, { asCheck }) {
   if (options.store === null || options.baseline === null)
     fail(`${asCheck ? 'check' : 'status'} needs --store and --baseline`);
+  // `check` without the model verified nothing and printed "in sync"
+  if (asCheck && options.model === null)
+    fail('check needs --model — drift is measured against the model the code carries');
   const baseline = readJson(options.baseline, 'baseline model');
   const model = options.model !== null ? readJson(options.model, 'model') : undefined;
   const migrations = readMigrationsDir(options.migrations);
@@ -206,7 +214,10 @@ async function commandApply(options) {
     const answer = await confirm('Apply anyway? [y/N] ');
     if (!answer) fail('aborted — nothing was applied');
   }
-  else if (!options.yes && process.stdin.isTTY) {
+  else if (!options.yes) {
+    // "default is dry-run + ask" (MIGRATION-FORMAT §11): where nobody
+    // can be asked, the statements above are the dry run and nothing runs
+    if (!process.stdin.isTTY) fail('apply needs --yes (no interactive terminal to ask) — nothing was applied');
     const answer = await confirm('Apply? [y/N] ');
     if (!answer) fail('aborted — nothing was applied');
   }

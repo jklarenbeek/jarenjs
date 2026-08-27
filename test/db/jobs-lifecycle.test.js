@@ -175,9 +175,12 @@ describe('bounded shutdown', () => {
     await assert.rejects(() => store.close({ graceMs: 20 }),
       (error) => /** @type {any} */ (error).code === 'JD2062');
     // JD2062 is a REPORT, not a refusal: the connection really did close,
-    // which is why a second close finds nothing left to close
-    await assert.rejects(() => store.close({ graceMs: 20 }),
-      /database is not open/);
+    // which is why a second close finds nothing left to close — and says
+    // so by doing nothing, on every driver alike
+    assert.strictEqual(await store.close({ graceMs: 20 }), undefined);
+    // while any other call after close() is refused by name
+    await assert.rejects(() => store.jobs.enqueue('k', {}),
+      (error) => /** @type {any} */ (error).code === 'JD2063');
   });
 
   it('stop() CANCELS the loop it could not drain', async () => {

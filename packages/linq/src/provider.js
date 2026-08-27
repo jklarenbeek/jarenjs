@@ -9,23 +9,60 @@
  * real.
  *
  * Compiled documents are shared through a bounded LRU keyed by the
- * document's COLLISION-FREE structural identity, one cache per REGISTRY
- * identity — the hooks change what compiles, so two different registries
- * must not share compiled programs.
- * A fingerprint would not do: a 32-bit content hash collides after tens
- * of thousands of documents, and a collision here runs one query's
- * compiled program for another query's document — silently wrong rows.
+ * document's COLLISION-FREE, ORDER-SENSITIVE identity — its exact JSON
+ * text — one cache per REGISTRY identity, because the hooks change what
+ * compiles, so two different registries must not share compiled
+ * programs. A fingerprint would not do: a 32-bit content hash collides
+ * after tens of thousands of documents, and a collision here runs one
+ * query's compiled program for another query's document — silently
+ * wrong rows. Nor would an order-insensitive identity: a constructor's
+ * member order is part of a document's meaning (`{ id, name }` and
+ * `{ name, id }` project different objects), and a cache that keyed them
+ * as one answered the second projection in the first one's order.
  */
 
 import { compileJsonQuery, JsonQueryCompileError } from '@jarenjs/json/query';
-import { createSemanticCache, createWeakCache } from '@jarenjs/core/cache';
+import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
 import { LinqBuildError } from './errors.js';
 
 /** Stands in for an absent hook while walking the identity chain. */
 const NO_HOOK = Object.freeze({});
 
 const CACHES = createWeakCache();
-const cacheFor = () => createSemanticCache(512);
+const cacheFor = () => createBoundedCache(512);
+
+/**
+ * The cache identity of one compilation: the document's exact JSON text
+ * beside the declared externals and the limits. `null` when the value
+ * cannot be keyed injectively — a function, an `undefined`, a symbol, a
+ * bigint, a non-finite number, `-0`, or a class instance whose `toJSON`
+ * would otherwise stand in for it — which is a permanent miss, never
+ * someone else's entry.
+ * @param {any} document
+ * @param {readonly string[]} externals
+ * @param {any} limits
+ * @returns {string | null}
+ */
+function compilationKey(document, externals, limits) {
+  try {
+    return JSON.stringify([document, externals, limits ?? null], function (key, value) {
+      const raw = this[key];
+      const type = typeof raw;
+      if (type === 'function' || type === 'undefined' || type === 'symbol' || type === 'bigint'
+        || (type === 'number' && (!Number.isFinite(raw) || Object.is(raw, -0)))) {
+        throw new TypeError('unkeyable');
+      }
+      if (raw !== null && type === 'object' && !Array.isArray(raw)) {
+        const proto = Object.getPrototypeOf(raw);
+        if (proto !== Object.prototype && proto !== null) throw new TypeError('unkeyable');
+      }
+      return value;
+    });
+  }
+  catch {
+    return null;
+  }
+}
 
 /** The root of the hook-identity chain. */
 const REGISTRY_IDS = createWeakCache();
@@ -103,10 +140,7 @@ function registryIdentity(options) {
  */
 export function compileDocument(document, options) {
   const cache = /** @type {any} */ (CACHES.getOrCreate(registryIdentity(options), cacheFor));
-  // the externals and the limits are part of the identity: the same
-  // document compiles differently against a different set of declared
-  // names, and differently again under a step or result bound
-  return cache.getOrCreate([document, options.externals, options.limits ?? null], () => {
+  const compile = () => {
     try {
       return compileJsonQuery(document, {
         ...compileOptionsOf(options),
@@ -123,7 +157,12 @@ export function compileDocument(document, options) {
       }
       throw err;
     }
-  });
+  };
+  // the externals and the limits are part of the identity: the same
+  // document compiles differently against a different set of declared
+  // names, and differently again under a step or result bound
+  const key = compilationKey(document, options.externals, options.limits);
+  return key === null ? compile() : cache.getOrCreate(key, compile);
 }
 
 /**

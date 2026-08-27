@@ -32,6 +32,11 @@
  */
 
 import { normalizeEntities } from './model.js';
+import { DbCompileError } from './errors.js';
+
+/** The fixed declarations every artifact carries; an entity of one of
+ * these names would be emitted twice. */
+const FIXED_DECLARATIONS = new Set(['DateTime', 'Entities', 'EntityInputs', 'EntityMetaMap']);
 
 const primitive = (name) => ({ kind: 'primitive', primitive: name });
 const ref = (name) => ({ kind: 'ref', ref: name });
@@ -75,6 +80,15 @@ export function entityEmitModel(model, options) {
     throw new TypeError("entityEmitModel needs { compile: compileEmitModel } injected");
   const entities = normalizeEntities(model);
   const entityNames = [...entities.keys()];
+  for (const name of entityNames) {
+    if (FIXED_DECLARATIONS.has(name)
+      || (name.endsWith('Input') && entityNames.includes(name.slice(0, -'Input'.length)))) {
+      throw new DbCompileError('JD0005',
+        `entity '${name}' collides with a fixed declaration of the emitted artifact `
+        + `(${[...FIXED_DECLARATIONS].join(', ')}, and <Entity>Input for every entity)`,
+        `/entities/${name}`);
+    }
+  }
 
   // every entity name, input name and the brand are reserved up front
   // so nested-shape hints can never steal them

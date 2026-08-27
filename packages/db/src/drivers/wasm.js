@@ -166,6 +166,7 @@ export function wasmDriver(handle) {
       openConnection(raw, {
         dialect: sqliteDialect,
         synchronous: handle.synchronous === true,
+        queueTimeout: options?.queueTimeout,
         declared: {
           sessions: handle.declares?.sessions === true,
           userFunctions: handle.declares?.userFunctions === true,

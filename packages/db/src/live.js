@@ -79,12 +79,22 @@ function unwrapDocument(document) {
   return { inner: doc, whole, windowed, offset, limit, aggregate };
 }
 
+/** Whether a `$for` source is the whole collection: the bare `$[*]`, or
+ * its packed spelling `["$[*]"]` — one array item a `$for` unpacks back
+ * into the rows, which is how `@jarenjs/linq` binds every source so an
+ * array-valued row stays one item. Over a collection the two are the
+ * same rows (the planner reads through the packing the same way). */
+function isWholeCollection(source) {
+  return source === '$[*]'
+    || (Array.isArray(source) && source.length === 1 && source[0] === '$[*]');
+}
+
 /** The single for-binding name of a canonical flwor, or null. */
 function bindingNameOf(inner) {
   if (!isJsonObject(inner) || !isJsonObject(inner.$for)) return null;
   const names = Object.keys(inner.$for);
   if (names.length !== 1) return null;
-  return inner.$for[names[0]] === '$[*]' ? names[0] : null;
+  return isWholeCollection(inner.$for[names[0]]) ? names[0] : null;
 }
 
 /** The whole-documents read behind a flwor: same binding, same

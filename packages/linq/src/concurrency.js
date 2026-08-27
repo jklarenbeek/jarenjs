@@ -118,25 +118,30 @@ export async function* applyMapAsync(items, fn, opts) {
     // parallel: a sliding window of `concurrency` in-flight tasks
     const window = [];
     let sourceDone = false;
+    // the first rejection anywhere in the window aborts every sibling
+    // and stops the pull, at once — not when it reaches the head of the
+    // ordered window: the rejection itself still surfaces in order
+    let rejected = false;
     const pull = async () => {
       const step = await items.next();
       if (step.done) { sourceDone = true; return null; }
+      if (rejected) return null; // a sibling failed while this pull awaited
       const promise = Promise.resolve(fn(step.value, signal));
       // a rejection must wait its turn in the ordered window without
       // firing unhandledRejection while an earlier task is in flight
-      promise.catch(() => {});
+      promise.catch(() => { rejected = true; controller.abort(); });
       return { promise };
     };
     if (opts.ordered) {
       // completion order = source order; the window buffers at most
       // `concurrency` results (the documented buffering cost)
-      while (!sourceDone && window.length < opts.concurrency) {
+      while (!sourceDone && !rejected && window.length < opts.concurrency) {
         const task = await pull();
         if (task !== null) window.push(task.promise);
       }
       while (window.length > 0) {
         const value = await window.shift();
-        if (!sourceDone) {
+        if (!sourceDone && !rejected) {
           const task = await pull();
           if (task !== null) window.push(task.promise);
         }

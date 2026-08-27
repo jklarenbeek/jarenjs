@@ -18,6 +18,23 @@ import { CodedError } from '@jarenjs/core/errors';
  * this package can raise, proven in sync with MODEL-FORMAT.md §7's
  * normative table by a test.
  */
+/**
+ * Whether a database error is the unique-key collision of `table.column`
+ * — the one failure every insert path reports as `JD2001` rather than
+ * the generic `JD2005`. One detector for the collection cores, the
+ * entity cores and the unit of work, so no path wraps it differently.
+ * @param {any} error
+ * @param {string} table
+ * @param {string} column
+ * @returns {boolean}
+ */
+export function isDuplicateKeyError(error, table, column) {
+  if (error?.errcode === 1555) return true;
+  return typeof error?.message === 'string'
+    && error.message.includes('UNIQUE constraint failed')
+    && error.message.includes(`${table}.${column}`);
+}
+
 export const DB_CODES = Object.freeze({
   JD0001: 'the SQLite library is below the supported floor',
   JD0002: 'the declared model disagrees with the existing database',
@@ -30,6 +47,7 @@ export const DB_CODES = Object.freeze({
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
+  JD0033: 'an entity query names no entity array',
   JD0040: 'the save spans a relation cycle',
   JD0050: 'live queries require change capture',
   JD0051: 'the demanded live mode is unavailable',
@@ -52,6 +70,7 @@ export const DB_CODES = Object.freeze({
   JD2060: 'the maintained live state exceeded its bound',
   JD2061: 'another context owns the database',
   JD2062: 'the store closed with job handlers still in flight',
+  JD2063: 'the store is closed',
 });
 
 /**
@@ -83,6 +102,9 @@ export const DB_CODES = Object.freeze({
  *    silently ignored mapping directive is a data-loss bug waiting
  *  - `JD0031` — two relation declarations whose inverses contradict
  *    (different `via`, impossible `many` pairings)
+ *  - `JD0033` — a document handed to `store.execute()` over entities
+ *    ranges over no declared entity array (`$.<Entity>[*]`); the root
+ *    is the map of entity arrays, so there are no rows to answer
  *  - `JD0032` — a graph-load include specification is invalid: an
  *    unknown relation, a cycle, an untranslatable filter, or the
  *    depth bound exceeded (the bound is printed, never silent)
@@ -152,6 +174,9 @@ export class DbCompileError extends CodedError {
  *  - `JD2061` — a second context tried to open a database whose
  *    storage grants one context exclusive access (the owner topology
  *    of LIVE-FORMAT §11); connect to the owner instead
+ *  - `JD2063` — a call after `close()`: every entry point of a closed
+ *    store refuses by name rather than leaking the driver's own error,
+ *    and a second `close()` is a no-op on every driver
  */
 export class DbRuntimeError extends CodedError {
   /**

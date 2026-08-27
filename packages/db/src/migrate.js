@@ -32,6 +32,8 @@ import { normalizeModel } from './store.js';
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
+import { mergeEntityRow } from './graph.js';
+import { entityCore } from './entity.js';
 
 /**
  * The physical mapping a connection's driver imposes on derived index
@@ -64,7 +66,41 @@ export const HISTORY_TABLE = '_jaren_migrations';
  * @returns {string}
  */
 export function shapeHash(model) {
-  return hashContent(canonicalizeJson(model));
+  return hashContent(canonicalizeJson(withoutRenameHints(model)));
+}
+
+/**
+ * The model without its `x-rename` hints. A hint is a PLANNING
+ * instruction, not shape: two models that differ only by the hint
+ * describe the same database, and hashing the hint made an empty
+ * migration necessary just to move the recorded shape once the hint
+ * was removed.
+ * @param {any} model
+ * @returns {any}
+ */
+function withoutRenameHints(model) {
+  if (model === null || typeof model !== 'object') return model;
+  const out = {};
+  for (const key of Object.keys(model)) out[key] = model[key];
+  for (const member of ['collections', 'entities']) {
+    const declared = model[member];
+    if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) continue;
+    const stripped = {};
+    for (const name of Object.keys(declared)) {
+      const spec = declared[name];
+      if (spec !== null && typeof spec === 'object' && !Array.isArray(spec)
+        && Object.hasOwn(spec, 'x-rename')) {
+        const copy = { ...spec };
+        delete copy['x-rename'];
+        stripped[name] = copy;
+      }
+      else {
+        stripped[name] = spec;
+      }
+    }
+    out[member] = stripped;
+  }
+  return out;
 }
 
 /**
@@ -153,6 +189,10 @@ export function planMigration(fromModel, toModel, options = undefined) {
     const hint = toModel.collections[name]?.['x-rename'];
     if (hint === undefined) continue;
     if (!fromCollections.has(hint)) {
+      // the hint's work is done once the from-model already declares the
+      // target and no longer the source: planning a model against itself
+      // must yield nothing, not refuse the hint it still carries
+      if (fromCollections.has(name)) continue;
       throw new TypeError(
         `x-rename on '${name}' names '${hint}', which the from-model does not declare`);
     }
@@ -423,6 +463,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report) {
     const hint = toModel.entities[name]?.['x-rename'];
     if (hint === undefined) continue;
     if (!fromEntities.has(hint)) {
+      if (fromEntities.has(name)) continue; // a satisfied hint (see the collections)
       throw new TypeError(
         `x-rename on entity '${name}' names '${hint}', which the from-model does not declare`);
     }
@@ -434,30 +475,62 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report) {
     report.renamed.push({ from: hint, to: name });
     steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(hint, name),
       note: `rename entity '${hint}' to '${name}'` });
-    for (const joinName of Object.keys(fromMapping.joinTables)) {
-      const pair = joinName.split('_');
-      if (!pair.includes(hint)) continue;
-      const renamedPair = pair.map((part) => (part === hint ? name : part)).sort();
-      const newJoin = renamedPair.join('_');
+  }
+  const consumedOldEntities = new Set(renamedFrom.values());
+  // a join table's endpoints come from the MAPPING, never from splitting
+  // its name: an entity named with an underscore, or a `through` name,
+  // does not split into its endpoints — and a split that guessed wrong
+  // renamed the table to a name nothing declares, created the declared
+  // one empty, and dropped the memberships as "destructive"
+  const implicitJoinName = (join) => [join.left.entity, join.right.entity].sort().join('_');
+  const renamedEntity = (entityName) => {
+    for (const [to, from] of renamedFrom) if (from === entityName) return to;
+    return entityName;
+  };
+  const renamedJoinName = (joinName) => {
+    const join = fromMapping.joinTables[joinName];
+    if (joinName !== implicitJoinName(join)) return joinName; // a `through` name stays
+    return [renamedEntity(join.left.entity), renamedEntity(join.right.entity)].sort().join('_');
+  };
+  for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
+    if (![join.left, join.right].some((side) => renamedEntity(side.entity) !== side.entity)) continue;
+    const newJoin = renamedJoinName(joinName);
+    const target = toMapping.joinTables[newJoin];
+    if (target === undefined) continue; // the relation is gone: the drop below names it
+    // the fresh build orders the endpoint columns by the SORTED entity
+    // names, and a rename can flip that order — then the primary key's
+    // column order would differ from a fresh build's and the shape
+    // check would refuse the migrated database, so the table is rebuilt
+    // in the target order with its rows copied; when the order holds,
+    // renaming the table and the column is enough
+    const renamedColumns = [join.left, join.right]
+      .map((side) => ({ from: side.column, to: `${renamedEntity(side.entity)}_key` }));
+    const targetOrder = [target.left.column, target.right.column];
+    const sameOrder = renamedColumns.every((column, i) => column.to === targetOrder[i]);
+    if (sameOrder) {
       if (newJoin !== joinName) {
         steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(joinName, newJoin),
           note: `rename join table '${joinName}' with its endpoint` });
-        steps.push({ kind: 'ddl',
-          sql: dialect.ddl.renameColumn(newJoin, `${hint}_key`, `${name}_key`),
-          note: `rename the endpoint column '${hint}_key' with its entity` });
       }
+      for (const column of renamedColumns) {
+        if (column.from === column.to) continue;
+        steps.push({ kind: 'ddl', sql: dialect.ddl.renameColumn(newJoin, column.from, column.to),
+          note: `rename the endpoint column '${column.from}' with its entity` });
+      }
+      continue;
     }
+    const q = dialect.quoteIdentifier;
+    const sourceOf = (toColumn) => renamedColumns.find((column) => column.to === toColumn).from;
+    for (const sql of planJoinTable(newJoin, target, toMapping, dialect).createSql) {
+      steps.push({ kind: 'ddl', sql, note: `rebuild join table '${joinName}' as '${newJoin}' in its endpoint order` });
+    }
+    steps.push({ kind: 'sql',
+      sql: `INSERT INTO ${q(newJoin)} (${targetOrder.map(q).join(', ')}) `
+        + `SELECT ${targetOrder.map((column) => q(sourceOf(column))).join(', ')} FROM ${q(joinName)}`,
+      note: `copy the memberships of '${joinName}' into '${newJoin}'` });
+    steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(joinName),
+      note: `drop '${joinName}' — its memberships now live in '${newJoin}'` });
   }
-  const consumedOldEntities = new Set(renamedFrom.values());
-  const renamedJoinName = (joinName) => {
-    const pair = joinName.split('_');
-    return pair
-      .map((part) => {
-        for (const [to, from] of renamedFrom) if (from === part) return to;
-        return part;
-      })
-      .sort().join('_');
-  };
 
   // ————— per-entity strategies —————
   for (const [name, toEntity] of toEntities) {
@@ -589,9 +662,26 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report) {
     }
   }
 
-  // ————— dropped entities —————
-  for (const [name] of fromEntities) {
-    if (toEntities.has(name) || consumedOldEntities.has(name)) continue;
+  // ————— dropped entities, children before parents —————
+  // foreign keys are enforced while a migration runs (node:sqlite has
+  // them on by default), so a parent with RESTRICT children cannot go
+  // first: the dropped set is ordered so that every entity referencing
+  // another dropped entity is dropped before it
+  const dropped = [...fromEntities.keys()]
+    .filter((name) => !toEntities.has(name) && !consumedOldEntities.has(name));
+  const droppedSet = new Set(dropped);
+  const references = (name) => new Set(fromMapping.entities[name].foreignKeys
+    .map((fk) => fk.references).filter((target) => droppedSet.has(target) && target !== name));
+  const dropOrder = [];
+  const placed = new Set();
+  while (dropOrder.length < dropped.length) {
+    // ready: every dropped entity that no other UNPLACED dropped entity references
+    const ready = dropped.filter((name) => !placed.has(name)
+      && !dropped.some((other) => !placed.has(other) && other !== name && references(other).has(name)));
+    if (ready.length === 0) { dropOrder.push(...dropped.filter((name) => !placed.has(name))); break; }
+    for (const name of ready) { placed.add(name); dropOrder.push(name); }
+  }
+  for (const name of dropOrder) {
     report.removed.push(name);
     report.destructive = true;
     steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(name),
@@ -650,6 +740,12 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   const sources = [];
   let docExpr = q('doc');
   const lost = [];
+  // a SQL NULL is an ABSENT member (§9.3): folding it in as JSON null
+  // turned every row without the value into a narrowing the target
+  // schema refused
+  const foldColumn = (expression, columnName, fold) =>
+    `CASE WHEN ${q(columnName)} IS NULL THEN ${expression} `
+    + `ELSE ${dialect.jsonSet(expression, pathText(columnName), fold)} END`;
   for (const { name: columnName, column } of ordered) {
     targets.push(q(columnName));
     if (fromHas(columnName)) {
@@ -659,9 +755,10 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
       if (column !== null && column.source === 'epoch(document)'
         && fromColumn !== undefined && fromColumn.source !== 'epoch(document)') {
         // plain text column becomes a derived instant: derive from the
-        // old column and keep the string in the document
+        // old column and keep the string in the document — an absent
+        // string stays absent (§9.3), never a JSON null
         sources.push(dialect.epochFromRfc3339(q(columnName)));
-        docExpr = dialect.jsonSet(docExpr, pathText(columnName), q(columnName));
+        docExpr = foldColumn(docExpr, columnName, q(columnName));
       }
       else if (sameStorage) {
         sources.push(q(columnName));
@@ -686,9 +783,22 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
       const fold = fromColumn.storage === 'boolean'
         ? dialect.jsonEncode(`CASE WHEN ${q(columnName)} = 1 THEN 'true' ELSE 'false' END`)
         : q(columnName);
-      docExpr = dialect.jsonSet(docExpr, pathText(columnName), fold);
+      docExpr = foldColumn(docExpr, columnName, fold);
     }
     else if (fromColumn.source !== 'epoch(document)') {
+      lost.push(columnName);
+    }
+  }
+  // an INFERRED foreign-key column (no property of its own) that the
+  // target no longer carries: its values are lost unless the target
+  // declares the property, in which case they fold into the document —
+  // walking the mapped columns alone dropped it without a word
+  for (const columnName of fromFkOnly) {
+    if (ordered.some((entry) => entry.name === columnName)) continue;
+    if (toMapping.entities[name] !== undefined && tm.document.includes(columnName)) {
+      docExpr = foldColumn(docExpr, columnName, q(columnName));
+    }
+    else {
       lost.push(columnName);
     }
   }
@@ -923,15 +1033,20 @@ function checkMigrationDocument(migration) {
  *   value-or-promise per batch
  * @returns {any}
  */
-function walkRows(connection, table, batchSize, handle, keyed = true) {
+function walkRows(connection, table, batchSize, handle, keyed = true, entityMapping = null) {
   // entity tables carry no 'key' column — the transform walk goes by
-  // row identity alone; only the collection walks select the key
+  // row identity alone; only the collection walks select the key. An
+  // entity's mapped columns ride beside the document so the row can be
+  // read WHOLE (`mergeEntityRow`): a transform or an assertion that saw
+  // the rest-document alone could not see `id` or `name` at all
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const rid = dialect.rowIdentity();
   const keySelect = keyed ? `, ${q('key')} AS ${q('k')}` : '';
+  const columnSelect = entityMapping === null ? '' : entityColumnsOf(entityMapping)
+    .map((column) => `, ${q(column)}`).join('');
   const sql = `SELECT ${rid} AS ${q('rid')}, ${dialect.jsonText(q('doc'))} AS ${q('doc')}`
-    + `${keySelect} FROM ${q(table)} WHERE ${rid} > ${dialect.parameterRef(1, 'after')} `
+    + `${keySelect}${columnSelect} FROM ${q(table)} WHERE ${rid} > ${dialect.parameterRef(1, 'after')} `
     + `ORDER BY ${rid} ${dialect.limitClause(batchSize, undefined)}`;
   return chain(connection.prepare(sql), (statement) => {
     const nextBatch = (after) =>
@@ -944,15 +1059,44 @@ function walkRows(connection, table, batchSize, handle, keyed = true) {
   });
 }
 
-/** All documents of a collection (the assertion steps' working set —
- * a documented whole-collection read). */
-function allDocs(connection, table) {
+/** The physical columns an entity row carries beside its document. */
+function entityColumnsOf(entityMapping) {
+  const names = new Set(entityMapping.columns.map((column) => column.name));
+  for (const fk of entityMapping.foreignKeys) names.add(fk.column);
+  return [...names];
+}
+
+/**
+ * The entity mapping a migration step over `table` runs under, or
+ * `null` for a collection. The TARGET model maps the table: a chain's
+ * intermediate shapes are hashes only, so an entity transform belongs
+ * to the last migration of a chain (MIGRATION-FORMAT §9); without a
+ * target model the step sees the rest-document, as it always did.
+ * @param {any} options
+ * @param {string} table
+ * @returns {{ entity: any, mapping: any } | null}
+ */
+function entityStepMapping(options, table) {
+  if (options.model === undefined) return null;
+  const entities = normalizeEntities(options.model);
+  const entity = entities.get(table);
+  if (entity === undefined) return null;
+  return { entity, mapping: explainMapping(options.model).entities[table] };
+}
+
+/** All documents of a collection or entity (the assertion steps' working
+ * set — a documented whole-collection read), entities read WHOLE. */
+function allDocs(connection, table, entityMapping = null) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
-  const sql = `SELECT ${dialect.jsonText(q('doc'))} AS ${q('doc')} FROM ${q(table)} `
+  const columnSelect = entityMapping === null ? '' : entityColumnsOf(entityMapping)
+    .map((column) => `, ${q(column)}`).join('');
+  const sql = `SELECT ${dialect.jsonText(q('doc'))} AS ${q('doc')}${columnSelect} FROM ${q(table)} `
     + `ORDER BY ${dialect.rowIdentity()}`;
   return chain(connection.prepare(sql), (statement) =>
-    chain(statement.all([]), (rows) => rows.map((row) => JSON.parse(row.doc))));
+    chain(statement.all([]), (rows) => rows.map((row) => (entityMapping === null
+      ? JSON.parse(row.doc)
+      : mergeEntityRow(entityMapping, row, 'doc')))));
 }
 
 /**
@@ -1057,6 +1201,51 @@ function runSteps(connection, migration, options) {
           return fail(`the stylesheet does not compile: ${/** @type {Error} */ (cause).message}`,
             /** @type {Error} */ (cause));
         }
+        const stepEntity = entityStepMapping(options, current.collection);
+        if (stepEntity !== null) {
+          // an entity row is transformed WHOLE: the mapped columns fold in
+          // before the stylesheet and split out after it, through the
+          // entity's own split — a column-mapped member the stylesheet
+          // wrote used to land in the document and be shadowed on read
+          const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null);
+          const columns = entityColumnsOf(stepEntity.mapping);
+          const assignments = [
+            ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
+            `${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(columns.length + 1, 'doc'))}`,
+          ];
+          const updateSql = `UPDATE ${q(current.collection)} SET ${assignments.join(', ')} `
+            + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 2, 'rid')}`;
+          let transformed = 0;
+          return chain(connection.prepare(updateSql), (update) =>
+            chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
+              for (const row of rows) {
+                const whole = mergeEntityRow(stepEntity.mapping, row, 'doc');
+                const next = transform(whole);
+                if (next === null || typeof next !== 'object' || Array.isArray(next))
+                  fail(`the transform produced a non-document for row ${row.rid}`);
+                // the key is the row's identity, not the document's to
+                // change: a body that leaves it out keeps it, a body
+                // that rewrites it is refused, as a collection's key is
+                for (const key of stepEntity.mapping.keys) {
+                  if (next[key] === undefined) next[key] = whole[key];
+                  else if (next[key] !== whole[key]) {
+                    fail(`the transform changed the key member '${key}' of row ${row.rid} — `
+                      + `key changes are not supported in ${MIGRATION_VERSION}`);
+                  }
+                }
+                const { values, rest } = core.plan.split(next);
+                const byName = new Map(values.map((value) => [value.name, value.value]));
+                update.run([...columns.map((column) => byName.get(column) ?? null),
+                  JSON.stringify(rest), row.rid]);
+                transformed++;
+              }
+              options.onProgress?.({
+                migration: migration.id,
+                collection: current.collection,
+                transformed,
+              });
+            }, false, stepEntity.mapping), () => transformed));
+        }
         const updateSql = `UPDATE ${q(current.collection)} SET ${q('doc')} = `
           + `${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))} `
           + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(2, 'rid')}`;
@@ -1087,7 +1276,8 @@ function runSteps(connection, migration, options) {
         return fail(`the assertion does not compile: ${/** @type {Error} */ (cause).message}`,
           /** @type {Error} */ (cause));
       }
-      return chain(allDocs(connection, current.collection), (docs) => {
+      return chain(allDocs(connection, current.collection,
+        entityStepMapping(options, current.collection)?.mapping ?? null), (docs) => {
         if (current.expect === 'ebv') {
           if (!compiled.ebv(docs)) fail('the EBV assertion answered false');
           return null;
@@ -1129,8 +1319,13 @@ function validateTargetState(connection, model, options) {
       ? options.compileSchema(entity.schema)
       : null;
     if (validate === null) return verifyEntity(i + 1);
+    // the WHOLE document — mapped columns folded in — is what the target
+    // schema judges; the rest-document alone failed every entity whose
+    // required members are columns, so a pure widening could not land
+    const entityMapping = explainMapping(model).entities[entity.name];
     const rid = dialect.rowIdentity();
-    const sql = `SELECT ${rid} AS ${q('rid')}, ${dialect.jsonText(q('doc'))} AS ${q('doc')} `
+    const columnSelect = entityColumnsOf(entityMapping).map((column) => `, ${q(column)}`).join('');
+    const sql = `SELECT ${rid} AS ${q('rid')}, ${dialect.jsonText(q('doc'))} AS ${q('doc')}${columnSelect} `
       + `FROM ${q(entity.name)} WHERE ${rid} > ${dialect.parameterRef(1, 'after')} `
       + `ORDER BY ${rid} ${dialect.limitClause(options.batchSize, undefined)}`;
     return chain(connection.prepare(sql), (statement) => {
@@ -1138,7 +1333,7 @@ function validateTargetState(connection, model, options) {
         chain(statement.all([after]), (rows) => {
           if (rows.length === 0) return null;
           for (const row of rows) {
-            const outcome = validate(JSON.parse(row.doc));
+            const outcome = validate(mergeEntityRow(entityMapping, row, 'doc'));
             const valid = outcome === true || outcome?.valid === true;
             if (!valid) {
               throw refuse('JD0021',
@@ -1379,6 +1574,7 @@ export function migrate(target, migrations, options) {
     batchSize,
     onProgress: options.onProgress,
     registerFunctions: options.registerFunctions,
+    model: options.model,
   };
 
   return toPromise(chain(

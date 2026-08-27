@@ -77,7 +77,7 @@ export function normalizeEventTime(options, collection) {
   const declared = options?.eventTime;
   if (declared === undefined || declared === null) return null;
   const refuse = (reason) => {
-    throw new DbCompileError('JD0053', reason, { collection });
+    throw new DbCompileError('JD0053', reason, `/collections/${collection}`);
   };
   if (!isJsonObject(declared))
     refuse('live eventTime is an object with a path, a watermark and a retention');
@@ -178,6 +178,15 @@ export function classifyEventTime(inner, windowed, keyed, eventTime) {
     return rerun(`'${name}' — a named zone resolves through the injected provider, which `
       + 'maintenance would have to consult per boundary');
   }
+  // the kernel reads member NAMES (`at`, `value`); the document spells
+  // them as row selectors (`$.at`) — handed the document's spelling, the
+  // kernel read `row['$.at']` and every fold died on its first reading
+  const valueMember = spec.value === undefined ? null : singularSelector(spec.value);
+  if (spec.value !== undefined && valueMember === null) {
+    return rerun(`'${name}' — the spec reads a value selector this view cannot follow`);
+  }
+  const kernelSpec = { ...spec, at: eventTime.member,
+    ...(valueMember === null ? {} : { value: valueMember }) };
   const aggregate = spec.aggregate ?? 'mean';
   if (!MAINTAINED_AGGREGATES.includes(aggregate)) {
     return rerun(`'${name}' — '${aggregate}' names a row by its position in the series, `
@@ -215,7 +224,7 @@ export function classifyEventTime(inner, windowed, keyed, eventTime) {
     return {
       strategy: 'rolling',
       source: operand.source,
-      spec,
+      spec: kernelSpec,
       member: eventTime.member,
       width: span.width,
       eventTime,
@@ -236,7 +245,7 @@ export function classifyEventTime(inner, windowed, keyed, eventTime) {
   return {
     strategy: 'bucket',
     source: operand.source,
-    spec,
+    spec: kernelSpec,
     member: eventTime.member,
     ladder,
     fill,

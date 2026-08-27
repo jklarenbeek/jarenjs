@@ -534,15 +534,43 @@ what each does is its own documentation's job
   and the diversion reason would have to name which widths were on
   offer. A single-width collection, which is what an embedding model
   gives you, never meets it.
-- [ ] **The `jaren-migration` artifact omits two shipped step kinds.** The
-  committed schema's `step` union carries `ddl`, `jslt`, `query` and `derive`,
-  but not `sql` (the directly-spelled data step, MIGRATION-FORMAT §9.4) or
-  `rebuild` (the entity restructure, §10) — both of which the planner emits and
-  the runner accepts. A migration document containing either fails validation
-  against the artifact that claims to describe it. Found while adding `derive`;
-  the fix belongs with whoever next touches entity migrations, together with a
-  planner-output validation that covers the entity path the way
-  `test/db/migrate-plan.test.js` covers the collection one.
+- [ ] **Two processes opening one fresh file race on `openStore`.**
+  Reproduction: two child processes released simultaneously on a path
+  that does not exist yet. `PRAGMA journal_mode = wal` runs right after
+  open, then the shape is created as `tableExists` + `CREATE` inside a
+  DEFERRED savepoint, so the read→write upgrade gets `SQLITE_BUSY`
+  without the busy handler: 3 of 12 rounds failed with a raw
+  `database is locked` (at the pragma or at the CREATE) despite the 5 s
+  busy timeout, the other process succeeding. The fix is known and
+  unbuilt: shape creation under `BEGIN IMMEDIATE` (the dialect already
+  spells it), `CREATE … IF NOT EXISTS`, and open-time driver errors
+  wrapped as `JD0002`.
+- [ ] **`explain().series.counts` after a row, aggregate or cursor
+  run.** `countSeries` runs on the set path only: a `$return:
+  '$s.value'` range reports `mode: 'row'`, `series.mode: 'native'` and
+  `counts: null` after `execute`; a `$count` over the range and a
+  `for await` over it leave `counts` null and `stats().series.queries`
+  unchanged; a plain `execute` of the same range then fills
+  `{ statements: 1, candidates: 3, results: 3 }`. Count in all three
+  paths, and derive `series.mode` from the plan mode rather than from
+  the index alone.
+- [ ] **A UDF-hatch error names the wrapper's path.** The hatch compiles
+  a fragment as `{ $let: { it: '$' }, $return: body }`, so `$match` over
+  a number raises `JQ2001 … at /$return/$match/0` natively and
+  `/$where/$match/0` in the residual — the same error with two
+  `path`s. Rebase the path onto the document's.
+- [ ] **`$sum` over an INTEGER column past int64.** Two documents with
+  `n: 2**62` make the pushed `SUM` a raw `integer overflow` from SQLite
+  where the engine answers `9223372036854776000` (a double). Either the
+  planner refuses `$sum` over integer paths it cannot bound, or the
+  overflow becomes a coded residual — today it is the one raw driver
+  error left on the query path.
+- [ ] **The plain bind-time diversion is invisible.** `explain(doc,
+  { externals: { flag: true } })` reports `mode: 'row'` with the native
+  SQL, while `execute` with the same externals runs the whole-collection
+  set residual (a boolean cannot bind); the k-nearest divert has its own
+  counter, the plain one has none. `explain` should read the externals
+  it is given, or the divert should count.
 - [ ] **Relation-name query sugar and entity linq roots.** `load` owns
   name navigation today because `$.author.name` over the multi-entity
   root is engine-unexecutable and therefore oracle-unprovable; a linq

@@ -24,12 +24,36 @@ import { createJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
-import { chain } from './driver.js';
+import { chain, attempt } from './driver.js';
 import { translatePatch } from './patch-sql.js';
 
 /** Rows per batched INSERT: bounded by the portable parameter budget. */
 export const BATCH_PARAM_BUDGET = 900;
 export const BATCH_ROW_BOUND = 100;
+
+/**
+ * The target keys a many-to-many membership array names: a key, or a
+ * document carrying the target's key. One reading for the unit of work
+ * and for `create()`, so the two attach the same rows.
+ * @param {any} value - the member's value
+ * @param {string} targetKey - the target entity's key property
+ * @param {string} member
+ * @param {(reason: string) => Error} refuse
+ * @returns {(string | number)[]}
+ */
+export function membershipKeys(value, targetKey, member, refuse) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw refuse(`'${member}' must be an array to synchronise its join table`);
+  return value.map((element) => {
+    const key = typeof element === 'string' || typeof element === 'number'
+      ? element
+      : element !== null && typeof element === 'object'
+        ? element[targetKey] : undefined;
+    if (typeof key !== 'string' && typeof key !== 'number')
+      throw refuse(`an element of '${member}' carries no usable '${targetKey}' key`);
+    return key;
+  });
+}
 
 const UNIT_SEPARATOR = '';
 
@@ -280,24 +304,14 @@ export function createTracker(context) {
     const entity = entities.get(entityName);
     const relation = entity.properties.get(member).relation;
     const targetKey = mapping.entities[relation.to].keys[0];
-    const extract = (value) => {
-      if (value === undefined || value === null) return [];
-      if (!Array.isArray(value)) {
-        throw contractError(entityName,
-          `'${member}' must be an array to synchronise its join table`);
-      }
-      return value.map((element) => {
-        const key = typeof element === 'string' || typeof element === 'number'
-          ? element
-          : element !== null && typeof element === 'object'
-            ? element[targetKey] : undefined;
-        if (typeof key !== 'string' && typeof key !== 'number') {
-          throw contractError(entityName,
-            `an element of '${member}' carries no usable '${targetKey}' key`);
-        }
-        return key;
-      });
-    };
+    const extract = (value) => membershipKeys(value, targetKey, member,
+      (reason) => contractError(entityName, reason));
+    // the endpoint columns come from the mapping, never from the join
+    // table's NAME: an entity name with an underscore, or a `through`
+    // name, does not split into its endpoints
+    const join = mapping.joinTables[relation.joinTable];
+    const own = join.left.entity === entityName ? join.left : join.right;
+    const target = own === join.left ? join.right : join.left;
     // a snapshot that never LOADED the member knows nothing about the
     // current membership — treating unknown as empty would re-insert
     // existing rows (a UNIQUE violation the seeded corpus found); the
@@ -308,8 +322,9 @@ export function createTracker(context) {
       : [...new Set(extract(memberValue))];
     return {
       joinTable: relation.joinTable,
-      ownColumn: `${entityName}_key`,
-      targetColumn: `${relation.to}_key`,
+      ownColumn: own.column,
+      targetColumn: target.column,
+      tableColumns: [join.left.column, join.right.column],
       ownKey,
       beforeKeys,
       afterKeys: [...new Set(extract(after[member]))],
@@ -368,6 +383,10 @@ export function createTracker(context) {
         continue;
       }
       if (record.current === record.snapshot) continue;
+      // a record with a pending removal is deleted, not updated: planning
+      // both bumped the version on the UPDATE and left the DELETE's
+      // snapshot guard matching nothing (JD2040), so the row survived
+      if (removals.has(recordKeyFor(record.entity, record.snapshot) ?? '')) continue;
       // probe before stamping: an update stamp must never turn a
       // deep-equal replacement into a phantom write
       if (createJSONPatch(record.snapshot, record.current).length === 0) continue;
@@ -525,7 +544,7 @@ export function createTracker(context) {
             + `(${q(op.ownColumn)}, ${q(op.targetColumn)}) VALUES `
             + op.added.map((_, i) => `(${parameterAt(i * 2 + 1)}, ${parameterAt(i * 2 + 2)})`).join(', ');
           statements.push({
-            kind: 'join-insert', entity: op.joinTable, sql,
+            kind: 'join-insert', entity: op.joinTable, sql, tableColumns: op.tableColumns,
             params: op.added.flatMap((key) => [op.ownKey, key]),
             joinRows: op.added.map((key) => ({
               own: op.ownKey, target: key,
@@ -535,7 +554,7 @@ export function createTracker(context) {
         }
         for (const key of op.removed) {
           statements.push({
-            kind: 'join-delete', entity: op.joinTable,
+            kind: 'join-delete', entity: op.joinTable, tableColumns: op.tableColumns,
             sql: `DELETE FROM ${q(op.joinTable)} WHERE ${q(op.ownColumn)} = ${parameterAt(1)} `
               + `AND ${q(op.targetColumn)} = ${parameterAt(2)}`,
             params: [op.ownKey, key],
@@ -633,14 +652,8 @@ export function createTracker(context) {
             ? captureJoinDelete(statement.entity, statement.removal.parts)
             : null,
           () => {
-        let ran;
-        try {
-          ran = prepared.run(statement.params);
-        }
-        catch (error) {
-          throw wrapDb(error, statement);
-        }
-        return chain(ran, (outcome) => {
+        return chain(attempt(() => prepared.run(statement.params),
+          (error) => wrapDb(error, statement)), (outcome) => {
           const changed = Number(outcome?.changes ?? 0);
           report.statements.push({ sql: statement.sql, rows: changed });
           if (statement.kind === 'insert') report.inserted += statement.records.length;
@@ -709,12 +722,11 @@ export function createTracker(context) {
       else if (statement.kind === 'join-insert' || statement.kind === 'join-delete') {
         for (const row of statement.joinRows ?? []) {
           // the join-row "document" lists its columns in table order
-          // (the sorted pair) so both capture modes agree exactly
-          const pair = statement.entity.split('_');
+          // (the mapping's left, right) so both capture modes agree exactly
           const value = { [row.ownColumn]: row.own, [row.targetColumn]: row.target };
           const ordered = {};
-          for (const part of pair) ordered[part + '_key'] = value[part + '_key'];
-          const keyParts = pair.map((part) => ordered[part + '_key']);
+          for (const column of statement.tableColumns) ordered[column] = value[column];
+          const keyParts = statement.tableColumns.map((column) => ordered[column]);
           if (statement.kind === 'join-insert') {
             captureRecord?.(statement.entity, keyParts, null, ordered);
           }

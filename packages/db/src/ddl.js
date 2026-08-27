@@ -70,11 +70,31 @@ export function compileIndexPath(expression, docPath) {
       `the index path '${expression}' selects the whole document — index a member`,
       docPath);
   }
-  const canonical = segments
-    .map((s) => ('name' in s ? `.${s.name}` : `[${s.index}]`))
-    .join('');
-  return { segments, canonical };
+  return { segments, canonical: canonicalOf(segments) };
 }
+
+/**
+ * The canonical spelling of a member path — the key every generated
+ * column and every promoted reference is matched by. INJECTIVE: a
+ * member literally named `a.b` and the nested path `a` → `b` used to
+ * spell the same `.a.b`, so an index over one silently served the
+ * other and a filter on the flat member answered from the nested
+ * value. Names are JSON-quoted, so no two paths share a spelling; the
+ * generated column STEM strips the quotes and keeps its old form.
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {string}
+ */
+export function canonicalOf(segments) {
+  return segments
+    .map((s) => ('name' in s
+      ? (IDENTIFIER.test(s.name) ? `.${s.name}` : `.${JSON.stringify(s.name)}`)
+      : `[${s.index}]`))
+    .join('');
+}
+
+/** A member name that spells itself: anything else is JSON-quoted in
+ * the canonical, so `.a.b` (nested) and `."a.b"` (one member) differ. */
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * The schema subschema at a segment path, walked structurally through

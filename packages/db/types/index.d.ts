@@ -409,10 +409,19 @@ export interface OpenStoreOptions {
    * than answered in UTC. No time-zone database is bundled. */
   zoneProvider?: unknown;
   busyTimeout?: number;
+  /** How long work waits for an open transaction to settle before
+   * `JD0012` (MODEL-FORMAT §5.1); reaches every driver. */
+  queueTimeout?: number;
   journalMode?: string;
   statementCacheBound?: number;
   profile?: unknown;
   readOnly?: boolean;
+  /** A `createJsltRegistry()` registry (Ring 2/3): the operators a
+   * query may use, and the pushable subset. */
+  operators?: unknown;
+  /** Raw registry-free operators; never pushed. */
+  functions?: Record<string, unknown>;
+  extensions?: Record<string, unknown>;
 }
 
 export declare function openStore(model: unknown, options: OpenStoreOptions): Promise<Store>;
@@ -433,7 +442,9 @@ export interface Dialect {
 export interface Driver {
   readonly name: string;
   readonly dialect: Dialect;
-  open(options?: unknown): unknown;
+  /** Open a connection (value-or-promise) at `path` (`':memory:'` for
+   * none) with the driver's own options. */
+  open(path: string, options?: unknown): unknown;
 }
 
 export declare const sqliteDialect: Dialect;
@@ -527,7 +538,9 @@ export declare const HISTORY_TABLE: string;
 // are deliberately WIDE (unknown), never wrong.
 
 export declare function planCollection(name: string, collection: unknown, dialect: Dialect): unknown;
-export declare function compileIndexPath(path: string, schema: unknown): unknown;
+export declare function compileIndexPath(expression: string, docPath: string): unknown;
+export declare function normalizeDeclaredSql(sql: string): string;
+export declare function comparableDeclaredSql(sql: string): string;
 export declare function schemaTypeAt(schema: unknown, segments: unknown): unknown;
 export declare const KEY_COLUMN: string;
 export declare const DOC_COLUMN: string;
@@ -575,7 +588,7 @@ export declare function openConnection(raw: unknown, options: unknown): unknown;
 export declare function wrapStatement(statement: unknown): unknown;
 export declare function lazyOpen(spec: unknown, reason: string, use: unknown, args?: unknown): unknown;
 export declare function classifyLiveQuery(
-  document: unknown, queryShape: unknown, keyed: boolean): unknown;
+  document: unknown, queryShape: unknown, keyed: boolean, eventTime?: unknown): unknown;
 export declare function createLiveRegistry(
   bounds: { maxQueries: number; maxMaintained: number }): unknown;
 export declare function diffRows(oldRows: readonly unknown[], newRows: readonly unknown[]):
@@ -586,6 +599,35 @@ export declare function createSortedWindow(
 export declare function compareCodepoint(a: string, b: string): number;
 export declare function collectEntityRoots(
   document: unknown, entities: ReadonlyMap<string, unknown>): Set<string>;
+
+// ————— the derived-index and k-nearest machinery —————
+// Constants carry their real shapes; the functions take and answer the
+// planner's own records, which have no published type — WIDE, never
+// wrong (the line at the top of this file).
+
+export declare const DERIVE_KINDS: ReadonlySet<string>;
+export declare const DERIVE_MAPPING: Readonly<Record<string, string | null>>;
+export declare const PHYSICAL_KINDS: ReadonlySet<string>;
+export declare const BBOX_COMPONENTS: readonly ['w', 's', 'e', 'n'];
+export declare const BBOX_INDEX_ORDER: readonly ['w', 'e', 's', 'n'];
+export declare const PRECISION_MIN: number;
+export declare const PRECISION_MAX: number;
+export declare const DIMS_MIN: number;
+export declare const DIMS_MAX: number;
+export declare function derivedMappingFor(kind: string, driverMapping: unknown): unknown;
+export declare function deriveGeohash(value: unknown, precision: number): unknown;
+export declare function deriveBboxEdge(value: unknown, component: 'w' | 's' | 'e' | 'n'): unknown;
+export declare function deriveVector(member: unknown, dims: number): unknown;
+export declare function storedMemberForm(member: unknown): unknown;
+export declare function derivedValue(column: unknown, member: unknown): unknown;
+export declare function memberAt(doc: unknown, segments: unknown): unknown;
+export declare function registerDeriveFunctions(connection: unknown): unknown;
+export declare function probeVector(value: unknown, dims: number): unknown;
+export declare function columnScore(bytes: unknown, dims: number, probe: unknown): unknown;
+export declare const KNN_MARGIN: number;
+export declare const IDENTITY_CHUNK: number;
+export declare function cutCandidates(rows: unknown[], m: number, margin: number): unknown;
+export declare function identityBatches(identities: unknown[]): unknown;
 
 // ————— the job queue (JOBS-FORMAT) —————
 
@@ -617,21 +659,25 @@ export interface JobCounts {
 
 export interface JobWorker {
   start(): JobWorker;
-  /** Resolves after in-flight handlers settle. */
-  stop(): Promise<void>;
+  /** Stop claiming, signal in-flight handlers, and wait up to `graceMs`
+   * (JOBS-FORMAT §6): the record says whether every loop drained. */
+  stop(options?: { graceMs?: number }): Promise<{ drained: boolean; inFlight: number }>;
   stats(): { claims: number; completions: number; failures: number;
-    polls: number; wakes: number };
+    polls: number; wakes: number; claimErrors: number; inFlight: number };
 }
 
 export interface JobWorkerOptions {
-  handlers: Record<string,
-    (payload: unknown, context: { job: JobRecord, checkpointsFor: Function }) => unknown>;
+  handlers: Record<string, (payload: unknown, context: {
+    job: JobRecord; checkpointsFor: Function; signal: AbortSignal }) => unknown>;
+  /** A positive integer; the loops claiming concurrently. */
   concurrency?: number;
   pollInterval?: number;
   leaseMs?: number;
   owner?: string;
   backoffBase?: number;
   backoffCap?: number;
+  /** How long `stop()` waits for in-flight handlers by default. */
+  stopGraceMs?: number;
 }
 
 export interface JobsApi {
@@ -659,6 +705,7 @@ export interface JobsOptions {
   pollInterval?: number;
   backoffBase?: number;
   backoffCap?: number;
+  stopGraceMs?: number;
   /** Injectable clock and randomness — every test injects both. */
   now?: () => number;
   random?: () => number;
@@ -674,6 +721,7 @@ export declare function createDagJobRunner(store: Store, options: {
   owner?: string;
   backoffBase?: number;
   backoffCap?: number;
+  stopGraceMs?: number;
 }): JobWorker;
 
 export declare function createJobEngine(options: {
@@ -683,4 +731,8 @@ export declare const JOBS_TABLE: string;
 export declare const JOB_CHECKPOINTS_TABLE: string;
 export declare const JOB_DEFAULTS: Readonly<{
   maxAttempts: number; leaseMs: number; pollInterval: number;
-  backoffBase: number; backoffCap: number }>;
+  backoffBase: number; backoffCap: number; stopGraceMs: number }>;
+/** A total diagnostic string for any value, including ones that fight back. */
+export declare function describeValue(value: unknown): string;
+/** A job result as the queue stores it: JSON text, or the reason it could not be. */
+export declare function serializeResult(value: unknown): unknown;

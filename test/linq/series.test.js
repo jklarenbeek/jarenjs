@@ -210,8 +210,11 @@ describe('the series family lowers to §8.16', () => {
     const query = from([{ rows }])
       .selectMany((s) => s.rows.all().resample({ every: 60000, aggregate: 'sum' }));
     assert.deepStrictEqual(query.toDocument(), {
-      $for: { it: '$[*]' },
-      $return: { $resample: ['$it.rows[*]', { every: 60000, aggregate: 'sum' }] },
+      $for: { it: ['$[*]'] },
+      $return: {
+        $for: { it: { $resample: ['$it.rows[*]', { every: 60000, aggregate: 'sum' }] } },
+        $return: '$it',
+      },
     });
     assert.deepStrictEqual(query.toArray(), [
       { at: 0, value: 4, count: 2 },

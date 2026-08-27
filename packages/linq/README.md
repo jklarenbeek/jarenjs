@@ -16,7 +16,7 @@ const adults = from(users)
   .select((u) => ({ id: u.id, name: u.name }));
 
 adults.toArray();     // runs in memory, deferred until now
-adults.toDocument();  // { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 21] }, … }
+adults.toDocument();  // { $for: { it: ['$[*]'] }, $where: { $gt: ['$it.age', 21] }, … }
 ```
 
 **The C# comparison, stated honestly.** The operator names, deferred
@@ -35,7 +35,8 @@ played by the provider seam below.
   common path precisely and degrade to honest `unknown` — never a
   wrong type — with runtime twins pinning every claim.
 - **The async story (the obvious objection, answered).** `fromAsync`
-  runs the SAME operator set over cursors and streams — async is a
+  runs the same operator set over cursors and streams — joins excepted,
+  because a single-pass source cannot be read twice — and async is a
   boundary, not a colour (the same chain emits a byte-identical
   document through both drivers, test-pinned). Element-wise async
   work happens in exactly one place, `mapAsync`, with a REQUIRED
@@ -76,8 +77,12 @@ played by the provider seam below.
 
 Not an ORM — entities, storage and migrations live in `@jarenjs/db`.
 Not expression trees over arbitrary methods — the vocabulary is the
-query engine's, and a construct outside it fails loudly at build time
-with a coded error (`JL0001`–`JL0006`) rather than guessing. Not a
+query engine's, and an unknown METHOD fails loudly at build time with
+a coded error (`JL0001`–`JL0006`) rather than guessing. JavaScript's own
+operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`
+and `===` evaluate against the proxy object and yield a wrong document
+silently (use `.and()`/`.or()`/`.not()`), and `u.age > 21` or `u.age + 1`
+throw a plain `TypeError` — the format doc's §3 lists them. Not a
 general lazy-iterable library — if you don't want a query document,
 you don't want this package.
 

@@ -32,8 +32,8 @@
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
-import { DbRuntimeError } from './errors.js';
-import { chain } from './driver.js';
+import { DbCompileError, DbRuntimeError } from './errors.js';
+import { chain, attempt } from './driver.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
 export const CHANGES_TABLE = '_jaren_changes';
@@ -323,6 +323,11 @@ export function createCaptureEngine(options) {
   const { connection, shapes, mode } = options;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
+  if (options.log && !(Number.isInteger(options.retention) && options.retention >= 1)) {
+    // a retention of 0 pruned every record the moment it was written,
+    // with the log reported as enabled
+    throw new TypeError('capture.log.retention must be a positive integer (records kept)');
+  }
 
   /** @type {Set<Function>} */
   const observers = new Set();
@@ -345,9 +350,15 @@ export function createCaptureEngine(options) {
         { name: 'patch', type: dialect.typeFor('string', 'key') },
       ],
     }),
+    // the sequence is allocated by the STATEMENT, inside the write's
+    // own transaction: a counter seeded once at open collided with
+    // another store's writes to the same file and rolled the user's
+    // write back with a raw UNIQUE failure
     insert: `INSERT INTO ${q(CHANGES_TABLE)} `
       + `(${['seq', 'at', 'source', 'patch'].map(q).join(', ')}) `
-      + `VALUES (${[1, 2, 3, 4].map((i) => dialect.parameterRef(i, 'v')).join(', ')})`,
+      + `VALUES ((SELECT COALESCE(MAX(${q('seq')}), 0) + 1 FROM ${q(CHANGES_TABLE)}), `
+      + `${[1, 2, 3].map((i) => dialect.parameterRef(i, 'v')).join(', ')}) `
+      + `RETURNING ${q('seq')} AS ${q('seq')}`,
     prune: `DELETE FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} <= ${dialect.parameterRef(1, 'v')}`,
     highest: `SELECT MAX(${q('seq')}) AS ${q('n')} FROM ${q(CHANGES_TABLE)}`,
     read: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
@@ -357,7 +368,10 @@ export function createCaptureEngine(options) {
 
   const ready = logStatements === null
     ? null
-    : chain(connection.exec(logStatements.create), () =>
+    : chain(attempt(() => connection.exec(logStatements.create), (error) => new DbCompileError('JD0002',
+      `the change log table could not be created (${error?.message ?? String(error)}) — `
+      + 'a read-only store creates nothing; open it read-write once, or without capture.log',
+      '/capture', error)), () =>
       chain(connection.prepare(logStatements.highest), (statement) =>
         chain(statement.get([]), (row) => {
           seq = Number(row?.n ?? 0) || 0;
@@ -443,27 +457,44 @@ export function createCaptureEngine(options) {
 
   const persist = (patch, at) => {
     if (logStatements === null || patch.length === 0) return null;
-    seq += 1;
-    const mySeq = seq;
     return chain(connection.prepare(logStatements.insert), (insert) =>
-      chain(insert.run([mySeq, at, mode, JSON.stringify(patch)]), () =>
-        chain(connection.prepare(logStatements.prune), (prune) =>
-          chain(prune.run([mySeq - options.retention]), () => null))));
+      chain(insert.get([at, mode, JSON.stringify(patch)]), (row) => {
+        seq = Number(row.seq);
+        return chain(connection.prepare(logStatements.prune), (prune) =>
+          chain(prune.run([seq - options.retention]), () => null));
+      }));
   };
 
+  /** The collections a patch touches, in first-seen order. */
+  const collectionsOf = (patch) => [...new Set(patch.map(
+    (op) => decodeJSONPointerSegment(op.path.split('/')[1])))];
+
+  let delivering = false;
   const deliver = () => {
-    while (pendingDeliveries.length > 0) {
-      const delivery = pendingDeliveries.shift();
-      for (const observer of [...observers]) {
-        // error isolation: a throwing observer must never affect the
-        // write (the app.observe discipline)
-        try {
-          observer(delivery);
-        }
-        catch {
-          // deliberately swallowed; the write already committed
+    // never re-entered: an observer that WRITES commits a further record
+    // from inside this loop, and delivering that record here handed it to
+    // every sibling before the older one — commit order inverted for
+    // them, and a maintained view kept a stale row for good. The nested
+    // call queues its record; this loop drains it after the current one.
+    if (delivering) return;
+    delivering = true;
+    try {
+      while (pendingDeliveries.length > 0) {
+        const delivery = pendingDeliveries.shift();
+        for (const observer of [...observers]) {
+          // error isolation: a throwing observer must never affect the
+          // write (the app.observe discipline)
+          try {
+            observer(delivery);
+          }
+          catch {
+            // deliberately swallowed; the write already committed
+          }
         }
       }
+    }
+    finally {
+      delivering = false;
     }
   };
 
@@ -498,9 +529,7 @@ export function createCaptureEngine(options) {
                 seq: logStatements === null ? (seq += 1) : seq,
                 at,
                 source: mode,
-                collections: [...new Set(patch.map(
-                  (op) => decodeJSONPointerSegment(op.path.split('/')[1]))),
-                ],
+                collections: collectionsOf(patch),
                 patch,
               },
             }));
@@ -570,13 +599,22 @@ export function createCaptureEngine(options) {
         throw new DbRuntimeError('JD2051',
           'the change log is not enabled — open the store with capture.log');
       }
+      if (typeof after !== 'number' || !Number.isFinite(after)) {
+        throw new TypeError(`changesSince(after) takes the last seq seen as a number, got ${
+          after === undefined ? 'undefined' : JSON.stringify(after)}`);
+      }
       return chain(connection.prepare(logStatements.read), (statement) =>
-        chain(statement.all([after]), (rows) => rows.map((row) => ({
-          seq: Number(row.seq),
-          at: Number(row.at),
-          source: String(row.source),
-          patch: JSON.parse(row.patch),
-        }))));
+        chain(statement.all([after]), (rows) => rows.map((row) => {
+          const patch = JSON.parse(row.patch);
+          // the same record shape observers receive: `collections` too
+          return {
+            seq: Number(row.seq),
+            at: Number(row.at),
+            source: String(row.source),
+            collections: collectionsOf(patch),
+            patch,
+          };
+        })));
     },
   };
 }

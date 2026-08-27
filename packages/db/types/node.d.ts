@@ -2,9 +2,11 @@
 import type { Driver } from '@jarenjs/db';
 
 export interface NodeOpenOptions {
-  path?: string;
+  /** The busy timeout in milliseconds. */
   timeout?: number;
   readOnly?: boolean;
+  /** How long work waits for an open transaction (`JD0012` after). */
+  queueTimeout?: number;
 }
 
 /** The `node:sqlite` binding; the builtin loads lazily inside open(). */

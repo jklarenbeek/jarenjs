@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.49.2",
+  "version": "0.49.3",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -16,7 +16,8 @@
   "files": [
     "types/",
     "src/",
-    "docs/"
+    "docs/",
+    "ARCHITECTURE.md"
   ],
   "description": "A C#-familiar fluent LINQ surface for the Jaren suite: expression capture into plain query documents, deferred immutable sequences, and a provider seam that runs the same document in memory or anywhere else",
   "author": "joham",
@@ -47,7 +48,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.49.2",
-    "@jarenjs/json": "^0.49.2"
+    "@jarenjs/core": "^0.49.3",
+    "@jarenjs/json": "^0.49.3"
   }
 }

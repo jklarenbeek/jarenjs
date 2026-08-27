@@ -92,7 +92,10 @@ them).
   already knows what it wrote. **Less complete, stated plainly**: it
   cannot see writes made through raw SQL, triggers, or another
   connection; a journal-mode delete of a row the store never read
-  emits its `remove` without having seen the old document; and of the
+  emits its `remove` without having seen the old document; a keyed
+  `put` reads the stored document first, so it emits the `replace`
+  session mode emits and a `put` that changes nothing emits nothing;
+  and of the
   database's own `ON DELETE` side effects it reconstructs exactly ONE
   — join-table membership dying with its entity (read before the
   delete) — while cascades into CHILD rows (`onDelete: 'cascade'` /
@@ -114,8 +117,14 @@ reads forward:
 const records = await store.changesSince(lastSeq);  // JD2051 when no log
 ```
 
-`seq` is monotonic; with the log enabled it continues across reopens
-(seeded from `MAX(seq)`), without it it is per-process. Retention is
+`seq` is monotonic; with the log enabled the DATABASE allocates it —
+each record's `seq` is `MAX(seq) + 1` computed inside the insert
+statement and read back through `RETURNING` — so two stores over one
+file never collide on the log's key and each sees the other's
+sequence continue; without the log it is per-process. `changesSince`
+answers records in the shape observers receive, `collections`
+included; a cursor that is not a number is a `TypeError`, as is a
+`retention` that is not a positive integer. Retention is
 a bounded count (`retention`, default 1000): older rows are pruned in
 the same transaction. The log is an ordered, replayable stream —
 which is what makes a late-joining consumer possible. **Replication
@@ -260,7 +269,11 @@ state. `externals` are fixed at registration — a query whose inputs
 change is a new registration.
 
 Maintenance runs synchronously inside patch delivery, in commit
-order, on the store's own connection. Writes from ANOTHER connection
+order, on the store's own connection. Delivery is never re-entered: a
+write made from inside an observer or a subscriber commits at once,
+but its record is queued and delivered after the current record has
+reached every consumer, so sibling live views see commits in commit
+order rather than in call-stack order. Writes from ANOTHER connection
 are invisible to capture (§6) and therefore to live queries; the
 coarse `dataVersion()` signal and the §11 topology are the honest
 answers, and re-registering re-reads.
@@ -375,9 +388,11 @@ ERRORING rather than degrading (the D14 rule — the bound is printed):
 
 Non-claims, in one place: no incremental joins (re-run is the declared
 strategy), no cross-connection invalidation (§6's `data_version` is
-the signal), no maintenance over asynchronous connections in this
-version (every current driver is synchronous; the browser driver's
-order owns that story), no replication, and no ordering guarantee for
+the signal), no maintenance over asynchronous connections —
+`capabilities.live` is `false` there and a registration is `JD0051`
+naming the reason, because maintenance point-reads rows synchronously
+inside delivery (the wasm driver's oo1 API is synchronous, which is
+why the browser has live queries at all) — no replication, and no ordering guarantee for
 unordered queries beyond §9's determinism.
 
 ## 13. Event time
@@ -404,7 +419,8 @@ live.stats().watermark;          // what it is now
 `eventTime` is a **closed** member set: `path`, `watermark`,
 `allowedLateness` (default 0) and `retention`. Anything else — a
 misspelling, a non-finite epoch, a negative lateness, a `path` that is
-not a singular row selector — is `JD0053` at registration, not a member
+not a singular row selector — is `JD0053` at registration (its
+`docPath` names the collection, `/collections/<name>`), not a member
 quietly ignored. `advance()` refuses a value that is not finite or that
 goes backwards (a `TypeError`), and it is absent on every view
 registered without an `eventTime`. An entity document has no collection
@@ -415,7 +431,12 @@ to place rows in and re-runs, so an `eventTime` on `store.live` is
 
 Two documents, and only these two shapes: `$resample` and `$rolling`
 whose series operand is the collection (`"$[*]"`, or a FLWOR over it
-whose `$where` narrows and whose `$return` is the bare binding).
+whose `$where` narrows and whose `$return` is the bare binding). A
+spec that spells `at` and `value` explicitly — the spelling the query
+language accepts — is maintained: the view folds with the kernel
+reading the declared instant member and the `value` member the spec
+names, and a `value` selector the view cannot follow re-runs with the
+reason named, never a maintained view that dies on its first fold.
 
 - **A bucket view keeps its rows by bucket.** A write touches one bucket
   — two, when it moves a reading across a boundary — and exactly those

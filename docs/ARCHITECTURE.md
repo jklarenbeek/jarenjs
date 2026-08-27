@@ -66,10 +66,14 @@ flowchart BT
     FORMS --> CORE
     FORMS --> JSON
     FORMS --> FORMATS
+    FORMS --> VALIDATE
+    LOCALES --> CORE
+    REFS --> CORE
     LINQ --> CORE
     LINQ --> JSON
     DB --> CORE
     DB --> JSON
+    DB --> VALIDATE
     LINQ -. "execute(document)" .-> DB
 ```
 
@@ -82,7 +86,7 @@ flowchart BT
 | [`@jarenjs/refs`](../packages/refs) | Data-only meta-schema bundle | — |
 | [`@jarenjs/emit`](../packages/emit) | Build-time artifacts: a schema-analysis pass producing a published type model, then a JTLT stylesheet per target language | [ARCHITECTURE](../packages/emit/ARCHITECTURE.md) · [FORMAT](../packages/emit/docs/EMIT-FORMAT.md) |
 | [`@jarenjs/contract`](../packages/contract) | Operation contracts: the `$contract` document compiled once into per-operation validators, transport normalizers (path/query strings decoded through the input schema's own `coerceTypes` normalizer) and a static-segment path matcher, served over HTTP, in-process (`local`) and over message channels (`port`, with collision-free client-scoped request ids), streaming `subscribe` operations (LIVE-FORMAT `{ patch, seq }` emissions as SSE and port push frames, resumable by seq) and called with JSON outcomes, projected to OpenAPI/TypeScript/Markdown/AI tools, revisioned (SHA-256 over the canonical public projection) and diffed by a published rule table; depends on core, json and validate — plus emit, reached only from the `./project` subpath — and cooperates with app/db/flow/ai by generated documents, never an import | [CONTRACT-FORMAT](../packages/contract/docs/CONTRACT-FORMAT.md) |
-| [`@jarenjs/forms`](../packages/forms) | Schema → form model; never imports the validator (apps wire the authoritative layer); a `geojson` field carries a `preview` hint a host with a map renderer may draw | — (see its [README](../packages/forms/README.md)) |
+| [`@jarenjs/forms`](../packages/forms) | Schema → form model; imports only the pure `$ref` normalization from `@jarenjs/validate/normalize` and never runs the validator (apps wire the authoritative layer); a `geojson` field carries a `preview` hint a host with a map renderer may draw | — (see its [README](../packages/forms/README.md)) |
 | [`@jarenjs/locales`](../packages/locales) | Locale packs (message catalogs) for validate & forms errors; deliberately free of any *consumer* dependency — it sits on `@jarenjs/core` like its siblings but never imports validate or forms, so either can serve any pack, and key parity with the built-in English catalogs is enforced by repo tests rather than imports | — (see its [README](../packages/locales/README.md) and [ERROR-MESSAGES](../packages/validate/docs/ERROR-MESSAGES.md)) |
 | [`@jarenjs/view`](../packages/view) | The vnode format (UIs as JSON) with a keyed DOM patcher and SSR; the only DOM-touching package, depends only on core | [VIEW-FORMAT](../packages/view/docs/VIEW-FORMAT.md) |
 | [`@jarenjs/app`](../packages/app) | Applications as JSON documents; the compiled dispatch loop composing view (JSLT → vnodes) and json (query actions) | [APP-FORMAT](../packages/app/docs/APP-FORMAT.md) |

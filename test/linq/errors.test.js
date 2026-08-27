@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
+import { from, fromDocument, createPushQueue, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
 import { JsonQueryCompileError } from '@jarenjs/json/query';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { JarenValidator } from '@jarenjs/validate';
@@ -48,6 +48,14 @@ describe('every JL code fires', () => {
     assert.throws(() => from([]).params({ it: 1 }),
       (e) => e.code === 'JL0004' && /reserved/.test(e.message));
     assert.throws(() => from([]).params({ 'bad name': 1 }), (e) => e.code === 'JL0004');
+    // a binding that is not query data would compare against nothing
+    assert.throws(() => from([]).params({ d: new Date(0) }),
+      (e) => e.code === 'JL0004' && /Date instance/.test(e.message) && /ISO string/.test(e.message));
+    assert.throws(() => from([]).params({ n: NaN }), (e) => e.code === 'JL0004');
+    // one name, two values, one document
+    const rows = from([{ k: 1 }]);
+    assert.throws(() => rows.params({ k: 1 }).concat(rows.params({ k: 2 })),
+      (e) => e.code === 'JL0004' && /different values/.test(e.message));
   });
 
   it('JL0005 — invalid build-time uses', () => {
@@ -56,6 +64,10 @@ describe('every JL code fires', () => {
     assert.throws(() => from([]).take(1.5), (e) => e.code === 'JL0005');
     assert.throws(() => from([]).where('not a function'), (e) => e.code === 'JL0005');
     assert.throws(() => from([]).concat('nope'), (e) => e.code === 'JL0005');
+    // a constant array crosses the same JSON boundary a captured constant does
+    assert.throws(() => from([1]).concat([new Date(0)]),
+      (e) => e.code === 'JL0005' && /Date instance/.test(e.message));
+    assert.throws(() => from([1]).concat([NaN]), (e) => e.code === 'JL0005');
   });
 
   it('JL0006 — the recorded unsupported operator', () => {
@@ -73,11 +85,18 @@ describe('every JL code fires', () => {
       (e) => e instanceof LinqRuntimeError && e.code === 'JL2004');
   });
 
+  it('JL2005 — a push queue fed after it ended (a runtime condition, not a build one)', () => {
+    const queue = createPushQueue();
+    queue.end();
+    assert.throws(() => queue.feed(1),
+      (e) => e instanceof LinqRuntimeError && e.code === 'JL2005' && /closed/.test(e.message));
+  });
+
   it('LINQ_CODES is frozen and covers exactly the raised codes', () => {
     assert.strictEqual(Object.isFrozen(LINQ_CODES), true);
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006',
-      'JL2001', 'JL2002', 'JL2003', 'JL2004',
+      'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006',
     ]);
   });
 

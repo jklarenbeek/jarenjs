@@ -13,8 +13,10 @@
  * authorable by a constrained decoder.
  */
 
-import { captureExpression, toExpression } from './expression.js';
-import { emitDocument, wrapTerminal } from './document.js';
+import { compileJsonQuery } from '@jarenjs/json/query';
+
+import { captureExpression, toExpression, requireJsonBinding } from './expression.js';
+import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.js';
 import { classifySource, compileDocument, executeInMemory } from './provider.js';
 import { asyncFromSequence } from './async.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
@@ -24,35 +26,6 @@ import { LinqBuildError, LinqRuntimeError } from './errors.js';
 const RESERVED_NAMES = new Set(['it', 'it2', 'acc', 'g']);
 
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * A deep, independent copy of an emitted query document. Plain data
- * only, which is exactly what a document is — every captured expression
- * has already passed the JSON-domain boundary in `expression.js`, so
- * there is nothing here a structural copy would lose.
- * @param {any} node
- * @returns {any}
- */
-function snapshot(node) {
-  if (node === null || typeof node !== 'object') return node;
-  if (Array.isArray(node)) return node.map(snapshot);
-  /** @type {Record<string, any>} */
-  const out = {};
-  for (const key of Object.keys(node)) defineOwn(out, key, snapshot(node[key]));
-  return out;
-}
-
-/**
- * Assign an OWN property, so a `__proto__` member stays a member instead
- * of silently replacing the object's prototype and vanishing.
- * @param {Record<string, any>} target
- * @param {string} key
- * @param {any} value
- */
-function defineOwn(target, key, value) {
-  Object.defineProperty(target, key,
-    { value, writable: true, enumerable: true, configurable: true });
-}
 
 /** @param {number} value @param {string} what */
 function requireIndex(value, what) {
@@ -89,10 +62,22 @@ export class Sequence {
     this.#options = options;
   }
 
-  /** @param {any} stage */
-  #with(stage) {
+  /** @param {any} stage @param {ReadonlyMap<string, any>} [params] */
+  #with(stage, params = this.#params) {
     return new Sequence(this.#source, this.#sourceKind, this.#root,
-      [...this.#stages, stage], this.#params, this.#options);
+      [...this.#stages, stage], params, this.#options);
+  }
+
+  /** @param {ReadonlyMap<string, any>} params */
+  #rebound(params) {
+    return new Sequence(this.#source, this.#sourceKind, this.#root,
+      this.#stages, params, this.#options);
+  }
+
+  /** Whether this sequence is a provider's own root, untouched — the
+   * one `$for` source the emitter leaves unpacked (document.js). */
+  #isBareRoot() {
+    return this.#sourceKind === 'provider' && this.#stages.length === 0;
   }
 
   #declared() {
@@ -119,10 +104,12 @@ export class Sequence {
     return this.#with({ kind: 'select', projection: this.#capture(projection) });
   }
 
-  /** Project-and-flatten: a multi-item projection concatenates (the
-   * FLWOR `$return` already flattens per tuple). */
+  /** Project-and-flatten: the projected value is iterated one level
+   * (an array member's elements, a constructed array's members), so
+   * `Seq<R[]>` really answers `Seq<R>`; the FLWOR `$return` then
+   * concatenates per tuple. */
   selectMany(selector) {
-    return this.#with({ kind: 'select', projection: this.#capture(selector) });
+    return this.#with({ kind: 'select', projection: fanProjection(this.#capture(selector)) });
   }
 
   /** @param {any} key @param {boolean} desc @param {any} [options] */
@@ -170,7 +157,12 @@ export class Sequence {
 
   /** Both sides read ONE input document in 0.1 — a query document has
    * one root. Cross-source composition arrives with the relational order.
-   * @param {Sequence} inner @param {string} what */
+   * Returns the merged parameter bindings: the inner side's declared
+   * externals ride along, because its document is embedded whole and
+   * would otherwise run against the outer's bindings only — a name both
+   * sides bind differently is `JL0004`, never silently the outer's.
+   * @param {Sequence} inner @param {string} what
+   * @returns {ReadonlyMap<string, any>} */
   #requireSameSource(inner, what) {
     if (!(inner instanceof Sequence)) {
       throw new LinqBuildError('JL0005', `${what} takes another sequence as its inner side`);
@@ -181,41 +173,62 @@ export class Sequence {
         + 'a query document reads one input; load both collections under one root '
         + '(the relational order lifts this)');
     }
+    const merged = new Map(this.#params);
+    for (const [name, value] of inner.#params) {
+      if (merged.has(name) && merged.get(name) !== value) {
+        throw new LinqBuildError('JL0004',
+          `parameter '${name}' is bound to different values by the two sides of ${what} — `
+          + 'one document carries one binding per name; bind it once, or rename one side');
+      }
+      merged.set(name, value);
+    }
+    return merged;
   }
 
   /** Equi-join → nested `$for` + `$where` equality (the engine rewrites
    * this shape to a hash join; that is why it is fast). */
   join(inner, outerKey, innerKey, result) {
-    this.#requireSameSource(inner, 'join');
+    const params = this.#requireSameSource(inner, 'join');
     return this.#with({
       kind: 'join',
       inner: inner.toDocument(),
+      innerBare: inner.#isBareRoot(),
       on: {
         $eq: [this.#capture(outerKey), this.#capture(innerKey, ['it2'])],
       },
       result: this.#capture(result, ['it', 'it2']),
-    });
+    }, params);
   }
 
   /** Group-join: the result selector receives the outer item and the
-   * MATCHING inner group as an expression (`(u, g) => ({ n: g.count() })`). */
+   * MATCHING inner group, bound as an array value (`$let`) so it can be
+   * indexed (`g.at(0)`), fanned (`g.all()`), placed in a member
+   * (`{ matches: g }`) and aggregated over its members
+   * (`(u, g) => ({ n: g.count() })`). */
   groupJoin(inner, outerKey, innerKey, result) {
-    this.#requireSameSource(inner, 'groupJoin');
+    const params = this.#requireSameSource(inner, 'groupJoin');
+    const innerDoc = inner.toDocument();
     const group = {
-      $for: { it2: inner.toDocument() },
+      $for: { it2: inner.#isBareRoot() ? innerDoc : [innerDoc] },
       $where: { $eq: [this.#capture(outerKey), this.#capture(innerKey, ['it2'])] },
       $return: '$it2',
     };
     return this.#with({
-      kind: 'select',
-      projection: this.#capture(result, ['it', { doc: group, pathable: false }]),
-    });
+      kind: 'groupJoin',
+      group,
+      projection: this.#capture(result, ['it', { doc: '$g', pathable: true, seq: '$g[*]' }]),
+    }, params);
   }
 
   /** Seeded fold → `$fold` (the accumulator clause). Only the seeded
    * form exists: JSON has no way to spell an unseeded lambda's implicit
    * first element without one. */
   aggregate(seed, step) {
+    if (typeof seed === 'function' && step === undefined) {
+      throw new LinqBuildError('JL0006',
+        'aggregate(fn) is unsupported: JSON cannot spell the implicit first element as a '
+        + 'lambda seed — pass a seed, aggregate(seed, fn) (see LINQ-FORMAT.md §4)');
+    }
     return this.#with({
       kind: 'aggregate',
       seed: toExpression(seed),
@@ -249,17 +262,20 @@ export class Sequence {
    * rows twice instead of concatenating two inputs. */
   concat(other) {
     let expr;
+    let params = this.#params;
     if (other instanceof Sequence) {
-      this.#requireSameSource(other, 'concat');
+      params = this.#requireSameSource(other, 'concat');
       expr = other.toDocument();
     }
     else if (Array.isArray(other)) {
-      expr = { $for: { it: { $const: other } }, $return: '$it' };
+      // the same JSON boundary a captured constant crosses (§5): a Date
+      // or a Map in the array would embed as {} and NaN would fold to null
+      expr = { $for: { it: { $const: toExpression(other).$const } }, $return: '$it' };
     }
     else {
       throw new LinqBuildError('JL0005', 'concat takes a sequence or a constant array');
     }
-    return this.#with({ kind: 'concat', other: expr });
+    return this.#with({ kind: 'concat', other: expr }, params);
   }
 
   /** `$default`: the sequence, or the fallback when it is empty. */
@@ -285,7 +301,10 @@ export class Sequence {
    * @param {{ concurrency: number, mode?: string, ordered?: boolean }} options */
   mapAsync(fn, options) {
     return asyncFromSequence({
-      runPrefix: () => this.toArray(),
+      // the prefix runs under the bindings the ASYNC sequence holds at
+      // enumeration time — a `params()` after the split rebinds the
+      // whole document, exactly as it would on the sync surface
+      runPrefix: (params) => this.#rebound(params).toArray(),
       prefixDocument: () => this.toDocument(),
       params: this.#params,
       options: this.#options,
@@ -316,10 +335,10 @@ export class Sequence {
         throw new LinqBuildError('JL0004',
           `'${name}' is reserved (the emitted document's own binding names: it, it2, acc, g)`);
       }
+      requireJsonBinding(name, bindings[name]);
       merged.set(name, bindings[name]);
     }
-    return new Sequence(this.#source, this.#sourceKind, this.#root,
-      this.#stages, merged, this.#options);
+    return this.#rebound(merged);
   }
 
   //#endregion
@@ -336,7 +355,8 @@ export class Sequence {
    * the returned document rewrote the predicate, and the next
    * enumeration answered differently. A snapshot cannot do that. */
   toDocument() {
-    return snapshot(emitDocument(this.#root, this.#stages));
+    return snapshot(emitDocument(this.#root, this.#stages,
+      { bareRoot: this.#sourceKind === 'provider' }));
   }
 
   /** The compiled view of the chain: the document, its externals and
@@ -394,8 +414,17 @@ export class Sequence {
   /** @param {string} terminal @param {readonly any[]} [args] */
   #window(terminal, args) {
     // element terminals emit `[window]`, so the result is always one
-    // array item and element extraction is unambiguous
-    return /** @type {any[]} */ (this.#execute(terminal, args));
+    // array item and element extraction is unambiguous — for a provider
+    // that keeps the contract; one that answers anything else is named,
+    // rather than indexed into a TypeError or an `undefined` typed `T[]`
+    const result = this.#execute(terminal, args);
+    if (!Array.isArray(result)) {
+      throw new LinqRuntimeError('JL2006',
+        `the provider answered ${terminal}() with ${result === undefined ? 'undefined'
+          : `a ${typeof result}`} — an element terminal emits an array constructor, so a `
+        + 'conforming execute() answers exactly one array (LINQ-FORMAT.md §8)');
+    }
+    return /** @type {any[]} */ (result);
   }
 
   toArray() {
@@ -524,7 +553,12 @@ export function from(source, options = {}) {
 /**
  * Attach a hand-written (or stored) query document to a source. The
  * document's result is the item sequence; further operators chain over
- * it. A version envelope is unwrapped so the expression embeds.
+ * it. A version envelope is unwrapped so the expression embeds — only
+ * the envelope this version knows (`{ $query: '0.1', $expr }`, nothing
+ * else); any other spelling is handed to the engine first so its own
+ * verdict (`JQ0006` for a version this consumer does not implement,
+ * `JQ0003` for a stray member) is what surfaces, never a silent run of
+ * a future document as a 0.1 one.
  * @param {any} source - iterable or provider, as `from`
  * @param {any} document - a Jaren query document
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
@@ -536,7 +570,14 @@ export function from(source, options = {}) {
 export function fromDocument(source, document, options = {}) {
   let root = document;
   if (root !== null && typeof root === 'object' && !Array.isArray(root)
-    && Object.hasOwn(root, '$expr')) {
+    && (Object.hasOwn(root, '$expr') || Object.hasOwn(root, '$query'))) {
+    const keys = Object.keys(root);
+    const known = root.$query === '0.1' && keys.length === 2 && Object.hasOwn(root, '$expr');
+    if (!known) {
+      compileJsonQuery(root); // the engine's verdict, or —
+      throw new LinqBuildError('JL0005',
+        "a version envelope is exactly { $query: '0.1', $expr: … } (QUERY-FORMAT §4.1)");
+    }
     root = root.$expr;
   }
   return new Sequence(source, classifySource(source), root, [], new Map(), options);

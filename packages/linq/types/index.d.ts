@@ -65,7 +65,7 @@ export interface NumberExpr extends ExprBase<number>, EqExpr<number> {
     context?: CalendarContext): NumberExpr;
 }
 
-export interface StringExpr extends ExprBase<string>, EqExpr<string> {
+export interface StringExpr extends ExprBase<string>, EqExpr<string>, SpatialMethods {
   lt(value: string | StringExpr): BoolExpr;
   le(value: string | StringExpr): BoolExpr;
   gt(value: string | StringExpr): BoolExpr;
@@ -236,20 +236,65 @@ export interface SeriesMethods {
     Expr<AsOfMatch[]> & AggregatableExpr;
 }
 
-export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods {
+/** A geometry operand: a GeoJSON geometry or position, a WKT string,
+ * or an expression yielding one. */
+export type GeoOperand = ExprBase<unknown> | object | readonly number[] | string;
+
+/** The §8.14 family, one method per operator, on every expression kind
+ * a geometry can be — a position or bbox array, a GeoJSON object, a WKT
+ * or geohash string — and on the honest top. Measurements are numbers,
+ * cells and text are strings, a bbox and a centroid are positions; a
+ * result that is a geometry stays `UnknownExpr`, because a GeoJSON
+ * shape is not a TypeScript type this surface can promise. */
+export interface SpatialMethods {
+  /** `[west, south, east, north]` of the value's positions. */
+  bbox(): ArrayExpr<number>;
+  /** Square metres of the value's polygons (`$area`). */
+  geoArea(): NumberExpr;
+  /** Metres of the value's lines and ring perimeters (`$length`). */
+  geoLength(): NumberExpr;
+  /** The mean of the value's positions, as a position. */
+  centroid(): ArrayExpr<number>;
+  /** Metres between the two representative positions. */
+  distance(other: GeoOperand): NumberExpr;
+  /** Is this value's representative position inside `region`'s surface? */
+  within(region: GeoOperand): BoolExpr;
+  /** Do the two bounding boxes overlap? Touching edges count. */
+  bboxIntersects(other: GeoOperand): BoolExpr;
+  /** The base-32 geohash cell (precision 1–12, default 9). */
+  geohash(precision?: number | NumberExpr): StringExpr;
+  /** A Well-Known Text string → the geometry it denotes. */
+  geoParse(): UnknownExpr;
+  /** Any value → its Well-Known Text. */
+  geoText(): StringExpr;
+  /** A cell string → the `Polygon` covering that cell. */
+  geohashBounds(): UnknownExpr;
+  /** A cell string → the cell and its neighbours, a SEQUENCE of up to
+   * nine cell strings (aggregate it, or `at()` is not available). */
+  geohashNeighbours(): StringExpr & AggregatableExpr;
+  /** The same value with vertices dropped; the tolerance is in degrees. */
+  geoSimplify(tolerance: number | NumberExpr): UnknownExpr;
+}
+
+export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods, SpatialMethods {
   eq(value: readonly E[] | ArrayExpr<E> | null): BoolExpr;
   ne(value: readonly E[] | ArrayExpr<E> | null): BoolExpr;
   /** Do two half-open `{start, end}` intervals share an instant?
    * Touching spans do not. */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
   /** Fan the elements out (`[*]`) — a MANY-cardinality expression the
-   * aggregates apply to (`u.tags.all().count()`). */
-  all(): Expr<E> & AggregatableExpr;
+   * aggregates and the §8.16 sequence operators apply to
+   * (`u.tags.all().count()`, `rows.all().resample(spec)`). */
+  all(): Expr<E> & AggregatableExpr & SeriesMethods;
   /** The element at a 0-based index; negative counts from the end. */
   at(index: number): Expr<E>;
   /** `$count` over the fanned elements requires `all()` first; this
    * counts the ARRAY as one item — see the format doc. */
   count(): NumberExpr;
+  /** Cosine similarity to another vector (§8.15): a captured array
+   * embeds as a literal, a `params()` binding stays an external. Only a
+   * numeric array is a vector. */
+  similarity(this: ArrayExpr<number>, other: readonly number[] | ArrayExpr<number>): NumberExpr;
 }
 
 /** Aggregates available on any expression (a fanned path, a group). */
@@ -262,8 +307,13 @@ export interface AggregatableExpr {
 }
 
 /** An object's expression: exactly its properties, recursively typed —
- * which is what makes a misspelled member a compile error. */
-export type ObjectExpr<T> = ExprBase<T> & EqExpr<T> & {
+ * which is what makes a misspelled member a compile error. A GeoJSON
+ * object carries the spatial family; a `{ start, end }` object the
+ * interval test. */
+export type ObjectExpr<T> = ExprBase<T> & EqExpr<T> & SpatialMethods & {
+  /** Do two half-open `{start, end}` intervals share an instant? */
+  overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
+} & {
   readonly [K in keyof T & string]-?: Expr<NonNullable<T[K]>>;
 };
 
@@ -271,7 +321,7 @@ export type ObjectExpr<T> = ExprBase<T> & EqExpr<T> & {
  * where inference ends (dynamic `get`, post-operator members, unknown
  * elements) — wide, never wrong. */
 export interface UnknownExpr
-  extends ExprBase<unknown>, AggregatableExpr, DateMethods, SeriesMethods {
+  extends ExprBase<unknown>, AggregatableExpr, DateMethods, SeriesMethods, SpatialMethods {
   eq(value: unknown): BoolExpr;
   ne(value: unknown): BoolExpr;
   lt(value: unknown): BoolExpr;
@@ -302,6 +352,8 @@ export interface UnknownExpr
   at(index: number): UnknownExpr;
   /** Do two half-open `{start, end}` intervals share an instant? */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
+  /** Cosine similarity (§8.15) — wide, on the honest top. */
+  similarity(other: unknown): NumberExpr;
 }
 
 /** Value type → expression type. Order matters: the DateTime brand is
@@ -349,10 +401,24 @@ export interface Provider {
   execute(document: unknown, options: { externals: Record<string, unknown> }): unknown;
 }
 
+/** The engine's compile registries, under the engine's own option names
+ * (LINQ-FORMAT §8.1): what makes an expressible document executable in
+ * memory. Their shapes are the query engine's — wide here, never wrong. */
 export interface LinqOptions {
   /** Enables `ofType`/`cast` (schema operators); e.g.
    * `createTypeTestCompiler()` from `@jarenjs/validate/query`. */
   compileTypeTest?: (schema: unknown, docPath: string) => (value: unknown) => boolean;
+  /** Registered `$call` functions, for a hand-written or saved document. */
+  functions?: Readonly<Record<string, (...args: any[]) => unknown>>;
+  /** Named collations: `orderBy(…, { collation })` is `JQ0010` without one. */
+  collations?: Readonly<Record<string, (a: string, b: string) => number>>;
+  /** Custom RFC 9535 path function extensions. */
+  pathFunctions?: Readonly<Record<string, unknown>>;
+  /** Step, depth and sequence bounds — a SAVED document's guard. */
+  limits?: Readonly<Record<string, number>>;
+  /** An explicit cache-partition key, when the hooks above are rebuilt
+   * per call: compiled documents are shared per registry combination. */
+  registry?: object;
 }
 
 export interface Explanation {
@@ -389,6 +455,10 @@ export class Sequence<T = unknown, P = {}> {
     result: (outer: Expr<T>, inner: Expr<U>, p: ParamsExpr<P>) => R,
   ): Sequence<Unwrap<R>, P>;
 
+  /** The matching inner group is bound as an ARRAY value: index it
+   * (`g.at(0)`), fan it (`g.all()`), place it in a member (`{ all: g }`),
+   * and aggregate over its MEMBERS (`g.count()` is the number of
+   * matches, `g.exists()` whether there are any). */
   groupJoin<U, R extends ExprResult>(
     inner: Sequence<U, any>,
     outerKey: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult,
@@ -560,6 +630,11 @@ export class AsyncSequence<T = unknown, P = {}> {
   all(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): Promise<boolean>;
 }
 
+/** Build an async sequence over an async iterable, a sync iterable, a
+ * cursor or a push queue. A STRING is refused (`JL0001`): on this
+ * surface a string is a chunk source — feed it through a push queue —
+ * never a character stream, which is where the twins deliberately
+ * differ from `from('abc')`. */
 export function fromAsync<T>(
   source: AsyncIterable<T> | Iterable<T> | AsyncCursor<T>,
   options?: LinqOptions,

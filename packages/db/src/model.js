@@ -24,6 +24,7 @@
 import {
   collectSameDocumentAnchors, resolveSameDocumentRef,
 } from '@jarenjs/validate/normalize';
+import { compileJsonQuery } from '@jarenjs/json/query';
 
 import { DbCompileError } from './errors.js';
 
@@ -123,10 +124,63 @@ function checkDefault(declared, docPath) {
     || declared === 'auto') return;
   if (declared !== null && typeof declared === 'object' && !Array.isArray(declared)
     && (Object.hasOwn(declared, 'value') !== Object.hasOwn(declared, 'query'))
-    && Object.keys(declared).length === 1) return;
+    && Object.keys(declared).length === 1) {
+    if (Object.hasOwn(declared, 'query')) {
+      // compiled where the model is checked, not at the first
+      // `store.entity()` call — a default that cannot compile is a model
+      // defect, and the engine's reason travels with the model position
+      try {
+        compileJsonQuery(declared.query);
+      }
+      catch (cause) {
+        throw new DbCompileError('JD0005',
+          `the { query } default does not compile: ${/** @type {Error} */ (cause).message}`,
+          docPath, /** @type {Error} */ (cause));
+      }
+    }
+    return;
+  }
   throw modelError(
     "a default is 'now', 'updated', 'uuid', 'auto', { value: … } or { query: … }",
     docPath);
+}
+
+/** The schema positions whose `x-entity` block the one-level walk READS:
+ * a top-level property, an `allOf` branch of one (shallow-merged), and
+ * a `$defs`/anchor target (a property's `$ref` resolves there). */
+const READ_BLOCK_KEYS = new Set(['allOf', '$defs', 'definitions']);
+
+/**
+ * Find an `x-entity` block the entity walk would never read — nested
+ * inside a property's `properties`, `items`, `anyOf`, … — so it fails
+ * the model instead of being ignored. §9.2's promise: a silently
+ * ignored mapping directive is a data-loss bug, so the vocabulary is
+ * closed in POSITION as well as in name.
+ * @param {any} node
+ * @param {string} path
+ * @param {boolean} read - whether a block AT this node is read
+ * @returns {string | null} the docPath of an unread block
+ */
+function unreadEntityBlock(node, path, read) {
+  if (node === null || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      const found = unreadEntityBlock(node[i], `${path}/${i}`, read);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  for (const key of Object.keys(node)) {
+    if (key === 'x-entity') {
+      if (!read) return `${path}/x-entity`;
+      continue;
+    }
+    // a block one level under a read position is read only through
+    // `allOf`/`$defs`; under anything else it is out of the walk
+    const found = unreadEntityBlock(node[key], `${path}/${key}`, read && READ_BLOCK_KEYS.has(key));
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /**
@@ -169,14 +223,54 @@ export function normalizeEntities(model) {
           ? raw['x-entity'] : undefined),
         `${propertyPath}/x-entity`);
 
-      const type = typeof effective.type === 'string'
-        ? effective.type
-        : Array.isArray(effective.type)
-          ? effective.type.find((t) => t !== 'null')
-          : undefined;
+      // a nullable scalar (`['string', 'null']`) is that scalar; a union
+      // of two or more scalar types has no one column type and lives in
+      // the document (§9.3) — mapping it by its FIRST member stored `5`
+      // as `"5.0"` in a text column
+      const scalarMembers = Array.isArray(effective.type)
+        ? effective.type.filter((t) => t !== 'null')
+        : [effective.type];
+      const type = scalarMembers.length === 1 && typeof scalarMembers[0] === 'string'
+        ? scalarMembers[0]
+        : undefined;
+      const union = scalarMembers.length > 1;
 
       if (entityBlock.default !== undefined)
         checkDefault(entityBlock.default, `${propertyPath}/x-entity/default`);
+      if (entityBlock.default !== undefined && entityBlock.relation !== undefined) {
+        throw modelError('a relation member takes no default — it is a projection, not stored state',
+          `${propertyPath}/x-entity/default`);
+      }
+      if (entityBlock.default === 'auto' && entityBlock.key !== true) {
+        throw modelError("default: 'auto' is allocated by the database for a single integer key only",
+          `${propertyPath}/x-entity/default`);
+      }
+      // the mapping directives that need a column of their own: on a
+      // property the document keeps — `column: 'json'`, a non-scalar, a
+      // union — they were accepted and never applied (a key with no key
+      // column let duplicates in and broke every read)
+      const columnMapped = SCALARS.has(type ?? '') && entityBlock.column !== 'json';
+      const needsColumn = ['key', 'unique', 'index'].filter((member) => entityBlock[member] === true);
+      if (!columnMapped && needsColumn.length > 0) {
+        const why = entityBlock.column === 'json'
+          ? "column: 'json' keeps the property in the document"
+          : union ? 'a union of scalar types lives in the document'
+            : 'only a top-level scalar takes a column';
+        throw modelError(entityBlock.key === true
+          ? `a key property must be a scalar with a column of its own — ${why}`
+          : `'${propertyName}' declares ${needsColumn.join('/')} but has no column — ${why}`,
+          propertyPath);
+      }
+      for (const key of Object.keys(raw !== null && typeof raw === 'object' ? raw : {})) {
+        if (key === 'x-entity') continue;
+        const unread = unreadEntityBlock(raw[key], `${propertyPath}/${key}`, READ_BLOCK_KEYS.has(key));
+        if (unread !== null) {
+          throw new DbCompileError('JD0030',
+            'x-entity applies to an entity\'s top-level properties (and their allOf/$ref '
+            + 'targets) only — a nested block is never read, so it is refused rather than ignored',
+            unread);
+        }
+      }
       if (entityBlock.column !== undefined
         && entityBlock.column !== 'integer' && entityBlock.column !== 'json') {
         throw modelError("x-entity.column is 'integer' (epoch date column) or 'json' (stay in the document)",
@@ -289,6 +383,16 @@ function resolveRelations(entities) {
       // many-to-many: a join table
       relation.kind = 'manyToMany';
       const other = relation.to;
+      if (other === owner) {
+        throw modelError('a many-to-many relation to the entity itself is not supported — '
+          + 'both endpoint columns would carry the same name', docPath);
+      }
+      for (const endpoint of [owner, other]) {
+        if (entities.get(endpoint).keys.length !== 1) {
+          throw modelError(`a many-to-many relation needs single-key endpoints; '${endpoint}' `
+            + 'declares a composite key', docPath);
+        }
+      }
       relation.joinTable = typeof relation.through === 'string'
         ? relation.through
         : [owner, other].sort().join('_');
@@ -313,6 +417,13 @@ function resolveRelations(entities) {
     const holder = entities.get(relation.fkEntity);
     const declaredVia = holder.properties.get(relation.via);
     const targetEntity = entities.get(relation.fkTargets);
+    if (targetEntity.keys.length !== 1) {
+      // a foreign key references ONE column; a composite-key target
+      // rendered a reference to its first key alone, which SQLite
+      // refused at the first write with a raw "foreign key mismatch"
+      throw modelError(`a foreign-key relation must reference a single-key entity; `
+        + `'${relation.fkTargets}' declares a composite key`, docPath);
+    }
     const targetKeyType = targetEntity.properties.get(targetEntity.keys[0]).type;
     if (declaredVia !== undefined) {
       if (declaredVia.type !== targetKeyType || declaredVia.column === 'json') {
@@ -408,7 +519,13 @@ export function explainMapping(model) {
         source: epoch ? 'epoch(document)' : 'document',
         key: property.key,
       };
-      if (property.enum !== undefined) column.check = property.enum;
+      if (property.enum !== undefined) {
+        // `null` never fails a CHECK (NULL IN (…) is unknown, which
+        // passes), but rendered into the list it made the whole CHECK
+        // unknown for EVERY value — a nullable enum accepted anything
+        const values = property.enum.filter((value) => value !== null);
+        if (values.length > 0) column.check = values;
+      }
       columns.push(column);
       if (property.unique) indexes.push({ property: property.name, unique: true });
       else if (property.index) indexes.push({ property: property.name, unique: false });

@@ -26,6 +26,8 @@ export const LINQ_CODES = Object.freeze({
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
   JL2004: 'an asynchronous provider cannot back the synchronous surface',
+  JL2005: 'a push queue was fed after it ended',
+  JL2006: 'a provider answered an element terminal with something other than one array',
 });
 
 /**
@@ -42,11 +44,14 @@ export const LINQ_CODES = Object.freeze({
  *    compileTypeTest })`, e.g. `createTypeTestCompiler()` from
  *    `@jarenjs/validate/query`)
  *  - `JL0004` — a parameter was referenced without being declared via
- *    `.params({...})`, or a declared name is reserved (`it`, `acc`,
- *    `g` — the document's own binding names)
+ *    `.params({...})`, a declared name is reserved (`it`, `it2`, `acc`,
+ *    `g` — the document's own binding names), a binding is not query
+ *    data, or the two sides of a `join`/`groupJoin`/`concat` bind one
+ *    name to different values
  *  - `JL0005` — an operator was used invalidly at build time (`thenBy`
- *    without `orderBy`, `all()` off a plain path, a negative
- *    `skip`/`take`, a value that cannot embed in a document)
+ *    without `orderBy`, `all()` off an operator result rather than a
+ *    path, a negative `skip`/`take`, a value that cannot embed in a
+ *    document)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  */
@@ -77,6 +82,12 @@ export class LinqBuildError extends CodedError {
  *    `Sequence` terminal is a value (`toArray(): T[]`), so a promise
  *    cannot be returned under that type; emit `toDocument()` and await
  *    the provider directly instead.
+ *  - `JL2005` — `feed()` was called on a push queue after `end()`
+ *    closed it (a condition of the running stream, not of the build)
+ *  - `JL2006` — a provider answered an element terminal (`toArray`,
+ *    `first`, …) with something other than exactly one array; the
+ *    emitted document is an array constructor, so a conforming
+ *    `execute()` never answers `undefined` there
  */
 export class LinqRuntimeError extends CodedError {
   /**

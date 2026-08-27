@@ -11,7 +11,11 @@ Two properties shape everything below:
 - **TypeScript declarations are generated, not committed.** `dist/types/` is
   gitignored, so `.d.ts` files exist only after a build or in a packed
   tarball. This is the one thing that surprises source consumers, and it has
-  its own section below.
+  its own section below. Two packages are the exception: `@jarenjs/linq` and
+  `@jarenjs/db` hand-author their declarations in a committed `types/`
+  directory (their `types` field points at `./types/index.d.ts`), so they
+  resolve in a fresh checkout with no build, and a repo test keeps each
+  subpath's declared value exports equal to its runtime exports.
 
 Runtime baseline for every package: **Node ≥ 24, ESM only** (`"type":
 "module"`), and **zero third-party runtime dependencies** — a `@jarenjs/*`
@@ -32,8 +36,9 @@ request for a lower, tested floor rather than install past the warning.
 npm install @jarenjs/validate @jarenjs/formats @jarenjs/refs
 ```
 
-Published tarballs ship `src/`, `dist/types/` and the package docs, so types
-resolve with no build on your side. Each release is gated by
+Published tarballs ship `src/`, the declarations (`dist/types/`, or the
+committed `types/` for linq and db) and the package docs, so types resolve
+with no build on your side. Each release is gated by
 `npm run release:check`, which runs lint, the full test suite, all builds, a
 TypeScript consumer check, a tree-shaking check and npm pack dry-runs, on
 Linux **and** Windows CI. A separate check imports every packed package from
@@ -208,7 +213,8 @@ workspace symlinks differently from installed packages.
 ### Generate the TypeScript declarations first
 
 This is the step that bites. `package.json` `types` and `exports` point at
-`./dist/types/*.d.ts`, which **does not exist in a fresh checkout**:
+`./dist/types/*.d.ts`, which **does not exist in a fresh checkout** (linq
+and db excepted — theirs are committed under `types/`):
 
 ```bash
 npm --prefix vendor/jarenjs install

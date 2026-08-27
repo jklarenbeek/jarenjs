@@ -19,8 +19,8 @@ import {
   getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
 } from '@jarenjs/core/dates/rfc3339';
 
-import { DbRuntimeError } from './errors.js';
-import { chain } from './driver.js';
+import { DbRuntimeError, isDuplicateKeyError } from './errors.js';
+import { chain, attempt } from './driver.js';
 
 /**
  * The write/read machinery for one entity, prepared once.
@@ -139,9 +139,13 @@ export function entityCore(connection, entity, entityMapping, validate) {
     const declared = property.default;
     if (declared === undefined || property.relation !== undefined) continue;
     if (declared === 'now' || declared === 'updated') {
-      defaulters.push({ name: property.name, fill: () => new Date().toISOString() });
-      if (declared === 'updated')
-        updateStamps.push({ name: property.name, fill: () => new Date().toISOString() });
+      // a `date` property takes the calendar date; a date-time stamp on
+      // it was invalid under its own format and refused by an epoch column
+      const stamp = property.format === 'date'
+        ? () => new Date().toISOString().slice(0, 10)
+        : () => new Date().toISOString();
+      defaulters.push({ name: property.name, fill: stamp });
+      if (declared === 'updated') updateStamps.push({ name: property.name, fill: stamp });
       continue;
     }
     if (declared === 'uuid') {
@@ -162,10 +166,40 @@ export function entityCore(connection, entity, entityMapping, validate) {
     for (const { name, fill } of defaulters) {
       if (out[name] === undefined) out[name] = fill(out);
     }
+    // the version token starts at 0 on insert: a row written with SQL
+    // NULL never matched the tracker's `WHERE ver = 0` and could not be
+    // saved through the unit of work at all
+    if (!updating && entity.version !== null && entity.version !== undefined
+      && out[entity.version] === undefined) {
+      out[entity.version] = 0;
+    }
     if (updating) {
       for (const { name, fill } of updateStamps) out[name] = fill(out);
     }
     return out;
+  };
+
+  /**
+   * Refuse relation members a write cannot store: every relation member
+   * is a projection (§10.1), except a many-to-many MEMBERSHIP array,
+   * which `create()`/`add()` attach through the join table.
+   * @param {any} doc
+   * @param {string} verb
+   * @param {boolean} memberships - whether membership arrays are taken
+   */
+  const refuseProjections = (doc, verb, memberships) => {
+    for (const name of relationNames) {
+      const value = doc?.[name];
+      if (value === undefined || (Array.isArray(value) && value.length === 0)) continue;
+      const relation = entity.properties.get(name).relation;
+      if (memberships && relation.kind === 'manyToMany' && Array.isArray(value)) continue;
+      throw new DbRuntimeError('JD2003',
+        `'${name}' is a relation member — ${verb}() stores no projections; `
+        + (relation.kind === 'manyToMany'
+          ? 'membership changes through the unit of work (put + saveChanges)'
+          : 'write the related entities themselves'),
+        { docPath, collection: entity.name });
+    }
   };
 
   const checkValid = (doc) => {
@@ -233,7 +267,13 @@ export function entityCore(connection, entity, entityMapping, validate) {
   };
 
   const wrapWrite = (error, key) => {
-    if (/** @type {any} */ (error)?.code === 'JD2003') return error;
+    const code = /** @type {any} */ (error)?.code;
+    if (typeof code === 'string' && code.startsWith('JD')) return error;
+    if (keys.length === 1 && isDuplicateKeyError(error, table, keys[0])) {
+      return new DbRuntimeError('JD2001',
+        `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
+        { docPath, collection: entity.name, key, cause: error });
+    }
     return new DbRuntimeError('JD2005',
       `the database rejected the operation: ${/** @type {any} */ (error)?.message ?? String(error)}`,
       key === undefined
@@ -280,15 +320,7 @@ export function entityCore(connection, entity, entityMapping, validate) {
     },
     normalizeKey: (key) => normalizeKeyArg(key),
     create(doc) {
-      for (const name of relationNames) {
-        const value = doc?.[name];
-        if (value !== undefined && (!Array.isArray(value) || value.length > 0)) {
-          throw new DbRuntimeError('JD2003',
-            `'${name}' is a relation member — create() stores no `
-            + 'projections; use the unit of work for membership',
-            { docPath, collection: entity.name });
-        }
-      }
+      refuseProjections(doc, 'create', true);
       const completed = applyDefaults(doc, { updating: false });
       checkValid(completed);
       const { values, rest } = split(completed);
@@ -296,17 +328,11 @@ export function entityCore(connection, entity, entityMapping, validate) {
       const sql = insertSqlFor(names);
       return chain(prepared(`insert:${names.join(',')}`, sql), (statement) => {
         const params = [...values.map((value) => value.value), JSON.stringify(rest)];
-        let out;
-        try {
-          out = autoKey !== null && !names.includes(autoKey)
-            ? statement.get(params)
-            : (statement.run(params), null);
-        }
-        catch (error) {
-          throw wrapWrite(error, completed[keys[0]]);
-        }
-        if (out !== null) return { ...completed, [autoKey]: out.key };
-        return completed;
+        const returning = autoKey !== null && !names.includes(autoKey);
+        return chain(
+          attempt(() => (returning ? statement.get(params) : statement.run(params)),
+            (error) => wrapWrite(error, completed[keys[0]])),
+          (out) => (returning ? { ...completed, [autoKey]: out.key } : completed));
       });
     },
     get(key) {
@@ -317,11 +343,21 @@ export function entityCore(connection, entity, entityMapping, validate) {
     },
     update(key, changes) {
       const parts = normalizeKeyArg(key);
+      refuseProjections(changes, 'update', false);
       return chain(this.get(key), (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
             `no '${entity.name}' to update under that key`,
             { docPath, collection: entity.name });
+        }
+        for (const keyName of keys) {
+          // the key identifies the row the UPDATE addresses; rewriting it
+          // through `changes` moved rows out from under the tracker
+          if (changes?.[keyName] !== undefined && changes[keyName] !== current[keyName]) {
+            throw new DbRuntimeError('JD2003',
+              `'${keyName}' is the primary key — update() cannot rewrite it; delete and create`,
+              { docPath, collection: entity.name, key: parts[0] });
+          }
         }
         const next = applyDefaults({ ...current, ...changes }, { updating: true });
         // an explicit update is last-write-wins by contract (§11.2),
@@ -337,31 +373,18 @@ export function entityCore(connection, entity, entityMapping, validate) {
         ].join(', ');
         const sql = `UPDATE ${q(table)} SET ${assignments} `
           + `WHERE ${keyWhere(values.length + 1)}`;
-        return chain(prepared(`update:${values.length}`, sql), (statement) => {
-          try {
-            statement.run([...values.map((value) => value.value),
-              JSON.stringify(rest), ...parts]);
-          }
-          catch (error) {
-            throw wrapWrite(error, parts[0]);
-          }
-          return next;
-        });
+        return chain(prepared(`update:${values.length}`, sql), (statement) =>
+          chain(attempt(() => statement.run([...values.map((value) => value.value),
+            JSON.stringify(rest), ...parts]), (error) => wrapWrite(error, parts[0])),
+          () => next));
       });
     },
     delete(key) {
       const parts = normalizeKeyArg(key);
       const sql = `DELETE FROM ${q(table)} WHERE ${keyWhere(0)}`;
-      return chain(prepared('delete', sql), (statement) => {
-        let out;
-        try {
-          out = statement.run(parts);
-        }
-        catch (error) {
-          throw wrapWrite(error, parts[0]);
-        }
-        return chain(out, (result) => Number(result?.changes ?? 0) > 0);
-      });
+      return chain(prepared('delete', sql), (statement) =>
+        chain(attempt(() => statement.run(parts), (error) => wrapWrite(error, parts[0])),
+          (result) => Number(result?.changes ?? 0) > 0));
     },
   };
 }
