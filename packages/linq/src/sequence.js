@@ -20,6 +20,7 @@ import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.
 import { classifySource, compileDocument, executeInMemory } from './provider.js';
 import { asyncFromSequence } from './async.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
+import { schemaOf } from './schema-of.js';
 
 /** Binding names the emitted documents own; parameters may not shadow
  * them (LINQ-FORMAT.md §7). */
@@ -283,14 +284,15 @@ export class Sequence {
     return this.#with({ kind: 'defaultIfEmpty', fallback: toExpression(fallback) });
   }
 
-  /** Keep only items matching the JSON Schema (`$valid` filter). */
+  /** Keep only items matching the JSON Schema (`$valid` filter) — a
+   * document, or a schema-pen builder, whose document is taken. */
   ofType(schema) {
-    return this.#with({ kind: 'ofType', schema });
+    return this.#with({ kind: 'ofType', schema: schemaOf(schema) });
   }
 
   /** Assert every item against the JSON Schema (`$assert`). */
   cast(schema) {
-    return this.#with({ kind: 'cast', schema });
+    return this.#with({ kind: 'cast', schema: schemaOf(schema) });
   }
 
   /** Cross into the async surface: everything BEFORE this call is the

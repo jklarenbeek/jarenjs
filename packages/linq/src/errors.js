@@ -22,6 +22,10 @@ export const LINQ_CODES = Object.freeze({
   JL0004: 'an undeclared or reserved parameter name was used',
   JL0005: 'an operator was used invalidly at build time',
   JL0006: 'an unsupported operator was invoked',
+  JL0101: 'a pen received a value it cannot spell: not JSON, or not what the keyword takes',
+  JL0102: 'a pen was asked for a construct the format cannot carry',
+  JL0103: 'a $defs name collision, a dangling ref, or an unnamed recursion',
+  JL0104: 'a pen-owned keyword through meta(), or a check() external other than root/path',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
@@ -54,6 +58,21 @@ export const LINQ_CODES = Object.freeze({
  *    document)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
+ *
+ * The pens (`@jarenjs/linq/schema`, PENS-FORMAT.md §1.3) refuse with
+ * the `JL01xx` codes:
+ *
+ *  - `JL0101` — a pen received a value it cannot spell: a function,
+ *    symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance or a
+ *    cycle where JSON was needed, or a value that is not what the
+ *    keyword takes (`min('x')`, a non-builder member)
+ *  - `JL0102` — a construct the format cannot carry: a function
+ *    `refine`/`transform`, a coercion the normalizer would never run,
+ *    closed objects under `allOf`, an annotation on `never()`
+ *  - `JL0103` — two distinct builders under one `$defs` name, a
+ *    `ref()` no definition answers, or a `lazy()` that is not named
+ *  - `JL0104` — a pen-owned keyword written through `meta()`, or a
+ *    `check()` rule naming an external other than `root`/`path`
  */
 export class LinqBuildError extends CodedError {
   /**

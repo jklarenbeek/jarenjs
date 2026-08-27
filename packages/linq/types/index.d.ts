@@ -19,7 +19,9 @@
  * EVERY string a date. Purely a type-level marker — the runtime value is a plain
  * RFC 3339 string; there is no constructor and no runtime cost.
  */
-export type DateTime = string & { readonly __jarenTag: 'date-time' };
+export type DateTime = string & { __jarenTag: 'date-time' };
+
+import type { SchemaBuilder } from './schema.js';
 
 /** The phantom carrier every expression type extends: `__value` never
  * exists at runtime; it lets projections infer their unwrapped shape. */
@@ -284,8 +286,9 @@ export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods, SpatialMetho
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
   /** Fan the elements out (`[*]`) — a MANY-cardinality expression the
    * aggregates and the §8.16 sequence operators apply to
-   * (`u.tags.all().count()`, `rows.all().resample(spec)`). */
-  all(): Expr<E> & AggregatableExpr & SeriesMethods;
+   * (`u.tags.all().count()`, `rows.all().resample(spec)`); an object
+   * element's members are fanned with it (`lines.all().amount.sum()`). */
+  all(): FannedExpr<E>;
   /** The element at a 0-based index; negative counts from the end. */
   at(index: number): Expr<E>;
   /** `$count` over the fanned elements requires `all()` first; this
@@ -296,6 +299,13 @@ export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods, SpatialMetho
    * numeric array is a vector. */
   similarity(this: ArrayExpr<number>, other: readonly number[] | ArrayExpr<number>): NumberExpr;
 }
+
+/** A fanned path (`$.lines[*]`): the element's expression, aggregatable,
+ * and — for an object element — every member is a fanned path too
+ * (`$.lines[*].amount`), so it aggregates without a second `all()`. */
+export type FannedExpr<E> = Expr<E> & AggregatableExpr & SeriesMethods &
+  ([E] extends [readonly unknown[]] ? {} :
+    [E] extends [object] ? { readonly [K in keyof E & string]-?: MemberExpr<E[K]> & AggregatableExpr } : {});
 
 /** Aggregates available on any expression (a fanned path, a group). */
 export interface AggregatableExpr {
@@ -314,8 +324,12 @@ export type ObjectExpr<T> = ExprBase<T> & EqExpr<T> & SpatialMethods & {
   /** Do two half-open `{start, end}` intervals share an instant? */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
 } & {
-  readonly [K in keyof T & string]-?: Expr<NonNullable<T[K]>>;
+  readonly [K in keyof T & string]-?: MemberExpr<T[K]>;
 };
+
+/** A member's expression: an `unknown` (or `any`) member is the honest
+ * top, never the first conditional arm `Expr<>` would pick for it. */
+export type MemberExpr<V> = unknown extends V ? UnknownExpr : Expr<NonNullable<V>>;
 
 /** The honest top: everything is available, nothing is precise. Used
  * where inference ends (dynamic `get`, post-operator members, unknown
@@ -476,9 +490,13 @@ export class Sequence<T = unknown, P = {}> {
   concat(other: Sequence<T, any> | readonly T[]): Sequence<T, P>;
   defaultIfEmpty(fallback?: T | null): Sequence<T | null, P>;
 
-  /** Keep items the schema accepts. `S` is caller-asserted (a JSON
-   * Schema is not a TypeScript type); the default is honest `unknown`. */
+  /** Keep items the schema accepts. A schema-pen builder carries its
+   * own shape (`Infer<>`); for a hand-written document `S` is
+   * caller-asserted (a JSON Schema is not a TypeScript type) and the
+   * default is honest `unknown`. */
+  ofType<S>(schema: SchemaBuilder<S, any, any>): Sequence<S, P>;
   ofType<S = unknown>(schema: object): Sequence<S, P>;
+  cast<S>(schema: SchemaBuilder<S, any, any>): Sequence<S, P>;
   cast<S = unknown>(schema: object): Sequence<S, P>;
 
   /** Recorded unsupported: throws `JL0006`. */
@@ -594,7 +612,9 @@ export class AsyncSequence<T = unknown, P = {}> {
   /** Only a CONSTANT array can join an async stream (§10). */
   concat(other: readonly T[]): AsyncSequence<T, P>;
   defaultIfEmpty(fallback?: T | null): AsyncSequence<T | null, P>;
+  ofType<S>(schema: SchemaBuilder<S, any, any>): AsyncSequence<S, P>;
   ofType<S = unknown>(schema: object): AsyncSequence<S, P>;
+  cast<S>(schema: SchemaBuilder<S, any, any>): AsyncSequence<S, P>;
   cast<S = unknown>(schema: object): AsyncSequence<S, P>;
   zip(...args: never[]): never;
   params<Q extends Record<string, unknown>>(bindings: Q): AsyncSequence<T, P & Q>;

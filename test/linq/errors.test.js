@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { from, fromDocument, createPushQueue, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
+import * as s from '@jarenjs/linq/schema';
 import { JsonQueryCompileError } from '@jarenjs/json/query';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { JarenValidator } from '@jarenjs/validate';
@@ -74,6 +75,68 @@ describe('every JL code fires', () => {
     assert.throws(() => from([]).zip(), (e) => e.code === 'JL0006' && /zip/.test(e.message));
   });
 
+  it('JL0101 — a pen received a value it cannot spell', () => {
+    // not JSON: the constant rule of LINQ-FORMAT §5, applied to defaults and literals
+    assert.throws(() => s.literal(new Date(0)), (e) => e instanceof LinqBuildError && e.code === 'JL0101' && /Date instance/.test(e.message));
+    assert.throws(() => s.string().default(() => 'x'), (e) => e.code === 'JL0101' && /function/.test(e.message));
+    assert.throws(() => s.enumOf([1, NaN]), (e) => e.code === 'JL0101');
+    assert.throws(() => s.number().default(-0), (e) => e.code === 'JL0101');
+    assert.throws(() => s.string().example(Symbol('s')), (e) => e.code === 'JL0101');
+    assert.throws(() => s.string().meta({ 'x-big': 1n }), (e) => e.code === 'JL0101');
+    const cycle = {}; cycle.self = cycle;
+    assert.throws(() => s.from(cycle), (e) => e.code === 'JL0101');
+    // not what the keyword takes
+    assert.throws(() => s.string().min('x'), (e) => e.code === 'JL0101' && /non-negative integer/.test(e.message));
+    assert.throws(() => s.number().multipleOf(0), (e) => e.code === 'JL0101');
+    assert.throws(() => s.object({ a: 'string' }), (e) => e.code === 'JL0101' && /from\(\)/.test(e.message));
+    assert.throws(() => s.named('bad name', s.string()), (e) => e.code === 'JL0101');
+    assert.throws(() => s.lazy('nope'), (e) => e.code === 'JL0101');
+    assert.throws(() => s.enumOf([]), (e) => e.code === 'JL0101');
+  });
+
+  it('JL0102 — a construct the format cannot carry, with the fix in the message', () => {
+    // a coercion the normalizer would never run
+    assert.throws(() => s.string().coerce().nullable(), (e) => e.code === 'JL0102' && /nullable/.test(e.message));
+    assert.throws(() => s.string().nullable().coerce(), (e) => e.code === 'JL0102');
+    assert.throws(() => s.object({}).coerce(), (e) => e.code === 'JL0102' && /scalar/.test(e.message));
+    assert.throws(() => s.number().trim(), (e) => e.code === 'JL0102' && /string/.test(e.message));
+    // a default in a branch the normalizer never descends
+    assert.throws(() => s.union([s.string().default('x'), s.number()]).schema,
+      (e) => e.code === 'JL0102' && /never runs/.test(e.message) && e.docPath === '/anyOf/0');
+    assert.throws(() => s.array(s.string()).contains(s.string().trim()).schema, (e) => e.code === 'JL0102');
+    assert.throws(() => s.when(s.string()).then(s.string().coerce()).schema, (e) => e.code === 'JL0102');
+    // closed objects under allOf accept neither's members
+    assert.throws(() => s.intersection([s.object({ a: s.string() }), s.object({ b: s.string() })]).schema,
+      (e) => e.code === 'JL0102' && /extend\(\)/.test(e.message));
+    // false carries nothing
+    assert.throws(() => s.never().describe('x'), (e) => e.code === 'JL0102');
+    assert.throws(() => s.never().check(() => true), (e) => e.code === 'JL0102');
+    // a draft the pen does not write; a discriminated union without its tag
+    assert.throws(() => s.document(s.string(), { draft: 'draft-07' }), (e) => e.code === 'JL0102');
+    assert.throws(() => s.discriminated('k', [s.string()]), (e) => e.code === 'JL0102');
+  });
+
+  it('JL0103 — definitions: a collision, a dangling ref, an unnamed recursion', () => {
+    const A = s.named('T', s.string());
+    const B = s.named('T', s.number());
+    assert.throws(() => s.object({ a: A, b: B }).schema, (e) => e.code === 'JL0103' && /'T'/.test(e.message));
+    assert.throws(() => s.object({ a: s.ref('Missing') }).schema, (e) => e.code === 'JL0103' && /Missing/.test(e.message));
+    assert.throws(() => s.array(s.lazy(() => s.string())).schema, (e) => e.code === 'JL0103' && /NAMED/.test(e.message));
+    assert.throws(() => s.array(s.lazy(() => 42)).schema, (e) => e.code === 'JL0103');
+    // the same builder under one name, reached twice, is one definition
+    assert.deepStrictEqual(Object.keys(s.object({ a: A, b: A }).schema.$defs), ['T']);
+  });
+
+  it('JL0104 — a pen-owned keyword through meta(), or a check() external that is not root/path', () => {
+    assert.throws(() => s.object({}).meta({ type: 'x' }), (e) => e.code === 'JL0104' && /'type'/.test(e.message));
+    assert.throws(() => s.string().meta({ $ref: '#' }), (e) => e.code === 'JL0104');
+    assert.throws(() => s.string().meta({ 'x-coerce': true }), (e) => e.code === 'JL0104');
+    assert.throws(() => s.object({}).check((o, x) => x.foo.eq(1)), (e) => e.code === 'JL0104' && /'foo'/.test(e.message));
+    // an annotation the pen does not own passes through
+    assert.deepStrictEqual(s.string().meta({ deprecated: true, $comment: 'c' }).schema,
+      { type: 'string', deprecated: true, $comment: 'c' });
+  });
+
   it('JL2001/JL2002/JL2003 — the terminal codes by name', () => {
     assert.throws(() => from([]).first(), (e) => e instanceof LinqRuntimeError && e.code === 'JL2001');
     assert.throws(() => from([1, 2]).single(), (e) => e.code === 'JL2002');
@@ -96,6 +159,7 @@ describe('every JL code fires', () => {
     assert.strictEqual(Object.isFrozen(LINQ_CODES), true);
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006',
+      'JL0101', 'JL0102', 'JL0103', 'JL0104',
       'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006',
     ]);
   });

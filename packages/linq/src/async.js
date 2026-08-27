@@ -37,6 +37,7 @@ import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
 import { captureExpression, toExpression, requireJsonBinding } from './expression.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
+import { schemaOf } from './schema-of.js';
 import { semanticKey } from '@jarenjs/core/object';
 
 /** Barrier stage kinds and the reason each materialises. There is no
@@ -193,8 +194,8 @@ export class AsyncSequence {
     return this.#with({ kind: 'defaultIfEmpty', fallback: expr, value: expr?.$const ?? fallback });
   }
 
-  ofType(schema) { return this.#with({ kind: 'ofType', schema }); }
-  cast(schema) { return this.#with({ kind: 'cast', schema }); }
+  ofType(schema) { return this.#with({ kind: 'ofType', schema: schemaOf(schema) }); }
+  cast(schema) { return this.#with({ kind: 'cast', schema: schemaOf(schema) }); }
 
   zip() {
     throw new LinqBuildError('JL0006',

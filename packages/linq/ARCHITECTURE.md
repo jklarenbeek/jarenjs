@@ -63,6 +63,34 @@ is required, the modes reuse the `createTaskEffect` vocabulary
 (`parallel`/`concat`/`switch`/`exhaust`), and failure is fail-closed —
 the first rejection aborts every in-flight signal and the source.
 
+## The pens (`src/schema/`)
+
+A pen is a by-code front-end to one of the suite's document formats,
+exported under its own subpath (`@jarenjs/linq/schema` first; `.` stays
+the chain). The rule set is one paragraph: the document is the
+deliverable (plain, deep-frozen JSON, memoized under `.schema`,
+`toJSON()` returns it); the pen imports no engine and re-implements no
+compile check — it refuses only what it cannot spell, with a `JL01xx`
+code; types are phantoms (`Infer<>`/`Input<>`) proven by a three-way
+agreement against emit's declarations and the validator's verdicts over
+one corpus; objects are closed by default. The schema pen is four
+modules: `builders.js` (one small immutable class per kind, state
+replaced through `with()` — which is also how a later pen extends it, by
+subclassing, never by patching a prototype), `emit.js` (assembly: `$defs`
+hoisting in discovery order, `$ref` resolution, the two refusals a
+document could not carry faithfully — a name spelled twice, a default in
+a branch the normalizer never descends), `check.js` (the ONLY pen module
+that imports the recording proxy: a `check()` rule is captured with the
+value at `$` and exactly the two externals the validator binds) and
+`brand.js` (a registry symbol every builder answers `true` under). The
+chain recognises a builder handed to `ofType`/`cast` by that symbol —
+looked up by key in `src/schema-of.js`, not imported from the pen — so a
+chain-only bundle carries nothing from the pen's directory, and a
+pen-only bundle carries no chain module and no engine (the tree-shaking
+gate proves both). The one shared machine, the capture in
+`expression.js`, rides in the pen's bundle whether or not `check()` is
+called: a class method cannot be shaken.
+
 ## The provider seam (`src/provider.js`)
 
 A provider is any object with `execute(queryDocument, { externals })`.

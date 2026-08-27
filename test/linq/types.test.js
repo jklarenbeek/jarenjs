@@ -33,6 +33,9 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { from } from '@jarenjs/linq';
+import * as s from '@jarenjs/linq/schema';
+import { JarenValidator } from '@jarenjs/validate';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const USERS = [
   { id: 1, name: 'ada', age: 36, active: true, created: '2020-05-01T00:00:00Z', tags: ['dev'] },
@@ -95,5 +98,15 @@ describe('runtime twins of the type-level claims', () => {
     // widened — the honest-unknown default of the typed surface
     assert.throws(() => from([1, 'a']).ofType({ type: 'number' }).toArray(),
       (e) => e.code === 'JL0003');
+  });
+
+  it('ofType over a schema-pen builder narrows to Infer<> of the builder (the runtime twin)', () => {
+    // the type gate pins `from(rows).ofType(Strict)` as Sequence<{ kind: string }>;
+    // here the same builder's document does the filtering
+    const Strict = s.object({ kind: s.string() });
+    const compileTypeTest = createTypeTestCompiler(new JarenValidator());
+    const rows = [{ kind: 'a' }, { kind: 1 }, { kind: 'b', extra: true }];
+    assert.deepStrictEqual(from(rows, { compileTypeTest }).ofType(Strict).toArray(), [{ kind: 'a' }]);
+    assert.deepStrictEqual(from(rows, { compileTypeTest }).ofType(Strict.schema).toArray(), [{ kind: 'a' }]);
   });
 });

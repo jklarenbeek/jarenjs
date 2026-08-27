@@ -73,12 +73,49 @@ played by the provider seam below.
   `mapAsync` splits a provider chain into a pushed prefix and a local
   residual, and `explain()` shows the split.
 
+## By code: the schema pen
+
+The chain is the first pen; `@jarenjs/linq/schema` is the second. It
+builds standard JSON Schema 2020-12 documents in code — every keyword
+`@jarenjs/validate` supports, cross-field rules captured into `$query`
+through the same recording proxy the chain uses, `$defs`/`$ref`
+recursion, the normalizer's per-field annotations — and carries
+`Infer<>`/`Input<>` types that a gate proves equal to `@jarenjs/emit`'s
+generated declarations and consistent with the validator's verdicts over
+one corpus.
+
+```js
+import * as s from '@jarenjs/linq/schema';
+import type { Infer } from '@jarenjs/linq/schema';
+
+const User = s.object({
+  id: s.string().uuid(),
+  name: s.string().min(1),
+  created: s.datetime(),
+  age: s.integer().optional(),
+}).check((u) => u.created.year().ge(1970));
+
+User.schema;              // { type: 'object', properties: {…}, required: [...], additionalProperties: false, $query: {…} }
+type User = Infer<typeof User>;   // { id: string; name: string; created: DateTime; age?: number }
+from(rows).ofType(User);  // Sequence<User> — the chain takes a builder where it took a document
+```
+
+Objects are closed by default (`.open()` admits more); a document is a
+frozen value (`JSON.stringify(builder)` is the document); a pen imports
+no engine, so a schema-only bundle carries no chain and no validator.
+What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0104`)
+naming the fix — there is no `.transform()` and no function `refine`;
+cross-field rules are `check()`, transforms are application code. The
+normative mapping table, the rules every pen keeps and the worked
+examples a test executes are [docs/PENS-FORMAT.md](docs/PENS-FORMAT.md).
+
 ## What this is not
 
 Not an ORM — entities, storage and migrations live in `@jarenjs/db`.
 Not expression trees over arbitrary methods — the vocabulary is the
 query engine's, and an unknown METHOD fails loudly at build time with
-a coded error (`JL0001`–`JL0006`) rather than guessing. JavaScript's own
+a coded error (`JL0001`–`JL0006`; the pens' refusals are `JL0101`–`JL0104`)
+rather than guessing. JavaScript's own
 operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`
 and `===` evaluate against the proxy object and yield a wrong document
 silently (use `.and()`/`.or()`/`.not()`), and `u.age > 21` or `u.age + 1`

@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "allowJs": true,
     "lib": [
       "ESNext",
       "DOM"
@@ -12,6 +13,7 @@
     "target": "ESNext"
   },
   "files": [
-    "types.ts"
+    "types.ts",
+    "linq-schema.ts"
   ]
 }

@@ -5,10 +5,13 @@ schemas and wants JSON Schema underneath them.
 
 Read the trade first: this is not a drop-in replacement, and it should not
 be. Zod bundles four things — validation, normalization, TypeScript
-inference and an error API. Jaren gives you the first two and a typed,
-narrowing surface for the third; it does not infer types from schema
-literals, and it never runs arbitrary transforms. What you get in exchange
-is that your contracts stop being a library dialect.
+inference and an error API. Jaren gives you the first two, a typed,
+narrowing surface for the third, and — through the schema pen,
+`@jarenjs/linq/schema` — inference for schemas built in code; it does not
+infer types from schema literals, and it never runs arbitrary transforms.
+What you get in exchange is that your contracts stop being a library
+dialect: what the pen writes is standard JSON Schema, and the pen is one
+`import` you can drop.
 
 ## Should you?
 
@@ -21,43 +24,48 @@ characterize instead of two. There are no third-party runtime dependencies.
 And on the operation a service actually performs — normalize, validate, map
 errors — Jaren is measurably faster than every Zod flavor (numbers below).
 
-**Reasons not to.** If your value is `z.infer` giving you types for free from
-schema literals, Jaren does not replace that; you either assert the type or
-generate it. If your contracts lean on `.transform()` chains, those stay
-application code by design. And if you are not otherwise using JSON Schema,
-the portability argument is worth little to you.
+**Reasons not to.** If your value is `z.infer` over schema *literals*, Jaren
+does not replace that; a literal is asserted or generated, and only a schema
+built through the pen carries `Infer<>`. If your contracts lean on
+`.transform()` chains, those stay application code by design. And if you are
+not otherwise using JSON Schema, the portability argument is worth little
+to you.
 
 ## The idiom map
 
-| Zod | JSON Schema |
-| --- | --- |
-| `z.string()` | `{ "type": "string" }` |
-| `z.number()` / `z.number().int()` | `{ "type": "number" }` / `{ "type": "integer" }` |
-| `z.boolean()`, `z.null()` | `{ "type": "boolean" }`, `{ "type": "null" }` |
-| `z.literal('a')` | `{ "const": "a" }` |
-| `z.enum(['a','b'])` | `{ "enum": ["a","b"] }` |
-| `z.array(T)` | `{ "type": "array", "items": T }` |
-| `z.tuple([A, B])` | `{ "type": "array", "prefixItems": [A, B] }` |
-| `z.object({...})` | `{ "type": "object", "properties": {...}, "required": [...] }` |
-| `.optional()` | omit the key from `required` |
-| `.nullable()` | `{ "type": ["string","null"] }` |
-| `z.record(T)` | `{ "type": "object", "additionalProperties": T }` |
-| `z.union([A, B])` | `{ "anyOf": [A, B] }` |
-| `z.discriminatedUnion('k', [...])` | `{ "oneOf": [...] }`, or `if`/`then` on the discriminator |
-| `z.intersection(A, B)` | `{ "allOf": [A, B] }` |
-| `.min(n)` / `.max(n)` on strings | `minLength` / `maxLength` |
-| `.min(n)` / `.max(n)` on numbers | `minimum` / `maximum` |
-| `.regex(re)` | `{ "pattern": "..." }` |
-| `z.uuid()`, `z.email()`, `z.url()` | `{ "type": "string", "format": "uuid" \| "email" \| "uri" }` |
-| `z.iso.datetime()` | `{ "type": "string", "format": "date-time" }` |
-| `.default(v)` | `{ "default": v }` + the normalizer's `useDefaults` |
-| `.strict()` (and Zod's default stripping) | `additionalProperties: false` + `removeAdditional` |
-| `.passthrough()` | leave `additionalProperties` open, `removeAdditional: false` |
-| `z.coerce.number()` | `{ "type": "number" }` + `coerceTypes` |
-| `.trim()` | the normalizer's `trimStrings`, as a **predicate** — see below |
-| `.refine()` / `.superRefine()` | conditionals (`if`/`then`), or the [`$query` keyword](../packages/validate/README.md#query--cross-field-assertions) for cross-field rules |
-| `.transform()` | **stays application code** — see below |
-| `z.lazy()` + recursion | `$ref: '#'` or `$ref: '#/$defs/Name'` |
+The third column is the schema pen (`import * as s from
+'@jarenjs/linq/schema'`), which writes the second column for you and
+carries the type; every pen spelling here is one the pen's corpus emits.
+
+| Zod | JSON Schema | The pen |
+| --- | --- | --- |
+| `z.string()` | `{ "type": "string" }` | `s.string()` |
+| `z.number()` / `z.number().int()` | `{ "type": "number" }` / `{ "type": "integer" }` | `s.number()` / `s.number().int()`, `s.integer()` |
+| `z.boolean()`, `z.null()` | `{ "type": "boolean" }`, `{ "type": "null" }` | `s.boolean()`, `s.nil()` |
+| `z.literal('a')` | `{ "const": "a" }` | `s.literal('a')` |
+| `z.enum(['a','b'])` | `{ "enum": ["a","b"] }` | `s.enumOf(['a', 'b'])` |
+| `z.array(T)` | `{ "type": "array", "items": T }` | `s.array(T)` |
+| `z.tuple([A, B])` | `{ "type": "array", "prefixItems": [A, B], "items": false, "minItems": 2 }` | `s.tuple([A, B]).rest(s.never())` (without `.rest()` the tuple stays open, as JSON Schema reads it) |
+| `z.object({...})` | `{ "type": "object", "properties": {...}, "required": [...], "additionalProperties": false }` | `s.object({...})` — closed by default, like `.strict()` |
+| `.optional()` | omit the key from `required` | `.optional()` |
+| `.nullable()` | `{ "type": ["string","null"] }` | `.nullable()` |
+| `z.record(T)` | `{ "type": "object", "additionalProperties": T }` | `s.record(T)` |
+| `z.union([A, B])` | `{ "anyOf": [A, B] }` | `s.union([A, B])` |
+| `z.discriminatedUnion('k', [...])` | `{ "oneOf": [...] }`, or `if`/`then` on the discriminator | `s.discriminated('k', [...])` |
+| `z.intersection(A, B)` | `{ "allOf": [A, B] }` | `s.intersection([A.open(), B.open()])` — closed objects do not intersect; `A.extend(...)` merges them |
+| `.min(n)` / `.max(n)` on strings | `minLength` / `maxLength` | `.min(n)` / `.max(n)` |
+| `.min(n)` / `.max(n)` on numbers | `minimum` / `maximum` | `.min(n)` / `.max(n)` (`.gt()`/`.lt()` for the exclusive pair) |
+| `.regex(re)` | `{ "pattern": "..." }` | `.pattern(re)` |
+| `z.uuid()`, `z.email()`, `z.url()` | `{ "type": "string", "format": "uuid" \| "email" \| "uri" }` | `s.string().uuid()`, `.email()`, `.uri()` |
+| `z.iso.datetime()` | `{ "type": "string", "format": "date-time" }` | `s.datetime()` — typed as the linq `DateTime` brand |
+| `.default(v)` | `{ "default": v }` + the normalizer's `useDefaults` | `.default(v)` — present in `Infer<>`, optional in `Input<>` |
+| `.strict()` (and Zod's default stripping) | `additionalProperties: false` + `removeAdditional` | the default; `.open()` to lift it |
+| `.passthrough()` | leave `additionalProperties` open, `removeAdditional: false` | `.open()` |
+| `z.coerce.number()` | `{ "type": "number", "x-coerce": true }` + `coerceTypes` as a predicate | `s.number().coerce()` — `Input<>` admits the string form |
+| `.trim()` | the normalizer's `trimStrings`, as a **predicate** — see below | `s.string().trim()` (`x-trim: true`) |
+| `.refine()` / `.superRefine()` | conditionals (`if`/`then`), or the [`$query` keyword](../packages/validate/README.md#query--cross-field-assertions) for cross-field rules | `.check((o) => o.total.eq(o.lines.all().amount.sum()))` — captured into `$query`; a function `refine` is refused (`JL0102`) |
+| `.transform()` | **stays application code** — see below | not a method (`JL0102` names the reason) |
+| `z.lazy()` + recursion | `$ref: '#'` or `$ref: '#/$defs/Name'` | `s.named('Node', …)` + `s.lazy(() => Node)` |
 
 ### Three that do not map cleanly
 
@@ -71,16 +79,29 @@ fields — "end must be after start", "the line items must sum to the total" —
 is what [`$query`](../packages/validate/README.md#query--cross-field-assertions)
 is for, and unlike a refinement it stays inside the schema and stays data.
 
-**`z.infer` has no equivalent.** Jaren does not derive TypeScript types from
-schema literals. Either assert the type at the call site, which is checked:
+**`z.infer` has no equivalent for schema *literals*.** Jaren does not derive
+TypeScript types from a JSON literal. A schema built through the pen carries
+`Infer<>` — proven against `@jarenjs/emit`'s generated declarations and the
+validator's verdicts by one corpus, so the type is never wider or narrower
+than the document it wrote:
+
+```typescript
+import * as s from '@jarenjs/linq/schema';
+import type { Infer } from '@jarenjs/linq/schema';
+
+const User = s.object({ id: s.string().uuid(), name: s.string().min(1) });
+type User = Infer<typeof User>;   // { id: string; name: string }
+```
+
+For a literal, either assert the type at the call site, which is checked:
 
 ```typescript
 const isUser = validator.compile<User>(userSchema);
 if (isUser(input)) input.name;   // input is User here
 ```
 
-...or generate types from your canonical schemas with a tool built for it
-(`json-schema-to-ts` and friends), which composes with the above.
+...or generate types from your canonical schemas with `@jarenjs/emit`
+(`emitTypeScript(schema)`), which composes with the above.
 
 ## The error-shape map
 

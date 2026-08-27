@@ -88,3 +88,69 @@ if (packLeak.length > 0)
   throw new Error(`compileDateLocale pulled locale packs into the bundle: ${packLeak.map(([file]) => file).join(', ')}`);
 
 console.log('Tree-shaking smoke test passed (compileDateLocale carries no Intl provider and no locale pack).');
+
+// The schema pen (`@jarenjs/linq/schema`) is a subpath a consumer may take
+// WITHOUT the chain: a schema-only bundle must carry none of the chain's
+// modules and no engine (the pen imports no `@jarenjs/json`, `validate`,
+// `emit` or `db`). The one shared runtime machine — the recording proxy in
+// `expression.js`, which `check()` captures `$query` through — rides along
+// because a class method cannot be shaken, and its size is part of the
+// measured ceiling. Conversely a chain-only bundle carries nothing from the
+// pen's directory: the chain recognises a builder by a registry symbol, not
+// by an import.
+const schemaResult = await build({
+  stdin: {
+    contents: "import * as s from '@jarenjs/linq/schema'; export const U = s.object({ id: s.string() }).schema;",
+    resolveDir: process.cwd(),
+    sourcefile: 'schema-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const schemaBytes = schemaResult.outputFiles[0].contents.length;
+const schemaInputs = Object.values(schemaResult.metafile.outputs)[0].inputs;
+const chainLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (chainLeak.length > 0)
+  throw new Error(`The schema pen pulled chain modules into the bundle: ${chainLeak.map(([file]) => file).join(', ')}`);
+const engineLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
+if (engineLeak.length > 0)
+  throw new Error(`The schema pen pulled an engine into the bundle: ${engineLeak.map(([file]) => file).join(', ')}`);
+if (schemaBytes > 27000)
+  throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
+
+console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
+
+const chainResult = await build({
+  stdin: {
+    contents: "import { from } from '@jarenjs/linq'; export const rows = from([1]).toArray();",
+    resolveDir: process.cwd(),
+    sourcefile: 'chain-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const chainBytes = chainResult.outputFiles[0].contents.length;
+const chainInputs = Object.values(chainResult.metafile.outputs)[0].inputs;
+const penLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/schema/') && info.bytesInOutput > 0);
+if (penLeak.length > 0)
+  throw new Error(`The chain pulled the schema pen into the bundle: ${penLeak.map(([file]) => file).join(', ')}`);
+if (chainBytes > 180000)
+  throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
+
+console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module).`);
