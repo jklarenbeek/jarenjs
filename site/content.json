@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-26T22:04:10+02:00",
-  "commit": "15e048f0cba387991c17758f689e8fd3b306dea8",
+  "generated": "2026-08-27T21:24:45+02:00",
+  "commit": "e67bd7680fe237b6b3f2210b1d8bc4aea2f7fceb",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -7379,7 +7379,7 @@
             "type": "code",
             "lang": "js",
             "meta": null,
-            "value": "import { from } from '@jarenjs/linq';\n\nconst adults = from(users)\n  .where((u) => u.age.gt(21))\n  .orderBy((u) => u.name)\n  .select((u) => ({ id: u.id, name: u.name }));\n\nadults.toArray();    // deferred until a terminal\nadults.toDocument(); // { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 21] }, … }\n"
+            "value": "import { from } from '@jarenjs/linq';\n\nconst adults = from(users)\n  .where((u) => u.age.gt(21))\n  .orderBy((u) => u.name)\n  .select((u) => ({ id: u.id, name: u.name }));\n\nadults.toArray();    // deferred until a terminal\nadults.toDocument(); // { $for: { it: ['$[*]'] }, $where: { $gt: ['$it.age', 21] }, … }\n"
           },
           {
             "type": "paragraph",
@@ -7479,7 +7479,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/linq/site.md",
-          "hash": "1vgi3em",
+          "hash": "q6v0oq",
           "frontmatterLang": "yaml"
         }
       },
