@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-28T10:10:45+02:00",
-  "commit": "9ecff14980c15c2e013ce3d053112ee8146b6d9d",
+  "generated": "2026-08-28T13:06:29+02:00",
+  "commit": "b157926cf1571ecb8d2d5a25faf37f65220ab72e",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -7299,7 +7299,7 @@
       "name": "@jarenjs/linq",
       "card": {
         "title": "LINQ — chains to query documents",
-        "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
+        "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
         "perf": "one operator set, byte-identical documents through the sync and async drivers"
       },
       "engines": [
@@ -7308,7 +7308,7 @@
           "suite": null,
           "card": {
             "title": "LINQ",
-            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
+            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           }
         }
@@ -7319,7 +7319,7 @@
           "package": "@jarenjs/linq",
           "card": {
             "title": "LINQ — chains to query documents",
-            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
+            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           },
           "engines": [
@@ -7416,14 +7416,25 @@
               },
               {
                 "type": "text",
-                "value": " implements that contract with no import edge in either"
+                "value": " implements that contract (the chain imports no store), its"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "direction, and its entity sets are providers a chain binds through by root."
+                "value": "entity sets are providers a chain binds through by root, and "
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/linq/db"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "fronts the store with a typed client over one declared, optional-peer edge."
               }
             ]
           },
@@ -7531,7 +7542,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/linq/site.md",
-          "hash": "92glrf",
+          "hash": "1eofqcq",
           "frontmatterLang": "yaml"
         }
       },
