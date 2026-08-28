@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-28T13:06:29+02:00",
-  "commit": "b157926cf1571ecb8d2d5a25faf37f65220ab72e",
+  "generated": "2026-08-28T20:09:17+02:00",
+  "commit": "f33770b634f16210f1f6d3496fba861f28e2adf1",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -7298,8 +7298,8 @@
     {
       "name": "@jarenjs/linq",
       "card": {
-        "title": "LINQ — chains to query documents",
-        "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
+        "title": "LINQ — the suite, by code",
+        "blurb": "One package writes every document the suite runs: C#-familiar chains whose output is a plain query document, and eight pens that write the others the same way — a JSON Schema, a database model, a JSLT stylesheet, a migration with its transform typed old row to new row, a contract, a state machine and a dataflow, an application, a form. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
         "perf": "one operator set, byte-identical documents through the sync and async drivers"
       },
       "engines": [
@@ -7308,7 +7308,7 @@
           "suite": null,
           "card": {
             "title": "LINQ",
-            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
+            "blurb": "One package writes every document the suite runs: C#-familiar chains whose output is a plain query document, and eight pens that write the others the same way — a JSON Schema, a database model, a JSLT stylesheet, a migration with its transform typed old row to new row, a contract, a state machine and a dataflow, an application, a form. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           }
         }
@@ -7318,8 +7318,8 @@
         "frontmatter": {
           "package": "@jarenjs/linq",
           "card": {
-            "title": "LINQ — chains to query documents",
-            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
+            "title": "LINQ — the suite, by code",
+            "blurb": "One package writes every document the suite runs: C#-familiar chains whose output is a plain query document, and eight pens that write the others the same way — a JSON Schema, a database model, a JSLT stylesheet, a migration with its transform typed old row to new row, a contract, a state machine and a dataflow, an application, a form. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam — or through the typed client that fronts the store under `./db`, over one declared edge.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           },
           "engines": [
@@ -7376,7 +7376,7 @@
               },
               {
                 "type": "text",
-                "value": "stylesheet) and "
+                "value": "stylesheet), "
               },
               {
                 "type": "inlineCode",
@@ -7384,14 +7384,92 @@
               },
               {
                 "type": "text",
-                "value": " (a migration whose data transform is typed old"
+                "value": " (a migration whose data transform is typed old row"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "row to new row). Capture is a recording proxy (never source-text inspection),"
+                "value": "to new row), "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/contract"
+              },
+              {
+                "type": "text",
+                "value": " (an operation contract that types its own client and"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "handlers), "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/flow"
+              },
+              {
+                "type": "text",
+                "value": " (state machines and dataflow graphs), "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/app"
+              },
+              {
+                "type": "text",
+                "value": " (an"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "application with its actions, patches and subscriptions) and "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/forms"
+              },
+              {
+                "type": "text",
+                "value": " (the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "x-form"
+              },
+              {
+                "type": "text",
+                "value": " rules a schema carries). Every pen emits exactly the published"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "document its engine already takes, and carries types a gate proves equal to"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "emit's generated declarations. Capture is a recording proxy (never"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "source-text inspection),"
               },
               {
                 "type": "softBreak"
@@ -7542,7 +7620,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/linq/site.md",
-          "hash": "1eofqcq",
+          "hash": "19nm73q",
           "frontmatterLang": "yaml"
         }
       },
