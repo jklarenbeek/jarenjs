@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-27T21:24:45+02:00",
-  "commit": "e67bd7680fe237b6b3f2210b1d8bc4aea2f7fceb",
+  "generated": "2026-08-28T10:10:45+02:00",
+  "commit": "9ecff14980c15c2e013ce3d053112ee8146b6d9d",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -410,7 +410,7 @@
       "name": "@jarenjs/linq",
       "card": {
         "title": "LINQ — chains to query documents",
-        "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+        "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
         "perf": "one operator set, byte-identical documents through the sync and async drivers"
       },
       "engines": [
@@ -419,7 +419,7 @@
           "suite": null,
           "card": {
             "title": "LINQ",
-            "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           }
         }

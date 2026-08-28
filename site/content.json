@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-27T21:24:45+02:00",
-  "commit": "e67bd7680fe237b6b3f2210b1d8bc4aea2f7fceb",
+  "generated": "2026-08-28T10:10:45+02:00",
+  "commit": "9ecff14980c15c2e013ce3d053112ee8146b6d9d",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -7299,7 +7299,7 @@
       "name": "@jarenjs/linq",
       "card": {
         "title": "LINQ — chains to query documents",
-        "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+        "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
         "perf": "one operator set, byte-identical documents through the sync and async drivers"
       },
       "engines": [
@@ -7308,7 +7308,7 @@
           "suite": null,
           "card": {
             "title": "LINQ",
-            "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           }
         }
@@ -7319,7 +7319,7 @@
           "package": "@jarenjs/linq",
           "card": {
             "title": "LINQ — chains to query documents",
-            "blurb": "C#-familiar fluent chains whose output is a plain query document: a recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed to SQL through the provider seam.",
+            "blurb": "The suite, by code: C#-familiar chains whose output is a plain query document, and pens that write the suite's other documents the same way — a JSON Schema, a model, a JSLT stylesheet, a migration with its transform typed old row to new row. A recording proxy captures the callback, the emitter folds stages into one FLWOR document, and the same chain runs in memory, over streams (one bounded mapAsync boundary), or pushed whole to a store's entity sets through the provider seam.",
             "perf": "one operator set, byte-identical documents through the sync and async drivers"
           },
           "engines": [
@@ -7335,28 +7335,80 @@
             "children": [
               {
                 "type": "text",
-                "value": "A C#-familiar chain whose product is a plain JSON query document. Capture is a"
+                "value": "A C#-familiar chain whose product is a plain JSON query document — and, under"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "recording proxy (never source-text inspection), execution is deferred, and the"
+                "value": "its subpaths, the pens that write the suite's other documents the same way:"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/linq/schema"
+              },
+              {
+                "type": "text",
+                "value": " (JSON Schema), "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/model"
+              },
+              {
+                "type": "text",
+                "value": " (a store model), "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/jslt"
+              },
+              {
+                "type": "text",
+                "value": " (a"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "emitted document runs in memory, over async streams, or against any provider"
+                "value": "stylesheet) and "
+              },
+              {
+                "type": "inlineCode",
+                "value": "/migration"
+              },
+              {
+                "type": "text",
+                "value": " (a migration whose data transform is typed old"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "exposing execute(document, options) — "
+                "value": "row to new row). Capture is a recording proxy (never source-text inspection),"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "execution is deferred, and the emitted document runs in memory, over async"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "streams, or against any provider exposing execute(document, options) —"
+              },
+              {
+                "type": "softBreak"
               },
               {
                 "type": "inlineCode",
@@ -7364,14 +7416,14 @@
               },
               {
                 "type": "text",
-                "value": " implements that contract"
+                "value": " implements that contract with no import edge in either"
               },
               {
                 "type": "softBreak"
               },
               {
                 "type": "text",
-                "value": "with no import edge in either direction."
+                "value": "direction, and its entity sets are providers a chain binds through by root."
               }
             ]
           },
@@ -7479,7 +7531,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/linq/site.md",
-          "hash": "q6v0oq",
+          "hash": "92glrf",
           "frontmatterLang": "yaml"
         }
       },
