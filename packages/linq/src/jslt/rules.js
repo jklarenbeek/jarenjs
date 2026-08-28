@@ -13,10 +13,10 @@
  * body's operators, the schema — is the compiler's.
  */
 
-import { deepFreeze } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
 import { body } from './body.js';
 
 const DISPOSITIONS = ['share', 'fresh', 'error'];
@@ -175,6 +175,7 @@ export function stylesheet(rules, options = undefined) {
           `stylesheet() modes is { name: { unmatched } }, got ${describeValue(options.modes)}`,
           '/modes');
       }
+      requireNameMap(options.modes, 'stylesheet() modes', '/modes');
       const modes = {};
       for (const name of Object.keys(options.modes)) {
         const mode = options.modes[name];
@@ -183,7 +184,8 @@ export function stylesheet(rules, options = undefined) {
             `stylesheet() mode '${name}' is { unmatched } and nothing else (JSLT-FORMAT §2.1)`,
             `/modes/${name}`);
         }
-        modes[name] = { unmatched: readDisposition(mode.unmatched, `modes/${name}/unmatched`) };
+        setObjectMember(modes, name,
+          { unmatched: readDisposition(mode.unmatched, `modes/${name}/unmatched`) });
       }
       out.modes = modes;
     }

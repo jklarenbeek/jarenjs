@@ -24,10 +24,10 @@
  * click; the pen can see the whole document at once and refuses it.
  */
 
-import { deepFreeze } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
 import { ACTION } from './action.js';
 import { SUB } from './sub.js';
@@ -73,7 +73,7 @@ function initialOf(schema, at, needed) {
   for (const [name, member] of Object.entries(schema.properties)) {
     const isRequired = required.includes(name);
     const resolved = initialOf(member, `${at}/${name}`, isRequired);
-    if (resolved.has) { out[name] = resolved.value; any = true; continue; }
+    if (resolved.has) { setObjectMember(out, name, resolved.value); any = true; continue; }
     if (!isRequired) continue;
     throw new LinqBuildError('JL0102',
       `the initial state cannot be derived: '${at}/${name}' is required and declares no `
@@ -204,6 +204,7 @@ export function defineApp(spec) {
         `defineApp() actions is an object of named action() declarations, got ${describeValue(spec.actions)}`,
         '/actions');
     }
+    requireNameMap(spec.actions, 'defineApp() actions', '/actions');
     actions = {};
     for (const [name, declared] of Object.entries(spec.actions)) {
       if (!isPlainObject(declared) || declared[ACTION] !== true) {
@@ -211,7 +212,7 @@ export function defineApp(spec) {
           `defineApp() action '${name}' is action((s, x) => transition(…)), got ${describeValue(declared)}`,
           `/actions/${name}`);
       }
-      actions[name] = declared.document;
+      setObjectMember(actions, name, declared.document);
     }
   }
 

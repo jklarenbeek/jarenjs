@@ -277,7 +277,18 @@ The order that keeps risk low, and the reason for it:
    a uuid/enum command object. Then simple commands in groups, then
    frontend consumers, then cross-field rules, and configuration last,
    because it combines coercion, defaults and environment-dependent rules.
-5. **Remove Zod only when** every public schema goes through the facade and
+5. **Then choose how the surviving schemas are written.** Both routes are
+   supported and they interoperate, because the pen's output *is* a JSON
+   Schema: keep them as JSON literals and generate types with
+   `@jarenjs/emit`, or write them through the schema pen (`import * as s
+   from '@jarenjs/linq/schema'`) and get `Infer<>` with no generate step —
+   the third column of the table above is that spelling for every row. The
+   pen is the closer analogue of what you are leaving (`z.object(...)` →
+   `s.object(...)`, `z.infer` → `Infer`), so a codebase migrating *from*
+   Zod usually wants it; a codebase whose schemas already live in `.json`
+   files usually does not. Mixing is fine — `s.from(jsonSchema)` embeds a
+   hand-written schema verbatim inside a built one.
+6. **Remove Zod only when** every public schema goes through the facade and
    your bundle contains no accidental Zod import.
 
 Reference: [Compatibility settings](../packages/validate/README.md#compatibility-settings),

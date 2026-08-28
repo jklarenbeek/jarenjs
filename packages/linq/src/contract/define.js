@@ -24,7 +24,7 @@
 import { cloneJson, deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { createHoist, emitInto, hoistedDefs } from '../schema/emit.js';
 import { http as httpBinding, isHttpBinding } from './http.js';
@@ -187,6 +187,7 @@ export function defineContract(meta, operations) {
       `defineContract() operations is a plain object of id → operation, got `
       + `${describeValue(operations)}`, '/operations');
   }
+  requireNameMap(operations, 'defineContract() operations', '/operations');
   const ids = Object.keys(operations);
   if (ids.length === 0) {
     throw new LinqBuildError('JL0101',

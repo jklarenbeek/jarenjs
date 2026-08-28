@@ -17,7 +17,7 @@
  */
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
 import { SCHEMA_BUILDER, isSchemaBuilder } from './brand.js';
 import { assemble } from './emit.js';
 import { captureCheck } from './check.js';
@@ -96,6 +96,7 @@ export function requireBuilderMap(value, what) {
     throw new LinqBuildError('JL0101',
       `${what} takes a plain object of builders, got ${describeValue(value)}`);
   }
+  requireNameMap(value, what);
   return Object.keys(value).map((key) => [key, requireBuilder(value[key], `${what}.${key}`)]);
 }
 

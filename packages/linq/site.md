@@ -1,16 +1,18 @@
 ---
 package: "@jarenjs/linq"
 card:
-  title: LINQ — chains to query documents
+  title: LINQ — the suite, by code
   blurb: >-
-    The suite, by code: C#-familiar chains whose output is a plain query
-    document, and pens that write the suite's other documents the same way —
-    a JSON Schema, a model, a JSLT stylesheet, a migration with its transform
-    typed old row to new row. A recording proxy captures the callback, the
-    emitter folds stages into one FLWOR document, and the same chain runs in
-    memory, over streams (one bounded mapAsync boundary), or pushed whole to
-    a store's entity sets through the provider seam — or through the typed
-    client that fronts the store under `./db`, over one declared edge.
+    One package writes every document the suite runs: C#-familiar chains
+    whose output is a plain query document, and eight pens that write the
+    others the same way — a JSON Schema, a database model, a JSLT stylesheet,
+    a migration with its transform typed old row to new row, a contract, a
+    state machine and a dataflow, an application, a form. A recording proxy
+    captures the callback, the emitter folds stages into one FLWOR document,
+    and the same chain runs in memory, over streams (one bounded mapAsync
+    boundary), or pushed whole to a store's entity sets through the provider
+    seam — or through the typed client that fronts the store under `./db`,
+    over one declared edge.
   perf: >-
     one operator set, byte-identical documents through the sync and async
     drivers
@@ -22,8 +24,14 @@ engines:
 A C#-familiar chain whose product is a plain JSON query document — and, under
 its subpaths, the pens that write the suite's other documents the same way:
 `@jarenjs/linq/schema` (JSON Schema), `/model` (a store model), `/jslt` (a
-stylesheet) and `/migration` (a migration whose data transform is typed old
-row to new row). Capture is a recording proxy (never source-text inspection),
+stylesheet), `/migration` (a migration whose data transform is typed old row
+to new row), `/contract` (an operation contract that types its own client and
+handlers), `/flow` (state machines and dataflow graphs), `/app` (an
+application with its actions, patches and subscriptions) and `/forms` (the
+`x-form` rules a schema carries). Every pen emits exactly the published
+document its engine already takes, and carries types a gate proves equal to
+emit's generated declarations. Capture is a recording proxy (never
+source-text inspection),
 execution is deferred, and the emitted document runs in memory, over async
 streams, or against any provider exposing execute(document, options) —
 `@jarenjs/db` implements that contract (the chain imports no store), its

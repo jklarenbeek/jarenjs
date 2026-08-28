@@ -432,7 +432,7 @@ describe('website — the site as one app document', function () {
       'the rail is the census — one button per public workspace, no more, no fewer');
     // the docs sections cover flow and the data pair too
     assert.match(html, /Flow — executable workflows/);
-    assert.match(html, /LINQ — chains to query documents/);
+    assert.match(html, /LINQ — the suite, by code/);
     assert.match(html, /Data — documents in SQLite/);
   });
 

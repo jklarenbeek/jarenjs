@@ -94,23 +94,51 @@ projections) and the `jaren-contract` CLI additionally need `emit`. The
 tree-shaking gate holds this: a bundle that never imports `./project`
 carries no emit code.
 
-Which linq subpath needs what: `.` (the chain) and the pens — `./schema`,
-`./model`, `./jslt`, `./migration`, `./contract` — need only `core` +
-`json` (the contract pen imports no byte of `@jarenjs/contract`); `./db`,
-the store's typed front door, additionally needs `@jarenjs/db`,
-`@jarenjs/validate` and `@jarenjs/formats`, which `@jarenjs/linq`
-declares as OPTIONAL peer dependencies: `npm install @jarenjs/linq` alone
-installs nothing beyond `core` and `json`, and a `./db` consumer installs
-the three itself (`npm install @jarenjs/db @jarenjs/validate
-@jarenjs/formats`; pnpm's isolated layout resolves declared peers the
-same way). The price is published rather than hidden: a minified `import
-{ open } from '@jarenjs/linq/db'` bundle measures
-<!--bundle:linq-db-->478 kB — the store, the validator and the formats
-ride along by construction, beside the chain's own bundle, which the
-same gate prints. The tree-shaking gate holds both halves: the `.` entry
-carries not one byte of the three, and the figure above is compared with
-the measured bundle on every run, so it can go stale only by failing the
-gate.
+Which linq subpath needs what: `.` (the chain) and every pen —
+`./schema`, `./model`, `./jslt`, `./migration`, `./contract`, `./flow`,
+`./app`, `./forms` — need only `core` + `json`, and no pen imports the
+package it writes for (the contract pen carries no byte of
+`@jarenjs/contract`, the app pen none of `@jarenjs/app`, and so on).
+`./db`, the store's typed front door, is the package's ONE runtime edge:
+it additionally needs `@jarenjs/db`, `@jarenjs/validate` and
+`@jarenjs/formats`, which `@jarenjs/linq` declares as OPTIONAL peer
+dependencies. So `npm install @jarenjs/linq` alone installs nothing
+beyond `core` and `json`, and a `./db` consumer installs the three
+itself (`npm install @jarenjs/db @jarenjs/validate @jarenjs/formats`;
+pnpm's isolated layout resolves declared peers the same way).
+
+The prices are published rather than hidden — one minified, tree-shaken
+bundle per subpath (esbuild, `platform: 'neutral'`, `node:*` external),
+each figure below compared with the measured bundle by the tree-shaking
+gate on every run, so a stale number fails the gate rather than
+misleading a reader:
+
+| Subpath | Bundle | What rides along |
+|---|---:|---|
+| `.` | <!--bundle:linq-chain-->173 kB | the query engine — a chain's document has to run somewhere |
+| `./schema` | <!--bundle:linq-schema-->32 kB | the builders and the recording proxy `check()` captures through |
+| `./model` | <!--bundle:linq-model-->38 kB | the schema pen it subclasses |
+| `./jslt` | <!--bundle:linq-jslt-->19 kB | the body capture; of the schema pen, only the builder brand |
+| `./migration` | <!--bundle:linq-migration-->23 kB | the canonicalizer and hash a shape identity needs |
+| `./contract` | <!--bundle:linq-contract-->44 kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./flow` | <!--bundle:linq-flow-->19 kB | the capture; of the schema pen, only the brand |
+| `./app` | <!--bundle:linq-app-->46 kB | the schema pen and the JSLT pen (state, and views) |
+| `./forms` | <!--bundle:linq-forms-->36 kB | the schema pen it subclasses |
+| `./db` | <!--bundle:linq-db-->478 kB | the store, the validator and the formats, by construction |
+
+Read the last row as the honest one: the front door costs what the store
+costs, because it *is* the store. The tree-shaking gate holds both
+halves of the edge rule — the `.` entry carries not one byte of the
+three peers, and no pen carries another pen's modules or an engine.
+
+The remaining packages are independent of the validation set above in
+the only sense that matters when you are picking packages: none of them
+is *needed* to validate. Independent does not mean closure-free — every
+one still brings its own arrows, and several of those point back into
+the set (the store and the form model both sit on the validating
+compiler; the chain sits on the addressing package). The graph in
+[ARCHITECTURE.md](ARCHITECTURE.md#monorepo-layout) is the authority on
+which.
 
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
 `play`, `josl`, `ai`, `flow`, `linq` and `db`

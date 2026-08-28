@@ -23,6 +23,7 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
+import { setObjectMember } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
@@ -81,7 +82,7 @@ export function shapeHash(model) {
 function withoutRenameHints(model) {
   if (model === null || typeof model !== 'object') return model;
   const out = {};
-  for (const key of Object.keys(model)) out[key] = model[key];
+  for (const key of Object.keys(model)) setObjectMember(out, key, model[key]);
   for (const member of ['collections', 'entities']) {
     const declared = model[member];
     if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) continue;
@@ -92,10 +93,10 @@ function withoutRenameHints(model) {
         && Object.hasOwn(spec, 'x-rename')) {
         const copy = { ...spec };
         delete copy['x-rename'];
-        stripped[name] = copy;
+        setObjectMember(stripped, name, copy);
       }
       else {
-        stripped[name] = spec;
+        setObjectMember(stripped, name, spec);
       }
     }
     out[member] = stripped;

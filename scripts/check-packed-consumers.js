@@ -273,6 +273,7 @@ import { defineContract, read, http } from '@jarenjs/linq/contract';
 import { defineDag, defineFsm, edge, effect, input, on, output, query, state } from '@jarenjs/linq/flow';
 import { action, append, bind, defineApp, transition } from '@jarenjs/linq/app';
 import { rule } from '@jarenjs/linq/jslt';
+import { defineMigration } from '@jarenjs/linq/migration';
 import * as fm from '@jarenjs/linq/forms';
 import { assertOnSubmit } from '@jarenjs/linq/forms';
 import { open } from '@jarenjs/linq/db';
@@ -283,6 +284,9 @@ const api = defineContract({ id: 'shop' }, {
 const contract: any = api.document;
 void (contract.$contract === '0.1' && Object.keys(contract.operations)[0] === 'catalog.load');
 const model = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string() }) } });
+const wider = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string(), city: m.string().optional() }) } });
+const step: any = defineMigration({ id: 'add-city', from: model, to: wider }).toJSON();
+void (step.$migration === '0.1' && typeof step.from === 'string' && step.from !== step.to);
 const opening = open(model, { driver: nodeDriver() });
 void opening.then(async (client) => {
   const names: string[] = await client.entities.User.where((u) => u.name.eq('ada')).select((u) => u.name).toArray();

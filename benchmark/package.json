@@ -73,6 +73,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "rxdb": "^17.4.0",
+    "rxjs": "^7.8.2",
     "smol-toml": "^1.7.0",
     "sqlite-vec": "^0.1.9",
     "tinybase": "^5.4.9",

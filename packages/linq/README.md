@@ -1,11 +1,27 @@
 # @jarenjs/linq
 
-A C#-familiar fluent query surface whose output is a **plain JSON
-query document**. You write `from(users).where(u =>
-u.age.gt(21)).orderBy(u => u.name)`; what exists afterwards is data —
-inspectable, serializable, executable by the `@jarenjs/json` engine in
+**The suite, by code.** Every engine in this repository takes a JSON
+document — a query, a schema, a database model, a migration, a contract,
+a stylesheet, a state machine, a dataflow, an application, a form — and
+this is the one package that writes those documents from typed
+JavaScript. The chain is the pen; the document is the deliverable.
+
+`.` is the chain: you write `from(users).where(u =>
+u.age.gt(21)).orderBy(u => u.name)`, and what exists afterwards is data
+— inspectable, serializable, executable by the `@jarenjs/json` engine in
 memory, streamed over a cursor, or pushed into a database by any
-provider. The chain is the pen; the document is the deliverable.
+provider. Each subpath is a **pen** for one other format —
+[`./schema`](#by-code-the-schema-pen), [`./model`](#by-code-the-model-pen),
+[`./jslt`](#by-code-the-jslt-pen),
+[`./migration`](#by-code-the-migration-pen),
+[`./contract`](#by-code-the-contract-pen), [`./flow`](#by-code-the-flow-pen),
+[`./app`](#by-code-the-app-pen), [`./forms`](#by-code-the-forms-pen) —
+emitting exactly the document that format's engine already takes, and
+carrying `Infer<>` types a gate proves equal to `@jarenjs/emit`'s
+generated declarations. [`./db`](#the-front-door-jarenjslinqdb) is not a
+pen: it is the store's typed front door, and the package's one runtime
+edge. The rules every pen keeps, and the mapping table for each, are
+[docs/PENS-FORMAT.md](docs/PENS-FORMAT.md).
 
 ```js
 import { from } from '@jarenjs/linq';
@@ -123,6 +139,48 @@ naming the fix — there is no `.transform()` and no function `refine`;
 cross-field rules are `check()`, transforms are application code. The
 normative mapping table, the rules every pen keeps and the worked
 examples a test executes are [docs/PENS-FORMAT.md](docs/PENS-FORMAT.md).
+
+## By code: the model pen
+
+`@jarenjs/linq/model` is the schema pen with the store's vocabulary
+subclassed onto it: the same builders, plus the `x-entity` members
+`@jarenjs/db` reads — `key()`, `unique()`, `index()`, `version()`,
+`identity('uuid' | 'auto')`, `default()`, `column('integer' | 'json')`
+and the three relation spellings — and `defineModel({ entities,
+collections })`, which emits exactly the `$model` 0.1 document
+`openStore` takes. Its shape hash equals the store's own, so a model
+written this way is a model the migration engine already understands.
+
+```js
+import * as m from '@jarenjs/linq/model';
+import type { InferMeta } from '@jarenjs/linq/model';
+
+export const model = m.defineModel({ entities: {
+  User: m.object({
+    id: m.string().identity('uuid'),
+    email: m.string().email().unique(),
+    posts: m.rel.hasMany('Post', { via: 'authorId', onDelete: 'cascade' }),
+  }),
+  Post: m.object({
+    pid: m.integer().identity('auto'),
+    title: m.string(),
+    authorId: m.string(),
+    author: m.rel.hasOne('User', { via: 'authorId', onDelete: 'cascade' }),
+  }),
+} });
+
+const store = await openStore(model, { driver: nodeDriver() });   // @jarenjs/db takes it unchanged
+type Meta = InferMeta<typeof model>;   // the EntityMetaMap typedStore<E> wants — no generate step
+```
+
+`InferMeta<>` is the point: `@jarenjs/db`'s typed surface wanted an
+`EntityMetaMap` that `@jarenjs/emit` had to generate from a model file,
+and a repo gate holds the pen's type equal to that generated map for the
+fixture model — so the codegen step is optional rather than load-bearing.
+The mapping table, member by member, is
+[docs/PENS-FORMAT.md §3](docs/PENS-FORMAT.md#3-the-model-pen--jarenjslinqmodel);
+what the model document itself means is
+[MODEL-FORMAT.md](../db/docs/MODEL-FORMAT.md).
 
 ## By code: the JSLT pen
 
@@ -349,6 +407,53 @@ holds it), a `./db` consumer installs the three, and the bundle price is
 published in [CONSUMING](../../docs/CONSUMING.md). What is the store's
 and what is the client's is one table in
 [docs/PENS-FORMAT.md §6](docs/PENS-FORMAT.md#6-the-client--jarenjslinqdb).
+
+**What the door costs, measured.** `benchmark/orm.js` runs the client as
+one more route in every table beside Prisma, Drizzle and Kysely over the
+same SQLite corpus, equality asserted before anything is timed and
+statement counts printed beside the timings.
+
+Against the store it fronts, the door is nearly free: <!--bm:orm.clientDoorPrice-->0.9× on a point read, 1.4× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/bm-->
+— because it issues the same documents the store would. What it does
+NOT amortize is capture: a chain re-captures its callbacks and re-emits
+its document on **every** call, by design, which is the predicate row's
+difference and which a caller with a hot query removes by holding the
+`Sequence` (or the emitted document) instead of rebuilding it.
+
+Against the rivals, at this corpus, it is faster on <!--bm:orm.clientVsRivals-->8 of 9 against Prisma, 4 of 9 against Drizzle, 1 of 9 against Kysely<!--/bm-->,
+and here is every row where the *fastest* rival beats it — <!--bm:orm.clientLosses-->update one column by primary key 18.8× (Drizzle), nested json member filter 6.3× (Kysely), cold start 3.0× (Prisma), posts per user 2.4× (Kysely), graph load 2.2× (Kysely), indexed predicate over 500 users, ids only 2.0× (Kysely), pagination over 5000 comments, page size 20 1.6× (Kysely), insert 1.4× (Kysely), point read by primary key 1.2× (Drizzle)<!--/bm-->.
+
+Three things make that list readable rather than damning, and none of
+them removes a row from it. **Kysely is a SQL builder**: on every row it
+wins, you wrote the SQL — the comparison it belongs in is against a
+hand-written statement, not against a schema-first ORM. **The update row
+is the widest loss and has one cause**: the client's only write door is
+the unit of work (`get`, mutate, `saveChanges`), where a rival issues one
+prepared `UPDATE`; the store's own `update()` sits in the same table so
+the difference is visible rather than argued. And **the claim that
+survives is structural, not temporal** — the graph load's statement
+counts are printed beside its timings, and the client answers a
+two-level graph in ONE statement where the schema-first ORM takes three,
+whatever the corpus and whatever the clock says.
+
+## What a pen costs
+
+A pen builds a **definition** — once, at module load — and the engine
+compiles the document it emitted. That is the only place its price is
+paid, and `benchmark/db.js` measures it as ns per build beside the
+hand-written literal each pen must emit byte for byte — <!--bm:linq.penBuildCost-->schema 61.1×, model 87.1×, JSLT 72.1× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same two shape hashes<!--/bm-->.
+
+Multiples that size are what typed builders, `$defs` hoisting, a
+deep-freeze and a coded refusal per mistake cost against typing the JSON
+yourself; against a request they cost nothing, because no request builds
+a definition. The one pen that is nearly free is the migration pen, and
+for a plain reason: a `$migration` document IS its two shape hashes, so
+a hand-written one has to canonicalize and hash both models too.
+
+The chain's price is a different shape and is published beside it: a
+chain re-captures and re-emits its document on every call, so the
+in-memory row in the same benchmark reports the loop, the chain and the
+pre-compiled document as three separate figures.
 
 ## What this is not
 

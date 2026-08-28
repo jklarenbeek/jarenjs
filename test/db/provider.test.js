@@ -13,6 +13,8 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 import { from, fromAsync } from '@jarenjs/linq';
 import { compileJsonQuery } from '@jarenjs/json/query';
@@ -147,6 +149,48 @@ describe('one edge, one direction (D6)', () => {
       else assert.deepStrictEqual(found, [], `${file} imports ${found.join(', ')} outside the edge`);
     }
     assert.ok(inside > 0, 'the edge exists: src/db/ imports the peers');
+  });
+
+  it('the scan is load-bearing: every import spelling, in a .js and in a .d.ts', () => {
+    // D7 (the hunt): the first version of this suite read `src/**` with a
+    // regex that only saw a static `import … from`, so a `.d.ts` and four
+    // other spellings could carry the edge past it. The predicate is
+    // proven here against synthetic sources rather than by mutating the
+    // package tree: what a file under `types/` says binds a consumer's
+    // `tsc` exactly as what a file under `src/` says binds its bundler.
+    const probe = path.join(os.tmpdir(), `edge-probe-${process.pid}`);
+    fs.mkdirSync(probe, { recursive: true });
+    /** @param {string} name @param {string} code */
+    const scan = (name, code) => {
+      const file = path.join(probe, name);
+      fs.writeFileSync(file, code);
+      return specifiers(file, PEERS);
+    };
+    try {
+      const seen = [
+        ['static.js', "import { openStore } from '@jarenjs/db';"],
+        ['named-deep.js', "import { nodeDriver } from '@jarenjs/db/node';"],
+        ['dynamic.js', 'export const p = () => import("@jarenjs/db");'],
+        ['require.cjs', "const db = require('@jarenjs/db');"],
+        ['export-from.js', "export { JarenValidator } from '@jarenjs/validate';"],
+        ['side-effect.js', "import '@jarenjs/formats';"],
+        ['type-only.d.ts', "import type { Store } from '@jarenjs/db';\nexport type S = Store;"],
+        ['reference.d.ts', 'export type S = import("@jarenjs/db").Store;'],
+      ];
+      for (const [name, code] of seen) {
+        assert.notDeepStrictEqual(scan(name, code), [], `${name} must be seen as an edge`);
+      }
+      // and prose is not an edge: the provider comment names the store on
+      // purpose, in both comment forms and in a string that is not a
+      // specifier
+      assert.deepStrictEqual(scan('prose.js',
+        '/* @jarenjs/db implements this contract */\n// see @jarenjs/validate\nexport const why = 1;'), []);
+      assert.deepStrictEqual(scan('message.js',
+        "export const msg = 'install @jarenjs/db beside it';"), []);
+    }
+    finally {
+      fs.rmSync(probe, { recursive: true, force: true });
+    }
   });
 
   it("linq's manifest names the three as optional peers only; its dependencies are unchanged", () => {

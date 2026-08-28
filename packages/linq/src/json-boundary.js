@@ -7,6 +7,12 @@
  * null, booleans, finite numbers (never `-0`), strings, arrays and plain
  * objects, and nothing else — a function, symbol, bigint, `NaN`,
  * `±Infinity`, a class instance or a cycle is refused by name.
+ *
+ * Beside it, one predicate for the OTHER door a pen has: the name → value
+ * map it reads its members out of (`requireNameMap`). There the hazard is
+ * not a value the document cannot carry but a member that never arrived —
+ * `{ __proto__: builder }` sets the object's prototype instead of adding
+ * a key — and the prototype is the only trace of it left to refuse by.
  */
 
 import { isJsonValue } from '@jarenjs/core/object';
@@ -49,4 +55,31 @@ export function requireJson(value, what) {
     `${what} received ${describeValue(value)}, which is not JSON — a document carries `
     + 'null, booleans, finite numbers (never -0), strings, arrays and plain objects, '
     + 'and nothing else');
+}
+
+/**
+ * A name → value map a pen reads by its OWN keys — an object of
+ * builders, operations, nodes, actions or modes.
+ *
+ * `{ __proto__: x }` in an object LITERAL sets the object's prototype
+ * instead of adding a member, so that member never reaches the pen:
+ * there is nothing to emit and nothing to see. The one thing that IS
+ * visible is the prototype, and no plain map has one — so the map is
+ * refused by it rather than emitted a member short. A computed key
+ * (`{ ['__proto__']: x }`) is an ordinary own property and passes, as
+ * does `Object.create(null)`.
+ *
+ * @template T
+ * @param {T} value - a non-null, non-array object
+ * @param {string} what - the method, for the message
+ * @param {string} [at] - the docPath of the node being assembled
+ * @returns {T}
+ */
+export function requireNameMap(value, what, at) {
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null || proto === Object.prototype) return value;
+  throw new LinqBuildError('JL0101',
+    `${what} received a map whose prototype was replaced: a '__proto__:' key in an object `
+    + 'literal sets the prototype instead of adding a member, so that member is not there to '
+    + "emit — spell it { ['__proto__']: … }, which is an own key", at);
 }

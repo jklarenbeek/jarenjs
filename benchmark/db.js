@@ -45,7 +45,7 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, shapeHash } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { from } from '@jarenjs/linq';
 
@@ -484,6 +484,120 @@ report('Sort + limit 20 (ns/query)', ['ns/query'], sortRows);
   ]);
   notes.push('the linq chain re-captures and re-emits its document every call by design; '
     + 'hold the Sequence (or the compiled document) to pay capture once');
+}
+
+// ---- the pens: what a document costs to WRITE by code (D11) ----
+// Not a per-request price. A pen builds a definition — a schema, a model,
+// a stylesheet, a migration — once, at module load, and the engine
+// compiles the document it emitted. The row that matters is therefore
+// "ns per BUILD", read beside the hand-written document literal it must
+// equal byte for byte: what the phantom types and the coded refusals
+// cost over typing the JSON yourself.
+{
+  const s = await import('@jarenjs/linq/schema');
+  const m = await import('@jarenjs/linq/model');
+  const { rule, stylesheet } = await import('@jarenjs/linq/jslt');
+  const { defineMigration } = await import('@jarenjs/linq/migration');
+
+  const PEN_ITER = flags.quick ? 200 : 2000;
+
+  // 1. one schema, by the pen and as the literal it emits
+  const schemaPen = () => s.object({
+    id: s.string().uuid(),
+    name: s.string().min(1),
+    age: s.integer().optional(),
+  }).schema;
+  const schemaLiteral = () => ({
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      name: { type: 'string', minLength: 1 },
+      age: { type: 'integer' },
+    },
+    required: ['id', 'name'],
+    additionalProperties: false,
+  });
+  if (!deepEquals(schemaPen(), schemaLiteral())) {
+    equivalenceFailures++;
+    console.error('  ✗ the schema pen and its literal are not the same document');
+  }
+
+  // 2. one model (one entity), by the pen and as the literal
+  const modelPen = () => m.defineModel({ entities: {
+    User: m.object({ id: m.string().key(), name: m.string(), age: m.integer().optional() }),
+  } });
+  const modelLiteral = () => ({
+    $model: '0.1',
+    entities: { User: { schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', 'x-entity': { key: true } },
+        name: { type: 'string' },
+        age: { type: 'integer' },
+      },
+      required: ['id', 'name'],
+      additionalProperties: false,
+    } } },
+  });
+  if (!deepEquals(modelPen(), modelLiteral())) {
+    equivalenceFailures++;
+    console.error('  ✗ the model pen and its literal are not the same document');
+  }
+
+  // 3. one stylesheet, by the pen and as the literal
+  const jsltPen = () => stylesheet([rule('$.users[*]', (u) => ({ id: u.id, name: u.name }))]);
+  const jsltLiteral = () => ({
+    $jslt: '0.1',
+    rules: [{ match: '$.users[*]', body: { id: '$.id', name: '$.name' } }],
+  });
+  if (!deepEquals(jsltPen(), jsltLiteral())) {
+    equivalenceFailures++;
+    console.error('  ✗ the JSLT pen and its literal are not the same document');
+  }
+
+  // 4. one migration between two models — the pen hashes both shapes, so
+  //    its price includes the canonicalization a hand-written document
+  //    would have had to get right by hand
+  const v1 = modelPen();
+  const v2 = m.defineModel({ entities: {
+    User: m.object({
+      id: m.string().key(), name: m.string(), age: m.integer().optional(), city: m.string().optional(),
+    }),
+  } });
+  const migrationPen = () => defineMigration({ id: 'add-city', from: v1, to: v2 }).toJSON();
+  // the hand-written route is not cheaper by skipping the hashes: a
+  // migration document IS its two shape hashes, and an author who types
+  // one still has to compute them with the store's own function
+  const migrationLiteral = () => ({
+    $migration: '0.1',
+    id: 'add-city',
+    from: shapeHash(v1),
+    to: shapeHash(v2),
+    steps: [],
+  });
+  if (!deepEquals(migrationPen(), migrationLiteral())) {
+    equivalenceFailures++;
+    console.error('  ✗ the migration pen and its literal are not the same document');
+  }
+
+  report('By code: what one DEFINITION costs to build (ns/build — paid once per '
+    + 'definition, never per request)', ['ns/build'], [
+    { name: 'schema pen — one object, 3 members', results: [timeSync(schemaPen, PEN_ITER)] },
+    { name: '  the same document, hand-written', results: [timeSync(schemaLiteral, PEN_ITER)] },
+    { name: 'model pen — one entity', results: [timeSync(modelPen, PEN_ITER)] },
+    { name: '  the same document, hand-written', results: [timeSync(modelLiteral, PEN_ITER)] },
+    { name: 'JSLT pen — one rule', results: [timeSync(jsltPen, PEN_ITER)] },
+    { name: '  the same document, hand-written', results: [timeSync(jsltLiteral, PEN_ITER)] },
+    { name: 'migration pen — two models, no step', results: [timeSync(migrationPen, PEN_ITER)] },
+    { name: '  the same document, hand-written (both hashes included)',
+      results: [timeSync(migrationLiteral, PEN_ITER)] },
+  ]);
+  notes.push('the pen rows are BUILD cost, paid once per definition at module load: a pen '
+    + 'emits the document a hand-written literal would have been, and every row above is '
+    + 'asserted byte-equal to that literal before it is timed. The migration pen carries '
+    + "both models' shape hashes (a canonicalize + hash per side), which is the whole of "
+    + 'its distance from a literal — and is work a hand-written migration document still '
+    + 'has to get right');
 }
 
 // ---- the router's sanity floor, re-measured ----

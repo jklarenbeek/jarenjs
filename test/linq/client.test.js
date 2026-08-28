@@ -13,6 +13,7 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import { open, defaultValidator } from '@jarenjs/linq/db';
@@ -22,6 +23,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { stringFormats } from '@jarenjs/formats';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 
+import { compileArtifact } from '../json/schema-artifact-helpers.js';
 import { placesModel } from './model-corpus.js';
 import { FIXTURE_MODEL } from '../db/emit-model-fixture.js';
 
@@ -423,5 +425,72 @@ describe('the in-memory chain agrees with the client\'s', () => {
     assert.deepStrictEqual(await client.entities.Post.where((p) => p.stars.ge(3)).orderByDescending((p) => p.stars).select((p) => p.title).toArray(),
       build(rows).toArray());
     await client.close();
+  });
+});
+
+describe('the chain and the client emit jaren-query documents', () => {
+  // The agreement's grammar cell for the `.` entry and for `./db`. Every
+  // pen validates its emission against the published artifact of the
+  // format it writes; the chain writes query documents, so this is that
+  // same check for the one "pen" that was here before the word existed —
+  // over the corpus a generator produced from real chains (which is why
+  // no document below was typed by hand) and over documents this suite's
+  // own client emits.
+  const load = (file) => JSON.parse(fs.readFileSync(new URL(file, import.meta.url), 'utf8'));
+  const grammars = [
+    ['2020-12', compileArtifact(load('../../packages/json/schemas/jaren-query.schema.json'))],
+    ['draft-07', compileArtifact(load('../../packages/json/schemas/jaren-query.draft-07.schema.json'))],
+  ];
+
+  it('the grammar check is load-bearing', () => {
+    for (const [draft, validate] of grammars) {
+      assert.strictEqual(validate({ $for: { it: '$[*]' }, $return: '$it' }), true, draft);
+      assert.strictEqual(validate({ $for: 'not an object', $return: '$it' }), false, draft);
+      assert.strictEqual(validate({ $nonsense: 1 }), false, draft);
+    }
+  });
+
+  it('every document of the generated roots and hops corpora validates under both artifacts', () => {
+    let checked = 0;
+    for (const file of ['14-linq-roots.json', '15-linq-hops.json']) {
+      const { cases } = load(`../db/oracle/relations/${file}`);
+      assert.ok(cases.length > 0, `${file} carries cases`);
+      for (const entry of cases) {
+        // a terminal that emits an aggregate is one bare document; every
+        // other case is the one-item window array the chain hands a provider
+        const emitted = Array.isArray(entry.query) ? entry.query : [entry.query];
+        for (const document of emitted) {
+          for (const [draft, validate] of grammars) {
+            assert.strictEqual(validate(document), true,
+              `${file} :: ${entry.name} under ${draft}: ${JSON.stringify(document)}`);
+          }
+          checked++;
+        }
+      }
+    }
+    assert.ok(checked >= 20, `${checked} generated chain documents checked`);
+  });
+
+  it('a client chain, a hop, an ordered window and a terminal window all validate', async () => {
+    const { client } = await seeded();
+    try {
+      const documents = [
+        client.entities.Post.where((p) => p.stars.ge(3)).toDocument(),
+        client.entities.Post.where((p) => p.author.email.eq('ada@x.test')).toDocument(),
+        client.entities.Post.orderBy((p) => p.stars).skip(1).take(2).toDocument(),
+        client.entities.Post.select((p) => ({ t: p.title, n: p.stars })).toDocument(),
+        client.entities.Post.groupBy((p) => p.authorId).toDocument(),
+        from([{ a: 1 }]).where((r) => r.a.gt(0)).toDocument(),
+      ];
+      for (const document of documents) {
+        for (const [draft, validate] of grammars) {
+          assert.strictEqual(validate(document), true,
+            `under ${draft}: ${JSON.stringify(document)}`);
+        }
+      }
+    }
+    finally {
+      await client.close();
+    }
   });
 });

@@ -16,7 +16,7 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
-import { deepFreeze } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson } from '../json-boundary.js';
@@ -44,7 +44,7 @@ function isPlainObject(value) {
  */
 function withoutRenameHints(model) {
   const out = {};
-  for (const key of Object.keys(model)) out[key] = model[key];
+  for (const key of Object.keys(model)) setObjectMember(out, key, model[key]);
   for (const member of ['collections', 'entities']) {
     const declared = model[member];
     if (!isPlainObject(declared)) continue;
@@ -53,10 +53,10 @@ function withoutRenameHints(model) {
       const spec = declared[name];
       if (isPlainObject(spec) && Object.hasOwn(spec, 'x-rename')) {
         const { 'x-rename': _hint, ...rest } = spec;
-        stripped[name] = rest;
+        setObjectMember(stripped, name, rest);
       }
       else {
-        stripped[name] = spec;
+        setObjectMember(stripped, name, spec);
       }
     }
     out[member] = stripped;

@@ -12,6 +12,7 @@
 import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
+import { requireNameMap } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { COLLECTION } from './collection.js';
 
@@ -22,6 +23,7 @@ function requireMap(value, what) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new LinqBuildError('JL0101', `defineModel() ${what} is a plain object of declarations`);
   }
+  requireNameMap(value, `defineModel() ${what}`, `/${what}`);
   for (const name of Object.keys(value)) {
     if (!NAME.test(name)) {
       throw new LinqBuildError('JL0101',

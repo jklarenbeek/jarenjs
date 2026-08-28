@@ -91,6 +91,13 @@ if (packLeak.length > 0)
 
 console.log('Tree-shaking smoke test passed (compileDateLocale carries no Intl provider and no locale pack).');
 
+// Every `@jarenjs/linq` subpath's measured size, collected as the probes
+// run and checked against docs/CONSUMING.md's table at the end: a price
+// this repository publishes is a price this gate measured, so it can go
+// stale only by failing here (D11 — report the loss).
+/** @type {Map<string, number>} */
+const linqBundles = new Map();
+
 // The schema pen (`@jarenjs/linq/schema`) is a subpath a consumer may take
 // WITHOUT the chain: a schema-only bundle must carry none of the chain's
 // modules and no engine (the pen imports no `@jarenjs/json`, `validate`,
@@ -117,6 +124,7 @@ const schemaResult = await build({
 });
 
 const schemaBytes = schemaResult.outputFiles[0].contents.length;
+linqBundles.set('schema', schemaBytes);
 const schemaInputs = Object.values(schemaResult.metafile.outputs)[0].inputs;
 const chainLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -127,7 +135,12 @@ const engineLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (engineLeak.length > 0)
   throw new Error(`The schema pen pulled an engine into the bundle: ${engineLeak.map(([file]) => file).join(', ')}`);
-if (schemaBytes > 32000)
+// The ceiling moved from 32,000 to 32,500 at the campaign's close-out: the
+// shared JSON boundary gained `requireNameMap`, the one refusal that keeps
+// a `__proto__:` key in a spec literal from eating a member silently, and
+// `json-boundary.js` rides in EVERY pen bundle. Raising the ceiling with
+// the reason is the honest move; shaving the message is not.
+if (schemaBytes > 32500)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -148,6 +161,7 @@ const chainResult = await build({
 });
 
 const chainBytes = chainResult.outputFiles[0].contents.length;
+linqBundles.set('chain', chainBytes);
 const chainInputs = Object.values(chainResult.metafile.outputs)[0].inputs;
 const penLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/schema/') && info.bytesInOutput > 0);
@@ -191,6 +205,7 @@ const modelResult = await build({
 });
 
 const modelBytes = modelResult.outputFiles[0].contents.length;
+linqBundles.set('model', modelBytes);
 const modelInputs = Object.values(modelResult.metafile.outputs)[0].inputs;
 const modelChainLeak = Object.entries(modelInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -236,6 +251,7 @@ const jsltResult = await build({
 });
 
 const jsltBytes = jsltResult.outputFiles[0].contents.length;
+linqBundles.set('jslt', jsltBytes);
 const jsltInputs = Object.values(jsltResult.metafile.outputs)[0].inputs;
 const jsltChainLeak = Object.entries(jsltInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -286,6 +302,7 @@ const migrationResult = await build({
 });
 
 const migrationBytes = migrationResult.outputFiles[0].contents.length;
+linqBundles.set('migration', migrationBytes);
 const migrationInputs = Object.values(migrationResult.metafile.outputs)[0].inputs;
 const migrationChainLeak = Object.entries(migrationInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -337,6 +354,7 @@ const clientResult = await build({
 });
 
 const clientBytes = clientResult.outputFiles[0].contents.length;
+linqBundles.set('db', clientBytes);
 const clientInputs = Object.values(clientResult.metafile.outputs)[0].inputs;
 const clientPenLeak = Object.entries(clientInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(contract|flow|app|forms)\//.test(file) && info.bytesInOutput > 0);
@@ -352,15 +370,7 @@ if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
 if (clientBytes > 520000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
-const consuming = readFileSync('docs/CONSUMING.md', 'utf8');
-const stated = /<!--bundle:linq-db-->(\d+) kB/.exec(consuming);
-const measuredKb = Math.round(clientBytes / 1000);
-if (stated === null || Number(stated[1]) !== measuredKb) {
-  throw new Error(`docs/CONSUMING.md states the client bundle as ${stated === null ? 'nothing' : `${stated[1]} kB`}; `
-    + `measured ${measuredKb} kB (${clientBytes} bytes) — refresh the figure beside the <!--bundle:linq-db--> marker.`);
-}
-
-console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs; CONSUMING states ${measuredKb} kB).`);
+console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
 // The contract pen (`@jarenjs/linq/contract`) writes `$contract` 0.1
 // documents whose schemas are the schema pen's — so the probe measures
@@ -386,6 +396,7 @@ const contractPenResult = await build({
 });
 
 const contractPenBytes = contractPenResult.outputFiles[0].contents.length;
+linqBundles.set('contract', contractPenBytes);
 const contractPenInputs = Object.values(contractPenResult.metafile.outputs)[0].inputs;
 const contractPenChainLeak = Object.entries(contractPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -438,6 +449,7 @@ const flowPenResult = await build({
 });
 
 const flowPenBytes = flowPenResult.outputFiles[0].contents.length;
+linqBundles.set('flow', flowPenBytes);
 const flowPenInputs = Object.values(flowPenResult.metafile.outputs)[0].inputs;
 const flowPenChainLeak = Object.entries(flowPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -494,6 +506,7 @@ const appPenResult = await build({
 });
 
 const appPenBytes = appPenResult.outputFiles[0].contents.length;
+linqBundles.set('app', appPenBytes);
 const appPenInputs = Object.values(appPenResult.metafile.outputs)[0].inputs;
 const appPenChainLeak = Object.entries(appPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -544,6 +557,7 @@ const formsPenResult = await build({
 });
 
 const formsPenBytes = formsPenResult.outputFiles[0].contents.length;
+linqBundles.set('forms', formsPenBytes);
 const formsPenInputs = Object.values(formsPenResult.metafile.outputs)[0].inputs;
 const formsPenChainLeak = Object.entries(formsPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
@@ -571,3 +585,28 @@ if (schemaFormsLeak.length > 0)
   throw new Error(`The schema pen pulled the forms pen into the bundle: ${schemaFormsLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${formsPenBytes} byte forms-pen bundle; no chain module, no @jarenjs/forms bytes, no model pen).`);
+
+// ---- the published prices (D11) ----
+// docs/CONSUMING.md states one figure per `@jarenjs/linq` subpath, each
+// beside a `<!--bundle:NAME-->` marker. Every one is compared with the
+// bundle measured above, so a published price cannot go stale without
+// this gate going red — and no number in that table was ever typed.
+const consuming = readFileSync('docs/CONSUMING.md', 'utf8');
+const kb = (bytes) => Math.round(bytes / 1000);
+const stale = [];
+for (const [name, bytes] of linqBundles) {
+  const marker = `<!--bundle:linq-${name}-->`;
+  const stated = new RegExp(`${marker}(\\d+) kB`).exec(consuming);
+  if (stated === null) stale.push(`${marker} is missing (measured ${kb(bytes)} kB)`);
+  else if (Number(stated[1]) !== kb(bytes)) {
+    stale.push(`${marker} states ${stated[1]} kB, measured ${kb(bytes)} kB (${bytes} bytes)`);
+  }
+}
+if (stale.length > 0) {
+  throw new Error('docs/CONSUMING.md\'s subpath prices are stale:\n  '
+    + stale.join('\n  ') + '\nRefresh the figure beside each marker.');
+}
+
+console.log(`Tree-shaking smoke test passed (docs/CONSUMING.md states all ${linqBundles.size} `
+  + `@jarenjs/linq subpath prices, each equal to the bundle measured here: `
+  + [...linqBundles].map(([name, bytes]) => `${name} ${kb(bytes)} kB`).join(', ') + ').');

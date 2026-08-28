@@ -13,11 +13,26 @@ and executed deferred — over any iterable in memory, or by any
 emits the query language and nothing else; there is no second grammar,
 no private protocol, and no `Function.prototype.toString` anywhere.
 
-What this package is NOT: it is not an ORM (storage is `@jarenjs/db`'s
-job), it does not evaluate JavaScript callbacks per element (callbacks
-run ONCE, at build time, against recording proxies), and it promises
-nothing the query grammar cannot express — §4 records every such gap
-as `unsupported`, by name.
+**Scope.** This document is normative for the CHAIN — the `.` entry, the
+query documents it emits, and the provider seam. The package's other
+subpaths are **pens**: the same idea applied to the suite's other
+formats, each writing exactly the published document its engine already
+takes. They have their own normative document,
+[PENS-FORMAT.md](PENS-FORMAT.md), which covers the rules every pen keeps
+(§1), the `JL01xx` refusal table this document's §9 mirrors, and one
+section per pen; `@jarenjs/linq/db` — the store's typed front door and
+the package's one runtime edge — is PENS-FORMAT §6.
+
+What this package is NOT: it is not a storage engine — the store, its
+tables, its planner, its unit of work and its migrations are
+`@jarenjs/db`'s, and the client subpath is that store's front door
+rather than a second engine; it does not evaluate JavaScript callbacks
+per element (callbacks run ONCE, at build time, against recording
+proxies); it infers nothing from a JSON literal (a document stays a
+document — `from(json)` is `unknown` until the caller says otherwise,
+and the pens are the only inference route); and it promises nothing the
+query grammar cannot express — §4 records every such gap as
+`unsupported`, by name.
 
 ## 2. The surface
 
@@ -466,7 +481,7 @@ the normative home, this table mirrors it):
 
 | Code | Condition |
 |---|---|
-| `JL0101` | a pen received a value it cannot spell: not JSON, or not what the keyword takes |
+| `JL0101` | a pen received a value it cannot spell: not JSON, not what the keyword takes, or a name → value map whose prototype a `__proto__:` literal replaced |
 | `JL0102` | a pen was asked for a construct the format cannot carry |
 | `JL0103` | a `$defs` name collision, a dangling ref, or an unnamed recursion |
 | `JL0104` | a pen-owned keyword through `meta()`, or an external a captured rule did not declare |

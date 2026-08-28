@@ -15,6 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 import { openStore, shapeHash } from '@jarenjs/db';
@@ -379,5 +380,112 @@ describe('jaren-db, code-first (modules, the snapshot, purity, --types)', () => 
     assert.strictEqual(without.status, 1);
     assert.match(without.stderr, /--types needs @jarenjs\/emit/);
     assert.strictEqual(fs.existsSync(at('v2b.d.ts')), false);
+  });
+});
+
+describe('jaren-db — every command, run twice', () => {
+  // The campaign's rule (§4.1): every importer, migration and CLI command
+  // in scope passes the two-run check BY TEST. "Passes" is bytes, not a
+  // word: the second run of a command leaves every file in the working
+  // directory exactly as the first left it. Reading commands are trivially
+  // so; the writing ones (`plan --out`, `apply`, `snapshot`) each have a
+  // reason not to be, which is why they are here.
+  /** @type {string} */
+  let work = '';
+  const at = (name) => path.join(work, name);
+
+  /** Every file under `work` as name → sha-256, so "changed nothing" is
+   * bytes and not a timestamp. */
+  const digests = () => Object.fromEntries(fs.readdirSync(work, { recursive: true, encoding: 'utf8' })
+    .filter((name) => fs.statSync(at(name)).isFile())
+    .map((name) => [name, createHash('sha256').update(fs.readFileSync(at(name))).digest('hex')]));
+
+  /**
+   * Run a command twice and assert the second changed no byte.
+   * @param {{ exit?: number, saysAgain?: RegExp }} expect
+   * @param {...string} args
+   */
+  const twice = (expect, ...args) => {
+    const first = run(...args);
+    const between = digests();
+    const second = run(...args);
+    assert.strictEqual(first.status, expect.exit ?? 0, `first run: ${first.stderr}`);
+    assert.strictEqual(second.status, first.status, 'the second run answers the same code');
+    assert.deepStrictEqual(digests(), between,
+      `the second \`${args[0]}\` changed a file`);
+    if (expect.saysAgain === undefined) {
+      assert.strictEqual(second.stdout, first.stdout, 'and prints the same thing');
+      assert.strictEqual(second.stderr, first.stderr);
+    }
+    else {
+      assert.match(second.stdout, expect.saysAgain,
+        'a writer that has nothing to write says so rather than rewriting');
+    }
+    return first;
+  };
+
+  before(async () => {
+    work = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-db-two-run-'));
+    fs.writeFileSync(at('v1.json'), JSON.stringify(FROM, null, 2));
+    fs.writeFileSync(at('v2.json'), JSON.stringify(TO, null, 2));
+    fs.mkdirSync(at('migrations'));
+    const store = await openStore(FROM, { driver: nodeDriver(), path: at('app.db') });
+    await store.entity('User').create({ id: 'u1', name: 'ada' });
+    await store.close();
+  });
+  after(() => {
+    fs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it('plan, shape and --help', () => {
+    twice({}, 'plan', '--from', at('v1.json'), '--to', at('v2.json'), '--out', at('migrations/001.json'));
+    twice({}, 'shape', '--model', at('v2.json'));
+    twice({}, '--help');
+    // the planner leaves a DRAFT transform for the widening; the CLI's own
+    // message says to fill it in or delete it for a pure widening
+    const doc = JSON.parse(fs.readFileSync(at('migrations/001.json'), 'utf8'));
+    doc.steps = doc.steps.filter((step) => step.kind !== 'jslt' || step.draft !== true);
+    fs.writeFileSync(at('migrations/001.json'), JSON.stringify(doc, null, 2));
+  });
+
+  it('status and check while a migration is pending', () => {
+    // status creates the history table on its first read (§6 licenses it);
+    // the point of the pair is that the SECOND run adds nothing
+    const status = twice({}, 'status', '--model', at('v2.json'), '--store', at('app.db'),
+      '--baseline', at('v1.json'), '--migrations', at('migrations'));
+    assert.match(status.stdout, /pending:\s+to-/);
+    twice({ exit: 1 }, 'check', '--model', at('v2.json'), '--store', at('app.db'),
+      '--baseline', at('v1.json'), '--migrations', at('migrations'));
+  });
+
+  it('apply --dry-run, then apply --yes, then status and check in sync', () => {
+    const dry = twice({}, 'apply', '--store', at('app.db'), '--baseline', at('v1.json'),
+      '--migrations', at('migrations'), '--model', at('v2.json'), '--dry-run');
+    assert.match(dry.stdout, /ADD COLUMN "age"/);
+
+    // the one command that MUST change the database on its first run, and
+    // must not on its second
+    const before = digests();
+    const applied = run('apply', '--store', at('app.db'), '--baseline', at('v1.json'),
+      '--migrations', at('migrations'), '--model', at('v2.json'), '--yes');
+    assert.strictEqual(applied.status, 0, applied.stderr);
+    assert.match(applied.stdout, /applied: to-/);
+    assert.notDeepStrictEqual(digests(), before, 'the first apply is not a no-op');
+    twice({ saysAgain: /nothing to apply — up to date/ }, 'apply', '--store', at('app.db'),
+      '--baseline', at('v1.json'), '--migrations', at('migrations'), '--model', at('v2.json'), '--yes');
+
+    twice({}, 'status', '--model', at('v2.json'), '--store', at('app.db'),
+      '--baseline', at('v1.json'), '--migrations', at('migrations'));
+    twice({}, 'check', '--model', at('v2.json'), '--store', at('app.db'),
+      '--baseline', at('v1.json'), '--migrations', at('migrations'));
+    // and the from-model no longer matches the store, which plan --store says
+    twice({ exit: 1 }, 'plan', '--from', at('v1.json'), '--to', at('v2.json'), '--store', at('app.db'));
+  });
+
+  it('snapshot and snapshot --types', () => {
+    twice({ saysAgain: /unchanged .*model\.snapshot\.json/ }, 'snapshot', '--model', at('v2.json'),
+      '--snapshot', at('model.snapshot.json'));
+    twice({ saysAgain: /unchanged .*model\.d\.ts/ }, 'snapshot', '--model', at('v2.json'),
+      '--snapshot', at('model.snapshot.json'), '--types', at('model.d.ts'));
   });
 });

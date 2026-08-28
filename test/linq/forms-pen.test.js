@@ -25,6 +25,7 @@ import {
 } from '@jarenjs/forms';
 import { JarenValidator } from '@jarenjs/validate';
 import { jsonFormats } from '@jarenjs/formats';
+import { getSchemaDraftByVersion } from '@jarenjs/refs';
 
 const README = new URL('../../packages/forms/README.md', import.meta.url);
 const FORMS_SRC = new URL('../../packages/linq/src/forms/', import.meta.url);
@@ -283,5 +284,52 @@ describe('the forms pen imports no engine', () => {
       assert.strictEqual(/from '@jarenjs\/(forms|validate|json)/.test(source), false,
         `${file} imports a package the pen must not carry`);
     }
+  });
+});
+
+describe('the forms pen — the published grammar it writes under', () => {
+  // `x-form` is an annotation ON a JSON Schema, so the forms pen's grammar
+  // IS the 2020-12 meta-schema — the same cell the schema pen fills, and
+  // the one the pen agreement needs filled for every pen. (The direct
+  // compile is the route that works: `addMetaSchema(bundle)` answers false
+  // for every schema, which the schema pen's suite records.)
+  const [main, ...vocabularies] = getSchemaDraftByVersion(2020).schema;
+  const metaSchema = new JarenValidator().addSchema(vocabularies).compile(main);
+
+  it('the meta-schema check is load-bearing', () => {
+    assert.strictEqual(metaSchema({ type: 42 }), false);
+    assert.strictEqual(metaSchema({ type: 'string', minLength: -1 }), false);
+    assert.strictEqual(metaSchema({ type: 'string' }), true);
+  });
+
+  it("every document the README's two examples build is valid 2020-12", () => {
+    const layer2 = s.document(s.object({
+      company: s.string().optional(),
+      vatId: s.string().optional().form({
+        visible: (c) => c.root.company.ne(''),
+        assert: (c) => c.root.company.eq('').or(c.root.vatId.ne('')),
+        message: 'VAT id is required for companies',
+      }),
+      total: s.number().optional().form({ computed: (c) => c.root.lines.all().amount.sum() }),
+    }).open());
+    assert.strictEqual(metaSchema(layer2), true, JSON.stringify(metaSchema.errors ?? []));
+  });
+
+  it('every x-form member the pen can write leaves a valid 2020-12 document', () => {
+    const doc = s.document(s.object({
+      kind: s.string().enumOf(['a', 'b']),
+      note: s.string().optional().form({
+        visible: (c) => c.root.kind.eq('a'),
+        enabled: (c) => c.root.kind.eq('a'),
+        assert: (c) => c.value.ne(''),
+        message: { $msgid: 'x-form/assert', message: 'a note is required' },
+      }),
+      lines: s.array(s.object({ amount: s.number() })),
+      total: s.number().optional().form({ computed: (c) => c.root.lines.all().amount.sum() }),
+    }).open());
+    assert.strictEqual(metaSchema(doc), true, JSON.stringify(metaSchema.errors ?? []));
+    // and the annotation really is in the document the grammar accepted
+    assert.ok(Object.hasOwn(doc.properties.note, 'x-form'));
+    assert.strictEqual(buildFormModel(doc).kind, 'object');
   });
 });

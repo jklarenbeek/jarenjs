@@ -88,11 +88,15 @@ packages/website/playwright.config.js`); the gate builds the site on the
 host first and, in full mode, runs that command verbatim.
 
 Running a subset is a speed convenience for a small change in flight, never the
-basis a change lands on. Two gates sit outside `site:gate` because they answer a
-packaging question rather than a behavior one, and belong to any change that
-touches exports: `npm run test:packed` and `npm run test:tree-shaking`.
-`release:check` runs `site:gate`'s stages plus the packaging ones, so the release
-path cannot skip what the working path runs.
+basis a change lands on. **Seven gates sit outside `site:gate`**, because they
+answer a packaging or a declaration question rather than a behavior one. Four
+belong to any change that touches exports or types — `npm run test:types`,
+`npm run test:packed`, `npm run test:tree-shaking` and `npm run test:deps` — and
+three answer questions about the checkout itself, which a release asks and a
+working change rarely does: `npm run test:lock`, `npm run test:native` and
+`npm run test:source`. `release:check` runs `site:gate`'s stages plus all seven,
+so the release path cannot skip what the working path runs; a work order that
+moves an export names the first four in its own acceptance list.
 
 `git push` runs the four seconds-fast ones through lefthook (lint, test,
 `docs:check`, `test:documents`); the minutes-long stages stay out of the hook so a

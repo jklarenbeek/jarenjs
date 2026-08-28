@@ -34,6 +34,8 @@ number in a README performance table names the command that produced it.
 | [`retrieval.js`](./retrieval.js) | Did the right memory reach the prompt — recall@k and MRR for `@jarenjs/ai`'s recall policies (tag+recency, and the seam-gated ranked path) over a seeded corpus, against an oracle | Measuring ledger retrieval, default and ranked, on one instrument |
 | [`vector.js`](./vector.js) | k-nearest over a `derive: 'vector'` column every physical way it runs — resident sweep, the shipped plan, its own statement, `ORDER BY` over a UDF, the same query with no column — against **sqlite-vec**, equivalence-gated, with what the column costs to write and to store | Choosing between a vector column, a JSON member and an extension |
 | [`series.js`](./series.js) | The temporal ground and what was built on it: a range, a fixed bucketing, a rolling window and an as-of read over a seeded series, answered by plain references, by `@jarenjs/core/series`, by a generic query document, by stock SQLite under a declared epoch column and by the store's own plan — gated on the committed series corpus and on every route agreeing with the others before a timer starts, with the resident ceiling and the durable loss both published | Deciding what a temporal fast path has to beat, what the kernel costs against the one-pass loops it replaces, and what a declared epoch column buys over the document it came from |
+| [`db.js`](./db.js) | The store and the LINQ front door: documents in SQLite through the pushdown planner against PouchDB/RxDB/lowdb, the pushdown headline, the chain in memory, and what one DEFINITION costs to build through a pen beside the hand-written document | Deciding what pushdown buys, and what writing a document by code costs |
+| [`orm.js`](./orm.js) | Entities and the typed client against Prisma/Drizzle/Kysely over SQLite, on Node and on Bun, with statement counts beside the timings | Comparing the store and its front door with the tools they will be compared to |
 | [`qt3-runner.js`](./qt3-runner.js) | W3C QT3 scorecard through the XQuery front-end | Checking query-engine compliance (see [qt3-README.md](./qt3-README.md)) |
 | [`index.js`](./index.js) | The json-schema-benchmark style suite run | Quick Jaren-vs-Ajv suite pass (`npm run benchmark`) |
 
@@ -904,6 +906,17 @@ are Node-only rows; the capability cliff (no UDF hatch, no session
 capture) is stated beside the Bun tables. The losses stay in the
 tables with their reasons.
 
+**Run-to-run spread, measured rather than assumed.** Three unchanged
+runs of this suite on one host (Node v24.19.0, Linux x86_64) at the
+campaign's close-out put 9 of 78 Node figures beyond the ±10 % this
+repository's README quotes for micro-timings, the widest at 16.7 %, and
+moved the graph-load headline across 9.0× / 6.7× / 7.1×. **Treat this
+suite as noisier than ±10 %**: the numbers are file-database work at a
+500-user corpus, where a page-cache miss is a visible fraction of a row.
+What does NOT move between runs is what the suite is for — the statement
+counts, and the equality every engine must produce before it is timed.
+Read a ratio here as a band, and read a statement count as a fact.
+
 The `@jarenjs/linq/db` client is one more route in every table: the
 same store reached through its typed front door — a chain per read
 (`where`/`orderBy`/`skip`/`take` pushed down, the keyset page spelled
@@ -914,3 +927,37 @@ itself is a published row beside the hand-written documents. Its reads
 run unvalidated like the store rows; the one validated client row is
 the DEFAULT door (`open()` without a `validator`, formats asserting),
 stated as such.
+
+## db.js — the store, the chain, and what a pen costs to write
+
+`node benchmark/db.js` measures `@jarenjs/db` against the JavaScript
+document stores a reader would shortlist (PouchDB over pouchdb-find,
+RxDB over its memory storage, lowdb as the object-with-a-veneer floor),
+with `--docs N` for the corpus size. Its headline is jaren-only and
+structural: the same query document through the pushdown planner versus
+forced to the residual (`pushdown: false`) — what translating a query to
+SQL is worth, measured rather than argued. Every engine must answer the
+same normalized result before a timer starts, and each engine's storage
+adapter is printed beside its rows; the async engines are timed through
+their async APIs, and jaren's async row pays that toll beside its
+`store.sync` row.
+
+Two tables in it are about `@jarenjs/linq` rather than the store:
+
+- **the chain in memory** — a hand-written loop, the chain, and the
+  chain's pre-compiled document, over the same rows. The chain
+  re-captures and re-emits on every call by design, so the third row is
+  what holding the `Sequence` (or the document) buys.
+- **what one DEFINITION costs to build** — the schema, model, JSLT and
+  migration pens against the hand-written literal each must emit byte
+  for byte, in ns per build. This is a **build-time** price, paid once
+  per definition at module load, never per request: the row exists so
+  that "types for free" is not published without its cost. Each pen row
+  is asserted `deepEquals` its literal before it is timed, and the
+  migration row's literal computes the same two shape hashes the pen
+  does, because a hand-written `$migration` document has to carry them
+  too.
+
+The suite needs `rxdb`'s `rxjs` peer installed; it is declared in
+`benchmark/package.json` so that a checkout of the repository's own lock
+can run it.

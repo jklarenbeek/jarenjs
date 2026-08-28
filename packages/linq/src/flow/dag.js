@@ -23,7 +23,7 @@
 import { cloneJson, deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
 import { queryMember } from './capture.js';
 
 const DAG_VERSION = '0.1';
@@ -241,6 +241,7 @@ export function defineDag(spec) {
       `defineDag() nodes is a plain object of id → node declaration, got ${describeValue(spec.nodes)}`,
       '/nodes');
   }
+  requireNameMap(spec.nodes, 'defineDag() nodes', '/nodes');
   const ids = Object.keys(spec.nodes);
   if (ids.length === 0) {
     throw new LinqBuildError('JL0101', 'defineDag() needs at least one node', '/nodes');

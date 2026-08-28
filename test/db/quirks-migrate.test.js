@@ -396,3 +396,54 @@ describe('a dry run writes nothing', () => {
     assert.strictEqual(Buffer.compare(after, fs.readFileSync(file)), 0);
   });
 });
+
+describe("the shape hash reads a model's OWN entity names", () => {
+  // `withoutRenameHints` rebuilds `entities`/`collections` to strip the
+  // planning hint. It did so with a plain `stripped[name] = spec`, so an
+  // entity named `__proto__` — a legal identifier and a legal JSON member,
+  // and what `JSON.parse` of a model FILE hands back as an own property —
+  // reassigned the object's prototype instead of becoming a member: the
+  // entity vanished from the hash input and the canonicalizer then refused
+  // the model the walk had built ("a Object instance is not a JSON object
+  // at /entities"), naming the wrong thing. `setObjectMember` is the
+  // repository's answer to exactly this, and the two models below hash
+  // apart only if the extra entity survives the walk.
+  const entity = () => ({
+    schema: {
+      type: 'object',
+      properties: { id: { type: 'string', 'x-entity': { key: true } } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  });
+  /** A model as a FILE hands it back: `__proto__` is an own data property. */
+  const parsed = (text) => JSON.parse(text);
+  const ONE = parsed(JSON.stringify({ $model: '0.1', entities: { U: entity() } }));
+  const TWO = parsed(JSON.stringify({
+    $model: '0.1',
+    entities: { U: entity(), ['__proto__']: entity() },
+  }));
+
+  it('hashes a model whose entity is named __proto__, and hashes it apart', () => {
+    assert.deepStrictEqual(Object.keys(TWO.entities), ['U', '__proto__']);
+    assert.match(shapeHash(TWO), /^[a-z0-9]+$/u);
+    assert.notStrictEqual(shapeHash(TWO), shapeHash(ONE),
+      'an entity the walk drops would make one MORE entity hash the same');
+    assert.strictEqual(shapeHash(TWO), shapeHash(structuredClone(TWO)), 'and hashes stably');
+  });
+
+  it('plans that entity like any other, and plans nothing against itself', () => {
+    const { migration } = planModelMigration(ONE, TWO, { dialect: sqliteDialect, id: 'p' });
+    assert.ok(migration.steps.some((step) => /CREATE TABLE "__proto__"/u.test(step.sql ?? '')),
+      `the plan creates the table: ${JSON.stringify(migration.steps.map((s) => s.sql ?? s.kind))}`);
+    assert.deepStrictEqual(
+      planModelMigration(TWO, TWO, { dialect: sqliteDialect, id: 'q' }).migration.steps, []);
+  });
+
+  it('strips an x-rename hint from that entity without losing it', () => {
+    const hinted = structuredClone(TWO);
+    hinted.entities['__proto__']['x-rename'] = 'Old';
+    assert.strictEqual(shapeHash(hinted), shapeHash(TWO),
+      'a hint is a planning instruction, not shape — even on this name');
+  });
+});

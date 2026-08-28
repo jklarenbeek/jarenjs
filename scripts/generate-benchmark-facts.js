@@ -218,6 +218,51 @@ function contractDispatchBand(rivalColumn, invert = false) {
 
 
 /** A geo row by name, or a refusal naming it — never a fabricated figure. */
+/** One figure of `orm.json`, by table title prefix and row name. */
+function ormRow(title, name) {
+  const table = data('orm').tables.find((t) => t.title.startsWith(title.slice(0, 40)));
+  if (table === undefined) throw new Error(`orm.json has no table '${title}'`);
+  const row = table.rows.find((r) => r.name === name);
+  if (row === undefined) throw new Error(`orm.json's '${table.title}' has no row '${name}'`);
+  return row.results[0];
+}
+
+/**
+ * Every Node table of `orm.json` where the typed client can be compared
+ * with a rival: which rivals it beats there, and its ratio against the
+ * FASTEST rival in the table (above 1 is a loss). Each engine is taken
+ * at its own best row, which is how each of them would quote itself.
+ * @returns {{ label: string, rival: string, ratio: number,
+ *   met: string[], beats: string[] }[]}
+ */
+function ormClientRows() {
+  const RIVALS = ['Prisma', 'Drizzle', 'Kysely'];
+  const fastest = (rows) => rows.reduce((a, b) => (b.results[0] < a.results[0] ? b : a));
+  const rows = [];
+  for (const table of data('orm').tables) {
+    if (table.title.startsWith('[Bun]')) continue;
+    const timed = (prefix) => table.rows.filter((row) => row.name.startsWith(prefix)
+      && typeof row.results[0] === 'number');
+    const mine = timed('jaren client');
+    if (mine.length === 0) continue;
+    const ours = fastest(mine).results[0];
+    const met = RIVALS.filter((rival) => timed(rival).length > 0);
+    if (met.length === 0) continue;
+    const best = met.map((rival) => ({ rival, ns: fastest(timed(rival)).results[0] }));
+    const winner = best.reduce((a, b) => (b.ns < a.ns ? b : a));
+    rows.push({
+      // the title up to its first ':' or '(' — the table's own words, cut
+      // where its parenthetical apparatus begins
+      label: table.title.split(/[:(]/u)[0].trim().toLowerCase(),
+      rival: winner.rival,
+      ratio: ours / winner.ns,
+      met,
+      beats: best.filter((entry) => ours <= entry.ns).map((entry) => entry.rival),
+    });
+  }
+  return rows;
+}
+
 function geoRow(name) {
   const row = data('geo').rows.find((r) => r.name === name);
   if (row === undefined) throw new Error(`geo.json has no '${name}' row — regenerate it before quoting one`);
@@ -761,6 +806,48 @@ const FACTS = {
   'geo.node': () => data('geo').node,
   'geo.table': () => geoTable((row) => !row.name.startsWith('wkt ')),
   'geo.wktTable': () => geoTable((row) => row.name.startsWith('wkt ')),
+  // -- orm: the phase-B head-to-head, and the price of the front door.
+  // Three facts, all derived from orm.json's own rows: what the typed
+  // client beats, what beats it, and what the door itself costs over the
+  // store it fronts. Quoting only the first would be the same dishonesty
+  // a dropped row is (D11 — report the loss).
+  'orm.clientVsRivals': () => {
+    const rows = ormClientRows();
+    const beaten = ['Prisma', 'Drizzle', 'Kysely']
+      .map((rival) => `${rows.filter((row) => row.beats.includes(rival)).length} of `
+        + `${rows.filter((row) => row.met.includes(rival)).length} against ${rival}`);
+    return beaten.join(', ');
+  },
+  'orm.clientLosses': () => {
+    const losses = ormClientRows().filter((row) => row.ratio > 1)
+      .sort((a, b) => b.ratio - a.ratio);
+    if (losses.length === 0) return 'no row loses to a rival';
+    return losses.map((row) => `${row.label} ${ratio(row.ratio)}× (${row.rival})`).join(', ');
+  },
+  'orm.clientDoorPrice': () => {
+    const point = ormRow('Point read by primary key', 'jaren client (@jarenjs/linq/db)')
+      / ormRow('Point read by primary key', 'jaren (@jarenjs/db)');
+    const predicate = ormRow('Indexed predicate over 500 users',
+      'jaren client (@jarenjs/linq/db) — 10%')
+      / ormRow('Indexed predicate over 500 users', 'jaren — 10% (age >= 81)');
+    const graph = ormRow('Graph load', 'jaren client (@jarenjs/linq/db) — 1 statement(s)')
+      / ormRow('Graph load', 'jaren (@jarenjs/db) — 1 statement (asserted by test)');
+    return `${ratio(point)}× on a point read, ${ratio(predicate)}× on an indexed predicate at `
+      + `10 % selectivity, ${ratio(graph)}× on the two-level graph load`;
+  },
+  // -- the pens: build cost per DEFINITION, never per request
+  'linq.penBuildCost': () => {
+    const table = data('db').tables.find((t) => t.title.startsWith('By code: what one DEFINITION'));
+    const at = (name) => table.rows.find((row) => row.name === name).results[0];
+    const hand = at('  the same document, hand-written');
+    const each = [['schema', 'schema pen — one object, 3 members'], ['model', 'model pen — one entity'],
+      ['JSLT', 'JSLT pen — one rule']]
+      .map(([name, row]) => `${name} ${ratio(at(row) / hand)}×`);
+    const migration = at('migration pen — two models, no step')
+      / at('  the same document, hand-written (both hashes included)');
+    return `${each.join(', ')} a hand-written literal, and the migration pen `
+      + `${ratio(migration)}× a hand-written document carrying the same two shape hashes`;
+  },
   'geo.losses': () => {
     const losses = data('geo').rows.filter((row) => row.rival !== null && row.rival / row.ours < 1);
     if (losses.length === 0) return 'no row loses to its rival';
@@ -1170,6 +1257,7 @@ const DOCS = [
   'packages/josl/README.md',
   'packages/ai/README.md',
   'packages/db/README.md',
+  'packages/linq/README.md',
   'packages/db/docs/MODEL-FORMAT.md',
   'packages/core/README.md',
   'packages/core/ARCHITECTURE.md',
