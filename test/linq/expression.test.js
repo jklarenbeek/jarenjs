@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Expression capture (LINQ-FORMAT.md §3): path recording, method
+ * @file Expression capture (QUERY-PEN.md §3): path recording, method
  * shadowing, literal embedding rules, and the escape detection that
  * keeps a stored proxy from silently emitting nonsense.
  */

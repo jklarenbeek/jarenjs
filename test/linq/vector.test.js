@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The vector family on the fluent surface (LINQ-FORMAT.md §4).
+ * @file The vector family on the fluent surface (QUERY-PEN.md §4).
  *
  * Two things are proven here and neither is decoration. The chain emits
  * the query document a hand-writer would have written — the `$orderby`
@@ -102,14 +102,14 @@ describe('the vector family runs', () => {
   });
 });
 
-describe('the vector surface is documented exactly once, in LINQ-FORMAT §4', () => {
+describe('the vector surface is documented exactly once, in QUERY-PEN §4', () => {
   // the same membership gate the spatial family has: the methods the
   // source spells and the row the format publishes must name the same
   // set, and every one maps to a §8.15 operator the query format
   // publishes — so the surface cannot name an operator that does not
   // exist, and a second vector method cannot land in one place only
   const source = readFileSync(new URL('../../packages/linq/src/expression.js', import.meta.url), 'utf8');
-  const format = readFileSync(new URL('../../packages/linq/docs/LINQ-FORMAT.md', import.meta.url), 'utf8');
+  const format = readFileSync(new URL('../../packages/linq/docs/QUERY-PEN.md', import.meta.url), 'utf8');
   const query = readFileSync(new URL('../../packages/json/docs/QUERY-FORMAT.md', import.meta.url), 'utf8');
 
   const section = sectionOf(query, '### 8.15');
@@ -128,7 +128,7 @@ describe('the vector surface is documented exactly once, in LINQ-FORMAT §4', ()
       + 'measured reason, and this row is where it would have to be argued');
     assert.deepStrictEqual(methods, ['similarity']);
     const row = format.split('\n').find((line) => line.startsWith('| vector family (§8.15) |'));
-    assert.ok(row !== undefined, 'LINQ-FORMAT §4 has the vector row');
+    assert.ok(row !== undefined, 'QUERY-PEN §4 has the vector row');
     for (const name of methods)
       assert.ok(row.includes(`\`${name}(`), `§4's row does not name ${name}`);
     // and the row says what the surface deliberately does NOT have

@@ -216,7 +216,7 @@ describe('a spatial linq chain reaches the derived index (D2)', () => {
     return { store, places };
   };
   // `at` is the index METHOD on this surface, so a member of that name
-  // is reached with get() — the collision LINQ-FORMAT §4 records
+  // is reached with get() — the collision QUERY-PEN §4 records
   const chain = (source) => from(source)
     .params({ region: REGION })
     .where((p, q) => p.get('at').within(q.region))
@@ -532,7 +532,7 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
   });
 });
 
-describe("a chain's element window is read through by both planners (LINQ-FORMAT §6, D15)", () => {
+describe("a chain's element window is read through by both planners (QUERY-PEN §6, D15)", () => {
   it('a collection answers the rows as the one array item, never unwrapped: [] for none, [row] for one', async () => {
     const { store, users } = await seeded();
     const window = (min) => [{ $for: { it: ['$[*]'] }, $where: { $ge: ['$it.age', min] }, $return: '$it' }];

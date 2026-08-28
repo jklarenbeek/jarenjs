@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file `mapAsync` (LINQ-FORMAT.md §11): the bound is enforced (a
+ * @file `mapAsync` (QUERY-PEN.md §11): the bound is enforced (a
  * counting callback proves the window), the bound is REQUIRED, the four
  * modes behave per the `createTaskEffect` vocabulary, ordering is a
  * choice, abort threads through, and failure is fail-closed.

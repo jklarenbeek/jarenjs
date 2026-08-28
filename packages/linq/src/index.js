@@ -7,7 +7,7 @@
  * contract-level coupling — the chain imports no provider; the client
  * subpath `./db` is the package's one declared edge, toward the
  * store). The normative surface, mapping table and error codes live
- * in docs/LINQ-FORMAT.md.
+ * in docs/QUERY-PEN.md.
  */
 
 export { from, fromDocument, Sequence } from './sequence.js';

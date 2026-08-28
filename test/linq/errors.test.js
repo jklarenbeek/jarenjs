@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file Every documented JL code is raised by at least one test
- * (LINQ-FORMAT.md §9), on the suite's coded contract.
+ * (QUERY-PEN.md §9), on the suite's coded contract.
  */
 
 import { describe, it } from 'node:test';
@@ -90,7 +90,7 @@ describe('every JL code fires', () => {
   });
 
   it('JL0101 — a pen received a value it cannot spell', () => {
-    // not JSON: the constant rule of LINQ-FORMAT §5, applied to defaults and literals
+    // not JSON: the constant rule of QUERY-PEN §5, applied to defaults and literals
     assert.throws(() => s.literal(new Date(0)), (e) => e instanceof LinqBuildError && e.code === 'JL0101' && /Date instance/.test(e.message));
     assert.throws(() => s.string().default(() => 'x'), (e) => e.code === 'JL0101' && /function/.test(e.message));
     assert.throws(() => s.enumOf([1, NaN]), (e) => e.code === 'JL0101');

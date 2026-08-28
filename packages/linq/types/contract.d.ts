@@ -22,7 +22,7 @@
  * CONTRACT-FORMAT §10.1's fixed D6 members and §12.3's rendering of
  * them, and the same file pins them equal.
  *
- * The runtime is in src/contract/*; PENS-FORMAT.md §7 is the normative
+ * The runtime is in src/contract/*; CONTRACT-PEN.md is the normative
  * mapping table.
  */
 

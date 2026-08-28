@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Entity roots and the asynchronous provider (LINQ-FORMAT §8,
+ * @file Entity roots and the asynchronous provider (QUERY-PEN §8,
  * §12). A provider's items are bound through ITS root; a store-level
  * provider that serves several roots and none of its own is refused at
  * `from()` time by name (`JL0007`); two providers of one scope join in

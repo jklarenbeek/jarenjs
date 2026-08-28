@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The Sequence contract (LINQ-FORMAT.md §§5–8): deferral,
+ * @file The Sequence contract (QUERY-PEN.md §§5–8): deferral,
  * immutability, re-enumeration, the C# terminal matrix, parameters as
  * externals, and the provider seam — a double proves the document
  * arrives WHOLE and nothing is enumerated locally (D2).

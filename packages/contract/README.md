@@ -135,8 +135,8 @@ shop>` is the operation map, and `typedClient`, `typedHandlers` and
 `typedTools` carry it onto a client, a handler table and an AI toolbox —
 proven type for type equal to what `toTypeScript` declares for the same
 document, the `DateTime` brand on a date-formatted string included.
-The pen's normative section is
-[PENS-FORMAT §7](../linq/docs/PENS-FORMAT.md); it imports nothing of
+The pen's normative document is
+[CONTRACT-PEN.md](../linq/docs/CONTRACT-PEN.md); it imports nothing of
 this package.
 
 ## Compile once, use everywhere

@@ -48,7 +48,7 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['QUERY_CODES', QUERY_CODES, 'packages/json/docs/QUERY-FORMAT.md', 'JQ'],
   ['APP_CODES', APP_CODES, 'packages/app/docs/APP-FORMAT.md', 'JA'],
   ['FLOW_CODES', FLOW_CODES, 'packages/flow/docs/FLOW-FORMAT.md', 'JF'],
-  ['LINQ_CODES', LINQ_CODES, 'packages/linq/docs/LINQ-FORMAT.md', 'JL'],
+  ['LINQ_CODES', LINQ_CODES, 'packages/linq/docs/QUERY-PEN.md', 'JL'],
   ['DB_CODES', DB_CODES,
     ['packages/db/docs/MODEL-FORMAT.md', 'packages/db/docs/MIGRATION-FORMAT.md'], 'JD'],
   ['CONTRACT_CODES', CONTRACT_CODES, 'packages/contract/docs/CONTRACT-FORMAT.md', 'JC'],

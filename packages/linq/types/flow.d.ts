@@ -29,8 +29,8 @@
  *   agree at compile time. The runtime check stays `JF0018`.
  *
  * Every claim here has a runtime twin in `test/linq/flow-pen.test.js`
- * and a compile-level pin in `test/consumer/linq-flow.ts`; PENS-FORMAT.md
- * §8 is the normative mapping table.
+ * and a compile-level pin in `test/consumer/linq-flow.ts`; FLOW-PEN.md
+ * is the normative mapping table.
  */
 
 import type { ExprBase, MemberExpr, StringExpr, UnknownExpr } from './index.js';

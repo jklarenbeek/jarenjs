@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Relation navigation, desugared by the pen (LINQ-FORMAT §3, §4
+ * @file Relation navigation, desugared by the pen (QUERY-PEN §3, §4
  * "relation navigation"): over a provider that carries a relation
  * table, `p.author.email`, `u.posts.all().count()` and
  * `u.posts.all().exists()` are captured as HOPS and lowered to the

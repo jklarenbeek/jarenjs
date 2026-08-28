@@ -39,7 +39,7 @@
 
 import { LinqBuildError } from './errors.js';
 
-/** The binding names the emitted documents own (LINQ-FORMAT §7): the
+/** The binding names the emitted documents own (QUERY-PEN §7): the
  * item bindings, the accumulator and the group — and the relation-hop
  * bindings `r1`, `r2`, … a capture allocates (expression.js). A
  * parameter may shadow none of them. */
@@ -59,7 +59,7 @@ export function isReservedBinding(name) {
 export const RESERVED_BINDINGS_TEXT = 'it, it2, acc, g, and r1, r2, … for relation hops';
 
 /** The stage kinds after which the items are no longer the source's
- * rows: a relation name on them is an ordinary member (LINQ-FORMAT §3).
+ * rows: a relation name on them is an ordinary member (QUERY-PEN §3).
  * The async surface adds its host boundary, `mapAsync`. */
 export const PROJECTING_STAGES = new Set(['select', 'groupBy', 'join', 'groupJoin', 'aggregate']);
 

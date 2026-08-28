@@ -2129,7 +2129,7 @@ export function planQuery(document, shape, options = undefined) {
 /**
  * A chain's element terminal wraps its phrase in a one-item array
  * constructor — `[<phrase>]`, the window that keeps an array-valued item
- * one item (LINQ-FORMAT §6) — so the document a store receives from
+ * one item (QUERY-PEN §6) — so the document a store receives from
  * `toArray()`/`first()` is that constructor around the phrase. Read
  * through it: the phrase inside plans as it would bare, and the engines
  * answer its rows as the ONE array the constructor yields (`wrapped`),

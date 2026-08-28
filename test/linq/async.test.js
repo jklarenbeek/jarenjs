@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The async surface (LINQ-FORMAT.md §10): the D5 proof FIRST —
+ * @file The async surface (QUERY-PEN.md §10): the D5 proof FIRST —
  * the same chain emits a byte-identical document through `from` and
  * `fromAsync` — then streaming (a counting source proves nothing
  * materialises), barriers (named by `explain()`), early close (a

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The spatial family on the fluent surface (LINQ-FORMAT.md §4).
+ * @file The spatial family on the fluent surface (QUERY-PEN.md §4).
  *
  * Two things are proven here and neither is decoration. The chain emits
  * the query document a hand-writer would have written — which is what
@@ -130,14 +130,14 @@ describe('the spatial family runs', () => {
   });
 });
 
-describe('the spatial surface is documented exactly once, in LINQ-FORMAT §4', () => {
+describe('the spatial surface is documented exactly once, in QUERY-PEN §4', () => {
   // the same shape as the operator/§8 membership gate one package over:
   // the methods the source spells and the row the format publishes must
   // name the same set, so a sixth spatial method cannot land in one
   // place — and every method maps to a §8.14 operator the query format
   // publishes, so the surface cannot name an operator that does not exist
   const source = readFileSync(new URL('../../packages/linq/src/expression.js', import.meta.url), 'utf8');
-  const format = readFileSync(new URL('../../packages/linq/docs/LINQ-FORMAT.md', import.meta.url), 'utf8');
+  const format = readFileSync(new URL('../../packages/linq/docs/QUERY-PEN.md', import.meta.url), 'utf8');
   const query = readFileSync(new URL('../../packages/json/docs/QUERY-FORMAT.md', import.meta.url), 'utf8');
 
   // the section, not everything after it: §8.14 stopped being the last
@@ -175,7 +175,7 @@ describe('the spatial surface is documented exactly once, in LINQ-FORMAT §4', (
       `§8.14 yielded ${spatialOperators.size} operators — the section slice is wrong`);
     assert.ok(spatialMethods.length >= 13,
       `the source yielded ${spatialMethods.length} spatial methods`);
-    assert.ok(row !== undefined, 'LINQ-FORMAT §4 has the spatial row');
+    assert.ok(row !== undefined, 'QUERY-PEN §4 has the spatial row');
     const unknown = documented.filter((name) => !emitted.has(name) && !handWritten.has(name));
     assert.deepStrictEqual(unknown, [], 'the row names a method the source does not have');
     const spatialDocumented = documented.filter((name) => spatialMethods.includes(name));

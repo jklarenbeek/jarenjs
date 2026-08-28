@@ -181,7 +181,7 @@ export function isProviderSource(source) {
 }
 
 /**
- * The root expression a provider's items are bound through (LINQ-FORMAT
+ * The root expression a provider's items are bound through (QUERY-PEN
  * §8): its `root` (`'$.Post[*]'` for an entity set), or `'$[*]'` when it
  * names none — the whole input, a collection. A provider that serves
  * SEVERAL roots and none of its own (a store with entities: `roots`) has
@@ -198,7 +198,7 @@ export function providerRoot(provider) {
     if (Array.isArray(roots) && roots.length > 0) {
       throw new LinqBuildError('JL0007',
         `this provider serves entity roots ${roots.join(', ')} and has no root of its own — `
-        + 'chain over one of them: from(store.entity(name)) (LINQ-FORMAT.md §8)');
+        + 'chain over one of them: from(store.entity(name)) (QUERY-PEN.md §8)');
     }
     return '$[*]';
   }
@@ -210,7 +210,7 @@ export function providerRoot(provider) {
 }
 
 /**
- * The relation context a provider offers (LINQ-FORMAT §8): its own
+ * The relation context a provider offers (QUERY-PEN §8): its own
  * relation table — `relations`, keyed by member (MODEL-FORMAT §10.1) —
  * and a resolver for the tables of the other roots of its scope
  * (`scope.relations`, keyed by root name: one store's entity sets), so
@@ -234,7 +234,7 @@ export function providerRelations(provider) {
 /**
  * Whether two sources may share one document: the same object, or two
  * providers carrying one `scope` — one store's entity sets, which are
- * two roots of ONE multi-entity input (LINQ-FORMAT §8).
+ * two roots of ONE multi-entity input (QUERY-PEN §8).
  * @param {any} a
  * @param {any} b
  * @returns {boolean}

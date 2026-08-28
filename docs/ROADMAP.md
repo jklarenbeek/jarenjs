@@ -639,7 +639,7 @@ what each does is its own documentation's job
   desugared by the chain now: `p.author.email` and `u.posts.all()
   .count()` over an entity set lower to the correlated phrases the
   engine runs, read from the set's relation table (MODEL-FORMAT §10.1,
-  LINQ-FORMAT §4 "relation navigation"), and the document carries no
+  QUERY-PEN §4 "relation navigation"), and the document carries no
   relation name. The one hop still refused is many-to-many (`u.labels`,
   `JL0105`): its join table is not a queryable root, so there is no
   phrase to lower to. The change that closes it: expose the join tables
@@ -675,7 +675,7 @@ what each does is its own documentation's job
   drift.
 - [ ] **Cross-source linq joins beyond one store.** Two entity sets of
   one store join in one document now (a shared provider `scope`,
-  LINQ-FORMAT §8; one statement for a bare-binding equijoin). What stays
+  QUERY-PEN §8; one statement for a bare-binding equijoin). What stays
   open is a join across two different sources — two stores, a store and
   an array — which one query document cannot spell (one input), and
   three or more bindings, which the entity translator names a residual
@@ -790,7 +790,7 @@ what each does is its own documentation's job
   oracle's cases run through both.
 - [ ] **The remaining authored documents have no pen.** Nine formats are
   written by code today, under one contract stated in
-  [PENS-FORMAT §1](../packages/linq/docs/PENS-FORMAT.md) — the emitted
+  [LINQ-FORMAT §1](../packages/linq/docs/LINQ-FORMAT.md) — the emitted
   document is exactly the published one, types are phantoms, and grammar,
   compile, docs and type gates hold each. Five authored formats are still
   written as JSON literals, each for its own reason rather than a shared
@@ -803,10 +803,44 @@ what each does is its own documentation's job
   would be typed by the msgids the English catalog declares; and the AI
   action language is authored by models rather than people, so a pen
   there buys fixtures and tests rather than authoring. Each is one work
-  order of the shape orders 07/11/12 already have — a subpath, a
-  `types/<pen>.d.ts`, a corpus test, grammar validation, an engine
-  compile, a PENS-FORMAT section whose fences run, a tree-shaking probe,
-  a packed-consumer subpath and a type pin. None is scheduled.
+  order of the shape every shipped pen already has — a subpath, a
+  `types/<pen>.d.ts`, a corpus test asserting emission byte for byte
+  against hand-written documents and the format's own examples, grammar
+  validation, an engine compile and run, a pen document whose fences
+  run, a tree-shaking probe carrying neither chain module nor engine, a
+  packed-consumer subpath and a type pin. A JTLT order additionally
+  carries the grammar artifact and its tests. None is scheduled.
+- [ ] **Three pens declare a class the runtime does not export, and export
+  a class the declaration does not name.** `packages/linq/types/schema.d.ts`
+  declares `BooleanBuilder`, `NullBuilder` and `NamedBuilder` with
+  `export class`, which declares a VALUE as well as a type, while
+  `packages/linq/src/schema/index.js` exports neither them nor a binding
+  under those names — so `import { NamedBuilder } from '@jarenjs/linq/schema'`
+  type-checks and is `undefined` at run time, and an `instanceof` against
+  it throws. The other direction holds too: `NeverBuilder` and
+  `createFactories` are runtime exports no declaration names, so a
+  consumer who wants either cannot import it under `strict`. `model`
+  repeats both halves (`EntityNeverBuilder` runtime-only, `RelationBuilder`
+  declared-only) and `forms` the first (`FormNeverBuilder`). The
+  constraint is that the three declared-only classes are load-bearing as
+  TYPES — `types/model.d.ts` and `types/forms.d.ts` extend all three, the
+  schema corpus annotates its recursive definition with `NamedBuilder`,
+  and `test/consumer/linq-schema.ts` pins it — so the repair is not a
+  deletion but a decision per name: export the class from the subpath, or
+  declare it as an `interface`/`type` that carries no value. Either way it
+  is an export-surface change, and the packed-consumer and type gates are
+  what must prove it.
+- [ ] **A refused `-0` is reported as `0`.** `describeValue` in
+  `packages/linq/src/json-boundary.js` renders a number with `String(value)`,
+  and `String(-0)` is `'0'` — so `s.number().default(-0)` refuses with
+  "default() received 0, which is not JSON", naming a value the caller did
+  not write. The tail of the same message says "finite numbers (never -0)",
+  so the information is there, but a reader who greps their source for the
+  literal the message names finds the wrong one. The constraint is that
+  `describeValue` is the shared boundary every pen's `JL0101` message is
+  built from and its output appears in assertions across the pen tests, so
+  special-casing `-0` there is a message change with a wide blast radius
+  and wants its own pass over those assertions.
 
 ## @jarenjs/ai
 
@@ -1068,7 +1102,7 @@ half is documented where a stranger looks rather than here: the kernel and its
 published losses in `packages/core/docs/GEO.md` and `packages/core/ARCHITECTURE.md`;
 the thirteen spatial operators, the conversion family, the proximity rule and
 the CSV recipe in QUERY-FORMAT §8.14, the `@jarenjs/json` README and
-`docs/HOWTO.md`; the fluent surface in LINQ-FORMAT §4; derived spatial index
+`docs/HOWTO.md`; the fluent surface in QUERY-PEN §4; derived spatial index
 kinds, the two-stage plan with its truth table, the geofence and the storage
 numbers with their loss in the `@jarenjs/db` README, ARCHITECTURE, MODEL-FORMAT
 and LIVE-FORMAT; the spatial authoring profile and the geo toolbox in the
@@ -1125,6 +1159,27 @@ still open is listed here, each with its reason.
   so if this is ever built it starts by benchmarking honestly against
   [Turf](https://github.com/Turfjs/turf) (~796k weekly downloads) and JSTS
   (~577k), and records the loss here rather than pretending the gap is small.
+
+## The website
+
+- [ ] **A cross-document deep link leaves the site.** The README dialog's
+  link walk (`rewriteAnchor`, `packages/website/src/boundaries/markdown.js`)
+  resolves a repo-relative href and then tests the resolved path for
+  `.md` — but the path still carries its `#fragment`, so
+  `SCHEMA-PEN.md#4-refusals` fails that test, fails `isDirectoryPath`
+  next because its last segment contains a dot, and falls through to a
+  GitHub blob URL in a new tab. A bare `SCHEMA-PEN.md` navigates in the
+  dialog and a same-document `#4-refusals` scrolls; only the two
+  together throw the reader out, which is exactly the form a directory
+  of interlinked documents wants to write. The fix has to split the
+  fragment off before the extension test and then carry it: the dialog's
+  navigation state is `{ title, url }` in three places — `readme/navigate`
+  patches it, the `readme-hist` effect stores it as the trail entry, and
+  `readme/show` replays that entry on back and forward — and the scroll
+  cannot run at dispatch time the way `readme/anchor` does, because the
+  document is not in the DOM until `readme/loaded`. The trail then has
+  to decide whether a fragment is a history entry of its own or a
+  detail of the entry it arrived with.
 
 ## Benchmarks & tooling
 

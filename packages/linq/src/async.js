@@ -57,7 +57,7 @@ import { semanticKey } from '@jarenjs/core/object';
  * never a barrier: over a provider it rides INSIDE the one pushed
  * document (the only place this surface joins), and over a single-pass
  * source — a cursor, a queue, a stream — it is refused, because the
- * inner side would have to read the source twice (LINQ-FORMAT.md §10). */
+ * inner side would have to read the source twice (QUERY-PEN.md §10). */
 const BARRIERS = {
   orderBy: '$orderby materialises the tuple stream to sort it',
   thenBy: '$orderby materialises the tuple stream to sort it',
@@ -208,7 +208,7 @@ export class AsyncSequence {
       throw new LinqRuntimeError('JL2006',
         `the provider answered ${terminal}() with ${result === undefined ? 'undefined'
           : `a ${typeof result}`} — an element terminal emits an array constructor, so a `
-        + 'conforming execute() answers exactly one array (LINQ-FORMAT.md §8)');
+        + 'conforming execute() answers exactly one array (QUERY-PEN.md §8)');
     }
     return /** @type {any[]} */ (result);
   }
@@ -278,7 +278,7 @@ export class AsyncSequence {
     });
   }
 
-  /** The inner side of a join, checked (LINQ-FORMAT.md §10): a join on
+  /** The inner side of a join, checked (QUERY-PEN.md §10): a join on
    * this surface rides INSIDE the one document a provider receives, so
    * it needs a provider origin with no `mapAsync` before it, an async
    * sequence over the same provider (or one sharing its scope) as the
@@ -292,7 +292,7 @@ export class AsyncSequence {
       throw new LinqBuildError('JL0005',
         `${what} on the async surface is pushed whole to a provider — it needs a provider `
         + 'source and comes before any mapAsync; over an iterable, a cursor or a push queue '
-        + 'there is no join, because a single-pass source cannot be read twice (LINQ-FORMAT.md §10)');
+        + 'there is no join, because a single-pass source cannot be read twice (QUERY-PEN.md §10)');
     }
     if (!(inner instanceof AsyncSequence) || !inner.#pushable()) {
       throw new LinqBuildError('JL0005',
@@ -388,10 +388,10 @@ export class AsyncSequence {
 
   zip() {
     throw new LinqBuildError('JL0006',
-      'zip is unsupported: the query grammar has no positional co-iteration (see LINQ-FORMAT.md §4)');
+      'zip is unsupported: the query grammar has no positional co-iteration (see QUERY-PEN.md §4)');
   }
 
-  /** The bounded-concurrency boundary (LINQ-FORMAT.md §11). */
+  /** The bounded-concurrency boundary (QUERY-PEN.md §11). */
   mapAsync(fn, options) {
     if (typeof fn !== 'function') {
       throw new LinqBuildError('JL0005', 'mapAsync takes an async callback');
@@ -799,7 +799,7 @@ function validateParams(bindings) {
 }
 
 /**
- * Build an async sequence over an async source (LINQ-FORMAT.md §10), or
+ * Build an async sequence over an async source (QUERY-PEN.md §10), or
  * over a provider (§12): an `execute` duck is asked for BEFORE the
  * iterable shapes, and its items are bound through its own root — as
  * `from()` binds them, so the two surfaces emit one document.

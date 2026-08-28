@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Source adapters (LINQ-FORMAT.md §12): the cursor shape, the
+ * @file Source adapters (QUERY-PEN.md §12): the cursor shape, the
  * push queue with its high-water mark, sync iterables, and the josl
  * CSV end-to-end — `iterateCsvStream` into a linq chain with the live
  * set measured flat after a forced GC (in a subprocess, per the

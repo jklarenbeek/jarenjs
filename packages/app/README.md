@@ -82,7 +82,7 @@ with one. A `bind()` to an action `actions` does not declare is refused
 at build time (`JL0102`) rather than dropped per click (`JA2001`), and
 the state's required members must have defaults or an explicit
 `initial`. The mapping table is
-[PENS-FORMAT §9](../linq/docs/PENS-FORMAT.md); this package depends on
+[APP-PEN.md](../linq/docs/APP-PEN.md); this package depends on
 none of it.
 
 ## The view

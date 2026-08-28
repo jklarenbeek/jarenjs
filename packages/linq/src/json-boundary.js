@@ -3,7 +3,7 @@
  * @file The JSON boundary every value entering a pen's document crosses
  * (`JL0101`): a default, a literal, an annotation, a hand-written
  * schema or query document, a mode name, a priority. One predicate for
- * every pen — the constant rule of LINQ-FORMAT §5, applied at the door:
+ * every pen — the constant rule of QUERY-PEN §5, applied at the door:
  * null, booleans, finite numbers (never `-0`), strings, arrays and plain
  * objects, and nothing else — a function, symbol, bigint, `NaN`,
  * `±Infinity`, a class instance or a cycle is refused by name.

@@ -44,7 +44,7 @@ derived from its schema's defaults, the view the JSLT pen's stylesheet,
 actions captured over §3.1's three names, and patch pointers derived
 from the state shape — with `defineApp()` refusing at build time what
 §4 and §6 would otherwise report per dispatch. Its mapping table is
-[PENS-FORMAT §9](../../linq/docs/PENS-FORMAT.md); §2's document below
+[APP-PEN.md](../../linq/docs/APP-PEN.md); §2's document below
 and the `contract/catalog.load/start` action of
 [CONTRACT-FORMAT §11.1](../../contract/docs/CONTRACT-FORMAT.md) are
 rebuilt through it byte for byte by that package's test suite. Nothing

@@ -1,13 +1,20 @@
 //@ts-check
 /**
- * @file One helper shared by the surface-membership gates.
+ * @file One helper shared by the gates that read a format document.
  *
  * Both the spatial and the vector gate assert that the methods
- * `expression.js` spells, the row LINQ-FORMAT §4 publishes and the
- * operators QUERY-FORMAT §8 defines name the same set. Each needs one
- * subsection of a format document, and getting its END wrong is the
- * failure mode that matters: a slice that comes back empty makes every
- * membership assertion pass over nothing.
+ * `expression.js` spells, the row QUERY-PEN §4 publishes and the
+ * operators `packages/json/docs/QUERY-FORMAT.md` §8 defines name the
+ * same set. Each needs one `### n.m` subsection of a format document,
+ * and getting its END wrong is the failure mode that matters: a slice
+ * that comes back empty makes every membership assertion pass over
+ * nothing.
+ *
+ * The section this stops at is the next heading of ANY depth, which is
+ * what a numbered subsection wants. A reader who needs a whole
+ * TOP-LEVEL section — one that may group its own rows under `###`
+ * subheadings — wants a slice that stops at the next `## ` instead, and
+ * must not reach for this one.
  */
 
 /**

@@ -150,7 +150,7 @@ the same context (`c.root`, `c.value`, `c.pointer`) rather than typed
 as path strings, and `assertOnSubmit()` answering the layer-3 twin
 below in one call. The document above is what it emits, byte for byte
 — see [the by-code twin](#the-same-model-by-code) and
-[PENS-FORMAT §10](../linq/docs/PENS-FORMAT.md). This package depends on
+[FORMS-PEN.md](../linq/docs/FORMS-PEN.md). This package depends on
 none of it; the annotation is the contract.
 
 Recognized members — unknown members are ignored for forward compatibility:

@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file `mapAsync` — the ONE explicit bounded-concurrency boundary
- * (LINQ-FORMAT.md §11). Element-wise asynchronous work (an HTTP call, a
+ * (QUERY-PEN.md §11). Element-wise asynchronous work (an HTTP call, a
  * model call, a file read per row) happens here and nowhere else: there
  * is no parallel universe of `selectAwait`-shaped operators, and a
  * per-element async *predicate* is `mapAsync` then `where`, by design.

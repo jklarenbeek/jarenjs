@@ -430,7 +430,7 @@ export interface RelationEntry {
  * rows it serves. */
 export type RelationTable = Readonly<Record<string, RelationEntry>>;
 
-/** One relation hop a callback navigated (LINQ-FORMAT §4, relation
+/** One relation hop a callback navigated (QUERY-PEN §4, relation
  * navigation): the member read, the relation's kind, and the binding
  * the lowered correlated phrase ranges over (`r1`, `r2`, …). */
 export interface Hop {
@@ -439,7 +439,7 @@ export interface Hop {
   binding: string;
 }
 
-/** The provider contract (D2, LINQ-FORMAT §8): any object exposing
+/** The provider contract (D2, QUERY-PEN §8): any object exposing
  * `execute(document, options)`. The document arrives whole; the return
  * value uses the engine's result mapping. `T` is the item type — read
  * from the `__item` phantom a typed provider carries (a typed entity
@@ -477,7 +477,7 @@ export interface AsyncProvider<T = unknown> {
 }
 
 /** The engine's compile registries, under the engine's own option names
- * (LINQ-FORMAT §8.1): what makes an expressible document executable in
+ * (QUERY-PEN §8.1): what makes an expressible document executable in
  * memory. Their shapes are the query engine's — wide here, never wrong. */
 export interface LinqOptions {
   /** Enables `ofType`/`cast` (schema operators); e.g.
@@ -601,7 +601,7 @@ export class Sequence<T = unknown, P = {}> {
   any(predicate?: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): boolean;
   all(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): boolean;
 
-  /** Cross into the async surface (LINQ-FORMAT.md §11): the sync chain
+  /** Cross into the async surface (QUERY-PEN.md §11): the sync chain
    * becomes the pushed prefix; the element re-types to the callback's
    * RESOLVED type. */
   mapAsync<R>(fn: (item: T, signal: AbortSignal) => R, options: MapAsyncOptions):
@@ -619,7 +619,7 @@ export function fromDocument<T = unknown>(
   options?: LinqOptions,
 ): Sequence<T, {}>;
 
-/** The runtime code table, synced to LINQ-FORMAT.md §9 by a test. */
+/** The runtime code table, synced to QUERY-PEN.md §9 by a test. */
 export const LINQ_CODES: Readonly<Record<string, string>>;
 
 export class LinqBuildError extends Error {
@@ -634,7 +634,7 @@ export class LinqRuntimeError extends Error {
   readonly docPath: string | undefined;
 }
 
-// ————— The asynchronous surface (LINQ-FORMAT.md §§10–12) —————
+// ————— The asynchronous surface (QUERY-PEN.md §§10–12) —————
 
 export interface MapAsyncOptions {
   /** REQUIRED: the in-flight bound (a positive integer, `JL0005`
@@ -683,7 +683,7 @@ export class AsyncSequence<T = unknown, P = {}> {
   /** Equi-join, pushed WHOLE: only over a provider origin, before any
    * `mapAsync`, with an inner async sequence over the same provider or
    * one sharing its scope (`JL0005` otherwise — a single-pass source
-   * cannot be joined; LINQ-FORMAT §10). */
+   * cannot be joined; QUERY-PEN §10). */
   join<U, R extends ExprResult>(
     inner: AsyncSequence<U, any>,
     outerKey: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult,

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The mapping table, row by row (LINQ-FORMAT.md §4): every
+ * @file The mapping table, row by row (QUERY-PEN.md §4): every
  * `native` row asserts BOTH the emitted document and the executed
  * result, and the worked examples in the format doc are
  * byte-reproducible by the builder. The D2 proof runs here too: the

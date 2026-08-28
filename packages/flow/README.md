@@ -261,7 +261,7 @@ gate — `compileFsm`/`compileDag` — which is the point: the pen refuses
 only what it cannot spell (a plain-string guard is `JL0102`, because
 §3 makes a non-`$` literal vacuously true), and everything the format
 governs is still the compiler's `JF0xxx`. The mapping table is
-[PENS-FORMAT §8](../linq/docs/PENS-FORMAT.md#8-the-flow-pen--jarenjslinqflow).
+[FLOW-PEN.md](../linq/docs/FLOW-PEN.md).
 
 ## Development
 

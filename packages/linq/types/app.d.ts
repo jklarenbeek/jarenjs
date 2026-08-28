@@ -28,8 +28,8 @@
  *   cannot reach: a view is a compiled stylesheet by then.
  *
  * Every claim here has a runtime twin in `test/linq/app-pen.test.js` and
- * a compile-level pin in `test/consumer/linq-app.ts`; PENS-FORMAT.md §9
- * is the normative mapping table.
+ * a compile-level pin in `test/consumer/linq-app.ts`; APP-PEN.md is the
+ * normative mapping table.
  */
 
 import type { Expr, MemberExpr, UnknownExpr } from './index.js';

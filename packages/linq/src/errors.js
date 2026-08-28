@@ -4,7 +4,7 @@
  * contract: every failure carries a stable `code` (JL0xxx build, JL2xxx
  * runtime), a bare `reason`, a composed `message`, and — where a
  * document position exists — a `docPath`. The normative table lives in
- * docs/LINQ-FORMAT.md §9, proven in sync with `LINQ_CODES` below by a
+ * docs/QUERY-PEN.md §9, proven in sync with `LINQ_CODES` below by a
  * test.
  */
 
@@ -12,7 +12,7 @@ import { CodedError } from '@jarenjs/core/errors';
 
 /**
  * The runtime code table (the `CSV_CODES` shape): one entry per code
- * this package can raise, proven in sync with LINQ-FORMAT.md §9's
+ * this package can raise, proven in sync with QUERY-PEN.md §9's
  * normative table by a test.
  */
 export const LINQ_CODES = Object.freeze({
@@ -67,7 +67,7 @@ export const LINQ_CODES = Object.freeze({
  *    store with entities; chain over one of them (`store.entity(name)`)
  *
  * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`,
- * `/contract`, `/flow`) and the client (`/db`; PENS-FORMAT.md §1.3)
+ * `/contract`, `/flow`) and the client (`/db`; LINQ-FORMAT.md §1.3)
  * refuse with the `JL01xx` codes:
  *
  *  - `JL0101` — a pen received a value it cannot spell: a function,

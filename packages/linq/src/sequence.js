@@ -4,7 +4,7 @@
  * NEW sequence; nothing runs until a terminal operation; a sequence may
  * be enumerated repeatedly and each enumeration re-reads its source —
  * the C# contract, including the part that surprises people
- * (LINQ-FORMAT.md §5 has the worked example).
+ * (QUERY-PEN.md §5 has the worked example).
  *
  * The chain is data: `toDocument()` emits one Jaren query document, and
  * a terminal either compiles it in memory (the reference semantics) or
@@ -202,7 +202,7 @@ export class Sequence {
    * root — so the other side derives from the same source, or (for a
    * join) from a provider sharing this one's scope: two entity sets of
    * one store are two roots of ONE multi-entity input, and the store
-   * answers their equijoin in one statement (LINQ-FORMAT.md §8). A
+   * answers their equijoin in one statement (QUERY-PEN.md §8). A
    * `concat` stays same-source: its other side contributes an
    * expression over THIS input, never a second one. Returns the merged
    * parameter bindings: the inner side's declared externals ride along,
@@ -288,7 +288,7 @@ export class Sequence {
     if (typeof seed === 'function' && step === undefined) {
       throw new LinqBuildError('JL0006',
         'aggregate(fn) is unsupported: JSON cannot spell the implicit first element as a '
-        + 'lambda seed — pass a seed, aggregate(seed, fn) (see LINQ-FORMAT.md §4)');
+        + 'lambda seed — pass a seed, aggregate(seed, fn) (see QUERY-PEN.md §4)');
     }
     const { expression, hops } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
     return this.#with({
@@ -360,7 +360,7 @@ export class Sequence {
   /** Cross into the async surface: everything BEFORE this call is the
    * prefix — compiled in memory, or pushed WHOLE to the provider — and
    * `mapAsync` plus everything after runs locally over its rows.
-   * `explain()` on the result reports the split (LINQ-FORMAT.md §11).
+   * `explain()` on the result reports the split (QUERY-PEN.md §11).
    * @param {(item: any, signal: AbortSignal) => any} fn
    * @param {{ concurrency: number, mode?: string, ordered?: boolean }} options */
   mapAsync(fn, options) {
@@ -375,11 +375,11 @@ export class Sequence {
     }, fn, options);
   }
 
-  /** Recorded `unsupported` (LINQ-FORMAT.md §4): the grammar has no
+  /** Recorded `unsupported` (QUERY-PEN.md §4): the grammar has no
    * positional co-iteration. */
   zip() {
     throw new LinqBuildError('JL0006',
-      'zip is unsupported: the query grammar has no positional co-iteration (see LINQ-FORMAT.md §4)');
+      'zip is unsupported: the query grammar has no positional co-iteration (see QUERY-PEN.md §4)');
   }
 
   /** Declare (and bind) external parameters: `.params({ tenantId })`.
@@ -426,7 +426,7 @@ export class Sequence {
   /** The compiled view of the chain: the document, its externals, its
    * dependency sets and the relation hops its callbacks navigated (the
    * member, the relation's kind and the binding the lowered phrase
-   * ranges over — LINQ-FORMAT §4, relation navigation).
+   * ranges over — QUERY-PEN §4, relation navigation).
    *
    * This always explains the IN-MEMORY compilation — it is the reference
    * semantics, and it is not the provider's plan. It cannot report SQL
@@ -490,7 +490,7 @@ export class Sequence {
       throw new LinqRuntimeError('JL2006',
         `the provider answered ${terminal}() with ${result === undefined ? 'undefined'
           : `a ${typeof result}`} — an element terminal emits an array constructor, so a `
-        + 'conforming execute() answers exactly one array (LINQ-FORMAT.md §8)');
+        + 'conforming execute() answers exactly one array (QUERY-PEN.md §8)');
     }
     return /** @type {any[]} */ (result);
   }

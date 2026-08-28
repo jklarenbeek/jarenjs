@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file The date and time-series families on the fluent surface
- * (LINQ-FORMAT.md §4, QUERY-FORMAT.md §§8.13 and 8.16).
+ * (QUERY-PEN.md §4, QUERY-FORMAT.md §§8.13 and 8.16).
  *
  * One rule is proven here, method by method: **every lowering is the
  * document a hand-writer would have written, and every answer is the
@@ -13,7 +13,7 @@
  * surface over a document language is prone to.
  *
  * The membership gates at the bottom are the anti-drift half: the
- * methods the source spells, the row LINQ-FORMAT §4 publishes and the
+ * methods the source spells, the row QUERY-PEN §4 publishes and the
  * operators QUERY-FORMAT publishes must name the same set, so a family
  * cannot gain a method in one place only.
  */
@@ -238,7 +238,7 @@ describe('the date and series surfaces are documented exactly once', () => {
   const source = readFileSync(
     new URL('../../packages/linq/src/expression.js', import.meta.url), 'utf8');
   const format = readFileSync(
-    new URL('../../packages/linq/docs/LINQ-FORMAT.md', import.meta.url), 'utf8');
+    new URL('../../packages/linq/docs/QUERY-PEN.md', import.meta.url), 'utf8');
   const query = readFileSync(
     new URL('../../packages/json/docs/QUERY-FORMAT.md', import.meta.url), 'utf8');
   const types = readFileSync(
@@ -273,7 +273,7 @@ describe('the date and series surfaces are documented exactly once', () => {
       'the date family is complete on this surface — §8.13 operators with no method');
     const methods = [...emits].filter(([, op]) => operators.has(op)).map(([name]) => name);
     const row = format.split('\n').find((line) => line.startsWith('| date family (§8.13) |'));
-    assert.ok(row !== undefined, 'LINQ-FORMAT §4 has the date row');
+    assert.ok(row !== undefined, 'QUERY-PEN §4 has the date row');
     for (const name of methods) {
       assert.ok(new RegExp(`\\b${name}\\b`).test(row), `§4's row does not name ${name}`);
       assert.ok(new RegExp(`\\b${name}\\(`).test(types),
@@ -287,7 +287,7 @@ describe('the date and series surfaces are documented exactly once', () => {
       ['$asof', '$overlaps', '$resample', '$rolling', '$time-bucket'],
       'the series family is exactly five operators');
     const row = format.split('\n').find((line) => line.startsWith('| series family (§8.16) |'));
-    assert.ok(row !== undefined, 'LINQ-FORMAT §4 has the series row');
+    assert.ok(row !== undefined, 'QUERY-PEN §4 has the series row');
     for (const name of ['overlaps', 'timeBucket', 'resample', 'rolling', 'asof']) {
       assert.ok(row.includes(`\`${name}(`), `§4's row does not name ${name}`);
       assert.ok(new RegExp(`\\b${name}\\(`).test(types),

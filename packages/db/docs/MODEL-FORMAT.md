@@ -1037,7 +1037,7 @@ The schema stays a valid JSON Schema throughout: strip every
 (test-asserted over a corpus). The vocabulary is invisible to the
 validator by the same argument as `x-form`. A model document may also
 be written by code — `@jarenjs/linq/model`'s `defineModel()` emits
-exactly this document (PENS-FORMAT §3), and this section stays its
+exactly this document ([MODEL-PEN.md](../../linq/docs/MODEL-PEN.md)), and this section stays its
 one specification.
 
 ### 9.2 The `x-entity` vocabulary (a closed set)
@@ -1201,10 +1201,10 @@ all — a `$for` over a member the model does not name, or over a
 scalar — is `JD0033` at compile, never an empty answer. The
 array-constructor spelling `["$.<Entity>[*]"]`, which `@jarenjs/linq`
 emits so that an item that is itself an array stays one item
-(LINQ-FORMAT §5), names the same whole-entity source; the planner
+(QUERY-PEN §5), names the same whole-entity source; the planner
 reads through it for collections (`["$[*]"]`) and entities alike.
 
-An entity set is a provider (LINQ-FORMAT §8): `store.entity(name)` and
+An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
 `store.sync.entity(name)` carry `execute(document, options)` and
 `explain(document, options)` — the document is over the multi-entity
 root and goes to the entity translator whole, exactly as
@@ -1216,7 +1216,7 @@ the entity names, because it has no single root: a chain over it is
 refused by name (`JL0007`) rather than answering the mixed rows or
 counting the sets, and a document naming no entity array stays
 `JD0033`. A chain's element terminal hands over the one-item window
-`[<phrase>]` (LINQ-FORMAT §6); the planner reads through the window as
+`[<phrase>]` (QUERY-PEN §6); the planner reads through the window as
 it reads through the packed source — the phrase inside plans as if
 bare, and the store answers its rows as the ONE array item the engine
 would (`[]` for none, `[row]` for one, never singleton-unwrapped;
@@ -1248,7 +1248,7 @@ set can follow a hop into another root. `relationTables(entities)` is
 the one function that derives them. The document format is unchanged:
 `@jarenjs/linq`'s chain reads the table and lowers `p.author.email` to
 `{ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] },
-$return: '$r1.email' }` (LINQ-FORMAT §4, relation navigation) — a
+$return: '$r1.email' }` (QUERY-PEN §4, relation navigation) — a
 document a hand could have written, which this translator and the
 engine both run and the oracle proves (`15-linq-hops.json`). Every such
 lowered shape is a residual here (§10.6 — a projection, a comparison or

@@ -13,8 +13,8 @@
  * the flow pen's `context` meets, and TypeScript's own.
  *
  * Every claim here has a runtime twin in `test/linq/forms-pen.test.js`
- * and a compile-level pin in `test/consumer/linq-app.ts`; PENS-FORMAT.md
- * §10 is the normative mapping table.
+ * and a compile-level pin in `test/consumer/linq-app.ts`; FORMS-PEN.md
+ * is the normative mapping table.
  */
 
 import type { BoolExpr, DateTime, MemberExpr, StringExpr } from './index.js';

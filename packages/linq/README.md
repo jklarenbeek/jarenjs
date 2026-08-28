@@ -20,8 +20,8 @@ emitting exactly the document that format's engine already takes, and
 carrying `Infer<>` types a gate proves equal to `@jarenjs/emit`'s
 generated declarations. [`./db`](#the-front-door-jarenjslinqdb) is not a
 pen: it is the store's typed front door, and the package's one runtime
-edge. The rules every pen keeps, and the mapping table for each, are
-[docs/PENS-FORMAT.md](docs/PENS-FORMAT.md).
+edge. The rules every pen keeps, and the index of the ten pen
+documents, are [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md).
 
 ```js
 import { from } from '@jarenjs/linq';
@@ -41,7 +41,7 @@ is a recording proxy, never source-text inspection, so callbacks must
 use the expression surface (`u.age.gt(21)`, not `u.age > 21` — a
 JavaScript proxy cannot overload `>`); the operator vocabulary is the
 query engine's, closed and documented in the
-[mapping table](docs/LINQ-FORMAT.md); and `IQueryable`'s role is
+[mapping table](docs/QUERY-PEN.md); and `IQueryable`'s role is
 played by the provider seam below.
 
 - **Deferred and immutable.** A `Sequence` holds a stage list; nothing
@@ -137,8 +137,9 @@ no engine, so a schema-only bundle carries no chain and no validator.
 What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0107`)
 naming the fix — there is no `.transform()` and no function `refine`;
 cross-field rules are `check()`, transforms are application code. The
-normative mapping table, the rules every pen keeps and the worked
-examples a test executes are [docs/PENS-FORMAT.md](docs/PENS-FORMAT.md).
+normative mapping table and the worked examples a test executes are
+[docs/SCHEMA-PEN.md](docs/SCHEMA-PEN.md); the rules every pen keeps are
+[docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md).
 
 ## By code: the model pen
 
@@ -178,7 +179,7 @@ type Meta = InferMeta<typeof model>;   // the EntityMetaMap typedStore<E> wants 
 and a repo gate holds the pen's type equal to that generated map for the
 fixture model — so the codegen step is optional rather than load-bearing.
 The mapping table, member by member, is
-[docs/PENS-FORMAT.md §3](docs/PENS-FORMAT.md#3-the-model-pen--jarenjslinqmodel);
+[docs/MODEL-PEN.md](docs/MODEL-PEN.md);
 what the model document itself means is
 [MODEL-FORMAT.md](../db/docs/MODEL-FORMAT.md).
 
@@ -205,7 +206,7 @@ compileJsltStylesheet(book, { compileTypeTest })(input);   // @jarenjs/json/jslt
 ```
 
 The mapping table and the worked examples are
-[docs/PENS-FORMAT.md §4](docs/PENS-FORMAT.md#4-the-jslt-pen--jarenjslinqjslt).
+[docs/JSLT-PEN.md](docs/JSLT-PEN.md).
 
 ## By code: the migration pen
 
@@ -234,7 +235,7 @@ export default fromPlanned(planned, { from: v1, to: v2 })
 committed `model.snapshot.json`, refuses a module that is not pure and,
 in CI, a model that moved without a plan (`jaren-db check`). The mapping
 table and the worked examples are
-[docs/PENS-FORMAT.md §5](docs/PENS-FORMAT.md#5-the-migration-pen--jarenjslinqmigration).
+[docs/MIGRATION-PEN.md](docs/MIGRATION-PEN.md).
 
 ## By code: the contract pen
 
@@ -270,7 +271,7 @@ const outcome = await api.invoke('product.save', { id: 1, product });   // Outco
 ```
 
 The mapping table and the worked examples are
-[docs/PENS-FORMAT.md §7](docs/PENS-FORMAT.md#7-the-contract-pen--jarenjslinqcontract).
+[docs/CONTRACT-PEN.md](docs/CONTRACT-PEN.md).
 
 ## By code: the flow pen
 
@@ -302,7 +303,7 @@ fsmToApp(review);                                                            // 
 ```
 
 The mapping table and the worked examples are
-[docs/PENS-FORMAT.md §8](docs/PENS-FORMAT.md#8-the-flow-pen--jarenjslinqflow).
+[docs/FLOW-PEN.md](docs/FLOW-PEN.md).
 
 ## By code: the app pen
 
@@ -339,7 +340,7 @@ createApp(document, { node, validateState: new JarenValidator().compile(stateSch
 ```
 
 The mapping table and the worked examples are
-[docs/PENS-FORMAT.md §9](docs/PENS-FORMAT.md#9-the-app-pen--jarenjslinqapp).
+[docs/APP-PEN.md](docs/APP-PEN.md).
 
 ## By code: the forms pen
 
@@ -370,7 +371,7 @@ new JarenValidator().compile(assertOnSubmit(invoice));    // on submit, the same
 ```
 
 The mapping table and the worked examples are
-[docs/PENS-FORMAT.md §10](docs/PENS-FORMAT.md#10-the-forms-pen--jarenjslinqforms).
+[docs/FORMS-PEN.md](docs/FORMS-PEN.md).
 
 ## The front door: `@jarenjs/linq/db`
 
@@ -406,7 +407,7 @@ new, the `.` entry carries not one byte of them (the tree-shaking gate
 holds it), a `./db` consumer installs the three, and the bundle price is
 published in [CONSUMING](../../docs/CONSUMING.md). What is the store's
 and what is the client's is one table in
-[docs/PENS-FORMAT.md §6](docs/PENS-FORMAT.md#6-the-client--jarenjslinqdb).
+[docs/DB-CLIENT.md](docs/DB-CLIENT.md).
 
 **What the door costs, measured.** `benchmark/orm.js` runs the client as
 one more route in every table beside Prisma, Drizzle and Kysely over the
@@ -475,5 +476,5 @@ general lazy-iterable library — if you don't want a query document,
 you don't want this package.
 
 The normative mapping — every operator, its emitted phrase, and the
-deliberate deviations — is [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md);
+deliberate deviations — is [docs/QUERY-PEN.md](docs/QUERY-PEN.md);
 internals are in [ARCHITECTURE.md](ARCHITECTURE.md).

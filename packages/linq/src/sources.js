@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Async source adapters (LINQ-FORMAT.md §12): everything
+ * @file Async source adapters (QUERY-PEN.md §12): everything
  * `fromAsync` accepts normalizes to "a factory of async iterators" —
  * a fresh iterator per enumeration, so the deferred re-enumeration
  * contract carries over exactly (a one-shot generator object simply
@@ -28,7 +28,7 @@ export function adaptAsyncSource(source) {
     // a string is refused on purpose: on this surface a string is a
     // CHUNK source (feed it through a push queue), never a character
     // stream — `from('abc')` iterates characters, and the twins differ
-    // here by design (LINQ-FORMAT.md §12)
+    // here by design (QUERY-PEN.md §12)
     if (typeof source[Symbol.iterator] === 'function' && typeof source !== 'string') {
       return () => (async function* () { yield* source; })();
     }

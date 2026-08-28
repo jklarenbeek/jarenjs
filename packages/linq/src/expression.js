@@ -17,7 +17,7 @@
  * data member — reach a colliding member with `u.get('eq')`.
  *
  * A root whose items are an entity's rows carries the entity's RELATION
- * TABLE (LINQ-FORMAT §3, MODEL-FORMAT §10.1): a member access naming a
+ * TABLE (QUERY-PEN §3, MODEL-FORMAT §10.1): a member access naming a
  * relation records a HOP and lowers, right here, to the correlated
  * phrase the engine and the store both run — `p.author.email` is
  * `{ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] },
@@ -311,7 +311,7 @@ function literalSpec(spec, method) {
 
 /**
  * The operator methods, name → builder(record, ...args). One table so
- * the mapping in LINQ-FORMAT.md §4 has exactly one code counterpart.
+ * the mapping in QUERY-PEN.md §4 has exactly one code counterpart.
  * Null prototype: `constructor`/`toString` must read as member access,
  * never as inherited "methods".
  */

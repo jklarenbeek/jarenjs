@@ -316,7 +316,7 @@ describe('the app pen — patch paths', () => {
     assert.strictEqual(pathOf((st) => st.todos.at(2).done), '/todos/2/done');
   });
 
-  it('writes a COMPUTED index as the $concat pointer expression of PENS-FORMAT §9', () => {
+  it('writes a COMPUTED index as the $concat pointer expression of APP-PEN', () => {
     assert.deepStrictEqual(pathOf((st, x) => st.todos.at(x.payload.i)),
       { $concat: ['/todos/', '$payload.i'] });
     assert.deepStrictEqual(pathOf((st, x) => st.todos.at(x.payload.i).done),
