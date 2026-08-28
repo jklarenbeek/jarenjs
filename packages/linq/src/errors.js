@@ -67,8 +67,8 @@ export const LINQ_CODES = Object.freeze({
  *    store with entities; chain over one of them (`store.entity(name)`)
  *
  * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`,
- * `/contract`) and the client (`/db`; PENS-FORMAT.md §1.3) refuse with
- * the `JL01xx` codes:
+ * `/contract`, `/flow`) and the client (`/db`; PENS-FORMAT.md §1.3)
+ * refuse with the `JL01xx` codes:
  *
  *  - `JL0101` — a pen received a value it cannot spell: a function,
  *    symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance or a
@@ -79,13 +79,17 @@ export const LINQ_CODES = Object.freeze({
  *    closed objects under `allOf`, an annotation on `never()`, an
  *    `apply()` as a bare object member, a `match` of `{}`, a path
  *    template form CONTRACT-FORMAT §4.2 reserves, an operation `kind`
- *    outside the three
+ *    outside the three, a flow guard given as a plain string
+ *    (FLOW-FORMAT §3 makes a non-`$` literal vacuously true), a state
+ *    or node id no declaration carries
  *  - `JL0103` — two distinct builders under one `$defs` name, a
  *    `ref()` no definition answers, or a `lazy()` that is not named
  *  - `JL0104` — a pen-owned keyword written through `meta()`, or a
  *    captured rule naming an external it did not declare (a `check()`
  *    or `body()` external other than `root`/`path` and, for a body,
- *    its declared parameters; a `compute()` external at all)
+ *    its declared parameters; a `compute()` external at all, or a flow
+ *    guard/`with`/node-query/`select` external at all — both flow
+ *    engines evaluate with one `$` and nothing else)
  *  - `JL0105` — a relation hop on the chain (the query pen) cannot
  *    lower: the member is a many-to-many relation, whose join table is
  *    not a queryable root in this version (`load({ include })` reads the

@@ -2,7 +2,7 @@
 /**
  * @file The docs gate for PENS-FORMAT.md: every ```js fence of a pen
  * section is executed — written as a module beside the workspace's
- * `node_modules` so `@jarenjs/linq/schema` (or `/model`, `/jslt`, `/db`)
+ * `node_modules` so `@jarenjs/linq/schema` (or `/model`, `/jslt`, `/flow`, `/db`)
  * resolves as it does for a consumer — and the ```json fence that
  * follows it must be the document the fence's one export emits (a
  * builder's `schema`, or a pen builder's — a migration's, a client
@@ -47,7 +47,7 @@ function fencePairs(markdown, heading) {
   return pairs;
 }
 
-for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3], ['migration', '5.2 Worked examples', 2], ['client', '6.2 Worked examples', 1], ['contract', '7.2 Worked examples', 2]]) {
+for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3], ['migration', '5.2 Worked examples', 2], ['client', '6.2 Worked examples', 1], ['contract', '7.2 Worked examples', 2], ['flow', '8.2 Worked examples', 2]]) {
   describe(`PENS-FORMAT — the ${pen} pen's worked examples are what the pen emits`, () => {
     const markdown = fs.readFileSync(DOC, 'utf8');
     const pairs = fencePairs(markdown, heading);

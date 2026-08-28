@@ -277,6 +277,20 @@ delete it or fix it.
   `@jarenjs/josl` incremental readers is the natural 0.2 composition,
   and doing it honestly changes the node contract, so it is a format
   revision rather than an option.
+- [ ] **A dag node's result carries the query engine's singleton rule,
+  and §6 never says so** — QUERY-FORMAT rule 5 identifies a one-item
+  sequence with the item, and `compileDag` calls a compiled query with
+  its default entry point, so a `query` node whose filter passes exactly
+  one row yields THAT ROW where two rows yield an array. FLOW-FORMAT §6
+  states only the empty case ("a `query`/`jslt` node whose own result is
+  empty yields `null`"), and its own worked example changes shape at one
+  row. Reproduction: run §6's document over
+  `[{name:'ada',age:36},{name:'kit',age:9},{name:'lin',age:20}]` — the
+  `ul` carries two `li`s with names; drop `lin` and the `ul` carries two
+  EMPTY `li`s, because the downstream `$[*]` iterated the surviving
+  object's values. The fix is a §6 sentence and a worked example that
+  cannot be read two ways, or a node-level "always a sequence" option;
+  either is a format decision, not a bug fix.
 - [ ] **Editor: free-form geometry** — the Flow studio lays out every
   diagram deterministically and connects by click-source-then-target;
   free-form node dragging and *persisted* positions are out of scope for

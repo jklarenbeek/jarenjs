@@ -227,6 +227,42 @@ section shows the `composeChecks(schema, compileGate)` recipe, and
 runs a model as an ordinary dag `task`. Neither package imports the
 other — the composition is data.
 
+## Authoring by code
+
+The same documents have a by-code twin. `@jarenjs/linq/flow` is the
+suite's pen for both formats: state ids, event names and node ids are
+literal types, so a transition into an undeclared state or an edge from
+an undeclared node is a compile error, and guards, effect props, node
+queries and edge selectors are callbacks captured over the scope the
+engine evaluates them in — never a path typed as a string.
+
+```javascript
+import { defineFsm, on, state, effect } from '@jarenjs/linq/flow';
+
+const doc = defineFsm({
+  initial: 'idle',
+  states: [
+    'idle',
+    state('loading', { entry: [effect('fetch', (s) => ({ url: s.context.url }))] }),
+    state('done', { final: true }),
+  ],
+  transitions: [
+    on('idle', 'start').to('loading'),
+    on('loading', 'ok').when((s) => s.payload.fresh).to('done'),
+    on('loading', 'fail').to('idle'),
+  ],
+});                                // the document at the top of this README, byte for byte
+
+compileFsm(doc).step('idle', 'start', { context: { url: '/rows' } });
+```
+
+A model-authored document and a pen-written one go through the SAME
+gate — `compileFsm`/`compileDag` — which is the point: the pen refuses
+only what it cannot spell (a plain-string guard is `JL0102`, because
+§3 makes a non-`$` literal vacuously true), and everything the format
+governs is still the compiler's `JF0xxx`. The mapping table is
+[PENS-FORMAT §8](../linq/docs/PENS-FORMAT.md#8-the-flow-pen--jarenjslinqflow).
+
 ## Development
 
 Unit tests live in `test/flow/` at the repository root

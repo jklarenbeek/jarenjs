@@ -413,3 +413,59 @@ if (schemaContractLeak.length > 0)
   throw new Error(`The schema pen pulled the contract pen into the bundle: ${schemaContractLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${contractPenBytes} byte contract-pen bundle, the schema pen included; no chain module, no @jarenjs/contract bytes, no other pen; the chain and the schema pen carry no contract module).`);
+
+// The flow pen (`@jarenjs/linq/flow`) writes machine and dataflow
+// documents whose guards, effect props, node queries and edge selectors
+// are captures — so it carries `expression.js` and the shared root
+// capture by construction, and nothing else: no chain module, no engine,
+// no schema module beyond `brand.js` (a `context`/`payload` builder is a
+// TYPE, and the brand is how the pen tells one), and above all no byte
+// of `@jarenjs/flow`, whose compiler is the only judge of what the
+// document means. The chain carries no flow module in return.
+const flowPenResult = await build({
+  stdin: {
+    contents: "import { defineFsm, on, state, effect } from '@jarenjs/linq/flow'; export const M = defineFsm({ initial: 'a', states: ['a', state('b', { final: true })], transitions: [on('a', 'go').when((s) => s.payload.ok).to('b').effects([effect('toast', () => ({ text: 'hi' }))])] });",
+    resolveDir: process.cwd(),
+    sourcefile: 'flow-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const flowPenBytes = flowPenResult.outputFiles[0].contents.length;
+const flowPenInputs = Object.values(flowPenResult.metafile.outputs)[0].inputs;
+const flowPenChainLeak = Object.entries(flowPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (flowPenChainLeak.length > 0)
+  throw new Error(`The flow pen pulled chain modules into the bundle: ${flowPenChainLeak.map(([file]) => file).join(', ')}`);
+const flowPenPackageLeak = Object.entries(flowPenInputs)
+  .filter(([file, info]) => /packages\/(flow|contract|validate|emit|db|formats|refs|json)\//.test(file)
+    && info.bytesInOutput > 0);
+if (flowPenPackageLeak.length > 0)
+  throw new Error(`The flow pen pulled a package it must not carry into the bundle: ${flowPenPackageLeak.map(([file]) => file).join(', ')}`);
+const flowPenSchemaLeak = Object.entries(flowPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/schema\/(?!brand\.js)/.test(file) && info.bytesInOutput > 0);
+if (flowPenSchemaLeak.length > 0)
+  throw new Error(`The flow pen pulled schema-pen modules into the bundle: ${flowPenSchemaLeak.map(([file]) => file).join(', ')}`);
+const flowPenLeak = Object.entries(flowPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|contract|db)\//.test(file) && info.bytesInOutput > 0);
+if (flowPenLeak.length > 0)
+  throw new Error(`The flow pen pulled another pen into the bundle: ${flowPenLeak.map(([file]) => file).join(', ')}`);
+if (flowPenBytes > 20000)
+  throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
+const chainFlowLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
+if (chainFlowLeak.length > 0)
+  throw new Error(`The chain pulled the flow pen into the bundle: ${chainFlowLeak.map(([file]) => file).join(', ')}`);
+const schemaFlowLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
+if (schemaFlowLeak.length > 0)
+  throw new Error(`The schema pen pulled the flow pen into the bundle: ${schemaFlowLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${flowPenBytes} byte flow-pen bundle; no chain module, no @jarenjs/flow bytes, no schema module beyond brand.js, no other pen; the chain and the schema pen carry no flow module).`);

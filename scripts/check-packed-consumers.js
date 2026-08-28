@@ -270,6 +270,7 @@ import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from
 import * as m from '@jarenjs/linq/model';
 import * as sc from '@jarenjs/linq/schema';
 import { defineContract, read, http } from '@jarenjs/linq/contract';
+import { defineDag, defineFsm, edge, effect, input, on, output, query, state } from '@jarenjs/linq/flow';
 import { open } from '@jarenjs/linq/db';
 import { nodeDriver } from '@jarenjs/db/node';
 const api = defineContract({ id: 'shop' }, {
@@ -284,6 +285,17 @@ void opening.then(async (client) => {
   void names;
   await client.close();
 }).catch(() => undefined);
+const machine = defineFsm({
+  initial: 'draft',
+  states: ['draft', state('published', { final: true })],
+  transitions: [on('draft', 'publish').when((sc) => sc.payload.get('ok')).to('published').effects([effect('toast')])],
+});
+void (machine.$fsm === '0.1' && machine.transitions[0].to === 'published');
+const graph = defineDag({
+  nodes: { rows: input(), adults: query((v) => v.all()), out: output() },
+  edges: [edge('rows', 'adults'), edge('adults', 'out')],
+});
+void (graph.$dag === '0.1' && graph.edges.length === 2);
 const rows = [{ id: 1, name: 'ada' }, { id: 2, name: 'lin' }];
 const seq = from(rows).where((r: any) => r.id.gt(1)).select((r: any) => ({ n: r.name }));
 const doc: unknown = seq.toDocument();

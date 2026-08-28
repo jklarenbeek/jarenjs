@@ -67,6 +67,15 @@ honestly-stated divergences, is specified in
 [APP-INTEGRATION.md](APP-INTEGRATION.md); nothing there changes the
 format defined here.
 
+Documents in both formats are authored by hand, projected from a
+diagram, decoded by a model under the published grammar, or written by
+code: `@jarenjs/linq/flow` is the suite's by-code producer
+(`defineFsm`, `defineDag`), and it emits exactly the documents this
+section defines — its guards, effect props, node queries and edge
+selectors are callbacks captured over the scopes §3 and §6.1 fix. It
+imports nothing of this package; the compilers here remain the only
+judge of what a document means.
+
 ## §2 The jaren-fsm document
 
 ```json

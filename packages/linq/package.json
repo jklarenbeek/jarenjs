@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.52.0",
+  "version": "0.52.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -30,6 +30,10 @@
     "./contract": {
       "types": "./types/contract.d.ts",
       "default": "./src/contract/index.js"
+    },
+    "./flow": {
+      "types": "./types/flow.d.ts",
+      "default": "./src/flow/index.js"
     },
     "./db": {
       "types": "./types/db.d.ts",
@@ -72,13 +76,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.52.0",
-    "@jarenjs/json": "^0.52.0"
+    "@jarenjs/core": "^0.52.1",
+    "@jarenjs/json": "^0.52.1"
   },
   "peerDependencies": {
-    "@jarenjs/db": "^0.52.0",
-    "@jarenjs/formats": "^0.52.0",
-    "@jarenjs/validate": "^0.52.0"
+    "@jarenjs/db": "^0.52.1",
+    "@jarenjs/formats": "^0.52.1",
+    "@jarenjs/validate": "^0.52.1"
   },
   "peerDependenciesMeta": {
     "@jarenjs/db": {

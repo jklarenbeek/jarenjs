@@ -214,6 +214,38 @@ const outcome = await api.invoke('product.save', { id: 1, product });   // Outco
 The mapping table and the worked examples are
 [docs/PENS-FORMAT.md §7](docs/PENS-FORMAT.md#7-the-contract-pen--jarenjslinqcontract).
 
+## By code: the flow pen
+
+`@jarenjs/linq/flow` writes the two `@jarenjs/flow` documents — a
+`jaren-fsm` 0.1 machine and a `jaren-dag` 0.1 dataflow. State ids, event
+names and node ids are literal types, so a transition into an undeclared
+state or an edge from an undeclared node is a compile error; guards,
+effect props, node queries and edge selectors are callbacks captured
+over the scope the engine evaluates them in, never a path typed as a
+string — which is also how the pen can refuse the one trap FLOW-FORMAT
+§3 names itself, a plain-string guard that is vacuously true (`JL0102`).
+
+```js
+import { defineFsm, on, state, effect } from '@jarenjs/linq/flow';
+
+const review = defineFsm({
+  initial: 'draft',
+  states: ['draft', 'review', state('published', { final: true })],
+  transitions: [
+    on('draft', 'submit').to('review'),
+    on('review', 'approve', { payload: Approval }).when((s) => s.payload.fresh).to('published'),
+    on('review').to('draft'),                    // a wildcard, listed last: document order is the priority
+  ],
+  context: Cart,
+});
+
+compileFsm(review).step('review', 'approve', { payload: { fresh: true } });   // @jarenjs/flow takes it unchanged
+fsmToApp(review);                                                            // and so does the app projection
+```
+
+The mapping table and the worked examples are
+[docs/PENS-FORMAT.md §8](docs/PENS-FORMAT.md#8-the-flow-pen--jarenjslinqflow).
+
 ## The front door: `@jarenjs/linq/db`
 
 `open(model, { driver })` opens `@jarenjs/db`'s store and fronts it with
