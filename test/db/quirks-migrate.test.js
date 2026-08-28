@@ -7,8 +7,11 @@
  * `x-rename` hint still in place yields nothing and moves no hash; a
  * rebuild folds an absent column as absent and names an inferred
  * foreign key it loses; a parent with RESTRICT children is dropped
- * after them; the artifact describes every step kind the runner
- * accepts; and the CLI keeps §11's defaults.
+ * after them; a join table takes its endpoints from the mapping and
+ * never from splitting its name; the artifact describes every step
+ * kind the runner accepts; a dry run writes nothing at all; and the
+ * CLI keeps §11's defaults. Every entity-path fix is pinned twice —
+ * two plans are one document, two applies are one migration.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -20,7 +23,7 @@ import * as os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  openStore, planModelMigration, migrate, sqliteDialect, shapeHash,
+  openStore, planModelMigration, migrate, migrationStatus, sqliteDialect, shapeHash,
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { JarenValidator } from '@jarenjs/validate';
@@ -83,6 +86,12 @@ describe('an entity migrates whole', () => {
     const migrated = await openStore(to, { driver: nodeDriver(), path: file });
     assert.deepStrictEqual(await migrated.entity('User').get('u1'), { id: 'u1', name: 'ADA', idSeen: 'u1' });
     await migrated.close();
+    // two-run: the recorded migration is skipped, so the transform does
+    // not run over its own output (a second $upper is invisible, but a
+    // second $concat or increment would not be)
+    const again = await migrate({ driver: nodeDriver(), path: file }, [transform], { baseline: FROM, model: to, compileSchema });
+    assert.deepStrictEqual({ applied: again.applied, skipped: again.skipped, upToDate: again.upToDate },
+      { applied: [], skipped: ['t1'], upToDate: true });
     const raw = new DatabaseSync(file);
     assert.deepStrictEqual({ ...raw.prepare('SELECT "name", "idSeen", json("doc") AS d FROM "User"').get() },
       { name: 'ADA', idSeen: 'u1', d: '{}' }, 'the column is written, and the document keeps no shadow copy');
@@ -233,5 +242,157 @@ describe('the CLI keeps §11', () => {
     assert.strictEqual(check.status, 1);
     assert.match(check.stderr, /--model/);
     assert.strictEqual(run('check', '--store', store, '--baseline', files.v1, '--migrations', migrations, '--model', files.v2).status, 0);
+  });
+});
+
+describe('a join table takes its endpoints from the mapping, never from its name', () => {
+  // splitting the table name on '_' guessed wrong for an entity whose
+  // own name carries one, and for a `through` name that spells neither
+  // endpoint: the rename moved the table to a name nothing declared,
+  // built the declared one empty, and dropped the memberships as
+  // "destructive" — the endpoints are read off `mapping.joinTables`
+  const many = (to, through) => ({ 'x-entity': { relation: { to, many: true, ...(through === undefined ? {} : { through }) } } });
+  const FROM = model({ Team_Member: ent({ items: many('Work_Item') }), Work_Item: ent({}) });
+  const TO = model({ Crew_Member: { 'x-rename': 'Team_Member', ...ent({ items: many('Work_Item') }) }, Work_Item: ent({}) });
+
+  it('an underscored entity name renames its implicit join table and its endpoint column', async () => {
+    const { migration, report } = planModelMigration(FROM, TO, { dialect: sqliteDialect, id: 'u1' });
+    assert.strictEqual(report.destructive, false);
+    assert.deepStrictEqual(migration.steps.map((step) => step.sql), [
+      'ALTER TABLE "Team_Member" RENAME TO "Crew_Member"',
+      'ALTER TABLE "Team_Member_Work_Item" RENAME TO "Crew_Member_Work_Item"',
+      'ALTER TABLE "Crew_Member_Work_Item" RENAME COLUMN "Team_Member_key" TO "Crew_Member_key"',
+    ]);
+    const file = fresh('join-underscore');
+    const store = await openStore(FROM, { driver: nodeDriver(), path: file });
+    await store.entity('Team_Member').create({ id: 'tm1' });
+    await store.entity('Work_Item').create({ id: 'wi1' });
+    await store.saveChanges();
+    store.entity('Team_Member').link('tm1', 'items', 'wi1');
+    await store.saveChanges();
+    await store.close();
+    await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: FROM, model: TO });
+    const migrated = await openStore(TO, { driver: nodeDriver(), path: file });
+    const [member] = await migrated.entity('Crew_Member').asNoTracking()
+      .load({ where: { $eq: ['$it.id', 'tm1'] }, include: { items: true } });
+    assert.deepStrictEqual(member.items.map((item) => item.id), ['wi1'], 'the memberships survive the rename');
+    await migrated.close();
+  });
+
+  it('a `through` name keeps its own name and renames only the endpoint column', async () => {
+    const from = model({ Team_Member: ent({ items: many('Work_Item', 'Team_Member_assignments') }), Work_Item: ent({ owners: many('Team_Member', 'Team_Member_assignments') }) });
+    const to = model({
+      Crew_Member: { 'x-rename': 'Team_Member', ...ent({ items: many('Work_Item', 'Team_Member_assignments') }) },
+      Work_Item: ent({ owners: many('Crew_Member', 'Team_Member_assignments') }),
+    });
+    const { migration, report } = planModelMigration(from, to, { dialect: sqliteDialect, id: 't1' });
+    assert.strictEqual(report.destructive, false, 'a rename loses no membership');
+    assert.deepStrictEqual(migration.steps.map((step) => step.sql), [
+      'ALTER TABLE "Team_Member" RENAME TO "Crew_Member"',
+      'ALTER TABLE "Team_Member_assignments" RENAME COLUMN "Team_Member_key" TO "Crew_Member_key"',
+    ]);
+    const file = fresh('join-through');
+    const store = await openStore(from, { driver: nodeDriver(), path: file });
+    await store.entity('Team_Member').create({ id: 'tm1' });
+    await store.entity('Work_Item').create({ id: 'wi1' });
+    await store.saveChanges();
+    store.entity('Team_Member').link('tm1', 'items', 'wi1');
+    await store.saveChanges();
+    await store.close();
+    await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: from, model: to });
+    const raw = new DatabaseSync(file);
+    assert.deepStrictEqual(raw.prepare('SELECT * FROM "Team_Member_assignments"').all().map((row) => ({ ...row })),
+      [{ Crew_Member_key: 'tm1', Work_Item_key: 'wi1' }]);
+    raw.close();
+    const migrated = await openStore(to, { driver: nodeDriver(), path: file });
+    const [member] = await migrated.entity('Crew_Member').asNoTracking()
+      .load({ where: { $eq: ['$it.id', 'tm1'] }, include: { items: true } });
+    assert.deepStrictEqual(member.items.map((item) => item.id), ['wi1']);
+    await migrated.close();
+  });
+});
+
+describe('the entity path plans twice to one document and applies twice to one database', () => {
+  // one pair per fixed strategy: the fold-back (an absent column stays
+  // absent), the inferred foreign key that folds in, the drop order
+  // with RESTRICT children, and a plain widening
+  const PAIRS = [
+    ['widening', model({ User: ent({ name: { type: 'string' } }) }), model({ User: ent({ name: { type: 'string' }, age: { type: 'integer' } }) })],
+    ['fold-back', model({ User: ent({ name: { type: 'string' }, age: { type: 'integer' } }) }),
+      model({ User: ent({ name: { type: 'string', 'x-entity': { column: 'json' } }, age: { type: 'string' } }) })],
+    ['inferred foreign key', model({ User: ent({ posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } } }), Post: { schema: { type: 'object', required: ['pid'], properties: { pid: { type: 'integer', 'x-entity': { key: true } }, title: { type: 'string' } } } } }),
+      model({ User: ent({}), Post: { schema: { type: 'object', required: ['pid'], properties: { pid: { type: 'integer', 'x-entity': { key: true } }, title: { type: 'string' }, authorId: { type: 'string', 'x-entity': { column: 'json' } } } } } })],
+    ['drop order', model({ User: ent({}), Post: { schema: { type: 'object', required: ['pid'], properties: { pid: { type: 'integer', 'x-entity': { key: true } }, author: { 'x-entity': { relation: { to: 'User', via: 'authorId', onDelete: 'restrict' } } } } } } }),
+      model({ Other: ent({}) })],
+  ];
+
+  for (const [label, from, to] of PAIRS) {
+    it(`${label}: two plans are one document, two applies are one migration`, async () => {
+      const first = planModelMigration(from, to, { dialect: sqliteDialect, id: 'x' }).migration;
+      const second = planModelMigration(from, to, { dialect: sqliteDialect, id: 'x' }).migration;
+      assert.deepStrictEqual(second, first, 'planning is a function of the model pair');
+      const file = fresh(`two-run-${label.replace(/\s+/gu, '-')}`);
+      const store = await openStore(from, { driver: nodeDriver(), path: file });
+      await store.entity('User' in from.entities ? 'User' : 'Other').create({ id: 'u1' });
+      if ('Post' in from.entities) await store.entity('Post').create({ pid: 1, title: 't', authorId: 'u1' });
+      await store.saveChanges();
+      await store.close();
+      const chain = [applied(first)];
+      const target = { driver: nodeDriver(), path: file };
+      assert.deepStrictEqual((await migrate(target, chain, { baseline: from, model: to, compileSchema })).applied, ['x']);
+      const shapeAfter = (path) => {
+        const raw = new DatabaseSync(path);
+        const rows = raw.prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name").all().map((row) => ({ ...row }));
+        raw.close();
+        return rows;
+      };
+      const afterFirst = shapeAfter(file);
+      const again = await migrate(target, chain, { baseline: from, model: to, compileSchema });
+      assert.deepStrictEqual({ applied: again.applied, skipped: again.skipped, upToDate: again.upToDate },
+        { applied: [], skipped: ['x'], upToDate: true }, 'the second run applies nothing');
+      assert.deepStrictEqual(shapeAfter(file), afterFirst, 'and changes no schema object');
+    });
+  }
+});
+
+describe('a dry run writes nothing', () => {
+  const V1 = model({ Thing: ent({}) });
+  const V2 = model({ Thing: ent({ n: { type: 'integer' } }) });
+
+  it('§6: the dry run leaves the file byte-identical, history table and all', async () => {
+    const file = fresh('dry-run');
+    const store = await openStore(V1, { driver: nodeDriver(), path: file });
+    await store.entity('Thing').create({ id: 'a' });
+    await store.saveChanges();
+    await store.close();
+    const tablesOf = () => {
+      const raw = new DatabaseSync(file);
+      const names = raw.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => String(row.name));
+      raw.close();
+      return names;
+    };
+    assert.deepStrictEqual(tablesOf(), ['Thing']);
+    const { migration } = planModelMigration(V1, V2, { dialect: sqliteDialect, id: 'd1' });
+    const before = fs.readFileSync(file);
+    const report = await migrate({ driver: nodeDriver(), path: file }, [applied(migration)],
+      { baseline: V1, model: V2, dryRun: true });
+    assert.deepStrictEqual(report.pending, ['d1']);
+    assert.ok(report.statements.some((sql) => /ADD COLUMN "n"/u.test(sql)), 'and still prints what it would run');
+    assert.deepStrictEqual(tablesOf(), ['Thing'], 'no history table on a database that had none');
+    assert.strictEqual(Buffer.compare(before, fs.readFileSync(file)), 0);
+
+    // the ONE write a reading command makes is migrationStatus's, and it is the documented one
+    const status = await migrationStatus({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: V1 });
+    assert.deepStrictEqual(status.pending, ['d1']);
+    assert.deepStrictEqual(tablesOf(), ['Thing', '_jaren_migrations']);
+
+    // and a dry run over an APPLIED chain reads the history it finds
+    await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: V1, model: V2 });
+    const after = fs.readFileSync(file);
+    const second = await migrate({ driver: nodeDriver(), path: file }, [applied(migration)],
+      { baseline: V1, model: V2, dryRun: true });
+    assert.deepStrictEqual({ applied: second.applied, skipped: second.skipped, upToDate: second.upToDate },
+      { applied: [], skipped: ['d1'], upToDate: true });
+    assert.strictEqual(Buffer.compare(after, fs.readFileSync(file)), 0);
   });
 });

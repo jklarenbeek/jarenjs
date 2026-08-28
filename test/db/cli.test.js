@@ -107,8 +107,17 @@ describe('jaren-db', () => {
     assert.strictEqual(result.status, 0, result.stderr);
     assert.match(result.stdout, /ADD COLUMN "age"/);
     const raw = new DatabaseSync(files.store);
+    // §11: the CLI's printout reads the history the way `status` does —
+    // the empty table is created, no migration is recorded. §6's
+    // `dryRun: true` is the stricter one that writes nothing at all.
     assert.strictEqual(
       raw.prepare('SELECT COUNT(*) AS n FROM _jaren_migrations').get().n, 0);
+    assert.deepStrictEqual(
+      raw.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'User'").all()
+        .map((row) => String(row.name)), ['User']);
+    assert.strictEqual(
+      raw.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('User') WHERE name = 'age'").get().n, 0,
+      'and no statement it printed was run');
     raw.close();
   });
 

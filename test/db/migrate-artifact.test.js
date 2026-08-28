@@ -45,6 +45,8 @@ const ROWS = [
     model({ User: ent({ age: { type: 'string' } }) }), ['rebuild', 'jslt'], false],
   ['change an enum CHECK', model({ User: ent({ role: { type: 'string', enum: ['a'] } }) }),
     model({ User: ent({ role: { type: 'string', enum: ['a', 'b'] } }) }), ['rebuild', 'jslt'], false],
+  ['change the key', { $model: '0.1', entities: { User: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, code: { type: 'string' } } } } } },
+    { $model: '0.1', entities: { User: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, code: { type: 'string', 'x-entity': { key: true } } } } } } }, ['rebuild'], false],
   ['change the epoch flavor', model({ User: ent({ at: { type: 'string', format: 'date-time' } }) }),
     model({ User: ent({ at: { type: 'string', format: 'date-time', 'x-entity': { column: 'integer' } } }) }), ['rebuild'], false],
   ['add an index', model({ User: ent({ name: { type: 'string' } }) }),

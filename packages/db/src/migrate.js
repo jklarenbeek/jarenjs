@@ -1591,174 +1591,183 @@ export function migrate(target, migrations, options) {
 
       let work;
       try {
-        work = chain(connection.exec(statements.create), () =>
-        chain(connection.prepare(statements.select), (select) =>
-          chain(select.all([]), (appliedRows) => {
-            // the list must agree with the history: same ids, same
-            // order, same checksums — an edited applied migration is
-            // always a bug worth failing on
-            for (let i = 0; i < appliedRows.length; i++) {
-              const row = appliedRows[i];
-              const doc = migrations[i];
-              if (doc === undefined || doc.id !== row.id) {
-                throw refuse('JD0022',
-                  `history position ${i} records '${row.id}' but the migration list has `
-                  + `'${doc?.id ?? '<nothing>'}' — the list must contain every applied `
-                  + 'migration, in order');
-              }
-              if (migrationChecksum(doc) !== row.checksum) {
-                throw refuse('JD0022',
-                  `migration '${row.id}' differs from the document recorded in the `
-                  + 'history — an applied migration must never be edited');
-              }
+        // §6's "writes NOTHING": an apply creates the empty history
+        // table before reading it, a DRY RUN probes for it instead and
+        // reads an absent one as an empty history — the promise a dry
+        // run makes is the reason it is safe to point at production
+        const history = options.dryRun === true
+          ? chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
+            chain(probe.get([HISTORY_TABLE]), (row) => (row === undefined
+              ? []
+              : chain(connection.prepare(statements.select), (select) => select.all([])))))
+          : chain(connection.exec(statements.create), () =>
+            chain(connection.prepare(statements.select), (select) => select.all([])));
+        work = chain(history, (appliedRows) => {
+          // the list must agree with the history: same ids, same
+          // order, same checksums — an edited applied migration is
+          // always a bug worth failing on
+          for (let i = 0; i < appliedRows.length; i++) {
+            const row = appliedRows[i];
+            const doc = migrations[i];
+            if (doc === undefined || doc.id !== row.id) {
+              throw refuse('JD0022',
+                `history position ${i} records '${row.id}' but the migration list has `
+                + `'${doc?.id ?? '<nothing>'}' — the list must contain every applied `
+                + 'migration, in order');
             }
-            const pending = migrations.slice(appliedRows.length);
-            const currentShape = appliedRows.length > 0
-              ? appliedRows[appliedRows.length - 1].to_hash
-              : shapeHash(options.baseline);
+            if (migrationChecksum(doc) !== row.checksum) {
+              throw refuse('JD0022',
+                `migration '${row.id}' differs from the document recorded in the `
+                + 'history — an applied migration must never be edited');
+            }
+          }
+          const pending = migrations.slice(appliedRows.length);
+          const currentShape = appliedRows.length > 0
+            ? appliedRows[appliedRows.length - 1].to_hash
+            : shapeHash(options.baseline);
 
-            let expectedFrom = currentShape;
-            for (const migration of pending) {
-              checkMigrationDocument(migration);
-              if (migration.from !== expectedFrom) {
-                throw refuse('JD0020',
-                  `migration '${migration.id}' expects shape '${migration.from}' but the `
-                  + `database is at '${expectedFrom}' — refusing to run against the wrong shape`);
-              }
-              expectedFrom = migration.to;
-            }
-            if (options.model !== undefined && pending.length > 0
-              && expectedFrom !== shapeHash(options.model)) {
+          let expectedFrom = currentShape;
+          for (const migration of pending) {
+            checkMigrationDocument(migration);
+            if (migration.from !== expectedFrom) {
               throw refuse('JD0020',
-                "the last migration's to-hash is not the target model's shape — the "
-                + 'migration chain and the code disagree about where this ends');
+                `migration '${migration.id}' expects shape '${migration.from}' but the `
+                + `database is at '${expectedFrom}' — refusing to run against the wrong shape`);
             }
+            expectedFrom = migration.to;
+          }
+          if (options.model !== undefined && pending.length > 0
+            && expectedFrom !== shapeHash(options.model)) {
+            throw refuse('JD0020',
+              "the last migration's to-hash is not the target model's shape — the "
+              + 'migration chain and the code disagree about where this ends');
+          }
 
-            if (pending.length === 0) {
-              return { applied: [], skipped: appliedRows.map((row) => row.id), upToDate: true };
-            }
+          if (pending.length === 0) {
+            return { applied: [], skipped: appliedRows.map((row) => row.id), upToDate: true };
+          }
 
-            const shadowRun = options.shadow === false
-              ? null
-              : replayOnShadow(target.driver, options.shadowPath ?? ':memory:',
-                options.baseline, migrations, options.model, runOptions);
+          const shadowRun = options.shadow === false
+            ? null
+            : replayOnShadow(target.driver, options.shadowPath ?? ':memory:',
+              options.baseline, migrations, options.model, runOptions);
 
-            return chain(shadowRun, () => {
-              if (options.dryRun === true) {
-                const rendered = [];
-                const counts = {};
-                const collect = (i) => {
-                  if (i >= pending.length) return null;
-                  const migration = pending[i];
-                  for (const migrationStep of migration.steps) {
-                    if (migrationStep.kind === 'ddl') rendered.push(migrationStep.sql);
-                    else if (migrationStep.kind === 'sql') {
-                      rendered.push(`-- data step (sql): ${migrationStep.note ?? ''}`);
-                      rendered.push(migrationStep.sql);
-                    }
-                    else if (migrationStep.kind === 'rebuild') {
-                      rendered.push(`-- rebuild '${migrationStep.table}' (§10 procedure)`);
-                      rendered.push(...migrationStep.create, migrationStep.copy,
-                        dialect.ddl.dropTable(migrationStep.table),
-                        dialect.ddl.renameTable(`${migrationStep.table}__rebuild`,
-                          migrationStep.table),
-                        ...migrationStep.indexes,
-                        dialect.pragma.foreignKeyCheck());
-                    }
-                    else if (migrationStep.kind === 'jslt')
-                      rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
-                    else rendered.push(`-- assert over '${migrationStep.collection}'`);
-                  }
-                  const jsltCollections = [...new Set(migration.steps
-                    .filter((s) => s.kind === 'jslt').map((s) => s.collection))];
-                  const count = (j) => {
-                    if (j >= jsltCollections.length) return null;
-                    const table = jsltCollections[j];
-                    const countSql = `SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} `
-                      + `FROM ${dialect.quoteIdentifier(table)}`;
-                    return chain(connection.prepare(countSql), (statement) =>
-                      chain(statement.get([]), (row) => {
-                        counts[table] = row.n;
-                        return count(j + 1);
-                      }));
-                  };
-                  return chain(count(0), () => collect(i + 1));
-                };
-                return chain(collect(0), () => ({
-                  dryRun: true,
-                  pending: pending.map((migration) => migration.id),
-                  statements: rendered,
-                  counts,
-                  shadowValidated: options.shadow !== false,
-                }));
-              }
-
-              // the real run: one exclusive transaction per migration
-              const applied = [];
-              const applyNext = (i) => {
+          return chain(shadowRun, () => {
+            if (options.dryRun === true) {
+              const rendered = [];
+              const counts = {};
+              const collect = (i) => {
                 if (i >= pending.length) return null;
                 const migration = pending[i];
-                const last = i === pending.length - 1;
-                // the §10 procedure's pragma bracket, literally: the
-                // foreign_keys pragma is a no-op inside a transaction,
-                // and node:sqlite enables enforcement BY DEFAULT — a
-                // parent-table rebuild could not even DROP without this
-                const bracket = migration.steps.some(
-                  (candidate) => candidate.kind === 'rebuild');
-                return chain(
-                  bracket ? connection.exec(dialect.pragma.foreignKeys(false)) : null,
-                  () => chain(connection.exec(dialect.tx.beginImmediate), () => {
-                  const body = () => chain(runSteps(connection, migration, runOptions), () =>
-                    chain(last && options.model !== undefined
-                      ? chain(validateTargetState(connection, options.model,
-                        { compileSchema: options.compileSchema, batchSize }),
-                      () => (normalizeEntities(options.model).size === 0 ? null
-                        : chain(compareShapeToModel(target.driver, connection,
-                          options.model, options.registerFunctions), (difference) => {
-                          if (difference !== null) {
-                            throw refuse('JD0023',
-                              `the migrated shape does not equal the target model's: ${difference}`);
-                          }
-                          return null;
-                        })))
-                      : null,
-                    () => chain(connection.prepare(statements.insert), (insert) =>
-                      insert.run([migration.id, Date.now(), migration.from,
-                        migration.to, migrationChecksum(migration),
-                        migration.steps.length]))));
-                  const restore = () => (bracket
-                    ? connection.exec(dialect.pragma.foreignKeys(true)) : null);
-                  const commit = () => chain(connection.exec(dialect.tx.commit), () =>
-                    chain(restore(), () => {
-                      applied.push(migration.id);
-                      return applyNext(i + 1);
+                for (const migrationStep of migration.steps) {
+                  if (migrationStep.kind === 'ddl') rendered.push(migrationStep.sql);
+                  else if (migrationStep.kind === 'sql') {
+                    rendered.push(`-- data step (sql): ${migrationStep.note ?? ''}`);
+                    rendered.push(migrationStep.sql);
+                  }
+                  else if (migrationStep.kind === 'rebuild') {
+                    rendered.push(`-- rebuild '${migrationStep.table}' (§10 procedure)`);
+                    rendered.push(...migrationStep.create, migrationStep.copy,
+                      dialect.ddl.dropTable(migrationStep.table),
+                      dialect.ddl.renameTable(`${migrationStep.table}__rebuild`,
+                        migrationStep.table),
+                      ...migrationStep.indexes,
+                      dialect.pragma.foreignKeyCheck());
+                  }
+                  else if (migrationStep.kind === 'jslt')
+                    rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
+                  else rendered.push(`-- assert over '${migrationStep.collection}'`);
+                }
+                const jsltCollections = [...new Set(migration.steps
+                  .filter((s) => s.kind === 'jslt').map((s) => s.collection))];
+                const count = (j) => {
+                  if (j >= jsltCollections.length) return null;
+                  const table = jsltCollections[j];
+                  const countSql = `SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} `
+                    + `FROM ${dialect.quoteIdentifier(table)}`;
+                  return chain(connection.prepare(countSql), (statement) =>
+                    chain(statement.get([]), (row) => {
+                      counts[table] = row.n;
+                      return count(j + 1);
                     }));
-                  const rollback = (error) =>
-                    chain(connection.exec(dialect.tx.rollback), () =>
-                      chain(restore(), () => { throw error; }));
-                  // only body() may route to this migration's rollback:
-                  // commit() chains the NEXT migration, whose failure
-                  // rolls ITSELF back — catching it here would roll
-                  // back a transaction that already committed
-                  let outcome;
-                  try {
-                    outcome = body();
-                  }
-                  catch (error) {
-                    return rollback(error);
-                  }
-                  return outcome instanceof Promise
-                    ? outcome.then(commit, rollback)
-                    : commit();
-                }));
+                };
+                return chain(count(0), () => collect(i + 1));
               };
-              return chain(applyNext(0), () => ({
-                applied,
-                skipped: appliedRows.map((row) => row.id),
-                shape: expectedFrom,
+              return chain(collect(0), () => ({
+                dryRun: true,
+                pending: pending.map((migration) => migration.id),
+                statements: rendered,
+                counts,
+                shadowValidated: options.shadow !== false,
               }));
-            });
-          })));
+            }
+
+            // the real run: one exclusive transaction per migration
+            const applied = [];
+            const applyNext = (i) => {
+              if (i >= pending.length) return null;
+              const migration = pending[i];
+              const last = i === pending.length - 1;
+              // the §10 procedure's pragma bracket, literally: the
+              // foreign_keys pragma is a no-op inside a transaction,
+              // and node:sqlite enables enforcement BY DEFAULT — a
+              // parent-table rebuild could not even DROP without this
+              const bracket = migration.steps.some(
+                (candidate) => candidate.kind === 'rebuild');
+              return chain(
+                bracket ? connection.exec(dialect.pragma.foreignKeys(false)) : null,
+                () => chain(connection.exec(dialect.tx.beginImmediate), () => {
+                const body = () => chain(runSteps(connection, migration, runOptions), () =>
+                  chain(last && options.model !== undefined
+                    ? chain(validateTargetState(connection, options.model,
+                      { compileSchema: options.compileSchema, batchSize }),
+                    () => (normalizeEntities(options.model).size === 0 ? null
+                      : chain(compareShapeToModel(target.driver, connection,
+                        options.model, options.registerFunctions), (difference) => {
+                        if (difference !== null) {
+                          throw refuse('JD0023',
+                            `the migrated shape does not equal the target model's: ${difference}`);
+                        }
+                        return null;
+                      })))
+                    : null,
+                  () => chain(connection.prepare(statements.insert), (insert) =>
+                    insert.run([migration.id, Date.now(), migration.from,
+                      migration.to, migrationChecksum(migration),
+                      migration.steps.length]))));
+                const restore = () => (bracket
+                  ? connection.exec(dialect.pragma.foreignKeys(true)) : null);
+                const commit = () => chain(connection.exec(dialect.tx.commit), () =>
+                  chain(restore(), () => {
+                    applied.push(migration.id);
+                    return applyNext(i + 1);
+                  }));
+                const rollback = (error) =>
+                  chain(connection.exec(dialect.tx.rollback), () =>
+                    chain(restore(), () => { throw error; }));
+                // only body() may route to this migration's rollback:
+                // commit() chains the NEXT migration, whose failure
+                // rolls ITSELF back — catching it here would roll
+                // back a transaction that already committed
+                let outcome;
+                try {
+                  outcome = body();
+                }
+                catch (error) {
+                  return rollback(error);
+                }
+                return outcome instanceof Promise
+                  ? outcome.then(commit, rollback)
+                  : commit();
+              }));
+            };
+            return chain(applyNext(0), () => ({
+              applied,
+              skipped: appliedRows.map((row) => row.id),
+              shape: expectedFrom,
+            }));
+          });
+        });
 
       }
       catch (error) {

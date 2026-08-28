@@ -199,12 +199,16 @@ hash of the `baseline` model when no migration has run.
   otherwise), the physical end shape is verified, and the real-data
   validation of §3 runs.
 - `dryRun: true` prints every statement and the affected document
-  counts, validates the chain on the shadow, and writes NOTHING. The
-  API default is to run; a CLI SHOULD default to the dry run.
+  counts, validates the chain on the shadow, and writes NOTHING — not
+  even the history table: it PROBES for one and reads an absent one as
+  an empty history, so a dry run may be pointed at a production
+  database and leave its file byte-identical. The API default is to
+  run; a CLI SHOULD default to the dry run.
 - `migrationStatus` (and the CLI's `status`/`check`) create the empty
   history table on a database that has none — the one write a reading
   command makes, so a fresh file answers `applied: (none)` rather than
-  a missing-table error.
+  a missing-table error. This is the one place the two differ: a dry
+  run reports the same state and writes nothing at all.
 - Each pending migration runs in ONE exclusive transaction
   (`BEGIN IMMEDIATE` on SQLite — concurrent writers wait or time out
   under the busy timeout) with a savepoint per step; any failure rolls
@@ -395,6 +399,11 @@ jaren-db shape    --model <model>
   printout. Without an interactive terminal there is nobody to ask, so
   `apply` without `--yes` exits 1 after the printout with nothing
   applied — a CI job passes `--yes` deliberately, never by default.
+  `apply --dry-run` is the CLI's printout, not §6's `dryRun: true`: it
+  reads the history the way `status` does — creating the empty table on
+  a database that has none — and does NOT replay the chain on the
+  shadow, so a draft step still prints instead of refusing. The
+  shadow's verdict comes with the real `apply`.
 - `status` lists applied/pending and reports drift (§12); on a
   database without a history table it creates the empty one (§6).
 - `shape` prints the physical mapping a model produces.
