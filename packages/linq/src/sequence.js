@@ -445,6 +445,7 @@ export class Sequence {
       externals: [...compiled.externals],
       dependencies: compiled.dependencies,
       hops: this.#hops(),
+      bindings: Object.fromEntries(this.#params),
     };
   }
 

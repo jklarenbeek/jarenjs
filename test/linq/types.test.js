@@ -135,4 +135,16 @@ describe('a provider keeps its item type through the phantom (the runtime twin)'
     assert.deepStrictEqual(chain.toArray(), [{ title: 'p1', by: 'ada@x' }]);
     assert.deepStrictEqual(chain.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
   });
+
+  it('explain().bindings carries the values params() bound, on both surfaces', async () => {
+    // the type gate pins `bindings` as Record<string, unknown> on Explanation
+    // and AsyncExplanation; here the values are what a provider receives
+    const { fromAsync } = await import('@jarenjs/linq');
+    const bound = from(USERS).params({ min: 21, who: 'ada' }).where((u, p) => u.age.gt(p.min));
+    assert.deepStrictEqual(bound.explain().bindings, { min: 21, who: 'ada' });
+    assert.deepStrictEqual(bound.explain().externals, ['min'], 'externals names what the document reads');
+    assert.deepStrictEqual(from(USERS).explain().bindings, {});
+    assert.deepStrictEqual(fromAsync(USERS).params({ min: 21 }).explain().bindings, { min: 21 });
+    assert.deepStrictEqual(fromAsync(USERS).explain().bindings, {});
+  });
 });

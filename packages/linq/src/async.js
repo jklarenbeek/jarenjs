@@ -445,7 +445,7 @@ export class AsyncSequence {
         barriers.push({ operator: stage.name ?? stage.kind, reason: BARRIERS[stage.kind] });
       }
     }
-    const out = { barriers, hops: this.#hops() };
+    const out = { barriers, hops: this.#hops(), bindings: this.#externals().values };
     if (firstMap < 0) {
       out.document = this.toDocument();
     }

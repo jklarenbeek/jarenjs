@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { build } from 'esbuild';
 
 const result = await build({
@@ -151,10 +153,22 @@ const penLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/schema/') && info.bytesInOutput > 0);
 if (penLeak.length > 0)
   throw new Error(`The chain pulled the schema pen into the bundle: ${penLeak.map(([file]) => file).join(', ')}`);
+// The package's one runtime edge is the client subpath's (`./db` imports
+// the store, the validator and the formats as optional peers): the `.`
+// entry carries no client module and not one byte of the three, so a
+// consumer of the chain alone installs nothing new.
+const chainClientLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/db/') && info.bytesInOutput > 0);
+if (chainClientLeak.length > 0)
+  throw new Error(`The chain pulled the client into the bundle: ${chainClientLeak.map(([file]) => file).join(', ')}`);
+const chainEdgeLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => /packages\/(db|validate|formats|emit|refs)\//.test(file) && info.bytesInOutput > 0);
+if (chainEdgeLeak.length > 0)
+  throw new Error(`The chain pulled an optional peer into the bundle: ${chainEdgeLeak.map(([file]) => file).join(', ')}`);
 if (chainBytes > 180000)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
-console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module).`);
+console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
 
 // The model pen (`@jarenjs/linq/model`) subclasses the schema pen: a
 // model-only bundle carries the schema pen's classes and no chain module,
@@ -300,3 +314,50 @@ if (schemaMigrationLeak.length > 0)
   throw new Error(`The schema pen pulled the migration pen into the bundle: ${schemaMigrationLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${migrationBytes} byte migration-pen bundle; no chain module, no schema/model module, no engine beyond the canonicalizer and its pointer encoder; the chain and the schema pen carry no migration module).`);
+
+// The client (`@jarenjs/linq/db`) is the package's one runtime edge: it
+// carries the store, the validator and the formats — its optional peers —
+// beside the chain, by construction, and that price is published (the
+// figure below is what docs/CONSUMING.md states, held equal here so the
+// number can go stale only by failing this gate). It carries no other
+// pen: not the contract, flow, app or forms pens, nor emit or refs.
+const clientResult = await build({
+  stdin: {
+    contents: "import { open } from '@jarenjs/linq/db'; export const opening = open({ $model: '0.1', entities: {} }, { driver: { open: () => null } });",
+    resolveDir: process.cwd(),
+    sourcefile: 'client-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const clientBytes = clientResult.outputFiles[0].contents.length;
+const clientInputs = Object.values(clientResult.metafile.outputs)[0].inputs;
+const clientPenLeak = Object.entries(clientInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(contract|flow|app|forms)\//.test(file) && info.bytesInOutput > 0);
+if (clientPenLeak.length > 0)
+  throw new Error(`The client pulled another pen into the bundle: ${clientPenLeak.map(([file]) => file).join(', ')}`);
+const clientEngineLeak = Object.entries(clientInputs)
+  .filter(([file, info]) => /packages\/(contract|flow|app|forms|emit|refs)\//.test(file) && info.bytesInOutput > 0);
+if (clientEngineLeak.length > 0)
+  throw new Error(`The client pulled an unrelated package into the bundle: ${clientEngineLeak.map(([file]) => file).join(', ')}`);
+const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries(clientInputs)
+  .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
+if (clientEdge.length !== 3)
+  throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
+if (clientBytes > 520000)
+  throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
+const consuming = readFileSync('docs/CONSUMING.md', 'utf8');
+const stated = /<!--bundle:linq-db-->(\d+) kB/.exec(consuming);
+const measuredKb = Math.round(clientBytes / 1000);
+if (stated === null || Number(stated[1]) !== measuredKb) {
+  throw new Error(`docs/CONSUMING.md states the client bundle as ${stated === null ? 'nothing' : `${stated[1]} kB`}; `
+    + `measured ${measuredKb} kB (${clientBytes} bytes) — refresh the figure beside the <!--bundle:linq-db--> marker.`);
+}
+
+console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs; CONSUMING states ${measuredKb} kB).`);

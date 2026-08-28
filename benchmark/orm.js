@@ -21,6 +21,15 @@
  *    BUILDER, not an ORM — it writes whatever SQL you write. Its
  *    graph row is a hand-written json_group_array select, which is
  *    the honest contrast: one statement, but you authored it.
+ *  - **jaren client** (`@jarenjs/linq/db`, the store's front door):
+ *    the same store reached through the typed client — a chain for
+ *    every read (`where`/`orderBy`/`skip`/`take` pushed down), the
+ *    graph builder for the include rows, the unit of work for the
+ *    update — so the price of the door itself is a row beside the
+ *    hand-written documents, with statement counts from a counting
+ *    driver. The reads run unvalidated (`validator: null`) like the
+ *    store rows; the one validated row is the client's DEFAULT door
+ *    (formats asserting), stated as such.
  *
  * Fairness rules paid for elsewhere in this repo: every engine gets
  * WAL journal mode and a fresh file database; every engine must
@@ -42,6 +51,7 @@ import * as os from 'node:os';
 
 import { openStore } from '@jarenjs/db';
 import { JarenValidator } from '@jarenjs/validate';
+import { open } from '@jarenjs/linq/db';
 
 import { deepEquals } from './lib/equals.js';
 import { formatNs } from './lib/fmt.js';
@@ -356,6 +366,132 @@ async function jarenEngine() {
     },
   };
 
+}
+
+/** A node:sqlite database shimmed so every statement execution is
+ * counted (the client's statement-count instrument; the rivals' is
+ * `countingDb` above). */
+function countedNodeDatabase(db, counters) {
+  const count = (fn) => (...params) => {
+    counters.executed++;
+    return fn(...params);
+  };
+  return {
+    exec: count((sql) => db.exec(sql)),
+    prepare: (sql) => {
+      const statement = db.prepare(sql);
+      return {
+        run: count((...p) => statement.run(...p)),
+        get: count((...p) => statement.get(...p)),
+        all: count((...p) => statement.all(...p)),
+        iterate: count((...p) => statement.iterate(...p)),
+      };
+    },
+    function: (name, options, fn) => db.function(name, options, fn),
+    aggregate: (name, spec) => db.aggregate(name, spec),
+    createSession: (options) => db.createSession(options),
+    close: () => db.close(),
+  };
+}
+
+async function clientEngine() {
+  const counters = { executed: 0 };
+  // a counted driver on Node; bun:sqlite as it is on Bun (no shim: the
+  // graph row then says what the test asserts instead of counting)
+  const driverFor = async (file, counted) => {
+    if (IS_BUN) return (await import('@jarenjs/db/bun')).bunDriver();
+    if (!counted) return (await import('@jarenjs/db/node')).nodeDriver();
+    const { DatabaseSync } = await import('node:sqlite');
+    const { adaptNodeDatabase } = await import('@jarenjs/db/node');
+    return { open: () => adaptNodeDatabase(countedNodeDatabase(new DatabaseSync(file), counters)) };
+  };
+  const fresh = async (name, validator) => open(MODEL, {
+    driver: await driverFor(fileOf(name), false), path: fileOf(name), validator,
+  });
+  const client = await open(MODEL, {
+    driver: await driverFor(fileOf('jaren-client.db'), !IS_BUN),
+    path: fileOf('jaren-client.db'),
+    validator: null,
+  });
+
+  return {
+    label: 'jaren client (@jarenjs/linq/db)',
+    adapter: `the typed client over the same ${IS_BUN ? 'bun:sqlite' : 'node:sqlite'} store (WAL); `
+      + 'every read a chain or an include graph; validation OFF except the validated row',
+    counters: IS_BUN ? undefined : counters,
+    // the rows the loop labels by the rivals' route, named by this one's
+    groupLabel: 'include count (1 statement)',
+    jsonbLabel: 'entity doc path through the chain (guarded scan, no index declared)',
+    insertSingle: async () => {
+      const target = await fresh(`jaren-client-ins-${Math.random().toString(36).slice(2)}.db`, null);
+      const t = await timeOnceAsync(() => target.transaction(async () => {
+        for (const user of DATA.users) await target.entities.User.create(user);
+      }));
+      await target.close();
+      return t / USERS;
+    },
+    insertBatched: async () => {
+      const target = await fresh(`jaren-client-batch-${Math.random().toString(36).slice(2)}.db`, null);
+      const t = await timeOnceAsync(async () => {
+        for (const user of DATA.users) target.entities.User.add(user);
+        await target.saveChanges();
+      });
+      await target.close();
+      return t / USERS;
+    },
+    insertValidated: async () => {
+      // the client's DEFAULT door: the Zod-recipe validator, formats asserting
+      const target = await fresh(`jaren-client-valid-${Math.random().toString(36).slice(2)}.db`, undefined);
+      const t = await timeOnceAsync(async () => {
+        for (const user of DATA.users) target.entities.User.add(user);
+        await target.saveChanges();
+      });
+      await target.close();
+      return t / USERS;
+    },
+    seed: async () => {
+      for (const user of DATA.users) client.entities.User.add(user);
+      for (const post of DATA.posts) client.entities.Post.add(post);
+      for (const comment of DATA.comments) client.entities.Comment.add(comment);
+      await client.saveChanges();
+    },
+    point: (key) => client.entities.User.asNoTracking().get(key),
+    // whole documents, as the store rows: the bare binding is the native
+    // path and a projection is the residual (§10.6); ids extract in JS
+    predicateOne: async () => idSet((await client.entities.User.where((u) => u.age.eq(AGE_ONE)).toArray())
+      .map((row) => row.id)),
+    predicateTen: async () => idSet((await client.entities.User.where((u) => u.age.ge(AGE_TEN)).toArray())
+      .map((row) => row.id)),
+    predicateAll: async () => idSet((await client.entities.User.where((u) => u.age.ge(0)).toArray())
+      .map((row) => row.id)),
+    graph: async () => normalizeGraph(await client.entities.User
+      .include((u) => u.posts, { orderBy: (p) => p.pid, include: { comments: { orderBy: (c) => c.cid } } })
+      .where((u) => u.age.ge(GRAPH_AGE))
+      .orderBy((u) => u.id)
+      .asNoTracking()
+      .toArray()),
+    groupCounts: async () => normalizeCounts((await client.entities.User
+      .include((u) => u.posts, { count: true })
+      .orderBy((u) => u.id)
+      .asNoTracking()
+      .toArray())
+      .map((user) => [user.id, user.posts])),
+    pageOffset: async (skip) => (await client.entities.Comment
+      .orderBy((c) => c.cid).skip(skip).take(PAGE).toArray()).map((c) => c.cid),
+    // the keyset page as the rivals spell it: a where over the cursor
+    pageKeyset: async (after) => (await client.entities.Comment
+      .where((c) => c.cid.gt(after)).orderBy((c) => c.cid).take(PAGE).toArray()).map((c) => c.cid),
+    update: async (key, name) => {
+      const users = client.entities.User;
+      users.discard(key);
+      const doc = await users.get(key);
+      users.put({ ...doc, name });
+      await client.saveChanges();
+    },
+    jsonbUnindexed: async () => idSet((await client.entities.User
+      .where((u) => u.profile.city.eq(CITY)).toArray()).map((row) => row.id)),
+    close: () => client.close(),
+  };
 }
 
 function normalizeGraph(loaded) {
@@ -739,6 +875,15 @@ const COLD_SCRIPTS = {
     await db.selectFrom('users').selectAll().where('id', '=', 'u1').executeTakeFirst();
     console.log(Number(process.hrtime.bigint() - t0));
     await db.destroy();`,
+  'jaren client (@jarenjs/linq/db)': (dbFile) => `
+    const t0 = process.hrtime.bigint();
+    const { open } = await import('@jarenjs/linq/db');
+    const { nodeDriver } = await import('@jarenjs/db/node');
+    const client = await open(${JSON.stringify(MODEL)},
+      { driver: nodeDriver(), path: ${JSON.stringify(dbFile)}, validator: null });
+    await client.entities.User.asNoTracking().get('u1');
+    console.log(Number(process.hrtime.bigint() - t0));
+    await client.close();`,
   Prisma: (dbFile) => `
     const t0 = process.hrtime.bigint();
     const { PrismaClient } = await import('@prisma/client');
@@ -816,6 +961,9 @@ async function main() {
       + 'are Node-only; on Bun there is also no UDF hatch and no session '
       + 'capture (bun:sqlite has no function/aggregate/createSession).');
   }
+  // the front door, last: every phase below treats it as one more route
+  // whose answer must equal the store's before it is timed
+  engines.push(await clientEngine());
 
   // ————— 1. insert —————
   {
@@ -834,6 +982,10 @@ async function main() {
     rows.push({ name: 'jaren — batched, schema-VALIDATED writes',
       results: [await jaren.insertValidated()],
       note: 'no rival row exists: none of them validates documents at all' });
+    const client = engines.find((engine) => engine.label.startsWith('jaren client'));
+    rows.push({ name: 'jaren client — batched, the DEFAULT door (formats asserting)',
+      results: [await client.insertValidated()],
+      note: 'what open() validates with unless told otherwise' });
     tables.push({ title: `Insert (ns/row over ${USERS} users; batched = multi-row VALUES)`,
       columns: ['ns/row'], rows });
   }
@@ -934,7 +1086,7 @@ async function main() {
       if (engine.groupCounts === undefined) continue;
       const actual = await engine.groupCounts();
       if (!verify('groupby', expected, actual, engine.label)) continue;
-      rows.push({ name: `${engine.label} — GROUP BY`,
+      rows.push({ name: `${engine.label} — ${engine.groupLabel ?? 'GROUP BY'}`,
         results: [await timeAsync(() => engine.groupCounts(), 100)] });
     }
     tables.push({ title: 'Posts per user: aggregate + group over a join (ns/query)',
@@ -995,6 +1147,7 @@ async function main() {
       Drizzle: fileOf('drizzle.db'),
       Kysely: fileOf('kysely.db'),
       Prisma: fileOf('prisma.db'),
+      'jaren client (@jarenjs/linq/db)': fileOf('jaren-client.db'),
     };
     for (const engine of engines) {
       const ns = coldStart(engine.label, dbFiles[engine.label]);
@@ -1026,9 +1179,9 @@ async function main() {
       const actual = await engine.jsonbUnindexed();
       if (!verify('jsonb', expected, actual, engine.label)) continue;
       rows.push({
-        name: `${engine.label} — ${engine.label === 'Prisma'
+        name: `${engine.label} — ${engine.jsonbLabel ?? (engine.label === 'Prisma'
           ? 'fetch all + filter in JS (no Json type on SQLite)'
-          : 'json_extract scan'}`,
+          : 'json_extract scan')}`,
         results: [await timeAsync(() => engine.jsonbUnindexed(), 200)],
       });
       if (engine.prepareJsonbIndex !== undefined) {

@@ -585,10 +585,13 @@ what each does is its own documentation's job
   `$r.<targetKey> = join.<To>_key` — under the oracle. The lowered
   shapes that do exist are residuals (a phrase where the planner wants
   a member path); their promotion belongs to the pushdown entry above.
-- [ ] **A many-to-many membership API.** The join tables, their
-  synchronisation through the unit of work and the read side all
-  shipped; a first-class link/unlink surface (and m2m attach for
-  auto-key pending inserts) did not.
+- [ ] **Membership on an auto-keyed pending insert.** `link`/`unlink`
+  shipped (MODEL-FORMAT §11.7; surfaced typed on `@jarenjs/linq/db`),
+  and a pending insert with a caller-supplied key links in the same
+  save; an `auto`-keyed one still cannot — the join row needs the key
+  the save allocates, so the attach would have to ride the insert's
+  `RETURNING` inside the same transaction, keyed back to the record.
+  Until then: save, then link (the refusal says so).
 - [ ] **Other SQL dialects.** The dialect seam is real (proven by a
   test double) and the capability slots for statement timeouts and
   row estimates are deliberately empty on SQLite; a second dialect is

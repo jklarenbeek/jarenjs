@@ -111,6 +111,37 @@ capture, `apply`/`op` lifted into it through `liftExpression`, the `[]`
 refusal) and `rules.js` (the rule object and the envelope, in Appendix
 A's member order) — it imports nothing of `src/schema/` but `brand.js`.
 
+## The client (`src/db/`)
+
+`@jarenjs/linq/db` is the one subpath with a runtime edge: `open.js`
+imports `openStore` from `@jarenjs/db`, `JarenValidator` from
+`@jarenjs/validate` and the string and date-time formats from
+`@jarenjs/formats` — declared in `package.json` as OPTIONAL peer
+dependencies, never dependencies, so a consumer of any other subpath
+installs nothing new and the store never imports this package. Three
+gates hold the edge: the tree-shaking probes (the `.` entry carries no
+`src/db/` module and not one byte of the three; the `./db` bundle
+carries all three, no other pen, and the size CONSUMING states), the
+packed-consumer gate (every subpath is imported WITHOUT the peers first
+— `./db` must fail by a peer's name and nothing else may fail — then
+with their closures installed from the tarballs), and the edge suite
+in `test/db/provider.test.js` (both manifests, and every source and
+declaration file of both packages, for every import spelling).
+`handle.js` builds one frozen handle per declared name at open — the
+store's entity set spread in, the chain start generated from
+`AsyncSequence.prototype` so nothing is duplicated (`explain()` is the
+one overload: the empty chain's without a document, the store's with
+one), and `include`, `link`/`unlink`, `live` beside them. `include.js`
+is a builder that EMITS the store's `load` spec: the relation member
+captured to its name, every callback captured over `$it` through the
+same recording proxy with no parameters, the nested includes resolved
+over the scope's relation tables, the spec deep-frozen in a fixed
+member order. `membership.js` reads the relation table before the store
+records a link (`JL0107` names the kind); `live.js` hands a chain's
+document and `explain().bindings` to the store's own registration.
+Nothing here runs a query, plans one or keeps state: the store stays
+the engine, and every read is one its `explain()` can name.
+
 ## The provider seam (`src/provider.js`)
 
 A provider is any object with `execute(queryDocument, { externals })` —
@@ -120,8 +151,9 @@ optionally carrying `root` (the path its items are bound through, bare),
 `relations` keyed by root name, where a chained hop finds its target's
 table) and `relations` (the relation table of its rows, what a hop
 lowers from).
-`@jarenjs/db` implements it; neither package imports the other, and a
-test asserts both directions. On the async surface the provider is asked
+`@jarenjs/db` implements it; the chain imports no store, and the
+package's one runtime edge — the client subpath below — runs the other
+way, a test asserting the direction. On the async surface the provider is asked
 for first, receives the whole chain up to a `mapAsync` as one document,
 and may answer a promise. `mapAsync` splits a provider chain: the
 translatable prefix is pushed to the provider in ONE call, the
@@ -146,8 +178,9 @@ residual runs locally, and `explain()` reports the split.
 
 ## What this is not
 
-Not an ORM (no entities, no identity map — the store is
-`@jarenjs/db`'s job), not IQueryable with expression trees over
+Not a storage engine (entities, identity, migrations — the store is
+`@jarenjs/db`'s, and `src/db/` is its front door, never a second
+engine), not IQueryable with expression trees over
 arbitrary CLR-style methods (the operator set is the query engine's
 104, closed and documented), and not a lazy-collection library for
 JavaScript iterables in general — the deliverable is always a QUERY

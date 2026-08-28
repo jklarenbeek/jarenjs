@@ -282,3 +282,37 @@ describe('the include specification is validated (JD0032)', () => {
       });
   });
 });
+
+describe("an include windows with skip and take; after is the root's alone (§10.4)", () => {
+  const WINDOW_MODEL = {
+    $model: '0.1',
+    entities: {
+      User: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } },
+        posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } } } } },
+      Post: { schema: { type: 'object', required: ['pid', 'authorId'], properties: {
+        pid: { type: 'integer', 'x-entity': { key: true } },
+        stars: { type: 'integer' }, authorId: { type: 'string' } } } },
+    },
+  };
+
+  it('skip inside an include is an OFFSET per parent, never dropped', async () => {
+    const store = await openStore(WINDOW_MODEL,
+      { driver: { open: () => adaptNodeDatabase(new DatabaseSync(':memory:')) } });
+    for (const id of ['u1', 'u2']) await store.entity('User').create({ id });
+    for (const [pid, stars, authorId] of [[1, 3, 'u1'], [2, 1, 'u1'], [3, 5, 'u1'], [4, 2, 'u2']]) {
+      await store.entity('Post').create({ pid, stars, authorId });
+    }
+    const users = await store.entity('User').asNoTracking().load({
+      orderBy: '$it.id',
+      include: { posts: { orderBy: { $key: '$it.stars', $dir: 'desc' }, skip: 1, take: 1 } },
+    });
+    assert.deepStrictEqual(users.map((u) => u.posts.map((p) => p.pid)), [[1], []],
+      'desc by stars: 3, 1, 2 → skip one, take one → pid 1; u2 has one post → none');
+    const explained = store.entity('User').explainLoad({ include: { posts: { skip: 2 } } });
+    assert.match(explained.sql, /LIMIT -1 OFFSET 2/);
+    assert.throws(() => store.entity('User').explainLoad({ include: { posts: { after: 1 } } }),
+      (e) => e.code === 'JD0032' && /paginates the root/.test(e.message) && /include path: posts/.test(e.message));
+    await store.close();
+  });
+});

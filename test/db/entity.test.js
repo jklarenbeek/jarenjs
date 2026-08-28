@@ -132,6 +132,27 @@ describe('identity and defaults', () => {
       (error) => error.code === 'JD2003', 'required email missing');
     await store.close();
   });
+
+  it('a store-allocated key is exempt from a write\'s required list under validation', async () => {
+    // the Post schema REQUIRES `pid`, and the database allocates it after
+    // the hook runs — a write is validated with the key exempt, on both
+    // paths; the read shape keeps it, and every other member still binds
+    const validator = new JarenValidator({ collectErrors: true });
+    const store = await openStore(MODEL, {
+      driver: nodeDriver(),
+      compileSchema: (schema) => validator.compile(schema),
+    });
+    const ada = await store.entity('User').create({ email: 'ada@x.test' });
+    const posts = store.entity('Post');
+    const created = await posts.create({ title: 'one', authorId: ada.id });
+    assert.strictEqual(typeof created.pid, 'number');
+    posts.add({ title: 'two', authorId: ada.id });
+    assert.strictEqual((await store.saveChanges()).inserted, 1);
+    await assert.rejects(() => posts.create({ authorId: ada.id }),
+      (error) => error.code === 'JD2003'
+        && error.errors.some((e) => /'title'/.test(e.message)), 'the other required members still bind');
+    await store.close();
+  });
 });
 
 describe('referential integrity (real foreign keys)', () => {

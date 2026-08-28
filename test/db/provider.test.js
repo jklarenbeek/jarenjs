@@ -2,10 +2,12 @@
 /**
  * @file The D2 seam: a `@jarenjs/linq` chain executes against a
  * collection because the collection implements `execute(document,
- * options)` — contract-level coupling, no import edge in either
- * direction (asserted against both manifests). The same chains run
- * in-memory and against the store and must agree; `fromAsync` streams
- * the cursor.
+ * options)` — contract-level coupling. The one import edge between the
+ * two packages is the client subpath's (`@jarenjs/linq/db` → db,
+ * validate, formats, as optional peers) and it runs one way: the D6
+ * suite below scans both manifests and every source and declaration
+ * file for every import spelling. The same chains run in-memory and
+ * against the store and must agree; `fromAsync` streams the cursor.
  */
 
 import { describe, it } from 'node:test';
@@ -111,34 +113,54 @@ describe('a linq chain against a collection (D2)', () => {
   });
 });
 
-describe('no import edge in either direction (D2)', () => {
-  it('neither manifest names the other', () => {
+describe('one edge, one direction (D6)', () => {
+  const PEERS = ['@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats'];
+  /** Every quoted `@jarenjs/<name>` specifier in a file's CODE — the
+   * import, export-from, dynamic-import, require and reference spellings
+   * alike, under either quote — with comments stripped first: prose may
+   * name a package (the provider comment does, by design), an import
+   * edge may not. */
+  const specifiers = (file, names) => {
+    const code = fs.readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    const pattern = new RegExp(`['"](${names.map((n) => n.replace('/', '\\/')).join('|')})(?:\\/[^'"]*)?['"]`, 'g');
+    return [...code.matchAll(pattern)].map((m) => m[1]);
+  };
+  const walk = (dir) => fs.readdirSync(dir, { recursive: true, encoding: 'utf8' })
+    .filter((f) => /\.(js|ts)$/.test(f)).map((f) => `${dir}/${f}`);
+
+  it("db's manifest and sources never name linq", () => {
     const db = JSON.parse(fs.readFileSync('packages/db/package.json', 'utf8'));
-    const linq = JSON.parse(fs.readFileSync('packages/linq/package.json', 'utf8'));
-    for (const manifest of [db, linq]) {
-      const declared = {
-        ...manifest.dependencies,
-        ...manifest.peerDependencies,
-        ...manifest.devDependencies,
-      };
-      const other = manifest.name === '@jarenjs/db' ? '@jarenjs/linq' : '@jarenjs/db';
-      assert.strictEqual(other in declared, false,
-        `${manifest.name} must not declare ${other}`);
-    }
+    for (const field of ['dependencies', 'peerDependencies', 'devDependencies', 'optionalDependencies'])
+      assert.strictEqual('@jarenjs/linq' in (db[field] ?? {}), false, `db must not declare linq under ${field}`);
+    for (const file of [...walk('packages/db/src'), ...walk('packages/db/types')])
+      assert.deepStrictEqual(specifiers(file, ['@jarenjs/linq']), [], `${file} imports linq`);
   });
 
-  it('no db source imports linq and no linq source imports db', () => {
-    const scan = (dir) => {
-      const files = fs.readdirSync(dir, { recursive: true, encoding: 'utf8' })
-        .filter((f) => f.endsWith('.js'));
-      return files.map((f) => fs.readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
-    };
-    // the assertion is about IMPORT EDGES — prose may mention the
-    // other package (the provider comment does, by design)
-    assert.strictEqual(/from '@jarenjs\/linq/.test(scan('packages/db/src')), false);
-    assert.strictEqual(/import\('@jarenjs\/linq/.test(scan('packages/db/src')), false);
-    assert.strictEqual(/from '@jarenjs\/db/.test(scan('packages/linq/src')), false);
-    assert.strictEqual(/import\('@jarenjs\/db/.test(scan('packages/linq/src')), false);
+  it("linq imports the store, the validator and the formats under src/db/ and types/db.d.ts only", () => {
+    const edge = (file) => /packages\/linq\/(src\/db\/|types\/db\.d\.ts)/.test(file);
+    let inside = 0;
+    for (const file of [...walk('packages/linq/src'), ...walk('packages/linq/types')]) {
+      const found = specifiers(file, PEERS);
+      if (edge(file)) inside += found.length;
+      else assert.deepStrictEqual(found, [], `${file} imports ${found.join(', ')} outside the edge`);
+    }
+    assert.ok(inside > 0, 'the edge exists: src/db/ imports the peers');
+  });
+
+  it("linq's manifest names the three as optional peers only; its dependencies are unchanged", () => {
+    const linq = JSON.parse(fs.readFileSync('packages/linq/package.json', 'utf8'));
+    assert.deepStrictEqual(Object.keys(linq.peerDependencies).sort(), [...PEERS].sort());
+    for (const peer of PEERS) {
+      assert.strictEqual(peer in (linq.dependencies ?? {}), false, `${peer} must not be a dependency`);
+      assert.deepStrictEqual(linq.peerDependenciesMeta[peer], { optional: true });
+      assert.match(linq.peerDependencies[peer], /^\^\d+\.\d+\.\d+$/, 'a caret range the version bump moves');
+    }
+    assert.deepStrictEqual(Object.keys(linq.dependencies).sort(), ['@jarenjs/core', '@jarenjs/json']);
+    assert.strictEqual(linq.devDependencies, undefined);
+    assert.deepStrictEqual(linq.exports['./db'],
+      { types: './types/db.d.ts', default: './src/db/index.js' });
   });
 });
 

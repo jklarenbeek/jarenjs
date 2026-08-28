@@ -170,6 +170,14 @@ multi-entity shape of MODEL-FORMAT §10) the same way. Live queries
 REQUIRE change capture — the patch stream is the invalidation source —
 and registering on a store opened without `capture` is `JD0050`.
 
+A producer may hand a registration a CHAIN instead of a document: the
+`@jarenjs/linq/db` client's `live(chain, options)` passes the chain's
+`toDocument()` and its `explain().bindings` as the externals to exactly
+these two registrations (`store.live` for an entity-root chain,
+`collection.live` for a collection's), so the strategy, the reason and
+the maintenance are this table's — an entity chain re-runs, declared —
+and this document stays the only place they are decided.
+
 **This table is normative.** Every row is implemented and tested;
 nothing outside it is attempted. Classification reads the compiled
 PLAN (never the raw document), so "extractable" below means exactly

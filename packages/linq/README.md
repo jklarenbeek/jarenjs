@@ -73,7 +73,9 @@ played by the provider seam below.
   may be joined in one document. `@jarenjs/db` implements it — a chain
   over a SQLite-backed collection or an entity set
   (`from(store.sync.entity('Post'))`, `fromAsync(store.entity('Post'))`)
-  pushes to SQL with no import edge in either direction; two entity sets
+  pushes to SQL — the chain imports no store; the package's one runtime
+  edge is the client subpath's (`@jarenjs/linq/db`, below) and it runs
+  one way, toward the store; two entity sets
   of one store join in ONE statement; the store itself, serving several
   roots, is refused by name (`JL0007`). A provider carrying a relation
   table (`relations` — an entity set does) lets a declared relation
@@ -116,7 +118,7 @@ from(rows).ofType(User);  // Sequence<User> — the chain takes a builder where 
 Objects are closed by default (`.open()` admits more); a document is a
 frozen value (`JSON.stringify(builder)` is the document); a pen imports
 no engine, so a schema-only bundle carries no chain and no validator.
-What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0106`)
+What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0107`)
 naming the fix — there is no `.transform()` and no function `refine`;
 cross-field rules are `check()`, transforms are application code. The
 normative mapping table, the rules every pen keeps and the worked
@@ -176,12 +178,53 @@ in CI, a model that moved without a plan (`jaren-db check`). The mapping
 table and the worked examples are
 [docs/PENS-FORMAT.md §5](docs/PENS-FORMAT.md#5-the-migration-pen--jarenjslinqmigration).
 
+## The front door: `@jarenjs/linq/db`
+
+`open(model, { driver })` opens `@jarenjs/db`'s store and fronts it with
+handles typed from the model pen — no cast, no generate step. Every read
+is the chain and pushes down; `include` emits the store's one-statement
+`load` spec; `link`/`unlink` reach the store's membership API; `live` is
+the store's registration with the chain's bound params; and `explain()`
+names what ran at every level — the chain's document and hops, the
+graph's SQL and pagination strategy, the store's residual reasons.
+
+```js
+import { open } from '@jarenjs/linq/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { model } from './model.js';                          // defineModel(…) from the model pen
+
+const db = await open(model, { driver: nodeDriver() });     // validated by default: formats assert
+const hot = await db.entities.Post
+  .where((p) => p.stars.ge(3)).orderBy((p) => p.pid).toArray();   // Post[], pushed down
+const users = await db.entities.User
+  .include((u) => u.posts, { where: (p) => p.stars.ge(3), take: 2 })   // one statement, whatever the depth
+  .include((u) => u.labels, { count: true })
+  .toArray();                                                // posts: Post[], labels: number
+db.entities.User.link(users[0], 'labels', 'admin');          // 'labels' only: the many-to-many members
+await db.saveChanges();
+const live = await db.live(db.entities.Post.where((p) => p.stars.ge(3)));   // { result, subscribe, close, mode }
+```
+
+The edge is one, declared, and proven: this subpath imports
+`@jarenjs/db`, `@jarenjs/validate` and `@jarenjs/formats` as OPTIONAL
+peer dependencies — `npm install @jarenjs/linq` alone installs nothing
+new, the `.` entry carries not one byte of them (the tree-shaking gate
+holds it), a `./db` consumer installs the three, and the bundle price is
+published in [CONSUMING](../../docs/CONSUMING.md). What is the store's
+and what is the client's is one table in
+[docs/PENS-FORMAT.md §6](docs/PENS-FORMAT.md#6-the-client--jarenjslinqdb).
+
 ## What this is not
 
-Not an ORM — entities, storage and migrations live in `@jarenjs/db`.
+Not a storage engine — the store is `@jarenjs/db`'s: its model, its
+tables, its translator, its unit of work and its migrations live there,
+and `@jarenjs/linq/db` is that store's front door, not a second engine
+(it adds no storage semantics and duplicates no algorithm; every read it
+makes is a query document or a `load` spec the store already runs, and
+the store never imports this package).
 Not expression trees over arbitrary methods — the vocabulary is the
 query engine's, and an unknown METHOD fails loudly at build time with
-a coded error (`JL0001`–`JL0007`; the pens' refusals are `JL0101`–`JL0106`)
+a coded error (`JL0001`–`JL0007`; the pens' and the client's refusals are `JL0101`–`JL0107`)
 rather than guessing. JavaScript's own
 operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`
 and `===` evaluate against the proxy object and yield a wrong document

@@ -250,7 +250,7 @@ describe('the asynchronous provider (§12, D8)', () => {
     const pushed = { $for: { it: '$.Post[*]' }, $where: { $gt: ['$it.stars', 1] }, $return: '$it' };
     assert.deepStrictEqual(calls, [{ document: [pushed], options: { externals: {} } }]);
     assert.deepStrictEqual(seq.explain(),
-      { barriers: [], hops: [], split: { pushed, residual: ['mapAsync', 'where'] } });
+      { barriers: [], hops: [], bindings: {}, split: { pushed, residual: ['mapAsync', 'where'] } });
     assert.throws(() => seq.toDocument(), codeIs('JL0005'));
     // a terminal after the split runs locally over the pushed rows
     assert.strictEqual(await seq.count(), 2);

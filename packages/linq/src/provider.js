@@ -1,9 +1,11 @@
 //@ts-check
 /**
  * @file The provider seam (D2): a provider is any object exposing
- * `execute(queryDocument, options)` — contract-level coupling, never an
- * import edge. `@jarenjs/db` will implement this interface without
- * either package importing the other. The in-memory runner implements
+ * `execute(queryDocument, options)` — contract-level coupling: the
+ * chain imports no provider. `@jarenjs/db` implements this interface;
+ * the package's one runtime edge — the client subpath `./db` — runs
+ * the other way, toward the store, as declared optional peers, and the
+ * store never imports this package. The in-memory runner implements
  * the SAME interface over an iterable, so it is both the reference
  * semantics every other provider must match and the proof the seam is
  * real.

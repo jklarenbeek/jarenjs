@@ -38,8 +38,13 @@ export type TypedInclude<E extends MetaMap<E>, M extends EntityMeta> = {
   readonly [K in keyof M['relations']]?:
     true
     | { count: true }
-    | TypedLoadSpec<E, E[M['relations'][K]['entity'] & keyof E]>;
+    | TypedIncludeSpec<E, E[M['relations'][K]['entity'] & keyof E]>;
 };
+
+/** An include's clauses: the root's without `after` (a keyset cursor
+ * paginates the root alone; an include windows with `skip`/`take`). */
+export type TypedIncludeSpec<E extends MetaMap<E>, M extends EntityMeta> =
+  TypedLoadSpecBase & { include?: TypedInclude<E, M> };
 
 export interface TypedLoadSpecBase {
   /** A query expression over `$it` — its format is the runtime's. */
@@ -70,6 +75,17 @@ export type Loaded<
         : Loaded<E, E[M['relations'][K]['entity'] & keyof E], I[K]> | null;
 } : NonNullable<unknown>);
 
+/** The relation members `link`/`unlink` take: the many-to-many ones —
+ * exactly the relation members the generated INPUT type also carries,
+ * since a membership array is writable where a projection is not. */
+export type MembershipMember<M extends EntityMeta> =
+  keyof M['relations'] & keyof M['input'] & string;
+
+/** What a membership names on the target side: the target's key, or a
+ * document carrying it. */
+export type MembershipTarget<E extends MetaMap<E>, M extends EntityMeta, K extends keyof M['relations']> =
+  E[M['relations'][K]['entity'] & keyof E]['key'] | M['relations'][K]['doc'];
+
 export interface TypedUntrackedReads<E extends MetaMap<E>, M extends EntityMeta> {
   get(key: EntityKeyArg): Promise<M['doc'] | undefined>;
   load<const S extends TypedLoadSpec<E, M>>(spec?: S): Promise<Array<Loaded<E, M, S>>>;
@@ -92,6 +108,12 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   put(next: M['doc']): Readonly<M['doc']>;
   remove(key: EntityKeyArg | M['doc']): void;
   discard(key: EntityKeyArg | M['doc']): void;
+  /** Attach / detach one many-to-many membership through the unit of
+   * work (MODEL-FORMAT §11.7): `member` is one of the relation members
+   * `create`/`add` also take as an array — never a projection — and
+   * `target` the target's key or a document carrying it. */
+  link<K extends MembershipMember<M>>(own: M['key'] | M['doc'], member: K, target: MembershipTarget<E, M, K>): void;
+  unlink<K extends MembershipMember<M>>(own: M['key'] | M['doc'], member: K, target: MembershipTarget<E, M, K>): void;
   asNoTracking(): TypedUntrackedReads<E, M>;
   /** The provider contract over this entity's root (MODEL-FORMAT §10.1);
    * the answer is the engine's result shape, value-or-promise (D2). */

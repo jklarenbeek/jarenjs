@@ -1148,7 +1148,12 @@ validates against its own format; `"updated"` stamps
 on insert AND on every update, always; `{ "value": … }` fills a
 literal when absent; `{ "query": … }` evaluates a query document over
 the document being written. Defaults run BEFORE validation, so the
-injected hook sees the completed document. A `version` property is
+injected hook sees the completed document — with one member exempt: a
+store-allocated key (`default: "auto"`) is allocated by the database
+AFTER validation, so a write validates against the schema with that
+key dropped from `required` (the generated input type marks it
+optional for the same reason); the document the store answers carries
+it, and the read shape keeps it required. A `version` property is
 engine-owned and never defaulted by the caller: an insert without one
 writes `0` — not SQL `NULL`, which no `WHERE version = ?` guard could
 match — and every successful write bumps it (§11.5).
@@ -1320,8 +1325,11 @@ store.entity('User').load({
 })
 ```
 
-Per-relation `where`/`orderBy`/`take` apply INSIDE the subquery — the
-point where naive loaders fall back to N+1. Clauses compile against
+Per-relation `where`/`orderBy`/`take`/`skip` apply INSIDE the subquery
+(`LIMIT`/`OFFSET` per parent row) — the point where naive loaders fall
+back to N+1; `after` (§10.5) paginates the ROOT alone, since a keyset
+cursor is one position in one ordered set, and on an include it is
+`JD0032`. Clauses compile against
 the child's own reference flavors; an untranslatable clause is a
 refusal (`JD0032`) naming the include path, never a silent residual.
 Include depth is bounded (default 3, override with `maxDepth`);
@@ -1508,3 +1516,43 @@ The return value is data, not a boolean:
   elapsedMs,
 }
 ```
+
+### 11.7 Membership: `link` and `unlink`
+
+A many-to-many membership is attached or detached one row at a time
+through the unit of work, without carrying the whole membership array:
+
+```js
+users.link('u1', 'labels', 'admin');           // a key, or a document carrying the key
+users.unlink(ada, 'labels', { name: 'dev' });  // the own side is a key or a document too
+const report = await store.saveChanges();      // { joinInserted: 1, joinDeleted: 1, … }
+```
+
+- `link`/`unlink` are local, synchronous bookkeeping, like `add`/`put`/
+  `remove`; nothing reaches the database until `saveChanges()`.
+- The member MUST be a many-to-many relation of the entity — `JD2003`
+  otherwise, naming the relation's kind or the missing declaration. The
+  target is read exactly as a membership array's element is: a key, or
+  a document carrying the target's key (`JD2003` when it carries none).
+- The own side needs the entity's key. A pending insert whose `auto`
+  key the save allocates has none to attach to and is refused (`JD2003`:
+  "save the entity first, then attach"); a pending insert with a
+  caller-supplied key may be linked in the same save, since join rows
+  run after the inserts (§11.4).
+- The baseline is the join table **as read at save time**, not a
+  snapshot: linking a member that already exists and unlinking one that
+  does not are no-ops, so a save repeated with the same calls changes
+  nothing (asserted). The last word on one target wins — `unlink` after
+  `link` means unlink.
+- A `link`/`unlink` beside a `put` carrying the SAME member's membership
+  array folds into that array's key-set difference (§11.3): one intent
+  per entity, own key and member, never two statements racing for one
+  row.
+- A tracked snapshot's loaded membership array is not rewritten by a
+  saved `link`/`unlink` — a projection stays what it was read as;
+  re-read (`load({ include })`) to see the membership. `discard(key)`
+  drops the key's pending membership changes together with its
+  tracking, and a failed save leaves them pending, as §11.6 promises.
+- The report counts the rows written under `joinInserted`/`joinDeleted`
+  and `stats().tracker.pendingMemberships` counts the pending
+  (entity, key, member) records.

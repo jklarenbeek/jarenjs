@@ -1162,6 +1162,20 @@ const genJoined: Promise<{ t: string; e: string }[]> = fromAsync(genStore.entity
 void genJoined;
 const genRoots: readonly ('User' | 'Post' | 'Label' | 'Grade')[] | undefined = genStore.roots;
 void genRoots;
+// membership is typed over exactly the many-to-many members (the ones the
+// input type also carries), with the target's key or document
+genStore.entity('User').link('u1', 'labels', 'admin');
+genStore.entity('User').unlink(genUser, 'labels', { name: 'dev' });
+// @ts-expect-error — a to-many relation is not a membership
+genStore.entity('User').link('u1', 'posts', 1);
+// @ts-expect-error — a to-one relation is not a membership
+genStore.entity('Post').link(1, 'author', 'u1');
+const genPendingMemberships: number | undefined = genStore.stats().tracker?.pendingMemberships;
+void genPendingMemberships;
+// explain() reports the bound params on both surfaces
+const genBindings: Record<string, unknown> = linqFrom(genUsers).params({ k: 1 }).explain().bindings;
+const genAsyncBindings: Record<string, unknown> = fromAsync(genStore.entity('User')).params({ k: 1 }).explain().bindings;
+void [genBindings, genAsyncBindings];
 // relation navigation types from emit's optional relation members — nothing
 // new on the expression surface — and explain() types the hops it lowered
 const genByAuthor: { title: string; by: string }[] = linqFrom(genStore.entity('Post'))

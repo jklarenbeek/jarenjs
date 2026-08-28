@@ -12,7 +12,12 @@
  *      `@jarenjs/*` dependency closure (extracted from the packed
  *      tarballs, nothing hoisted, nothing extra),
  *   3. imports every explicit JavaScript export subpath under plain
- *      Node ESM,
+ *      Node ESM — for a package declaring OPTIONAL peers, first one
+ *      subpath at a time WITHOUT them, so that every subpath that fails
+ *      fails only by a peer's name (`ERR_MODULE_NOT_FOUND`), at least
+ *      one imports clean and at least one needs them (a peer rule no
+ *      subpath exercises is a claim nobody checked), then all of them
+ *      with the peers' closures installed from the tarballs,
  *   4. type-checks a strict TypeScript consumer against the packed
  *      declarations (`tsc --noEmit`, strict, no `skipLibCheck`) —
  *      namespace imports of every subpath, plus semantic calls of the
@@ -98,6 +103,13 @@ function importSubpaths(pkg) {
     subpaths.push(key === '.' ? pkg.name : pkg.name + key.slice(1));
   }
   return subpaths;
+}
+
+/** The declared peers of a package (`peerDependencies`), each with its
+ * own dependency closure — what a consumer of the subpath that needs
+ * them installs beside the package. */
+function declaredPeers(pkg) {
+  return Object.keys(pkg.peerDependencies ?? {});
 }
 
 /** The transitive DECLARED `@jarenjs/*` dependency closure of a package. */
@@ -255,6 +267,16 @@ void renderMermaid(source, { dateNames: undefined })[0];
 `,
   '@jarenjs/linq': `
 import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
+import * as m from '@jarenjs/linq/model';
+import { open } from '@jarenjs/linq/db';
+import { nodeDriver } from '@jarenjs/db/node';
+const model = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string() }) } });
+const opening = open(model, { driver: nodeDriver() });
+void opening.then(async (client) => {
+  const names: string[] = await client.entities.User.where((u) => u.name.eq('ada')).select((u) => u.name).toArray();
+  void names;
+  await client.close();
+}).catch(() => undefined);
 const rows = [{ id: 1, name: 'ada' }, { id: 2, name: 'lin' }];
 const seq = from(rows).where((r: any) => r.id.gt(1)).select((r: any) => ({ n: r.name }));
 const doc: unknown = seq.toDocument();
@@ -457,14 +479,56 @@ try {
       JSON.stringify({ name: 'consumer', private: true, type: 'module' }));
 
     // install ONLY the declared closure, from the packed tarballs
-    for (const dep of declaredClosure(byName, name)) {
+    const installed = new Set();
+    const install = (dep) => {
+      if (installed.has(dep)) return;
+      installed.add(dep);
       const dest = join(modulesDir, dep);
       mkdirSync(dest, { recursive: true });
       execFileSync('tar', ['-xzf', /** @type {string} */ (tarballs.get(dep)),
         '--strip-components=1', '-C', dest]);
-    }
+    };
+    for (const dep of declaredClosure(byName, name)) install(dep);
 
     const subpaths = importSubpaths(pkg);
+    const peers = declaredPeers(pkg);
+    /** @type {{ subpath: string, peer: string }[]} */
+    const needing = [];
+    if (peers.length > 0) {
+      // the peer rule, made visible: without the peers every failing
+      // subpath fails by a declared peer's NAME and nothing else
+      let broken = false;
+      for (const [i, subpath] of subpaths.entries()) {
+        const probeFile = join(consumerDir, `probe-${i}.mjs`);
+        writeFileSync(probeFile, `await import(${JSON.stringify(subpath)});\n`);
+        const probe = spawnSync(process.execPath, [probeFile], { cwd: consumerDir, encoding: 'utf8' });
+        if (probe.status === 0) continue;
+        const named = peers.find((peer) => probe.stderr.includes(`'${peer}'`));
+        if (!probe.stderr.includes('ERR_MODULE_NOT_FOUND') || named === undefined) {
+          failures++;
+          console.error(`✗ ${name} (peers): ${subpath} fails without the optional peers for a reason `
+            + `other than a missing peer: ${probe.stderr.split('\n').find((l) => l.trim() !== '') ?? 'failed'}`);
+          broken = true;
+          break;
+        }
+        needing.push({ subpath, peer: named });
+      }
+      if (broken) continue;
+      if (needing.length === 0) {
+        failures++;
+        console.error(`✗ ${name} (peers): declares optional peers (${peers.join(', ')}) that no export subpath needs`);
+        continue;
+      }
+      if (needing.length === subpaths.length) {
+        failures++;
+        console.error(`✗ ${name} (peers): every export subpath needs the optional peers — they are dependencies in disguise`);
+        continue;
+      }
+      // then the peers, with their own closures, like dependencies
+      for (const peer of peers) {
+        for (const dep of declaredClosure(byName, peer)) install(dep);
+      }
+    }
     const program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
     // the runtime consumer is a real program FILE: `-e` strings are not
     // portable (a Windows shell reparses multiline programs)
@@ -543,7 +607,9 @@ try {
       }
     }
 
-    console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s), node+types${bun ? '+bun' : ''}${name === '@jarenjs/app' ? '+vite' : ''}`);
+    const peerNote = peers.length === 0 ? ''
+      : ` + ${peers.length} optional peer(s) needed by ${[...new Set(needing.map((n) => n.subpath))].join(', ')}`;
+    console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s)${peerNote}, node+types${bun ? '+bun' : ''}${name === '@jarenjs/app' ? '+vite' : ''}`);
   }
 }
 finally {

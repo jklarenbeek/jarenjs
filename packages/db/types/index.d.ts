@@ -84,7 +84,9 @@ export interface ExecuteOptions {
   pushdown?: boolean;
 }
 
-export interface LoadInclude extends LoadSpec {
+/** An include's clauses: the root's without `after` — a keyset cursor
+ * paginates the root alone; an include windows with `skip`/`take`. */
+export interface LoadInclude extends Omit<LoadSpec, 'after'> {
   /** Project the related-row COUNT instead of the rows. */
   count?: boolean;
 }
@@ -128,6 +130,8 @@ export interface StoreStats {
     tracked: number;
     pendingInserts: number;
     pendingDeletes: number;
+    /** Pending `link`/`unlink` records: one per entity, own key and member (§11.7). */
+    pendingMemberships: number;
   } | null;
   liveQueries: number;
 }
@@ -238,6 +242,12 @@ export interface EntitySet<T = unknown, I = unknown> {
   remove(key: EntityKeyArg | T): void;
   /** Drop tracking without scheduling anything — conflict recovery. */
   discard(key: EntityKeyArg | T): void;
+  /** Attach / detach one many-to-many membership through the unit of
+   * work (§11.7): local bookkeeping, written by `saveChanges()` as join
+   * rows against the join table as it stands then — idempotent. `own`
+   * and `target` are each a key or a document carrying the key. */
+  link(own: EntityKeyArg | T, member: string, target: EntityKeyArg | object): void;
+  unlink(own: EntityKeyArg | T, member: string, target: EntityKeyArg | object): void;
   asNoTracking(): UntrackedReads<T>;
   /** The provider contract over this entity's root (MODEL-FORMAT §10.1):
    * the document is over the multi-entity root and arrives whole; the
@@ -273,6 +283,8 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   put(next: T): Readonly<T>;
   remove(key: EntityKeyArg | T): void;
   discard(key: EntityKeyArg | T): void;
+  link(own: EntityKeyArg | T, member: string, target: EntityKeyArg | object): void;
+  unlink(own: EntityKeyArg | T, member: string, target: EntityKeyArg | object): void;
   asNoTracking(): SyncUntrackedReads<T>;
   /** The provider contract over this entity's root, answering values. */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;

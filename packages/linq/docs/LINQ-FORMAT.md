@@ -336,7 +336,10 @@ them is `JL0004`. A binding must be query data (§5): a `Date`, `Map`,
 
 The inner side of a `join`, `groupJoin` or `concat` contributes its
 document WHOLE, so its declared parameters ride along into the new
-sequence (`explain().externals` lists the union); a name both sides
+sequence (`explain().externals` lists the union, `explain().bindings`
+the values bound so far — what a provider receives as `externals`, and
+what a host handed the chain, such as a live registration, forwards
+without a second spelling); a name both sides
 bind to different values is `JL0004` — one document carries one binding
 per name. Rebinding a name later (`.params({ k: 3 })`) re-runs the
 whole document under the new value, on the async surface too: a
@@ -469,6 +472,7 @@ the normative home, this table mirrors it):
 | `JL0104` | a pen-owned keyword through `meta()`, or an external a captured rule did not declare |
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
+| `JL0107` | the client (`@jarenjs/linq/db`, PENS-FORMAT §6) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
 
 Runtime errors (`LinqRuntimeError`):
 

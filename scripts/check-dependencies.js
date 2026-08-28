@@ -149,7 +149,7 @@ for (const { pkg, manifest } of published) {
     fail(`${manifest} declares third-party peer dependencies: ${peers.join(', ')}`);
 }
 if (failures === 0)
-  console.log(`  ✓ ${published.length} published packages, zero third-party runtime dependencies`);
+  console.log(`  ✓ ${published.length} published packages, zero third-party runtime or peer dependencies`);
 
 if (!process.argv.includes('--skip-audit')) {
   console.log('\nAdvisories');

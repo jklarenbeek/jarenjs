@@ -656,6 +656,18 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   `typedStore` (from `@jarenjs/db/typed`) types every read, checks
   every write, and widens `load` results by their include
   specification.
+- **Membership** (§11.7): `link(own, member, target)` and `unlink` attach
+  and detach one many-to-many membership at a time through the unit of
+  work — written against the join table as it stands at save time, so a
+  repeated save changes nothing.
+- **The front door**: `@jarenjs/linq/db` opens this store behind a
+  client typed from the model pen — `db.entities.Post.where((p) =>
+  p.stars.ge(3))` is the chain over the entity set, pushed down;
+  `db.entities.User.include((u) => u.posts, { where: (p) => p.stars.ge(3),
+  take: 2 }).toArray()` emits exactly the `load` spec above and runs in
+  the same one statement; `link`/`unlink` reach §11.7 and `live` the
+  registration below. It imports this package as an optional peer; this
+  package never imports it.
 - **Relational migrations and the `jaren-db` CLI** (MIGRATION-FORMAT
   §§9–12): the strategy-table diff, the documented twelve-step table
   rebuild with `foreign_key_check` inside the transaction, shape
@@ -764,9 +776,9 @@ replication on these primitives is a roadmap item, not a hint.
   adapted); OPFS needs a secure context, and where it is absent the
   store runs in memory with the durability difference stated.
 - **Named future work, not silent gaps**: `$groupby` pushdown beyond
-  the `$time-bucket` ladder, relation-name query sugar, a many-to-many membership API, incremental
-  joins, other SQL dialects, replication, database introspection
-  (MODEL-FORMAT §10.6, the roadmap).
+  the `$time-bucket` ladder, a many-to-many hop on the chain, membership
+  on an auto-keyed pending insert, incremental joins, other SQL dialects,
+  replication, database introspection (MODEL-FORMAT §10.6, the roadmap).
 
 The normative formats are
 [docs/MODEL-FORMAT.md](docs/MODEL-FORMAT.md) (storage §§1–7, safe

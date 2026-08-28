@@ -9,6 +9,9 @@ import * as assert from 'node:assert';
 
 import { from, fromDocument, createPushQueue, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
 import * as s from '@jarenjs/linq/schema';
+import { open } from '@jarenjs/linq/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { fixtureModel } from './model-corpus.js';
 import { JsonQueryCompileError } from '@jarenjs/json/query';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { JarenValidator } from '@jarenjs/validate';
@@ -69,6 +72,17 @@ describe('every JL code fires', () => {
     assert.throws(() => from([1]).concat([new Date(0)]),
       (e) => e.code === 'JL0005' && /Date instance/.test(e.message));
     assert.throws(() => from([1]).concat([NaN]), (e) => e.code === 'JL0005');
+  });
+
+  it('JL0107 — the client names a member of the wrong relation kind, the fix named', async () => {
+    const client = await open(fixtureModel, { driver: nodeDriver() });
+    assert.throws(() => client.entities.User.include((u) => u.email),
+      (e) => e instanceof LinqBuildError && e.code === 'JL0107' && /'posts', 'labels'/.test(e.message));
+    assert.throws(() => client.entities.User.link('u1', 'posts', 1),
+      (e) => e.code === 'JL0107' && /oneToMany/.test(e.message) && /foreign key/.test(e.message));
+    assert.throws(() => client.entities.Post.unlink(1, 'author', 'u1'),
+      (e) => e.code === 'JL0107' && /oneToOne/.test(e.message));
+    await client.close();
   });
 
   it('JL0006 — the recorded unsupported operator', () => {
@@ -170,7 +184,7 @@ describe('every JL code fires', () => {
     assert.strictEqual(Object.isFrozen(LINQ_CODES), true);
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006', 'JL0007',
-      'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106',
+      'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106', 'JL0107',
       'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006',
     ]);
   });

@@ -903,3 +903,14 @@ On Bun, Kysely and Prisma have no first-party `bun:sqlite` route and
 are Node-only rows; the capability cliff (no UDF hatch, no session
 capture) is stated beside the Bun tables. The losses stay in the
 tables with their reasons.
+
+The `@jarenjs/linq/db` client is one more route in every table: the
+same store reached through its typed front door — a chain per read
+(`where`/`orderBy`/`skip`/`take` pushed down, the keyset page spelled
+as the rivals spell it), the include builder for the graph and the
+count rows, the unit of work for the update — verified equal before it
+is timed and counted by a counting driver, so the price of the door
+itself is a published row beside the hand-written documents. Its reads
+run unvalidated like the store rows; the one validated client row is
+the DEFAULT door (`open()` without a `validator`, formats asserting),
+stated as such.

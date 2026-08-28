@@ -506,6 +506,10 @@ export interface Explanation {
   /** The relation hops the chain's callbacks navigated, in capture
    * order; a join's inner sequence's hops precede the join's own. */
   hops: Hop[];
+  /** The values `params()` bound, by name — what a provider receives as
+   * `externals` when the document runs, so a host handed the chain (a
+   * live registration) can carry them without a second spelling. */
+  bindings: Record<string, unknown>;
 }
 
 /** The deferred, immutable sequence of `T` with declared params `P`. */
@@ -644,6 +648,8 @@ export interface AsyncExplanation {
   barriers: { operator: string, reason: string }[];
   /** The relation hops the chain's callbacks navigated (as `Explanation`). */
   hops: Hop[];
+  /** The values `params()` bound, by name (as `Explanation`). */
+  bindings: Record<string, unknown>;
   /** Present when the chain is document-representable (no mapAsync). */
   document?: unknown;
   /** Present when a mapAsync splits the chain. */

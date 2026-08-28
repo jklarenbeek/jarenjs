@@ -94,6 +94,23 @@ projections) and the `jaren-contract` CLI additionally need `emit`. The
 tree-shaking gate holds this: a bundle that never imports `./project`
 carries no emit code.
 
+Which linq subpath needs what: `.` (the chain) and the pens — `./schema`,
+`./model`, `./jslt`, `./migration` — need only `core` + `json`; `./db`,
+the store's typed front door, additionally needs `@jarenjs/db`,
+`@jarenjs/validate` and `@jarenjs/formats`, which `@jarenjs/linq`
+declares as OPTIONAL peer dependencies: `npm install @jarenjs/linq` alone
+installs nothing beyond `core` and `json`, and a `./db` consumer installs
+the three itself (`npm install @jarenjs/db @jarenjs/validate
+@jarenjs/formats`; pnpm's isolated layout resolves declared peers the
+same way). The price is published rather than hidden: a minified `import
+{ open } from '@jarenjs/linq/db'` bundle measures
+<!--bundle:linq-db-->478 kB — the store, the validator and the formats
+ride along by construction, beside the chain's own bundle, which the
+same gate prints. The tree-shaking gate holds both halves: the `.` entry
+carries not one byte of the three, and the figure above is compared with
+the measured bundle on every run, so it can go stale only by failing the
+gate.
+
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
 `play`, `josl`, `ai`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.

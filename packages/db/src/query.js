@@ -1132,6 +1132,10 @@ export function createLoadEngine(context, entityName) {
     `${reason} (include path: ${path.join('.') || '<root>'})`,
     entities.get(entityName)?.docPath);
   const isWindowBound = (value) => Number.isSafeInteger(value) && value >= 0;
+  /** An include's window inside its subquery: LIMIT, and OFFSET for a
+   * `skip` — per parent row, since the subquery is correlated (§10.4). */
+  const windowClause = (child) => (child.take !== undefined || (child.skip !== undefined && child.skip > 0)
+    ? ` ${dialect.limitClause(child.take ?? null, child.skip)}` : '');
 
   /** Compile a where EXPRESSION over `$it` against one entity. */
   const compileWhere = (expression, entity, path) => {
@@ -1202,6 +1206,7 @@ export function createLoadEngine(context, entityName) {
       where: spec?.where !== undefined ? compileWhere(spec.where, entity, path) : null,
       order: spec?.orderBy !== undefined ? compileOrder(spec.orderBy, entity, path) : null,
       take: spec?.take,
+      skip: spec?.skip,
       includes: [],
     };
     const includeSpec = spec?.include;
@@ -1230,6 +1235,12 @@ export function createLoadEngine(context, entityName) {
       for (const member of ['take', 'skip']) {
         if (childSpec[member] !== undefined && !isWindowBound(childSpec[member]))
           throw refuse(`${member} must be a non-negative integer`, [...path, relationName]);
+      }
+      // a keyset cursor is one position in ONE ordered set; an include is
+      // a set per parent, so it windows with skip/take and never seeks
+      if (childSpec.after !== undefined) {
+        throw refuse("'after' (keyset pagination) paginates the root — an include windows with skip and take",
+          [...path, relationName]);
       }
       const childName = relation.to;
       const include = {
@@ -1329,10 +1340,10 @@ export function createLoadEngine(context, entityName) {
         + (child.where !== null
           ? ` AND ${emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where)}` : '')
         + ` ORDER BY ${orderSql.join(', ')}`
-        + (child.take !== undefined ? ` ${dialect.limitClause(child.take, undefined)}` : '')
+        + windowClause(child)
       : `SELECT ${rendered.aliasSql}.* FROM ${q(childTable)} AS ${q(childAlias)} `
         + `WHERE ${conditions.join(' AND ')} ORDER BY ${orderSql.join(', ')}`
-        + (child.take !== undefined ? ` ${dialect.limitClause(child.take, undefined)}` : '');
+        + windowClause(child);
     if (relation.kind === 'oneToOne') {
       return `(SELECT json_object(${rendered.projection()}) FROM `
         + `(${inner} ${dialect.limitClause(1, undefined)}) AS ${q(childAlias)})`;

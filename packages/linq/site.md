@@ -9,7 +9,8 @@ card:
     typed old row to new row. A recording proxy captures the callback, the
     emitter folds stages into one FLWOR document, and the same chain runs in
     memory, over streams (one bounded mapAsync boundary), or pushed whole to
-    a store's entity sets through the provider seam.
+    a store's entity sets through the provider seam — or through the typed
+    client that fronts the store under `./db`, over one declared edge.
   perf: >-
     one operator set, byte-identical documents through the sync and async
     drivers
@@ -25,8 +26,9 @@ stylesheet) and `/migration` (a migration whose data transform is typed old
 row to new row). Capture is a recording proxy (never source-text inspection),
 execution is deferred, and the emitted document runs in memory, over async
 streams, or against any provider exposing execute(document, options) —
-`@jarenjs/db` implements that contract with no import edge in either
-direction, and its entity sets are providers a chain binds through by root.
+`@jarenjs/db` implements that contract (the chain imports no store), its
+entity sets are providers a chain binds through by root, and `@jarenjs/linq/db`
+fronts the store with a typed client over one declared, optional-peer edge.
 
 ```js
 import { from } from '@jarenjs/linq';

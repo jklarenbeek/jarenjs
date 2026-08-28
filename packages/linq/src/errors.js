@@ -29,6 +29,7 @@ export const LINQ_CODES = Object.freeze({
   JL0104: 'a pen-owned keyword through meta(), or an external a captured rule did not declare',
   JL0105: 'a relation hop cannot lower: a many-to-many member, a composite or undeclared key, or a malformed relation entry',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
+  JL0107: 'a client operation named a member that is not the relation kind it needs',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
@@ -65,8 +66,8 @@ export const LINQ_CODES = Object.freeze({
  *    several entity roots (`roots`) and has no `root` of its own — a
  *    store with entities; chain over one of them (`store.entity(name)`)
  *
- * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`;
- * PENS-FORMAT.md §1.3) refuse with the `JL01xx` codes:
+ * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`) and
+ * the client (`/db`; PENS-FORMAT.md §1.3) refuse with the `JL01xx` codes:
  *
  *  - `JL0101` — a pen received a value it cannot spell: a function,
  *    symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance or a
@@ -92,6 +93,12 @@ export const LINQ_CODES = Object.freeze({
  *    target model does not declare (`transform`, `assert`, `derive`),
  *    or a `transform` over a planned document finds no draft to
  *    replace, or two drafts for one name
+ *  - `JL0107` — the client was handed a member that is not the relation
+ *    kind the operation needs: `include()` picks a declared relation
+ *    member (a scalar member, or a name the model does not declare, is
+ *    refused naming the declared ones); `link()`/`unlink()` attach
+ *    many-to-many memberships only (a to-one or to-many relation is
+ *    refused naming its kind)
  */
 export class LinqBuildError extends CodedError {
   /**

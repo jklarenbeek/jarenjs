@@ -8,8 +8,10 @@
  * snapshot against current with the suite's own diff engine and plans
  * the MINIMAL set of parameterised statements: scalar/epoch/foreign-
  * key column writes, `jsonb_set`/`jsonb_remove` chains for document
- * paths, join-table synchronisation for many-to-many members, and a
- * counted whole-row fallback for anything untranslatable.
+ * paths, join-table synchronisation for many-to-many members — by the
+ * key-set difference a `put` implies, or by an explicit `link`/`unlink`
+ * delta resolved against the join table at save time — and a counted
+ * whole-row fallback for anything untranslatable.
  *
  * Ordering never violates a foreign key mid-transaction: inserts run
  * parent-first, deletes child-first, updates in between, join rows
@@ -94,6 +96,11 @@ export function createTracker(context) {
   const records = new Map();
   /** @type {Map<string, any>} */
   const removals = new Map();
+  /** Pending membership deltas (§11.7), one per entity, own key and
+   * many-to-many member: the targets to link and the targets to unlink.
+   * @type {Map<string, { entity: string, member: string, ownKey: string | number,
+   *   links: Set<string | number>, unlinks: Set<string | number> }>} */
+  const memberships = new Map();
   let pendingSequence = 0;
 
   const keyOf = (entityName, parts) =>
@@ -112,6 +119,12 @@ export function createTracker(context) {
       docPath: entities.get(entityName)?.docPath ?? '/entities',
       collection: entityName,
     });
+
+  /** A membership write needs the entity's own key: an `auto` key is
+   * allocated by the save, so a pending insert has none to attach to. */
+  const needsOwnKey = (entityName, member, verb) => contractError(entityName,
+    `'${member}' membership needs the entity's own key at ${verb} time — `
+    + 'save the entity first, then attach');
 
   const register = (entityName, doc) => {
     deepFreeze(doc);
@@ -193,6 +206,60 @@ export function createTracker(context) {
     });
   };
 
+  /**
+   * The pending membership delta a `link`/`unlink` addresses (§11.7):
+   * the member must be a many-to-many relation of the entity; the own
+   * key is read from a key or a document (a pending insert whose key
+   * the save allocates has none to attach to); the target is a key or a
+   * document carrying the target's key — the reading a membership array
+   * gets, so the two attach the same rows.
+   */
+  const membershipOf = (entityName, own, member, target, verb) => {
+    const plan = coreFor(entityName).plan;
+    const relation = entities.get(entityName).properties.get(member)?.relation;
+    if (relation === undefined || relation.kind !== 'manyToMany') {
+      throw contractError(entityName, relation === undefined
+        ? `'${member}' is not a relation member of '${entityName}' — ${verb}() attaches a `
+          + 'many-to-many membership through its join table'
+        : `'${member}' is a ${relation.kind} relation — ${verb}() attaches many-to-many `
+          + "memberships only; write the related entity's foreign key instead");
+    }
+    let ownKey;
+    if (own !== null && typeof own === 'object' && !Array.isArray(own)) {
+      ownKey = own[plan.keys[0]];
+      if (typeof ownKey !== 'string' && typeof ownKey !== 'number')
+        throw needsOwnKey(entityName, member, `${verb}()`);
+    }
+    else {
+      ownKey = coreFor(entityName).normalizeKey(own)[0];
+    }
+    const targetKey = mapping.entities[relation.to].keys[0];
+    const [key] = membershipKeys([target], targetKey, member,
+      (reason) => contractError(entityName, reason));
+    const id = `${keyOf(entityName, [ownKey])}${UNIT_SEPARATOR}${member}`;
+    let pending = memberships.get(id);
+    if (pending === undefined) {
+      pending = { entity: entityName, member, ownKey, links: new Set(), unlinks: new Set() };
+      memberships.set(id, pending);
+    }
+    return { pending, key };
+  };
+
+  /** Attach one membership (local, synchronous); the last word on one
+   * target wins, so `unlink` after `link` means unlink. */
+  const link = (entityName, own, member, target) => {
+    const { pending, key } = membershipOf(entityName, own, member, target, 'link');
+    pending.unlinks.delete(key);
+    pending.links.add(key);
+  };
+
+  /** Detach one membership (local, synchronous). */
+  const unlink = (entityName, own, member, target) => {
+    const { pending, key } = membershipOf(entityName, own, member, target, 'unlink');
+    pending.links.delete(key);
+    pending.unlinks.add(key);
+  };
+
   const counts = () => {
     let pendingInserts = 0;
     for (const record of records.values()) {
@@ -202,6 +269,7 @@ export function createTracker(context) {
       tracked: records.size - pendingInserts,
       pendingInserts,
       pendingDeletes: removals.size,
+      pendingMemberships: memberships.size,
     };
   };
 
@@ -299,19 +367,31 @@ export function createTracker(context) {
     return { columnSets, docBuild, m2mMembers, fallback };
   };
 
-  /** Compute a many-to-many member's join-row difference by key sets. */
-  const joinDiff = (entityName, before, after, ownKey, member) => {
-    const entity = entities.get(entityName);
-    const relation = entity.properties.get(member).relation;
-    const targetKey = mapping.entities[relation.to].keys[0];
-    const extract = (value) => membershipKeys(value, targetKey, member,
-      (reason) => contractError(entityName, reason));
-    // the endpoint columns come from the mapping, never from the join
-    // table's NAME: an entity name with an underscore, or a `through`
-    // name, does not split into its endpoints
+  /** The join-table endpoints a many-to-many member writes through. The
+   * endpoint columns come from the mapping, never from the join table's
+   * NAME: an entity name with an underscore, or a `through` name, does
+   * not split into its endpoints. */
+  const joinEndpoints = (entityName, member) => {
+    const relation = entities.get(entityName).properties.get(member).relation;
     const join = mapping.joinTables[relation.joinTable];
     const own = join.left.entity === entityName ? join.left : join.right;
     const target = own === join.left ? join.right : join.left;
+    return {
+      entity: entityName,
+      member,
+      joinTable: relation.joinTable,
+      ownColumn: own.column,
+      targetColumn: target.column,
+      tableColumns: [join.left.column, join.right.column],
+      targetKey: mapping.entities[relation.to].keys[0],
+    };
+  };
+
+  /** Compute a many-to-many member's join-row difference by key sets. */
+  const joinDiff = (entityName, before, after, ownKey, member) => {
+    const endpoints = joinEndpoints(entityName, member);
+    const extract = (value) => membershipKeys(value, endpoints.targetKey, member,
+      (reason) => contractError(entityName, reason));
     // a snapshot that never LOADED the member knows nothing about the
     // current membership — treating unknown as empty would re-insert
     // existing rows (a UNIQUE violation the seeded corpus found); the
@@ -321,15 +401,23 @@ export function createTracker(context) {
       ? null
       : [...new Set(extract(memberValue))];
     return {
-      joinTable: relation.joinTable,
-      ownColumn: own.column,
-      targetColumn: target.column,
-      tableColumns: [join.left.column, join.right.column],
+      ...endpoints,
       ownKey,
       beforeKeys,
       afterKeys: [...new Set(extract(after[member]))],
     };
   };
+
+  /** A pending `link`/`unlink` delta as a join op. Its baseline is the
+   * join table as read at save time, so linking a member that exists
+   * and unlinking one that does not are no-ops — the two-run property. */
+  const membershipDelta = (pending) => ({
+    ...joinEndpoints(pending.entity, pending.member),
+    ownKey: pending.ownKey,
+    beforeKeys: null,
+    links: [...pending.links],
+    unlinks: [...pending.unlinks],
+  });
 
   /** Relation members riding a pending INSERT: many-to-many becomes
    * join rows; anything else refuses — projections are not state. */
@@ -349,11 +437,8 @@ export function createTracker(context) {
           + 'projection, not stored state; add the related entities themselves');
       }
       const ownKey = record.current[plan.keys[0]];
-      if (typeof ownKey !== 'string' && typeof ownKey !== 'number') {
-        throw contractError(record.entity,
-          `'${property.name}' membership needs the entity's own key at `
-          + 'add() time — save the entity first, then attach');
-      }
+      if (typeof ownKey !== 'string' && typeof ownKey !== 'number')
+        throw needsOwnKey(record.entity, property.name, 'add()');
       ops.push(joinDiff(record.entity, null, record.current, ownKey, property.name));
     }
     return ops;
@@ -416,6 +501,23 @@ export function createTracker(context) {
         unversioned.add(removal.entity);
     }
 
+    // a link/unlink beside a put-based synchronisation of the SAME member
+    // folds into that op's key set: one intent per entity, own key and
+    // member, never two statements racing for one row
+    const synced = new Map(joinOps.map((op) =>
+      [`${op.entity}${UNIT_SEPARATOR}${op.ownKey}${UNIT_SEPARATOR}${op.member}`, op]));
+    for (const [id, pending] of memberships) {
+      const diff = synced.get(id);
+      if (diff === undefined) {
+        joinOps.push(membershipDelta(pending));
+        continue;
+      }
+      const after = new Set(diff.afterKeys);
+      for (const key of pending.unlinks) after.delete(key);
+      for (const key of pending.links) after.add(key);
+      diff.afterKeys = [...after];
+    }
+
     // resolve unknown membership baselines, then finalize each op
     const resolveJoins = (i) => {
       if (i >= joinOps.length) return null;
@@ -432,6 +534,11 @@ export function createTracker(context) {
     const finalizeJoins = () => {
       for (const op of joinOps) {
         const before = new Set(op.beforeKeys);
+        if (op.links !== undefined) {
+          op.added = op.links.filter((key) => !before.has(key));
+          op.removed = op.unlinks.filter((key) => before.has(key));
+          continue;
+        }
         const after = new Set(op.afterKeys);
         op.added = op.afterKeys.filter((key) => !before.has(key));
         op.removed = op.beforeKeys.filter((key) => !after.has(key));
@@ -746,6 +853,7 @@ export function createTracker(context) {
       }
     }
     removals.clear();
+    memberships.clear();
   };
 
   const saveChanges = () => {
@@ -779,10 +887,15 @@ export function createTracker(context) {
   /** Drop tracking for a key without scheduling anything. */
   const discard = (entityName, keyOrDoc) => {
     const parts = coreFor(entityName).normalizeKey(keyOrDoc);
-    records.delete(keyOf(entityName, parts));
+    const key = keyOf(entityName, parts);
+    records.delete(key);
+    // a pending membership change belongs to the key it attaches to
+    for (const id of memberships.keys()) {
+      if (id.startsWith(`${key}${UNIT_SEPARATOR}`)) memberships.delete(id);
+    }
   };
 
   return {
-    register, registerGraph, add, put, remove, discard, counts, saveChanges,
+    register, registerGraph, add, put, remove, discard, link, unlink, counts, saveChanges,
   };
 }

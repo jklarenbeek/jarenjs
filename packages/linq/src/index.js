@@ -4,8 +4,10 @@
  * expressions as plain Jaren query documents (QUERY-FORMAT.md),
  * executes deferred over any iterable, and hands the SAME document
  * whole to any provider exposing `execute(document, options)` (D2:
- * contract-level coupling, never an import edge). The normative
- * surface, mapping table and error codes live in docs/LINQ-FORMAT.md.
+ * contract-level coupling — the chain imports no provider; the client
+ * subpath `./db` is the package's one declared edge, toward the
+ * store). The normative surface, mapping table and error codes live
+ * in docs/LINQ-FORMAT.md.
  */
 
 export { from, fromDocument, Sequence } from './sequence.js';

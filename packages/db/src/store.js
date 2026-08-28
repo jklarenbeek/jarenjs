@@ -740,6 +740,26 @@ function asyncCollection(core, live) {
  * @param {any} options
  * @returns {{ functions: any, extensions: any } | null}
  */
+/**
+ * The schema a WRITE validates against. A store-allocated key (`default:
+ * "auto"`) is absent from the document the injected hook sees — the
+ * database allocates it after validation — so it cannot be required of a
+ * write, and the generated input type already marks it optional; every
+ * other member is the schema's own, defaults filled (§9.6). The read
+ * shape is untouched: the document the store answers carries the key.
+ * @param {any} entity - a normalized entity
+ * @returns {any}
+ */
+function writeSchemaOf(entity) {
+  const schema = entity.schema;
+  const auto = entity.keys.find((key) => entity.properties.get(key).default === 'auto');
+  if (auto === undefined || !Array.isArray(schema?.required) || !schema.required.includes(auto))
+    return schema;
+  const out = { ...schema, required: schema.required.filter((name) => name !== auto) };
+  if (out.required.length === 0) delete out.required;
+  return out;
+}
+
 function resolveOperators(options) {
   const registry = options.operators;
   const hasRegistry = registry !== undefined && registry !== null;
@@ -1358,7 +1378,7 @@ export function openStore(model, options) {
                   { docPath: '/entities', collection: name });
               }
               const validate = options.compileSchema !== undefined
-                ? options.compileSchema(entity.schema)
+                ? options.compileSchema(writeSchemaOf(entity))
                 : null;
               if (validate !== null && typeof validate !== 'function')
                 throw new TypeError('openStore: compileSchema must return a validation function');
@@ -1478,6 +1498,10 @@ export function openStore(model, options) {
               put: (next) => tracker.put(name, next),
               remove: (keyOrDoc) => tracker.remove(name, keyOrDoc),
               discard: (keyOrDoc) => tracker.discard(name, keyOrDoc),
+              // membership (§11.7): local bookkeeping like add/put/remove;
+              // the join rows are written by saveChanges()
+              link: (own, member, target) => tracker.link(name, own, member, target),
+              unlink: (own, member, target) => tracker.unlink(name, own, member, target),
               noTracking: {
                 get: (key) => core.get(key),
                 load: (spec) => loads.load(spec),
@@ -1528,6 +1552,8 @@ export function openStore(model, options) {
                   put: ops.put,
                   remove: ops.remove,
                   discard: ops.discard,
+                  link: ops.link,
+                  unlink: ops.unlink,
                   asNoTracking: () => untracked,
                   // the provider contract over ONE entity root (MODEL-FORMAT
                   // §10.1): the document is over the multi-entity root and
@@ -1732,6 +1758,8 @@ export function openStore(model, options) {
                     put: ops.put,
                     remove: ops.remove,
                     discard: ops.discard,
+                    link: ops.link,
+                    unlink: ops.unlink,
                     asNoTracking: () => untracked,
                     // the same provider members as the asynchronous handle,
                     // answering values; one handle per name, so two chains
