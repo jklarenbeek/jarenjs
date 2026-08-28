@@ -15,6 +15,7 @@
   "files": [
     "types.ts",
     "linq-schema.ts",
-    "linq-model.ts"
+    "linq-model.ts",
+    "linq-jslt.ts"
   ]
 }

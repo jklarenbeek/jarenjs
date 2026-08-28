@@ -52,7 +52,10 @@ NOT**, **SHOULD**, **SHOULD NOT**, **RECOMMENDED**, **MAY**, and
 RFC 2119.
 
 - A **producer** emits stylesheet documents and MUST emit documents valid
-  per this specification.
+  per this specification. (`@jarenjs/linq/jslt` is one: it writes these
+  documents by code — rule bodies captured as callbacks — and reproduces
+  Appendix A byte for byte; its mapping table is
+  `packages/linq/docs/PENS-FORMAT.md` §4.)
 - A **consumer** (stylesheet compiler + transformation engine) MUST accept
   every valid stylesheet, MUST reject invalid ones with the compile errors
   of §10, and MUST raise the runtime errors of §10 under the conditions

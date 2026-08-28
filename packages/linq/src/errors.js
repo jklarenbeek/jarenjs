@@ -25,7 +25,7 @@ export const LINQ_CODES = Object.freeze({
   JL0101: 'a pen received a value it cannot spell: not JSON, or not what the keyword takes',
   JL0102: 'a pen was asked for a construct the format cannot carry',
   JL0103: 'a $defs name collision, a dangling ref, or an unnamed recursion',
-  JL0104: 'a pen-owned keyword through meta(), or a check() external other than root/path',
+  JL0104: 'a pen-owned keyword through meta(), or an external a captured rule did not declare',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
@@ -59,8 +59,8 @@ export const LINQ_CODES = Object.freeze({
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  *
- * The pens (`@jarenjs/linq/schema`, PENS-FORMAT.md §1.3) refuse with
- * the `JL01xx` codes:
+ * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`; PENS-FORMAT.md
+ * §1.3) refuse with the `JL01xx` codes:
  *
  *  - `JL0101` — a pen received a value it cannot spell: a function,
  *    symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance or a
@@ -68,11 +68,14 @@ export const LINQ_CODES = Object.freeze({
  *    keyword takes (`min('x')`, a non-builder member)
  *  - `JL0102` — a construct the format cannot carry: a function
  *    `refine`/`transform`, a coercion the normalizer would never run,
- *    closed objects under `allOf`, an annotation on `never()`
+ *    closed objects under `allOf`, an annotation on `never()`, an
+ *    `apply()` as a bare object member, a `match` of `{}`
  *  - `JL0103` — two distinct builders under one `$defs` name, a
  *    `ref()` no definition answers, or a `lazy()` that is not named
  *  - `JL0104` — a pen-owned keyword written through `meta()`, or a
- *    `check()` rule naming an external other than `root`/`path`
+ *    captured rule naming an external it did not declare (a `check()`
+ *    or `body()` external other than `root`/`path` and, for a body,
+ *    its declared parameters; a `compute()` external at all)
  */
 export class LinqBuildError extends CodedError {
   /**

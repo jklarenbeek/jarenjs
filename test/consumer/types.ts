@@ -926,6 +926,14 @@ void linqFrom(linqUsers).select((u) => u.tags.similarity([1]));
 void linqFrom(linqUsers).where((u) => u.age.within([1, 2]));
 // @ts-expect-error — an unknown registry key
 void linqFrom(linqUsers, { collation: {} });
+// @ts-expect-error — a vector's other side is a numeric array, never a string
+void linqFrom(linqPlaces).select((p) => p.embedding.similarity('x'));
+// @ts-expect-error — a number is not a geometry operand
+void linqFrom(linqPlaces).where((p) => p.at.within(42));
+// @ts-expect-error — a collation is a comparator, not a value
+void linqFrom(linqUsers, { collations: { nl: 1 } });
+// the §8.1 bag is the same on every entry point
+void linqFromDocument<LinqUser>(linqUsers, '$[*]', { functions: { double: (n: number) => n * 2 } });
 
 // providers keep the element type the caller declares; unknown otherwise
 const linqProvider = { execute: (_d: unknown, _o: { externals: Record<string, unknown> }) => [] as unknown };
@@ -968,6 +976,7 @@ async function linqAsyncBlock(): Promise<void> {
   void explanation.split?.residual.length;
   // @ts-expect-error — concurrency is required
   void fromAsync(linqUsers).mapAsync(async (u) => u, {});
+  void fromAsync(linqUsers, { limits: { steps: 1000 }, collations: { nl: (a: string, b: string) => a.localeCompare(b) } });
 }
 void linqAsyncBlock;
 

@@ -9,7 +9,7 @@ A **pen** is a by-code front-end to one of the suite's document formats:
 named functions that build a standard document — a JSON Schema, a
 `$model`, a `$jslt` stylesheet — the way the chain builds a query
 document. `@jarenjs/linq` exports each pen under its own subpath
-(`@jarenjs/linq/schema` is the first); `.` stays the chain. This document
+(`@jarenjs/linq/schema`, `/model` and `/jslt` so far); `.` stays the chain. This document
 is normative for every pen: §1 states the rules they all keep, §1.3 the
 error codes they share, and one section per pen (§2 onward) carries the
 mapping table — method, emitted member, type reading, status — and the
@@ -39,9 +39,11 @@ worked examples a test executes.
    exports NAMED functions (`import * as s`), never a namespace object; a
    pen that extends another does so by subclassing through the base
    class's `with()`, never by patching an imported prototype. The only
-   shared runtime machine is the chain's recording proxy (and the
-   builder brand). Every subpath has a tree-shaking probe: a pen-only
-   bundle carries no chain module and no engine.
+   shared runtime machine is the chain's recording proxy — with the one
+   root capture over it (`captureQuery`: a value at `$`, named externals)
+   that every query-valued member is captured through, the JSON boundary
+   (`requireJson`) and the builder brand. Every subpath has a tree-shaking
+   probe: a pen-only bundle carries no chain module and no engine.
 4. **Objects are closed by default.** `object()` emits
    `additionalProperties: false`; `.open()` removes it. The type follows
    emit's reading of the EMITTED document in both cases: an index
@@ -66,9 +68,9 @@ mirrored in LINQ-FORMAT §9 (one table, held equal by a test):
 | Code | Condition |
 |---|---|
 | `JL0101` | a pen received a value it cannot spell: not JSON (a function, symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance, a cycle — the constant rule of LINQ-FORMAT §5 applied to defaults, literals, examples and annotations), or not what the keyword takes (`min('x')`, a member that is not a builder) |
-| `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write |
+| `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write; in the JSLT pen an `apply()` as a bare object member (the `[]` idiom, JSLT-FORMAT §6.3 — the engine would fail at run time on the second child), a `match` of `{}` (the compiler's `JT0003`, earlier), an `apply()` outside a body |
 | `JL0103` | a `$defs` name collision (two distinct builders under one name), a `ref()` no definition answers, or a `lazy()` that does not return a named builder |
-| `JL0104` | a pen-owned keyword written through `meta()`, or a `check()` external other than `root`/`path` |
+| `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare: a `check()` external other than `root`/`path`, a `compute()` external at all, a `body()` external other than `root`/`path` and its declared parameters — or `root`/`path` declared as one, since the engine binds them |
 
 The message names the fix; `docPath` is the JSON pointer of the node
 being assembled where one exists (`/properties/lines/items`).
@@ -574,3 +576,170 @@ const store = typedStore<InferMeta<typeof model>>(await openStore(model, { drive
 const users = await store.entity('User').load({ include: { posts: true } });
 users[0].posts;   // Post[] — widened by the include, no generate step
 ```
+
+## 4. The JSLT pen — `@jarenjs/linq/jslt`
+
+```js
+import { stylesheet, rule, body, apply, op } from '@jarenjs/linq/jslt';
+```
+
+writes `$jslt` 0.1 stylesheets ([JSLT-FORMAT](../../json/docs/JSLT-FORMAT.md)):
+the envelope and its rules, whose bodies are callbacks captured over `$` —
+the matched value — through the chain's recording proxy, with the two
+externals the engine binds on every dispatch (`root`, `path`) and the
+parameters a body declares. The document is what `compileJsltStylesheet`
+takes unchanged; the pen imports no engine and judges nothing the compiler
+judges — path syntax (`JT0003`), the body's operators (`JT0007`), a
+`schema` match's hook (`JT0006`), the depth guard (`JT2001`) — with one
+exception it can see earlier: the `[]` idiom. `body()` is the one
+body-capture entry point the migration, flow and app pens reuse.
+
+### 4.1 The mapping table
+
+| Method | Emits | Type reading | Status |
+|---|---|---|---|
+| `stylesheet(rules, { unmatched?, modes? })` | `{ $jslt: '0.1', unmatched?, modes?, rules }` — the envelope (§2.1), in that member order; the bare-array form is the rules array itself | `Stylesheet<In, Out>`: the FIRST rule's phantoms, or the author's (`stylesheet<In, Out>(…)`) | native; another option, a rule without `body`, a non-array `JL0101` |
+| `unmatched` | `unmatched: 'share' \| 'fresh' \| 'error'` (§5) | `Disposition` | native; another value `JL0101` |
+| `modes` | `modes: { name: { unmatched } }` (§2.1) | — | native; another member `JL0101` |
+| `rule(match, body, { mode?, priority? })` | `{ mode?, match?, priority?, body }` — the rule object (§2.2), in that member order | `Rule<In, Out>` | native; another option `JL0101` |
+| `match` as a JSONPath string | `match: '$..price'` (§3.1) | the honest top | native |
+| `match` as `{ path?, schema? }` | the object; `schema` a schema-pen builder's document, or a schema verbatim | a builder types the body's value (`Infer<>`) | native; `{}` is `JL0102`; another member, a non-string `path` `JL0101` |
+| `match` `null` or absent | no `match` member — the unconditional rule (default priority −1, §4) | the honest top | native |
+| `mode` | `mode: 'toc'` (§7) | `string` | native; a non-string `JL0101` |
+| `priority` | `priority: 2` (§4) | `number` | native; a non-finite number `JL0101` |
+| `body(fn, { externals? })` | the captured query document — `fn(v, x)` with `v` at `$`, `x.root`/`x.path` (§8.2) and the declared parameters as `$name` externals (§8.1); a returned literal is a constructor, a string starting `$` is escaped `$$` | `BodyDocument<In, Out>`: `In` from the annotated `v` (`(v: Expr<Book>) => …`), `Out` the unwrapped return; a declared parameter is `UnknownExpr` until `x` is annotated (`x: Externals<{ rate: number }>`) | native; an undeclared external `JL0104`; `root`/`path` declared `JL0104` |
+| a callback where a body is taken | `body(fn)` with no parameters | as above; the match's builder types `v` | native |
+| a query document where a body is taken | the document, verbatim (a `body()` result, or by hand) | a `body()` document carries its phantoms; a hand-written one is `unknown` | native; not JSON `JL0101` |
+| `apply(selector)` | `{ $apply: selector }` — the rule's own mode (§6.2); the selector an expression (`v.chapters.all()`), a path string verbatim (`'$.chapters[*]'`), or data (`[1, 2]` embeds as `$const`) | `UnknownExpr` — a dispatch to other rules | native; outside `body()` `JL0102` |
+| `apply(selector, mode)` | `{ $apply: [selector, mode] }` — the argument-list form (§6.2) | `UnknownExpr` | native; a non-string mode `JL0101` |
+| `[apply(…)]` as a member value | `[{ $apply: … }]` — the `[]` idiom (§6.3) | `unknown[]` | native |
+| `apply(…)` as a bare member value | — | — | refused (`JL0102`): the engine fails at run time on the second child (`JQ2001`) |
+| `op(name, operands)` | `{ [name]: operands }` — a registered operator (§13), spelled without judging it; one operand or a list | `UnknownExpr` | native; the engine's `JQ0002` decides; a name without `$` `JL0101`; outside any capture `JL0005` |
+
+Three rules the table implies, spelled out:
+
+- **A body's literal is a constructor, not a constant.** The chain folds a
+  pure data tree into one `$const` (LINQ-FORMAT §3); a body spells it as
+  the format's own object constructor — Appendix A.6's `{ "level":
+  "unknown" }` — the same value, the published spelling. A string starting
+  `$` is data only with the `$$` escape, so the pen writes it.
+- **`root` and `path` need no declaration; a parameter needs one.** The
+  engine binds the two on every dispatch (§8.2) and shadows any binding of
+  the same name, so declaring them is the mistake and is refused. A
+  parameter is `body(fn, { externals: ['rate'] })`, and `transform.externals`
+  lists exactly the declared names the body used (§8.3).
+- **The pen judges nothing the compiler judges.** A path that does not
+  parse, an operator no registry answers, a `schema` match compiled without
+  a hook, a self-applying loop: each is the engine's own error
+  (`JT0003`, `JT0007`/`JQ0002`, `JT0006`, `JT2001`), unwrapped. The one
+  refusal the pen adds is the one the engine would only raise at RUN time.
+
+### 4.2 Worked examples
+
+Every `js` fence exports exactly one stylesheet (or rule list), and the
+`json` fence that follows is what the pen emits — executed by
+`test/linq/pens-format.test.js`. The seven fixtures of JSLT-FORMAT
+Appendix A are all rebuilt through the pen and held byte-equal to the
+format doc by `test/linq/jslt-pen.test.js`; three of them here.
+
+JSLT-FORMAT A.3 — the book example, done right (the `[]` around the
+`apply`):
+
+```js
+import { stylesheet, rule, apply } from '@jarenjs/linq/jslt';
+
+export const book = stylesheet([
+  rule({ schema: { type: 'object', required: ['isbn'] } },
+    (v) => ({ title: v.title, children: [apply(v.chapters.all())] })),
+  rule({ schema: { type: 'object', required: ['heading'] } },
+    (v) => ({ name: v.heading })),
+]);
+```
+
+```json
+{ "$jslt": "0.1",
+  "rules": [
+    { "match": { "schema": { "type": "object", "required": ["isbn"] } },
+      "body": { "title": "$.title",
+                "children": [ { "$apply": "$.chapters[*]" } ] } },
+    { "match": { "schema": { "type": "object", "required": ["heading"] } },
+      "body": { "name": "$.heading" } }
+  ] }
+```
+
+A.4 — two modes, the argument-list form of `apply`:
+
+```js
+import { stylesheet, rule, apply } from '@jarenjs/linq/jslt';
+
+export const guide = stylesheet([
+  rule('$', (v) => ({
+    toc: [apply(v.sections.all(), 'toc')],
+    body: [apply(v.sections.all(), 'render')],
+  })),
+  rule('$.sections[*]', (v) => ({ ref: v.id, label: v.heading }), { mode: 'toc' }),
+  rule('$.sections[*]', (v) => ({ anchor: v.id, heading: v.heading, text: v.text }), { mode: 'render' }),
+]);
+```
+
+```json
+{ "$jslt": "0.1",
+  "rules": [
+    { "match": "$",
+      "body": { "toc":  [ { "$apply": ["$.sections[*]", "toc"] } ],
+                "body": [ { "$apply": ["$.sections[*]", "render"] } ] } },
+    { "mode": "toc", "match": "$.sections[*]",
+      "body": { "ref": "$.id", "label": "$.heading" } },
+    { "mode": "render", "match": "$.sections[*]",
+      "body": { "anchor": "$.id", "heading": "$.heading", "text": "$.text" } }
+  ] }
+```
+
+A.7 — a declared parameter and the two reserved externals, in the
+bare-array form:
+
+```js
+import { rule, body } from '@jarenjs/linq/jslt';
+
+export const priced = [
+  rule('$..price', body(
+    (v, x) => ({ amount: v.mul(x.rate), currency: x.root.currency, at: x.path }),
+    { externals: ['rate'] })),
+];
+```
+
+```json
+[ { "match": "$..price",
+    "body": { "amount": { "$mul": ["$", "$rate"] },
+              "currency": "$root.currency",
+              "at": "$path" } } ]
+```
+
+### 4.3 The types, in one place
+
+```ts
+import { stylesheet, rule, body, apply } from '@jarenjs/linq/jslt';
+import type { Externals, Output, Stylesheet } from '@jarenjs/linq/jslt';
+import type { Expr } from '@jarenjs/linq';
+
+interface Chapter { heading: string }
+interface Book { title: string; chapters: Chapter[] }
+
+const chapter = rule({ schema: ChapterSchema }, (v) => ({ name: v.heading }));
+//    ^ Rule<Infer<typeof ChapterSchema>, { name: string }> — the builder types v
+const book = body((v: Expr<Book>) => ({ title: v.title, children: [apply(v.chapters.all())] }));
+//    ^ BodyDocument<Book, { title: string; children: unknown[] }> — a dispatch is unknown
+const priced = body(
+  (v: Expr<Item>, x: Externals<{ rate: number }>) => ({ amount: v.price.mul(x.rate) }),
+  { externals: ['rate'] });                        // x.limit does not compile
+
+const sheet = stylesheet([rule(null, book), chapter]);
+type Out = Output<typeof sheet>;                   // the FIRST rule's: { title: string; children: unknown[] }
+const typed = stylesheet<Book, { title: string; children: { name: string }[] }>([rule(null, book), chapter]);
+```
+
+A stylesheet's output is its root rule's, and every `apply()` inside it
+is `unknown` — a dispatch lands on whichever rule wins, which no type can
+see. Where the author knows (a chapter always renders as `{ name }`), the
+author says so with `stylesheet<In, Out>(…)`; the built-in rule's
+rebuilds around an unmatched root are not typed at all.

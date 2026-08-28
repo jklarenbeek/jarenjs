@@ -2,9 +2,9 @@
 /**
  * @file The docs gate for PENS-FORMAT.md: every ```js fence of a pen
  * section is executed — written as a module beside the workspace's
- * `node_modules` so `@jarenjs/linq/schema` resolves as it does for a
- * consumer — and the ```json fence that follows it must be the document
- * the fence's one export emits. The prose is what the pen writes, never
+ * `node_modules` so `@jarenjs/linq/schema` (or `/model`, `/jslt`)
+ * resolves as it does for a consumer — and the ```json fence that
+ * follows it must be the document the fence's one export emits. The prose is what the pen writes, never
  * a copy of it.
  */
 
@@ -36,7 +36,7 @@ function fencePairs(markdown, heading) {
   return pairs;
 }
 
-for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2]]) {
+for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3]]) {
   describe(`PENS-FORMAT — the ${pen} pen's worked examples are what the pen emits`, () => {
     const markdown = fs.readFileSync(DOC, 'utf8');
     const pairs = fencePairs(markdown, heading);

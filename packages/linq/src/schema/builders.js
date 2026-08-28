@@ -16,9 +16,8 @@
  * every subpath constructs its own classes through one implementation.
  */
 
-import { isJsonValue } from '@jarenjs/core/object';
-
 import { LinqBuildError } from '../errors.js';
+import { describeValue, requireJson } from '../json-boundary.js';
 import { SCHEMA_BUILDER, isSchemaBuilder } from './brand.js';
 import { assemble } from './emit.js';
 import { captureCheck } from './check.js';
@@ -53,37 +52,8 @@ const OWNED = new Set([
   'x-coerce', 'x-trim',
 ]);
 
-/** @param {any} value */
-function hasNegativeZero(value) {
-  if (typeof value === 'number') return Object.is(value, -0);
-  if (value === null || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some(hasNegativeZero);
-  return Object.keys(value).some((key) => hasNegativeZero(value[key]));
-}
-
-/** What a refused value is, for a message. @param {any} value */
-export function describeValue(value) {
-  if (value === null) return 'null';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'object') return `a ${value.constructor?.name ?? 'non-plain'} instance`;
-  return `a ${typeof value}`;
-}
-
-/**
- * The JSON boundary every value entering a document crosses — the
- * constant rule the chain applies to captured literals, applied here to
- * defaults, literals, examples and annotations.
- * @param {any} value
- * @param {string} what - the receiving keyword or method
- * @returns {any} the value, unchanged
- */
-export function requireJson(value, what) {
-  if (isJsonValue(value) && !hasNegativeZero(value)) return value;
-  throw new LinqBuildError('JL0101',
-    `${what} received ${describeValue(value)}, which is not JSON — a document carries `
-    + 'null, booleans, finite numbers (never -0), strings, arrays and plain objects, '
-    + 'and nothing else');
-}
+/** The JSON boundary (`JL0101`), shared with every pen. */
+export { describeValue, requireJson } from '../json-boundary.js';
 
 /** @param {any} value @param {string} what */
 export function requireBuilder(value, what) {

@@ -63,11 +63,11 @@ is required, the modes reuse the `createTaskEffect` vocabulary
 (`parallel`/`concat`/`switch`/`exhaust`), and failure is fail-closed —
 the first rejection aborts every in-flight signal and the source.
 
-## The pens (`src/schema/`)
+## The pens (`src/schema/`, `src/model/`, `src/jslt/`)
 
 A pen is a by-code front-end to one of the suite's document formats,
-exported under its own subpath (`@jarenjs/linq/schema` first; `.` stays
-the chain). The rule set is one paragraph: the document is the
+exported under its own subpath (`@jarenjs/linq/schema`, `/model`, `/jslt`;
+`.` stays the chain). The rule set is one paragraph: the document is the
 deliverable (plain, deep-frozen JSON, memoized under `.schema`,
 `toJSON()` returns it); the pen imports no engine and re-implements no
 compile check — it refuses only what it cannot spell, with a `JL01xx`
@@ -89,7 +89,16 @@ chain-only bundle carries nothing from the pen's directory, and a
 pen-only bundle carries no chain module and no engine (the tree-shaking
 gate proves both). The one shared machine, the capture in
 `expression.js`, rides in the pen's bundle whether or not `check()` is
-called: a class method cannot be shaken.
+called: a class method cannot be shaken. Two small modules beside it are
+shared by every pen: `capture-root.js` (`captureQuery`: one capture over
+a value at `$` with named externals — `check()`'s `root`/`path`, the
+model pen's `compute()` with none, the JSLT pen's `body()` with the
+declared parameters) and `json-boundary.js` (`requireJson`, the `JL0101`
+door). The model pen (`src/model/`) subclasses the schema pen's classes
+through one mixin; the JSLT pen (`src/jslt/`) is `body.js` (the body
+capture, `apply`/`op` lifted into it through `liftExpression`, the `[]`
+refusal) and `rules.js` (the rule object and the envelope, in Appendix
+A's member order) — it imports nothing of `src/schema/` but `brand.js`.
 
 ## The provider seam (`src/provider.js`)
 

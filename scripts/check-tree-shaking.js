@@ -195,3 +195,52 @@ if (schemaModelLeak.length > 0)
   throw new Error(`The schema pen pulled the model pen into the bundle: ${schemaModelLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${modelBytes} byte model-pen bundle; no chain module, no store; the schema pen carries no model module).`);
+
+// The JSLT pen (`@jarenjs/linq/jslt`) writes stylesheets whose bodies are
+// captures, so it carries `expression.js` (and the shared root capture) by
+// construction — and nothing else of the chain: no sequence/document/
+// provider module, no engine, and no schema module beyond `brand.js` (a
+// `schema` match may be a builder; the brand is how the pen tells). The
+// chain and the schema pen carry nothing from `jslt/` in return.
+const jsltResult = await build({
+  stdin: {
+    contents: "import { rule, stylesheet } from '@jarenjs/linq/jslt'; export const S = stylesheet([rule('$..price', (v) => v.mul(1.21))]);",
+    resolveDir: process.cwd(),
+    sourcefile: 'jslt-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const jsltBytes = jsltResult.outputFiles[0].contents.length;
+const jsltInputs = Object.values(jsltResult.metafile.outputs)[0].inputs;
+const jsltChainLeak = Object.entries(jsltInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (jsltChainLeak.length > 0)
+  throw new Error(`The JSLT pen pulled chain modules into the bundle: ${jsltChainLeak.map(([file]) => file).join(', ')}`);
+const jsltSchemaLeak = Object.entries(jsltInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/schema\/(?!brand\.js)/.test(file) && info.bytesInOutput > 0);
+if (jsltSchemaLeak.length > 0)
+  throw new Error(`The JSLT pen pulled schema-pen modules into the bundle: ${jsltSchemaLeak.map(([file]) => file).join(', ')}`);
+const jsltEngineLeak = Object.entries(jsltInputs)
+  .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
+if (jsltEngineLeak.length > 0)
+  throw new Error(`The JSLT pen pulled an engine into the bundle: ${jsltEngineLeak.map(([file]) => file).join(', ')}`);
+if (jsltBytes > 16000)
+  throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
+const chainJsltLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
+if (chainJsltLeak.length > 0)
+  throw new Error(`The chain pulled the JSLT pen into the bundle: ${chainJsltLeak.map(([file]) => file).join(', ')}`);
+const schemaJsltLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
+if (schemaJsltLeak.length > 0)
+  throw new Error(`The schema pen pulled the JSLT pen into the bundle: ${schemaJsltLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${jsltBytes} byte JSLT-pen bundle; no chain module, no schema module beyond brand.js, no engine; the chain and the schema pen carry no jslt module).`);

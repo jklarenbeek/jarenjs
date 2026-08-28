@@ -149,11 +149,16 @@ export function requireJsonBinding(name, value) {
  * Objects without `$`-prefixed keys become Rule 1 constructors; a
  * `$`-keyed data object embeds through `$map` so it stays a
  * constructor rather than colliding with the operator vocabulary;
- * pure data trees embed as `$const`.
+ * pure data trees embed as `$const` — unless `fold` is false, when
+ * they are spelled as constructor trees too (a stylesheet body writes
+ * its output the way the format's own examples do: `{ "level":
+ * "unknown" }`, not `{ "$const": … }` — the same value, the published
+ * spelling).
  * @param {any} value
+ * @param {boolean} [fold] - whether a pure data tree folds into one `$const`
  * @returns {any} a query expression (plain JSON)
  */
-export function toExpression(value) {
+export function toExpression(value, fold = true) {
   if (value === null) return null;
   const t = typeof value;
   if (t === 'string') return embedString(value);
@@ -179,7 +184,7 @@ export function toExpression(value) {
       assertLive(record);
       return record.doc;
     }
-    if (isPlainJson(value)) {
+    if (fold && isPlainJson(value)) {
       // verbatim data: cheaper and clearer than a constructor tree
       return { $const: value };
     }
@@ -190,7 +195,7 @@ export function toExpression(value) {
           'a captured expression cannot embed an Array subclass instance — its behaviour '
           + 'is not expressible as query data');
       }
-      return value.map(toExpression);
+      return value.map((v) => toExpression(v, fold));
     }
     if (proto !== Object.prototype && proto !== null) {
       // a Date, Map, Set, RegExp or class instance: `Object.keys` reports
@@ -204,14 +209,14 @@ export function toExpression(value) {
     }
     const keys = Object.keys(value);
     if (keys.some((k) => k.charCodeAt(0) === 0x24)) {
-      return { $map: keys.map((k) => [embedString(k), toExpression(value[k])]) };
+      return { $map: keys.map((k) => [embedString(k), toExpression(value[k], fold)]) };
     }
     const out = {};
     // an own `__proto__` member is DATA here; plain assignment would set
     // the builder's prototype and drop the member
     for (const key of keys) {
       Object.defineProperty(out, key, {
-        value: toExpression(value[key]),
+        value: toExpression(value[key], fold),
         writable: true,
         enumerable: true,
         configurable: true,
@@ -499,9 +504,11 @@ function makeParams(declared, epoch) {
  * @param {(...roots: any[]) => any} fn - the user callback
  * @param {readonly (string | { doc: any, pathable: boolean, seq?: string })[]} roots
  * @param {Set<string>} declaredParams
+ * @param {boolean} [fold] - whether a pure data tree folds into one
+ *   `$const` (the chain's spelling) or is a constructor tree (a pen's)
  * @returns {any} the captured expression (plain JSON)
  */
-export function captureExpression(fn, roots, declaredParams) {
+export function captureExpression(fn, roots, declaredParams, fold = true) {
   const epoch = ++epochCounter;
   const proxies = roots.map((root) => (typeof root === 'string'
     ? makeExpr('$' + root, epoch, true)
@@ -509,9 +516,42 @@ export function captureExpression(fn, roots, declaredParams) {
   proxies.push(makeParams(declaredParams, epoch));
   captureStack.push(epoch);
   try {
-    return toExpression(fn(...proxies));
+    return toExpression(fn(...proxies), fold);
   }
   finally {
     captureStack.pop(); // every proxy of this capture is now dead
   }
+}
+
+/**
+ * Whether `value` is an expression proxy of some capture (live or not).
+ * A pen walking a captured result before it lowers needs to tell a
+ * proxy from the plain object it would otherwise descend into.
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isExpression(value) {
+  return value !== null && typeof value === 'object' && value[NODE] !== undefined;
+}
+
+/**
+ * Lift a hand-spelled operator expression into the capture in
+ * progress: the escape for an operator the method table does not name
+ * — a registered one (`{ $npv: [...] }`, JSLT-FORMAT §13) or a
+ * body-local one (`$apply`, §6). The document is taken as given — the
+ * engine's compiler is the judge of it (`JQ0002` for an operator it
+ * does not know) — and the proxy it answers is bound to the innermost
+ * capture, so it composes with that capture's own proxies and dies
+ * with them. Outside a capture there is nothing to bind it to:
+ * `JL0005`.
+ * @param {any} doc - the operator expression, plain JSON
+ * @returns {any} an expression proxy over `doc`
+ */
+export function liftExpression(doc) {
+  if (captureStack.length === 0) {
+    throw new LinqBuildError('JL0005',
+      'an operator expression can only be lifted inside a capture callback — no capture '
+      + 'is in progress to bind it to');
+  }
+  return makeExpr(doc, captureStack[captureStack.length - 1], false);
 }

@@ -371,16 +371,16 @@ exists):
 | `JL0005` | an operator was used invalidly at build time |
 | `JL0006` | an unsupported operator was invoked |
 
-Pen build errors (`LinqBuildError`, raised by `@jarenjs/linq/schema`
-and the pens that follow it; PENS-FORMAT.md §1.3 is the normative
-home, this table mirrors it):
+Pen build errors (`LinqBuildError`, raised by `@jarenjs/linq/schema`,
+`/model`, `/jslt` and the pens that follow them; PENS-FORMAT.md §1.3 is
+the normative home, this table mirrors it):
 
 | Code | Condition |
 |---|---|
 | `JL0101` | a pen received a value it cannot spell: not JSON, or not what the keyword takes |
 | `JL0102` | a pen was asked for a construct the format cannot carry |
 | `JL0103` | a `$defs` name collision, a dangling ref, or an unnamed recursion |
-| `JL0104` | a pen-owned keyword through `meta()`, or a `check()` external other than `root`/`path` |
+| `JL0104` | a pen-owned keyword through `meta()`, or an external a captured rule did not declare |
 
 Runtime errors (`LinqRuntimeError`):
 

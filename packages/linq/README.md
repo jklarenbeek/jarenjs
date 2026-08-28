@@ -109,6 +109,31 @@ cross-field rules are `check()`, transforms are application code. The
 normative mapping table, the rules every pen keeps and the worked
 examples a test executes are [docs/PENS-FORMAT.md](docs/PENS-FORMAT.md).
 
+## By code: the JSLT pen
+
+`@jarenjs/linq/jslt` writes `$jslt` 0.1 stylesheets the same way: rule
+bodies are callbacks captured over the matched value, with `root`/`path`
+and the declared parameters as typed externals; `apply()` spells the
+apply-templates operator (and refuses the one shape the engine only
+catches at run time — an `apply` as a bare object member, `JL0102`);
+`rule()`/`stylesheet()` write the rule object and the envelope byte-equal
+to the format's own Appendix A.
+
+```js
+import { stylesheet, rule, apply } from '@jarenjs/linq/jslt';
+
+const book = stylesheet([
+  rule({ schema: { type: 'object', required: ['isbn'] } },
+    (v) => ({ title: v.title, children: [apply(v.chapters.all())] })),
+  rule({ schema: { type: 'object', required: ['heading'] } },
+    (v) => ({ name: v.heading })),
+]);
+compileJsltStylesheet(book, { compileTypeTest })(input);   // @jarenjs/json/jslt takes it unchanged
+```
+
+The mapping table and the worked examples are
+[docs/PENS-FORMAT.md §4](docs/PENS-FORMAT.md#4-the-jslt-pen--jarenjslinqjslt).
+
 ## What this is not
 
 Not an ORM — entities, storage and migrations live in `@jarenjs/db`.

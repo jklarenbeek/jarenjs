@@ -287,12 +287,12 @@ describe('the schema pen — the chain accepts a builder where a document was', 
 });
 
 describe('the schema pen — no engine behind it', () => {
-  it('imports no validate, emit or db module, and only check.js imports the capture', async () => {
+  it('imports no validate, emit or db module, and only check.js reaches the capture (through the shared root capture)', async () => {
     const dir = new URL('../../packages/linq/src/schema/', import.meta.url);
     for (const file of fs.readdirSync(dir)) {
       const source = await fs.promises.readFile(new URL(file, dir), 'utf8');
       assert.strictEqual(/from '@jarenjs\/(validate|emit|db)/.test(source), false, `${file} imports an engine`);
-      assert.strictEqual(/expression\.js/.test(source), file === 'check.js', `${file} and the capture machine`);
+      assert.strictEqual(/(expression|capture-root)\.js/.test(source), file === 'check.js', `${file} and the capture machine`);
     }
   });
 });
