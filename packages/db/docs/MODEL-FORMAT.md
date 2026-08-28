@@ -1085,7 +1085,12 @@ everything else; a read merges them back. **The absent-versus-null
 rule, plainly**: for a column-mapped scalar, JSON `null` and absence
 both store as SQL `NULL` and read back as ABSENT. A property that
 needs present-`null` semantics declares `column: "json"` and stays in
-the document.
+the document. The rule reaches the WRITE's return value, not only the
+read: `create()`, `update()` and `add()` answer the document a read
+would answer, so a `null` handed in for a column-mapped scalar is
+absent from what comes back — a returned object never names a member
+no read will show. An epoch column (§9.3's `column: "integer"` row)
+keeps its string in the document, present-`null` included.
 
 ### 9.4 Relations and referential integrity
 
@@ -1093,17 +1098,25 @@ Declared on one side, inferred on the other; when both sides declare,
 the inverses MUST agree (`JD0031` on any contradiction).
 
 What counts as "the same edge" is decided by `via`, not by the pair of
-entity names. Two declarations pointing at each other pair up when
-they name the same foreign-key property, and a pair is one `many` side
-and one `one` side — two `many` sides, or two `one` sides, on one
-`via` is `JD0031`, and a paired edge must agree on `onDelete`. A
-`many` declaration facing a `one` declaration with a DIFFERENT `via`
-is a contradiction too (`JD0031`: the pair disagrees on its key),
-while two declarations of the SAME kind with different `via`s are two
-independent edges — which is how a legitimate cycle is written
-(`Post.author` by `authorId` and `User.featured` by `featuredPostId`,
-one-to-one each way). Many-to-many pairs must agree on the join
-table, and a many-to-many facing a foreign-key relation is `JD0031`.
+entity names: two declarations pair up when they name the same
+foreign-key property, and a pair is one `many` side and one `one`
+side. Two `many` sides, or two `one` sides, on one `via` is `JD0031`,
+and a paired edge must agree on `onDelete`.
+
+Between one pair of entities, a `many` declaration facing a `one`
+declaration with a DIFFERENT `via` is `JD0031` as well (the pair
+disagrees on its key) — the check is per entity pair, so **two
+one-to-many edges between the same two entities declare their inverse
+on ONE side only**. The author-and-editor model is written with both
+edges on `User` (`authored` by `authorId`, `edited` by `editorId`) and
+the foreign-key properties on `Post`, or with both edges on `Post` and
+none on `User`; declaring `Post.author` AND `User.edited` makes
+`User.authored` face `Post.editor` and is refused. Two declarations of
+the SAME kind with different `via`s are two independent edges — which
+is how a legitimate cycle is written (`Post.author` by `authorId` and
+`User.featured` by `featuredPostId`, one-to-one each way).
+Many-to-many pairs must agree on the join table, and a many-to-many
+facing a foreign-key relation is `JD0031`.
 
 - **one-to-many** — `{ to, many: true, via, onDelete }`: `via` names
   the foreign-key property on the TARGET entity (`authorId` on

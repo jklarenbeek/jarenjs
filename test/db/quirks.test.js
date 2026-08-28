@@ -93,8 +93,13 @@ describe('what the model accepts is what the store can keep', () => {
     assert.deepStrictEqual(explainMapping(m).entities.E.columns.find((c) => c.name === 'role').check, ['admin', 'user']);
     const store = await openStore(m, { driver: nodeDriver() });
     await assert.rejects(store.entity('E').create({ id: 'x', role: 'emperor' }), (e) => e.code === 'JD2005');
-    assert.deepStrictEqual(await store.entity('E').create({ id: 'y', role: null }), { id: 'y', role: null });
+    // the CHECK admits null (the enum's null member is left to the
+    // column's nullability) — and the write returns what a read answers:
+    // a column-mapped scalar null stores as SQL NULL and reads ABSENT (§9.3)
+    assert.deepStrictEqual(await store.entity('E').create({ id: 'y', role: null }), { id: 'y' });
+    assert.deepStrictEqual(await store.entity('E').get('y'), { id: 'y' });
     assert.deepStrictEqual(await store.entity('E').create({ id: 'z', role: 'admin' }), { id: 'z', role: 'admin' });
+    assert.deepStrictEqual(await store.entity('E').get('z'), { id: 'z', role: 'admin' });
     await store.close();
   });
 
@@ -132,6 +137,52 @@ describe('a write does what its return value says', () => {
     assert.strictEqual(store.sync.saveChanges().inserted, 1);
     store.sync.entity('User').put({ ...store.sync.entity('User').get('u10'), name: 'y' });
     assert.strictEqual(store.sync.saveChanges().updated, 1);
+    await store.close();
+  });
+
+  it('a write returns the document a read answers: a column-mapped scalar null is dropped, column: json keeps it', async () => {
+    // §9.3: for a column-mapped scalar, JSON `null` and absence both
+    // store as SQL NULL and read back ABSENT. The value a write RETURNS
+    // said otherwise — it echoed the caller's `null`, so the returned
+    // object named a member no read would ever show.
+    const m = model({
+      E: {
+        schema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', 'x-entity': { key: true } },
+            s: { type: ['string', 'null'] },
+            n: { type: ['integer', 'null'] },
+            j: { type: ['string', 'null'], 'x-entity': { column: 'json' } },
+            o: { type: 'object' },
+          },
+        },
+      },
+    });
+    const store = await openStore(m, { driver: nodeDriver() });
+    const set = store.entity('E');
+
+    const made = await set.create({ id: 'a', s: null, n: null, j: null, o: null });
+    assert.deepStrictEqual(made, { id: 'a', j: null, o: null },
+      'create() returns what a read answers — the present-null opt-out survives');
+    assert.deepStrictEqual(await set.get('a'), made);
+
+    await set.create({ id: 'b', s: 'x', n: 1 });
+    const next = await set.update('b', { s: null, n: null });
+    assert.deepStrictEqual(next, { id: 'b' }, 'update() returns what a read answers');
+    assert.deepStrictEqual(await set.get('b'), next);
+
+    // the tracker's completion is the same source of truth
+    const added = store.sync.entity('E').add({ id: 'c', s: null, j: null });
+    assert.deepStrictEqual(added, { id: 'c', j: null });
+    store.sync.saveChanges();
+    assert.deepStrictEqual(store.sync.entity('E').get('c'), added);
+
+    // false and 0 are values, not absences
+    const kept = await set.create({ id: 'd', s: '', n: 0 });
+    assert.deepStrictEqual(kept, { id: 'd', s: '', n: 0 });
+    assert.deepStrictEqual(await set.get('d'), kept);
     await store.close();
   });
 

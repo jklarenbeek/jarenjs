@@ -466,7 +466,8 @@ function resolveRelations(entities) {
         if (relationA.kind !== relationB.kind) {
           throw new DbCompileError('JD0031',
             `relation '${a.owner}.${a.property.name}' and '${b.owner}.${b.property.name}' `
-            + `disagree on the foreign key ('${relationA.via}' vs '${relationB.via}')`,
+            + `disagree on the foreign key ('${relationA.via}' vs '${relationB.via}') `
+            + '— two edges between the same pair declare their inverse on one side only (§9.4)',
             `${a.property.docPath}/x-entity/relation`);
         }
         continue;

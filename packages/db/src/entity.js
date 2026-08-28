@@ -132,6 +132,28 @@ export function entityCore(connection, entity, entityMapping, validate) {
     return doc;
   };
 
+  /** The document as a read will answer it. For a column-mapped scalar,
+   * JSON `null` and absence both store as SQL NULL and read back ABSENT
+   * (§9.3) — so a value a write RETURNS drops it too, and the promise
+   * this file opens with holds: the value the application sees IS the
+   * value stored. A property that needs present-`null` declares
+   * `column: "json"` and stays in the document, where it survives; an
+   * epoch column keeps its string in the document for the same reason. */
+  const asStored = (doc) => {
+    let out = doc;
+    const drop = (name) => {
+      if (!(name in out) || (out[name] !== null && out[name] !== undefined)) return;
+      if (out === doc) out = { ...doc };
+      delete out[name];
+    };
+    for (const column of scalarColumns) {
+      if (column.epoch) continue; // the string is in the document, null and all
+      drop(column.name);
+    }
+    for (const fk of fkColumns) drop(fk);
+    return out;
+  };
+
   // defaults, compiled once
   const defaulters = [];
   const updateStamps = [];
@@ -309,7 +331,7 @@ export function entityCore(connection, entity, entityMapping, validate) {
     complete: (doc, { updating }) => {
       const completed = applyDefaults(doc, { updating });
       checkValid(completed);
-      return completed;
+      return asStored(completed);
     },
     validateOnly: (doc) => checkValid(doc),
     stampUpdated: (doc) => {
@@ -332,7 +354,7 @@ export function entityCore(connection, entity, entityMapping, validate) {
         return chain(
           attempt(() => (returning ? statement.get(params) : statement.run(params)),
             (error) => wrapWrite(error, completed[keys[0]])),
-          (out) => (returning ? { ...completed, [autoKey]: out.key } : completed));
+          (out) => asStored(returning ? { ...completed, [autoKey]: out.key } : completed));
       });
     },
     get(key) {
@@ -376,7 +398,7 @@ export function entityCore(connection, entity, entityMapping, validate) {
         return chain(prepared(`update:${values.length}`, sql), (statement) =>
           chain(attempt(() => statement.run([...values.map((value) => value.value),
             JSON.stringify(rest), ...parts]), (error) => wrapWrite(error, parts[0])),
-          () => next));
+          () => asStored(next)));
       });
     },
     delete(key) {

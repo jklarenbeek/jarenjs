@@ -238,6 +238,54 @@ describe('inverse agreement (JD0031)', () => {
     assert.strictEqual(entities.get('User').relations[0].relation.kind, 'oneToMany');
   });
 
+  it('two edges between one pair declare their inverse on one side only (\u00a79.4)', () => {
+    // author AND editor between User and Post: legitimate, and written
+    // with both edges on ONE side — the pairing check is per entity
+    // pair, so declaring an inverse for each makes `authored` face
+    // `editor` and disagree on the key.
+    const twoEdges = (userSide, postSide) => ({
+      $model: '0.1',
+      entities: {
+        User: {
+          schema: {
+            type: 'object',
+            properties: { id: { type: 'string', 'x-entity': { key: true } }, ...userSide },
+          },
+        },
+        Post: {
+          schema: {
+            type: 'object',
+            properties: {
+              pid: { type: 'integer', 'x-entity': { key: true } },
+              authorId: { type: 'string' },
+              editorId: { type: 'string' },
+              ...postSide,
+            },
+          },
+        },
+      },
+    });
+    const onUser = {
+      authored: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } },
+      edited: { 'x-entity': { relation: { to: 'Post', many: true, via: 'editorId', onDelete: 'setNull' } } },
+    };
+    const onPost = {
+      author: { 'x-entity': { relation: { to: 'User', via: 'authorId', onDelete: 'cascade' } } },
+      editor: { 'x-entity': { relation: { to: 'User', via: 'editorId', onDelete: 'setNull' } } },
+    };
+    // both edges on the User side, inverses inferred
+    assert.strictEqual(normalizeEntities(twoEdges(onUser, {})).get('User').relations.length, 2);
+    // both edges on the Post side, inverses inferred
+    assert.strictEqual(normalizeEntities(twoEdges({}, onPost)).get('Post').relations.length, 2);
+    // both sides declared: `authored` faces `editor` and is refused, and
+    // the message names the way out
+    assert.throws(() => normalizeEntities(twoEdges(onUser, onPost)), (error) => {
+      assert.strictEqual(error.code, 'JD0031');
+      assert.match(error.message, /one side only/);
+      return true;
+    });
+  });
+
   it('via disagreement, side disagreement and onDelete disagreement each refuse', () => {
     assert.throws(() => normalizeEntities(pair(
       { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' },
