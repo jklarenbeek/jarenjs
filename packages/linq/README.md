@@ -246,6 +246,74 @@ fsmToApp(review);                                                            // 
 The mapping table and the worked examples are
 [docs/PENS-FORMAT.md §8](docs/PENS-FORMAT.md#8-the-flow-pen--jarenjslinqflow).
 
+## By code: the app pen
+
+`@jarenjs/linq/app` writes the `jaren-app` 0.1 document `createApp`
+runs — a whole interactive application as one JSON value — and answers
+the state's JSON Schema beside it for `validateState`, never merged in
+(the format has no slot for one). The initial state comes from the
+state schema's own `default()`s; actions are captured over APP-FORMAT
+§3.1's three names, so a patch value and an effect's props are the SAME
+expression when they should be; and a patch PATH is a lambda over the
+state that lowers to a JSON Pointer — `st.todos.at(2).done` is
+`/todos/2/done`, and a computed index becomes the pointer expression
+`{ "$concat": ["/todos/", "$payload.i", "/done"] }`. Two refusals the
+loop can only report per dispatch land at build time instead: a view
+binding an action `actions` does not declare (`JA2001`), and an
+`$event` field §3.1 excludes because `$event` must survive
+`JSON.stringify` (`JL0102`).
+
+```js
+import { action, append, bind, defineApp, transition } from '@jarenjs/linq/app';
+import { rule } from '@jarenjs/linq/jslt';
+import * as s from '@jarenjs/linq/schema';
+
+const { document, stateSchema } = defineApp({
+  state: s.object({ todos: s.array(s.string()).default([]), draft: s.string().default('') }),
+  view: [rule('$', (v) => ['main', {},
+    ['button', { on: { click: bind('todo/add', { payload: v.draft }) } }, 'add']])],
+  actions: {
+    'todo/add': action((st, x) => transition({ patch: [append((c) => c.todos, x.payload)] })),
+  },
+});
+
+createApp(document, { node, validateState: new JarenValidator().compile(stateSchema) });
+```
+
+The mapping table and the worked examples are
+[docs/PENS-FORMAT.md §9](docs/PENS-FORMAT.md#9-the-app-pen--jarenjslinqapp).
+
+## By code: the forms pen
+
+`@jarenjs/linq/forms` is the schema pen plus the `x-form` vocabulary —
+`form({ visible, enabled, assert, computed, message })` on every
+builder — and `assertOnSubmit()`, which answers the same rules' layer-3
+`$query` twin in one call. A rule is an ANNOTATION: nothing about what
+the schema validates moves, and `Infer<>` reads exactly as it does on
+`./schema`. The rules are callbacks over the three names the evaluator
+binds — `c.root` the whole document, `c.value` the field, `c.pointer`
+its location — so a rule is written, never typed as a path string.
+
+```js
+import * as f from '@jarenjs/linq/forms';
+import { assertOnSubmit } from '@jarenjs/linq/forms';
+
+const invoice = f.object({
+  company: f.string().optional(),
+  vatId: f.string().optional().form({
+    visible: (c) => c.root.company.ne(''),
+    assert: (c) => c.root.company.eq('').or(c.value.ne('')),
+    message: 'VAT id is required for companies',
+  }),
+});
+
+compileFormRules(buildFormModel(invoice.schema));         // per keystroke
+new JarenValidator().compile(assertOnSubmit(invoice));    // on submit, the same rule
+```
+
+The mapping table and the worked examples are
+[docs/PENS-FORMAT.md §10](docs/PENS-FORMAT.md#10-the-forms-pen--jarenjslinqforms).
+
 ## The front door: `@jarenjs/linq/db`
 
 `open(model, { driver })` opens `@jarenjs/db`'s store and fronts it with

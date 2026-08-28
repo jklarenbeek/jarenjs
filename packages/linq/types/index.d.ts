@@ -289,8 +289,10 @@ export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods, SpatialMetho
    * (`u.tags.all().count()`, `rows.all().resample(spec)`); an object
    * element's members are fanned with it (`lines.all().amount.sum()`). */
   all(): FannedExpr<E>;
-  /** The element at a 0-based index; negative counts from the end. */
-  at(index: number): Expr<E>;
+  /** The element at a 0-based index; negative counts from the end. A
+   * computed index is an expression — the engine's `$get` — which is
+   * what an app-pen patch path lowers to a `$concat` pointer. */
+  at(index: number | NumberExpr): Expr<E>;
   /** `$count` over the fanned elements requires `all()` first; this
    * counts the ARRAY as one item — see the format doc. */
   count(): NumberExpr;
@@ -363,7 +365,7 @@ export interface UnknownExpr
   substring(start: number, length?: number): UnknownExpr;
   replace(pattern: string, replacement: string): UnknownExpr;
   all(): UnknownExpr;
-  at(index: number): UnknownExpr;
+  at(index: number | NumberExpr): UnknownExpr;
   /** Do two half-open `{start, end}` intervals share an instant? */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;
   /** Cosine similarity (§8.15) — wide, on the honest top. */

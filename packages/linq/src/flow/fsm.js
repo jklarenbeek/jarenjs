@@ -25,6 +25,7 @@
 import { deepFreeze } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
+import { effectDescriptor, readEffects } from '../effect.js';
 import { describeValue } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { queryMember } from './capture.js';
@@ -36,8 +37,6 @@ const SCOPE = 'the step scope { state, event, payload, context } (FLOW-FORMAT §
 
 /** The state-declaration brand: how `defineFsm` tells one apart. */
 const STATE = Symbol.for('@jarenjs/linq/flow-state');
-/** The effect-descriptor brand. */
-const EFFECT = Symbol.for('@jarenjs/linq/flow-effect');
 /** The transition brand; the entry it carries lives under it. */
 const TRANSITION = Symbol.for('@jarenjs/linq/flow-transition');
 
@@ -95,37 +94,7 @@ function readId(id, what) {
  * effect('toast', () => ({ text: 'retrying' }));      // a constructor, not $const
  */
 export function effect(run, props = undefined) {
-  if (typeof run !== 'string' || run === '') {
-    throw new LinqBuildError('JL0101',
-      `effect() takes the handler name as a non-empty string, got ${describeValue(run)}`, '/run');
-  }
-  const out = { run };
-  if (props !== undefined) out.with = queryMember('effect() with', SCOPE, props);
-  Object.defineProperty(out, EFFECT, { value: true, enumerable: false });
-  return Object.freeze(out);
-}
-
-/**
- * An effects list (`entry`, `exit`, a transition's `effects`), as the
- * document carries it.
- * @param {any} list
- * @param {string} what
- * @returns {any[]}
- */
-function readEffects(list, what) {
-  if (!Array.isArray(list)) {
-    throw new LinqBuildError('JL0101',
-      `${what} is an array of effect() descriptors, got ${describeValue(list)}`);
-  }
-  return list.map((declared, i) => {
-    if (!isPlainObject(declared) || declared[EFFECT] !== true) {
-      throw new LinqBuildError('JL0101',
-        `${what}[${i}] is effect(run, with?), got ${describeValue(declared)}`);
-    }
-    const out = { run: declared.run };
-    if (declared.with !== undefined) out.with = declared.with;
-    return out;
-  });
+  return effectDescriptor(run, props, (p) => queryMember('effect() with', SCOPE, p));
 }
 
 /**

@@ -40,6 +40,53 @@ const app = createApp({
 }, { node: document.getElementById('app') });
 ```
 
+### The same app, by code
+
+`@jarenjs/linq/app` writes that document from typed builders — the
+initial state derived from the state schema's defaults, the view the
+JSLT pen's stylesheet, the actions captured over `$`/`$event`/`$payload`
+and their patch pointers derived from the state shape — and answers the
+state's JSON Schema beside it for `validateState`:
+
+```javascript
+import { action, bind, defineApp, replace, transition } from '@jarenjs/linq/app';
+import { rule } from '@jarenjs/linq/jslt';
+import * as s from '@jarenjs/linq/schema';
+
+const counter = defineApp({
+  state: s.object({ count: s.integer().default(0) }),
+  view: [rule('$', (v) => ['main', {},
+    ['h1', {}, 'Count: ', v.get('count')],
+    ['button', { on: { click: 'inc' } }, '+'],
+    ['button', { on: { click: bind('add', { payload: 10 }) } }, '+10'],
+  ])],
+  actions: {
+    inc: action((st) => transition({
+      patch: [replace((c) => c.get('count'), st.get('count').add(1))],
+    })),
+    add: action((st, x) => transition({
+      patch: [replace((c) => c.get('count'), st.get('count').add(x.payload))],
+    }), { payload: s.integer() }),
+  },
+});
+
+createApp(counter.document, { node: document.getElementById('app') });
+```
+
+It is the same application — the test suite boots both and compares
+them frame for frame — with one spelling difference: the emitted paths
+read `$['count']` where the hand-written document reads `$.count`, the
+same RFC 9535 path, because `count` names a method on the chain's
+expression surface and `get()` is the escape for a member that collides
+with one. A `bind()` to an action `actions` does not declare is refused
+at build time (`JL0102`) rather than dropped per click (`JA2001`), and
+the state's required members must have defaults or an explicit
+`initial`. The mapping table is
+[PENS-FORMAT §9](../linq/docs/PENS-FORMAT.md); this package depends on
+none of it.
+
+## The view
+
 The view is a JSLT stylesheet: rules match state by location (JSONPath) and shape (JSON Schema, via `compileTypeTest`), bodies are query documents producing vnodes, and `$path`/`$root` are in scope — a rule rendering `/todos/3` can embed its own pointer in an event binding, which is why there are no payload-creator functions anywhere.
 
 ## Actions and transitions

@@ -20,6 +20,7 @@
     "linq-migration.ts",
     "linq-db.ts",
     "linq-contract.ts",
-    "linq-flow.ts"
+    "linq-flow.ts",
+    "linq-app.ts"
   ]
 }

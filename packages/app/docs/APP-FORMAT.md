@@ -38,6 +38,19 @@ valid per §2–§5. A **runtime** (the reference implementation is
 specified there, and MUST serialize dispatches per the transaction
 model of §8.
 
+One producer ships in this repository: `@jarenjs/linq/app` writes these
+documents from typed JavaScript builders — the state's initial value
+derived from its schema's defaults, the view the JSLT pen's stylesheet,
+actions captured over §3.1's three names, and patch pointers derived
+from the state shape — with `defineApp()` refusing at build time what
+§4 and §6 would otherwise report per dispatch. Its mapping table is
+[PENS-FORMAT §9](../../linq/docs/PENS-FORMAT.md); §2's document below
+and the `contract/catalog.load/start` action of
+[CONTRACT-FORMAT §11.1](../../contract/docs/CONTRACT-FORMAT.md) are
+rebuilt through it byte for byte by that package's test suite. Nothing
+in this package depends on it: the format is the contract, and a
+document written by hand is the same document.
+
 ## 2. The app document
 
 ```json

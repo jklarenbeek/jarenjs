@@ -74,11 +74,11 @@ is required, the modes reuse the `createTaskEffect` vocabulary
 (`parallel`/`concat`/`switch`/`exhaust`), and failure is fail-closed —
 the first rejection aborts every in-flight signal and the source.
 
-## The pens (`src/schema/`, `src/model/`, `src/jslt/`, `src/migration/`, `src/contract/`)
+## The pens (`src/schema/`, `src/model/`, `src/jslt/`, `src/migration/`, `src/contract/`, `src/flow/`, `src/app/`, `src/forms/`)
 
 A pen is a by-code front-end to one of the suite's document formats,
 exported under its own subpath (`@jarenjs/linq/schema`, `/model`, `/jslt`,
-`/migration`, `/contract`; `.` stays the chain). The rule set is one paragraph: the document is the
+`/migration`, `/contract`, `/flow`, `/app`, `/forms`; `.` stays the chain). The rule set is one paragraph: the document is the
 deliverable (plain, deep-frozen JSON, memoized under `.schema`,
 `toJSON()` returns it); the pen imports no engine and re-implements no
 compile check — it refuses only what it cannot spell, with a `JL01xx`
@@ -105,7 +105,10 @@ shared by every pen: `capture-root.js` (`captureQuery`: one capture over
 a value at `$` with named externals — `check()`'s `root`/`path`, the
 model pen's `compute()` with none, the JSLT pen's `body()` with the
 declared parameters) and `json-boundary.js` (`requireJson`, the `JL0101`
-door). The model pen (`src/model/`) subclasses the schema pen's classes
+door), and `effect.js` (the `{ run, with? }` descriptor two formats spell
+identically — a machine's effects and an app transition's — with each pen
+passing in how its props are captured). The model pen (`src/model/`) and
+the forms pen (`src/forms/`) each subclass the schema pen's classes
 through one mixin; the JSLT pen (`src/jslt/`) is `body.js` (the body
 capture, `apply`/`op` lifted into it through `liftExpression`, the `[]`
 refusal) and `rules.js` (the rule object and the envelope, in Appendix
@@ -118,7 +121,21 @@ and the three identity wrappers that type a client, a handler table and
 an AI toolbox). It reaches back into `schema/emit.js` for one thing —
 `createHoist`/`emitInto`/`hoistedDefs`, the same `$defs` walk `assemble`
 runs, over several roots instead of one — so a contract's `$defs` are
-hoisted to the CONTRACT's root by the one implementation.
+hoisted to the CONTRACT's root by the one implementation. The flow pen
+(`src/flow/`) is `fsm.js`, `dag.js` and `capture.js`, whose scope binds NO
+externals because neither flow engine binds any — a guard written through
+the JSLT pen's `body()` would read `$root` as false forever. The app pen
+(`src/app/`) is `capture.js` (APP-FORMAT §3.1's three names, and §5.3's
+narrower closed world for a subscription), `action.js`
+(`action`/`transition`/`effect`/`bind`), `patch.js` (the six RFC 6902
+operations, `append`, and the path lambda lowered to a JSON Pointer — as
+text where every segment is literal, as a lifted `$concat` where one is
+computed) and `define.js` (the document, the initial state derived from
+the state schema's defaults, and the view scan that refuses a binding to
+an undeclared action). The forms pen (`src/forms/`) is `rules.js` (the
+`form()` mixin and the rule context) and `submit.js` (`assertOnSubmit`,
+the layer-3 `$query` twin, pinned deep-equal to forms' own transform);
+neither imports the package it writes for.
 
 ## The client (`src/db/`)
 

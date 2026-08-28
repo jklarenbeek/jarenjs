@@ -21,13 +21,13 @@ import {
 
 const schema = {
   type: 'object',
-  title: 'Sign up',
   properties: {
     username: { type: 'string', minLength: 3, pattern: '^[a-z0-9_]+$' },
     email: { type: 'string', format: 'email' },
     age: { type: 'integer', minimum: 13 },
   },
   required: ['username', 'email'],
+  title: 'Sign up',
 };
 
 // 1. Build the field tree once
@@ -90,6 +90,30 @@ stylesheet is the second kind of host, and the website's data studio the first.
 
 Which date formats get a **native** control is decided by the offset, not by convenience. HTML's `datetime-local` and `time` inputs cannot produce one, and RFC 3339 requires one — binding them to `date-time`/`time` would make the control emit values its own schema rejects, so those stay text inputs. The `iso-date-time`/`iso-time` formats leave the offset optional and are exactly what those inputs spell, so they map losslessly. `formatMinimum`/`formatMaximum` reach the field as constraints and become the control's `min`/`max`, so the picker itself refuses an out-of-range date; HTML has no exclusive date bounds, so `formatExclusive*` stays a submit-time check.
 
+### The same model, by code
+
+The schema above is what `@jarenjs/linq/forms` emits, byte for byte:
+
+```javascript
+import * as f from '@jarenjs/linq/forms';
+
+export const signup = f.object({
+  username: f.string().min(3).pattern('^[a-z0-9_]+$'),
+  email: f.string().format('email'),
+  age: f.integer().min(13).optional(),
+}).open().title('Sign up');
+
+const model = buildFormModel(signup.schema);
+```
+
+`f.object({...})` closes the object (`additionalProperties: false`) —
+`.open()` is what the hand-written schema above says by leaving the
+keyword out — and every member is required unless `.optional()` says
+otherwise, which is the same `required: ['username', 'email']`. Every
+rule of the next section is a `.form({ … })` on the member it belongs
+to; nothing in this package depends on that one, and the schema is the
+contract.
+
 ## Layer 1 — preemptive per-field validation
 
 `validateField(field, value)` returns `[{ keyword, message }]` using `@jarenjs/core` directly:
@@ -118,6 +142,16 @@ One namespaced annotation keyword — safe under every metaschema, invisible to 
                   "x-form": { "computed": { "$sum": "$.lines[*].amount" } } }
   } }
 ```
+
+These annotations can be **written by code**: `@jarenjs/linq/forms` is
+the schema pen plus `form({ visible, enabled, assert, computed,
+message })` on every builder, with the rules captured as callbacks over
+the same context (`c.root`, `c.value`, `c.pointer`) rather than typed
+as path strings, and `assertOnSubmit()` answering the layer-3 twin
+below in one call. The document above is what it emits, byte for byte
+— see [the by-code twin](#the-same-model-by-code) and
+[PENS-FORMAT §10](../linq/docs/PENS-FORMAT.md). This package depends on
+none of it; the annotation is the contract.
 
 Recognized members — unknown members are ignored for forward compatibility:
 

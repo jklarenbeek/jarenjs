@@ -70,10 +70,10 @@ mirrored in LINQ-FORMAT §9 (one table, held equal by a test):
 
 | Code | Condition |
 |---|---|
-| `JL0101` | a pen received a value it cannot spell: not JSON (a function, symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance, a cycle — the constant rule of LINQ-FORMAT §5 applied to defaults, literals, examples and annotations), or not what the keyword takes (`min('x')`, a member that is not a builder); in the contract pen, also a member the pen's own surface does not know or a value outside a declared set (a `policy` member outside §3.1's table, a method outside §4's, a status outside its range) — the document's own closed vocabulary stays `compileContract`'s `JC0013` |
-| `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write; in the JSLT pen an `apply()` as a bare object member (the `[]` idiom, JSLT-FORMAT §6.3 — the engine would fail at run time on the second child), a `match` of `{}` (the compiler's `JT0003`, earlier), an `apply()` outside a body; in the contract pen a path template form CONTRACT-FORMAT §4.2 reserves (the compiler's `JC0008`, earlier, naming the same form), a member mapped to `path` the template does not declare, or a hand-written operation `kind` outside `read`/`command`/`subscribe`; in the flow pen a guard given as a plain STRING (FLOW-FORMAT §3 makes a non-`$` literal vacuously true, so a projected display annotation must not decide execution), or a state or node id no declaration carries (the compiler's `JF0004`/`JF0006`/`JF0013`, earlier, naming the id) |
+| `JL0101` | a pen received a value it cannot spell: not JSON (a function, symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance, a cycle — the constant rule of LINQ-FORMAT §5 applied to defaults, literals, examples and annotations), or not what the keyword takes (`min('x')`, a member that is not a builder); in the contract pen, also a member the pen's own surface does not know or a value outside a declared set (a `policy` member outside §3.1's table, a method outside §4's, a status outside its range) — the document's own closed vocabulary stays `compileContract`'s `JC0013`; in the app pen a member of its own surface it does not know, a `payload` that is not a builder, or a CALLBACK under a subscription's `with` (which is verbatim data and never evaluated); in the forms pen a member `x-form` does not define, or a `message` that is neither an inline string nor a MessageSpec |
+| `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write; in the JSLT pen an `apply()` as a bare object member (the `[]` idiom, JSLT-FORMAT §6.3 — the engine would fail at run time on the second child), a `match` of `{}` (the compiler's `JT0003`, earlier), an `apply()` outside a body; in the contract pen a path template form CONTRACT-FORMAT §4.2 reserves (the compiler's `JC0008`, earlier, naming the same form), a member mapped to `path` the template does not declare, or a hand-written operation `kind` outside `read`/`command`/`subscribe`; in the flow pen a guard given as a plain STRING (FLOW-FORMAT §3 makes a non-`$` literal vacuously true, so a projected display annotation must not decide execution), or a state or node id no declaration carries (the compiler's `JF0004`/`JF0006`/`JF0013`, earlier, naming the id); in the app pen a patch path that is not a chain of member reads and subscripts (a JSON Pointer cannot be written for it), an `$event` field APP-FORMAT §3.1 excludes by construction (`target`, `files`, a touch list — `$event` must survive `JSON.stringify`), an initial state no `default()` describes, a subscription-member combination §5.3 calls `JA0008`, or a view binding an action `actions` does not declare (the loop's `JA2001`, earlier, naming the declared ones); in the forms pen `preview`, which the format registry DERIVES from the field's own `format` |
 | `JL0103` | a `$defs` name collision (two distinct builders under one name), a `ref()` no definition answers, or a `lazy()` that does not return a named builder |
-| `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare: a `check()` external other than `root`/`path`, a `compute()` external at all, a `body()` external other than `root`/`path` and its declared parameters — or `root`/`path` declared as one, since the engine binds them; a flow guard, effect `with`, node query or edge `select` external at all, since both flow engines evaluate with one `$` and nothing else |
+| `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare: a `check()` external other than `root`/`path`, a `compute()` external at all, a `body()` external other than `root`/`path` and its declared parameters — or `root`/`path` declared as one, since the engine binds them; a flow guard, effect `with`, node query or edge `select` external at all, since both flow engines evaluate with one `$` and nothing else; an app action naming anything but `$event` and `$payload` (APP-FORMAT §3.1's whole ambient vocabulary), a subscription member naming anything but `$item`, and that only under `for` (§5.3's closed world); a form rule naming anything but the context's `root`, `value` and `pointer` |
 | `JL0105` | a relation hop on the chain — the query pen (LINQ-FORMAT §4, relation navigation) — cannot lower: the member is a many-to-many relation, whose join table is not a queryable root in this version (`load({ include })` reads the memberships); the relation's key column or the key it references is composite or undeclared; or the provider's relation table holds something that is not a relation record |
 | `JL0106` | a migration step names an entity or collection the target model does not declare (`transform`, `assert`, `derive`); or a `transform` over a planned document finds no draft to replace, or two drafts for one name |
 | `JL0107` | the client (`@jarenjs/linq/db`, §6) was handed a member that is not the relation kind the operation needs: `include()` picks a declared relation member — a scalar member, or a name the model does not declare, is refused naming the declared ones; `link()`/`unlink()` attach many-to-many memberships only — a to-one or to-many relation is refused naming its kind |
@@ -1457,3 +1457,435 @@ cannot exist):
 A `query`/`select`/`with` callback's value is the honest top until it
 is annotated (`query((v: Expr<Row[]>) => …)`), exactly as the JSLT
 pen's body is.
+
+## 9. The app pen — `@jarenjs/linq/app`
+
+```js
+import { defineApp, action, transition, effect, bind, sub } from '@jarenjs/linq/app';
+import { add, append, replace, remove, move, copy, test } from '@jarenjs/linq/app';
+```
+
+writes the `jaren-app` 0.1 document
+([APP-FORMAT](../../app/docs/APP-FORMAT.md)) `createApp` runs — a whole
+interactive application as one JSON value — and, beside it, the JSON
+Schema of its state. The two are two members of ONE result,
+`{ document, stateSchema }`, and are never merged: the format has no
+slot for a state schema, and the hook that wants one is
+`options.validateState` (§6), which is a `createApp` option.
+
+An action is ONE query document over APP-FORMAT §3.1's three names —
+`$` the whole state, `$event` the serializable event slice, `$payload`
+the dispatch payload — so everything inside it is captured in one pass:
+`transition()`, `effect()` and the patch helpers assemble plain objects
+and leave the spelling to the capture already running. That is what
+makes the format's own guarantee expressible — the increment in a patch
+and the one in an effect's props are the SAME expression, because both
+evaluate against the pre-transition state — and it is why an effect's
+props are a VALUE here where the flow pen's are a callback (§8): there,
+each guard is its own document; here, the action is.
+
+The initial state is DERIVED from the state builder's `default()`s
+unless `initial` names one. A member contributes its `default` (or its
+`const`); an object recurses; an object resolves when it is required or
+when at least one of its own members did, so an optional block of
+defaults appears and an optional empty one does not; and a REQUIRED
+member that resolves to nothing is `JL0102` naming its pointer —
+because a state whose required member is absent fails its own
+`validateState` on the boot transaction, which is a fatal `JA0007` and
+a bad way to learn about a missing default.
+
+The pen imports nothing of `@jarenjs/app`, `@jarenjs/view` or
+`@jarenjs/json`: the loop's compiler stays the only judge of what an app
+means (a tree-shaking probe holds it).
+
+### 9.1 The mapping table
+
+| Method | Emits | Type reading | Status |
+|---|---|---|---|
+| `defineApp({ state, initial?, schema?, view, actions?, subs? })` | `{ document: { $app: '0.1', state?, view, actions?, subs? }, stateSchema }` — only the members the author declared | `AppResult<State, Actions>`; `StateOf<>` and `ActionsOf<>` read it | native; a member the pen does not know, a missing `view`, a `schema` beside a builder state `JL0101`; an underivable initial state, or a view binding an undeclared action, `JL0102` |
+| `state` | the initial value, from the builder's `default()`s; the builder itself is `stateSchema` | `Infer<B>` | native |
+| `view` | the JSLT stylesheet verbatim — the pen's `stylesheet([rule(…)])` envelope (§4) or §2's bare rule array | `unknown`: a view is a document the grammar judges | native |
+| `action(fn, { payload?, event? })` | one action document, captured over `$`, `$event`, `$payload` | `ActionDeclaration<Payload>`; `payload`/`event` are TYPES — the format carries no schema for either | native; a non-builder `payload` `JL0101`; an excluded `event` field `JL0102`; a name §3.1 does not bind `JL0104` |
+| `transition({ state?, patch?, effects? })` | the transition object of §3.2, in the order the runtime applies it | `Transition` | native; another member `JL0101` |
+| `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope | `EffectDeclaration<Run>` — `Run` is a literal | native; an empty `run` `JL0101` |
+| `add/replace/remove/move/copy/test(path, …)` | one RFC 6902 operation, `op, from?, path, value?` | `PatchOp` | native; a path the pen cannot lower `JL0102` |
+| `append(path, value)` | `{ op: 'add', path: '<path>/-', value }` — the array APPEND | `PatchOp` | native |
+| a path lambda `(st, x) => …` | the JSON Pointer the state shape describes (`st.todos` → `/todos`, `st.todos.at(2).done` → `/todos/2/done`) | `PatchPath<State, Payload>` — annotate to type it | native |
+| a path lambda with a COMPUTED index | the pointer as a string EXPRESSION, `{ "$concat": ["/todos/", <index>, "/done"] }` — §3.2's "op members like `value` and `path` are themselves query expressions" | the same | native; anything that is not a chain of member reads and subscripts `JL0102` |
+| `bind(name, { payload?, event?, preventDefault?, stopPropagation? })` | §4's object binding, in the format's member order | `Binding<Names>` — annotate the call (`bind<Action>('todo/add')`) and an undeclared name stops compiling | native; a field §3.1 excludes `JL0102` |
+| `sub(run, { with?, when?, withQuery?, key?, for? })` | one §5.3 entry, in the format's member order | `SubDeclaration<Run>` | native; a callback under `with` `JL0101`; a combination §5.3 calls `JA0008` `JL0102`; `$item` outside a `for` `JL0104` |
+
+**The one pointer this pen computes.** Every other path is written as
+pointer TEXT at build time. A non-literal index cannot be — so
+`st.todos.at(x.payload.i).done` emits
+`{ "$concat": ["/todos/", "$payload.i", "/done"] }`, adjacent literal
+segments merged into one operand. (`$string-join` joins a SEQUENCE
+with a separator and casts an array constructor's array to a string —
+`JQ2001`; `$concat` is the operator that concatenates operands, and it
+is what a pointer needs.)
+
+**The `$event` allow-list.** A binding may request any field name: the
+built-in allow-list of §3.1, or a host extractor's own, since an
+extractor registered under a name WINS over the built-in list and the
+pen cannot see the host's registry. What the pen refuses is the set
+§3.1 excludes by construction — `target`, `currentTarget`,
+`relatedTarget`, `srcElement`, `view`, `files`, `dataTransfer`,
+`touches`, `targetTouches`, `changedTouches`, `path`, `composedPath`,
+`clipboardData`, `submitter` — because `$event` MUST survive
+`JSON.stringify`, the same invariant as state. The message names §5.4's
+own worked example: register an extractor under a name of its own
+(`fileTokens`) and request that.
+
+**The undeclared action.** §4 leaves an unknown action name to run time
+(`JA2001` per dispatch, the user's click silently dropped);
+`defineApp()` sees the whole document at once and refuses it. It reads
+both of §4's binding forms — a string under an `on` map, and an
+`action` member anywhere, which is where a widget's `emit` will find one
+— and skips a value starting with `$`, which is a query expression
+naming the action at render time and which no pen can resolve.
+
+What the pen does **not** judge, by design, is the loop's: an
+unregistered effect or subscription name (`JA2006`, `JA2008`), a
+`when`/action document's own operators (`JA2002`), a patch that fails to
+apply (`JA2004`), the state invariant (`JA2005`) and everything else
+§10 lists. The pen EMITS those documents and `createApp` refuses them; a
+test builds each through the pen and asserts the loop's code.
+
+### 9.2 Worked examples
+
+Every `js` fence exports exactly one document, and the `json` fence that
+follows is what the pen emits — executed by
+`test/linq/pens-format.test.js`. APP-FORMAT §2's document and the
+`contract/catalog.load/start` action CONTRACT-FORMAT §11.1 generates are
+rebuilt the same way and held BYTE-equal to those docs' own fences by
+`test/linq/app-pen.test.js`.
+
+A todo list: a state whose defaults are the initial value, a view whose
+bindings carry render-time payloads, a controlled input reading
+`$event.value`, and an append that is `add` at the array's `-`
+position:
+
+```js
+import { action, append, bind, defineApp, replace, transition } from '@jarenjs/linq/app';
+import { rule } from '@jarenjs/linq/jslt';
+import * as s from '@jarenjs/linq/schema';
+
+export const todo = defineApp({
+  state: s.object({
+    todos: s.array(s.object({ text: s.string(), done: s.boolean().default(false) })).default([]),
+    draft: s.string().default(''),
+  }),
+  view: [rule('$', (v) => ['main', {},
+    ['input', { value: v.draft, on: { input: bind('todo/draft') } }],
+    ['button', { on: { click: bind('todo/add', { payload: { text: v.draft } }) } }, 'add'],
+  ])],
+  actions: {
+    'todo/draft': action((st, x) => transition({
+      patch: [replace((c) => c.draft, x.event.value)],
+    }), { event: ['value'] }),
+    'todo/add': action((st, x) => transition({
+      patch: [
+        append((c) => c.todos, { text: x.payload.text, done: false }),
+        replace((c) => c.draft, ''),
+      ],
+    }), { payload: s.object({ text: s.string() }) }),
+  },
+}).document;
+```
+```json
+{
+  "$app": "0.1",
+  "state": { "todos": [], "draft": "" },
+  "view": [
+    { "match": "$", "body": ["main", {},
+      ["input", { "value": "$.draft", "on": { "input": { "action": "todo/draft" } } }],
+      ["button", { "on": { "click": { "action": "todo/add", "with": { "text": "$.draft" } } } }, "add"]] }
+  ],
+  "actions": {
+    "todo/draft": { "patch": [{ "op": "replace", "path": "/draft", "value": "$event.value" }] },
+    "todo/add": { "patch": [
+      { "op": "add", "path": "/todos/-", "value": { "text": "$payload.text", "done": false } },
+      { "op": "replace", "path": "/draft", "value": "" }] }
+  }
+}
+```
+
+`append` is `add` at `/todos/-`, and the distinction is RFC 6902's:
+`add((st) => st.todos, item)` sets `/todos` TO the item and drops the
+list, because a pointer that names a member replaces that member.
+
+A computed pointer, an effect and a dynamic subscription. Note that the
+same subscript lowers two ways in one line — as pointer TEXT under
+`path`, because a patch path is a pointer, and as the engine's `$get`
+under `value`, because a value is an expression:
+
+```js
+import { action, effect, defineApp, replace, sub, transition } from '@jarenjs/linq/app';
+import { rule } from '@jarenjs/linq/jslt';
+import * as s from '@jarenjs/linq/schema';
+
+export const board = defineApp({
+  state: s.object({
+    rows: s.array(s.object({ open: s.boolean() })).default([]),
+    live: s.boolean().default(false),
+  }),
+  view: [rule('$', (v) => ['ul', {}, v.rows.all().open])],
+  actions: {
+    'row/toggle': action((st, x) => transition({
+      patch: [replace((c, y) => c.rows.at(y.payload.i).open, st.rows.at(x.payload.i).open.not())],
+      effects: [effect('persist', { at: x.payload.i })],
+    })),
+  },
+  subs: [sub('feed', {
+    when: (st) => st.live,
+    withQuery: (st) => ({ rows: st.rows.all().count() }),
+  })],
+}).document;
+```
+```json
+{
+  "$app": "0.1",
+  "state": { "rows": [], "live": false },
+  "view": [{ "match": "$", "body": ["ul", {}, "$.rows[*].open"] }],
+  "actions": {
+    "row/toggle": {
+      "patch": [{ "op": "replace",
+                  "path": { "$concat": ["/rows/", "$payload.i", "/open"] },
+                  "value": { "$not": { "$get": [{ "$get": ["$.rows", "$payload.i"] }, "open"] } } }],
+      "effects": [{ "run": "persist", "with": { "at": "$payload.i" } }]
+    }
+  },
+  "subs": [{ "run": "feed", "when": "$.live",
+             "withQuery": { "rows": { "$count": "$.rows[*]" } } }]
+}
+```
+
+### 9.3 The types, in one place
+
+```ts
+import { createApp } from '@jarenjs/app';
+import { JarenValidator } from '@jarenjs/validate';
+import { action, bind, defineApp, transition } from '@jarenjs/linq/app';
+import type { ActionScope, ActionsOf, StateOf } from '@jarenjs/linq/app';
+import type { Expr } from '@jarenjs/linq';
+
+type State = StateOf<typeof todo>;        // { todos: { text: string; done: boolean }[]; draft: string }
+type Action = ActionsOf<typeof todo>;     // 'todo/draft' | 'todo/add'
+
+const { document, stateSchema } = todo;
+createApp(document, { node, validateState: new JarenValidator().compile(stateSchema) });
+
+bind<Action>('todo/add');                 // fine
+bind<Action>('nope');                     // does not compile — and JL0102 at defineApp()
+```
+
+The honest limits, both of them TypeScript's own (a function's type
+arguments are all-or-none, and a sibling member's inferred type cannot
+contextually type a callback beside it):
+
+- an action's state is typed by ANNOTATION — `action((s: Expr<State>, x)
+  => …)`, and a patch path the same — because `action()` is evaluated
+  before `defineApp()` sees the `state` builder. What `defineApp({ state
+  })` types is the DOCUMENT (`StateOf<>`), which is what a host reading
+  `app.getState()` needs. `x.payload` needs no annotation:
+  `action(fn, { payload })` declares it on the same call, and
+  `{ event: [...] as const }` adds the requested members to `x.event`
+  beside §3.1's default slice.
+- `bind()`'s action name is checked by annotating the call —
+  `bind<Action>('todo/add')`, with `Action` declared or read back
+  through `ActionsOf<>`. `defineApp()` checks the other direction at run
+  time over the whole view, which is the half a type cannot reach: by
+  then a view is a compiled stylesheet.
+
+A view body's value is the honest top until it is annotated
+(`rule('$', (v: Expr<State>) => …)`), exactly as the JSLT pen's body is.
+
+## 10. The forms pen — `@jarenjs/linq/forms`
+
+```js
+import * as f from '@jarenjs/linq/forms';
+import { assertOnSubmit } from '@jarenjs/linq/forms';
+```
+
+is the schema pen's every name from SUBCLASSES that carry the `x-form`
+vocabulary — `form({ visible, enabled, assert, computed, message })` on
+every builder — plus `assertOnSubmit()`, the one call that answers the
+same rules' layer-3 `$query` twin
+([the forms README](../../forms/README.md)).
+
+A rule is an ANNOTATION. It never changes what the schema validates:
+`required`, `additionalProperties` and every other keyword stay exactly
+what the schema pen wrote, `Infer<>`/`Input<>` read exactly as they do
+there, and the subclasses exist only so `form()` survives every chained
+method. What `buildFormModel`, `compileFormRules` and
+`evaluateFormRules` then read is the annotation.
+
+The three predicates and `computed` are CALLBACKS captured over the
+rule context, never paths typed as strings. The context spells the three
+names the evaluator binds, and no others: `c.root` is the whole form
+document (`$` — cross-field is the point), `c.value` the field's current
+value (the `$value` external; an absent field binds `null`) and
+`c.pointer` its data pointer (`$pointer`). Any other name is `JL0104`
+here, where the fix can be named, rather than a compile error out of
+`compileFormRules` naming the same two externals.
+
+The pen imports nothing of `@jarenjs/forms`: the reader is the only
+judge of what a rule means, and `assertOnSubmit()` is pinned deep-equal
+to `formRulesToQueryAssertions` over the whole corpus.
+
+### 10.1 The mapping table
+
+| Method | Emits | Type reading | Status |
+|---|---|---|---|
+| every schema-pen name (`f.string()`, `f.object({…})`, …) | exactly what `@jarenjs/linq/schema` emits | `Infer<>`/`Input<>` unchanged — a rule is an annotation | native |
+| `.form({ … })` | one `x-form` annotation, its members in the README's own order (`visible`, `enabled`, `assert`, `computed`, `message`) whatever order the author wrote; a second call merges into the same one | `this` — the builder's phantoms are untouched | native; a member `x-form` does not define, or a `message` that is neither a string nor a MessageSpec, `JL0101`; `preview` `JL0102`; a name the context does not bind `JL0104` |
+| `visible` / `enabled` | an EBV query; a broken one fails OPEN — a broken rule must never hide data or lock a control | `Rule<Doc, Value>` | native |
+| `assert` | an EBV query; a broken one fails CLOSED | `Rule<Doc, Value>` | native |
+| `computed` | a query whose plain-JSON result is the field's derived value | `Rule<Doc, Value>` | native |
+| `message` | a plain string (an inline template), or a `$msgid` MessageSpec, verbatim | `MessageSpec` | native |
+| a rule on an array item's builder | the annotation at the item template, which `buildFormModel` reads at `/lines/-/amount` and evaluates per element | the same | native |
+| `assertOnSubmit(root)` | the root with one `allOf` branch `{ $query, errorMessage }` per `x-form.assert`; a document with no assert answers itself | `JsonSchema` | native; a value that is not a builder or an object schema `JL0101` |
+| `f.string().meta({ 'x-form': … })` | — | — | `JL0104`: the pen owns the keyword; spell it through `form()` |
+
+**`preview` is not an authored member.** A field's preview hint is
+DERIVED from its `format` by the registry —
+`getFormatInfo(format).preview` is `{ kind: 'map' }` for `geojson`, and
+`buildFormModel` reads it from there, never from `x-form` — so writing
+one would be a keyword nothing reads. `form({ preview })` is `JL0102`
+naming the derivation; spell the format instead, and a host that
+understands the hint draws it beside the control.
+
+**What the submit twin keeps**, each a place a naive copy went wrong
+(the README's own three): an absent field binds `null` through
+`$default`, so `$ne`/`$eq` cannot mean opposite things on the two
+sides; an item-template assert quantifies over the ELEMENTS rather than
+the selected leaves, so an element missing the member is evaluated with
+`null` exactly as the keystroke path evaluates it; and an assert on a
+field that also declares `visible` is guarded by it, holding vacuously
+while the field is hidden — which is what the keystroke path already
+does, since `buildFormViewModel` drops hidden nodes. The branches land
+on the ROOT, where `$` is the instance root the rule context expects,
+and each carries the rule's message with `params` merged over
+`{ pointer }` so submit renders the same text in every locale.
+
+What the pen does **not** judge is the reader's: a root-level `visible`
+(a `TypeError` from `compileFormRules` — hiding the whole form would
+null the render tree and its dirty summary), the rules' own operators,
+and the schema's semantics.
+
+### 10.2 Worked examples
+
+Every `js` fence exports exactly one document, and the `json` fence that
+follows is what the pen emits — executed by
+`test/linq/pens-format.test.js`. The forms README's own layer-2 document
+is rebuilt the same way and held BYTE-equal to its fence by
+`test/linq/forms-pen.test.js`.
+
+An invoice: a cross-field visibility, an assert with a catalog message,
+an item-template rule and a computed total:
+
+```js
+import * as f from '@jarenjs/linq/forms';
+
+export const invoice = f.object({
+  company: f.string().optional(),
+  vatId: f.string().optional().form({
+    visible: (c) => c.root.company.ne(''),
+    assert: (c) => c.root.company.eq('').or(c.value.ne('')),
+    message: { $msgid: 'checkout.vat-required', message: 'A VAT id is required for companies' },
+  }),
+  lines: f.array(f.object({
+    amount: f.number().form({ assert: (c) => c.value.gt(0), message: 'Every line must be positive' }),
+  })).default([]),
+  total: f.number().optional().form({ computed: (c) => c.root.lines.all().amount.sum() }),
+});
+```
+```json
+{
+  "type": "object",
+  "properties": {
+    "company": { "type": "string" },
+    "vatId": { "type": "string", "x-form": {
+      "visible": { "$ne": ["$.company", ""] },
+      "assert": { "$or": [{ "$eq": ["$.company", ""] }, { "$ne": ["$value", ""] }] },
+      "message": { "$msgid": "checkout.vat-required", "message": "A VAT id is required for companies" } } },
+    "lines": { "type": "array", "items": {
+      "type": "object",
+      "properties": { "amount": { "type": "number", "x-form": {
+        "assert": { "$gt": ["$value", 0] },
+        "message": "Every line must be positive" } } },
+      "required": ["amount"],
+      "additionalProperties": false }, "default": [] },
+    "total": { "type": "number", "x-form": { "computed": { "$sum": "$.lines[*].amount" } } }
+  },
+  "required": ["lines"],
+  "additionalProperties": false
+}
+```
+
+The same rule, on submit — one call, and the branch the validator
+enforces carries the `visible` guard, the `null` binding and the
+message:
+
+```js
+import * as f from '@jarenjs/linq/forms';
+import { assertOnSubmit } from '@jarenjs/linq/forms';
+
+export const submit = assertOnSubmit(f.object({
+  company: f.string().optional(),
+  vatId: f.string().optional().form({
+    visible: (c) => c.root.company.ne(''),
+    assert: (c) => c.root.company.eq('').or(c.value.ne('')),
+    message: 'VAT id is required for companies',
+  }),
+}));
+```
+```json
+{
+  "type": "object",
+  "properties": {
+    "company": { "type": "string" },
+    "vatId": { "type": "string", "x-form": {
+      "visible": { "$ne": ["$.company", ""] },
+      "assert": { "$or": [{ "$eq": ["$.company", ""] }, { "$ne": ["$value", ""] }] },
+      "message": "VAT id is required for companies" } }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    { "$query": {
+        "$let": { "value": { "$default": ["$['vatId']", { "$const": null }] },
+                  "pointer": { "$const": "/vatId" } },
+        "$return": { "$or": [
+          { "$not": { "$ne": ["$.company", ""] } },
+          { "$or": [{ "$eq": ["$.company", ""] }, { "$ne": ["$value", ""] }] }] } },
+      "errorMessage": { "$query": {
+        "message": "VAT id is required for companies",
+        "params": { "pointer": "/vatId" } } } }
+  ]
+}
+```
+
+### 10.3 The types, in one place
+
+```ts
+import { buildFormModel, compileFormRules, evaluateFormRules } from '@jarenjs/forms';
+import { JarenValidator } from '@jarenjs/validate';
+import * as f from '@jarenjs/linq/forms';
+import { assertOnSubmit } from '@jarenjs/linq/forms';
+import type { RuleContext } from '@jarenjs/linq/forms';
+import type { Infer } from '@jarenjs/linq/schema';
+
+type Invoice = Infer<typeof invoice>;     // the schema pen's reading, unchanged
+
+const model = buildFormModel(invoice.schema);
+evaluateFormRules(compileFormRules(model), data);          // per keystroke
+new JarenValidator().compile(assertOnSubmit(invoice));     // on submit
+```
+
+The one limit is the same one the flow pen's `context` meets: a member
+builder is written before the object that will hold it exists, so
+`c.root` is the honest top until the rule is annotated —
+`form<Invoice>({ visible: (c) => … })`, or
+`(c: RuleContext<Invoice, string>) => …` on the callback itself.
+`c.value` is typed by the builder the rule sits on, and `c.pointer` is
+always a string.

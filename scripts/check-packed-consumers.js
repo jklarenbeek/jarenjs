@@ -271,6 +271,10 @@ import * as m from '@jarenjs/linq/model';
 import * as sc from '@jarenjs/linq/schema';
 import { defineContract, read, http } from '@jarenjs/linq/contract';
 import { defineDag, defineFsm, edge, effect, input, on, output, query, state } from '@jarenjs/linq/flow';
+import { action, append, bind, defineApp, transition } from '@jarenjs/linq/app';
+import { rule } from '@jarenjs/linq/jslt';
+import * as fm from '@jarenjs/linq/forms';
+import { assertOnSubmit } from '@jarenjs/linq/forms';
 import { open } from '@jarenjs/linq/db';
 import { nodeDriver } from '@jarenjs/db/node';
 const api = defineContract({ id: 'shop' }, {
@@ -296,6 +300,14 @@ const graph = defineDag({
   edges: [edge('rows', 'adults'), edge('adults', 'out')],
 });
 void (graph.$dag === '0.1' && graph.edges.length === 2);
+const todo = defineApp({
+  state: sc.object({ todos: sc.array(sc.string()).default([]) }),
+  view: [rule('$', (v: any) => ['ul', { on: { click: bind('todo/add', { payload: v.draft }) } }])],
+  actions: { 'todo/add': action((st: any, x: any) => transition({ patch: [append((c: any) => c.todos, x.payload)] })) },
+});
+void (todo.document.$app === '0.1' && (todo.stateSchema as any).type === 'object');
+const invoice = fm.object({ vatId: fm.string().form({ assert: (c: any) => c.value.ne(''), message: 'required' }) });
+void ((assertOnSubmit(invoice) as any).allOf.length === 1);
 const rows = [{ id: 1, name: 'ada' }, { id: 2, name: 'lin' }];
 const seq = from(rows).where((r: any) => r.id.gt(1)).select((r: any) => ({ n: r.name }));
 const doc: unknown = seq.toDocument();

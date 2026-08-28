@@ -398,7 +398,7 @@ const contractPenPackageLeak = Object.entries(contractPenInputs)
 if (contractPenPackageLeak.length > 0)
   throw new Error(`The contract pen pulled a package it must not carry into the bundle: ${contractPenPackageLeak.map(([file]) => file).join(', ')}`);
 const contractPenLeak = Object.entries(contractPenInputs)
-  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|db)\//.test(file) && info.bytesInOutput > 0);
+  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|flow|app|forms|db)\//.test(file) && info.bytesInOutput > 0);
 if (contractPenLeak.length > 0)
   throw new Error(`The contract pen pulled another pen into the bundle: ${contractPenLeak.map(([file]) => file).join(', ')}`);
 if (contractPenBytes > 46000)
@@ -454,7 +454,7 @@ const flowPenSchemaLeak = Object.entries(flowPenInputs)
 if (flowPenSchemaLeak.length > 0)
   throw new Error(`The flow pen pulled schema-pen modules into the bundle: ${flowPenSchemaLeak.map(([file]) => file).join(', ')}`);
 const flowPenLeak = Object.entries(flowPenInputs)
-  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|contract|db)\//.test(file) && info.bytesInOutput > 0);
+  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|contract|app|forms|db)\//.test(file) && info.bytesInOutput > 0);
 if (flowPenLeak.length > 0)
   throw new Error(`The flow pen pulled another pen into the bundle: ${flowPenLeak.map(([file]) => file).join(', ')}`);
 if (flowPenBytes > 20000)
@@ -469,3 +469,105 @@ if (schemaFlowLeak.length > 0)
   throw new Error(`The schema pen pulled the flow pen into the bundle: ${schemaFlowLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${flowPenBytes} byte flow-pen bundle; no chain module, no @jarenjs/flow bytes, no schema module beyond brand.js, no other pen; the chain and the schema pen carry no flow module).`);
+
+// The app pen (`@jarenjs/linq/app`) writes `jaren-app` 0.1 documents
+// whose state is a schema-pen builder, whose view is the JSLT pen's
+// stylesheet and whose actions are captures — so the probe measures the
+// three pens together (an app without a view and a state is not an app),
+// and the ceiling is that measured set. What it must NOT carry: a chain
+// module, and above all any byte of `@jarenjs/app`, `@jarenjs/view` or
+// `@jarenjs/json` — the loop's compiler is the only judge of what an app
+// means. The chain carries no app module in return.
+const appPenResult = await build({
+  stdin: {
+    contents: "import { defineApp, action, transition, append, bind } from '@jarenjs/linq/app'; import { rule } from '@jarenjs/linq/jslt'; import * as s from '@jarenjs/linq/schema'; export const A = defineApp({ state: s.object({ todos: s.array(s.string()).default([]) }), view: [rule('$', (v) => ['ul', { on: { click: bind('todo/add', { payload: { text: v.draft } }) } }])], actions: { 'todo/add': action((st, x) => transition({ patch: [append((c) => c.todos, x.payload)] })) } }).document;",
+    resolveDir: process.cwd(),
+    sourcefile: 'app-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const appPenBytes = appPenResult.outputFiles[0].contents.length;
+const appPenInputs = Object.values(appPenResult.metafile.outputs)[0].inputs;
+const appPenChainLeak = Object.entries(appPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (appPenChainLeak.length > 0)
+  throw new Error(`The app pen pulled chain modules into the bundle: ${appPenChainLeak.map(([file]) => file).join(', ')}`);
+const appPenPackageLeak = Object.entries(appPenInputs)
+  .filter(([file, info]) => /packages\/(app|view|forms|flow|contract|validate|emit|db|formats|refs|json)\//.test(file)
+    && info.bytesInOutput > 0);
+if (appPenPackageLeak.length > 0)
+  throw new Error(`The app pen pulled a package it must not carry into the bundle: ${appPenPackageLeak.map(([file]) => file).join(', ')}`);
+const appPenLeak = Object.entries(appPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(model|migration|contract|flow|forms|db)\//.test(file) && info.bytesInOutput > 0);
+if (appPenLeak.length > 0)
+  throw new Error(`The app pen pulled another pen into the bundle: ${appPenLeak.map(([file]) => file).join(', ')}`);
+if (appPenBytes > 48000)
+  throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
+const chainAppLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
+if (chainAppLeak.length > 0)
+  throw new Error(`The chain pulled the app pen into the bundle: ${chainAppLeak.map(([file]) => file).join(', ')}`);
+const schemaAppLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
+if (schemaAppLeak.length > 0)
+  throw new Error(`The schema pen pulled the app pen into the bundle: ${schemaAppLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${appPenBytes} byte app-pen bundle, the schema and JSLT pens included; no chain module, no @jarenjs/app or @jarenjs/view bytes, no other pen; the chain and the schema pen carry no app module).`);
+
+// The forms pen (`@jarenjs/linq/forms`) is the schema pen plus one
+// annotation method and the submit twin, so its bundle IS a schema-pen
+// bundle by construction — what the probe holds is that it stays one:
+// no `@jarenjs/forms` bytes (the model reader is the only judge of what
+// a rule means), no model pen (the two subclass the same base and must
+// not drag each other in), no chain module beyond the shared capture.
+const formsPenResult = await build({
+  stdin: {
+    contents: "import * as f from '@jarenjs/linq/forms'; import { assertOnSubmit } from '@jarenjs/linq/forms'; export const F = assertOnSubmit(f.object({ vatId: f.string().form({ visible: (c) => c.root.company.ne(''), assert: (c) => c.value.ne(''), message: 'required' }) }));",
+    resolveDir: process.cwd(),
+    sourcefile: 'forms-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const formsPenBytes = formsPenResult.outputFiles[0].contents.length;
+const formsPenInputs = Object.values(formsPenResult.metafile.outputs)[0].inputs;
+const formsPenChainLeak = Object.entries(formsPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (formsPenChainLeak.length > 0)
+  throw new Error(`The forms pen pulled chain modules into the bundle: ${formsPenChainLeak.map(([file]) => file).join(', ')}`);
+const formsPenPackageLeak = Object.entries(formsPenInputs)
+  .filter(([file, info]) => /packages\/(forms|app|view|flow|contract|validate|emit|db|formats|refs|json)\//.test(file)
+    && info.bytesInOutput > 0);
+if (formsPenPackageLeak.length > 0)
+  throw new Error(`The forms pen pulled a package it must not carry into the bundle: ${formsPenPackageLeak.map(([file]) => file).join(', ')}`);
+const formsPenLeak = Object.entries(formsPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|contract|flow|app|db)\//.test(file) && info.bytesInOutput > 0);
+if (formsPenLeak.length > 0)
+  throw new Error(`The forms pen pulled another pen into the bundle: ${formsPenLeak.map(([file]) => file).join(', ')}`);
+if (formsPenBytes > 40000)
+  throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
+const chainFormsLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
+if (chainFormsLeak.length > 0)
+  throw new Error(`The chain pulled the forms pen into the bundle: ${chainFormsLeak.map(([file]) => file).join(', ')}`);
+const schemaFormsLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
+if (schemaFormsLeak.length > 0)
+  throw new Error(`The schema pen pulled the forms pen into the bundle: ${schemaFormsLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${formsPenBytes} byte forms-pen bundle; no chain module, no @jarenjs/forms bytes, no model pen).`);
