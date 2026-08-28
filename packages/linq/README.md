@@ -75,7 +75,13 @@ played by the provider seam below.
   (`from(store.sync.entity('Post'))`, `fromAsync(store.entity('Post'))`)
   pushes to SQL with no import edge in either direction; two entity sets
   of one store join in ONE statement; the store itself, serving several
-  roots, is refused by name (`JL0007`). An asynchronous provider is
+  roots, is refused by name (`JL0007`). A provider carrying a relation
+  table (`relations` — an entity set does) lets a declared relation
+  NAVIGATE: `p.author.email` and `u.posts.all().count()` are hops,
+  lowered at capture to the correlated phrases the engine and the store
+  both run, so the document never carries a relation name and
+  `explain().hops` lists what was navigated; a many-to-many hop is
+  `JL0105` until the join table is a queryable root. An asynchronous provider is
   `fromAsync`'s: the document arrives whole and `execute` may answer a
   promise. `mapAsync` splits a provider chain into a pushed prefix and a
   local residual, and `explain()` shows the split.

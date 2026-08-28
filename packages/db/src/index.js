@@ -45,7 +45,7 @@ export {
   applyMandatoryPredicate, applyRowBound,
 } from './profile.js';
 export { translatePatch } from './patch-sql.js';
-export { normalizeEntities, explainMapping } from './model.js';
+export { normalizeEntities, explainMapping, relationTables } from './model.js';
 export { planEntity, planJoinTable } from './ddl.js';
 export { entityCore } from './entity.js';
 export { entityEmitModel } from './emit-model.js';

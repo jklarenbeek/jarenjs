@@ -1533,12 +1533,15 @@ export function openStore(model, options) {
                   // §10.1): the document is over the multi-entity root and
                   // goes to the entity engine whole; `root` is the hint a
                   // chain binds its items through, `scope` the identity two
-                  // sets of one store share so their documents may be joined.
+                  // sets of one store share so their documents may be joined
+                  // (it carries every root's `relations`, so a hop may chain),
+                  // `relations` this entity's own relation table (§10.1).
                   // `execute` stays value-or-promise (D2), as a collection's
                   execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
                   explain: lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
                   root: entityRoot(name),
                   scope: entityEngine,
+                  relations: entityEngine.relations[name],
                 });
                 asyncEntityHandles.set(name, handle);
               }
@@ -1554,6 +1557,7 @@ export function openStore(model, options) {
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
             roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
+            relations: entityEngine === null ? undefined : entityEngine.relations,
             // entity live queries re-run on invalidation — declared,
             // not attempted (LIVE-FORMAT §7)
             live: entityEngine === null ? undefined
@@ -1736,6 +1740,7 @@ export function openStore(model, options) {
                     explain: (document, queryOptions) => entityEngine.explain(document, queryOptions),
                     root: entityRoot(name),
                     scope: entityEngine,
+                    relations: entityEngine.relations[name],
                   });
                   syncEntityHandles.set(name, handle);
                 }
@@ -1748,6 +1753,7 @@ export function openStore(model, options) {
               explain: entityEngine === null ? undefined
                 : (document, queryOptions) => entityEngine.explain(document, queryOptions),
               roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
+              relations: entityEngine === null ? undefined : entityEngine.relations,
             });
           }
           return chain(capture === null ? null : capture.ready,

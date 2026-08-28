@@ -186,6 +186,36 @@ export interface SyncCollection<T = unknown> {
 
 // ————— entities (phase B) —————
 
+/** One row of an entity's relation table (MODEL-FORMAT §10.1): the
+ * declared relation as plain data a query producer can lower a hop
+ * from — never a document dialect. For a foreign-key relation `via`
+ * names the key property, `fkEntity` the entity holding it, `fkTargets`
+ * the entity it references and `targetKey` the key property it
+ * references there (the column a hop's equality compares `via` with);
+ * `kind` says which side holds the key (`oneToOne`: the declaring
+ * entity; `oneToMany`: the target). A many-to-many carries its
+ * `joinTable` and the target's `targetKey`. */
+export interface RelationEntry {
+  readonly to: string;
+  readonly kind: 'oneToOne' | 'oneToMany' | 'manyToMany';
+  readonly via?: string;
+  readonly fkEntity?: string;
+  readonly fkTargets?: string;
+  readonly joinTable?: string;
+  readonly targetKey: string;
+}
+
+/** An entity's relation table: one entry per declared relation member. */
+export type RelationTable = Readonly<Record<string, RelationEntry>>;
+
+/** The identity every entity set of one store shares — two sets with one
+ * `scope` may be joined in one document — carrying the relation tables
+ * of every root, keyed by entity name, so a hop can chain into another
+ * root of the same scope. */
+export interface EntityScope {
+  readonly relations: Readonly<Record<string, RelationTable>>;
+}
+
 export interface UntrackedReads<T = unknown> {
   get(key: EntityKeyArg): Promise<T | undefined>;
   load(spec?: LoadSpec): Promise<T[]>;
@@ -217,8 +247,12 @@ export interface EntitySet<T = unknown, I = unknown> {
   /** The root expression this set's rows are bound through (`$.<Name>[*]`). */
   readonly root: string;
   /** The identity every entity set of one store shares: two sets with one
-   * `scope` may be joined in one document. */
-  readonly scope: object;
+   * `scope` may be joined in one document; it carries every root's
+   * relation table. */
+  readonly scope: EntityScope;
+  /** This entity's relation table (MODEL-FORMAT §10.1) — what a query
+   * producer lowers a relation hop from. */
+  readonly relations: RelationTable;
 }
 
 export interface SyncUntrackedReads<T = unknown> {
@@ -244,7 +278,8 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain(document: unknown, options?: ExecuteOptions): unknown;
   readonly root: string;
-  readonly scope: object;
+  readonly scope: EntityScope;
+  readonly relations: RelationTable;
 }
 
 // ————— the store —————
@@ -261,6 +296,9 @@ export interface SyncStore {
    * entities): it has no single root of its own, so a chain over it is
    * refused by name — chain over `entity(name)` instead. */
   readonly roots?: readonly string[];
+  /** The relation tables of every entity, keyed by entity name (present
+   * with entities; MODEL-FORMAT §10.1). */
+  readonly relations?: Readonly<Record<string, RelationTable>>;
   saveChanges?(): SaveReport;
 }
 
@@ -281,6 +319,9 @@ export interface Store {
    * entities): it has no single root of its own, so a chain over it is
    * refused by name — chain over `entity(name)` instead. */
   readonly roots?: readonly string[];
+  /** The relation tables of every entity, keyed by entity name (present
+   * with entities; MODEL-FORMAT §10.1). */
+  readonly relations?: Readonly<Record<string, RelationTable>>;
   /** The unit of work (§11); present only with entities. */
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
@@ -483,6 +524,12 @@ export declare const SQLITE_FLOOR: string;
 
 export declare function normalizeEntities(model: unknown): Map<string, unknown>;
 export declare function explainMapping(model: unknown): unknown;
+/** The relation tables of normalized entities, keyed by entity name
+ * then by relation member (MODEL-FORMAT §10.1) — what every entity set
+ * exposes as `relations` and every scope carries for all its roots. */
+export declare function relationTables(
+  entities: Map<string, unknown>,
+): Readonly<Record<string, RelationTable>>;
 
 /**
  * Build the EMIT-FORMAT model document for a model's entities.

@@ -945,6 +945,7 @@ export function createQueryEngine(context) {
 // ————— The entity query surface (the second document kind) —————
 
 import { mergeEntityRow, parseGraphRow } from './graph.js';
+import { relationTables } from './model.js';
 
 /** The default include depth bound (D14: printed, never silent). */
 export const INCLUDE_DEPTH_DEFAULT = 3;
@@ -966,6 +967,10 @@ export function createEntityQueryEngine(context) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const physicalOf = (name) => ({ table: mapping.entities[name].table });
+  // the relation tables of every root this engine serves (§10.1): the
+  // engine is the scope every entity set of the store shares, so a
+  // producer holding one set can follow a hop into another root
+  const relations = relationTables(entities);
 
   const entryFor = (document, pushdown) => {
     const key = ['E', document, dialect.name, pushdown];
@@ -1096,7 +1101,7 @@ export function createEntityQueryEngine(context) {
       })));
   };
 
-  return { execute, explain };
+  return { execute, explain, relations };
 }
 
 /**

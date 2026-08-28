@@ -21,7 +21,16 @@ non-identifier keys. A proxy that escapes its callback (stored and
 reused later) is detected by a stack of capture epochs and refused
 (`JL0002`) — the emitted document would be nonsense, so the build fails
 instead; captures nest, and an enclosing capture's proxy used inside a
-nested one is refused by name for the same reason.
+nested one is refused by name for the same reason. A root whose items
+are an entity's rows carries the entity's relation table (a provider's
+`relations`), and a member naming a relation records a HOP: it is
+lowered right there to the correlated phrase the engine runs —
+`{ $for: { r1: '$.User[*]' }, $where: { $eq: [...] }, $return: … }`,
+a to-many hop packed as an array until `all()` fans it — so the
+document never carries a relation name; the hop bindings `r1`, `r2`, …
+are numbered per capture and reserved, and `explain().hops` reports
+them. The rows stop being rows at a projection, where the sequence
+drops the table.
 
 ## The emitter (`src/document.js`)
 
@@ -107,7 +116,10 @@ A's member order) — it imports nothing of `src/schema/` but `brand.js`.
 A provider is any object with `execute(queryDocument, { externals })` —
 optionally carrying `root` (the path its items are bound through, bare),
 `roots` (a store-level provider's entity roots; refused by name,
-`JL0007`) and `scope` (the identity two joinable providers share).
+`JL0007`), `scope` (the identity two joinable providers share; with
+`relations` keyed by root name, where a chained hop finds its target's
+table) and `relations` (the relation table of its rows, what a hop
+lowers from).
 `@jarenjs/db` implements it; neither package imports the other, and a
 test asserts both directions. On the async surface the provider is asked
 for first, receives the whole chain up to a `mapAsync` as one document,

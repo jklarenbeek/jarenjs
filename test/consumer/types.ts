@@ -1162,6 +1162,32 @@ const genJoined: Promise<{ t: string; e: string }[]> = fromAsync(genStore.entity
 void genJoined;
 const genRoots: readonly ('User' | 'Post' | 'Label' | 'Grade')[] | undefined = genStore.roots;
 void genRoots;
+// relation navigation types from emit's optional relation members — nothing
+// new on the expression surface — and explain() types the hops it lowered
+const genByAuthor: { title: string; by: string }[] = linqFrom(genStore.entity('Post'))
+  .select((p) => ({ title: p.title, by: p.author.email })).toArray();
+void genByAuthor;
+const genProlific: User[] = linqFrom(genStore.entity('User')).where((u) => u.posts.all().count().ge(2)).toArray();
+void genProlific;
+const genSiblings: number[] = linqFrom(genStore.entity('Post')).select((p) => p.author.posts.all().count()).toArray();
+void genSiblings;
+const genHops: { member: string; kind: 'oneToOne' | 'oneToMany'; binding: string }[] =
+  linqFrom(genStore.entity('Post')).select((p) => p.author.email).explain().hops;
+void genHops;
+const genAsyncHops: { member: string; kind: string; binding: string }[] =
+  fromAsync(genStore.entity('User')).where((u) => u.posts.all().exists()).explain().hops;
+void genAsyncHops;
+// the relation table is typed by the generated metadata's relation members
+const genPostRelations: { readonly author: { readonly to: string; readonly kind: 'oneToOne' | 'oneToMany' | 'manyToMany'; readonly targetKey: string } } =
+  genStore.entity('Post').relations;
+void genPostRelations;
+const genScopeTables: Readonly<Record<string, Readonly<Record<string, { readonly to: string }>>>> =
+  genStore.entity('Post').scope.relations;
+void genScopeTables;
+// @ts-expect-error — a relation the model does not declare is not in the table
+void genStore.entity('Post').relations.editor;
+// @ts-expect-error — a member off the to-many array: fan it first (the runtime refuses too, JL0005)
+void linqFrom(genStore.entity('User')).select((u) => u.posts.title);
 // @ts-expect-error — the untyped handle keeps unknown: a member is not a path into it
 void linqFrom(rawDbStore.entity('User')).select((u) => u.email);
 // @ts-expect-error — an async join's inner side is an async sequence, never a sync one

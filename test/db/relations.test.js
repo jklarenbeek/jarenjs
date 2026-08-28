@@ -19,7 +19,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 import {
   loadRelationGroups, storeForEntityGroup, runEntityCase,
 } from './oracle/harness.js';
-import { renderLinqRootsGroup } from '../../scripts/lib/linq-roots-cases.js';
+import { renderLinqRootsGroup, renderLinqHopsGroup } from '../../scripts/lib/linq-roots-cases.js';
 
 const groups = loadRelationGroups();
 
@@ -174,10 +174,47 @@ describe('the Z-normalization write contract (§10.3)', () => {
   });
 });
 
-describe('the linq-roots group is what the chains emit', () => {
+describe('the linq-roots groups are what the chains emit', () => {
   it('14-linq-roots.json regenerates byte-identically — never a hand-typed chain document', () => {
     const committed = fs.readFileSync('test/db/oracle/relations/14-linq-roots.json', 'utf8');
     assert.strictEqual(committed, renderLinqRootsGroup(),
       'run node scripts/generate-linq-roots-cases.js');
+  });
+
+  it('15-linq-hops.json regenerates byte-identically, and no case document names a relation member', () => {
+    const committed = fs.readFileSync('test/db/oracle/relations/15-linq-hops.json', 'utf8');
+    assert.strictEqual(committed, renderLinqHopsGroup(),
+      'run node scripts/generate-linq-roots-cases.js');
+    const group = JSON.parse(committed);
+    assert.ok(group.cases.length >= 10);
+    for (const kase of group.cases) {
+      const text = JSON.stringify(kase.query);
+      assert.strictEqual(/\b(author|posts)\b/.test(text), false, `${kase.name}: no relation name in the document`);
+      assert.match(text, /"r1"/, `${kase.name}: lowered to a hop binding`);
+    }
+  });
+
+  it('every lowered hop shape is a named residual today (nothing promoted), and strict refuses it', async () => {
+    const group = JSON.parse(fs.readFileSync('test/db/oracle/relations/15-linq-hops.json', 'utf8'));
+    const { store } = await storeForEntityGroup(group);
+    const REASONS = new Set([
+      'entity queries return one bare binding natively; projections run in the engine',
+      'existence tests translate only over a singular member path on the binding',
+      'comparisons translate only between a singular member path and a literal or external',
+      'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)',
+      'no equivalence proof exists yet; residual by default',
+    ]);
+    for (const kase of group.cases) {
+      const explained = await store.explain(kase.query);
+      assert.strictEqual(explained.mode, 'set', kase.name);
+      assert.ok(explained.reasons.length > 0 && explained.reasons.every((r) => REASONS.has(r.reason)),
+        `${kase.name}: ${JSON.stringify(explained.reasons)}`);
+      assert.deepStrictEqual([...explained.referenced].sort(), ['Post', 'User'], kase.name);
+      // the entity engine refuses before it returns a promise (value-or-
+      // promise, D2), so the refusal is awaited through an async wrapper
+      await assert.rejects(async () => store.execute(kase.query, { strict: true }),
+        (error) => /** @type {any} */ (error).code === 'JD0010', kase.name);
+    }
+    await store.close();
   });
 });

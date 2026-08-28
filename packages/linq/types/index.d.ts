@@ -408,6 +408,35 @@ export interface OrderOptions {
   collation?: string;
 }
 
+/** One row of a provider's relation table (MODEL-FORMAT §10.1, as a
+ * store spells it): the declared relation as plain data a hop lowers
+ * from. A foreign-key relation names its key column (`via`), the entity
+ * holding it (`fkEntity`), the entity it references (`fkTargets`) and the
+ * key it references there (`targetKey`); `kind` says which side holds the
+ * key. A many-to-many names its `joinTable` and is refused (`JL0105`). */
+export interface RelationEntry {
+  readonly to: string;
+  readonly kind: 'oneToOne' | 'oneToMany' | 'manyToMany';
+  readonly via?: string;
+  readonly fkEntity?: string;
+  readonly fkTargets?: string;
+  readonly joinTable?: string;
+  readonly targetKey: string;
+}
+
+/** A provider's relation table: one entry per relation member of the
+ * rows it serves. */
+export type RelationTable = Readonly<Record<string, RelationEntry>>;
+
+/** One relation hop a callback navigated (LINQ-FORMAT §4, relation
+ * navigation): the member read, the relation's kind, and the binding
+ * the lowered correlated phrase ranges over (`r1`, `r2`, …). */
+export interface Hop {
+  member: string;
+  kind: 'oneToOne' | 'oneToMany';
+  binding: string;
+}
+
 /** The provider contract (D2, LINQ-FORMAT §8): any object exposing
  * `execute(document, options)`. The document arrives whole; the return
  * value uses the engine's result mapping. `T` is the item type — read
@@ -424,8 +453,13 @@ export interface Provider<T = unknown> {
    * of its own — `from()` refuses it (`JL0007`) naming them. */
   readonly roots?: readonly string[];
   /** An identity two providers share when their documents may be joined
-   * (one store's entity sets). */
+   * (one store's entity sets). When it carries `relations` — the tables
+   * of every root of the scope, keyed by root name — a hop continues
+   * into another root (`p.author.posts`). */
   readonly scope?: unknown;
+  /** The relation table of the rows this provider serves: a relation
+   * member on the chain then hops (§3), lowered to a correlated phrase. */
+  readonly relations?: RelationTable;
 }
 
 /** The asynchronous provider (D8, §12): the same members, and `execute`
@@ -437,6 +471,7 @@ export interface AsyncProvider<T = unknown> {
   readonly root?: string;
   readonly roots?: readonly string[];
   readonly scope?: unknown;
+  readonly relations?: RelationTable;
 }
 
 /** The engine's compile registries, under the engine's own option names
@@ -468,6 +503,9 @@ export interface Explanation {
     readonly functions: readonly string[];
     readonly collations: readonly string[];
   };
+  /** The relation hops the chain's callbacks navigated, in capture
+   * order; a join's inner sequence's hops precede the join's own. */
+  hops: Hop[];
 }
 
 /** The deferred, immutable sequence of `T` with declared params `P`. */
@@ -604,6 +642,8 @@ export interface MapAsyncOptions {
 
 export interface AsyncExplanation {
   barriers: { operator: string, reason: string }[];
+  /** The relation hops the chain's callbacks navigated (as `Explanation`). */
+  hops: Hop[];
   /** Present when the chain is document-representable (no mapAsync). */
   document?: unknown;
   /** Present when a mapAsync splits the chain. */

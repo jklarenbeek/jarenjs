@@ -571,13 +571,20 @@ what each does is its own documentation's job
   set residual (a boolean cannot bind); the k-nearest divert has its own
   counter, the plain one has none. `explain` should read the externals
   it is given, or the divert should count.
-- [ ] **Relation-name query sugar.** `load` owns name navigation today
-  because `$.author.name` over the multi-entity root is
-  engine-unexecutable and therefore oracle-unprovable. A chain over an
-  entity set binds through the set's root now
-  (`from(store.sync.entity('User'))`, MODEL-FORMAT §10.1), so what
-  remains is the hop — a relation member on the chain lowered to the
-  correlated phrases the engine executes — never a document dialect.
+- [ ] **A many-to-many hop on the chain.** Relation navigation is
+  desugared by the chain now: `p.author.email` and `u.posts.all()
+  .count()` over an entity set lower to the correlated phrases the
+  engine runs, read from the set's relation table (MODEL-FORMAT §10.1,
+  LINQ-FORMAT §4 "relation navigation"), and the document carries no
+  relation name. The one hop still refused is many-to-many (`u.labels`,
+  `JL0105`): its join table is not a queryable root, so there is no
+  phrase to lower to. The change that closes it: expose the join tables
+  as roots in the entity engine (`$.Label_User[*]` with its two key
+  columns, planned and fetched like an entity), then lower the hop
+  through two equalities — `join.<Own>_key = $it.<key>` and
+  `$r.<targetKey> = join.<To>_key` — under the oracle. The lowered
+  shapes that do exist are residuals (a phrase where the planner wants
+  a member path); their promotion belongs to the pushdown entry above.
 - [ ] **A many-to-many membership API.** The join tables, their
   synchronisation through the unit of work and the read side all
   shipped; a first-class link/unlink surface (and m2m attach for

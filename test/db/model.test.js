@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { normalizeEntities, explainMapping } from '@jarenjs/db';
+import { normalizeEntities, explainMapping, relationTables } from '@jarenjs/db';
 
 const FULL = {
   $model: '0.1',
@@ -108,6 +108,40 @@ describe('explainMapping — the hybrid rule as data (every §9.3 row)', () => {
       { property: 'email', unique: true },
       { property: 'created', unique: false },
     ]);
+  });
+
+  it('the relation table is the declared relations as plain, frozen rows (§10.1)', () => {
+    const tables = relationTables(normalizeEntities(FULL));
+    assert.deepStrictEqual(tables, {
+      User: {
+        posts: { to: 'Post', kind: 'oneToMany', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' },
+        labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' },
+      },
+      Post: {},
+      Label: {},
+    });
+    assert.ok(Object.isFrozen(tables) && Object.isFrozen(tables.User) && Object.isFrozen(tables.User.posts));
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(tables)), tables, 'plain data, JSON through and through');
+    // a declared inverse names the same edge from the other side: the
+    // foreign key and the key it references are the same two columns
+    const both = relationTables(normalizeEntities({
+      $model: '0.1',
+      entities: {
+        User: { schema: { type: 'object', properties: {
+          id: { type: 'string', 'x-entity': { key: true } },
+          posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } },
+        } } },
+        Post: { schema: { type: 'object', properties: {
+          pid: { type: 'integer', 'x-entity': { key: true } },
+          authorId: { type: 'string' },
+          author: { 'x-entity': { relation: { to: 'User', via: 'authorId', onDelete: 'cascade' } } },
+        } } },
+      },
+    }));
+    assert.deepStrictEqual(both.Post.author,
+      { to: 'User', kind: 'oneToOne', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' });
+    assert.deepStrictEqual(both.User.posts,
+      { to: 'Post', kind: 'oneToMany', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' });
   });
 
   it('normalization never mutates the model document', () => {

@@ -316,6 +316,156 @@ describe('a linq chain over an entity set (entity roots)', () => {
   });
 });
 
+// ————— relation navigation: the table on the handles, the hop as a residual (MODEL-FORMAT §10.1) —————
+
+const RELATED_MODEL = {
+  $model: '0.1',
+  entities: {
+    User: { schema: { type: 'object', required: ['id'], properties: {
+      id: { type: 'string', 'x-entity': { key: true } },
+      email: { type: 'string' }, age: { type: 'integer' },
+      posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } },
+      labels: { 'x-entity': { relation: { to: 'Label', many: true } } } } } },
+    Post: { schema: { type: 'object', required: ['id'], properties: {
+      id: { type: 'integer', 'x-entity': { key: true } },
+      title: { type: 'string' }, authorId: { type: 'string' }, stars: { type: 'integer' },
+      author: { 'x-entity': { relation: { to: 'User', via: 'authorId', onDelete: 'cascade' } } } } } },
+    Label: { schema: { type: 'object', required: ['name'], properties: {
+      name: { type: 'string', 'x-entity': { key: true } } } } },
+  },
+};
+const RELATED_POSTS = [...ENTITY_POSTS, { id: 4, title: 'orphan', stars: 2 }];
+
+async function seededRelated() {
+  const store = await openStore(RELATED_MODEL, { driver: nodeDriver() });
+  for (const user of ENTITY_USERS) await store.entity('User').create(user);
+  for (const post of RELATED_POSTS) await store.entity('Post').create(post);
+  return store;
+}
+
+describe('the relation table on the entity handles (MODEL-FORMAT §10.1)', () => {
+  it('every handle carries its own frozen table; the scope and the store carry all of them by name', async () => {
+    const store = await seededRelated();
+    const expected = {
+      User: {
+        posts: { to: 'Post', kind: 'oneToMany', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' },
+        labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' },
+      },
+      Post: {
+        author: { to: 'User', kind: 'oneToOne', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' },
+      },
+      Label: {},
+    };
+    assert.deepStrictEqual(store.relations, expected);
+    assert.strictEqual(store.sync.relations, store.relations, 'one record, both surfaces');
+    for (const name of ['User', 'Post', 'Label']) {
+      assert.strictEqual(store.entity(name).relations, store.relations[name]);
+      assert.strictEqual(store.sync.entity(name).relations, store.relations[name]);
+      assert.strictEqual(store.entity(name).scope.relations, store.relations,
+        'the scope carries every root\'s table, so a hop can chain into another root');
+    }
+    assert.ok(Object.isFrozen(store.relations) && Object.isFrozen(store.relations.Post.author));
+    // a collections-only store has neither entities nor tables
+    const { store: plain } = await seeded();
+    assert.strictEqual(plain.relations, undefined);
+    assert.strictEqual(plain.sync.relations, undefined);
+    await plain.close();
+    await store.close();
+  });
+});
+
+describe('a relation hop is a residual the store runs over the fetched roots (MODEL-FORMAT §10.1, §10.6)', () => {
+  it('the to-one hop in a projection: the rows agree native, residual and in the engine; strict refuses', async () => {
+    const store = await seededRelated();
+    const chain = from(store.sync.entity('Post')).select((p) => ({ title: p.title, by: p.author.email }));
+    const doc = chain.toDocument();
+    assert.deepStrictEqual(doc, {
+      $for: { it: '$.Post[*]' },
+      $return: { title: '$it.title', by: {
+        $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] }, $return: '$r1.email' } },
+    });
+    assert.strictEqual(/\bauthor\b/.test(JSON.stringify(doc)), false, 'no relation name in the document');
+    const root = { User: ENTITY_USERS, Post: RELATED_POSTS };
+    const expected = [{ title: 'p1', by: 'ada@x' }, { title: 'p2', by: 'lin@x' }, { title: 'p3', by: 'ada@x' }, { title: 'orphan' }];
+    assert.deepStrictEqual(chain.toArray(), expected);
+    assert.deepStrictEqual(compileJsonQuery([doc])(root), expected, "the engine's own answer");
+    assert.deepStrictEqual(await store.entity('Post').execute([doc], { pushdown: false }), expected);
+    assert.deepStrictEqual(await fromAsync(store.entity('Post')).select((p) => ({ title: p.title, by: p.author.email })).toArray(),
+      expected);
+    // the residual, named: the §2.6 projection reason, over both roots
+    const explained = store.sync.explain(doc);
+    assert.strictEqual(explained.mode, 'set');
+    assert.deepStrictEqual(explained.referenced, ['Post', 'User']);
+    assert.deepStrictEqual(explained.reasons, [{ construct: '$return',
+      reason: 'entity queries return one bare binding natively; projections run in the engine' }]);
+    assert.deepStrictEqual(chain.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
+    assert.throws(() => store.sync.execute(doc, { strict: true }), (e) => e.code === 'JD0010');
+    await store.close();
+  });
+
+  it('the to-many count and existence, the chained hop and the it2 hop agree across executors', async () => {
+    const store = await seededRelated();
+    const users = store.sync.entity('User');
+    const posts = store.sync.entity('Post');
+    const root = { User: ENTITY_USERS, Post: RELATED_POSTS };
+    const agree = async (chain) => {
+      const doc = chain.toDocument();
+      const engine = compileJsonQuery([doc])(root);
+      assert.deepStrictEqual(chain.toArray(), engine);
+      assert.deepStrictEqual(await store.execute([doc], { pushdown: false }), engine);
+      assert.deepStrictEqual(await store.execute([doc]), engine);
+      return engine;
+    };
+    assert.deepStrictEqual(await agree(from(users).where((u) => u.posts.all().count().ge(2)).select((u) => u.id)), ['u1']);
+    assert.deepStrictEqual(await agree(from(users).where((u) => u.posts.all().exists()).select((u) => u.id)), ['u1', 'u2']);
+    assert.deepStrictEqual(await agree(from(posts).orderBy((p) => p.id)
+      .select((p) => ({ id: p.id, siblings: p.author.posts.all().count() }))),
+    [{ id: 1, siblings: 2 }, { id: 2, siblings: 1 }, { id: 3, siblings: 2 }, { id: 4, siblings: 0 }]);
+    assert.deepStrictEqual(await agree(from(posts).join(from(users), (p) => p.authorId, (u) => u.id,
+      (p, u) => ({ title: p.title, n: u.posts.all().count() }))),
+    [{ title: 'p1', n: 2 }, { title: 'p2', n: 1 }, { title: 'p3', n: 2 }]);
+    assert.strictEqual(from(users).where((u) => u.posts.all().exists()).count(), 2);
+    assert.strictEqual(await fromAsync(store.entity('User')).where((u) => u.posts.all().exists()).count(), 2);
+    // the many-to-many hop is refused at build time, naming the join table the model made
+    assert.throws(() => from(users).where((u) => u.labels.all().exists()),
+      (e) => e.code === 'JL0105' && /Label_User/.test(e.message));
+    await store.close();
+  });
+
+  it('which lowered shapes push natively today: none — every hop is a named residual, pinned per shape', async () => {
+    const store = await seededRelated();
+    const users = store.sync.entity('User');
+    const posts = store.sync.entity('Post');
+    const pins = [
+      ['a to-one hop in $where', from(posts).where((p) => p.author.email.eq('ada@x')),
+        'comparisons translate only between a singular member path and a literal or external'],
+      ['a to-one existence in $where', from(posts).where((p) => p.author.exists()),
+        'existence tests translate only over a singular member path on the binding'],
+      ['a to-one hop under $orderby', from(posts).orderBy((p) => p.author.email),
+        'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)'],
+      ['a to-many count in $where', from(users).where((u) => u.posts.all().count().ge(2)),
+        'comparisons translate only between a singular member path and a literal or external'],
+      ['a to-many existence in $where', from(users).where((u) => u.posts.all().exists()),
+        'existence tests translate only over a singular member path on the binding'],
+      ['a hop in $return', from(posts).select((p) => p.author.email),
+        'entity queries return one bare binding natively; projections run in the engine'],
+    ];
+    for (const [name, chain, reason] of pins) {
+      const explained = store.sync.explain(chain.toDocument());
+      assert.strictEqual(explained.mode, 'set', name);
+      assert.strictEqual(explained.sql, null, name);
+      assert.strictEqual(explained.reasons[0].reason, reason, name);
+      // the terminal's window is read through as it is for every chain
+      assert.strictEqual(store.sync.explain([chain.toDocument()]).wrapped, true, name);
+    }
+    // the contrast a hand-written document keeps: the two-binding equijoin
+    // returning a bare binding is the one native shape (§10.2)
+    assert.strictEqual(store.sync.explain(from(posts).join(from(users),
+      (p) => p.authorId, (u) => u.id, (p) => p).toDocument()).mode, 'native');
+    await store.close();
+  });
+});
+
 describe("a chain's element window is read through by both planners (LINQ-FORMAT §6, D15)", () => {
   it('a collection answers the rows as the one array item, never unwrapped: [] for none, [row] for one', async () => {
     const { store, users } = await seeded();

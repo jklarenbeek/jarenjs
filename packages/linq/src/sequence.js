@@ -15,16 +15,19 @@
 
 import { compileJsonQuery } from '@jarenjs/json/query';
 
-import { captureExpression, toExpression, requireJsonBinding } from './expression.js';
-import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.js';
-import { classifySource, compileDocument, executeInMemory, providerRoot, sharesScope } from './provider.js';
+import {
+  captureExpression, toExpression, requireJsonBinding, createHopSink, rowRoot, groupRoot,
+} from './expression.js';
+import {
+  emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
+  PROJECTING_STAGES,
+} from './document.js';
+import {
+  classifySource, compileDocument, executeInMemory, providerRoot, providerRelations, sharesScope,
+} from './provider.js';
 import { asyncFromSequence } from './async.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { schemaOf } from './schema-of.js';
-
-/** Binding names the emitted documents own; parameters may not shadow
- * them (LINQ-FORMAT.md §7). */
-const RESERVED_NAMES = new Set(['it', 'it2', 'acc', 'g']);
 
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -44,6 +47,7 @@ export class Sequence {
   #stages;
   #params;
   #options;
+  #relations;
 
   /**
    * @param {any} source
@@ -53,26 +57,49 @@ export class Sequence {
    * @param {ReadonlyMap<string, any>} params
    * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
    *   pathFunctions?: any, limits?: any, registry?: object }} options
+   * @param {{ table: any, resolve: (name: string) => any } | null} [relations] -
+   *   the relation table of the rows the items ARE (a provider's, while
+   *   no stage has projected them), or null
    */
-  constructor(source, sourceKind, root, stages, params, options) {
+  constructor(source, sourceKind, root, stages, params, options, relations = null) {
     this.#source = source;
     this.#sourceKind = sourceKind;
     this.#root = root;
     this.#stages = stages;
     this.#params = params;
     this.#options = options;
+    this.#relations = relations;
   }
 
   /** @param {any} stage @param {ReadonlyMap<string, any>} [params] */
   #with(stage, params = this.#params) {
     return new Sequence(this.#source, this.#sourceKind, this.#root,
-      [...this.#stages, stage], params, this.#options);
+      [...this.#stages, stage], params, this.#options,
+      PROJECTING_STAGES.has(stage.kind) ? null : this.#relations);
   }
 
   /** @param {ReadonlyMap<string, any>} params */
   #rebound(params) {
     return new Sequence(this.#source, this.#sourceKind, this.#root,
-      this.#stages, params, this.#options);
+      this.#stages, params, this.#options, this.#relations);
+  }
+
+  /** The `it` (or `it2`) root of a capture over this sequence's items:
+   * an entity's rows carry their relation table, so a relation name hops.
+   * @param {string} name @param {ReturnType<typeof createHopSink>} sink */
+  #rowRoot(name, sink) {
+    return rowRoot(name, this.#relations, sink);
+  }
+
+  /** The group root of a group-join over this sequence's items as the
+   * inner side. @param {ReturnType<typeof createHopSink>} sink */
+  #groupRoot(sink) {
+    return groupRoot(this.#relations, sink);
+  }
+
+  /** The relation hops every stage's callbacks navigated, in order. */
+  #hops() {
+    return this.#stages.flatMap((stage) => stage.hops ?? []);
   }
 
   /** Whether this sequence is a provider's own root, untouched — the
@@ -85,24 +112,36 @@ export class Sequence {
     return new Set(this.#params.keys());
   }
 
-  /** @param {(...roots: any[]) => any} fn @param {readonly any[]} roots */
-  #capture(fn, roots = ['it']) {
+  /**
+   * Capture one callback over this sequence's items: the expression and
+   * the relation hops it navigated (one sink per capture, so two roots
+   * of one callback number their hop bindings together).
+   * @param {(...roots: any[]) => any} fn
+   * @param {(sink: ReturnType<typeof createHopSink>) => readonly any[]} [rootsOf] -
+   *   the roots, given the capture's sink; the item root by default
+   * @returns {{ expression: any, hops: readonly any[] }}
+   */
+  #capture(fn, rootsOf = (sink) => [this.#rowRoot('it', sink)]) {
     if (typeof fn !== 'function') {
       throw new LinqBuildError('JL0005', 'this operator takes a callback function');
     }
-    return captureExpression(fn, roots, this.#declared());
+    const sink = createHopSink();
+    const expression = captureExpression(fn, rootsOf(sink), this.#declared());
+    return { expression, hops: sink.hops };
   }
 
   //#region operators (each returns a new immutable Sequence)
 
   /** Filter: `.where(it => it.age.gt(21))` → FLWOR `$where`. */
   where(predicate) {
-    return this.#with({ kind: 'where', predicate: this.#capture(predicate) });
+    const { expression, hops } = this.#capture(predicate);
+    return this.#with({ kind: 'where', predicate: expression, hops });
   }
 
   /** Project: `.select(it => ({ id: it.id }))` → `$return`. */
   select(projection) {
-    return this.#with({ kind: 'select', projection: this.#capture(projection) });
+    const { expression, hops } = this.#capture(projection);
+    return this.#with({ kind: 'select', projection: expression, hops });
   }
 
   /** Project-and-flatten: the projected value is iterated one level
@@ -110,18 +149,20 @@ export class Sequence {
    * `Seq<R[]>` really answers `Seq<R>`; the FLWOR `$return` then
    * concatenates per tuple. */
   selectMany(selector) {
-    return this.#with({ kind: 'select', projection: fanProjection(this.#capture(selector)) });
+    const { expression, hops } = this.#capture(selector);
+    return this.#with({ kind: 'select', projection: fanProjection(expression), hops });
   }
 
   /** @param {any} key @param {boolean} desc @param {any} [options] */
   #orderStage(kind, key, desc, options) {
-    const spec = { $key: this.#capture(key) };
+    const { expression, hops } = this.#capture(key);
+    const spec = { $key: expression };
     if (desc) spec.$dir = 'desc';
     if (options !== undefined) {
       if (options.empty !== undefined) spec.$empty = options.empty;
       if (options.collation !== undefined) spec.$collation = options.collation;
     }
-    return this.#with({ kind, spec });
+    return this.#with({ kind, spec, hops });
   }
 
   /** Sort ascending → an `$orderby` key spec (`$dir`/`$empty`/
@@ -153,7 +194,8 @@ export class Sequence {
 
   /** Group → `$groupby`; downstream items are `{ key, items }`. */
   groupBy(key) {
-    return this.#with({ kind: 'groupBy', key: this.#capture(key) });
+    const { expression, hops } = this.#capture(key);
+    return this.#with({ kind: 'groupBy', key: expression, hops });
   }
 
   /** Both sides read ONE input document — a query document has one
@@ -194,17 +236,22 @@ export class Sequence {
   }
 
   /** Equi-join → nested `$for` + `$where` equality (the engine rewrites
-   * this shape to a hash join; that is why it is fast). */
+   * this shape to a hash join; that is why it is fast). The inner side's
+   * rows keep their relation table under `it2`, so a hop from the joined
+   * row lowers as one from the root does. */
   join(inner, outerKey, innerKey, result) {
     const params = this.#requireSameSource(inner, 'join', true);
+    const outer = this.#capture(outerKey);
+    const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
+    const projection = this.#capture(result,
+      (sink) => [this.#rowRoot('it', sink), inner.#rowRoot('it2', sink)]);
     return this.#with({
       kind: 'join',
       inner: inner.toDocument(),
       innerBare: inner.#isBareRoot(),
-      on: {
-        $eq: [this.#capture(outerKey), this.#capture(innerKey, ['it2'])],
-      },
-      result: this.#capture(result, ['it', 'it2']),
+      on: { $eq: [outer.expression, key.expression] },
+      result: projection.expression,
+      hops: [...inner.#hops(), ...outer.hops, ...key.hops, ...projection.hops],
     }, params);
   }
 
@@ -212,19 +259,25 @@ export class Sequence {
    * MATCHING inner group, bound as an array value (`$let`) so it can be
    * indexed (`g.at(0)`), fanned (`g.all()`), placed in a member
    * (`{ matches: g }`) and aggregated over its members
-   * (`(u, g) => ({ n: g.count() })`). */
+   * (`(u, g) => ({ n: g.count() })`); the fanned rows keep the inner
+   * side's relation table (`g.all().author`). */
   groupJoin(inner, outerKey, innerKey, result) {
     const params = this.#requireSameSource(inner, 'groupJoin', true);
     const innerDoc = inner.toDocument();
+    const outer = this.#capture(outerKey);
+    const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
     const group = {
       $for: { it2: inner.#isBareRoot() ? innerDoc : [innerDoc] },
-      $where: { $eq: [this.#capture(outerKey), this.#capture(innerKey, ['it2'])] },
+      $where: { $eq: [outer.expression, key.expression] },
       $return: '$it2',
     };
+    const projection = this.#capture(result,
+      (sink) => [this.#rowRoot('it', sink), inner.#groupRoot(sink)]);
     return this.#with({
       kind: 'groupJoin',
       group,
-      projection: this.#capture(result, ['it', { doc: '$g', pathable: true, seq: '$g[*]' }]),
+      projection: projection.expression,
+      hops: [...inner.#hops(), ...outer.hops, ...key.hops, ...projection.hops],
     }, params);
   }
 
@@ -237,10 +290,12 @@ export class Sequence {
         'aggregate(fn) is unsupported: JSON cannot spell the implicit first element as a '
         + 'lambda seed — pass a seed, aggregate(seed, fn) (see LINQ-FORMAT.md §4)');
     }
+    const { expression, hops } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
     return this.#with({
       kind: 'aggregate',
       seed: toExpression(seed),
-      step: this.#capture(step, ['acc', 'it']),
+      step: expression,
+      hops,
     });
   }
 
@@ -340,9 +395,9 @@ export class Sequence {
       if (!VAR_NAME_RE.test(name)) {
         throw new LinqBuildError('JL0004', `'${name}' is not a valid parameter name`);
       }
-      if (RESERVED_NAMES.has(name)) {
+      if (isReservedBinding(name)) {
         throw new LinqBuildError('JL0004',
-          `'${name}' is reserved (the emitted document's own binding names: it, it2, acc, g)`);
+          `'${name}' is reserved (the emitted document's own binding names: ${RESERVED_BINDINGS_TEXT})`);
       }
       requireJsonBinding(name, bindings[name]);
       merged.set(name, bindings[name]);
@@ -368,15 +423,17 @@ export class Sequence {
       { bareRoot: this.#sourceKind === 'provider' }));
   }
 
-  /** The compiled view of the chain: the document, its externals and
-   * its dependency sets.
+  /** The compiled view of the chain: the document, its externals, its
+   * dependency sets and the relation hops its callbacks navigated (the
+   * member, the relation's kind and the binding the lowered phrase
+   * ranges over — LINQ-FORMAT §4, relation navigation).
    *
    * This always explains the IN-MEMORY compilation — it is the reference
    * semantics, and it is not the provider's plan. It cannot report SQL
    * pushdown, index use, residual execution or a strict refusal, and it
    * will fail on an operator or collation only the provider can compile.
    * For a provider's real plan, emit `toDocument()` and call that
-   * provider's own explanation. */
+   * provider's own explanation — a lowered hop is a residual there. */
   explain() {
     const document = this.toDocument();
     const compiled = compileDocument(document, {
@@ -387,6 +444,7 @@ export class Sequence {
       document,
       externals: [...compiled.externals],
       dependencies: compiled.dependencies,
+      hops: this.#hops(),
     };
   }
 
@@ -527,12 +585,12 @@ export class Sequence {
    * @param {(...roots: any[]) => any} [predicate] */
   any(predicate) {
     if (predicate === undefined) return this.#execute('exists');
-    return this.#execute('some', [this.#capture(predicate)]);
+    return this.#execute('some', [this.#capture(predicate).expression]);
   }
 
   /** The `$every` quantifier (vacuously true over the empty sequence). */
   all(predicate) {
-    return this.#execute('every', [this.#capture(predicate)]);
+    return this.#execute('every', [this.#capture(predicate).expression]);
   }
 
   //#endregion
@@ -545,7 +603,8 @@ export class Sequence {
  * semantics; anything else is `JL0001` now, not at enumeration time.
  * @param {any} source - an iterable, or a provider; a provider carrying
  *   `root` binds its items through that root (`'$.Post[*]'` for an entity
- *   set), one carrying `roots` and no `root` of its own is `JL0007`
+ *   set), one carrying `relations` lets a relation member navigate (§3),
+ *   one carrying `roots` and no `root` of its own is `JL0007`
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
  *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
  *   the engine registries this sequence compiles against, under the
@@ -560,7 +619,8 @@ export class Sequence {
 export function from(source, options = {}) {
   const kind = classifySource(source);
   const root = kind === 'provider' ? providerRoot(source) : '$[*]';
-  return new Sequence(source, kind, root, [], new Map(), options);
+  const relations = kind === 'provider' ? providerRelations(source) : null;
+  return new Sequence(source, kind, root, [], new Map(), options, relations);
 }
 
 /**

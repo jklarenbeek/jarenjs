@@ -190,6 +190,31 @@ describe('exactly one statement per graph load', () => {
       'the projection runs in the engine over the two fetched roots (MODEL-FORMAT §10.6)');
   });
 
+  it('a relation hop on the chain is the residual over the fetched roots: one fetch per root, never per row', async () => {
+    const posts = store.sync.entity('Post');
+    const users = store.sync.entity('User');
+    // the to-many hop in a projection: the engine runs it over both roots
+    const commented = from(posts).select((p) => ({ pid: p.pid, n: p.comments.all().count() }));
+    const explained = store.sync.explain(commented.toDocument());
+    assert.strictEqual(explained.mode, 'set');
+    assert.deepStrictEqual(explained.referenced, ['Post', 'Comment']);
+    counters.executed = 0;
+    const rows = commented.toArray();
+    assert.strictEqual(rows.length, 30);
+    assert.ok(rows.every((row) => row.n === 2));
+    assert.strictEqual(counters.executed, 2,
+      'two referenced roots, two fetches — the correlated phrase never issues a statement per row');
+    // the to-many count in a filter: the same two fetches for ten parents
+    counters.executed = 0;
+    const prolific = from(users).where((u) => u.posts.all().count().ge(3)).select((u) => u.id).toArray();
+    assert.strictEqual(prolific.length, 10);
+    assert.strictEqual(counters.executed, 2);
+    // and the async twin receives the same document once
+    counters.executed = 0;
+    assert.strictEqual((await fromAsync(store.entity('User')).where((u) => u.posts.all().exists()).count()), 10);
+    assert.strictEqual(counters.executed, 2);
+  });
+
   it('the contrast: per-parent querying is the N+1 the include avoids', async () => {
     counters.executed = 0;
     const parents = await store.entity('User').load({ orderBy: '$it.id' });

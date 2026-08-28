@@ -37,11 +37,18 @@
  * read transaction open.
  */
 
-import { compileDocument, isProviderSource, providerRoot, sharesScope } from './provider.js';
-import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.js';
+import {
+  compileDocument, isProviderSource, providerRoot, providerRelations, sharesScope,
+} from './provider.js';
+import {
+  emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
+  PROJECTING_STAGES,
+} from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
-import { captureExpression, toExpression, requireJsonBinding } from './expression.js';
+import {
+  captureExpression, toExpression, requireJsonBinding, createHopSink, rowRoot, groupRoot,
+} from './expression.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { schemaOf } from './schema-of.js';
 import { semanticKey } from '@jarenjs/core/object';
@@ -95,6 +102,7 @@ export class AsyncSequence {
   #stages;
   #params;
   #options;
+  #relations;
 
   /**
    * @param {{ kind: 'source', iterate: () => AsyncIterator<any> }
@@ -105,17 +113,51 @@ export class AsyncSequence {
    * @param {ReadonlyMap<string, any>} params
    * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
    *   pathFunctions?: any, limits?: any, registry?: object }} options
+   * @param {{ table: any, resolve: (name: string) => any } | null} [relations] -
+   *   the relation table of the rows the items ARE (a provider's, while
+   *   no stage has projected them), or null — as on the sync surface
    */
-  constructor(origin, stages, params, options) {
+  constructor(origin, stages, params, options, relations = null) {
     this.#origin = origin;
     this.#stages = stages;
     this.#params = params;
     this.#options = options;
+    this.#relations = relations;
   }
 
-  /** @param {any} stage */
-  #with(stage) {
-    return new AsyncSequence(this.#origin, [...this.#stages, stage], this.#params, this.#options);
+  /** @param {any} stage @param {ReadonlyMap<string, any>} [params] */
+  #with(stage, params = this.#params) {
+    // the items stop being rows at a projection, and at the host boundary
+    const projects = PROJECTING_STAGES.has(stage.kind) || stage.kind === 'mapAsync';
+    return new AsyncSequence(this.#origin, [...this.#stages, stage], params, this.#options,
+      projects ? null : this.#relations);
+  }
+
+  /**
+   * Capture one callback over this sequence's items — the expression and
+   * the relation hops it navigated — exactly as the synchronous surface
+   * does, so the two emit one document.
+   * @param {any} fn
+   * @param {(sink: ReturnType<typeof createHopSink>) => readonly any[]} [rootsOf]
+   * @returns {{ expression: any, hops: readonly any[] }}
+   */
+  #capture(fn, rootsOf = (sink) => [rowRoot('it', this.#relations, sink)]) {
+    if (typeof fn !== 'function') {
+      throw new LinqBuildError('JL0005', 'this operator takes a callback function');
+    }
+    const sink = createHopSink();
+    const expression = captureExpression(fn, rootsOf(sink), new Set(this.#params.keys()));
+    return { expression, hops: sink.hops };
+  }
+
+  /** @param {string} name @param {ReturnType<typeof createHopSink>} sink */
+  #rowRoot(name, sink) {
+    return rowRoot(name, this.#relations, sink);
+  }
+
+  /** The relation hops every stage's callbacks navigated, in order. */
+  #hops() {
+    return this.#stages.flatMap((stage) => stage.hops ?? []);
   }
 
   #externals() {
@@ -189,9 +231,11 @@ export class AsyncSequence {
   where(predicate) { return this.#chainCaptured('where', 'predicate', predicate); }
   select(projection) { return this.#chainCaptured('select', 'projection', projection); }
   selectMany(selector) {
+    const { expression, hops } = this.#capture(selector);
     return this.#with({
       kind: 'select', name: 'selectMany',
-      projection: fanProjection(captureFor(this.#params, selector)),
+      projection: fanProjection(expression),
+      hops,
     });
   }
 
@@ -199,7 +243,8 @@ export class AsyncSequence {
   #chainCaptured(kind, slot, fn) {
     // reuse the sync Sequence's capture through a local import-free
     // seam: capture lives in expression.js and is stage-agnostic
-    return this.#with({ kind, [slot]: captureFor(this.#params, fn) });
+    const { expression, hops } = this.#capture(fn);
+    return this.#with({ kind, [slot]: expression, hops });
   }
 
   orderBy(key, options) { return this.#orderStage('orderBy', key, false, options); }
@@ -208,22 +253,28 @@ export class AsyncSequence {
   thenByDescending(key, options) { return this.#orderStage('thenBy', key, true, options); }
 
   #orderStage(kind, key, desc, options) {
-    const spec = { $key: captureFor(this.#params, key) };
+    const { expression, hops } = this.#capture(key);
+    const spec = { $key: expression };
     if (desc) spec.$dir = 'desc';
     if (options !== undefined) {
       if (options.empty !== undefined) spec.$empty = options.empty;
       if (options.collation !== undefined) spec.$collation = options.collation;
     }
-    return this.#with({ kind, name: desc ? `${kind}Descending` : kind, spec });
+    return this.#with({ kind, name: desc ? `${kind}Descending` : kind, spec, hops });
   }
 
-  groupBy(key) { return this.#with({ kind: 'groupBy', key: captureFor(this.#params, key) }); }
+  groupBy(key) {
+    const { expression, hops } = this.#capture(key);
+    return this.#with({ kind: 'groupBy', key: expression, hops });
+  }
 
   aggregate(seed, step) {
+    const { expression, hops } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
     return this.#with({
       kind: 'aggregate',
       seed: toExpression(seed),
-      step: captureFor(this.#params, step, ['acc', 'it']),
+      step: expression,
+      hops,
     });
   }
 
@@ -265,18 +316,22 @@ export class AsyncSequence {
   }
 
   /** Equi-join, pushed whole: the nested-`$for` shape the synchronous
-   * surface emits (a store answers a two-root join in one statement). */
+   * surface emits (a store answers a two-root join in one statement);
+   * the inner rows keep their relation table under `it2`. */
   join(inner, outerKey, innerKey, result) {
     const params = this.#requireJoinable(inner, 'join');
-    return new AsyncSequence(this.#origin, [...this.#stages, {
+    const outer = this.#capture(outerKey);
+    const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
+    const projection = this.#capture(result,
+      (sink) => [this.#rowRoot('it', sink), inner.#rowRoot('it2', sink)]);
+    return this.#with({
       kind: 'join',
       inner: inner.toDocument(),
       innerBare: inner.#isBareRoot(),
-      on: {
-        $eq: [captureFor(this.#params, outerKey), captureFor(this.#params, innerKey, ['it2'])],
-      },
-      result: captureFor(this.#params, result, ['it', 'it2']),
-    }], params, this.#options);
+      on: { $eq: [outer.expression, key.expression] },
+      result: projection.expression,
+      hops: [...inner.#hops(), ...outer.hops, ...key.hops, ...projection.hops],
+    }, params);
   }
 
   /** Group-join, pushed whole: the `$let`-bound group of the synchronous
@@ -284,16 +339,21 @@ export class AsyncSequence {
   groupJoin(inner, outerKey, innerKey, result) {
     const params = this.#requireJoinable(inner, 'groupJoin');
     const innerDoc = inner.toDocument();
+    const outer = this.#capture(outerKey);
+    const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
     const group = {
       $for: { it2: inner.#isBareRoot() ? innerDoc : [innerDoc] },
-      $where: { $eq: [captureFor(this.#params, outerKey), captureFor(this.#params, innerKey, ['it2'])] },
+      $where: { $eq: [outer.expression, key.expression] },
       $return: '$it2',
     };
-    return new AsyncSequence(this.#origin, [...this.#stages, {
+    const projection = this.#capture(result,
+      (sink) => [this.#rowRoot('it', sink), groupRoot(inner.#relations, sink)]);
+    return this.#with({
       kind: 'groupJoin',
       group,
-      projection: captureFor(this.#params, result, ['it', { doc: '$g', pathable: true, seq: '$g[*]' }]),
-    }], params, this.#options);
+      projection: projection.expression,
+      hops: [...inner.#hops(), ...outer.hops, ...key.hops, ...projection.hops],
+    }, params);
   }
 
   skip(count) { return this.#with({ kind: 'skip', count: requireIndex(count, 'skip') }); }
@@ -346,7 +406,7 @@ export class AsyncSequence {
       requireJsonBinding(name, bindings[name]);
       merged.set(name, bindings[name]);
     }
-    return new AsyncSequence(this.#origin, this.#stages, merged, this.#options);
+    return new AsyncSequence(this.#origin, this.#stages, merged, this.#options, this.#relations);
   }
 
   //#endregion
@@ -366,10 +426,11 @@ export class AsyncSequence {
     return snapshot(this.#documentOf(this.#stages));
   }
 
-  /** Barriers, the split, and — when representable — the document.
-   * Stages are named by the OPERATOR the caller wrote (`selectMany`,
-   * `orderByDescending`), and a `thenBy` is part of the `$orderby`
-   * barrier it extends, not a barrier of its own. */
+  /** Barriers, the split, the relation hops the callbacks navigated,
+   * and — when representable — the document. Stages are named by the
+   * OPERATOR the caller wrote (`selectMany`, `orderByDescending`), and a
+   * `thenBy` is part of the `$orderby` barrier it extends, not a barrier
+   * of its own. */
   explain() {
     const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
     // over a provider nothing before the split materialises HERE — the
@@ -384,7 +445,7 @@ export class AsyncSequence {
         barriers.push({ operator: stage.name ?? stage.kind, reason: BARRIERS[stage.kind] });
       }
     }
-    const out = { barriers };
+    const out = { barriers, hops: this.#hops() };
     if (firstMap < 0) {
       out.document = this.toDocument();
     }
@@ -663,7 +724,7 @@ export class AsyncSequence {
     if (this.#pushable()) {
       return predicate === undefined
         ? this.#pushTerminal('exists')
-        : this.#pushTerminal('some', [captureFor(this.#params, predicate)]);
+        : this.#pushTerminal('some', [this.#capture(predicate).expression]);
     }
     const seq = predicate === undefined ? this : this.where(predicate);
     for await (const item of seq) {
@@ -675,8 +736,8 @@ export class AsyncSequence {
 
   /** @param {any} predicate */
   async all(predicate) {
-    if (this.#pushable()) return this.#pushTerminal('every', [captureFor(this.#params, predicate)]);
-    const q = this.#evaluator(captureFor(this.#params, predicate));
+    if (this.#pushable()) return this.#pushTerminal('every', [this.#capture(predicate).expression]);
+    const q = this.#evaluator(this.#capture(predicate).expression);
     for await (const item of this) {
       if (!q.ebv(item, this.#externals().values)) return false;
     }
@@ -721,14 +782,6 @@ function requireIndex(value, what) {
   return value;
 }
 
-/** @param {ReadonlyMap<string, any>} params @param {any} fn @param {readonly any[]} [roots] */
-function captureFor(params, fn, roots = ['it']) {
-  if (typeof fn !== 'function') {
-    throw new LinqBuildError('JL0005', 'this operator takes a callback function');
-  }
-  return captureExpression(fn, roots, new Set(params.keys()));
-}
-
 /** @param {any} bindings */
 function validateParams(bindings) {
   if (bindings === null || typeof bindings !== 'object' || Array.isArray(bindings)) {
@@ -738,9 +791,9 @@ function validateParams(bindings) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       throw new LinqBuildError('JL0004', `'${name}' is not a valid parameter name`);
     }
-    if (name === 'it' || name === 'it2' || name === 'acc' || name === 'g') {
+    if (isReservedBinding(name)) {
       throw new LinqBuildError('JL0004',
-        `'${name}' is reserved (the emitted document's own binding names: it, it2, acc, g)`);
+        `'${name}' is reserved (the emitted document's own binding names: ${RESERVED_BINDINGS_TEXT})`);
     }
   }
 }
@@ -761,7 +814,7 @@ export function fromAsync(source, options = {}) {
   if (isProviderSource(source)) {
     return new AsyncSequence(
       { kind: 'provider', source, root: providerRoot(source) },
-      [], new Map(), options);
+      [], new Map(), options, providerRelations(source));
   }
   return new AsyncSequence(
     { kind: 'source', iterate: adaptAsyncSource(source) },

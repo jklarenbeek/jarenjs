@@ -1211,7 +1211,32 @@ the entity sets return (`test/db/oracle/relations/`). Relation-NAME
 navigation (`$.author.name`) is deliberately not query-document sugar:
 the engine has no embedded `author` member to walk, so no oracle could
 vouch for it. Name-based navigation lives on the `load` surface
-(§10.4), where results and statement counts are the proof.
+(§10.4), where results and statement counts are the proof — and, by
+code, on a query producer that lowers a hop to what the engine CAN walk.
+
+For that, every entity set carries **`relations`**, the relation table
+a producer may read: a frozen plain record, one entry per declared
+relation member of the entity, `{ to, kind, via?, fkEntity?, fkTargets?,
+joinTable?, targetKey }` — `to` the target entity, `kind` one of
+`oneToOne`/`oneToMany`/`manyToMany`; for a foreign-key relation `via`
+the key property, `fkEntity` the entity holding it, `fkTargets` the
+entity it references and `targetKey` the key property it references
+there (the column a hop's equality compares `via` with; `kind` says
+which side holds the key: `oneToOne` the declaring entity, `oneToMany`
+the target); for a many-to-many `joinTable` and the target's `targetKey`.
+The store (`store.relations`) and every set's `scope` (`scope.relations`)
+carry the same tables keyed by entity name, so a producer holding one
+set can follow a hop into another root. `relationTables(entities)` is
+the one function that derives them. The document format is unchanged:
+`@jarenjs/linq`'s chain reads the table and lowers `p.author.email` to
+`{ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] },
+$return: '$r1.email' }` (LINQ-FORMAT §4, relation navigation) — a
+document a hand could have written, which this translator and the
+engine both run and the oracle proves (`15-linq-hops.json`). Every such
+lowered shape is a residual here (§10.6 — a projection, a comparison or
+an existence test over a phrase rather than a member path, an ordering
+by a phrase), named by `explain()` and refused under `strict`; none
+pushes natively in this version.
 
 Per binding, predicates resolve through three reference flavors:
 

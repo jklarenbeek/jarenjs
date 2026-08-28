@@ -208,6 +208,28 @@ export function providerRoot(provider) {
 }
 
 /**
+ * The relation context a provider offers (LINQ-FORMAT §8): its own
+ * relation table — `relations`, keyed by member (MODEL-FORMAT §10.1) —
+ * and a resolver for the tables of the other roots of its scope
+ * (`scope.relations`, keyed by root name: one store's entity sets), so
+ * a hop can continue into another root. `null` when the provider
+ * carries no table: a relation name is then an ordinary member.
+ * @param {any} provider
+ * @returns {{ table: any, resolve: (name: string) => any } | null}
+ */
+export function providerRelations(provider) {
+  const table = provider.relations;
+  if (table === null || typeof table !== 'object') return null;
+  const scope = provider.scope;
+  const scoped = scope !== null && typeof scope === 'object' ? scope.relations : undefined;
+  return {
+    table,
+    resolve: (name) => (scoped !== null && typeof scoped === 'object'
+      && Object.hasOwn(scoped, name) ? scoped[name] : undefined),
+  };
+}
+
+/**
  * Whether two sources may share one document: the same object, or two
  * providers carrying one `scope` — one store's entity sets, which are
  * two roots of ONE multi-entity input (LINQ-FORMAT §8).

@@ -201,7 +201,11 @@ console.log(`Tree-shaking smoke test passed (${modelBytes} byte model-pen bundle
 // construction — and nothing else of the chain: no sequence/document/
 // provider module, no engine, and no schema module beyond `brand.js` (a
 // `schema` match may be a builder; the brand is how the pen tells). The
-// chain and the schema pen carry nothing from `jslt/` in return.
+// chain and the schema pen carry nothing from `jslt/` in return. The
+// capture module is the one shared machine (a pen never re-implements it),
+// so what it carries for the chain — the relation-hop lowering a member
+// access dispatches to — rides into every pen bundle and is part of each
+// measured ceiling.
 const jsltResult = await build({
   stdin: {
     contents: "import { rule, stylesheet } from '@jarenjs/linq/jslt'; export const S = stylesheet([rule('$..price', (v) => v.mul(1.21))]);",
@@ -232,7 +236,7 @@ const jsltEngineLeak = Object.entries(jsltInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (jsltEngineLeak.length > 0)
   throw new Error(`The JSLT pen pulled an engine into the bundle: ${jsltEngineLeak.map(([file]) => file).join(', ')}`);
-if (jsltBytes > 16000)
+if (jsltBytes > 20000)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);

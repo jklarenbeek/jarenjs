@@ -1,0 +1,488 @@
+{
+  "group": "15 linq hops",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "User": {
+        "schema": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "name": {
+              "type": "string"
+            },
+            "age": {
+              "type": "integer"
+            },
+            "posts": {
+              "x-entity": {
+                "relation": {
+                  "to": "Post",
+                  "many": true,
+                  "via": "authorId",
+                  "onDelete": "cascade"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Post": {
+        "schema": {
+          "type": "object",
+          "required": [
+            "pid"
+          ],
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "title": {
+              "type": "string"
+            },
+            "stars": {
+              "type": "integer"
+            },
+            "authorId": {
+              "type": "string"
+            },
+            "author": {
+              "x-entity": {
+                "relation": {
+                  "to": "User",
+                  "via": "authorId",
+                  "onDelete": "cascade"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "documents": {
+    "User": [
+      {
+        "id": "u1",
+        "name": "ada",
+        "age": 36
+      },
+      {
+        "id": "u2",
+        "name": "lin",
+        "age": 64
+      },
+      {
+        "id": "u3",
+        "name": "kid",
+        "age": 8
+      },
+      {
+        "id": "u4",
+        "name": "mo"
+      }
+    ],
+    "Post": [
+      {
+        "pid": 1,
+        "title": "alpha",
+        "stars": 5,
+        "authorId": "u1"
+      },
+      {
+        "pid": 2,
+        "title": "beta",
+        "stars": 1,
+        "authorId": "u1"
+      },
+      {
+        "pid": 3,
+        "title": "gamma",
+        "stars": 4,
+        "authorId": "u2"
+      },
+      {
+        "pid": 4,
+        "title": "delta",
+        "stars": 3,
+        "authorId": "u1"
+      },
+      {
+        "pid": 5,
+        "title": "epsilon",
+        "authorId": "u2"
+      },
+      {
+        "pid": 6,
+        "title": "ada",
+        "stars": 2,
+        "authorId": "u4"
+      },
+      {
+        "pid": 7,
+        "title": "orphan",
+        "stars": 3
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "a to-one hop in the projection, one post without an author",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$return": {
+            "title": "$it.title",
+            "by": {
+              "$for": {
+                "r1": "$.User[*]"
+              },
+              "$where": {
+                "$eq": [
+                  "$r1.id",
+                  "$it.authorId"
+                ]
+              },
+              "$return": "$r1.name"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a to-one hop in the filter",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$where": {
+            "$ge": [
+              {
+                "$for": {
+                  "r1": "$.User[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$r1.id",
+                    "$it.authorId"
+                  ]
+                },
+                "$return": "$r1.age"
+              },
+              30
+            ]
+          },
+          "$return": "$it.pid"
+        }
+      ]
+    },
+    {
+      "name": "a to-one hop under an ordering, the unmatched row first",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$orderby": [
+            {
+              "$key": {
+                "$for": {
+                  "r1": "$.User[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$r1.id",
+                    "$it.authorId"
+                  ]
+                },
+                "$return": "$r1.name"
+              }
+            },
+            {
+              "$key": "$it.pid"
+            }
+          ],
+          "$return": "$it.pid"
+        }
+      ]
+    },
+    {
+      "name": "the absent to-one",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$where": {
+            "$empty": {
+              "$for": {
+                "r1": "$.User[*]"
+              },
+              "$where": {
+                "$eq": [
+                  "$r1.id",
+                  "$it.authorId"
+                ]
+              },
+              "$return": "$r1"
+            }
+          },
+          "$return": "$it.title"
+        }
+      ]
+    },
+    {
+      "name": "a to-many count",
+      "query": [
+        {
+          "$for": {
+            "it": "$.User[*]"
+          },
+          "$where": {
+            "$ge": [
+              {
+                "$count": {
+                  "$for": {
+                    "r1": "$.Post[*]"
+                  },
+                  "$where": {
+                    "$eq": [
+                      "$r1.authorId",
+                      "$it.id"
+                    ]
+                  },
+                  "$return": "$r1"
+                }
+              },
+              2
+            ]
+          },
+          "$return": "$it.id"
+        }
+      ]
+    },
+    {
+      "name": "a to-many existence",
+      "query": {
+        "$count": {
+          "$for": {
+            "it": "$.User[*]"
+          },
+          "$where": {
+            "$exists": {
+              "$for": {
+                "r1": "$.Post[*]"
+              },
+              "$where": {
+                "$eq": [
+                  "$r1.authorId",
+                  "$it.id"
+                ]
+              },
+              "$return": "$r1"
+            }
+          },
+          "$return": "$it"
+        }
+      }
+    },
+    {
+      "name": "a to-many hop as an array member",
+      "query": [
+        {
+          "$for": {
+            "it": "$.User[*]"
+          },
+          "$return": {
+            "id": "$it.id",
+            "titles": [
+              {
+                "$for": {
+                  "r1": "$.Post[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$r1.authorId",
+                    "$it.id"
+                  ]
+                },
+                "$return": "$r1.title"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "two hops chained",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$return": {
+            "pid": "$it.pid",
+            "siblings": {
+              "$count": {
+                "$for": {
+                  "r1": "$.User[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$r1.id",
+                    "$it.authorId"
+                  ]
+                },
+                "$return": {
+                  "$for": {
+                    "r2": "$.Post[*]"
+                  },
+                  "$where": {
+                    "$eq": [
+                      "$r2.authorId",
+                      "$r1.id"
+                    ]
+                  },
+                  "$return": "$r2"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a hop from the joined it2",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]",
+            "it2": "$.User[*]"
+          },
+          "$where": {
+            "$eq": [
+              "$it.authorId",
+              "$it2.id"
+            ]
+          },
+          "$return": {
+            "title": "$it.title",
+            "n": {
+              "$count": {
+                "$for": {
+                  "r1": "$.Post[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$r1.authorId",
+                    "$it2.id"
+                  ]
+                },
+                "$return": "$r1"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a hop from a group-join's fanned group",
+      "query": [
+        {
+          "$for": {
+            "it": "$.User[*]"
+          },
+          "$let": {
+            "g": [
+              {
+                "$for": {
+                  "it2": "$.Post[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$it.id",
+                    "$it2.authorId"
+                  ]
+                },
+                "$return": "$it2"
+              }
+            ]
+          },
+          "$return": {
+            "id": "$it.id",
+            "by": [
+              {
+                "$for": {
+                  "r1": "$g[*]"
+                },
+                "$return": {
+                  "$for": {
+                    "r2": "$.User[*]"
+                  },
+                  "$where": {
+                    "$eq": [
+                      "$r2.id",
+                      "$r1.authorId"
+                    ]
+                  },
+                  "$return": "$r2.name"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a hop in a first",
+      "query": [
+        {
+          "$subsequence": [
+            {
+              "$for": {
+                "it": "$.Post[*]"
+              },
+              "$where": {
+                "$eq": [
+                  {
+                    "$for": {
+                      "r1": "$.User[*]"
+                    },
+                    "$where": {
+                      "$eq": [
+                        "$r1.id",
+                        "$it.authorId"
+                      ]
+                    },
+                    "$return": "$r1.name"
+                  },
+                  "lin"
+                ]
+              },
+              "$orderby": {
+                "$key": "$it.pid"
+              },
+              "$return": "$it.title"
+            },
+            0,
+            1
+          ]
+        }
+      ]
+    }
+  ]
+}

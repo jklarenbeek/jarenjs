@@ -121,4 +121,18 @@ describe('a provider keeps its item type through the phantom (the runtime twin)'
     assert.deepStrictEqual(emails.toArray(), ['ada@x']);
     assert.deepStrictEqual(emails.toDocument(), { $for: { it: '$.User[*]' }, $return: '$it.email' });
   });
+
+  it('a relation member types as the related row (emit\'s optional member), and explain().hops lists the hop', () => {
+    // the type gate pins `p.author.email` as StringExpr and `u.posts.all().count()`
+    // as NumberExpr over the generated entity shapes; here the same
+    // members navigate at runtime and the hop is reported
+    const posts = {
+      root: '$.Post[*]',
+      relations: { author: { to: 'User', kind: 'oneToOne', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' } },
+      execute: (document) => (Array.isArray(document) ? [{ title: 'p1', by: 'ada@x' }] : undefined),
+    };
+    const chain = from(posts).select((p) => ({ title: p.title, by: p.author.email }));
+    assert.deepStrictEqual(chain.toArray(), [{ title: 'p1', by: 'ada@x' }]);
+    assert.deepStrictEqual(chain.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
+  });
 });

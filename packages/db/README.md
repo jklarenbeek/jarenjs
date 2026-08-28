@@ -91,6 +91,43 @@ await fromAsync(store.entity('Post'))
   .toArray();           // a two-root equijoin, one statement
 ```
 
+A declared relation navigates on the chain, and the document still
+carries no relation name: the chain reads the set's relation table
+(`store.entity('Post').relations`, MODEL-FORMAT §10.1) and lowers
+`p.author.email` to the correlated phrase the engine and the store both
+run. The store answers it as the residual it is — `explain()` says so,
+`strict` refuses it — over the two fetched roots, never a statement per
+row:
+
+```js
+const byAuthor = from(store.sync.entity('Post'))
+  .where((p) => p.stars.ge(3))
+  .select((p) => ({ title: p.title, by: p.author.email }));
+
+byAuthor.toDocument();
+// { $for: { it: '$.Post[*]' },
+//   $where: { $ge: ['$it.stars', 3] },
+//   $return: { title: '$it.title',
+//              by: { $for: { r1: '$.User[*]' },
+//                    $where: { $eq: ['$r1.id', '$it.authorId'] },
+//                    $return: '$r1.email' } } }
+byAuthor.explain().hops;   // [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]
+store.sync.explain(byAuthor.toDocument());
+// { mode: 'set', referenced: ['Post', 'User'], sql: null,
+//   reasons: [{ construct: '$return',
+//               reason: 'entity queries return one bare binding natively; projections run in the engine' }], … }
+byAuthor.toArray();        // the rows, two fetches — one per referenced root
+
+from(store.sync.entity('User')).where((u) => u.posts.all().count().ge(2));
+// … $where: { $ge: [{ $count: { $for: { r1: '$.Post[*]' },
+//                                $where: { $eq: ['$r1.authorId', '$it.id'] },
+//                                $return: '$r1' } }, 2] } …
+```
+
+A many-to-many member (`u.labels`) is refused at build time (`JL0105`)
+naming the join table: it is not a queryable root in this version, so
+`load({ include: { labels: true } })` is how the memberships are read.
+
 `execute` answers in the ENGINE's result shape (QUERY-FORMAT §1,
 "singleton ≡ item"): `undefined` for no rows, the document itself for
 exactly one, an array for more — typed `SequenceResult<R>`, with `R`

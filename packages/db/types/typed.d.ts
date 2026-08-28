@@ -16,6 +16,7 @@ import type {
   EntityKeyArg, LoadExplanation, SaveReport, Store, StoreCapabilities,
   StoreStats, Collection, ExecuteOptions, SequenceResult, ValueOrPromise,
   Dialect, ChangeRecord, LiveOptions, LiveQuery, JobsApi, SyncStore,
+  EntityScope, RelationEntry, RelationTable,
 } from '@jarenjs/db';
 
 /** The self-referential constraint an interface can satisfy: generated
@@ -98,8 +99,13 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** The root expression this set's rows are bound through (`$.<Name>[*]`). */
   readonly root: string;
-  /** The identity every entity set of one store shares. */
-  readonly scope: object;
+  /** The identity every entity set of one store shares; it carries every
+   * root's relation table. */
+  readonly scope: EntityScope;
+  /** This entity's relation table (MODEL-FORMAT §10.1): exactly the
+   * generated metadata's relation members, as the plain rows a query
+   * producer lowers a hop from. */
+  readonly relations: Readonly<Record<keyof M['relations'] & string, RelationEntry>>;
 }
 
 /** The typed store: every member of `Store` (a typed store is the same
@@ -114,6 +120,8 @@ export interface TypedStore<E extends MetaMap<E>> {
   explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** The entity roots this store-level provider serves (present with entities). */
   readonly roots?: readonly (keyof E & string)[];
+  /** The relation tables of every entity, keyed by entity name. */
+  readonly relations?: Readonly<Record<keyof E & string, RelationTable>>;
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
   observe(fn: (record: ChangeRecord) => void): () => void;

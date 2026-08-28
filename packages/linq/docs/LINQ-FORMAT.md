@@ -47,7 +47,11 @@ is bound bare.)
   items are bound through ITS root (`root` — `'$.Post[*]'` for a store's
   entity set; the emitted `$for` iterates that root, bare); a provider
   that serves several roots and none of its own (a store with entities,
-  `roots`) is `JL0007` at `from()` time, naming the roots to chain over.
+  `roots`) is `JL0007` at `from()` time, naming the roots to chain over;
+  a provider carrying a relation table (`relations` — a store's entity
+  set does) lets a relation member NAVIGATE (§3): `p.author.email`
+  lowers to the correlated phrase the engine and the store run, and the
+  document never carries the relation's name.
   `options.compileTypeTest` enables the schema operators behind
   `ofType`/`cast` (§4); absent, those two are `JL0003` with the fix in
   the message.
@@ -102,6 +106,27 @@ value becomes the expression:
 - The item binding is always named `it` in the emitted document
   (nested phrases shadow it legally), so captured expressions read
   `$it.…` at every depth and the document stays hand-readable.
+- **A relation name hops.** When the items are the rows of an entity
+  whose provider carries a relation table (§8: `relations`, a store's
+  entity set), a member access naming a declared relation records a
+  HOP rather than a path segment — `p.author` is the related row,
+  `u.posts` the array of related rows — and is lowered, at capture, to
+  the correlated phrase §4's "relation navigation" rows spell; the
+  emitted document carries the phrase, never the member's name. The
+  hop's target is the target entity's row, with ITS relation table, so
+  hops chain (`p.author.posts`); a trailing path continues on the target
+  (`p.author.email`); `all()` on a to-many hop fans the related rows,
+  and the aggregates and `exists()`/`isEmpty()` range over them. A
+  relation name reached through `get()` hops too (the escape for a
+  relation that collides with a method name). The rows stop being rows
+  at a projection — after `select`, `selectMany`, `groupBy`, `join`,
+  `groupJoin`, `aggregate` (and a `mapAsync`) a relation name is an
+  ordinary member again — and a `fromDocument` chain never hops: there
+  the document decides what the items are. A hop that cannot lower is
+  `JL0105` at build time (a many-to-many member: its join table is not a
+  queryable root in this version; a composite key); a member read off
+  the to-many ARRAY before `all()` is `JL0005` with the fix named, where
+  the same read off a stored array would answer nothing.
 
 ## 4. The mapping table
 
@@ -145,6 +170,10 @@ is part of THIS design.
 | series family (§8.16) | `overlaps(other)` → `$overlaps`; `timeBucket(every, origin?, context?)` → `$time-bucket`; `resample(spec)`, `rolling(spec)` and `asof(right, spec?)` → the three sequence operators. A **spec is a literal** and is embedded verbatim — it is read once when the query compiles, so a spec built from the row is `JL0005`, and every rule about what it may *say* stays in the compiler (`JQ0003`). Note that a member literally named `at` is read with `get('at')`: `at(index)` is path navigation on this surface | native | on `ArrayExpr`/fanned paths for the three sequence operators, on `Expr<…>` for the two scalar ones |
 | spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |
 | vector family (§8.15) | `similarity(other)` → `$similarity`. The other operand is an array of numbers: a captured one embeds as a literal, `.params({ query })` binds it at call time. There is no `knn` method — k-nearest is `orderByDescending(...).take(k)`, which is the composition the emitted document already is | native | on `Expr<…>`, per the typed-surface order |
+| relation navigation — to-one hop (`p.author`, `p.author.email`) | over a provider with a relation table (§3, §8): `{ "$for": { "r1": "$.User[*]" }, "$where": { "$eq": ["$r1.<targetKey>", "$it.<via>"] }, "$return": "$r1.email" }` — the target's key against the row's foreign key (`kind: "oneToOne"`, the key on the declaring entity). Zero or one item: an object member's one value (absent when there is none), an operand elsewhere (empty compares false; `exists()`/`isEmpty()` say which), and under `$orderby` a key that may be empty (`$empty` applies). The binding is `r1`, `r2`, … per capture | native by desugaring — the document is the phrase; a store runs it as a named residual (`explain()`, MODEL-FORMAT §10.6) | `Expr<Post>['author']` is `ObjectExpr<User>` — emit's optional relation member, nothing new |
+| relation navigation — to-many hop (`u.posts`, `u.posts.all()`) | `{ "$for": { "r1": "$.Post[*]" }, "$where": { "$eq": ["$r1.<via>", "$it.<targetKey>"] }, "$return": "$r1" }` — the target's foreign key against the row's key (`kind: "oneToMany"`, the key on the target). As a VALUE the phrase is packed, `[ <phrase> ]`, the array of related rows a member holds (`{ posts: u.posts }`; `u.posts.at(0)` indexes it); fanned, `u.posts.all()` is the bare phrase, a sequence: `.all().count()` → `{ "$count": <phrase> }`, `.all().exists()` → `{ "$exists": <phrase> }`, `.all().title` returns `"$r1.title"` per row (`[u.posts.all().title]` packs the titles). `count()`/`exists()` on the value range over the rows too, as a group-join's group's do | native by desugaring, as above | `ArrayExpr<Post>`; `all()` is `FannedExpr<Post>` |
+| relation navigation — chained, and from every row binding | hops nest: `p.author.posts.all().count()` is `{ "$count": { "$for": { "r1": "$.User[*]" }, "$where": …, "$return": { "$for": { "r2": "$.Post[*]" }, "$where": { "$eq": ["$r2.authorId", "$r1.id"] }, "$return": "$r2" } } }` — the inner phrase correlates with the outer binding; a hop off a fanned to-many (`u.posts.all().author`) is a sequence, one target per row; a join's `it2` hops from the inner row; a group-join's fanned group (`g.all().author`) binds each row first (`{ "$for": { "r1": "$g[*]" }, "$return": <hop over $r1> }`); the group itself is an array, not a row | native by desugaring, as above | as the target's `Expr<…>` |
+| relation navigation — many-to-many (`u.labels`) | — the join table is not a queryable root in this version, so no phrase exists to lower to; `load({ include: { labels: true } })` reads the memberships | unsupported (`JL0105`, naming the join table) | — |
 
 Two spatial names are deliberately not the obvious ones, and the reason
 is the same one that made §8.14's `$length` and §8.7's `$string-length`
@@ -299,9 +328,11 @@ The emitted document carries `$tenantId` as an external parameter
 Undeclared use is `JL0004` at BUILD time with the fix in the message
 (the engine would say JQ0005 at compile time; earlier and clearer
 wins). The names `it`, `it2`, `acc` and `g` are RESERVED — they are the
-emitted document's own binding names — and declaring them is `JL0004`.
-A binding must be query data (§5): a `Date`, `Map`, `NaN` or `-0` is
-`JL0004` with the conversion named.
+emitted document's own binding names — and so are `r1`, `r2`, … (`r`
+followed by a positive integer): the bindings a relation hop allocates,
+numbered per capture (§3, §4 "relation navigation"). Declaring any of
+them is `JL0004`. A binding must be query data (§5): a `Date`, `Map`,
+`NaN` or `-0` is `JL0004` with the conversion named.
 
 The inner side of a `join`, `groupJoin` or `concat` contributes its
 document WHOLE, so its declared parameters ride along into the new
@@ -360,7 +391,21 @@ time:
   the store's translator answers in ONE statement when the result is a
   bare binding (MODEL-FORMAT §10.2), and the declared residual over both
   fetched roots when it is a projection (§10.6). `concat` stays
-  same-source even within a scope: one input per document.
+  same-source even within a scope: one input per document. A scope MAY
+  carry `relations` — the relation tables of every root of the scope,
+  keyed by root name (a store's does) — which is where a chained hop
+  finds its target's table; without it the first hop lowers and the
+  target's members are plain paths.
+- `relations` — the relation table of the rows the provider serves
+  (MODEL-FORMAT §10.1; a store's entity set carries its entity's): a
+  plain record, one entry per declared relation member, `{ to, kind,
+  via?, fkEntity?, fkTargets?, joinTable?, targetKey }`. With it, a
+  relation name on a callback's row hops (§3) and is lowered to the
+  phrase §4's "relation navigation" rows spell; `kind` decides the
+  equality's sides (`oneToOne`: the key on the declaring entity;
+  `oneToMany`: on the target), `to` the root the hop binds (`$.<to>[*]`),
+  `via` and `targetKey` its two columns. A `manyToMany` entry is
+  `JL0105`. Absent, a relation name is an ordinary member.
 
 An element terminal hands over the one-item WINDOW `[<phrase>]` (§6). A
 provider that plans documents reads through that window — the store
@@ -370,8 +415,12 @@ one array the constructor yields (`[]` for none, `[row]` for one) — so
 
 `@jarenjs/db` implements this contract without either package
 importing the other: its collections and its entity sets are providers
-(the sets carry `root` and `scope`; the store carries `roots`), and a
-test double proves the document arrives whole.
+(the sets carry `root`, `scope` and `relations`; the store carries
+`roots` and `relations`), and a test double proves the document arrives
+whole. A lowered hop is what a store receives as any other document: it
+runs the correlated phrase in its residual over the fetched roots and
+`explain()` names the §10.6 reason — no lowered shape pushes natively in
+this version, and the store's `strict` refuses them all (`JD0010`).
 
 ### 8.1 Compilation registries
 
@@ -418,6 +467,7 @@ the normative home, this table mirrors it):
 | `JL0102` | a pen was asked for a construct the format cannot carry |
 | `JL0103` | a `$defs` name collision, a dangling ref, or an unnamed recursion |
 | `JL0104` | a pen-owned keyword through `meta()`, or an external a captured rule did not declare |
+| `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 
 Runtime errors (`LinqRuntimeError`):
@@ -471,8 +521,9 @@ because the engine itself materialises for `$orderby`/`$groupby`):
 `take(n)`, and an exception mid-chain all call `.return()` on the
 iterator — a generator left suspended holds a file handle or a read
 transaction open. `explain()` reports `{ barriers: [{ operator,
-reason }], document }` — or, when a `mapAsync` sits in the chain,
-`{ split: { pushed, residual } }` instead of `document`
+reason }], hops, document }` — `hops` the relation hops the callbacks
+navigated, as on the sync surface (§4) — or, when a `mapAsync` sits in
+the chain, `{ split: { pushed, residual } }` instead of `document`
 (`toDocument()` refuses with `JL0005`: a host callback has no document
 form). No silent caps, no silent buffering: if a chain materialises,
 the report says which operator forced it.

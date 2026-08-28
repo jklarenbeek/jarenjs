@@ -71,6 +71,7 @@ mirrored in LINQ-FORMAT §9 (one table, held equal by a test):
 | `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write; in the JSLT pen an `apply()` as a bare object member (the `[]` idiom, JSLT-FORMAT §6.3 — the engine would fail at run time on the second child), a `match` of `{}` (the compiler's `JT0003`, earlier), an `apply()` outside a body |
 | `JL0103` | a `$defs` name collision (two distinct builders under one name), a `ref()` no definition answers, or a `lazy()` that does not return a named builder |
 | `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare: a `check()` external other than `root`/`path`, a `compute()` external at all, a `body()` external other than `root`/`path` and its declared parameters — or `root`/`path` declared as one, since the engine binds them |
+| `JL0105` | a relation hop on the chain — the query pen (LINQ-FORMAT §4, relation navigation) — cannot lower: the member is a many-to-many relation, whose join table is not a queryable root in this version (`load({ include })` reads the memberships); the relation's key column or the key it references is composite or undeclared; or the provider's relation table holds something that is not a relation record |
 | `JL0106` | a migration step names an entity or collection the target model does not declare (`transform`, `assert`, `derive`); or a `transform` over a planned document finds no draft to replace, or two drafts for one name |
 
 The message names the fix; `docPath` is the JSON pointer of the node
@@ -447,6 +448,17 @@ Three rules the table implies:
   writes `format: 'uuid'` on the model pen too; the store-allocated key is
   `identity('uuid')`, MODEL-FORMAT §9.5's own word, and a member may carry
   both.
+
+A declared relation member is also what the chain — the query pen —
+navigates: over a store opened with this model, `from(store.sync
+.entity('Post'))` reads `p.author.email` and `u.posts.all().count()` as
+relation HOPS and lowers each to the correlated phrase the engine and the
+store both run, so the query document carries no relation name
+(LINQ-FORMAT §3, §4 "relation navigation"). The table the chain reads is
+the one the store derives from these members (`store.entity(name)
+.relations`, MODEL-FORMAT §10.1); `rel.belongsToMany` members are the one
+kind it refuses (`JL0105`), because their join table is not a queryable
+root in this version.
 
 ### 3.2 Worked examples
 

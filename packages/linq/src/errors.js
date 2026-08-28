@@ -27,6 +27,7 @@ export const LINQ_CODES = Object.freeze({
   JL0102: 'a pen was asked for a construct the format cannot carry',
   JL0103: 'a $defs name collision, a dangling ref, or an unnamed recursion',
   JL0104: 'a pen-owned keyword through meta(), or an external a captured rule did not declare',
+  JL0105: 'a relation hop cannot lower: a many-to-many member, a composite or undeclared key, or a malformed relation entry',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
@@ -51,13 +52,13 @@ export const LINQ_CODES = Object.freeze({
  *    `@jarenjs/validate/query`)
  *  - `JL0004` — a parameter was referenced without being declared via
  *    `.params({...})`, a declared name is reserved (`it`, `it2`, `acc`,
- *    `g` — the document's own binding names), a binding is not query
- *    data, or the two sides of a `join`/`groupJoin`/`concat` bind one
- *    name to different values
+ *    `g`, and the relation-hop bindings `r1`, `r2`, … — the document's
+ *    own binding names), a binding is not query data, or the two sides
+ *    of a `join`/`groupJoin`/`concat` bind one name to different values
  *  - `JL0005` — an operator was used invalidly at build time (`thenBy`
  *    without `orderBy`, `all()` off an operator result rather than a
- *    path, a negative `skip`/`take`, a value that cannot embed in a
- *    document)
+ *    path, a member read off a to-many relation before `all()`, a
+ *    negative `skip`/`take`, a value that cannot embed in a document)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  *  - `JL0007` — `from()`/`fromAsync()` received a provider that serves
@@ -81,6 +82,12 @@ export const LINQ_CODES = Object.freeze({
  *    captured rule naming an external it did not declare (a `check()`
  *    or `body()` external other than `root`/`path` and, for a body,
  *    its declared parameters; a `compute()` external at all)
+ *  - `JL0105` — a relation hop on the chain (the query pen) cannot
+ *    lower: the member is a many-to-many relation, whose join table is
+ *    not a queryable root in this version (`load({ include })` reads the
+ *    memberships); or the relation's key column or the key it references
+ *    is composite or undeclared; or the provider's relation table holds
+ *    something that is not a relation record
  *  - `JL0106` — a migration step names an entity or collection the
  *    target model does not declare (`transform`, `assert`, `derive`),
  *    or a `transform` over a planned document finds no draft to

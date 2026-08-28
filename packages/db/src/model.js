@@ -489,6 +489,53 @@ function resolveRelations(entities) {
 }
 
 /**
+ * The relation table a producer may read (§10.1): per entity, one
+ * frozen record per declared relation member — `to`, `kind`, and for a
+ * foreign-key relation `via`, `fkEntity`, `fkTargets` and `targetKey`
+ * (the key property the foreign key references on `fkTargets`, which
+ * is what a hop's equality compares `via` against); for a many-to-many
+ * `joinTable` and the target's `targetKey`. Plain data, keyed by
+ * entity name and then by member name, so a query producer can lower
+ * a relation hop to the phrases the translator runs without a second
+ * vocabulary and without importing this package.
+ * @param {Map<string, any>} entities - normalized entities
+ * @returns {Readonly<Record<string, Readonly<Record<string, any>>>>}
+ */
+export function relationTables(entities) {
+  /** @type {Record<string, any>} */
+  const tables = {};
+  for (const entity of entities.values()) {
+    /** @type {Record<string, any>} */
+    const table = {};
+    for (const property of entity.relations) {
+      const relation = property.relation;
+      const entry = relation.kind === 'manyToMany'
+        ? {
+          to: relation.to,
+          kind: relation.kind,
+          joinTable: relation.joinTable,
+          targetKey: entities.get(relation.to).keys[0],
+        }
+        : {
+          to: relation.to,
+          kind: relation.kind,
+          via: relation.via,
+          fkEntity: relation.fkEntity,
+          fkTargets: relation.fkTargets,
+          targetKey: entities.get(relation.fkTargets).keys[0],
+        };
+      // an own member, whatever the property is named: `__proto__` as
+      // a member name would otherwise rewrite the record's prototype
+      Object.defineProperty(table, property.name,
+        { value: Object.freeze(entry), writable: true, enumerable: true, configurable: true });
+    }
+    Object.defineProperty(tables, entity.name,
+      { value: Object.freeze(table), writable: true, enumerable: true, configurable: true });
+  }
+  return Object.freeze(tables);
+}
+
+/**
  * The hybrid mapping, derived mechanically from §9.3's table and
  * returned as DATA: per entity, the columns (name, type, source),
  * the checks, the foreign keys, the indexes, and which properties

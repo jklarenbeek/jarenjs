@@ -15,6 +15,14 @@
  *
  * Method names shadow member access: `u.eq` is the operator, never the
  * data member — reach a colliding member with `u.get('eq')`.
+ *
+ * A root whose items are an entity's rows carries the entity's RELATION
+ * TABLE (LINQ-FORMAT §3, MODEL-FORMAT §10.1): a member access naming a
+ * relation records a HOP and lowers, right here, to the correlated
+ * phrase the engine and the store both run — `p.author.email` is
+ * `{ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] },
+ * $return: '$r1.email' }` — so the emitted document never carries a
+ * relation name and never needs a dialect the oracle could not prove.
  */
 
 import { LinqBuildError } from './errors.js';
@@ -25,6 +33,10 @@ const NODE = Symbol('jaren-linq-node');
 /** RFC 9535 shorthand member names travel as `.name`; everything else
  * goes through a bracketed, single-quoted selector. */
 const SHORTHAND_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** A bare binding variable (`$it`, `$it2`, `$r1`): the one subject a
+ * hop correlates with directly; a fanned path is bound first. */
+const BARE_VAR_RE = /^\$[A-Za-z_][A-Za-z0-9_]*$/;
 
 let epochCounter = 0;
 
@@ -77,6 +89,16 @@ function bracketName(name) {
     else escaped += '\\u' + code.toString(16).padStart(4, '0');
   }
   return `['${escaped}']`;
+}
+
+/**
+ * One member step on a path: the shorthand for an identifier, the
+ * bracketed selector for anything else.
+ * @param {string} name
+ * @returns {string}
+ */
+function memberSegment(name) {
+  return SHORTHAND_RE.test(name) ? `.${name}` : bracketName(name);
 }
 
 /**
@@ -421,7 +443,11 @@ const METHODS = {
     return makeExpr({ $get: [record.doc, toExpression(index)] }, record.epoch, false);
   },
   all(record) {
-    if (record.seq !== undefined) return makeExpr(record.seq, record.epoch, true);
+    // a hop's related rows, fanned: the phrase itself, a sequence
+    if (record.hop !== undefined) return makeHop({ ...record.hop, fan: true }, record.epoch, record.nav);
+    // a bound array's fan carries the array's navigation (a group-join's
+    // group holds the inner rows; a hop off them binds each row first)
+    if (record.seq !== undefined) return makeExpr(record.seq, record.epoch, true, { nav: record.nav });
     if (!record.pathable) {
       throw new LinqBuildError('JL0005',
         "all() fans out a PATH ('$it.tags[*]'); it cannot follow an operator result");
@@ -429,12 +455,219 @@ const METHODS = {
     return makeExpr(`${record.doc}[*]`, record.epoch, true);
   },
   get(record, name) {
-    if (typeof name === 'string' && record.pathable) {
-      return makeExpr(`${record.doc}${bracketName(name)}`, record.epoch, true);
+    if (typeof name === 'string') {
+      // a relation name hops through get() as it does through member
+      // access — the escape reaches a relation that collides with a
+      // method name (`get('count')`), not a stored member of that name
+      if (navigates(record, name)) return startHop(record, name);
+      if (record.hop !== undefined) return extendHop(record, bracketName(name));
+      if (record.pathable) return makeExpr(`${record.doc}${bracketName(name)}`, record.epoch, true);
     }
     return makeExpr({ $get: [record.doc, toExpression(name)] }, record.epoch, false);
   },
 };
+
+//#region relation hops
+
+/**
+ * The root spelling of an entity array in a multi-entity document —
+ * MODEL-FORMAT §10.1's `$.<Entity>[*]`, the one spelling the store's
+ * planner reads. Spelled here, never imported.
+ * @param {string} name
+ */
+const entityRootOf = (name) => `$.${name}[*]`;
+
+/**
+ * Whether a member name on this record is a relation of the entity
+ * whose rows the record stands for: the record carries a relation
+ * table (a binding root, or a hop's target at its root) and the table
+ * names the member. A group-join's group carries its table for its FAN
+ * only — the group itself is an array, not a row.
+ * @param {any} record
+ * @param {string} name
+ */
+function navigates(record, name) {
+  return record.nav !== undefined && !record.navOnFan
+    && Object.hasOwn(record.nav.table, name);
+}
+
+/**
+ * The relation entry a hop may lower from, or the coded refusal: a
+ * many-to-many member has no queryable join-table root in this version
+ * (the phrase would need one — `load({ include })` reads the
+ * memberships), and a foreign-key relation needs its key column and the
+ * single key it references (a composite key would need a tuple equality
+ * the vocabulary does not spell).
+ * @param {any} relation
+ * @param {string} member
+ */
+function checkRelation(relation, member) {
+  if (relation === null || typeof relation !== 'object' || typeof relation.to !== 'string') {
+    throw new LinqBuildError('JL0105',
+      `the relation table names '${member}' but its entry is not a relation record `
+      + '({ to, kind, via, fkEntity, fkTargets, targetKey } — MODEL-FORMAT §10.1)');
+  }
+  if (relation.kind === 'manyToMany') {
+    throw new LinqBuildError('JL0105',
+      `'${member}' is a many-to-many relation: the join table '${relation.joinTable}' is not a `
+      + 'queryable root in this version, so the hop has no phrase to lower to — read the '
+      + `memberships with load({ include: { ${member}: true } })`);
+  }
+  if (relation.kind !== 'oneToOne' && relation.kind !== 'oneToMany') {
+    throw new LinqBuildError('JL0105',
+      `'${member}' has relation kind '${String(relation.kind)}', which is not one this `
+      + 'surface lowers (oneToOne, oneToMany)');
+  }
+  if (typeof relation.via !== 'string' || typeof relation.targetKey !== 'string') {
+    throw new LinqBuildError('JL0105',
+      `'${member}' cannot lower: its foreign key or the key it references is composite or `
+      + 'undeclared, and the hop\'s equality would need a tuple the vocabulary does not spell');
+  }
+}
+
+/**
+ * A hop chain as one nested document: each link binds its source,
+ * correlates through its `$where`, and returns the next link — the
+ * innermost returns `ret`, the path over the last binding.
+ * @param {readonly { binding: string, source: any, where?: any }[]} chain
+ * @param {any} ret
+ * @returns {any}
+ */
+function hopDocument(chain, ret) {
+  let doc = ret;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const link = chain[i];
+    /** @type {any} */
+    const phrase = { $for: { [link.binding]: link.source } };
+    if (link.where !== undefined) phrase.$where = link.where;
+    phrase.$return = doc;
+    doc = phrase;
+  }
+  return doc;
+}
+
+/**
+ * The proxy over a hop: as a VALUE a to-one hop is its phrase (zero or
+ * one row — an object member's one value, an empty operand elsewhere)
+ * and a to-many hop is the phrase packed into an array (`[phrase]`, the
+ * array of related rows a member holds); fanned (`all()`), either is the
+ * bare phrase, a sequence the aggregates and `exists()` range over. The
+ * fanned twin is the phrase in every case, so `count()`/`exists()` on
+ * the value count the rows, as they do on a group-join's group.
+ * @param {{ chain: any[], ret: string, many: boolean, fan: boolean }} hop
+ * @param {number} epoch
+ * @param {any} nav - the target entity's navigation, while `ret` is its root
+ */
+function makeHop(hop, epoch, nav) {
+  const phrase = hopDocument(hop.chain, hop.ret);
+  return makeExpr(hop.many && !hop.fan ? [phrase] : phrase, epoch, false,
+    { seq: phrase, nav, hop });
+}
+
+/**
+ * Record one hop: `member` is a relation of the rows `target` stands
+ * for. The subject the new binding correlates with is a bare binding
+ * variable — the root (`$it`), or the previous hop's binding (`$r1`) —
+ * or a fanned path (`$g[*]`), which is bound to a binding of its own
+ * first so the equality reads one row. The equality follows the
+ * table's placement of the foreign key: on the declaring entity
+ * (`oneToOne`) the target's key equals the subject's `via`; on the
+ * target (`oneToMany`) the target's `via` equals the subject's key.
+ * @param {any} target - the record the member was read on
+ * @param {string} member
+ */
+function startHop(target, member) {
+  const { table, resolve, sink } = target.nav;
+  const relation = table[member];
+  checkRelation(relation, member);
+  const chain = target.hop === undefined ? [] : [...target.hop.chain];
+  let subject = target.hop === undefined ? target.doc : target.hop.ret;
+  // a hop off a FANNED subject (a fanned to-many hop, a bound fan) is a
+  // sequence — one target per subject row, flattened by the outer
+  // phrase — never an array value; off a singular subject it is a
+  // value: the row (to-one) or the array of rows (to-many)
+  let many = target.hop !== undefined && target.hop.many;
+  let fan = target.hop !== undefined && target.hop.fan;
+  if (!BARE_VAR_RE.test(subject)) {
+    const binding = `r${sink.next++}`;
+    chain.push({ binding, source: subject });
+    subject = '$' + binding;
+    many = true;
+    fan = true;
+  }
+  const binding = `r${sink.next++}`;
+  const where = relation.kind === 'oneToMany'
+    ? { $eq: [`$${binding}${memberSegment(relation.via)}`, `${subject}${memberSegment(relation.targetKey)}`] }
+    : { $eq: [`$${binding}${memberSegment(relation.targetKey)}`, `${subject}${memberSegment(relation.via)}`] };
+  chain.push({ binding, source: entityRootOf(relation.to), where });
+  sink.hops.push({ member, kind: relation.kind, binding });
+  const targetTable = resolve(relation.to);
+  return makeHop(
+    { chain, ret: '$' + binding, many: many || relation.kind === 'oneToMany', fan },
+    target.epoch,
+    targetTable === undefined ? undefined : { table: targetTable, resolve, sink });
+}
+
+/**
+ * A member of the hop's target row: the phrase returns the path over its
+ * last binding, extended. A to-many hop is an ARRAY of rows until it is
+ * fanned — a member read off the array is refused with the fix named,
+ * where the same read off a stored array would answer nothing.
+ * @param {any} target
+ * @param {string} segment - the spelled path step (`.email`, `['odd key']`)
+ */
+function extendHop(target, segment) {
+  const hop = target.hop;
+  if (hop.many && !hop.fan) {
+    throw new LinqBuildError('JL0005',
+      `${segment} is read off a to-many relation, which holds an array of related rows — `
+      + `fan them first (.all()${segment}), index one (.at(0)), or aggregate the array`);
+  }
+  return makeHop({ ...hop, ret: `${hop.ret}${segment}` }, target.epoch, undefined);
+}
+
+/**
+ * A fresh hop sink for one capture: the bindings allocated so far
+ * (`r1`, `r2`, … — numbered per capture, across all its roots) and the
+ * hops recorded, in the order the callback navigated them.
+ * @returns {{ hops: { member: string, kind: string, binding: string }[], next: number }}
+ */
+export function createHopSink() {
+  return { hops: [], next: 1 };
+}
+
+/**
+ * A binding root whose items are an entity's rows: the bare name when
+ * there is no relation table to navigate, else the root record carrying
+ * the table, the resolver for the other roots of its scope, and the
+ * capture's sink.
+ * @param {string} name - the binding (`it`, `it2`)
+ * @param {{ table: any, resolve: (name: string) => any } | null} relations
+ * @param {ReturnType<typeof createHopSink>} sink
+ * @returns {any}
+ */
+export function rowRoot(name, relations, sink) {
+  return relations === null
+    ? name
+    : { doc: '$' + name, pathable: true, nav: { table: relations.table, resolve: relations.resolve, sink } };
+}
+
+/**
+ * A group-join's group root: the `$g` array value with its `$g[*]` fan
+ * — and, when the inner rows have a relation table, that table on the
+ * FAN, so `g.all().author` hops from each row.
+ * @param {{ table: any, resolve: (name: string) => any } | null} relations
+ * @param {ReturnType<typeof createHopSink>} sink
+ * @returns {any}
+ */
+export function groupRoot(relations, sink) {
+  const root = { doc: '$g', pathable: true, seq: '$g[*]' };
+  return relations === null
+    ? root
+    : { ...root, nav: { table: relations.table, resolve: relations.resolve, sink }, navOnFan: true };
+}
+
+//#endregion
 
 /**
  * Build one expression proxy.
@@ -442,12 +675,19 @@ const METHODS = {
  * @param {number} epoch - the owning capture
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
- * @param {string} [seq] - for a root standing for an array VALUE: the
- *   fanned path its aggregates range over (`'$g[*]'`)
+ * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any }} [extra] -
+ *   `seq`: for a value standing for an array or a hop, the fanned form
+ *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
+ *   relation table of the rows the value stands for, with the resolver
+ *   for the other roots and the capture's hop sink; `navOnFan`: the
+ *   table applies to the fan, not the value; `hop`: the hop chain
  * @returns {any}
  */
-function makeExpr(doc, epoch, pathable, seq = undefined) {
-  const record = { doc, epoch, pathable, seq };
+function makeExpr(doc, epoch, pathable, extra = undefined) {
+  const record = {
+    doc, epoch, pathable,
+    seq: extra?.seq, nav: extra?.nav, navOnFan: extra?.navOnFan === true, hop: extra?.hop,
+  };
   return new Proxy(record, {
     get(target, prop) {
       if (prop === NODE) return target;
@@ -460,15 +700,23 @@ function makeExpr(doc, epoch, pathable, seq = undefined) {
         };
       }
       assertLive(target);
-      if (target.pathable) {
-        const step = SHORTHAND_RE.test(prop)
-          ? `${target.doc}.${prop}`
-          : `${target.doc}${bracketName(prop)}`;
-        return makeExpr(step, target.epoch, true);
-      }
-      return makeExpr({ $get: [target.doc, prop] }, target.epoch, false);
+      return member(target, prop);
     },
   });
+}
+
+/**
+ * Member access: a relation name records a hop; a hop's target extends
+ * the phrase's return path; a pathable path extends; anything else is
+ * a `$get` over the operator result.
+ * @param {any} target
+ * @param {string} prop
+ */
+function member(target, prop) {
+  if (navigates(target, prop)) return startHop(target, prop);
+  if (target.hop !== undefined) return extendHop(target, memberSegment(prop));
+  if (target.pathable) return makeExpr(`${target.doc}${memberSegment(prop)}`, target.epoch, true);
+  return makeExpr({ $get: [target.doc, prop] }, target.epoch, false);
 }
 
 /**
@@ -496,13 +744,15 @@ function makeParams(declared, epoch) {
  * Run one capture: `fn` receives a proxy per root (plus the parameters
  * proxy last) and its result becomes an expression via
  * {@link toExpression}. A root is a binding NAME (`'it'` → the pathable
- * `$it`) or a `{ doc, pathable, seq? }` record for a bound root
- * (groupJoin's group: the `$g` array, whose aggregates fan over
- * `$g[*]`). Captures nest — a chain built and run inside a callback is
- * ordinary — but a proxy used outside its capture, or an enclosing
- * capture's proxy used inside a nested one, is `JL0002`.
+ * `$it`) or a `{ doc, pathable, seq?, nav?, navOnFan? }` record for a
+ * bound root ({@link rowRoot}: an entity's rows with their relation
+ * table; {@link groupRoot}: groupJoin's group, the `$g` array whose
+ * aggregates fan over `$g[*]`). Captures nest — a chain built and run
+ * inside a callback is ordinary — but a proxy used outside its capture,
+ * or an enclosing capture's proxy used inside a nested one, is `JL0002`.
  * @param {(...roots: any[]) => any} fn - the user callback
- * @param {readonly (string | { doc: any, pathable: boolean, seq?: string })[]} roots
+ * @param {readonly (string | { doc: any, pathable: boolean, seq?: string,
+ *   nav?: any, navOnFan?: boolean })[]} roots
  * @param {Set<string>} declaredParams
  * @param {boolean} [fold] - whether a pure data tree folds into one
  *   `$const` (the chain's spelling) or is a constructor tree (a pen's)
@@ -512,7 +762,7 @@ export function captureExpression(fn, roots, declaredParams, fold = true) {
   const epoch = ++epochCounter;
   const proxies = roots.map((root) => (typeof root === 'string'
     ? makeExpr('$' + root, epoch, true)
-    : makeExpr(root.doc, epoch, root.pathable, root.seq)));
+    : makeExpr(root.doc, epoch, root.pathable, root)));
   proxies.push(makeParams(declaredParams, epoch));
   captureStack.push(epoch);
   try {
