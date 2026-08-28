@@ -23,6 +23,17 @@
  * stylesheet — the D6 shapes as every binding carries them
  * (`OUTCOME_META_MEMBERS` / `OUTCOME_ERROR_MEMBERS` in the client module
  * are the runtime twins; a test holds the text to them).
+ *
+ * One convention rides on top of emit's reading, the suite's: a string
+ * with `format: "date-time"` or `format: "date"` is the `DateTime`
+ * brand, so a consumer's generated types agree with `@jarenjs/db`'s
+ * entity types (`entityEmitModel`) and `@jarenjs/linq`'s schema pen,
+ * which both read a date format that way. Emit itself records a format
+ * only as a dropped constraint, so the brand is applied HERE, by
+ * rewriting date-formatted string nodes to a `$ref` of one shared
+ * definition before emit reads the document — in every position, an
+ * array item as much as a member — and giving that definition the brand
+ * intersection.
  */
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
@@ -64,6 +75,72 @@ function pascal(word) {
     out += p.charAt(0).toUpperCase() + p.slice(1);
   }
   return out;
+}
+
+/** The two formats that carry the brand. */
+const DATE_FORMATS = ['date-time', 'date'];
+
+/** The definition name the brand takes when the contract leaves it free. */
+const DATE_TIME = 'DateTime';
+
+/**
+ * Rewrite every date-formatted string node to a reference to the shared
+ * brand definition, in every position. Nodes are rebuilt, never mutated:
+ * the schemas here are the compiled document's own frozen subtrees.
+ * @param {any} node
+ * @param {string} name - the brand definition's name in this document
+ * @returns {any}
+ */
+function brandDates(node, name) {
+  if (Array.isArray(node)) return node.map((item) => brandDates(item, name));
+  if (node === null || typeof node !== 'object') return node;
+  /** @type {Record<string, any>} */
+  const out = {};
+  const keys = Object.keys(node);
+  for (let i = 0; i < keys.length; i++) setObjectMember(out, keys[i], brandDates(node[keys[i]], name));
+  if (!DATE_FORMATS.includes(/** @type {any} */ (out.format))) return out;
+  const { type, format: _format, ...rest } = out;
+  if (type === 'string') return { $ref: `#/$defs/${name}`, ...rest };
+  // a nullable date: the brand or null, the rest of the node kept
+  if (Array.isArray(type) && type.length === 2 && type.includes('string') && type.includes('null')) {
+    return { anyOf: [{ $ref: `#/$defs/${name}` }, { type: 'null' }], ...rest };
+  }
+  return out;
+}
+
+/** Whether a document reaches a date-formatted string anywhere. */
+function usesDates(node) {
+  if (Array.isArray(node)) return node.some(usesDates);
+  if (node === null || typeof node !== 'object') return false;
+  if (DATE_FORMATS.includes(node.format)) return true;
+  return Object.values(node).some(usesDates);
+}
+
+/**
+ * Replace the brand definition's compiled declaration — a plain
+ * `string` — with the brand intersection `string & { __jarenTag:
+ * 'date-time' }`, structurally identical to `@jarenjs/db`'s and
+ * `@jarenjs/linq`'s.
+ * @param {any} model
+ * @param {string} name
+ */
+function brandDeclaration(model, name) {
+  const declaration = model.declarations.find((/** @type {any} */ d) => d.name === name);
+  /* c8 ignore next -- the definition is added exactly when it is referenced */
+  if (declaration === undefined) return;
+  declaration.type = {
+    kind: 'intersection',
+    parts: [{ kind: 'primitive', primitive: 'string' }, {
+      kind: 'object',
+      members: [{
+        kind: 'member', name: '__jarenTag',
+        type: { kind: 'literal', value: 'date-time' }, required: true,
+        constraints: [], doc: [],
+      }],
+    }],
+  };
+  declaration.doc = ['An RFC 3339 string branded for the date operators;',
+    'structurally identical to the @jarenjs/linq and @jarenjs/db brand.'];
 }
 
 /**
@@ -117,7 +194,20 @@ export function contractTypeModel(contract, ops, source) {
   }
   const names = Object.keys(contractDefs);
   for (let i = 0; i < names.length; i++) setObjectMember(defs, names[i], contractDefs[names[i]]);
-  const model = compileEmitModel({ $defs: defs }, { name: 'Contract', source });
+  /** @type {Record<string, any>} */
+  let root = defs;
+  /** @type {string | null} */
+  let brand = null;
+  if (usesDates(defs)) {
+    // the brand takes its own name unless the contract already spells it
+    brand = taken.has(DATE_TIME) ? unique(DATE_TIME) : DATE_TIME;
+    root = { [brand]: { type: 'string' } };
+    const branded = brandDates(defs, brand);
+    const keys = Object.keys(branded);
+    for (let i = 0; i < keys.length; i++) setObjectMember(root, keys[i], branded[keys[i]]);
+  }
+  const model = compileEmitModel({ $defs: root }, { name: 'Contract', source });
+  if (brand !== null) brandDeclaration(model, brand);
   const declarations = model.declarations.filter((d) => d.name !== model.root);
   const types = renderTypeScript({ ...model, declarations }, { banner: false });
   return { types, rows, model: { ...model, declarations } };

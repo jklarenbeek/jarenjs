@@ -268,8 +268,15 @@ void renderMermaid(source, { dateNames: undefined })[0];
   '@jarenjs/linq': `
 import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
 import * as m from '@jarenjs/linq/model';
+import * as sc from '@jarenjs/linq/schema';
+import { defineContract, read, http } from '@jarenjs/linq/contract';
 import { open } from '@jarenjs/linq/db';
 import { nodeDriver } from '@jarenjs/db/node';
+const api = defineContract({ id: 'shop' }, {
+  'catalog.load': read({ output: sc.object({ revision: sc.integer() }), http: http({ method: 'GET', path: '/api/catalog' }) }),
+});
+const contract: any = api.document;
+void (contract.$contract === '0.1' && Object.keys(contract.operations)[0] === 'catalog.load');
 const model = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string() }) } });
 const opening = open(model, { driver: nodeDriver() });
 void opening.then(async (client) => {

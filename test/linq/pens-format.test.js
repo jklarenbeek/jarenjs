@@ -47,7 +47,7 @@ function fencePairs(markdown, heading) {
   return pairs;
 }
 
-for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3], ['migration', '5.2 Worked examples', 2], ['client', '6.2 Worked examples', 1]]) {
+for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3], ['migration', '5.2 Worked examples', 2], ['client', '6.2 Worked examples', 1], ['contract', '7.2 Worked examples', 2]]) {
   describe(`PENS-FORMAT — the ${pen} pen's worked examples are what the pen emits`, () => {
     const markdown = fs.readFileSync(DOC, 'utf8');
     const pairs = fencePairs(markdown, heading);

@@ -151,11 +151,19 @@ None declared.
 
 # Types
 
+## DateTime
+
+An RFC 3339 string branded for the date operators;
+
+structurally identical to the @jarenjs/linq and @jarenjs/db brand.
+
+Type: `string and object`
+
 ## CatalogLoadInput
 
 | Member | Type | Required |
 | --- | --- | --- |
-| `since` | `string` | no |
+| `since` | `DateTime` | no |
 
 ## Product
 

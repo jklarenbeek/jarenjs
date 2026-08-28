@@ -35,12 +35,16 @@ const PENDING = Symbol('pending');
 const token = (key) => key.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /**
- * Assemble the document of one builder.
- * @param {any} root - the builder whose document this is
- * @returns {any} the deep-frozen JSON Schema document
+ * A hoisting context one or more roots share: every `named()` builder
+ * they reach becomes one entry of a single `$defs` block, in
+ * first-reference order. A schema document has one root; a contract
+ * document's roots are its operations' `input`, `output` and error
+ * schemas, so the same walk hoists a whole contract's definitions to
+ * its own root.
+ * @returns {any}
  */
-export function assemble(root) {
-  const ctx = {
+export function createHoist() {
+  return {
     /** @type {Map<string, any>} definition name → body, in discovery order */
     defs: new Map(),
     /** @type {Map<string, any>} definition name → the builder that owns it */
@@ -48,7 +52,22 @@ export function assemble(root) {
     /** @type {Map<string, string>} names demanded by `ref()` → where */
     demanded: new Map(),
   };
-  const doc = emitNode(root, ctx, '');
+}
+
+/**
+ * Emit one builder into a shared hoisting context (`emitInto(builder,
+ * ctx, at)`): the same walk `assemble` runs, with the definitions
+ * landing in the caller's context instead of a private one.
+ */
+export { emitNode as emitInto };
+
+/**
+ * The `$defs` block a context collected, or `null` when it collected
+ * none; every name a `ref()` demanded must be answered by then.
+ * @param {any} ctx
+ * @returns {any}
+ */
+export function hoistedDefs(ctx) {
   for (const [name, at] of ctx.demanded) {
     if (!ctx.defs.has(name)) {
       throw new LinqBuildError('JL0103',
@@ -56,10 +75,23 @@ export function assemble(root) {
         + `named('${name}', …) somewhere the root can reach`, at);
     }
   }
-  if (ctx.defs.size === 0) return deepFreeze(doc);
-  const out = {};
+  if (ctx.defs.size === 0) return null;
   const defs = {};
   for (const [name, body] of ctx.defs) setObjectMember(defs, name, body);
+  return defs;
+}
+
+/**
+ * Assemble the document of one builder.
+ * @param {any} root - the builder whose document this is
+ * @returns {any} the deep-frozen JSON Schema document
+ */
+export function assemble(root) {
+  const ctx = createHoist();
+  const doc = emitNode(root, ctx, '');
+  const defs = hoistedDefs(ctx);
+  if (defs === null) return deepFreeze(doc);
+  const out = {};
   setObjectMember(out, '$defs', defs);
   if (typeof doc === 'boolean') {
     // a boolean root with definitions: nothing references them, but a

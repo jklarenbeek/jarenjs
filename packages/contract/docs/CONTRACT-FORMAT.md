@@ -17,6 +17,15 @@ declared errors, a behavior policy and an HTTP binding. It is compiled
 path matcher, and it is the single source every artifact around it is
 projected from.
 
+A contract document is written by hand, or by code: `@jarenjs/linq/
+contract` is the pen that writes exactly this format — the same
+operations, schemas, policies and bindings, in §12.1's member order,
+with the operations' named schemas hoisted into `$defs` — and it types
+the client, the handler table and the AI tools from the same builders,
+without running the TypeScript projection of §12.3. The three worked
+examples below are rebuilt through it, byte for byte, by its own test
+suite.
+
 Format 0.1 covers the document, its compilation, the HTTP binding's
 *shape* (§2–§6), the HTTP **server** binding that carries it (§7–§9:
 the request pipeline and its wire errors, idempotency and the ledger
@@ -48,22 +57,22 @@ coming lines of this package and will append their sections here.
   "version": "5",
   "compat": ["4"],
   "$defs": {
+    "Catalog": {
+      "type": "object",
+      "properties": {
+        "revision": { "type": "integer" },
+        "products": { "type": "array", "items": { "$ref": "#/$defs/Product" } }
+      },
+      "required": ["revision", "products"]
+    },
     "Product": {
       "type": "object",
-      "required": ["id", "name", "price"],
       "properties": {
         "id": { "type": "integer" },
         "name": { "type": "string", "minLength": 1 },
         "price": { "type": "number", "minimum": 0 }
-      }
-    },
-    "Catalog": {
-      "type": "object",
-      "required": ["revision", "products"],
-      "properties": {
-        "revision": { "type": "integer" },
-        "products": { "type": "array", "items": { "$ref": "#/$defs/Product" } }
-      }
+      },
+      "required": ["id", "name", "price"]
     },
     "Conflict": { "type": "object", "properties": { "current": { "$ref": "#/$defs/Product" } } }
   },
@@ -81,12 +90,12 @@ coming lines of this package and will append their sections here.
       "kind": "command",
       "input": {
         "type": "object",
-        "required": ["id", "revision", "product"],
         "properties": {
           "id": { "type": "integer" },
           "revision": { "type": "integer" },
           "product": { "$ref": "#/$defs/Product" }
-        }
+        },
+        "required": ["id", "revision", "product"]
       },
       "output": { "$ref": "#/$defs/Product" },
       "errors": {
@@ -102,7 +111,7 @@ coming lines of this package and will append their sections here.
     },
     "image.bytes": {
       "kind": "read",
-      "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } } },
+      "input": { "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"] },
       "output": true,
       "http": { "method": "GET", "path": "/api/images/{id}", "media": "application/octet-stream" }
     }
@@ -427,20 +436,20 @@ The three worked examples this document is tested against, complete:
       "kind": "command",
       "input": {
         "type": "object",
-        "required": ["id", "doc"],
         "properties": {
           "id": { "type": "string" },
           "doc": { "type": "array", "items": { "type": "object" } },
           "dry": { "type": "boolean" }
-        }
+        },
+        "required": ["id", "doc"]
       },
       "output": true,
       "policy": { "idempotency": "optional" },
-      "http": { "method": "PUT", "path": "/docs/:id", "body": "doc", "in": { "dry": "query" }, "status": 204 }
+      "http": { "method": "PUT", "path": "/docs/:id", "in": { "dry": "query" }, "body": "doc", "status": 204 }
     },
     "doc.remove": {
       "kind": "command",
-      "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } },
+      "input": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
       "output": true
     }
   }
@@ -1554,6 +1563,17 @@ literal union), `UrlOperations` (opaque operations included, for
 a test holds the text to them; `details` is `unknown` and `status`
 `number | null`, never optional members. An input-less operation's
 `input` is `null`; an opaque operation appears only in `UrlOperations`.
+
+One convention rides on top of emit's reading, and it is the suite's:
+a string with `format: "date-time"` or `format: "date"` is declared as
+`DateTime` — `string & { __jarenTag: 'date-time' }` — rendered once per
+document and referenced from every position, an array item as much as a
+member. Emit itself records a format only as a dropped constraint; the
+brand is applied by this projection so a consumer's generated types
+agree with `@jarenjs/db`'s entity types (`entityEmitModel`) and with
+`@jarenjs/linq`'s schema and contract pens, which read a date format the
+same way. A contract that already declares a `$defs` entry named
+`DateTime` keeps it; the brand takes the next free name.
 
 ### §12.4 Markdown
 

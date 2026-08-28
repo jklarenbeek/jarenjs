@@ -51,8 +51,9 @@ published as JSON Schema in
   "$contract": "0.1",
   "id": "shop",
   "$defs": {
-    "Product": { "type": "object", "required": ["id", "name"],
-                 "properties": { "id": { "type": "integer" }, "name": { "type": "string" } } }
+    "Product": { "type": "object",
+                 "properties": { "id": { "type": "integer" }, "name": { "type": "string" } },
+                 "required": ["id", "name"] }
   },
   "operations": {
     "catalog.load": {
@@ -64,9 +65,10 @@ published as JSON Schema in
     },
     "product.save": {
       "kind": "command",
-      "input":  { "type": "object", "required": ["id", "revision", "product"], "properties": {
+      "input":  { "type": "object", "properties": {
                   "id": { "type": "integer" }, "revision": { "type": "integer" },
-                  "product": { "$ref": "#/$defs/Product" } } },
+                  "product": { "$ref": "#/$defs/Product" } },
+                  "required": ["id", "revision", "product"] },
       "output": { "$ref": "#/$defs/Product" },
       "errors": { "conflict": { "status": 409 }, "not-found": { "status": 404 } },
       "policy": { "idempotency": "required", "revision": "input:/revision" },
@@ -74,7 +76,7 @@ published as JSON Schema in
     },
     "image.bytes": {
       "kind": "read",
-      "input":  { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } } },
+      "input":  { "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"] },
       "output": true,
       "http":   { "method": "GET", "path": "/api/images/{id}", "media": "application/octet-stream" }
     }
@@ -89,6 +91,53 @@ are decoded by a normalizer compiled over exactly those members; body
 members are never coerced. An operation without `http` is bound to the
 canonical `POST /<op-id>`. A non-JSON `media` marks an operation
 *opaque*: routed and matched, never validated as JSON.
+
+## The same document, by code
+
+`@jarenjs/linq/contract` is the pen that writes this format. The
+builders are the schema pen's, every `named()` schema is hoisted into
+the contract's `$defs`, the members land in the order §12.1 fixes, and
+no default is written — so the document below is byte for byte the one
+above:
+
+```js
+import * as s from '@jarenjs/linq/schema';
+import { command, defineContract, error, http, read } from '@jarenjs/linq/contract';
+
+const Product = s.named('Product', s.object({ id: s.integer(), name: s.string() }).open());
+
+export const shop = defineContract({ id: 'shop' }, {
+  'catalog.load': read({
+    input: s.object({ since: s.string().format('date-time').optional() }).open(),
+    output: s.array(Product),
+    policy: { task: 'switch', cache: 'revision' },
+    http: http({ method: 'GET', path: '/api/catalog' }),
+  }),
+  'product.save': command({
+    input: s.object({ id: s.integer(), revision: s.integer(), product: Product }).open(),
+    output: Product,
+    errors: { conflict: error({ status: 409 }), 'not-found': error({ status: 404 }) },
+    policy: { idempotency: 'required', revision: 'input:/revision' },
+    http: http({ method: 'PUT', path: '/api/products/{id}/master' }),
+  }),
+  'image.bytes': read({
+    input: s.object({ id: s.integer() }).open(),
+    output: true,
+    http: http({ method: 'GET', path: '/api/images/{id}', media: 'application/octet-stream' }),
+  }),
+});
+
+compileContract(shop.document);                    // the same compile, the same errors
+```
+
+The types come with it, without the `types` projection: `ContractOf<typeof
+shop>` is the operation map, and `typedClient`, `typedHandlers` and
+`typedTools` carry it onto a client, a handler table and an AI toolbox —
+proven type for type equal to what `toTypeScript` declares for the same
+document, the `DateTime` brand on a date-formatted string included.
+The pen's normative section is
+[PENS-FORMAT §7](../linq/docs/PENS-FORMAT.md); it imports nothing of
+this package.
 
 ## Compile once, use everywhere
 

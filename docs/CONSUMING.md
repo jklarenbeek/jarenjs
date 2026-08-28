@@ -95,7 +95,8 @@ tree-shaking gate holds this: a bundle that never imports `./project`
 carries no emit code.
 
 Which linq subpath needs what: `.` (the chain) and the pens — `./schema`,
-`./model`, `./jslt`, `./migration` — need only `core` + `json`; `./db`,
+`./model`, `./jslt`, `./migration`, `./contract` — need only `core` +
+`json` (the contract pen imports no byte of `@jarenjs/contract`); `./db`,
 the store's typed front door, additionally needs `@jarenjs/db`,
 `@jarenjs/validate` and `@jarenjs/formats`, which `@jarenjs/linq`
 declares as OPTIONAL peer dependencies: `npm install @jarenjs/linq` alone

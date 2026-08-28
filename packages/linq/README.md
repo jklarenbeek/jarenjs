@@ -178,6 +178,42 @@ in CI, a model that moved without a plan (`jaren-db check`). The mapping
 table and the worked examples are
 [docs/PENS-FORMAT.md §5](docs/PENS-FORMAT.md#5-the-migration-pen--jarenjslinqmigration).
 
+## By code: the contract pen
+
+`@jarenjs/linq/contract` writes `$contract` 0.1 documents — the
+operations two ends exchange, their schemas, their policy and their HTTP
+binding — with the operations' `named()` schemas hoisted into the
+contract's own `$defs` and every member in the order CONTRACT-FORMAT
+§12.1 fixes, so the pen's document and its own public projection differ
+by nothing but the defaults the compiler materializes. The types come
+with it: `ContractOf<typeof shop>` is the operation map, and
+`typedClient`, `typedHandlers` and `typedTools` carry it onto a client,
+a handler table and an AI toolbox without running the TypeScript
+projection.
+
+```js
+import * as s from '@jarenjs/linq/schema';
+import { defineContract, command, error, http } from '@jarenjs/linq/contract';
+import { typedClient, typedHandlers } from '@jarenjs/linq/contract';
+
+const Product = s.named('Product', s.object({ id: s.integer(), name: s.string() }).open());
+
+export const shop = defineContract({ id: 'shop' }, {
+  'product.save': command({
+    input: s.object({ id: s.integer(), product: Product }).open(),
+    output: Product,
+    errors: { conflict: error({ status: 409 }) },
+    http: http({ method: 'PUT', path: '/api/products/{id}' }),
+  }),
+});
+
+const api = typedClient(openHttpClient(compileContract(shop.document), { baseUrl }), shop);
+const outcome = await api.invoke('product.save', { id: 1, product });   // Outcome<Product>
+```
+
+The mapping table and the worked examples are
+[docs/PENS-FORMAT.md §7](docs/PENS-FORMAT.md#7-the-contract-pen--jarenjslinqcontract).
+
 ## The front door: `@jarenjs/linq/db`
 
 `open(model, { driver })` opens `@jarenjs/db`'s store and fronts it with

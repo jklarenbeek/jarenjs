@@ -361,3 +361,55 @@ if (stated === null || Number(stated[1]) !== measuredKb) {
 }
 
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs; CONSUMING states ${measuredKb} kB).`);
+
+// The contract pen (`@jarenjs/linq/contract`) writes `$contract` 0.1
+// documents whose schemas are the schema pen's — so the probe measures
+// the two together (a contract without a schema builder is not a
+// contract), and the ceiling is that measured pair. What it must NOT
+// carry: a chain module, a query engine, a validator, another pen, and
+// above all any byte of `@jarenjs/contract`, whose compiler is the only
+// judge of what the document means. The chain carries no contract
+// module in return.
+const contractPenResult = await build({
+  stdin: {
+    contents: "import { defineContract, read, http } from '@jarenjs/linq/contract'; import * as s from '@jarenjs/linq/schema'; export const C = defineContract({ id: 'c' }, { 'a.b': read({ output: s.object({ id: s.string() }), http: http({ method: 'GET', path: '/a' }) }) }).document;",
+    resolveDir: process.cwd(),
+    sourcefile: 'contract-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const contractPenBytes = contractPenResult.outputFiles[0].contents.length;
+const contractPenInputs = Object.values(contractPenResult.metafile.outputs)[0].inputs;
+const contractPenChainLeak = Object.entries(contractPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (contractPenChainLeak.length > 0)
+  throw new Error(`The contract pen pulled chain modules into the bundle: ${contractPenChainLeak.map(([file]) => file).join(', ')}`);
+const contractPenPackageLeak = Object.entries(contractPenInputs)
+  .filter(([file, info]) => /packages\/(contract|validate|emit|db|formats|refs|json)\//.test(file)
+    && info.bytesInOutput > 0);
+if (contractPenPackageLeak.length > 0)
+  throw new Error(`The contract pen pulled a package it must not carry into the bundle: ${contractPenPackageLeak.map(([file]) => file).join(', ')}`);
+const contractPenLeak = Object.entries(contractPenInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|db)\//.test(file) && info.bytesInOutput > 0);
+if (contractPenLeak.length > 0)
+  throw new Error(`The contract pen pulled another pen into the bundle: ${contractPenLeak.map(([file]) => file).join(', ')}`);
+if (contractPenBytes > 46000)
+  throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
+const chainContractLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
+if (chainContractLeak.length > 0)
+  throw new Error(`The chain pulled the contract pen into the bundle: ${chainContractLeak.map(([file]) => file).join(', ')}`);
+const schemaContractLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
+if (schemaContractLeak.length > 0)
+  throw new Error(`The schema pen pulled the contract pen into the bundle: ${schemaContractLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${contractPenBytes} byte contract-pen bundle, the schema pen included; no chain module, no @jarenjs/contract bytes, no other pen; the chain and the schema pen carry no contract module).`);

@@ -74,11 +74,11 @@ is required, the modes reuse the `createTaskEffect` vocabulary
 (`parallel`/`concat`/`switch`/`exhaust`), and failure is fail-closed —
 the first rejection aborts every in-flight signal and the source.
 
-## The pens (`src/schema/`, `src/model/`, `src/jslt/`, `src/migration/`)
+## The pens (`src/schema/`, `src/model/`, `src/jslt/`, `src/migration/`, `src/contract/`)
 
 A pen is a by-code front-end to one of the suite's document formats,
 exported under its own subpath (`@jarenjs/linq/schema`, `/model`, `/jslt`,
-`/migration`; `.` stays the chain). The rule set is one paragraph: the document is the
+`/migration`, `/contract`; `.` stays the chain). The rule set is one paragraph: the document is the
 deliverable (plain, deep-frozen JSON, memoized under `.schema`,
 `toJSON()` returns it); the pen imports no engine and re-implements no
 compile check — it refuses only what it cannot spell, with a `JL01xx`
@@ -110,6 +110,15 @@ through one mixin; the JSLT pen (`src/jslt/`) is `body.js` (the body
 capture, `apply`/`op` lifted into it through `liftExpression`, the `[]`
 refusal) and `rules.js` (the rule object and the envelope, in Appendix
 A's member order) — it imports nothing of `src/schema/` but `brand.js`.
+The contract pen (`src/contract/`) is `operation.js` (the three kinds,
+the error declaration and the policy vocabulary), `http.js` (the binding
+and the §4.2 path-template scan, mirrored from the compiler's parser)
+and `define.js` (the document, in CONTRACT-FORMAT §12.1's member order,
+and the three identity wrappers that type a client, a handler table and
+an AI toolbox). It reaches back into `schema/emit.js` for one thing —
+`createHoist`/`emitInto`/`hoistedDefs`, the same `$defs` walk `assemble`
+runs, over several roots instead of one — so a contract's `$defs` are
+hoisted to the CONTRACT's root by the one implementation.
 
 ## The client (`src/db/`)
 

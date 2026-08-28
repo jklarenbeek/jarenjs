@@ -66,8 +66,9 @@ export const LINQ_CODES = Object.freeze({
  *    several entity roots (`roots`) and has no `root` of its own — a
  *    store with entities; chain over one of them (`store.entity(name)`)
  *
- * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`) and
- * the client (`/db`; PENS-FORMAT.md §1.3) refuse with the `JL01xx` codes:
+ * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`,
+ * `/contract`) and the client (`/db`; PENS-FORMAT.md §1.3) refuse with
+ * the `JL01xx` codes:
  *
  *  - `JL0101` — a pen received a value it cannot spell: a function,
  *    symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance or a
@@ -76,7 +77,9 @@ export const LINQ_CODES = Object.freeze({
  *  - `JL0102` — a construct the format cannot carry: a function
  *    `refine`/`transform`, a coercion the normalizer would never run,
  *    closed objects under `allOf`, an annotation on `never()`, an
- *    `apply()` as a bare object member, a `match` of `{}`
+ *    `apply()` as a bare object member, a `match` of `{}`, a path
+ *    template form CONTRACT-FORMAT §4.2 reserves, an operation `kind`
+ *    outside the three
  *  - `JL0103` — two distinct builders under one `$defs` name, a
  *    `ref()` no definition answers, or a `lazy()` that is not named
  *  - `JL0104` — a pen-owned keyword written through `meta()`, or a
