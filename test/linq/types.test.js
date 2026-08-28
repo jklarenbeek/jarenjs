@@ -110,3 +110,15 @@ describe('runtime twins of the type-level claims', () => {
     assert.deepStrictEqual(from(rows, { compileTypeTest }).ofType(Strict.schema).toArray(), [{ kind: 'a' }]);
   });
 });
+
+describe('a provider keeps its item type through the phantom (the runtime twin)', () => {
+  it('a rooted provider answers the rows the chain typed; its root rides in the document', () => {
+    const provider = {
+      root: '$.User[*]',
+      execute: (document) => (Array.isArray(document) ? ['ada@x'] : undefined),
+    };
+    const emails = from(provider).select((u) => u.email);
+    assert.deepStrictEqual(emails.toArray(), ['ada@x']);
+    assert.deepStrictEqual(emails.toDocument(), { $for: { it: '$.User[*]' }, $return: '$it.email' });
+  });
+});

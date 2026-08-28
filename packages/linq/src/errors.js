@@ -22,10 +22,12 @@ export const LINQ_CODES = Object.freeze({
   JL0004: 'an undeclared or reserved parameter name was used',
   JL0005: 'an operator was used invalidly at build time',
   JL0006: 'an unsupported operator was invoked',
+  JL0007: 'a provider serves several entity roots and has no root of its own',
   JL0101: 'a pen received a value it cannot spell: not JSON, or not what the keyword takes',
   JL0102: 'a pen was asked for a construct the format cannot carry',
   JL0103: 'a $defs name collision, a dangling ref, or an unnamed recursion',
   JL0104: 'a pen-owned keyword through meta(), or an external a captured rule did not declare',
+  JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
@@ -58,9 +60,12 @@ export const LINQ_CODES = Object.freeze({
  *    document)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
+ *  - `JL0007` — `from()`/`fromAsync()` received a provider that serves
+ *    several entity roots (`roots`) and has no `root` of its own — a
+ *    store with entities; chain over one of them (`store.entity(name)`)
  *
- * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`; PENS-FORMAT.md
- * §1.3) refuse with the `JL01xx` codes:
+ * The pens (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`;
+ * PENS-FORMAT.md §1.3) refuse with the `JL01xx` codes:
  *
  *  - `JL0101` — a pen received a value it cannot spell: a function,
  *    symbol, bigint, `NaN`, `±Infinity`, `-0`, a class instance or a
@@ -76,6 +81,10 @@ export const LINQ_CODES = Object.freeze({
  *    captured rule naming an external it did not declare (a `check()`
  *    or `body()` external other than `root`/`path` and, for a body,
  *    its declared parameters; a `compute()` external at all)
+ *  - `JL0106` — a migration step names an entity or collection the
+ *    target model does not declare (`transform`, `assert`, `derive`),
+ *    or a `transform` over a planned document finds no draft to
+ *    replace, or two drafts for one name
  */
 export class LinqBuildError extends CodedError {
   /**

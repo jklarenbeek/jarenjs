@@ -244,3 +244,55 @@ if (schemaJsltLeak.length > 0)
   throw new Error(`The schema pen pulled the JSLT pen into the bundle: ${schemaJsltLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${jsltBytes} byte JSLT-pen bundle; no chain module, no schema module beyond brand.js, no engine; the chain and the schema pen carry no jslt module).`);
+
+// The migration pen (`@jarenjs/linq/migration`) writes migration documents
+// whose transforms are bodies (the JSLT pen's capture) and whose identity
+// is the store's shape hash — so it carries `expression.js`, the body
+// module, `@jarenjs/json`'s canonicalizer and `@jarenjs/core`'s hash by
+// construction, and nothing else: no chain module, no query engine, no
+// validator, no store, no schema or model module. The chain and the
+// schema pen carry nothing from `migration/` in return.
+const migrationResult = await build({
+  stdin: {
+    contents: "import { defineMigration } from '@jarenjs/linq/migration'; export const M = defineMigration({ id: 'm', from: { $model: '0.1', entities: {} }, to: { $model: '0.1', entities: {} } }).ddl('SELECT 1').document;",
+    resolveDir: process.cwd(),
+    sourcefile: 'migration-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const migrationBytes = migrationResult.outputFiles[0].contents.length;
+const migrationInputs = Object.values(migrationResult.metafile.outputs)[0].inputs;
+const migrationChainLeak = Object.entries(migrationInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (migrationChainLeak.length > 0)
+  throw new Error(`The migration pen pulled chain modules into the bundle: ${migrationChainLeak.map(([file]) => file).join(', ')}`);
+const migrationPenLeak = Object.entries(migrationInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(schema|model)\//.test(file) && info.bytesInOutput > 0);
+if (migrationPenLeak.length > 0)
+  throw new Error(`The migration pen pulled the schema or model pen into the bundle: ${migrationPenLeak.map(([file]) => file).join(', ')}`);
+const migrationEngineLeak = Object.entries(migrationInputs)
+  .filter(([file, info]) => (/packages\/(validate|emit|db|formats|refs)\//.test(file)
+    || (file.includes('packages/json/') && !/packages\/json\/src\/(canonical|pointer)\.js$/.test(file)))
+    && info.bytesInOutput > 0);
+if (migrationEngineLeak.length > 0)
+  throw new Error(`The migration pen pulled an engine or the store into the bundle: ${migrationEngineLeak.map(([file]) => file).join(', ')}`);
+if (migrationBytes > 24000)
+  throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
+const chainMigrationLeak = Object.entries(chainInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
+if (chainMigrationLeak.length > 0)
+  throw new Error(`The chain pulled the migration pen into the bundle: ${chainMigrationLeak.map(([file]) => file).join(', ')}`);
+const schemaMigrationLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
+if (schemaMigrationLeak.length > 0)
+  throw new Error(`The schema pen pulled the migration pen into the bundle: ${schemaMigrationLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${migrationBytes} byte migration-pen bundle; no chain module, no schema/model module, no engine beyond the canonicalizer and its pointer encoder; the chain and the schema pen carry no migration module).`);

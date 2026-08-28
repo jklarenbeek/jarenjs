@@ -108,7 +108,11 @@ and the column entry carries the width the value is packed to:
 ## 3. Planning and the widening/narrowing rule
 
 `planMigration(fromModel, toModel, { dialect, id, derived })` produces
-`{ migration, report }` by diffing the two models' PHYSICAL plans:
+`{ migration, report }` by diffing the two models' PHYSICAL plans. The
+from-model is the previous model — the previous model FILE, or, under
+the CLI's snapshot discipline (§11), the committed `model.snapshot.json`
+the last `plan` advanced: a database stores shape hashes, never models,
+so the previous shape lives beside the code, where a diff can read it.
 
 - An added collection becomes its full CREATE DDL; a removed
   collection becomes a `DROP TABLE` step whose note says
@@ -336,22 +340,55 @@ drop the index) on a schema the store accepts.
 `jaren-db` drives the workflow (mirroring `jaren-emit`):
 
 ```
-jaren-db plan   --from <model> --to <model> [--store <db>] [--id x] [--out file]
-jaren-db status --model <model> --store <db> --baseline <model> [--migrations <dir>]
-jaren-db apply  --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
-jaren-db check  --model <model> --store <db> --baseline <model> [--migrations <dir>]
-jaren-db shape  --model <model>
+jaren-db plan     --from <model> --to <model> [--store <db>] [--id x] [--out file]
+jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id x] --out file
+jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
+jaren-db status   --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
+jaren-db check    --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+jaren-db shape    --model <model>
 ```
 
+- **A model or a migration is a `.json` file or a MODULE.** `--model`,
+  `--from`, `--to` and `--baseline` accept a `.json` file or a module
+  (`.js`, `.mjs`, `.cjs` — and `.ts` where the host strips types: Node
+  ≥ 24 does by default, and `--no-strip-types` is refused by name)
+  loaded with `import()` and read as its `default` export or its `model`
+  export — the model pen's document, or any object whose `toJSON()`
+  emits one; `--migrations <dir>` reads `.json` files and modules
+  (`default` or `migration` — the migration pen's builder), sorted by
+  file name. A module whose export is not a document, or whose emission
+  is not JSON, fails with the module named. **Modules are pure:** the
+  CLI loads every module TWICE (two `import()`s under distinct
+  cache-busting queries) and refuses one whose two emissions differ —
+  no clock, no env, no randomness — because a migration that hashes
+  differently per load can never match its own history.
 - `plan` diffs two model FILES (a database stores shape hashes, not
-  models — the from-model is the previous model file); with `--store`
-  it first compares the from-model's physical shape with the database
-  itself — never with the history, which would refuse every database
-  that has applied a migration.
-- `check` is the CI command: exit 1 when migrations are pending OR the
-  database drifted; 0 in sync. `--model` is required — without it
-  drift cannot be measured, and `check` refuses rather than print
-  `in sync`.
+  models — the from-model is the previous model file), or, with
+  `--model`, the committed SNAPSHOT against the model: `--snapshot`
+  names it and defaults to `model.snapshot.json` beside the model; a
+  model whose shape equals the snapshot's plans nothing and exits 0;
+  otherwise the migration is written (`--out`) and the snapshot is
+  advanced to the model — without `--out` the plan is printed and the
+  snapshot stays, and the CLI says so. With `--store` it first compares
+  the from-model's physical shape with the database itself — never
+  with the history, which would refuse every database that has applied
+  a migration.
+- `snapshot` writes the model's snapshot (`--snapshot`, the same
+  default) — from the model the store was created with, before the
+  first `plan --model`; with `--types <file>` it also writes emit's
+  TypeScript declaration for the model (`entityEmitModel` rendered by
+  `@jarenjs/emit`, loaded lazily — `@jarenjs/db` does not depend on emit,
+  and a host without it is told exactly what `--types` needs), so a
+  transform over a JSON snapshot can be typed by annotation. Two runs on
+  one input write nothing the second time.
+- `check` is the CI command: exit 1 on an UNPLANNED MODEL CHANGE (a
+  snapshot in use whose shape is not the model's — the model moved and
+  nobody planned; named as such, never as the database's drift), when
+  migrations are pending, OR when the database drifted; 0 in sync.
+  `--model` is required — without it drift cannot be measured, and
+  `check` refuses rather than print `in sync`. `status` reports the same
+  verdict on its `model:` line.
 - `apply` prints every statement, then asks; destructive steps (drop
   table/column, rebuild) print what is lost and ask for that
   separately. `--yes` answers both, `--dry-run` stops after the

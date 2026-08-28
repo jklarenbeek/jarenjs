@@ -17,7 +17,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 
 import { captureExpression, toExpression, requireJsonBinding } from './expression.js';
 import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.js';
-import { classifySource, compileDocument, executeInMemory } from './provider.js';
+import { classifySource, compileDocument, executeInMemory, providerRoot, sharesScope } from './provider.js';
 import { asyncFromSequence } from './async.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { schemaOf } from './schema-of.js';
@@ -156,23 +156,30 @@ export class Sequence {
     return this.#with({ kind: 'groupBy', key: this.#capture(key) });
   }
 
-  /** Both sides read ONE input document in 0.1 — a query document has
-   * one root. Cross-source composition arrives with the relational order.
-   * Returns the merged parameter bindings: the inner side's declared
-   * externals ride along, because its document is embedded whole and
-   * would otherwise run against the outer's bindings only — a name both
-   * sides bind differently is `JL0004`, never silently the outer's.
+  /** Both sides read ONE input document — a query document has one
+   * root — so the other side derives from the same source, or (for a
+   * join) from a provider sharing this one's scope: two entity sets of
+   * one store are two roots of ONE multi-entity input, and the store
+   * answers their equijoin in one statement (LINQ-FORMAT.md §8). A
+   * `concat` stays same-source: its other side contributes an
+   * expression over THIS input, never a second one. Returns the merged
+   * parameter bindings: the inner side's declared externals ride along,
+   * because its document is embedded whole and would otherwise run
+   * against the outer's bindings only — a name both sides bind
+   * differently is `JL0004`, never silently the outer's.
    * @param {Sequence} inner @param {string} what
+   * @param {boolean} [scoped] - whether a shared provider scope suffices
    * @returns {ReadonlyMap<string, any>} */
-  #requireSameSource(inner, what) {
+  #requireSameSource(inner, what, scoped = false) {
     if (!(inner instanceof Sequence)) {
       throw new LinqBuildError('JL0005', `${what} takes another sequence as its inner side`);
     }
-    if (inner.#source !== this.#source) {
+    if (inner.#source !== this.#source && !(scoped && sharesScope(this.#source, inner.#source))) {
       throw new LinqBuildError('JL0005',
-        `${what}'s other side must derive from the same source in 0.1 — `
-        + 'a query document reads one input; load both collections under one root '
-        + '(the relational order lifts this)');
+        `${what}'s other side must derive from the same source`
+        + (scoped ? ", or from two providers sharing one scope (one store's entity sets)" : '')
+        + ' — a query document reads one input; load both collections under one root'
+        + (scoped ? ', or join two entity sets of one store' : ''));
     }
     const merged = new Map(this.#params);
     for (const [name, value] of inner.#params) {
@@ -189,7 +196,7 @@ export class Sequence {
   /** Equi-join → nested `$for` + `$where` equality (the engine rewrites
    * this shape to a hash join; that is why it is fast). */
   join(inner, outerKey, innerKey, result) {
-    const params = this.#requireSameSource(inner, 'join');
+    const params = this.#requireSameSource(inner, 'join', true);
     return this.#with({
       kind: 'join',
       inner: inner.toDocument(),
@@ -207,7 +214,7 @@ export class Sequence {
    * (`{ matches: g }`) and aggregated over its members
    * (`(u, g) => ({ n: g.count() })`). */
   groupJoin(inner, outerKey, innerKey, result) {
-    const params = this.#requireSameSource(inner, 'groupJoin');
+    const params = this.#requireSameSource(inner, 'groupJoin', true);
     const innerDoc = inner.toDocument();
     const group = {
       $for: { it2: inner.#isBareRoot() ? innerDoc : [innerDoc] },
@@ -536,7 +543,9 @@ export class Sequence {
  * happens ONCE, here: an `execute` duck is a provider and is never
  * enumerated locally; any iterable gets the in-memory reference
  * semantics; anything else is `JL0001` now, not at enumeration time.
- * @param {any} source
+ * @param {any} source - an iterable, or a provider; a provider carrying
+ *   `root` binds its items through that root (`'$.Post[*]'` for an entity
+ *   set), one carrying `roots` and no `root` of its own is `JL0007`
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
  *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
  *   the engine registries this sequence compiles against, under the
@@ -549,7 +558,9 @@ export class Sequence {
  * @returns {Sequence}
  */
 export function from(source, options = {}) {
-  return new Sequence(source, classifySource(source), '$[*]', [], new Map(), options);
+  const kind = classifySource(source);
+  const root = kind === 'provider' ? providerRoot(source) : '$[*]';
+  return new Sequence(source, kind, root, [], new Map(), options);
 }
 
 /**

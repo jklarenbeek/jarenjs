@@ -11,6 +11,7 @@
  */
 
 import { describe, it, after } from 'node:test';
+import * as fs from 'node:fs';
 import * as assert from 'node:assert';
 
 import { openStore } from '@jarenjs/db';
@@ -18,6 +19,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 import {
   loadRelationGroups, storeForEntityGroup, runEntityCase,
 } from './oracle/harness.js';
+import { renderLinqRootsGroup } from '../../scripts/lib/linq-roots-cases.js';
 
 const groups = loadRelationGroups();
 
@@ -169,5 +171,13 @@ describe('the Z-normalization write contract (§10.3)', () => {
     const fine = await users.create({ id: 'x3', joined: '2026-01-05T12:00:00.123456Z' });
     assert.strictEqual(fine.joined, '2026-01-05T12:00:00.123456Z');
     await store.close();
+  });
+});
+
+describe('the linq-roots group is what the chains emit', () => {
+  it('14-linq-roots.json regenerates byte-identically — never a hand-typed chain document', () => {
+    const committed = fs.readFileSync('test/db/oracle/relations/14-linq-roots.json', 'utf8');
+    assert.strictEqual(committed, renderLinqRootsGroup(),
+      'run node scripts/generate-linq-roots-cases.js');
   });
 });

@@ -36,7 +36,7 @@ import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine } from './jobs.js';
-import { collectEntityRoots } from './plan.js';
+import { collectEntityRoots, entityRoot } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
   derivedValue, memberAt, storedMemberForm, registerDeriveFunctions,
@@ -1529,6 +1529,16 @@ export function openStore(model, options) {
                   remove: ops.remove,
                   discard: ops.discard,
                   asNoTracking: () => untracked,
+                  // the provider contract over ONE entity root (MODEL-FORMAT
+                  // §10.1): the document is over the multi-entity root and
+                  // goes to the entity engine whole; `root` is the hint a
+                  // chain binds its items through, `scope` the identity two
+                  // sets of one store share so their documents may be joined.
+                  // `execute` stays value-or-promise (D2), as a collection's
+                  execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
+                  explain: lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
+                  root: entityRoot(name),
+                  scope: entityEngine,
                 });
                 asyncEntityHandles.set(name, handle);
               }
@@ -1536,11 +1546,14 @@ export function openStore(model, options) {
             },
             saveChanges: entities.size === 0 ? undefined
               : lift(() => guard(() => tracker.saveChanges())),
-            // entity DOCUMENTS query the multi-entity root at the store
+            // entity DOCUMENTS query the multi-entity root at the store;
+            // `roots` names the entity arrays this provider serves, so a
+            // chain asked to iterate the store itself can refuse by name
             execute: entityEngine === null ? undefined
               : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
+            roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             // entity live queries re-run on invalidation — declared,
             // not attempted (LIVE-FORMAT §7)
             live: entityEngine === null ? undefined
@@ -1663,6 +1676,8 @@ export function openStore(model, options) {
           if (connection.synchronous) {
             /** @type {Map<string, any>} */
             const syncHandles = new Map();
+            /** @type {Map<string, any>} */
+            const syncEntityHandles = new Map();
             store.sync = Object.freeze({
               collection(name) {
                 let handle = syncHandles.get(name);
@@ -1695,29 +1710,44 @@ export function openStore(model, options) {
                 return topLevelTransaction(fn);
               },
               entity(name) {
-                const ops = trackedOpsFor(name);
-                const untracked = Object.freeze({
-                  get: (key) => ops.noTracking.get(key),
-                  load: (spec) => ops.noTracking.load(spec),
-                });
-                return Object.freeze({
-                  create: (doc) => ops.create(doc),
-                  get: (key) => ops.get(key),
-                  update: (key, changes) => ops.update(key, changes),
-                  delete: (key) => ops.delete(key),
-                  load: (spec) => ops.load(spec),
-                  explainLoad: ops.explainLoad,
-                  add: ops.add,
-                  put: ops.put,
-                  remove: ops.remove,
-                  discard: ops.discard,
-                  asNoTracking: () => untracked,
-                });
+                let handle = syncEntityHandles.get(name);
+                if (handle === undefined) {
+                  const ops = trackedOpsFor(name);
+                  const untracked = Object.freeze({
+                    get: (key) => ops.noTracking.get(key),
+                    load: (spec) => ops.noTracking.load(spec),
+                  });
+                  handle = Object.freeze({
+                    create: (doc) => ops.create(doc),
+                    get: (key) => ops.get(key),
+                    update: (key, changes) => ops.update(key, changes),
+                    delete: (key) => ops.delete(key),
+                    load: (spec) => ops.load(spec),
+                    explainLoad: ops.explainLoad,
+                    add: ops.add,
+                    put: ops.put,
+                    remove: ops.remove,
+                    discard: ops.discard,
+                    asNoTracking: () => untracked,
+                    // the same provider members as the asynchronous handle,
+                    // answering values; one handle per name, so two chains
+                    // over one set share one source identity
+                    execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
+                    explain: (document, queryOptions) => entityEngine.explain(document, queryOptions),
+                    root: entityRoot(name),
+                    scope: entityEngine,
+                  });
+                  syncEntityHandles.set(name, handle);
+                }
+                return handle;
               },
               saveChanges: entities.size === 0 ? undefined
                 : () => guard(() => tracker.saveChanges()),
               execute: entityEngine === null ? undefined
                 : (document, queryOptions) => entityEngine.execute(document, queryOptions),
+              explain: entityEngine === null ? undefined
+                : (document, queryOptions) => entityEngine.explain(document, queryOptions),
+              roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             });
           }
           return chain(capture === null ? null : capture.ready,

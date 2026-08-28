@@ -24,6 +24,12 @@
  *  - `mapAsync` applies the bounded-concurrency machinery between
  *    segments; it is NOT translatable to a document, so `toDocument()`
  *    refuses (`JL0005`) and `explain()` reports the split.
+ *  - a PROVIDER origin (`fromAsync(store.entity('Post'))`) runs nothing
+ *    here: everything up to the first `mapAsync` is ONE document the
+ *    provider executes whole — the terminal's wrapper included, exactly
+ *    as the synchronous surface pushes it — and `execute` may answer a
+ *    promise (D8); the residual after the split streams locally, and a
+ *    `join` exists on this surface only inside that pushed document.
  *
  * Early termination CLOSES the source: every consumer is a
  * `for await … break` chain, and async generators propagate `return()`
@@ -31,7 +37,7 @@
  * read transaction open.
  */
 
-import { compileDocument } from './provider.js';
+import { compileDocument, isProviderSource, providerRoot, sharesScope } from './provider.js';
 import { emitDocument, wrapTerminal, snapshot, fanProjection } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
@@ -40,9 +46,11 @@ import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { schemaOf } from './schema-of.js';
 import { semanticKey } from '@jarenjs/core/object';
 
-/** Barrier stage kinds and the reason each materialises. There is no
- * `join` here: a join's inner side re-reads the source, and an async
- * source is single-pass (LINQ-FORMAT.md §10). */
+/** Barrier stage kinds and the reason each materialises. A `join` is
+ * never a barrier: over a provider it rides INSIDE the one pushed
+ * document (the only place this surface joins), and over a single-pass
+ * source — a cursor, a queue, a stream — it is refused, because the
+ * inner side would have to read the source twice (LINQ-FORMAT.md §10). */
 const BARRIERS = {
   orderBy: '$orderby materialises the tuple stream to sort it',
   thenBy: '$orderby materialises the tuple stream to sort it',
@@ -90,6 +98,7 @@ export class AsyncSequence {
 
   /**
    * @param {{ kind: 'source', iterate: () => AsyncIterator<any> }
+   *   | { kind: 'provider', source: any, root: string }
    *   | { kind: 'sequence', runPrefix: (params: ReadonlyMap<string, any>) => any[],
    *       prefixDocument: () => any }} origin
    * @param {readonly any[]} stages
@@ -114,6 +123,57 @@ export class AsyncSequence {
       names: [...this.#params.keys()],
       values: Object.fromEntries(this.#params),
     };
+  }
+
+  /** Whether the chain so far goes to a provider as ONE document: a
+   * provider origin with no `mapAsync` yet (D8 — the document arrives
+   * whole; a host callback is where it splits). */
+  #pushable() {
+    return this.#origin.kind === 'provider'
+      && !this.#stages.some((stage) => stage.kind === 'mapAsync');
+  }
+
+  /** Whether this sequence is a provider's own root, untouched — the
+   * one `$for` source the emitter leaves unpacked (document.js). */
+  #isBareRoot() {
+    return this.#origin.kind === 'provider' && this.#stages.length === 0;
+  }
+
+  /** The root expression the stages iterate: a provider's own root, the
+   * pushed synchronous prefix, or the whole input. */
+  #rootExpression() {
+    if (this.#origin.kind === 'sequence') return this.#origin.prefixDocument();
+    return this.#origin.kind === 'provider' ? this.#origin.root : '$[*]';
+  }
+
+  /** The document for a run of stages over this origin's root. */
+  #documentOf(stages) {
+    return emitDocument(this.#rootExpression(), stages,
+      { bareRoot: this.#origin.kind === 'provider' });
+  }
+
+  /** Hand one document to the provider, whole, with the bound
+   * externals; `execute` may answer a value or a promise here. */
+  async #push(document) {
+    return this.#origin.source.execute(document, { externals: this.#externals().values });
+  }
+
+  /** A pushed element window over `stages`: the provider must answer
+   * exactly one array, as on the synchronous surface (`JL2006`). */
+  async #pushWindow(terminal, args = undefined, stages = this.#stages) {
+    const result = await this.#push(wrapTerminal(this.#documentOf(stages), terminal, args));
+    if (!Array.isArray(result)) {
+      throw new LinqRuntimeError('JL2006',
+        `the provider answered ${terminal}() with ${result === undefined ? 'undefined'
+          : `a ${typeof result}`} — an element terminal emits an array constructor, so a `
+        + 'conforming execute() answers exactly one array (LINQ-FORMAT.md §8)');
+    }
+    return /** @type {any[]} */ (result);
+  }
+
+  /** A pushed aggregate or quantifier over the whole chain. */
+  #pushTerminal(terminal, args = undefined) {
+    return this.#push(wrapTerminal(this.#documentOf(this.#stages), terminal, args));
   }
 
   /** Compile one per-item evaluator: the stage expression under
@@ -165,6 +225,75 @@ export class AsyncSequence {
       seed: toExpression(seed),
       step: captureFor(this.#params, step, ['acc', 'it']),
     });
+  }
+
+  /** The inner side of a join, checked (LINQ-FORMAT.md §10): a join on
+   * this surface rides INSIDE the one document a provider receives, so
+   * it needs a provider origin with no `mapAsync` before it, an async
+   * sequence over the same provider (or one sharing its scope) as the
+   * inner side, and — as on the synchronous surface — one binding per
+   * parameter name across the two sides. Over a single-pass source there
+   * is no join: the inner side would read the source twice.
+   * @param {any} inner @param {string} what
+   * @returns {ReadonlyMap<string, any>} the merged parameter bindings */
+  #requireJoinable(inner, what) {
+    if (!this.#pushable()) {
+      throw new LinqBuildError('JL0005',
+        `${what} on the async surface is pushed whole to a provider — it needs a provider `
+        + 'source and comes before any mapAsync; over an iterable, a cursor or a push queue '
+        + 'there is no join, because a single-pass source cannot be read twice (LINQ-FORMAT.md §10)');
+    }
+    if (!(inner instanceof AsyncSequence) || !inner.#pushable()) {
+      throw new LinqBuildError('JL0005',
+        `${what} takes another async sequence over a provider (with no mapAsync) as its inner side`);
+    }
+    if (!sharesScope(this.#origin.source, inner.#origin.source)) {
+      throw new LinqBuildError('JL0005',
+        `${what}'s other side must derive from the same source, or from two providers sharing `
+        + "one scope (one store's entity sets) — a query document reads one input");
+    }
+    const merged = new Map(this.#params);
+    for (const [name, value] of inner.#params) {
+      if (merged.has(name) && merged.get(name) !== value) {
+        throw new LinqBuildError('JL0004',
+          `parameter '${name}' is bound to different values by the two sides of ${what} — `
+          + 'one document carries one binding per name; bind it once, or rename one side');
+      }
+      merged.set(name, value);
+    }
+    return merged;
+  }
+
+  /** Equi-join, pushed whole: the nested-`$for` shape the synchronous
+   * surface emits (a store answers a two-root join in one statement). */
+  join(inner, outerKey, innerKey, result) {
+    const params = this.#requireJoinable(inner, 'join');
+    return new AsyncSequence(this.#origin, [...this.#stages, {
+      kind: 'join',
+      inner: inner.toDocument(),
+      innerBare: inner.#isBareRoot(),
+      on: {
+        $eq: [captureFor(this.#params, outerKey), captureFor(this.#params, innerKey, ['it2'])],
+      },
+      result: captureFor(this.#params, result, ['it', 'it2']),
+    }], params, this.#options);
+  }
+
+  /** Group-join, pushed whole: the `$let`-bound group of the synchronous
+   * surface, under the same rule as `join`. */
+  groupJoin(inner, outerKey, innerKey, result) {
+    const params = this.#requireJoinable(inner, 'groupJoin');
+    const innerDoc = inner.toDocument();
+    const group = {
+      $for: { it2: inner.#isBareRoot() ? innerDoc : [innerDoc] },
+      $where: { $eq: [captureFor(this.#params, outerKey), captureFor(this.#params, innerKey, ['it2'])] },
+      $return: '$it2',
+    };
+    return new AsyncSequence(this.#origin, [...this.#stages, {
+      kind: 'groupJoin',
+      group,
+      projection: captureFor(this.#params, result, ['it', { doc: '$g', pathable: true, seq: '$g[*]' }]),
+    }], params, this.#options);
   }
 
   skip(count) { return this.#with({ kind: 'skip', count: requireIndex(count, 'skip') }); }
@@ -234,10 +363,7 @@ export class AsyncSequence {
       throw new LinqBuildError('JL0005',
         'toDocument() cannot represent mapAsync (a host callback); explain() reports the split');
     }
-    const root = this.#origin.kind === 'sequence'
-      ? this.#origin.prefixDocument()
-      : '$[*]';
-    return snapshot(emitDocument(root, this.#stages));
+    return snapshot(this.#documentOf(this.#stages));
   }
 
   /** Barriers, the split, and — when representable — the document.
@@ -245,23 +371,26 @@ export class AsyncSequence {
    * `orderByDescending`), and a `thenBy` is part of the `$orderby`
    * barrier it extends, not a barrier of its own. */
   explain() {
+    const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
+    // over a provider nothing before the split materialises HERE — the
+    // provider runs the pushed document — so only the residual can hold
+    // a barrier of this surface's own
+    const local = this.#origin.kind === 'provider'
+      ? (firstMap < 0 ? [] : this.#stages.slice(firstMap))
+      : this.#stages;
     const barriers = [];
-    for (const stage of this.#stages) {
+    for (const stage of local) {
       if (BARRIERS[stage.kind] !== undefined && stage.kind !== 'thenBy') {
         barriers.push({ operator: stage.name ?? stage.kind, reason: BARRIERS[stage.kind] });
       }
     }
-    const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
     const out = { barriers };
     if (firstMap < 0) {
       out.document = this.toDocument();
     }
     else {
-      const prefix = this.#stages.slice(0, firstMap);
       out.split = {
-        pushed: snapshot(this.#origin.kind === 'sequence'
-          ? this.#origin.prefixDocument()
-          : emitDocument('$[*]', prefix)),
+        pushed: snapshot(this.#documentOf(this.#stages.slice(0, firstMap))),
         residual: this.#stages.slice(firstMap).map((s) => s.name ?? s.kind),
       };
     }
@@ -276,12 +405,22 @@ export class AsyncSequence {
    * barrier chunks. @returns {AsyncGenerator<any>} */
   async* [Symbol.asyncIterator]() {
     const { names, values } = this.#externals();
-    let stream = this.#origin.kind === 'sequence'
-      ? arrayStream(this.#origin.runPrefix(this.#params))
-      : this.#origin.iterate();
-
     const stages = this.#stages;
+    let stream;
     let i = 0;
+    if (this.#origin.kind === 'sequence') {
+      stream = arrayStream(this.#origin.runPrefix(this.#params));
+    }
+    else if (this.#origin.kind === 'provider') {
+      // everything up to the first mapAsync is ONE document the provider
+      // runs whole; the residual continues locally over its rows
+      const firstMap = stages.findIndex((s) => s.kind === 'mapAsync');
+      i = firstMap < 0 ? stages.length : firstMap;
+      stream = arrayStream(await this.#pushWindow('toArray', undefined, stages.slice(0, i)));
+    }
+    else {
+      stream = this.#origin.iterate();
+    }
     while (i < stages.length) {
       const stage = stages[i];
       if (BARRIERS[stage.kind] !== undefined) {
@@ -419,19 +558,19 @@ export class AsyncSequence {
   }
 
   async first() {
-    const w = await this.#window(1);
+    const w = this.#pushable() ? await this.#pushWindow('first') : await this.#window(1);
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'first() found no element');
     return w[0];
   }
 
   /** @param {any} [defaultValue] */
   async firstOrDefault(defaultValue) {
-    const w = await this.#window(1);
+    const w = this.#pushable() ? await this.#pushWindow('first') : await this.#window(1);
     return w.length === 0 ? defaultValue : w[0];
   }
 
   async single() {
-    const w = await this.#window(2);
+    const w = this.#pushable() ? await this.#pushWindow('single') : await this.#window(2);
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'single() found no element');
     if (w.length > 1) throw new LinqRuntimeError('JL2002', 'single() found more than one element');
     return w[0];
@@ -439,27 +578,34 @@ export class AsyncSequence {
 
   /** @param {any} [defaultValue] */
   async singleOrDefault(defaultValue) {
-    const w = await this.#window(2);
+    const w = this.#pushable() ? await this.#pushWindow('single') : await this.#window(2);
     if (w.length > 1) throw new LinqRuntimeError('JL2002', 'singleOrDefault() found more than one element');
     return w.length === 0 ? defaultValue : w[0];
   }
 
   async last() {
-    const all = await this.toArray();
-    if (all.length === 0) throw new LinqRuntimeError('JL2001', 'last() found no element');
-    return all[all.length - 1];
+    const w = this.#pushable() ? await this.#pushWindow('last') : await this.#lastWindow();
+    if (w.length === 0) throw new LinqRuntimeError('JL2001', 'last() found no element');
+    return w[0];
   }
 
   /** @param {any} [defaultValue] */
   async lastOrDefault(defaultValue) {
+    const w = this.#pushable() ? await this.#pushWindow('last') : await this.#lastWindow();
+    return w.length === 0 ? defaultValue : w[0];
+  }
+
+  /** The last item as a window, read from the whole stream. */
+  async #lastWindow() {
     const all = await this.toArray();
-    return all.length === 0 ? defaultValue : all[all.length - 1];
+    return all.length === 0 ? [] : [all[all.length - 1]];
   }
 
   /** @param {number} index */
   async elementAt(index) {
     requireIndex(index, 'elementAt');
-    const w = await this.skip(index).#window(1);
+    const w = this.#pushable()
+      ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
     if (w.length === 0) throw new LinqRuntimeError('JL2003', `elementAt(${index}) is out of range`);
     return w[0];
   }
@@ -467,11 +613,13 @@ export class AsyncSequence {
   /** @param {number} index @param {any} [defaultValue] */
   async elementAtOrDefault(index, defaultValue) {
     requireIndex(index, 'elementAtOrDefault');
-    const w = await this.skip(index).#window(1);
+    const w = this.#pushable()
+      ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
     return w.length === 0 ? defaultValue : w[0];
   }
 
   async count() {
+    if (this.#pushable()) return this.#pushTerminal('count');
     let n = 0;
     // eslint-disable-next-line no-unused-vars
     for await (const item of this) n++;
@@ -482,6 +630,7 @@ export class AsyncSequence {
    * their semantics (type errors included) match the sync surface
    * exactly. @param {string} terminal */
   async #aggregateTerminal(terminal) {
+    if (this.#pushable()) return this.#pushTerminal(terminal);
     const items = await this.toArray();
     const { names, values } = this.#externals();
     const compiled = compileDocument(wrapTerminal('$[*]', terminal),
@@ -511,6 +660,11 @@ export class AsyncSequence {
 
   /** @param {any} [predicate] */
   async any(predicate) {
+    if (this.#pushable()) {
+      return predicate === undefined
+        ? this.#pushTerminal('exists')
+        : this.#pushTerminal('some', [captureFor(this.#params, predicate)]);
+    }
     const seq = predicate === undefined ? this : this.where(predicate);
     for await (const item of seq) {
       void item;
@@ -521,6 +675,7 @@ export class AsyncSequence {
 
   /** @param {any} predicate */
   async all(predicate) {
+    if (this.#pushable()) return this.#pushTerminal('every', [captureFor(this.#params, predicate)]);
     const q = this.#evaluator(captureFor(this.#params, predicate));
     for await (const item of this) {
       if (!q.ebv(item, this.#externals().values)) return false;
@@ -591,15 +746,23 @@ function validateParams(bindings) {
 }
 
 /**
- * Build an async sequence over an async source (LINQ-FORMAT.md §10).
- * @param {any} source - async iterable, sync iterable, cursor or push
- *   queue
+ * Build an async sequence over an async source (LINQ-FORMAT.md §10), or
+ * over a provider (§12): an `execute` duck is asked for BEFORE the
+ * iterable shapes, and its items are bound through its own root — as
+ * `from()` binds them, so the two surfaces emit one document.
+ * @param {any} source - async iterable, sync iterable, cursor, push
+ *   queue, or a provider
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
  *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
  *   the engine registries, as `from()` takes them
  * @returns {AsyncSequence}
  */
 export function fromAsync(source, options = {}) {
+  if (isProviderSource(source)) {
+    return new AsyncSequence(
+      { kind: 'provider', source, root: providerRoot(source) },
+      [], new Map(), options);
+  }
   return new AsyncSequence(
     { kind: 'source', iterate: adaptAsyncSource(source) },
     [], new Map(), options);

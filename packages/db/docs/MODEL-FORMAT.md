@@ -1185,6 +1185,26 @@ array-constructor spelling `["$.<Entity>[*]"]`, which `@jarenjs/linq`
 emits so that an item that is itself an array stays one item
 (LINQ-FORMAT §5), names the same whole-entity source; the planner
 reads through it for collections (`["$[*]"]`) and entities alike.
+
+An entity set is a provider (LINQ-FORMAT §8): `store.entity(name)` and
+`store.sync.entity(name)` carry `execute(document, options)` and
+`explain(document, options)` — the document is over the multi-entity
+root and goes to the entity translator whole, exactly as
+`store.execute` runs it — plus `root` (`"$.<Entity>[*]"`, the one
+spelling `collectEntityRoots` reads, so a chain binds its items through
+it) and `scope` (one identity per store, shared by every set, so two
+sets may be joined in one document). The store itself carries `roots`,
+the entity names, because it has no single root: a chain over it is
+refused by name (`JL0007`) rather than answering the mixed rows or
+counting the sets, and a document naming no entity array stays
+`JD0033`. A chain's element terminal hands over the one-item window
+`[<phrase>]` (LINQ-FORMAT §6); the planner reads through the window as
+it reads through the packed source — the phrase inside plans as if
+bare, and the store answers its rows as the ONE array item the engine
+would (`[]` for none, `[row]` for one, never singleton-unwrapped;
+`explain().wrapped` says so) — so `toArray()` over an entity set runs
+the translator, and a two-root equijoin returning a bare binding runs
+as one statement.
 This is the shape the differential oracle
 can actually prove — the in-memory engine sees exactly the documents
 the entity sets return (`test/db/oracle/relations/`). Relation-NAME

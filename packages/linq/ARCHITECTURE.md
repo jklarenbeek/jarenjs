@@ -56,18 +56,20 @@ single-pass source through per-item compiled evaluators; a barrier
 operator (`orderBy`, `groupBy`, `aggregate`, `reverse`) collects the
 buffer and runs the MAXIMAL document slice through the sync engine in
 one call — so async answers are sync answers by construction, proven by
-a byte-identical-document test. There is no async `join`: the inner
-side re-reads the source, and a single-pass source cannot be. `mapAsync` is
+a byte-identical-document test. An async `join` exists only over a
+provider origin, pushed inside the one document — the inner side of a
+join re-reads the source, and a single-pass stream cannot be read twice.
+`mapAsync` is
 the one place element-wise asynchronous work happens: `concurrency`
 is required, the modes reuse the `createTaskEffect` vocabulary
 (`parallel`/`concat`/`switch`/`exhaust`), and failure is fail-closed —
 the first rejection aborts every in-flight signal and the source.
 
-## The pens (`src/schema/`, `src/model/`, `src/jslt/`)
+## The pens (`src/schema/`, `src/model/`, `src/jslt/`, `src/migration/`)
 
 A pen is a by-code front-end to one of the suite's document formats,
-exported under its own subpath (`@jarenjs/linq/schema`, `/model`, `/jslt`;
-`.` stays the chain). The rule set is one paragraph: the document is the
+exported under its own subpath (`@jarenjs/linq/schema`, `/model`, `/jslt`,
+`/migration`; `.` stays the chain). The rule set is one paragraph: the document is the
 deliverable (plain, deep-frozen JSON, memoized under `.schema`,
 `toJSON()` returns it); the pen imports no engine and re-implements no
 compile check — it refuses only what it cannot spell, with a `JL01xx`
@@ -102,9 +104,14 @@ A's member order) — it imports nothing of `src/schema/` but `brand.js`.
 
 ## The provider seam (`src/provider.js`)
 
-A provider is any object with `execute(queryDocument, { externals })`.
+A provider is any object with `execute(queryDocument, { externals })` —
+optionally carrying `root` (the path its items are bound through, bare),
+`roots` (a store-level provider's entity roots; refused by name,
+`JL0007`) and `scope` (the identity two joinable providers share).
 `@jarenjs/db` implements it; neither package imports the other, and a
-test asserts both directions. `mapAsync` splits a provider chain: the
+test asserts both directions. On the async surface the provider is asked
+for first, receives the whole chain up to a `mapAsync` as one document,
+and may answer a promise. `mapAsync` splits a provider chain: the
 translatable prefix is pushed to the provider in ONE call, the
 residual runs locally, and `explain()` reports the split.
 
@@ -116,9 +123,11 @@ residual runs locally, and `explain()` reports the split.
   immutable and cheap to walk; the benchmark publishes the price beside
   the hand-written loop). Hold the compiled document when the same
   query runs hot.
-- **Same-source joins only (0.1).** One document has one root, so
-  `join`/`groupJoin` across different sources is refused (`JL0005`)
-  rather than silently materialised; the relational order lifts it.
+- **Same-source joins, or one provider scope.** One document has one
+  root, so `join`/`groupJoin` across different sources is refused
+  (`JL0005`) rather than silently materialised — except two providers
+  sharing a `scope` (one store's entity sets), whose roots are two
+  bindings of one multi-entity input.
 - **The engine result shape leaks nowhere.** Every surface — sync,
   async, provider — reproduces `undefined | item | items` exactly,
   which is why the window-wrapper trick exists at all.

@@ -408,11 +408,35 @@ export interface OrderOptions {
   collation?: string;
 }
 
-/** The provider contract (D2): any object exposing
+/** The provider contract (D2, LINQ-FORMAT §8): any object exposing
  * `execute(document, options)`. The document arrives whole; the return
- * value uses the engine's result mapping. */
-export interface Provider {
+ * value uses the engine's result mapping. `T` is the item type — read
+ * from the `__item` phantom a typed provider carries (a typed entity
+ * set), stated by the caller (`from<T>(provider)`), or `unknown`. */
+export interface Provider<T = unknown> {
+  /** The item phantom: never present at runtime; what `from` infers `T` from. */
+  readonly __item?: T;
   execute(document: unknown, options: { externals: Record<string, unknown> }): unknown;
+  /** The root expression the items are bound through (`'$.Post[*]'`);
+   * absent means the whole input, `'$[*]'`. */
+  readonly root?: string;
+  /** The entity roots a store-level provider serves when it has no root
+   * of its own — `from()` refuses it (`JL0007`) naming them. */
+  readonly roots?: readonly string[];
+  /** An identity two providers share when their documents may be joined
+   * (one store's entity sets). */
+  readonly scope?: unknown;
+}
+
+/** The asynchronous provider (D8, §12): the same members, and `execute`
+ * may answer a promise — `fromAsync(provider)` awaits it, and the whole
+ * chain up to a `mapAsync` arrives as ONE document. */
+export interface AsyncProvider<T = unknown> {
+  readonly __item?: T;
+  execute(document: unknown, options: { externals: Record<string, unknown> }): unknown | Promise<unknown>;
+  readonly root?: string;
+  readonly roots?: readonly string[];
+  readonly scope?: unknown;
 }
 
 /** The engine's compile registries, under the engine's own option names
@@ -541,7 +565,9 @@ export class Sequence<T = unknown, P = {}> {
 }
 
 export function from<T>(source: Iterable<T>, options?: LinqOptions): Sequence<T, {}>;
-export function from<T = unknown>(source: Provider, options?: LinqOptions): Sequence<T, {}>;
+/** A provider: `T` from its `__item` phantom (a typed entity set infers
+ * without a cast), or as the caller states it, or `unknown`. */
+export function from<T = unknown>(source: Provider<T>, options?: LinqOptions): Sequence<T, {}>;
 
 export function fromDocument<T = unknown>(
   source: Iterable<unknown> | Provider,
@@ -605,6 +631,24 @@ export class AsyncSequence<T = unknown, P = {}> {
   groupBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R):
     AsyncSequence<{ key: Unwrap<R> | null, items: T[] }, P>;
   aggregate<A>(seed: A, step: (acc: Expr<A>, it: Expr<T>, p: ParamsExpr<P>) => ExprResult): AsyncSequence<A, P>;
+
+  /** Equi-join, pushed WHOLE: only over a provider origin, before any
+   * `mapAsync`, with an inner async sequence over the same provider or
+   * one sharing its scope (`JL0005` otherwise — a single-pass source
+   * cannot be joined; LINQ-FORMAT §10). */
+  join<U, R extends ExprResult>(
+    inner: AsyncSequence<U, any>,
+    outerKey: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult,
+    innerKey: (it: Expr<U>, p: ParamsExpr<P>) => ExprResult,
+    result: (outer: Expr<T>, inner: Expr<U>, p: ParamsExpr<P>) => R,
+  ): AsyncSequence<Unwrap<R>, P>;
+  /** Group-join, pushed WHOLE under the same rule as `join`. */
+  groupJoin<U, R extends ExprResult>(
+    inner: AsyncSequence<U, any>,
+    outerKey: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult,
+    innerKey: (it: Expr<U>, p: ParamsExpr<P>) => ExprResult,
+    result: (outer: Expr<T>, group: ArrayExpr<U> & AggregatableExpr, p: ParamsExpr<P>) => R,
+  ): AsyncSequence<Unwrap<R>, P>;
   skip(count: number): AsyncSequence<T, P>;
   take(count: number): AsyncSequence<T, P>;
   distinct(): AsyncSequence<T, P>;
@@ -650,6 +694,14 @@ export class AsyncSequence<T = unknown, P = {}> {
   all(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): Promise<boolean>;
 }
 
+/** Build an async sequence over a provider (an `execute` duck, asked for
+ * before the iterable shapes): the document arrives whole and `execute`
+ * may answer a promise; `T` from the `__item` phantom, the caller, or
+ * `unknown`. */
+export function fromAsync<T = unknown>(
+  source: AsyncProvider<T>,
+  options?: LinqOptions,
+): AsyncSequence<T, {}>;
 /** Build an async sequence over an async iterable, a sync iterable, a
  * cursor or a push queue. A STRING is refused (`JL0001`): on this
  * surface a string is a chunk source — feed it through a push queue —

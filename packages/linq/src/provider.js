@@ -166,6 +166,63 @@ export function compileDocument(document, options) {
 }
 
 /**
+ * Whether a source is a provider: an `execute` duck. The one dispatch
+ * both surfaces share — on `fromAsync` it is asked BEFORE the iterable
+ * shapes, so a provider that also happens to be iterable is still a
+ * provider.
+ * @param {any} source
+ * @returns {boolean}
+ */
+export function isProviderSource(source) {
+  return source !== null && typeof source === 'object'
+    && typeof (/** @type {any} */ (source).execute) === 'function';
+}
+
+/**
+ * The root expression a provider's items are bound through (LINQ-FORMAT
+ * §8): its `root` (`'$.Post[*]'` for an entity set), or `'$[*]'` when it
+ * names none — the whole input, a collection. A provider that serves
+ * SEVERAL roots and none of its own (a store with entities: `roots`) has
+ * nothing a chain could iterate — `$[*]` over the entity map would
+ * answer the rows of every entity, mixed, or count the SETS — so it is
+ * refused here, at `from()` time, naming the roots to chain over.
+ * @param {any} provider
+ * @returns {string}
+ */
+export function providerRoot(provider) {
+  const root = provider.root;
+  if (root === undefined || root === null) {
+    const roots = provider.roots;
+    if (Array.isArray(roots) && roots.length > 0) {
+      throw new LinqBuildError('JL0007',
+        `this provider serves entity roots ${roots.join(', ')} and has no root of its own — `
+        + 'chain over one of them: from(store.entity(name)) (LINQ-FORMAT.md §8)');
+    }
+    return '$[*]';
+  }
+  if (typeof root !== 'string' || root === '') {
+    throw new LinqBuildError('JL0005',
+      `a provider's root is a path expression string ('$.Post[*]'), got ${typeof root}`);
+  }
+  return root;
+}
+
+/**
+ * Whether two sources may share one document: the same object, or two
+ * providers carrying one `scope` — one store's entity sets, which are
+ * two roots of ONE multi-entity input (LINQ-FORMAT §8).
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+export function sharesScope(a, b) {
+  if (a === b) return true;
+  if (!isProviderSource(a) || !isProviderSource(b)) return false;
+  const scope = a.scope;
+  return scope !== undefined && scope !== null && scope === b.scope;
+}
+
+/**
  * Classify a `from()` source: an `execute` duck is a PROVIDER (the
  * document is handed over whole; nothing is enumerated locally);
  * any iterable is in-memory. Anything else is `JL0001` — at `from()`
@@ -174,10 +231,7 @@ export function compileDocument(document, options) {
  * @returns {'provider' | 'iterable'}
  */
 export function classifySource(source) {
-  if (source !== null && typeof source === 'object'
-    && typeof (/** @type {any} */ (source).execute) === 'function') {
-    return 'provider';
-  }
+  if (isProviderSource(source)) return 'provider';
   if (source != null && (typeof source === 'string'
     || typeof (/** @type {any} */ (source))[Symbol.iterator] === 'function')) {
     return 'iterable';

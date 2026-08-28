@@ -192,6 +192,8 @@ export interface UntrackedReads<T = unknown> {
 }
 
 export interface EntitySet<T = unknown, I = unknown> {
+  /** The provider phantom: a chain over this set infers its item type. */
+  readonly __item?: T;
   create(doc: I): Promise<Readonly<T>>;
   get(key: EntityKeyArg): Promise<Readonly<T> | undefined>;
   update(key: EntityKeyArg, changes: Partial<T>): Promise<Readonly<T>>;
@@ -207,6 +209,16 @@ export interface EntitySet<T = unknown, I = unknown> {
   /** Drop tracking without scheduling anything — conflict recovery. */
   discard(key: EntityKeyArg | T): void;
   asNoTracking(): UntrackedReads<T>;
+  /** The provider contract over this entity's root (MODEL-FORMAT §10.1):
+   * the document is over the multi-entity root and arrives whole; the
+   * answer is the engine's result shape, value-or-promise (D2). */
+  execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
+  /** The root expression this set's rows are bound through (`$.<Name>[*]`). */
+  readonly root: string;
+  /** The identity every entity set of one store shares: two sets with one
+   * `scope` may be joined in one document. */
+  readonly scope: object;
 }
 
 export interface SyncUntrackedReads<T = unknown> {
@@ -215,6 +227,8 @@ export interface SyncUntrackedReads<T = unknown> {
 }
 
 export interface SyncEntitySet<T = unknown, I = unknown> {
+  /** The provider phantom: a chain over this set infers its item type. */
+  readonly __item?: T;
   create(doc: I): Readonly<T>;
   get(key: EntityKeyArg): Readonly<T> | undefined;
   update(key: EntityKeyArg, changes: Partial<T>): Readonly<T>;
@@ -226,6 +240,11 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   remove(key: EntityKeyArg | T): void;
   discard(key: EntityKeyArg | T): void;
   asNoTracking(): SyncUntrackedReads<T>;
+  /** The provider contract over this entity's root, answering values. */
+  execute<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
+  explain(document: unknown, options?: ExecuteOptions): unknown;
+  readonly root: string;
+  readonly scope: object;
 }
 
 // ————— the store —————
@@ -237,6 +256,11 @@ export interface SyncStore {
   entity(name: string): SyncEntitySet;
   transaction<R>(fn: (store: Store) => R): R;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
+  explain?(document: unknown, options?: ExecuteOptions): unknown;
+  /** The entity roots this store-level provider serves (present with
+   * entities): it has no single root of its own, so a chain over it is
+   * refused by name — chain over `entity(name)` instead. */
+  readonly roots?: readonly string[];
   saveChanges?(): SaveReport;
 }
 
@@ -253,6 +277,10 @@ export interface Store {
    * in the engine's result shape. */
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
+  /** The entity roots this store-level provider serves (present with
+   * entities): it has no single root of its own, so a chain over it is
+   * refused by name — chain over `entity(name)` instead. */
+  readonly roots?: readonly string[];
   /** The unit of work (§11); present only with entities. */
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
@@ -599,6 +627,9 @@ export declare function createSortedWindow(
 export declare function compareCodepoint(a: string, b: string): number;
 export declare function collectEntityRoots(
   document: unknown, entities: ReadonlyMap<string, unknown>): Set<string>;
+/** The root expression an entity's rows are bound through (`$.<Name>[*]`) —
+ * what an entity set exposes as `root` and what `collectEntityRoots` reads. */
+export declare function entityRoot(name: string): string;
 
 // ————— the derived-index and k-nearest machinery —————
 // Constants carry their real shapes; the functions take and answer the

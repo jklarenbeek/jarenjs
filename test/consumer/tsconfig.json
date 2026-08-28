@@ -16,6 +16,7 @@
     "types.ts",
     "linq-schema.ts",
     "linq-model.ts",
-    "linq-jslt.ts"
+    "linq-jslt.ts",
+    "linq-migration.ts"
   ]
 }

@@ -77,6 +77,33 @@ export function createQueryState(bound = undefined, operators = null,
   };
 }
 
+/**
+ * The answer for a native selection's items: the engine's result shape
+ * (`undefined | item | items`), or — when the document is a chain's
+ * element WINDOW, `[<phrase>]` (plan.js, `wrapped`) — the items as the
+ * ONE array that constructor yields, never singleton-unwrapped: an empty
+ * selection is `[]`, one row is `[row]`. Exactly the engine's answer for
+ * the same document, which is what lets a chain's `toArray()` push.
+ * @param {any} entry
+ * @param {any[]} items
+ * @returns {any}
+ */
+function answerOf(entry, items) {
+  return entry.planned.wrapped === true ? items : sequenceResult(items);
+}
+
+/**
+ * The same for one aggregate value: `[value]` under the window, and `[]`
+ * for an aggregate that answers nothing.
+ * @param {any} entry
+ * @param {any} value
+ * @returns {any}
+ */
+function wrapValue(entry, value) {
+  if (entry.planned.wrapped !== true) return value;
+  return value === undefined ? [] : [value];
+}
+
 /** @param {any} value - a bindable native parameter? */
 function bindable(value) {
   return typeof value === 'string'
@@ -636,26 +663,26 @@ export function createQueryEngine(context) {
             const items = [];
             for (const row of checkRowBound(entry, rows))
               items.push(...entry.rowResidual(JSON.parse(row.doc), externals));
-            return sequenceResult(items);
+            return answerOf(entry, items);
           }));
       }
       return chain(statementOf(entry), (statement) => {
         if (entry.plan.aggregate !== null) {
           return chain(statement.get(bindParams(entry, externals)),
-            (row) => aggregateResult(entry, row));
+            (row) => wrapValue(entry, aggregateResult(entry, row)));
         }
         if (entry.plan.bucket !== null) {
           return chain(statement.all(bindParams(entry, externals)), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
             if (items === null) return divertBucket(entry, document, externals);
             countSeries(entry, 1, rows.length, items.length);
-            return sequenceResult(items);
+            return answerOf(entry, items);
           });
         }
         return chain(statement.all(bindParams(entry, externals)), (rows) => {
           const docs = rowsToDocs(checkRowBound(entry, rows));
           countSeries(entry, 1, docs.length, docs.length);
-          return sequenceResult(docs);
+          return answerOf(entry, docs);
         });
       });
     });
@@ -688,6 +715,21 @@ export function createQueryEngine(context) {
       if (done) return Promise.resolve({ done: true, value: undefined });
       if (bufferedAt < buffered.length) return Promise.resolve(nextFromBuffer());
 
+      if (entry.planned.wrapped === true) {
+        // a chain's element window is ONE item — the array — whatever
+        // the plan mode; the cursor hands it over as `execute` answers it
+        if (materialized === null) {
+          materialized = Promise.resolve(chain(execute(document, options), (value) => {
+            buffered = [value];
+            bufferedAt = 0;
+          }));
+        }
+        return materialized.then(() => {
+          if (bufferedAt < buffered.length) return nextFromBuffer();
+          done = true;
+          return { done: true, value: undefined };
+        });
+      }
       if (entry.planned.mode === 'set' || entry.planned.mode === 'knn'
         || mustDivert(entry, externals)) {
         // the barrier: materialize candidates, pack the result items
@@ -851,6 +893,9 @@ export function createQueryEngine(context) {
     return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
       chain(statement.all(eqpParams), (rows) => ({
         mode: entry.planned.mode,
+        // a chain's element window (`[<phrase>]`): the phrase planned as
+        // if bare, its rows answered as the one array item
+        wrapped: entry.planned.wrapped === true,
         externals: [...entry.externalNames],
         operators: [...entry.dependencies.operators],
         functions: [...entry.dependencies.functions],
@@ -1018,11 +1063,11 @@ export function createEntityQueryEngine(context) {
     if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
     return chain(entry.statement, (statement) => {
       if (entry.planned.plan.aggregate === 'count')
-        return chain(statement.get(params), (row) => row?.value ?? 0);
+        return chain(statement.get(params), (row) => wrapValue(entry, row?.value ?? 0));
       return chain(statement.all(params), (rows) => {
         const retEntity = entry.planned.plan.bindings
           .find((binding) => binding.name === entry.planned.plan.ret).entity;
-        return sequenceResult(rows.map((row) =>
+        return answerOf(entry, rows.map((row) =>
           mergeEntityRow(mapping.entities[retEntity], row, '__doc')));
       });
     });
@@ -1033,6 +1078,7 @@ export function createEntityQueryEngine(context) {
     const entry = entryFor(document, pushdown);
     const base = {
       mode: entry.planned.mode,
+      wrapped: entry.planned.wrapped === true,
       referenced: [...entry.planned.referenced],
       reasons: entry.planned.reasons,
       sql: entry.sql,

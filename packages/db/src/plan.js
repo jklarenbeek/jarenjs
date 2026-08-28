@@ -2121,8 +2121,28 @@ function planCollectionCore(document, shape, options = undefined) {
  * }}
  */
 export function planQuery(document, shape, options = undefined) {
-  const planned = planCollectionCore(document, shape, options);
+  const peeled = peelWrappedResult(document);
+  const planned = { ...planCollectionCore(peeled.document, shape, options), wrapped: peeled.wrapped };
   return prependRegisteredReason(planned, document, shape?.operators);
+}
+
+/**
+ * A chain's element terminal wraps its phrase in a one-item array
+ * constructor — `[<phrase>]`, the window that keeps an array-valued item
+ * one item (LINQ-FORMAT §6) — so the document a store receives from
+ * `toArray()`/`first()` is that constructor around the phrase. Read
+ * through it: the phrase inside plans as it would bare, and the engines
+ * answer its rows as the ONE array the constructor yields (`wrapped`),
+ * which is exactly the engine's own answer for the document. Anything
+ * else inside the brackets plans as itself and falls to the residual,
+ * where the whole document — brackets included — runs in the engine.
+ * @param {any} document
+ * @returns {{ document: any, wrapped: boolean }}
+ */
+function peelWrappedResult(document) {
+  return Array.isArray(document) && document.length === 1
+    ? { document: document[0], wrapped: true }
+    : { document, wrapped: false };
 }
 
 // ————— The entity document kind (one planner, two document kinds) —————
@@ -2470,7 +2490,11 @@ function planEntityQueryCore(document, entities, mapping, operators) {
  * @returns {any}
  */
 export function planEntityQuery(document, entities, mapping, operators = null) {
-  const planned = planEntityQueryCore(document, entities, mapping, operators);
+  const peeled = peelWrappedResult(document);
+  const planned = {
+    ...planEntityQueryCore(peeled.document, entities, mapping, operators),
+    wrapped: peeled.wrapped,
+  };
   return prependRegisteredReason(planned, document, operators);
 }
 
@@ -2488,13 +2512,30 @@ function collectBindingSlots(node, byName, slots) {
   }
 }
 
+/**
+ * The root expression an entity's rows are bound through — the ONE
+ * spelling of `$.<Name>[*]`: what an entity set exposes as its `root`
+ * (the hint a chain reads), and what {@link collectEntityRoots}
+ * recognises in a document. Two spellings would let a handle publish a
+ * root the planner does not read.
+ * @param {string} name - a declared entity name
+ * @returns {string}
+ */
+export function entityRoot(name) {
+  return `$.${name}[*]`;
+}
+
 /** The entity names a document's root paths reference (`$.Name[*]`). */
 export function collectEntityRoots(document, entities) {
   const found = new Set();
   const walk = (node) => {
     if (typeof node === 'string') {
-      const match = /^\$\.([A-Za-z_][A-Za-z0-9_]*)\[\*\]/.exec(node);
-      if (match !== null && entities.has(match[1])) found.add(match[1]);
+      for (const name of entities.keys()) {
+        if (node.startsWith(entityRoot(name))) {
+          found.add(name);
+          break;
+        }
+      }
       return;
     }
     if (Array.isArray(node)) {

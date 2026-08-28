@@ -9,7 +9,7 @@ A **pen** is a by-code front-end to one of the suite's document formats:
 named functions that build a standard document — a JSON Schema, a
 `$model`, a `$jslt` stylesheet — the way the chain builds a query
 document. `@jarenjs/linq` exports each pen under its own subpath
-(`@jarenjs/linq/schema`, `/model` and `/jslt` so far); `.` stays the chain. This document
+(`@jarenjs/linq/schema`, `/model`, `/jslt` and `/migration` so far); `.` stays the chain. This document
 is normative for every pen: §1 states the rules they all keep, §1.3 the
 error codes they share, and one section per pen (§2 onward) carries the
 mapping table — method, emitted member, type reading, status — and the
@@ -71,6 +71,7 @@ mirrored in LINQ-FORMAT §9 (one table, held equal by a test):
 | `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write; in the JSLT pen an `apply()` as a bare object member (the `[]` idiom, JSLT-FORMAT §6.3 — the engine would fail at run time on the second child), a `match` of `{}` (the compiler's `JT0003`, earlier), an `apply()` outside a body |
 | `JL0103` | a `$defs` name collision (two distinct builders under one name), a `ref()` no definition answers, or a `lazy()` that does not return a named builder |
 | `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare: a `check()` external other than `root`/`path`, a `compute()` external at all, a `body()` external other than `root`/`path` and its declared parameters — or `root`/`path` declared as one, since the engine binds them |
+| `JL0106` | a migration step names an entity or collection the target model does not declare (`transform`, `assert`, `derive`); or a `transform` over a planned document finds no draft to replace, or two drafts for one name |
 
 The message names the fix; `docPath` is the JSON pointer of the node
 being assembled where one exists (`/properties/lines/items`).
@@ -743,3 +744,156 @@ is `unknown` — a dispatch lands on whichever rule wins, which no type can
 see. Where the author knows (a chapter always renders as `{ name }`), the
 author says so with `stylesheet<In, Out>(…)`; the built-in rule's
 rebuilds around an unmatched root are not typed at all.
+
+## 5. The migration pen — `@jarenjs/linq/migration`
+
+```js
+import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
+```
+
+writes `$migration` 0.1 documents ([MIGRATION-FORMAT](../../db/docs/MIGRATION-FORMAT.md)):
+the two shape hashes and the ordered steps the runner takes unchanged.
+Identity stays the shape hash — `from`/`to` are
+`hashContent(canonicalizeJson(model))` with the `x-rename` planning
+hints stripped, the store's own rule, and a test holds the pen's hash
+equal to the store's `shapeHash` over every corpus model. The planner
+still plans: `jaren-db plan` renders the DDL and leaves the data
+transform it cannot infer as a draft; `fromPlanned(planned, { from, to })`
+takes that document up so a `transform` typed old row → new row REPLACES
+the draft, in place. The pen never clears a `draft` flag — a draft left
+alone still refuses to run (`JD0021`, the runner's rule) — and it imports
+no store and no engine: the transform's body is the JSLT pen's capture,
+the hash is `@jarenjs/core`'s over `@jarenjs/json`'s canonical form.
+
+### 5.1 The mapping table
+
+| Method | Emits | Type reading | Status |
+|---|---|---|---|
+| `defineMigration({ id, from, to, note? })` | `{ $migration: '0.1', id, from, to, note?, steps }` — `from`/`to` the two models' shape hashes, exactly `shapeHash` (pinned) | `Migration<From, To>`, the two model documents' phantoms | native; not a `$model` document, an empty `id`, another member `JL0101` |
+| `.ddl(sql, note?)` | `{ kind: 'ddl', sql, note? }` — one rendered statement (§2) | — | native; an empty statement `JL0101` |
+| `.sql(sql, note?)` | `{ kind: 'sql', sql, note? }` — one data statement spelled directly (§9.4) | — | native |
+| `.transform(name, (row, x) => …)` | `{ kind: 'jslt', collection: name, stylesheet: [{ match: '$', body }] }` — one root rule, the body captured through the JSLT pen's `body()` over the WHOLE row, `x.root`/`x.path` the externals the engine binds (§8.2 of JSLT-FORMAT) | `row` is `Expr<Old>` (`InferMeta<typeof from>[name]['doc']`); the result must spell `New` — a dropped, mistyped or foreign member does not compile; the honest top (`get()`) is admitted where a precise value is | native; a table the target model does not declare `JL0106`; an undeclared external `JL0104` |
+| `.transform(name, stylesheet(…))`, `.transform(name, rules)` | the rules ARRAY — a `jslt` step carries the array, so the envelope's `unmatched`/`modes` have no place in it | a typed stylesheet's or first rule's `Out` must be `New`; a hand-written rule is the honest top | native; a disposition or a mode table `JL0102`; not JSON `JL0101` |
+| `.assert(name, (row) => …, { expect? })` | `{ kind: 'query', collection: name, assert: { $for: { it: '$[*]' }, $where: <predicate>, $return: '$it' }, expect? }` — the format's own `$for` over the rows; the predicate names the VIOLATION (`expect: 'empty'`, the default, absent from the document) or the witness (`expect: 'ebv'`) | `row` is the members the two shapes share — a precondition sees old rows, a postcondition new ones, and what both agree on is what neither lies about; annotate (`(row: Expr<User>) => …`) when one shape is meant | native; another `expect` `JL0101`; an external `JL0104` |
+| `.assert(name, query, { expect? })` | the query document verbatim | — | native |
+| `.derive(name, columns)` | `{ kind: 'derive', collection: name, columns }` — a backfill of stored derived columns (§2.1), the columns verbatim | — | native; no columns `JL0101` |
+| `.step(raw)` | any planner-emitted step, verbatim — the escape that keeps `rebuild` (§10) authorable without the pen re-implementing it; a `draft` flag rides untouched | `MigrationStep` | native; an unrecognised kind or a missing member (the runner's `JD0023` rules, seen early) `JL0101` |
+| `fromPlanned(document, { from?, to? })` | the planner's document, taken up: `.transform(name, …)` replaces its draft for `name` in place; the other methods append | the models type the transforms and are checked against the document's hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and no target model `JL0106` |
+| `.document`, `toJSON()` | the deep-frozen `$migration` document | `MigrationDocument` | native |
+
+Three rules the table implies, spelled out:
+
+- **Identity stays the shape hash.** A database stores hashes, not
+  models; the pen computes what the store computes, from the same two
+  functions, with the same hint stripped — and the pin over every corpus
+  model is what keeps the two equal.
+- **The planner still plans; the pen types the human part.** The
+  workflow: a model module → `jaren-db plan --model ./model.js` (diffs
+  the committed `model.snapshot.json` against the model, writes the
+  migration with `--out`, advances the snapshot) → a migration module
+  built with `fromPlanned(planned, { from, to })` and a typed `transform`
+  → `jaren-db check` in CI (an unplanned model change, a pending
+  migration or drift exits 1) → `jaren-db apply`. `jaren-db` loads model
+  and migration modules beside JSON and refuses one that is not pure.
+- **A step's table is one the target model declares.** The runner would
+  fail the statement on a table that does not exist; the pen says so
+  first (`JL0106`) — for `transform`, `assert` and `derive` alike, when
+  it knows the target. Over a planned document alone it knows only the
+  drafts, so a transform for another table is spelled with `step()`.
+
+### 5.2 Worked examples
+
+Every `js` fence exports exactly one migration, and the `json` fence that
+follows is what the pen emits — executed by
+`test/linq/pens-format.test.js`.
+
+A migration by hand between two model-pen models — the DDL the planner
+would render, a typed transform, an assertion:
+
+```js
+import * as m from '@jarenjs/linq/model';
+import { defineMigration } from '@jarenjs/linq/migration';
+
+const v1 = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string() }) } });
+const v2 = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string(), handle: m.string() }) } });
+
+export const handles = defineMigration({ id: '0002-handles', from: v1, to: v2 })
+  .ddl('ALTER TABLE "User" ADD COLUMN "handle" TEXT')
+  .transform('User', (u) => ({ id: u.id, name: u.name, handle: u.name.lower() }))
+  .assert('User', (u) => u.handle.isEmpty());
+```
+
+```json
+{ "$migration": "0.1", "id": "0002-handles", "from": "1410er5", "to": "eedea8",
+  "steps": [
+    { "kind": "ddl", "sql": "ALTER TABLE \"User\" ADD COLUMN \"handle\" TEXT" },
+    { "kind": "jslt", "collection": "User",
+      "stylesheet": [ { "match": "$",
+                        "body": { "id": "$.id", "name": "$.name", "handle": { "$lower": "$.name" } } } ] },
+    { "kind": "query", "collection": "User",
+      "assert": { "$for": { "it": "$[*]" }, "$where": { "$empty": "$it.handle" }, "$return": "$it" } }
+  ] }
+```
+
+The bridge — the document `jaren-db plan --model ./model.js` wrote,
+with its draft replaced by a typed transform:
+
+```js
+import * as m from '@jarenjs/linq/model';
+import { fromPlanned } from '@jarenjs/linq/migration';
+
+const v1 = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string() }) } });
+const v2 = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string(), handle: m.string() }) } });
+
+// what the planner wrote: the DDL it rendered, and the transform it
+// could not infer, left as a draft that refuses to run
+const planned = {
+  $migration: '0.1', id: '0002-handles', from: '1410er5', to: 'eedea8',
+  steps: [
+    { kind: 'ddl', sql: 'ALTER TABLE "User" ADD COLUMN "handle" TEXT', note: "add column 'handle' on 'User'" },
+    { kind: 'jslt', collection: 'User', stylesheet: [], draft: true,
+      note: "the document schema of entity 'User' changed; fill in the transform (or delete this step if every stored document already validates) and remove \"draft\"" },
+  ],
+};
+
+export const typed = fromPlanned(planned, { from: v1, to: v2 })
+  .transform('User', (u) => ({ id: u.id, name: u.name, handle: u.name.lower() }));
+```
+
+```json
+{ "$migration": "0.1", "id": "0002-handles", "from": "1410er5", "to": "eedea8",
+  "steps": [
+    { "kind": "ddl", "sql": "ALTER TABLE \"User\" ADD COLUMN \"handle\" TEXT",
+      "note": "add column 'handle' on 'User'" },
+    { "kind": "jslt", "collection": "User",
+      "stylesheet": [ { "match": "$",
+                        "body": { "id": "$.id", "name": "$.name", "handle": { "$lower": "$.name" } } } ] }
+  ] }
+```
+
+### 5.3 The types, in one place
+
+```ts
+import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
+import type { DocOf } from '@jarenjs/linq/migration';
+import type { Expr } from '@jarenjs/linq';
+import { model as v1 } from './models/v1.js';   // the previous model module, kept beside the current one
+import { model as v2 } from './model.js';
+
+const handles = defineMigration({ id: '0002-handles', from: v1, to: v2 })
+  .transform('User', (u) => ({ id: u.id, name: u.name, handle: u.name.lower() }));
+//                     ^ Expr<DocOf<typeof v1, 'User'>> — the OLD row
+//                                                        ^ must spell the NEW row: a dropped `handle` does not compile
+fromPlanned(planned, { from: v1, to: v2 }).transform('User', (u) => ({ id: u.id, name: u.name, handle: u.name.lower() }));
+```
+
+The honest limit: from a JSON snapshot (`from: snapshot`) the old row is
+`unknown` and `u` the honest top, because a JSON literal is never
+inferred (§1.1, rule 2). Two routes keep the type: keep the previous
+model module beside the current one, as above; or ask the CLI for emit's
+declaration of the snapshot — `jaren-db snapshot --model ./model.js
+--types ./model.d.ts` — and annotate the row from it, `(u: Expr<User>)
+=> …`. A body's extra member is caught on a direct annotation of the
+spelling (`Spell<New>`); a contextually typed callback result is not
+excess-checked by TypeScript, and the closed target schema refuses the
+member at run time.

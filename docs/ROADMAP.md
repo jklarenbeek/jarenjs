@@ -571,11 +571,13 @@ what each does is its own documentation's job
   set residual (a boolean cannot bind); the k-nearest divert has its own
   counter, the plain one has none. `explain` should read the externals
   it is given, or the divert should count.
-- [ ] **Relation-name query sugar and entity linq roots.** `load` owns
-  name navigation today because `$.author.name` over the multi-entity
-  root is engine-unexecutable and therefore oracle-unprovable; a linq
-  `from` over `$.User[*]` needs a root-path emission option in the
-  builder.
+- [ ] **Relation-name query sugar.** `load` owns name navigation today
+  because `$.author.name` over the multi-entity root is
+  engine-unexecutable and therefore oracle-unprovable. A chain over an
+  entity set binds through the set's root now
+  (`from(store.sync.entity('User'))`, MODEL-FORMAT §10.1), so what
+  remains is the hop — a relation member on the chain lowered to the
+  correlated phrases the engine executes — never a document dialect.
 - [ ] **A many-to-many membership API.** The join tables, their
   synchronisation through the unit of work and the read side all
   shipped; a first-class link/unlink surface (and m2m attach for
@@ -597,9 +599,13 @@ what each does is its own documentation's job
   over UDF-indexed tables are tested; what remains is the model-level
   vocabulary to DECLARE such an index rather than hand-creating it as
   drift.
-- [ ] **Cross-source linq joins.** `join`/`groupJoin` are same-source
-  in 0.1 (one document, one root); the relational order lifts the
-  restriction.
+- [ ] **Cross-source linq joins beyond one store.** Two entity sets of
+  one store join in one document now (a shared provider `scope`,
+  LINQ-FORMAT §8; one statement for a bare-binding equijoin). What stays
+  open is a join across two different sources — two stores, a store and
+  an array — which one query document cannot spell (one input), and
+  three or more bindings, which the entity translator names a residual
+  (MODEL-FORMAT §10.6).
 - [ ] **Replication.** Change capture (LIVE-FORMAT) is an ordered log
   of RFC 6902 patches with a monotonic sequence, and SQLite's
   changeset/conflict primitives are available — the raw material a

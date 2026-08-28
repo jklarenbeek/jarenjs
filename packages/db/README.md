@@ -74,6 +74,23 @@ const model = m.defineModel({
 const store = await openStore(model, { driver: nodeDriver(), path: 'app.db' });
 ```
 
+Over an entities model, an entity set is a provider too (MODEL-FORMAT
+§10.1): a chain binds through the set's root and the store runs the
+document whole — the translator for a bare-binding selection or
+equijoin, the declared residual for a projection — while the store
+itself, serving several roots, is refused by name (`JL0007`):
+
+```js
+import { from, fromAsync } from '@jarenjs/linq';
+
+const starred = from(store.sync.entity('Post')).where((p) => p.stars.ge(3));
+starred.toDocument();   // { $for: { it: '$.Post[*]' }, $where: { $ge: ['$it.stars', 3] }, $return: '$it' }
+starred.toArray();      // the entity translator, one statement
+await fromAsync(store.entity('Post'))
+  .join(fromAsync(store.entity('User')), (p) => p.authorId, (u) => u.id, (p) => p)
+  .toArray();           // a two-root equijoin, one statement
+```
+
 `execute` answers in the ENGINE's result shape (QUERY-FORMAT §1,
 "singleton ≡ item"): `undefined` for no rows, the document itself for
 exactly one, an array for more — typed `SequenceResult<R>`, with `R`
@@ -150,7 +167,12 @@ shape binds at `store.collection<User>('users')`.
   replays the whole chain before the real store is touched; a
   checksummed history refuses edited or reordered migrations; a
   narrowing without an adequate transform is refused against the REAL
-  data, inside the transaction.
+  data, inside the transaction. And by code: `@jarenjs/linq/migration`
+  writes the same document with the data transform typed old row → new
+  row, `jaren-db` loads model and migration MODULES beside JSON, plans
+  from the committed `model.snapshot.json`, refuses a module that is
+  not pure, and `jaren-db check` fails CI on a model that moved without
+  a plan (MIGRATION-FORMAT §11).
 - **The safe profile.** Untrusted query documents run under composed
   bounds: engine limits on the residual, a mandatory row bound that
   refuses rather than truncates, reference allow-lists, optional

@@ -21,6 +21,7 @@ import * as assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 
 import { openStore } from '@jarenjs/db';
+import { from, fromAsync } from '@jarenjs/linq';
 import { adaptNodeDatabase } from '@jarenjs/db/node';
 
 const MODEL = {
@@ -161,6 +162,32 @@ describe('exactly one statement per graph load', () => {
     await store.entity('User').load({ include: { posts: true } });
     await store.entity('User').load({ include: { posts: true } });
     assert.strictEqual(counters.executed, 2);
+  });
+
+  it('a linq join over two entity sets of one store is ONE statement on both surfaces', async () => {
+    const posts = store.sync.entity('Post');
+    const users = store.sync.entity('User');
+    const chain = from(posts).join(from(users), (p) => p.authorId, (u) => u.id, (p) => p);
+    const explained = await store.explain(chain.toDocument());
+    assert.strictEqual(explained.mode, 'native');
+    assert.deepStrictEqual(explained.join,
+      { left: { binding: 'it', column: 'authorId' }, right: { binding: 'it2', column: 'id' } });
+    counters.executed = 0;
+    const rows = chain.toArray();
+    assert.strictEqual(counters.executed, 1, `expected ONE statement, counted ${counters.executed}`);
+    assert.strictEqual(rows.length, 30);
+    counters.executed = 0;
+    const streamed = await fromAsync(store.entity('Post'))
+      .join(fromAsync(store.entity('User')), (p) => p.authorId, (u) => u.id, (p) => p).toArray();
+    assert.strictEqual(counters.executed, 1, 'the asynchronous provider receives the same one document');
+    assert.strictEqual(streamed.length, 30);
+    // the contrast, declared: a PROJECTED join is the residual over both fetched roots
+    counters.executed = 0;
+    const projected = from(posts).join(from(users), (p) => p.authorId, (u) => u.id,
+      (p, u) => ({ pid: p.pid, by: u.name })).toArray();
+    assert.strictEqual(projected.length, 30);
+    assert.strictEqual(counters.executed, 2,
+      'the projection runs in the engine over the two fetched roots (MODEL-FORMAT §10.6)');
   });
 
   it('the contrast: per-parent querying is the N+1 the include avoids', async () => {

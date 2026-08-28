@@ -43,7 +43,11 @@ is bound bare.)
 
 - `from(source, options?)` — `source` is any iterable (arrays,
   strings, generators, Sets…) or a provider (§8); anything else is
-  `JL0001` at `from()` time, never at enumeration time.
+  `JL0001` at `from()` time, never at enumeration time. A provider's
+  items are bound through ITS root (`root` — `'$.Post[*]'` for a store's
+  entity set; the emitted `$for` iterates that root, bare); a provider
+  that serves several roots and none of its own (a store with entities,
+  `roots`) is `JL0007` at `from()` time, naming the roots to chain over.
   `options.compileTypeTest` enables the schema operators behind
   `ofType`/`cast` (§4); absent, those two are `JL0003` with the fix in
   the message.
@@ -117,7 +121,7 @@ is part of THIS design.
 | `OrderBy` / `OrderByDescending` | `$orderby` key spec (`$dir`; `$empty`/`$collation` via `options`) | native | `(e: Expr<T>) => Expr<K>` → `Seq<T>` |
 | `ThenBy` / `ThenByDescending` | appended `$orderby` spec; must directly follow `orderBy*` (`JL0005`) | native | as `OrderBy` |
 | `GroupBy` | `$groupby`; downstream items are `{ key, items }` | native | `(e: Expr<T>) => Expr<K>` → `Seq<{key: K, items: T[]}>` |
-| `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast **when both keys are plain member paths** (`o => o.pid`, `i => i.id`); a key with an operator in it (`o => o.name.lower()`, `o => o.p.add(0)`) is not a probe key and the join runs as a nested loop. Both sides MUST derive from the same source in 0.1 (`JL0005`): a query document reads one input; the relational order lifts this. The inner side's declared parameters ride along (§7) | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
+| `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast **when both keys are plain member paths** (`o => o.pid`, `i => i.id`); a key with an operator in it (`o => o.name.lower()`, `o => o.p.add(0)`) is not a probe key and the join runs as a nested loop. Both sides MUST derive from the same source, or from two providers sharing one `scope` (§8 — two entity sets of one store are two roots of ONE multi-entity input, and the store answers the equijoin in one statement); anything else is `JL0005`: a query document reads one input. On the async surface the join exists only over a provider, pushed whole (§10). The inner side's declared parameters ride along (§7) | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
 | `GroupJoin` | the matching group bound as an ARRAY value — `$let: { g: [ <correlated inner phrase> ] }` — so the result selector can index it (`g.at(0)`), fan it (`g.all()`), place it in a member (`{ matches: g }`) and aggregate over its members (`(u, g) => ({ n: g.count() })` counts the matches, `g.exists()` is whether there are any); same-source rule and parameter merge as `Join` | emulated | `(inner: Seq<U>, ok, ik, (o: Expr<T>, g: ArrayExpr<U> & AggregatableExpr) => Expr<R>)` → `Seq<R>` |
 | `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>` |
 | `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>` |
@@ -325,17 +329,49 @@ execute(queryDocument, options) -> undefined | item | items[]
   (`undefined` = empty, a single item as itself, several items as an
   array) — the in-memory runner is the reference semantics every
   provider MUST match, and it implements this same interface.
-- **`execute` is SYNCHRONOUS.** A `Sequence` terminal is a value —
-  `toArray(): T[]`, `count(): number` — so a promise cannot be returned
-  under that type. A provider that answers one is refused with `JL2004`
-  at the seam, because the alternative is not a slow answer but a wrong
-  one: the promise came back typed as the value, `count()` handed a
-  `Promise` to arithmetic, and `first()` indexed the promise and returned
-  `undefined`. An asynchronous provider (a wasm/OPFS driver) is reached
-  by emitting `toDocument()` and awaiting the provider directly.
+- **`execute` is SYNCHRONOUS on this surface.** A `Sequence` terminal
+  is a value — `toArray(): T[]`, `count(): number` — so a promise cannot
+  be returned under that type. A provider that answers one is refused
+  with `JL2004` at the seam, because the alternative is not a slow
+  answer but a wrong one: the promise came back typed as the value,
+  `count()` handed a `Promise` to arithmetic, and `first()` indexed the
+  promise and returned `undefined`. An asynchronous provider (a
+  wasm/OPFS driver, a store's asynchronous entity set) is `fromAsync`'s
+  source (§12): the same document arrives whole, and `execute` MAY
+  answer a promise there.
+
+A provider MAY carry three more members, read at `from()`/`fromAsync()`
+time:
+
+- `root` — the path expression its items are bound through
+  (`'$.Post[*]'` for a store's entity set); absent means the whole
+  input, `'$[*]'`. The emitted document iterates the root BARE (§5): a
+  stored document is an object, so an item is never an array there.
+- `roots` — the entity roots a STORE-LEVEL provider serves when it has
+  no root of its own (`['User', 'Post']`). Such a provider is refused by
+  `from()`/`fromAsync()` with `JL0007`, naming them: `$[*]` over the
+  entity map would answer every entity's rows mixed, or count the sets.
+  `fromDocument` keeps its own rule — there the document IS the root.
+- `scope` — an identity two providers share when their documents may be
+  joined. One store's entity sets carry one `scope`, so
+  `from(posts).join(from(users), (p) => p.authorId, (u) => u.id, (p) => p)`
+  emits `{ "$for": { "it": "$.Post[*]", "it2": "$.User[*]" }, "$where":
+  { "$eq": ["$it.authorId", "$it2.id"] }, "$return": "$it" }` — the shape
+  the store's translator answers in ONE statement when the result is a
+  bare binding (MODEL-FORMAT §10.2), and the declared residual over both
+  fetched roots when it is a projection (§10.6). `concat` stays
+  same-source even within a scope: one input per document.
+
+An element terminal hands over the one-item WINDOW `[<phrase>]` (§6). A
+provider that plans documents reads through that window — the store
+plans the phrase inside as if it were bare and answers its rows as the
+one array the constructor yields (`[]` for none, `[row]` for one) — so
+`toArray()` and `first()` push exactly as `count()` does.
 
 `@jarenjs/db` implements this contract without either package
-importing the other; a test double proves the document arrives whole.
+importing the other: its collections and its entity sets are providers
+(the sets carry `root` and `scope`; the store carries `roots`), and a
+test double proves the document arrives whole.
 
 ### 8.1 Compilation registries
 
@@ -370,6 +406,7 @@ exists):
 | `JL0004` | an undeclared or reserved parameter name was used |
 | `JL0005` | an operator was used invalidly at build time |
 | `JL0006` | an unsupported operator was invoked |
+| `JL0007` | a provider serves several entity roots (`roots`) and has no root of its own — chain over `store.entity(name)` |
 
 Pen build errors (`LinqBuildError`, raised by `@jarenjs/linq/schema`,
 `/model`, `/jslt` and the pens that follow them; PENS-FORMAT.md §1.3 is
@@ -381,6 +418,7 @@ the normative home, this table mirrors it):
 | `JL0102` | a pen was asked for a construct the format cannot carry |
 | `JL0103` | a `$defs` name collision, a dangling ref, or an unnamed recursion |
 | `JL0104` | a pen-owned keyword through `meta()`, or an external a captured rule did not declare |
+| `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 
 Runtime errors (`LinqRuntimeError`):
 
@@ -403,7 +441,7 @@ the operator.
 ## 10. The asynchronous surface: streaming and barriers
 
 `fromAsync(source, options?)` gives the same operator surface over
-async sources — joins excepted, see the table — emitting the SAME query
+async sources — joins only over a provider, see the table — emitting the SAME query
 documents: the same chain through `from` and `fromAsync` MUST emit
 byte-identical documents (the one-operator-set proof), with terminals
 returning promises. The rule: **the pipeline is synchronous, the
@@ -425,7 +463,7 @@ because the engine itself materialises for `$orderby`/`$groupby`):
 | `concat` | stream for a CONSTANT array; another sequence is refused (`JL0005`) — an async source is single-pass and cannot be re-iterated for a second chain |
 | | on the SYNC surface, `concat` also requires the same source: a query document reads one input, so the other sequence contributes its EXPRESSION, and a foreign sequence would have that expression evaluated against THIS source — reading the wrong rows twice instead of concatenating two inputs |
 | `orderBy`/`thenBy`, `groupBy`, `aggregate`, `reverse` | BARRIER, named by `explain()` with the reason (a `thenBy` is part of the `$orderby` barrier it extends) |
-| `join`, `groupJoin` | NOT on the async surface: a join's inner side re-reads the source, and an async source is single-pass. Join on the sync surface, or collect the stream first |
+| `join`, `groupJoin` | over a PROVIDER origin, before any `mapAsync`: pushed WHOLE inside the one document, with an async sequence over the same provider (or one sharing its `scope`) as the inner side — the store answers a two-root equijoin in one statement; over an iterable, a cursor or a push queue `JL0005`: a join's inner side re-reads the source, and a single-pass source cannot be read twice (join on the sync surface, or collect the stream first) |
 | `count`, `any`, `all`, `first`, `single`, `elementAt` | stream with early exit where semantics allow |
 | `sum`, `average`, `min`, `max`, `last` | consume the stream; the aggregate itself runs through the ENGINE over the collected items, so its semantics (type errors included) are identical to the sync surface |
 
@@ -485,6 +523,18 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
 
 `fromAsync` accepts, in order of preference:
 
+- a **provider** (§8) — asked for BEFORE the shapes below, so an
+  `execute` duck that also happens to be iterable is a provider. The
+  whole chain up to the first `mapAsync` — the terminal's wrapper
+  included — is ONE document `execute` receives, once, with the bound
+  externals, and `execute` MAY answer a promise here (D8: the contract
+  mirrors §8's; the awaiting is this surface's). The residual after a
+  `mapAsync` streams locally over the pushed rows, and `explain()`
+  reports `{ split: { pushed, residual } }` exactly as for a
+  synchronous prefix, with `barriers` naming only the residual's own.
+  The same chain through `from(store.sync.entity('X'))` and
+  `fromAsync(store.entity('X'))` MUST emit byte-identical documents —
+  the one-operator-set proof, extended to roots;
 - any **`AsyncIterable`** (async generators, `ReadableStream` — every
   target exposes `Symbol.asyncIterator` on it, josl's
   `iterateCsvStream` output);

@@ -257,9 +257,12 @@ type EntityFor<Names> = BuilderLike & {
   readonly __props: { readonly [member: string]: { readonly __out: unknown; readonly __relation?: { readonly to: Names } } };
 };
 
-/** The `$model` 0.1 document, carrying the entity builders as a phantom. */
-export interface ModelDocument<E = unknown> {
+/** The `$model` 0.1 document, carrying the entity builders — and the
+ * collection specs — as phantoms: what `InferMeta<>` and the migration
+ * pen's name and shape checks read. */
+export interface ModelDocument<E = unknown, C = unknown> {
   readonly __entities?: E;
+  readonly __collections?: C;
   readonly $model: '0.1';
   readonly entities?: { readonly [name: string]: { readonly schema: JsonSchema | boolean; readonly 'x-rename'?: string } };
   readonly collections?: { readonly [name: string]: CollectionSpec };
@@ -269,7 +272,7 @@ export interface ModelDocument<E = unknown> {
 export function defineModel<
   E extends { [K in keyof E]: EntityFor<keyof E & string> } = {},
   C extends Record<string, CollectionSpec<any>> = {},
->(spec: { entities?: E; collections?: C }): ModelDocument<E>;
+>(spec: { entities?: E; collections?: C }): ModelDocument<E, C>;
 
 // ————— InferMeta —————
 

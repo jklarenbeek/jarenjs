@@ -2,39 +2,61 @@
 //#region the jaren-db command
 // Migrations nobody drives by API stay undrifted by nobody: the CLI is
 // what puts `check` in CI and a reviewable migration document in the
-// repository. Five commands (MIGRATION-FORMAT §11): plan, status,
-// apply, check, shape.
+// repository. Six commands (MIGRATION-FORMAT §11): plan, snapshot,
+// status, apply, check, shape. A model or a migration is a JSON file or
+// a MODULE — the model pen's document, the migration pen's builder —
+// loaded twice, because a module that emits a different document on its
+// second load is one whose migration can never match its own history.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { pathToFileURL } from 'url';
+
+import { canonicalizeJson } from '@jarenjs/json/canonical';
 
 import {
   planModelMigration, migrate, migrationStatus, shapeHash, compareShapeToModel,
   sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
-  planCollection, planEntity, planJoinTable, HISTORY_TABLE,
+  planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
 } from './index.js';
 import { nodeDriver } from './drivers/node.js';
 
 const USAGE = `jaren-db — model-driven SQLite migrations
 
 Usage:
-  jaren-db plan   --from <model> --to <model> [--store <db>] [--id <name>] [--out <file>]
-  jaren-db status --model <model> --store <db> --baseline <model> [--migrations <dir>]
-  jaren-db apply  --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
-  jaren-db check  --model <model> --store <db> --baseline <model> [--migrations <dir>]
-  jaren-db shape  --model <model>
+  jaren-db plan     --from <model> --to <model> [--store <db>] [--id <name>] [--out <file>]
+  jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id <name>] --out <file>
+  jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
+  jaren-db status   --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+  jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
+  jaren-db check    --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+  jaren-db shape    --model <model>
 
-plan    Diff two model FILES into a migration document (a database
-        stores shape hashes, not models — the from-model is the
-        previous model file). With --store, first verify the
-        from-model matches the database's recorded shape.
-status  Applied, pending, and drift (a hand-modified database).
-apply   Print every statement, then apply. Destructive steps (drop
-        table/column, rebuild) require --yes or an interactive
-        confirmation naming what is lost. --dry-run only prints.
-check   The CI command: exit 1 on pending migrations or drift.
-shape   Print the physical mapping a model produces.
+A <model> or a migration is a .json file, or a MODULE (.js, .mjs, .cjs —
+or .ts where Node strips types) whose default export, or its 'model' /
+'migration' export, is the document or a pen builder that emits one. A
+module is loaded twice and refused when its two emissions differ: no
+clock, no env, no randomness. --migrations reads .json files and
+modules, sorted by file name.
+
+plan      Diff two model FILES into a migration document (a database
+          stores shape hashes, not models — the from-model is the
+          previous model file), or diff the committed SNAPSHOT (default
+          model.snapshot.json beside the model) against the model: with
+          --out the migration is written and the snapshot advanced; a
+          model matching its snapshot plans nothing. With --store, first
+          verify the from-model matches the database's recorded shape.
+snapshot  Write the model's snapshot; with --types, emit's TypeScript
+          declaration for it (needs @jarenjs/emit beside @jarenjs/db).
+status    Applied, pending, drift (a hand-modified database) and — with
+          a snapshot — an unplanned model change.
+apply     Print every statement, then apply. Destructive steps (drop
+          table/column, rebuild) require --yes or an interactive
+          confirmation naming what is lost. --dry-run only prints.
+check     The CI command: exit 1 on an unplanned model change, pending
+          migrations or drift.
+shape     Print the physical mapping a model produces.
 `;
 
 function fail(message) {
@@ -46,6 +68,7 @@ function parseArgs(argv) {
   const options = {
     command: argv[2], from: null, to: null, model: null, store: null,
     baseline: null, migrations: null, id: null, out: null,
+    snapshot: null, types: null,
     dryRun: false, yes: false, help: false,
   };
   for (let i = 3; i < argv.length; i++) {
@@ -58,6 +81,8 @@ function parseArgs(argv) {
       case '--migrations': options.migrations = argv[++i]; break;
       case '--id': options.id = argv[++i]; break;
       case '--out': options.out = argv[++i]; break;
+      case '--snapshot': options.snapshot = argv[++i]; break;
+      case '--types': options.types = argv[++i]; break;
       case '--dry-run': options.dryRun = true; break;
       case '--yes': options.yes = true; break;
       case '--help': case '-h': options.help = true; break;
@@ -76,13 +101,82 @@ const readJson = (file, what) => {
   }
 };
 
-/** The migrations directory, sorted — the full ordered chain. */
-const readMigrationsDir = (dir) => {
+const MODULE_EXT = /\.(?:m?js|cjs|m?ts|cts)$/;
+const TS_EXT = /\.[mc]?ts$/;
+let loads = 0;
+
+/** The document a module exports — `default`, or the named export — as
+ * its JSON emission (a pen builder's `toJSON()`), or a named failure. */
+const emissionOf = (mod, exportName, file) => {
+  const value = mod.default !== undefined ? mod.default : mod[exportName];
+  if (value === null || typeof value !== 'object') {
+    return fail(`module '${file}' exports neither a default nor a '${exportName}' document`);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(JSON.stringify(value));
+  }
+  catch (error) {
+    return fail(`module '${file}': the ${exportName} emission is not JSON (${error.message})`);
+  }
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) {
+    return fail(`module '${file}': the ${exportName} emission is not a document`);
+  }
+  return doc;
+};
+
+/**
+ * A model or migration document: a `.json` file, or a module loaded
+ * TWICE — an emission that changes between loads is not pure (a clock,
+ * the environment, randomness), and a migration that hashes differently
+ * per load can never match its own history.
+ */
+async function loadDocument(file, what, exportName) {
+  if (file.endsWith('.json')) return readJson(file, what);
+  if (!MODULE_EXT.test(file)) {
+    return fail(`cannot read ${what} '${file}': neither a .json file nor a module `
+      + '(.js, .mjs, .cjs — or .ts where Node strips types)');
+  }
+  const url = pathToFileURL(path.resolve(file)).href;
+  const load = async () => {
+    try {
+      return await import(`${url}?jaren-db-load=${++loads}`);
+    }
+    catch (error) {
+      return fail(`cannot load ${what} module '${file}': ${error.message}`
+        + (TS_EXT.test(file)
+          ? ' — a .ts module loads only where Node strips types (Node >= 24 does by default; --no-strip-types turns it off)'
+          : ''));
+    }
+  };
+  const first = emissionOf(await load(), exportName, file);
+  const second = emissionOf(await load(), exportName, file);
+  if (canonicalizeJson(first) !== canonicalizeJson(second)) {
+    return fail(`the ${what} module '${file}' is not pure — two loads emitted different documents; `
+      + 'no clock, no env, no randomness in a model or migration module');
+  }
+  return first;
+}
+
+/** The migrations directory, sorted by file name — the full ordered chain. */
+const loadMigrationsDir = async (dir) => {
   if (dir === null) return [];
-  return fs.readdirSync(dir)
-    .filter((file) => file.endsWith('.json'))
-    .sort()
-    .map((file) => readJson(path.join(dir, file), 'migration'));
+  const files = fs.readdirSync(dir)
+    .filter((file) => (file.endsWith('.json') || MODULE_EXT.test(file)) && !file.endsWith('.d.ts'))
+    .sort();
+  const migrations = [];
+  for (const file of files) migrations.push(await loadDocument(path.join(dir, file), 'migration', 'migration'));
+  return migrations;
+};
+
+/** The committed snapshot beside a model, unless one is named. */
+const defaultSnapshotOf = (modelFile) => path.join(path.dirname(modelFile), 'model.snapshot.json');
+
+/** Write a file only when its text changed — two runs on one input change nothing. */
+const writeIfChanged = (file, text) => {
+  const same = fs.existsSync(file) && fs.readFileSync(file, 'utf8') === text;
+  if (!same) fs.writeFileSync(file, text);
+  return same;
 };
 
 /** What a migration will destroy, by note — the confirmation names it. */
@@ -105,10 +199,30 @@ const renderSteps = (migration) => {
 };
 
 async function commandPlan(options) {
-  if (options.from === null || options.to === null)
-    fail('plan needs --from and --to model files');
-  const fromModel = readJson(options.from, 'from-model');
-  const toModel = readJson(options.to, 'to-model');
+  let fromModel;
+  let toModel;
+  let snapshotFile = null;
+  if (options.model !== null) {
+    if (options.from !== null || options.to !== null)
+      fail('plan takes either --from and --to model files, or --model with its --snapshot — not both');
+    snapshotFile = options.snapshot ?? defaultSnapshotOf(options.model);
+    if (!fs.existsSync(snapshotFile)) {
+      fail(`no snapshot at '${snapshotFile}' — write one from the model the store was created with: `
+        + `jaren-db snapshot --model <baseline> --snapshot '${snapshotFile}'`);
+    }
+    fromModel = readJson(snapshotFile, 'snapshot');
+    toModel = await loadDocument(options.model, 'model', 'model');
+    if (shapeHash(fromModel) === shapeHash(toModel)) {
+      console.log(`no change — the model matches its snapshot (${snapshotFile}); nothing to plan`);
+      return;
+    }
+  }
+  else {
+    if (options.from === null || options.to === null)
+      fail('plan needs --from and --to model files, or --model with a committed --snapshot');
+    fromModel = await loadDocument(options.from, 'from-model', 'model');
+    toModel = await loadDocument(options.to, 'to-model', 'model');
+  }
   if (options.store !== null) {
     // the from-model is compared with the database's SHAPE directly:
     // asking the history with an empty chain refused every database
@@ -141,6 +255,15 @@ async function commandPlan(options) {
       + 'fill them in before applying');
   }
   if (report.destructive) console.error('NOTE: this migration is DESTRUCTIVE');
+  if (snapshotFile !== null) {
+    if (options.out === null) {
+      console.error(`NOTE: the snapshot was not advanced — plan with --out to write the migration and move ${snapshotFile}`);
+    }
+    else {
+      writeIfChanged(snapshotFile, JSON.stringify(toModel, null, 2) + '\n');
+      console.log(`advanced ${snapshotFile} (shape ${shapeHash(toModel)})`);
+    }
+  }
 }
 
 async function commandStatus(options, { asCheck }) {
@@ -149,9 +272,22 @@ async function commandStatus(options, { asCheck }) {
   // `check` without the model verified nothing and printed "in sync"
   if (asCheck && options.model === null)
     fail('check needs --model — drift is measured against the model the code carries');
-  const baseline = readJson(options.baseline, 'baseline model');
-  const model = options.model !== null ? readJson(options.model, 'model') : undefined;
-  const migrations = readMigrationsDir(options.migrations);
+  const baseline = await loadDocument(options.baseline, 'baseline model', 'model');
+  const model = options.model !== null ? await loadDocument(options.model, 'model', 'model') : undefined;
+  const migrations = await loadMigrationsDir(options.migrations);
+  // the snapshot discipline, when it is in use: a model that moved
+  // without a plan is named as such, never as the database's drift
+  const snapshotFile = options.snapshot ?? (options.model !== null ? defaultSnapshotOf(options.model) : null);
+  let unplanned = null;
+  const snapshotInUse = snapshotFile !== null && (options.snapshot !== null || fs.existsSync(snapshotFile));
+  if (snapshotInUse) {
+    if (!fs.existsSync(snapshotFile)) fail(`no snapshot at '${snapshotFile}'`);
+    const recorded = shapeHash(readJson(snapshotFile, 'snapshot'));
+    const current = shapeHash(model);
+    if (recorded !== current) {
+      unplanned = `${snapshotFile} records shape ${recorded}, the model is ${current} — run jaren-db plan`;
+    }
+  }
   let status;
   try {
     status = await migrationStatus({ driver: nodeDriver(), path: options.store },
@@ -165,7 +301,12 @@ async function commandStatus(options, { asCheck }) {
   if (model !== undefined && status.pending.length === 0) {
     console.log(`drift:    ${status.drift === null ? 'none — in sync' : status.drift}`);
   }
+  if (snapshotInUse) {
+    console.log(`model:    ${unplanned === null ? 'planned — matches its snapshot' : `UNPLANNED change — ${unplanned}`}`);
+  }
   if (asCheck) {
+    if (unplanned !== null)
+      fail(`unplanned model change: ${unplanned}`);
     if (status.pending.length > 0)
       fail(`${status.pending.length} pending migration(s) — run jaren-db apply`);
     if (status.drift !== null)
@@ -185,9 +326,9 @@ const confirm = (question) => new Promise((resolve) => {
 async function commandApply(options) {
   if (options.store === null || options.baseline === null || options.migrations === null)
     fail('apply needs --store, --baseline and --migrations');
-  const baseline = readJson(options.baseline, 'baseline model');
-  const model = options.model !== null ? readJson(options.model, 'model') : undefined;
-  const migrations = readMigrationsDir(options.migrations);
+  const baseline = await loadDocument(options.baseline, 'baseline model', 'model');
+  const model = options.model !== null ? await loadDocument(options.model, 'model', 'model') : undefined;
+  const migrations = await loadMigrationsDir(options.migrations);
   const target = { driver: nodeDriver(), path: options.store };
 
   const status = await migrationStatus(target, migrations, { baseline })
@@ -231,9 +372,37 @@ async function commandApply(options) {
   }
 }
 
-function commandShape(options) {
+async function commandSnapshot(options) {
+  if (options.model === null) fail('snapshot needs --model');
+  const model = await loadDocument(options.model, 'model', 'model');
+  const snapshotFile = options.snapshot ?? defaultSnapshotOf(options.model);
+  const same = writeIfChanged(snapshotFile, JSON.stringify(model, null, 2) + '\n');
+  console.log(`${same ? 'unchanged' : 'wrote'} ${snapshotFile} (shape ${shapeHash(model)})`);
+  if (options.types === null) return;
+  // emit is loaded lazily, and only here: db does not depend on it, so a
+  // host without it is told exactly what --types needs
+  let emit;
+  let typescript;
+  try {
+    emit = await import('@jarenjs/emit');
+    typescript = await import('@jarenjs/emit/typescript');
+  }
+  catch (error) {
+    if (error.code === 'ERR_MODULE_NOT_FOUND' || error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+      return fail(`--types needs @jarenjs/emit beside @jarenjs/db, and it does not resolve `
+        + `(${error.message}) — install it: npm install @jarenjs/emit`);
+    }
+    throw error;
+  }
+  const declaration = typescript.renderTypeScript(
+    entityEmitModel(model, { compile: emit.compileEmitModel, source: options.model }), {});
+  const sameTypes = writeIfChanged(options.types, declaration);
+  console.log(`${sameTypes ? 'unchanged' : 'wrote'} ${options.types}`);
+}
+
+async function commandShape(options) {
   if (options.model === null) fail('shape needs --model');
-  const model = readJson(options.model, 'model');
+  const model = await loadDocument(options.model, 'model', 'model');
   console.log(`shape hash: ${shapeHash(model)}`);
   for (const collection of normalizeModel(model).values()) {
     for (const sql of planCollection(collection.name, collection, sqliteDialect).createSql)
@@ -262,6 +431,7 @@ async function main() {
   }
   switch (options.command) {
     case 'plan': return commandPlan(options);
+    case 'snapshot': return commandSnapshot(options);
     case 'status': return commandStatus(options, { asCheck: false });
     case 'check': return commandStatus(options, { asCheck: true });
     case 'apply': return commandApply(options);

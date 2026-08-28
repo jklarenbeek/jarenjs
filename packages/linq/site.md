@@ -3,10 +3,13 @@ package: "@jarenjs/linq"
 card:
   title: LINQ — chains to query documents
   blurb: >-
-    C#-familiar fluent chains whose output is a plain query document: a
-    recording proxy captures the callback, the emitter folds stages into one
-    FLWOR document, and the same chain runs in memory, over streams (one
-    bounded mapAsync boundary), or pushed to SQL through the provider seam.
+    The suite, by code: C#-familiar chains whose output is a plain query
+    document, and pens that write the suite's other documents the same way —
+    a JSON Schema, a model, a JSLT stylesheet, a migration with its transform
+    typed old row to new row. A recording proxy captures the callback, the
+    emitter folds stages into one FLWOR document, and the same chain runs in
+    memory, over streams (one bounded mapAsync boundary), or pushed whole to
+    a store's entity sets through the provider seam.
   perf: >-
     one operator set, byte-identical documents through the sync and async
     drivers
@@ -15,11 +18,15 @@ engines:
     title: LINQ
 ---
 
-A C#-familiar chain whose product is a plain JSON query document. Capture is a
-recording proxy (never source-text inspection), execution is deferred, and the
-emitted document runs in memory, over async streams, or against any provider
-exposing execute(document, options) — `@jarenjs/db` implements that contract
-with no import edge in either direction.
+A C#-familiar chain whose product is a plain JSON query document — and, under
+its subpaths, the pens that write the suite's other documents the same way:
+`@jarenjs/linq/schema` (JSON Schema), `/model` (a store model), `/jslt` (a
+stylesheet) and `/migration` (a migration whose data transform is typed old
+row to new row). Capture is a recording proxy (never source-text inspection),
+execution is deferred, and the emitted document runs in memory, over async
+streams, or against any provider exposing execute(document, options) —
+`@jarenjs/db` implements that contract with no import edge in either
+direction, and its entity sets are providers a chain binds through by root.
 
 ```js
 import { from } from '@jarenjs/linq';

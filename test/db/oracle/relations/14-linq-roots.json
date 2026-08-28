@@ -1,0 +1,320 @@
+{
+  "group": "14 linq roots",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "User": {
+        "schema": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "name": {
+              "type": "string"
+            },
+            "age": {
+              "type": "integer"
+            },
+            "posts": {
+              "x-entity": {
+                "relation": {
+                  "to": "Post",
+                  "many": true,
+                  "via": "authorId",
+                  "onDelete": "cascade"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Post": {
+        "schema": {
+          "type": "object",
+          "required": [
+            "pid",
+            "authorId"
+          ],
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "title": {
+              "type": "string"
+            },
+            "stars": {
+              "type": "integer"
+            },
+            "authorId": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "documents": {
+    "User": [
+      {
+        "id": "u1",
+        "name": "ada",
+        "age": 36
+      },
+      {
+        "id": "u2",
+        "name": "lin",
+        "age": 64
+      },
+      {
+        "id": "u3",
+        "name": "kid",
+        "age": 8
+      },
+      {
+        "id": "u4",
+        "name": "mo"
+      }
+    ],
+    "Post": [
+      {
+        "pid": 1,
+        "title": "alpha",
+        "stars": 5,
+        "authorId": "u1"
+      },
+      {
+        "pid": 2,
+        "title": "beta",
+        "stars": 1,
+        "authorId": "u1"
+      },
+      {
+        "pid": 3,
+        "title": "gamma",
+        "stars": 4,
+        "authorId": "u2"
+      },
+      {
+        "pid": 4,
+        "title": "delta",
+        "stars": 3,
+        "authorId": "u1"
+      },
+      {
+        "pid": 5,
+        "title": "epsilon",
+        "authorId": "u2"
+      },
+      {
+        "pid": 6,
+        "title": "ada",
+        "stars": 2,
+        "authorId": "u4"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "a filtered root",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$where": {
+            "$ge": [
+              "$it.stars",
+              3
+            ]
+          },
+          "$return": "$it"
+        }
+      ]
+    },
+    {
+      "name": "an ordered window",
+      "query": [
+        {
+          "$subsequence": [
+            {
+              "$subsequence": [
+                {
+                  "$for": {
+                    "it": "$.Post[*]"
+                  },
+                  "$orderby": [
+                    {
+                      "$key": "$it.stars",
+                      "$dir": "desc"
+                    },
+                    {
+                      "$key": "$it.pid"
+                    }
+                  ],
+                  "$return": "$it"
+                },
+                1
+              ]
+            },
+            0,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a projection",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$where": {
+            "$gt": [
+              "$it.stars",
+              1
+            ]
+          },
+          "$return": {
+            "id": "$it.pid",
+            "title": {
+              "$upper": "$it.title"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a two-entity join, the child returned",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]",
+            "it2": "$.User[*]"
+          },
+          "$where": {
+            "$eq": [
+              "$it.authorId",
+              "$it2.id"
+            ]
+          },
+          "$return": "$it"
+        }
+      ]
+    },
+    {
+      "name": "a two-entity join, projected",
+      "query": [
+        {
+          "$for": {
+            "it": "$.Post[*]",
+            "it2": "$.User[*]"
+          },
+          "$where": {
+            "$eq": [
+              "$it.authorId",
+              "$it2.id"
+            ]
+          },
+          "$return": {
+            "title": "$it.title",
+            "by": "$it2.name"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a group join counting the children",
+      "query": [
+        {
+          "$for": {
+            "it": "$.User[*]"
+          },
+          "$let": {
+            "g": [
+              {
+                "$for": {
+                  "it2": "$.Post[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$it.id",
+                    "$it2.authorId"
+                  ]
+                },
+                "$return": "$it2"
+              }
+            ]
+          },
+          "$return": {
+            "id": "$it.id",
+            "n": {
+              "$count": "$g[*]"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a count",
+      "query": {
+        "$count": {
+          "$for": {
+            "it": "$.Post[*]"
+          },
+          "$where": {
+            "$ge": [
+              "$it.stars",
+              3
+            ]
+          },
+          "$return": "$it"
+        }
+      }
+    },
+    {
+      "name": "an any",
+      "query": {
+        "$some": {
+          "it": "$.Post[*]"
+        },
+        "$satisfies": {
+          "$gt": [
+            "$it.stars",
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "a first",
+      "query": [
+        {
+          "$subsequence": [
+            {
+              "$for": {
+                "it": "$.Post[*]"
+              },
+              "$orderby": {
+                "$key": "$it.pid"
+              },
+              "$return": "$it"
+            },
+            0,
+            1
+          ]
+        }
+      ]
+    }
+  ]
+}

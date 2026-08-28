@@ -948,6 +948,20 @@ const linqCodes: Readonly<Record<string, string>> = LINQ_CODES;
 void linqCodes.JL2001;
 void (LinqBuildError.name.length + LinqRuntimeError.name.length);
 for (const row of linqFrom(linqUsers)) void row.id;
+// a provider carrying the item phantom infers T — a typed entity set does;
+// root/roots/scope are the contract's optional members
+const rootedProvider = { root: '$.User[*]', scope: {}, execute: linqProvider.execute };
+const rootedRows: unknown[] = linqFrom(rootedProvider).where((u) => u.get('age').gt(1)).toArray();
+void rootedRows;
+const phantomProvider = { __item: undefined as LinqUser | undefined, root: '$.User[*]', execute: linqProvider.execute };
+const inferredIds: LinqUser['id'][] = linqFrom(phantomProvider).select((u) => u.id).toArray();
+void inferredIds;
+const asyncPhantom: Promise<LinqUser[]> = fromAsync(phantomProvider).where((u) => u.id.gt(0)).toArray();
+void asyncPhantom;
+const asyncUntyped: Promise<unknown[]> = fromAsync(linqProvider).toArray();
+void asyncUntyped;
+// @ts-expect-error — a root is a path expression string
+void linqFrom({ root: 42, execute: linqProvider.execute });
 
 // @jarenjs/linq — the async surface: promise terminals, the typed
 // mapAsync re-typing, the split-aware explain
@@ -1136,6 +1150,22 @@ void linqFrom(genUsers).select((u) => u.nope);
 // the typed store: entity(name) speaks the generated shapes
 declare const rawDbStore: import('@jarenjs/db').Store;
 const genStore = typedStore<EntityMetaMap>(rawDbStore);
+// the acceptance pin: a chain over a typed entity set infers T with no cast
+const genEmails: string[] = linqFrom(genStore.entity('User')).select((u) => u.email).toArray();
+void genEmails;
+const genAsyncEmails: Promise<string[]> = fromAsync(genStore.entity('User')).select((u) => u.email).toArray();
+void genAsyncEmails;
+// the async join is typed as the sync one, over two async sequences of one store
+const genJoined: Promise<{ t: string; e: string }[]> = fromAsync(genStore.entity('Post'))
+  .join(fromAsync(genStore.entity('User')), (p) => p.authorId, (u) => u.id, (p, u) => ({ t: p.title, e: u.email }))
+  .toArray();
+void genJoined;
+const genRoots: readonly ('User' | 'Post' | 'Label' | 'Grade')[] | undefined = genStore.roots;
+void genRoots;
+// @ts-expect-error — the untyped handle keeps unknown: a member is not a path into it
+void linqFrom(rawDbStore.entity('User')).select((u) => u.email);
+// @ts-expect-error — an async join's inner side is an async sequence, never a sync one
+void fromAsync(genStore.entity('Post')).join(linqFrom(genStore.entity('User')), (p) => p.authorId, (u) => u.id, (p) => p);
 
 async function dbTypedBlock(): Promise<void> {
   const users = genStore.entity('User');

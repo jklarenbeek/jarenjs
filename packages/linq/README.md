@@ -35,8 +35,9 @@ played by the provider seam below.
   common path precisely and degrade to honest `unknown` — never a
   wrong type — with runtime twins pinning every claim.
 - **The async story (the obvious objection, answered).** `fromAsync`
-  runs the same operator set over cursors and streams — joins excepted,
-  because a single-pass source cannot be read twice — and async is a
+  runs the same operator set over cursors and streams — joins only over
+  a provider, pushed whole, because a single-pass stream cannot be read
+  twice — and async is a
   boundary, not a colour (the same chain emits a byte-identical
   document through both drivers, test-pinned). Element-wise async
   work happens in exactly one place, `mapAsync`, with a REQUIRED
@@ -67,11 +68,17 @@ played by the provider seam below.
   method. `.params({ query })` binds the query vector at call time, so
   one compiled document serves every question.
 - **The provider contract.** Any object with
-  `execute(queryDocument, { externals })` is a provider.
-  `@jarenjs/db` implements it — a chain over a SQLite-backed
-  collection pushes to SQL with no import edge in either direction.
-  `mapAsync` splits a provider chain into a pushed prefix and a local
-  residual, and `explain()` shows the split.
+  `execute(queryDocument, { externals })` is a provider; one carrying
+  `root` binds its items through that root, and two sharing a `scope`
+  may be joined in one document. `@jarenjs/db` implements it — a chain
+  over a SQLite-backed collection or an entity set
+  (`from(store.sync.entity('Post'))`, `fromAsync(store.entity('Post'))`)
+  pushes to SQL with no import edge in either direction; two entity sets
+  of one store join in ONE statement; the store itself, serving several
+  roots, is refused by name (`JL0007`). An asynchronous provider is
+  `fromAsync`'s: the document arrives whole and `execute` may answer a
+  promise. `mapAsync` splits a provider chain into a pushed prefix and a
+  local residual, and `explain()` shows the split.
 
 ## By code: the schema pen
 
@@ -103,7 +110,7 @@ from(rows).ofType(User);  // Sequence<User> — the chain takes a builder where 
 Objects are closed by default (`.open()` admits more); a document is a
 frozen value (`JSON.stringify(builder)` is the document); a pen imports
 no engine, so a schema-only bundle carries no chain and no validator.
-What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0104`)
+What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0106`)
 naming the fix — there is no `.transform()` and no function `refine`;
 cross-field rules are `check()`, transforms are application code. The
 normative mapping table, the rules every pen keeps and the worked
@@ -134,12 +141,41 @@ compileJsltStylesheet(book, { compileTypeTest })(input);   // @jarenjs/json/jslt
 The mapping table and the worked examples are
 [docs/PENS-FORMAT.md §4](docs/PENS-FORMAT.md#4-the-jslt-pen--jarenjslinqjslt).
 
+## By code: the migration pen
+
+`@jarenjs/linq/migration` closes the first picture — a schema by the
+schema pen, a model by the model pen, a chain over the model's entity
+sets, and a migration between two models whose data transform is typed
+old row → new row. `defineMigration({ id, from, to })` hashes the two
+models' shapes exactly as the store does; `.ddl()`, `.sql()`,
+`.transform()`, `.assert()`, `.derive()` and `.step()` write the step
+kinds MIGRATION-FORMAT names; `fromPlanned(planned, { from, to })` takes
+the document `jaren-db plan` wrote and lets a typed `transform` replace
+the draft the planner could not fill — the planner still plans, the pen
+types the human part, and a draft left alone still refuses to run.
+
+```js
+import { fromPlanned } from '@jarenjs/linq/migration';
+import { model as v1 } from './models/v1.js';   // the previous model, kept beside the current one
+import { model as v2 } from './model.js';
+
+export default fromPlanned(planned, { from: v1, to: v2 })
+  .transform('User', (u) => ({ id: u.id, name: u.name, handle: u.name.lower() }));
+//                     ^ the old row, typed        ^ the new row, checked: a dropped `handle` does not compile
+```
+
+`jaren-db` loads model and migration modules beside JSON, plans from the
+committed `model.snapshot.json`, refuses a module that is not pure and,
+in CI, a model that moved without a plan (`jaren-db check`). The mapping
+table and the worked examples are
+[docs/PENS-FORMAT.md §5](docs/PENS-FORMAT.md#5-the-migration-pen--jarenjslinqmigration).
+
 ## What this is not
 
 Not an ORM — entities, storage and migrations live in `@jarenjs/db`.
 Not expression trees over arbitrary methods — the vocabulary is the
 query engine's, and an unknown METHOD fails loudly at build time with
-a coded error (`JL0001`–`JL0006`; the pens' refusals are `JL0101`–`JL0104`)
+a coded error (`JL0001`–`JL0007`; the pens' refusals are `JL0101`–`JL0106`)
 rather than guessing. JavaScript's own
 operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`
 and `===` evaluate against the proxy object and yield a wrong document

@@ -19,6 +19,15 @@ const DOC = new URL('../../packages/linq/docs/PENS-FORMAT.md', import.meta.url);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const CACHE = path.join(ROOT, 'node_modules', '.cache-pens-format');
 
+/** A fence's emission: a builder's document (`schemaOf`), or a pen
+ * builder's `toJSON()` — a migration is a builder whose document is
+ * read that way. @param {any} value */
+function documentOf(value) {
+  const emitted = schemaOf(value);
+  return emitted !== null && typeof emitted === 'object' && typeof emitted.toJSON === 'function'
+    ? emitted.toJSON() : emitted;
+}
+
 /** The (js, json) fence pairs of one `### N.M` subsection, in order. */
 function fencePairs(markdown, heading) {
   const start = markdown.indexOf(`\n### ${heading}`);
@@ -36,7 +45,7 @@ function fencePairs(markdown, heading) {
   return pairs;
 }
 
-for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3]]) {
+for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2], ['jslt', '4.2 Worked examples', 3], ['migration', '5.2 Worked examples', 2]]) {
   describe(`PENS-FORMAT — the ${pen} pen's worked examples are what the pen emits`, () => {
     const markdown = fs.readFileSync(DOC, 'utf8');
     const pairs = fencePairs(markdown, heading);
@@ -53,7 +62,7 @@ for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['m
         const mod = await import(`${file}?${Date.now()}`);
         const names = Object.keys(mod);
         assert.strictEqual(names.length, 1, `one export per fence, got ${names.join(', ')}`);
-        assert.deepStrictEqual(schemaOf(mod[names[0]]), JSON.parse(pair.json));
+        assert.deepStrictEqual(documentOf(mod[names[0]]), JSON.parse(pair.json));
       });
     });
   });

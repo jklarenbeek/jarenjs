@@ -75,6 +75,9 @@ export interface TypedUntrackedReads<E extends MetaMap<E>, M extends EntityMeta>
 }
 
 export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
+  /** The provider phantom: `from(typed.entity('User'))` infers `User`
+   * without a cast. */
+  readonly __item?: M['doc'];
   create(doc: M['input']): Promise<Readonly<M['doc']>>;
   get(key: EntityKeyArg): Promise<Readonly<M['doc']> | undefined>;
   /** A relation member is a projection, never stored state: `update()`
@@ -89,6 +92,14 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   remove(key: EntityKeyArg | M['doc']): void;
   discard(key: EntityKeyArg | M['doc']): void;
   asNoTracking(): TypedUntrackedReads<E, M>;
+  /** The provider contract over this entity's root (MODEL-FORMAT §10.1);
+   * the answer is the engine's result shape, value-or-promise (D2). */
+  execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
+  /** The root expression this set's rows are bound through (`$.<Name>[*]`). */
+  readonly root: string;
+  /** The identity every entity set of one store shares. */
+  readonly scope: object;
 }
 
 /** The typed store: every member of `Store` (a typed store is the same
@@ -101,6 +112,8 @@ export interface TypedStore<E extends MetaMap<E>> {
   entity<K extends keyof E & string>(name: K): TypedEntitySet<E, E[K]>;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
+  /** The entity roots this store-level provider serves (present with entities). */
+  readonly roots?: readonly (keyof E & string)[];
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
   observe(fn: (record: ChangeRecord) => void): () => void;
