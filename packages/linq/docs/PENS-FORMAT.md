@@ -102,6 +102,7 @@ with identical semantics), **refused** (a coded error naming the reason).
 | `nil()` | `{ type: 'null' }` | `null` | native |
 | `literal(v)` | `{ const: v }` | the literal | native |
 | `enumOf(values)` | `{ enum: values }` | the literal union | native |
+| string/number `.enumOf(values)` | `enum` beside the `type` — a typed enum (what a store maps to a column); values of another JSON type are `JL0101` | the literal union; with `.coerce()` the `Input` widens by the one source primitive that can reach a member (`1 \| 2 \| 3 \| string`) | native |
 | `datetime()`, `date()` | `{ type: 'string', format: 'date-time' \| 'date' }` | `DateTime` | native |
 | `time()`, `duration()` | `{ type: 'string', format: 'time' \| 'duration' }` | `string` | native |
 | `object(props)` | `{ type: 'object', properties, required, additionalProperties: false }` — `required` lists every member not `optional()`, in declaration order, and is omitted when empty | a closed object: members required unless `optional()`; no index signature; `object({})` is `Record<string, never>` | native |
@@ -160,8 +161,8 @@ Three rules the table implies, spelled out:
 
 ### 2.2 Worked examples
 
-Every ```js fence below exports exactly one builder (or one document),
-and the ```json fence that follows it is what the pen emits — executed by
+Every `js` fence below exports exactly one builder (or one document),
+and the `json` fence that follows it is what the pen emits — executed by
 `test/linq/pens-format.test.js`, which imports each fence from the
 workspace and asserts the document.
 
@@ -378,3 +379,198 @@ const Node: s.NamedBuilder<Node> = s.named('Node', s.object({
 
 The chain takes a builder where it took a document, and types the
 element from it: `from(rows).ofType(User)` is `Sequence<Infer<typeof User>>`.
+
+## 3. The model pen — `@jarenjs/linq/model`
+
+```js
+import * as m from '@jarenjs/linq/model';
+```
+
+is the schema pen's every name, rebuilt from SUBCLASSES that carry the
+`x-entity` vocabulary of MODEL-FORMAT §9 — new classes made by one mixin,
+never a patched prototype, so a `./schema` consumer never carries an
+entity method — plus the relation members, collections and their
+indexes, and `defineModel()`, which writes one `$model` 0.1 document that
+`openStore` accepts unchanged. Nothing here imports `@jarenjs/db`: the
+pen writes what the store's own model walk reads, and refuses only what
+that walk would refuse and the builder can already see.
+
+### 3.1 The mapping table
+
+| Method | Emits (`x-entity` member unless said otherwise) | `InferMeta` reading | Status |
+|---|---|---|---|
+| `.key()` | `key: true` — (part of) the primary key | `key`: the member's primitive (`string`/`number`), or the composite object over several `key()` members | native |
+| `.identity('uuid')` (string), `.identity('auto')` (integer) | `key: true` + `default: 'uuid' \| 'auto'` — a store-allocated single key (§9.5) | `key` as above; the member is optional on `input` (store-written) | native; off its kind, or beside a composite key, `JL0102` |
+| `.unique()`, `.index()` | `unique: true`, `index: true` — an index over the column (an entity has no other index: no composite, no derived) | — | native |
+| `.version()` | `version: true` — the optimistic-concurrency token | — | native |
+| `.column('integer')` | `column: 'integer'` — an epoch column, on `datetime()`/`date()` only | — | native; off a date `JL0102` |
+| `.column('json')` | `column: 'json'` — the scalar stays in the document | — | native |
+| `.now()`, `.updated()` | `default: 'now' \| 'updated'` — an RFC 3339 stamp on insert, or on every write | optional on `input` | native |
+| `.fill(value)` | `default: { value }` — a literal, filled when absent | optional on `input` | native |
+| `.compute(fn)`, `.compute(query)` | `default: { query }` — captured over the document being written (`$`), no externals; or a document verbatim | optional on `input` | native; a named external is `JL0104` |
+| `.renamedFrom(name)` | `x-rename: name` on the entity (or collection) declaration — a migration hint the planner reads | — | native |
+| `.meta({ 'x-entity': … })` | — | — | refused (`JL0104`): the pen owns the keyword here |
+| `rel.hasMany(to, { via, onDelete })` | `relation: { to, many: true, via, onDelete }` — the FK on the TARGET (§9.4 one-to-many); optional by construction | `doc`: `to[]`, optional; dropped from `input`; `relations[name] = { entity: to, doc, many: true }` | native |
+| `rel.hasOne(to, { via, onDelete })` | `relation: { to, via, onDelete }` — the FK on the DECLARING entity (§9.4 one-to-one, and the many-to-one side) | `doc`: `to`, optional; dropped from `input`; `many: false` | native |
+| `rel.belongsToMany(to, { through? })` | `relation: { to, many: true, through? }` — a join table (§9.4 many-to-many) | `doc`: `to[]`, optional; `input`: `Array<key \| doc>`, optional; `many: true` | native |
+| `collection(schema, { key, identity?, indexes?, renamedFrom? })` | a collection declaration: `{ schema, key, identity?, indexes?, x-rename? }` — `key` an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` | — (collections carry no entity types) | native |
+| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical? }` — `path` a captured lambda (`(p) => p.embedding` → `$.embedding`), a composite array, or a JSONPath string; `name` defaults to `by_<segments>`; the options ride verbatim (§2, §2.1) | a member the shape lacks is a compile error | native; a member named like a surface method reads with `get('name')` (`JL0102` says so) |
+| `defineModel({ entities?, collections? })` | `{ $model: '0.1', entities?, collections? }`, deep-frozen | `InferMeta<typeof model>` | native; an undeclared relation target `JL0102`; a `collection()` under `entities` `JL0102` |
+
+What `InferMeta<>` says, rule by rule, is what `entityEmitModel` +
+`@jarenjs/emit` generate for the same document (pinned equal for the
+shared fixture model): every entity interface is CLOSED, nested shapes
+included, whatever `.open()` said (the runtime validator stays the judge
+of a stored document; excess-property checking is the point of a
+generated type); a relation member is an optional reference; a
+`datetime()`/`date()` member is `DateTime` on `doc` and a plain `string`
+on `input`; `input` drops to-one and to-many projections, makes every
+store-written member optional, and types a many-to-many member as
+key-or-document array; `key` is the key member's primitive — never its
+literal union — or the composite object.
+
+Three rules the table implies:
+
+- **A relation target is a name, checked once.** `rel.hasMany('Post', …)`
+  types `'Post'` as a member of `keyof Entities` — `'Psot'` is a compile
+  error — and `defineModel` refuses an undeclared name at build time
+  (`JL0102`, with the member's `docPath`). Inverse agreement, foreign-key
+  types and the join-table rules stay the store's (`JD0031`, `JD0005`).
+- **An entity has no `indexes` option.** Its indexes are `unique()`/
+  `index()` per member — the vocabulary has no composite or derived
+  entity index — so a `collection()` declaration under `entities` is
+  refused rather than spelling a document the store would refuse.
+- **`uuid()` is still the format shortcut.** The schema pen's `uuid()`
+  writes `format: 'uuid'` on the model pen too; the store-allocated key is
+  `identity('uuid')`, MODEL-FORMAT §9.5's own word, and a member may carry
+  both.
+
+### 3.2 Worked examples
+
+Every `js` fence exports exactly one model (or builder), and the
+`json` fence that follows is what the pen emits — executed by
+`test/linq/pens-format.test.js`.
+
+MODEL-FORMAT §9.1's own entity:
+
+```js
+import * as m from '@jarenjs/linq/model';
+
+export const model = m.defineModel({
+  entities: {
+    User: m.object({
+      id: m.string().identity('uuid'),
+      email: m.string().email().unique(),
+      created: m.datetime().now().column('integer').index().optional(),
+      profile: m.object({}).open().optional(),
+      posts: m.rel.hasMany('Post', { via: 'authorId', onDelete: 'cascade' }),
+    }).open(),
+    Post: m.object({
+      pid: m.integer().identity('auto'),
+      authorId: m.string(),
+    }).open(),
+  },
+});
+```
+
+```json
+{
+  "$model": "0.1",
+  "entities": {
+    "User": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "x-entity": { "key": true, "default": "uuid" } },
+          "email": { "type": "string", "format": "email", "x-entity": { "unique": true } },
+          "created": { "type": "string", "format": "date-time",
+                       "x-entity": { "default": "now", "column": "integer", "index": true } },
+          "profile": { "type": "object" },
+          "posts": { "x-entity": { "relation": { "to": "Post", "many": true,
+                     "via": "authorId", "onDelete": "cascade" } } }
+        },
+        "required": ["id", "email"]
+      }
+    },
+    "Post": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "pid": { "type": "integer", "x-entity": { "key": true, "default": "auto" } },
+          "authorId": { "type": "string" }
+        },
+        "required": ["pid", "authorId"]
+      }
+    }
+  }
+}
+```
+
+A collection with a captured key and every index kind of §2/§2.1:
+
+```js
+import * as m from '@jarenjs/linq/model';
+
+export const model = m.defineModel({
+  collections: {
+    places: m.collection(
+      m.object({
+        id: m.string(),
+        loc: m.array(m.number()),
+        series: m.string(),
+        t: m.integer(),
+        embedding: m.array(m.number()).length(768).optional(),
+      }),
+      {
+        key: (d) => d.id,
+        indexes: [
+          m.index([(p) => p.series, (p) => p.t]),
+          m.index((p) => p.loc, { name: 'by_cell', derive: 'geohash', precision: 7 }),
+          m.index((p) => p.embedding, { derive: 'vector', dims: 768 }),
+        ],
+      },
+    ),
+  },
+});
+```
+
+```json
+{
+  "$model": "0.1",
+  "collections": {
+    "places": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "loc": { "type": "array", "items": { "type": "number" } },
+          "series": { "type": "string" },
+          "t": { "type": "integer" },
+          "embedding": { "type": "array", "items": { "type": "number" }, "minItems": 768, "maxItems": 768 }
+        },
+        "required": ["id", "loc", "series", "t"],
+        "additionalProperties": false
+      },
+      "key": "/id",
+      "indexes": [
+        { "name": "by_series_t", "path": ["$.series", "$.t"] },
+        { "name": "by_cell", "path": "$.loc", "derive": "geohash", "precision": 7 },
+        { "name": "by_embedding", "path": "$.embedding", "derive": "vector", "dims": 768 }
+      ]
+    }
+  }
+}
+```
+
+### 3.3 The types, in one place
+
+```ts
+import * as m from '@jarenjs/linq/model';
+import type { InferMeta } from '@jarenjs/linq/model';
+import { typedStore } from '@jarenjs/db/typed';
+
+const model = m.defineModel({ entities: { User, Post } });
+const store = typedStore<InferMeta<typeof model>>(await openStore(model, { driver: nodeDriver() }));
+const users = await store.entity('User').load({ include: { posts: true } });
+users[0].posts;   // Post[] — widened by the include, no generate step
+```

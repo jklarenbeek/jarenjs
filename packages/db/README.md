@@ -57,6 +57,23 @@ const adults = await users.execute({
 });
 ```
 
+Or, by code — the same document, written by the model pen and typed
+without a generate step (`InferMeta<typeof model>` binds the typed store):
+
+```js
+import * as m from '@jarenjs/linq/model';
+
+const model = m.defineModel({
+  collections: {
+    users: m.collection(
+      m.object({ id: m.string(), email: m.string().email(), age: m.integer().optional() }).open(),
+      { key: (u) => u.id, indexes: [m.index((u) => u.age)] },
+    ),
+  },
+});
+const store = await openStore(model, { driver: nodeDriver(), path: 'app.db' });
+```
+
 `execute` answers in the ENGINE's result shape (QUERY-FORMAT §1,
 "singleton ≡ item"): `undefined` for no rows, the document itself for
 exactly one, an array for more — typed `SequenceResult<R>`, with `R`

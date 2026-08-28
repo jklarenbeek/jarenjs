@@ -11,7 +11,9 @@
  *
  * The base class is what a subclass extends — the model pen adds its
  * vocabulary by subclassing through `with()`, never by patching a
- * prototype it imported.
+ * prototype it imported. The named factory functions (`string()`,
+ * `object()`, …) live in `factories.js`, built once per class set, so
+ * every subpath constructs its own classes through one implementation.
  */
 
 import { isJsonValue } from '@jarenjs/core/object';
@@ -60,7 +62,7 @@ function hasNegativeZero(value) {
 }
 
 /** What a refused value is, for a message. @param {any} value */
-function describeValue(value) {
+export function describeValue(value) {
   if (value === null) return 'null';
   if (typeof value === 'number') return String(value);
   if (typeof value === 'object') return `a ${value.constructor?.name ?? 'non-plain'} instance`;
@@ -84,43 +86,34 @@ export function requireJson(value, what) {
 }
 
 /** @param {any} value @param {string} what */
-function requireBuilder(value, what) {
+export function requireBuilder(value, what) {
   if (isSchemaBuilder(value)) return value;
   throw new LinqBuildError('JL0101',
     `${what} takes a schema builder, got ${describeValue(value)} — wrap a hand-written `
     + 'JSON Schema with from()');
 }
 
-/** A builder, or a hand-written JSON Schema wrapped as one. @param {any} value @param {string} what */
-function builderOrJson(value, what) {
-  if (isSchemaBuilder(value)) return value;
-  if (typeof value === 'boolean' || (value !== null && typeof value === 'object' && !Array.isArray(value))) {
-    return from(value);
-  }
-  return requireBuilder(value, what);
-}
-
 /** @param {any} value @param {string} what */
-function requireString(value, what) {
+export function requireString(value, what) {
   if (typeof value === 'string') return value;
   throw new LinqBuildError('JL0101', `${what} takes a string, got ${describeValue(value)}`);
 }
 
 /** @param {any} value @param {string} what */
-function requireCount(value, what) {
+export function requireCount(value, what) {
   if (Number.isInteger(value) && value >= 0) return value;
   throw new LinqBuildError('JL0101',
     `${what} takes a non-negative integer, got ${describeValue(value)}`);
 }
 
 /** @param {any} value @param {string} what */
-function requireNumber(value, what) {
+export function requireNumber(value, what) {
   if (typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)) return value;
   throw new LinqBuildError('JL0101', `${what} takes a finite number, got ${describeValue(value)}`);
 }
 
 /** @param {any} value @param {string} what */
-function requireName(value, what) {
+export function requireName(value, what) {
   if (typeof value === 'string' && NAME_RE.test(value)) return value;
   throw new LinqBuildError('JL0101',
     `${what} takes a definition name (letters, digits, '_', '.', '-', not starting `
@@ -128,12 +121,38 @@ function requireName(value, what) {
 }
 
 /** @param {any} value @param {string} what @returns {[string, any][]} */
-function requireBuilderMap(value, what) {
+export function requireBuilderMap(value, what) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new LinqBuildError('JL0101',
       `${what} takes a plain object of builders, got ${describeValue(value)}`);
   }
   return Object.keys(value).map((key) => [key, requireBuilder(value[key], `${what}.${key}`)]);
+}
+
+/**
+ * The `enum` keyword on a TYPED scalar: every value must be of the
+ * builder's own JSON type, or the enum could never be satisfied.
+ * @param {any} builder
+ * @param {readonly any[]} values
+ * @returns {any}
+ */
+function typedEnum(builder, values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new LinqBuildError('JL0101', 'enumOf() takes a non-empty array of values');
+  }
+  const kind = builder.state.kind;
+  for (const value of values) {
+    requireJson(value, 'enumOf()');
+    const fits = kind === 'string' ? typeof value === 'string'
+      : kind === 'integer' ? Number.isInteger(value)
+        : typeof value === 'number';
+    if (!fits) {
+      throw new LinqBuildError('JL0101',
+        `enumOf() on a ${kind} takes ${kind} values; ${JSON.stringify(value)} could never `
+        + 'satisfy the enum');
+    }
+  }
+  return builder.keyword('enum', Object.freeze(values.slice()));
 }
 
 /**
@@ -153,7 +172,7 @@ function annotate(annotations, key, value) {
 }
 
 /** The state every kind shares. @param {string} kind @param {object} own */
-function initial(kind, own) {
+export function initial(kind, own) {
   return Object.freeze({
     kind,
     keywords: Object.freeze({}),
@@ -225,7 +244,7 @@ export class SchemaBuilder {
 
   /** One more entry of `examples`. @param {any} value */
   example(value) {
-    const current = this.#annotation('examples') ?? [];
+    const current = this.annotation('examples') ?? [];
     return this.annotate('examples', [...current, requireJson(value, 'example()')]);
   }
 
@@ -300,8 +319,13 @@ export class SchemaBuilder {
     return this.with({ annotations: annotate(this.#state.annotations, key, value) });
   }
 
-  /** @param {string} key */
-  #annotation(key) {
+  /**
+   * One annotation's value, or `undefined` — what a subclass reads
+   * before it merges into a keyword it owns.
+   * @param {string} key
+   * @returns {any}
+   */
+  annotation(key) {
     const found = this.#state.annotations.find(([k]) => k === key);
     return found === undefined ? undefined : found[1];
   }
@@ -354,6 +378,8 @@ export class StringBuilder extends SchemaBuilder {
   uuid() { return this.format('uuid'); }
   /** `format: 'uri'`. */
   uri() { return this.format('uri'); }
+  /** `enum` beside `type: 'string'` — a typed enum (a store maps it to a column). @param {readonly string[]} values */
+  enumOf(values) { return typedEnum(this, values); }
 }
 
 /** `{ type: 'number' | 'integer' }` and the numeric constraints. */
@@ -375,6 +401,8 @@ export class NumberBuilder extends SchemaBuilder {
   }
   /** `type: 'integer'`. */
   int() { return this.with({ kind: 'integer' }); }
+  /** `enum` beside the numeric type — a typed enum. @param {readonly number[]} values */
+  enumOf(values) { return typedEnum(this, values); }
 }
 
 /** `{ type: 'array', items }` and the array constraints. */
@@ -503,186 +531,4 @@ export class NeverBuilder extends SchemaBuilder {
     void rule;
     throw new LinqBuildError('JL0102', 'never() is the boolean schema false; nothing reaches a check on it');
   }
-}
-
-// ————— the named exports —————
-
-/** `{ type: 'string' }`. */
-export function string() { return new StringBuilder(initial('string', {})); }
-/** `{ type: 'number' }`. */
-export function number() { return new NumberBuilder(initial('number', {})); }
-/** `{ type: 'integer' }`. */
-export function integer() { return new NumberBuilder(initial('integer', {})); }
-/** `{ type: 'boolean' }`. */
-export function boolean() { return new SchemaBuilder(initial('boolean', {})); }
-/** `{ type: 'null' }`. */
-export function nil() { return new SchemaBuilder(initial('null', {})); }
-/** `{}` — anything. */
-export function any() { return new SchemaBuilder(initial('any', {})); }
-/** `false` — nothing. */
-export function never() { return new NeverBuilder(initial('never', {})); }
-
-/** `{ const: value }`. @param {any} value */
-export function literal(value) {
-  return new SchemaBuilder(initial('literal', { value: requireJson(value, 'literal()') }));
-}
-
-/** `{ enum: values }`. @param {readonly any[]} values */
-export function enumOf(values) {
-  if (!Array.isArray(values) || values.length === 0) {
-    throw new LinqBuildError('JL0101', 'enumOf() takes a non-empty array of JSON values');
-  }
-  return new SchemaBuilder(initial('enum', {
-    values: Object.freeze(values.map((value) => requireJson(value, 'enumOf()'))),
-  }));
-}
-
-/** A closed object (`additionalProperties: false`) of named members. @param {Record<string, any>} props */
-export function object(props) {
-  return new ObjectBuilder(initial('object', {
-    props: Object.freeze(requireBuilderMap(props, 'object()')),
-    open: false,
-    patterns: Object.freeze([]),
-    names: null,
-    dependent: null,
-  }));
-}
-
-/** `{ type: 'array', items }`. @param {any} items */
-export function array(items) {
-  return new ArrayBuilder(initial('array', {
-    items: requireBuilder(items, 'array()'), contains: null,
-  }));
-}
-
-/** `{ type: 'array', prefixItems, minItems }`. @param {readonly any[]} items */
-export function tuple(items) {
-  if (!Array.isArray(items)) {
-    throw new LinqBuildError('JL0101', 'tuple() takes an array of builders');
-  }
-  return new TupleBuilder(initial('tuple', {
-    items: Object.freeze(items.map((item, i) => requireBuilder(item, `tuple()[${i}]`))),
-    rest: null,
-  }));
-}
-
-/** `{ type: 'object', additionalProperties: values }`. @param {any} values */
-export function record(values) {
-  return new SchemaBuilder(initial('record', { values: requireBuilder(values, 'record()') }));
-}
-
-/** @param {any} options @param {string} what */
-function requireOptions(options, what) {
-  if (!Array.isArray(options) || options.length === 0) {
-    throw new LinqBuildError('JL0101', `${what} takes a non-empty array of builders or schemas`);
-  }
-  return Object.freeze(options.map((option, i) => builderOrJson(option, `${what}[${i}]`)));
-}
-
-/** `{ anyOf: options }`. @param {readonly any[]} options */
-export function union(options) {
-  return new SchemaBuilder(initial('union', { options: requireOptions(options, 'union()') }));
-}
-
-/**
- * `{ oneOf: options }` where every option is an object declaring the
- * discriminator as a `literal()` or `enumOf()` member.
- * @param {string} key
- * @param {readonly any[]} options
- */
-export function discriminated(key, options) {
-  requireString(key, 'discriminated()');
-  const parts = requireOptions(options, 'discriminated()');
-  parts.forEach((option, i) => {
-    const st = option.state;
-    const member = st.kind === 'object' ? st.props.find(([name]) => name === key) : undefined;
-    const tag = member === undefined ? null : member[1].state.kind;
-    if (tag !== 'literal' && tag !== 'enum') {
-      throw new LinqBuildError('JL0102',
-        `discriminated('${key}') option ${i} does not declare '${key}' as a literal() or `
-        + 'enumOf() member — without the tag on every option the oneOf is not a '
-        + 'discriminated union; use union() for an untagged one');
-    }
-  });
-  return new SchemaBuilder(initial('discriminated', { key, options: parts }));
-}
-
-/** `{ allOf: parts }` — parts that are objects must be `open()`. @param {readonly any[]} parts */
-export function intersection(parts) {
-  return new SchemaBuilder(initial('intersection', { options: requireOptions(parts, 'intersection()') }));
-}
-
-/**
- * A definition: hoisted to `$defs` and referenced wherever it is used.
- * @param {string} name
- * @param {any} builder
- */
-export function named(name, builder) {
-  return new SchemaBuilder(initial('named', {
-    name: requireName(name, 'named()'), target: requireBuilder(builder, 'named()'),
-  }));
-}
-
-/** A reference to a definition by name. @param {string} name */
-export function ref(name) {
-  return new SchemaBuilder(initial('ref', { name: requireName(name, 'ref()') }));
-}
-
-/** A deferred reference to a NAMED builder — the recursion spelling. @param {() => any} thunk */
-export function lazy(thunk) {
-  if (typeof thunk !== 'function') {
-    throw new LinqBuildError('JL0101', 'lazy() takes a function returning a named builder');
-  }
-  return new SchemaBuilder(initial('lazy', { thunk }));
-}
-
-/** `{ if: cond }`, extended by `.then()`/`.else()`. @param {any} cond */
-export function when(cond) {
-  return new WhenBuilder(initial('when', {
-    cond: requireBuilder(cond, 'when()'), then: null, else: null,
-  }));
-}
-
-/** A hand-written JSON Schema, embedded verbatim. @param {object | boolean} json */
-export function from(json) {
-  if (typeof json !== 'boolean'
-    && (json === null || typeof json !== 'object' || Array.isArray(json))) {
-    throw new LinqBuildError('JL0101',
-      `from() takes a JSON Schema object or boolean, got ${describeValue(json)}`);
-  }
-  return new SchemaBuilder(initial('raw', { json: requireJson(json, 'from()') }));
-}
-
-/** `{ type: 'string', format: 'date-time' }`. */
-export function datetime() { return string().format('date-time'); }
-/** `{ type: 'string', format: 'date' }`. */
-export function date() { return string().format('date'); }
-/** `{ type: 'string', format: 'time' }`. */
-export function time() { return string().format('time'); }
-/** `{ type: 'string', format: 'duration' }`. */
-export function duration() { return string().format('duration'); }
-
-/** The dialect a standalone document may declare. */
-const DRAFTS = Object.freeze({ '2020-12': 'https://json-schema.org/draft/2020-12/schema' });
-
-/**
- * A standalone document: the builder's schema, with `$schema` first when
- * a draft is named. The pen writes the 2020-12 vocabulary and no other.
- * @param {any} root
- * @param {{ draft?: '2020-12' }} [options]
- * @returns {any} the deep-frozen document
- */
-export function document(root, options = {}) {
-  const schema = requireBuilder(root, 'document()').schema;
-  if (options.draft === undefined) return schema;
-  const uri = DRAFTS[options.draft];
-  if (uri === undefined) {
-    throw new LinqBuildError('JL0102',
-      `document() writes the 2020-12 vocabulary only; '${options.draft}' is not a draft it `
-      + 'can declare');
-  }
-  if (typeof schema === 'boolean') {
-    throw new LinqBuildError('JL0102', 'a boolean schema cannot declare a $schema');
-  }
-  return Object.freeze({ $schema: uri, ...schema });
 }

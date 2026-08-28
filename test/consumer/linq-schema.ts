@@ -17,7 +17,7 @@ import {
   Account, Strict, Config, Id, Exact, Empty, Job, Scalars, Literals, Enums, Nullables,
   StringRules, NumberRules, Dates, ArrayRules, Tuples, Dict, Either, Shape, Both, Node,
   Linked, Conditional, Wrapped, Members, Patterned, Keyed, Derived, Invoice, Order,
-  Coerced, Annotated,
+  Coerced, Level, Annotated,
 } from '../linq/schema-corpus.js';
 
 /** Identical types, in both directions — the strict check, not assignability. */
@@ -86,6 +86,8 @@ const orderOut: Equals<Infer<typeof Order>, G.Order> = true;
 const orderIn: Equals<Input<typeof Order>, G.Order> = true;
 const coercedOut: Equals<Infer<typeof Coerced>, G.Coerced> = true;
 const coercedIn: Equals<Input<typeof Coerced>, G.CoercedInput> = true;
+const levelOut: Equals<Infer<typeof Level>, G.Level> = true;
+const levelIn: Equals<Input<typeof Level>, G.LevelInput> = true;
 const annotatedOut: Equals<Infer<typeof Annotated>, G.Annotated> = true;
 const annotatedIn: Equals<Input<typeof Annotated>, G.Annotated> = true;
 void [accountOut, accountIn, strictOut, strictIn, configOut, configIn, idOut, idIn,
@@ -96,7 +98,7 @@ void [accountOut, accountIn, strictOut, strictIn, configOut, configIn, idOut, id
   eitherIn, shapeOut, shapeIn, bothOut, bothIn, treeOut, treeIn, linkedOut, linkedIn,
   conditionalOut, conditionalIn, wrappedOut, wrappedIn, membersOut, membersIn,
   patternedOut, patternedIn, keyedOut, keyedIn, derivedOut, derivedIn, invoiceOut,
-  invoiceIn, orderOut, orderIn, coercedOut, coercedIn, annotatedOut, annotatedIn];
+  invoiceIn, orderOut, orderIn, coercedOut, coercedIn, levelOut, levelIn, annotatedOut, annotatedIn];
 
 // the brand: a date-formatted string IS the linq DateTime, so the date
 // family lights up on a chain over the pen's shape

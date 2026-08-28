@@ -43,7 +43,7 @@ carries the type; every pen spelling here is one the pen's corpus emits.
 | `z.number()` / `z.number().int()` | `{ "type": "number" }` / `{ "type": "integer" }` | `s.number()` / `s.number().int()`, `s.integer()` |
 | `z.boolean()`, `z.null()` | `{ "type": "boolean" }`, `{ "type": "null" }` | `s.boolean()`, `s.nil()` |
 | `z.literal('a')` | `{ "const": "a" }` | `s.literal('a')` |
-| `z.enum(['a','b'])` | `{ "enum": ["a","b"] }` | `s.enumOf(['a', 'b'])` |
+| `z.enum(['a','b'])` | `{ "enum": ["a","b"] }`, or typed: `{ "type": "string", "enum": ["a","b"] }` | `s.enumOf(['a', 'b'])`, or `s.string().enumOf(['a', 'b'])` |
 | `z.array(T)` | `{ "type": "array", "items": T }` | `s.array(T)` |
 | `z.tuple([A, B])` | `{ "type": "array", "prefixItems": [A, B], "items": false, "minItems": 2 }` | `s.tuple([A, B]).rest(s.never())` (without `.rest()` the tuple stays open, as JSON Schema reads it) |
 | `z.object({...})` | `{ "type": "object", "properties": {...}, "required": [...], "additionalProperties": false }` | `s.object({...})` — closed by default, like `.strict()` |

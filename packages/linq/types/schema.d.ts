@@ -31,11 +31,13 @@ export interface JsonSchema {
   readonly [keyword: string]: unknown;
 }
 
-/** The flags a member carries: left out of `required`, or defaulted. */
-export type Flag = 'optional' | 'defaulted';
+/** The flags a member carries: left out of `required`; carrying a JSON
+ * Schema `default`; and, for the model pen, a store-written default
+ * (`generated`) or a `key()` mark. */
+export type Flag = 'optional' | 'defaulted' | 'generated' | 'key';
 
 /** Flatten an intersection into one object type (what emit prints). */
-type Simplify<T> = { [K in keyof T]: T[K] };
+export type Simplify<T> = { [K in keyof T]: T[K] };
 
 /** `T`, or `T | null` when the builder is nullable. */
 type Nullify<T, N extends boolean> = N extends true ? T | null : T;
@@ -75,7 +77,7 @@ export type Input<B> = B extends BuilderLike<any, infer I, any> ? I : never;
 /** The document type a builder writes. */
 export type SchemaOf<B> = B extends BuilderLike<any, any, any> ? B['schema'] : never;
 
-type FlagsOf<B> = B extends BuilderLike<any, any, infer F> ? F : never;
+export type FlagsOf<B> = B extends BuilderLike<any, any, infer F> ? F : never;
 
 /** Required after normalization: unless `optional()` and not `default()`ed. */
 type OutRequired<B> = 'optional' extends FlagsOf<B> ? ('defaulted' extends FlagsOf<B> ? true : false) : true;
@@ -205,6 +207,8 @@ export class StringBuilder<Out = string, In = Out, F extends Flag = never> exten
   uuid(): this;
   /** `format: 'uri'`. */
   uri(): this;
+  /** `enum` beside `type: 'string'` — a typed enum, the literal union. */
+  enumOf<const V extends readonly string[]>(values: V): StringBuilder<V[number], V[number], F>;
 }
 
 /** `{ type: 'number' | 'integer' }` and the numeric constraints. */
@@ -226,6 +230,9 @@ export class NumberBuilder<Out = number, In = Out, F extends Flag = never> exten
   multipleOf(n: number): this;
   /** `type: 'integer'` — integer-ness is a documented widening, the type stays `number`. */
   int(): this;
+  /** `enum` beside the numeric type — a typed enum, the literal union;
+   * `coerce()` then widens `Input` by `string` (emit's accepted reading). */
+  enumOf<const V extends readonly number[]>(values: V): NumberBuilder<V[number], V[number] | Exclude<In, number>, F>;
 }
 
 /** `{ type: 'boolean' }`. */
@@ -283,6 +290,8 @@ export class ObjectBuilder<
   PV = never, PVIn = PV,
   N extends boolean = false, F extends Flag = never,
 > extends SchemaBuilder<Nullify<ObjectOut<P, Open, PV>, N>, Nullify<ObjectIn<P, Open, PVIn>, N>, F> {
+  /** The members, as builders — what a pen over this one reads. */
+  readonly __props: P;
   optional(): ObjectBuilder<P, Open, PV, PVIn, N, F | 'optional'>;
   nullable(): ObjectBuilder<P, Open, PV, PVIn, true, F>;
   default(value: Nullify<ObjectOut<P, Open, PV>, N>): ObjectBuilder<P, Open, PV, PVIn, N, F | 'defaulted'>;

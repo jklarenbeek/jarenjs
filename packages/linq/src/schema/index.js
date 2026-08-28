@@ -9,14 +9,26 @@
  * The document is the deliverable; nothing here imports an engine.
  */
 
-export {
-  string, number, integer, boolean, nil, literal, enumOf,
-  object, array, tuple, record,
-  union, discriminated, intersection,
-  named, ref, lazy, any, never, when, from, document,
-  datetime, date, time, duration,
+import {
   SchemaBuilder, StringBuilder, NumberBuilder, ArrayBuilder, TupleBuilder,
   ObjectBuilder, WhenBuilder, NeverBuilder,
-  requireJson,
 } from './builders.js';
+import { createFactories } from './factories.js';
+
+export const {
+  string, number, integer, boolean, nil, literal, enumOf,
+  object, array, tuple, record, union, discriminated, intersection,
+  named, ref, lazy, any, never, when, from, document,
+  datetime, date, time, duration,
+} = /** @type {any} */ (createFactories({
+  Base: SchemaBuilder, String: StringBuilder, Number: NumberBuilder,
+  Array: ArrayBuilder, Tuple: TupleBuilder, Object: ObjectBuilder,
+  When: WhenBuilder, Never: NeverBuilder,
+}));
+
+export {
+  SchemaBuilder, StringBuilder, NumberBuilder, ArrayBuilder, TupleBuilder,
+  ObjectBuilder, WhenBuilder, NeverBuilder, requireJson,
+} from './builders.js';
+export { createFactories } from './factories.js';
 export { isSchemaBuilder, schemaOf, SCHEMA_BUILDER } from './brand.js';

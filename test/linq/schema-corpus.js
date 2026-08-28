@@ -162,6 +162,10 @@ export const Coerced = s.object({
   ratio: s.number().coerce().default(1),
   label: s.string().nullable().optional(),
 });
+export const Level = s.object({
+  level: s.integer().enumOf([1, 2, 3]).coerce(),
+  role: s.string().enumOf(['admin', 'user']).nullable().optional(),
+});
 export const Annotated = s.object({
   id: s.string().describe('The id').title('Id').example('abc').example('def')
     .meta({ 'x-vendor': { a: 1 }, deprecated: true })
@@ -704,6 +708,26 @@ export const CORPUS = [
     invalidShape: [{ port: 'x', name: 'a', ratio: 1 }, { name: 'a', ratio: 1 }],
     invalidWidened: [{ port: 1.5, name: 'a', ratio: 1 }],
     rawInput: [{ port: '80', name: ' a ' }, { port: 80, on: 'true', name: 'a', ratio: '2' }],
+  },
+  {
+    // the emit corpus's Level: a TYPED enum, where coercion widens the
+    // accepted side by the one source primitive that can reach a member
+    name: 'Level',
+    normalize: PEN_NORMALIZE,
+    build: () => Level,
+    schema: {
+      type: 'object',
+      properties: {
+        level: { type: 'integer', enum: [1, 2, 3], 'x-coerce': true },
+        role: { type: ['string', 'null'], enum: ['admin', 'user', null] },
+      },
+      required: ['level'],
+      additionalProperties: false,
+    },
+    valid: [{ level: 2 }, { level: 1, role: null }, { level: 3, role: 'admin' }],
+    invalidShape: [{ level: 4 }, { level: true }, { level: 1, role: 'owner' }],
+    invalidWidened: [],
+    rawInput: [{ level: '2' }],
   },
   {
     name: 'Annotated',

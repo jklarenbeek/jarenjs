@@ -1035,7 +1035,10 @@ names:
 The schema stays a valid JSON Schema throughout: strip every
 `x-entity` member and it accepts and rejects exactly the same values
 (test-asserted over a corpus). The vocabulary is invisible to the
-validator by the same argument as `x-form`.
+validator by the same argument as `x-form`. A model document may also
+be written by code — `@jarenjs/linq/model`'s `defineModel()` emits
+exactly this document (PENS-FORMAT §3), and this section stays its
+one specification.
 
 ### 9.2 The `x-entity` vocabulary (a closed set)
 

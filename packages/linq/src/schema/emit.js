@@ -194,6 +194,8 @@ function emitNode(builder, ctx, at) {
 function nullableOf(node, st) {
   if (TYPED[st.kind] !== undefined) {
     node.type = [TYPED[st.kind], 'null'];
+    // a typed enum admits null only when the enum lists it
+    if (Array.isArray(node.enum) && !node.enum.includes(null)) node.enum = [...node.enum, null];
     return node;
   }
   if (st.kind === 'enum') {

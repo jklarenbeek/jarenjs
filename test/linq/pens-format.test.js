@@ -36,26 +36,28 @@ function fencePairs(markdown, heading) {
   return pairs;
 }
 
-describe('PENS-FORMAT §2 — the worked examples are what the pen emits', () => {
-  const markdown = fs.readFileSync(DOC, 'utf8');
-  const pairs = fencePairs(markdown, '2.2 Worked examples');
-  fs.mkdirSync(CACHE, { recursive: true });
+for (const [pen, heading, atLeast] of [['schema', '2.2 Worked examples', 5], ['model', '3.2 Worked examples', 2]]) {
+  describe(`PENS-FORMAT — the ${pen} pen's worked examples are what the pen emits`, () => {
+    const markdown = fs.readFileSync(DOC, 'utf8');
+    const pairs = fencePairs(markdown, heading);
+    fs.mkdirSync(CACHE, { recursive: true });
 
-  it('has worked examples to run', () => {
-    assert.ok(pairs.length >= 5, `${pairs.length} fence pairs`);
-  });
+    it('has worked examples to run', () => {
+      assert.ok(pairs.length >= atLeast, `${pairs.length} fence pairs`);
+    });
 
-  pairs.forEach((pair, i) => {
-    it(`example ${i + 1} emits its json fence`, async () => {
-      const file = path.join(CACHE, `schema-example-${i + 1}.mjs`);
-      fs.writeFileSync(file, pair.js);
-      const mod = await import(`${file}?${Date.now()}`);
-      const names = Object.keys(mod);
-      assert.strictEqual(names.length, 1, `one export per fence, got ${names.join(', ')}`);
-      assert.deepStrictEqual(schemaOf(mod[names[0]]), JSON.parse(pair.json));
+    pairs.forEach((pair, i) => {
+      it(`example ${i + 1} emits its json fence`, async () => {
+        const file = path.join(CACHE, `${pen}-example-${i + 1}.mjs`);
+        fs.writeFileSync(file, pair.js);
+        const mod = await import(`${file}?${Date.now()}`);
+        const names = Object.keys(mod);
+        assert.strictEqual(names.length, 1, `one export per fence, got ${names.join(', ')}`);
+        assert.deepStrictEqual(schemaOf(mod[names[0]]), JSON.parse(pair.json));
+      });
     });
   });
-});
+}
 
 describe('PENS-FORMAT §1.3 — the code table is the code', () => {
   it('lists exactly the JL01xx codes LINQ_CODES carries, each with a condition', async () => {

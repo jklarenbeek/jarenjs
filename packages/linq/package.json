@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.50.0",
+  "version": "0.50.1",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -14,6 +14,10 @@
     "./schema": {
       "types": "./types/schema.d.ts",
       "default": "./src/schema/index.js"
+    },
+    "./model": {
+      "types": "./types/model.d.ts",
+      "default": "./src/model/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -52,7 +56,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.50.0",
-    "@jarenjs/json": "^0.50.0"
+    "@jarenjs/core": "^0.50.1",
+    "@jarenjs/json": "^0.50.1"
   }
 }

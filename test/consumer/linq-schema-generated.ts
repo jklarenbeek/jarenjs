@@ -345,6 +345,27 @@ export interface CoercedInput {
 }
 
 
+export interface Level {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  level: 1 | 2 | 3;
+  role?: "admin" | "user" | null;
+}
+
+
+/**
+ * Accepted input for Level: the shape before normalization, where defaulted members may be absent and coercible values may still be in their transport form.
+ */
+export interface LevelInput {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  level: 1 | 2 | 3 | string;
+  role?: "admin" | "user" | null;
+}
+
+
 /**
  * An annotated object
  */

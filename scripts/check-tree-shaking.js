@@ -92,10 +92,11 @@ console.log('Tree-shaking smoke test passed (compileDateLocale carries no Intl p
 // The schema pen (`@jarenjs/linq/schema`) is a subpath a consumer may take
 // WITHOUT the chain: a schema-only bundle must carry none of the chain's
 // modules and no engine (the pen imports no `@jarenjs/json`, `validate`,
-// `emit` or `db`). The one shared runtime machine — the recording proxy in
-// `expression.js`, which `check()` captures `$query` through — rides along
-// because a class method cannot be shaken, and its size is part of the
-// measured ceiling. Conversely a chain-only bundle carries nothing from the
+// `emit` or `db`). Two things ride along by construction and are part of
+// the measured ceiling: the recording proxy in `expression.js`, which
+// `check()` captures `$query` through (a class method cannot be shaken),
+// and every factory function, built as one closure per class set so the
+// model pen constructs its subclasses through the same wiring. Conversely a chain-only bundle carries nothing from the
 // pen's directory: the chain recognises a builder by a registry symbol, not
 // by an import.
 const schemaResult = await build({
@@ -124,7 +125,7 @@ const engineLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (engineLeak.length > 0)
   throw new Error(`The schema pen pulled an engine into the bundle: ${engineLeak.map(([file]) => file).join(', ')}`);
-if (schemaBytes > 27000)
+if (schemaBytes > 32000)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -154,3 +155,43 @@ if (chainBytes > 180000)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module).`);
+
+// The model pen (`@jarenjs/linq/model`) subclasses the schema pen: a
+// model-only bundle carries the schema pen's classes and no chain module,
+// no store, no engine; and the schema pen never carries the model pen —
+// the subclasses are built by the model subpath, not patched onto the
+// base classes.
+const modelResult = await build({
+  stdin: {
+    contents: "import * as m from '@jarenjs/linq/model'; export const M = m.defineModel({ entities: { User: m.object({ id: m.string().key().uuid() }) } });",
+    resolveDir: process.cwd(),
+    sourcefile: 'model-pen-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+
+const modelBytes = modelResult.outputFiles[0].contents.length;
+const modelInputs = Object.values(modelResult.metafile.outputs)[0].inputs;
+const modelChainLeak = Object.entries(modelInputs)
+  .filter(([file, info]) => /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file)
+    && info.bytesInOutput > 0);
+if (modelChainLeak.length > 0)
+  throw new Error(`The model pen pulled chain modules into the bundle: ${modelChainLeak.map(([file]) => file).join(', ')}`);
+const modelEngineLeak = Object.entries(modelInputs)
+  .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
+if (modelEngineLeak.length > 0)
+  throw new Error(`The model pen pulled an engine or the store into the bundle: ${modelEngineLeak.map(([file]) => file).join(', ')}`);
+if (modelBytes > 40000)
+  throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
+const schemaModelLeak = Object.entries(schemaInputs)
+  .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
+if (schemaModelLeak.length > 0)
+  throw new Error(`The schema pen pulled the model pen into the bundle: ${schemaModelLeak.map(([file]) => file).join(', ')}`);
+
+console.log(`Tree-shaking smoke test passed (${modelBytes} byte model-pen bundle; no chain module, no store; the schema pen carries no model module).`);
