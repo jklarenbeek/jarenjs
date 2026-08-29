@@ -243,9 +243,11 @@ export class EntityWhenBuilder<F extends Flag = never> extends WhenBuilder<F> {
  * vocabulary cannot be written on it: `entity()`, `key()`, `unique()`,
  * `index()`, `version()`, `column()`, `now()`, `updated()`, `fill()`,
  * `compute()` and `meta()` all raise `JL0102` and `identity()` raises
- * `JL0101`. None is declared, so the refusal arrives at compile time as
- * well. `renamedFrom()` is the one that writes outside the schema and
- * so survives.
+ * `JL0101`. None of the entity vocabulary is declared here, and `meta()`
+ * is inherited from `NeverBuilder` with a `never` parameter, so none of
+ * those calls compiles either — and `never()` ANSWERS this class, so a
+ * caller meets the refusal without narrowing to it. `renamedFrom()` is
+ * the one that writes outside the schema and so survives.
  */
 export class EntityNeverBuilder<Out = never, In = Out, F extends Flag = never> extends NeverBuilder<Out, In, F> {
   optional(): EntityNeverBuilder<Out, In, F | 'optional'>;
@@ -473,7 +475,7 @@ export function named<B extends AnyBuilder>(name: string, builder: B): EntityNam
 export function ref<T = unknown>(name: string): EntityBuilder<T, T>;
 export function lazy<T, I = T>(thunk: () => NamedLike<T, I>): EntityBuilder<T, I>;
 export function any(): EntityBuilder<unknown, unknown>;
-export function never(): EntityBuilder<never, never>;
+export function never(): EntityNeverBuilder;
 export function when(cond: AnyBuilder): EntityWhenBuilder;
 export function from<T = unknown>(json: JsonSchema | boolean): EntityBuilder<T, T>;
 export function document(root: AnyBuilder, options?: { draft?: '2020-12' }): JsonSchema | boolean;

@@ -9,13 +9,14 @@ import {
   action, add, append, bind, defineApp, effect, remove, replace, sub, transition,
 } from '@jarenjs/linq/app';
 import type {
-  ActionScope, ActionsOf, AppDocument, Binding, EffectDeclaration, PatchOp, StateOf,
-  SubDeclaration,
+  ActionScope, ActionsOf, AppDocument, AppResult, Binding, EffectDeclaration, PatchOp,
+  StateOf, SubDeclaration,
 } from '@jarenjs/linq/app';
 import { rule } from '@jarenjs/linq/jslt';
 import * as s from '@jarenjs/linq/schema';
 import type { Expr } from '@jarenjs/linq';
 import type { Infer } from '@jarenjs/linq/schema';
+import { JarenValidator } from '@jarenjs/validate';
 import * as f from '@jarenjs/linq/forms';
 import { assertOnSubmit, FormNeverBuilder } from '@jarenjs/linq/forms';
 import type { RuleContext } from '@jarenjs/linq/forms';
@@ -70,6 +71,27 @@ const schema: unknown = todo.stateSchema;
 // @ts-expect-error — the state schema is not a member of the document
 const merged = todo.document.stateSchema;
 void [document, schema, merged];
+
+// ——— the state schema is typed by the OVERLOAD that answered it ———
+// `defineApp({ state: <builder> })` can never answer null, so the one
+// line every consumer writes — the line APP-PEN.md §5 shows — compiles
+// with no narrow and no cast. It did not until AppResult carried the
+// schema slot as its third phantom: one `JsonSchema | boolean | null`
+// served all three overloads, and `null` is not a schema to compile.
+const validateState = new JarenValidator().compile(todo.stateSchema);
+
+// the overload with NO schema answers exactly `null`, and that is what a
+// consumer has to handle — the union is not smeared across all three
+const stateless = defineApp({ state: { n: 1 }, view: [] });
+const noSchema: Equals<typeof stateless.stateSchema, null> = true;
+// @ts-expect-error — there is no schema to compile on this overload
+new JarenValidator().compile(stateless.stateSchema);
+// a `schema:` beside a plain state puts one back
+const beside = defineApp({ state: { n: 1 }, schema: s.object({ n: s.integer() }), view: [] });
+const besideSchema: unknown = new JarenValidator().compile(beside.stateSchema);
+// AppResult<State, Actions> still names any result, the slot defaulted
+const anyResult: AppResult<unknown, string> = stateless;
+void [validateState, noSchema, besideSchema, anyResult];
 
 // ——— an action's payload is typed by its own declaration ———
 const typedPayload = action((st: Expr<State>, x: ActionScope<Infer<typeof Payload>>) => transition({
@@ -162,3 +184,29 @@ f.string().form<Doc>({
 // halves equal for every pen.
 const isFormNever: boolean = f.never() instanceof FormNeverBuilder;
 void isFormNever;
+
+// never() ANSWERS the class the runtime builds — no cast — so the rule
+// vocabulary it refuses at run time does not compile either. It used to
+// be declared FormBuilder<never, never>, which carries form().
+const formNever: FormNeverBuilder = f.never();
+// @ts-expect-error — `false` carries no `x-form`; JL0102 at run time
+f.never().form({ visible: (c) => c.value });
+// @ts-expect-error — and no annotation of any name
+f.never().meta({ deprecated: true });
+// nullable() widens the node and hands back this pen's base builder,
+// where both are legal again — the remedy the refusal names, under test
+const widenedNever: unknown = f.never().nullable().form({ visible: (c) => c.value }).schema;
+void [formNever, widenedNever];
+
+// ——— a conditional carries a rule like any other node ———
+// buildFormModel reads `x-form` off whatever schema it builds a field
+// for, so a when() used as a MEMBER answers a field whose rules
+// evaluate; FormWhenBuilder declared then()/else() and not form().
+const gated = f.object({
+  kind: f.string(),
+  gate: f.when(f.object({ kind: f.literal('a') })).then(f.object({ extra: f.string() }))
+    .form<{ kind: string }>({ visible: (c) => c.root.kind.eq('a'), message: 'gated' }),
+});
+// @ts-expect-error — x-form is the pen's keyword here too, not meta()'s
+f.when(f.string()).meta({ 'x-form': { visible: '$.a' } });
+void gated;

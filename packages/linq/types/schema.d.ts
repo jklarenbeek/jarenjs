@@ -359,8 +359,12 @@ export class WhenBuilder<F extends Flag = never> extends SchemaBuilder<unknown, 
 /**
  * `false` — the schema nothing satisfies. While that IS the document it
  * carries no keywords at all, so every method that would write one is
- * refused with `JL0102` rather than dropped; the return types below say
- * so. `nullable()` is the way out and the refusals name it: the node
+ * refused with `JL0102` rather than dropped. The signatures below say so
+ * on BOTH sides: the return type is `never`, and the parameter is `never`
+ * too, so the call does not compile either — a method declared only
+ * `: never` still type-checks at its call site, which would leave the
+ * refusal a run-time surprise for a caller who narrowed to this class.
+ * `nullable()` is the way out and the refusals name it: the node
  * becomes `{ anyOf: [false, { type: 'null' }] }`, which carries keywords
  * like any other, so it answers the base builder rather than this class.
  * `never()` answers one, and this class is how a caller recognises it
@@ -374,19 +378,19 @@ export class NeverBuilder<Out = never, In = Out, F extends Flag = never> extends
    * that hands back a builder the annotations below are legal on. */
   nullable(): SchemaBuilder<Out | null, In | null, F>;
   /** Refused (`JL0102`) — `false` carries no `default`. */
-  default(value: Out): never;
+  default(value: never): never;
   /** Refused (`JL0102`) — `false` carries no `description`. */
-  describe(text: string): never;
+  describe(text: never): never;
   /** Refused (`JL0102`) — `false` carries no `title`. */
-  title(text: string): never;
+  title(text: never): never;
   /** Refused (`JL0102`) — `false` carries no `examples`. */
-  example(value: Out): never;
+  example(value: never): never;
   /** Refused (`JL0102`) — `false` carries no annotation of any name. */
-  meta(annotations: Annotations): never;
+  meta(annotations: never): never;
   /** Refused (`JL0102`) — `false` carries no `errorMessage`. */
-  message(spec: Json): never;
+  message(spec: never): never;
   /** Refused (`JL0102`) — nothing reaches a check on `false`. */
-  check(rule: CheckRule<Out>): never;
+  check(rule: never): never;
 }
 
 /** `{ type: 'string' }`. */
@@ -433,7 +437,7 @@ export function lazy<T, I = T>(thunk: () => NamedLike<T, I>): SchemaBuilder<T, I
 /** `{}` — anything. */
 export function any(): SchemaBuilder<unknown, unknown>;
 /** `false` — nothing; it carries no annotations (`JL0102`). */
-export function never(): SchemaBuilder<never, never>;
+export function never(): NeverBuilder;
 /** `{ if: cond }`, extended by `.then()`/`.else()`. */
 export function when(cond: AnyBuilder): WhenBuilder;
 /** A hand-written JSON Schema embedded verbatim; `T` is caller-asserted

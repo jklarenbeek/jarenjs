@@ -17,7 +17,7 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 
 import * as s from '@jarenjs/linq/forms';
-import { assertOnSubmit } from '@jarenjs/linq/forms';
+import { assertOnSubmit, FormNeverBuilder } from '@jarenjs/linq/forms';
 import { LinqBuildError } from '@jarenjs/linq';
 import {
   buildFormModel, buildFormViewModel, compileFormRules, evaluateFormRules,
@@ -227,6 +227,39 @@ describe('the forms pen — the rule context and the vocabulary', () => {
     assert.strictEqual(validate({ lines: [{ amount: 1 }, { amount: -1 }] }).valid, false,
       'the twin quantifies over the ELEMENTS');
     assert.deepStrictEqual(assertOnSubmit(doc), formRulesToQueryAssertions(doc));
+  });
+
+  it('a rule on a when() node is read and evaluated, like any other field', () => {
+    // buildFormModel reads `x-form` off whatever schema it builds a field
+    // for, so a conditional used as an object MEMBER carries a rule that
+    // really runs. FormWhenBuilder declared then()/else() and not form(),
+    // which made this spelling run and not compile.
+    const doc = s.document(s.object({
+      kind: s.string(),
+      gate: s.when(s.object({ kind: s.literal('a') })).then(s.object({ extra: s.string() }))
+        .form({ visible: (c) => c.root.kind.eq('a'), message: 'gated' }),
+    }));
+    assert.deepStrictEqual(doc.properties.gate['x-form'],
+      { visible: { $eq: ['$.kind', 'a'] }, message: 'gated' });
+    const rules = compileFormRules(buildFormModel(doc));
+    assert.deepStrictEqual(evaluateFormRules(rules, { kind: 'a' }), { '/gate': { visible: true } });
+    assert.deepStrictEqual(evaluateFormRules(rules, { kind: 'b' }), { '/gate': { visible: false } });
+  });
+
+  it('never() answers the class that refuses the vocabulary, and nullable() is the way out', () => {
+    // the declaration says never() answers a FormNeverBuilder, so the
+    // refusals below do not compile either; this is their run-time twin,
+    // and the last line is the remedy the message names.
+    assert.strictEqual(s.never() instanceof FormNeverBuilder, true);
+    assert.throws(() => s.never().form({ visible: (c) => c.value }),
+      (e) => e.code === 'JL0102' && /carries no 'x-form'/.test(e.message)
+        && /nullable\(\) it first/.test(e.message));
+    assert.throws(() => s.never().meta({ deprecated: true }),
+      (e) => e.code === 'JL0102' && /carries no 'deprecated'/.test(e.message));
+    assert.deepStrictEqual(
+      s.schemaOf(s.never().nullable().form({ visible: (c) => c.value })),
+      { anyOf: [false, { type: 'null' }], 'x-form': { visible: '$value' } },
+      'nullable() widens the node, and the rule is legal on what comes back');
   });
 });
 

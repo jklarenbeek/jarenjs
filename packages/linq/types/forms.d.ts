@@ -169,16 +169,30 @@ declare class FormNamedBuilder<Out, In = Out, F extends Flag = never> extends Na
   meta(annotations: Annotations & { readonly 'x-form'?: never }): this;
 }
 
+/**
+ * `when()` on this pen. A conditional carries a rule like any other
+ * node: `buildFormModel` reads `x-form` off whatever schema it builds a
+ * field for, so a `when()` used as an object MEMBER answers a field whose
+ * rules evaluate — the runtime twin is in `test/linq/forms-pen.test.js`.
+ * `Value` is `unknown` here, as on the object and tuple builders: the
+ * node describes a shape rather than a value.
+ */
 export class FormWhenBuilder<F extends Flag = never> extends WhenBuilder<F> {
   optional(): FormWhenBuilder<F | 'optional'>;
   then(builder: AnyBuilder): FormWhenBuilder<F>;
   else(builder: AnyBuilder): FormWhenBuilder<F>;
+  form<Doc = unknown>(rules: FormRules<Doc, unknown>): this;
+  meta(annotations: Annotations & { readonly 'x-form'?: never }): this;
 }
 
 /**
- * `never()` on this pen. A rule is an annotation and `false` carries no
- * annotation, so `form()` and `meta()` both raise `JL0102` here; neither
- * is declared, so the refusal arrives at compile time as well.
+ * `never()` on this pen — and `never()` ANSWERS one, so a caller meets
+ * this class without narrowing to it. A rule is an annotation and
+ * `false` carries no annotation, so `form()` and `meta()` both raise
+ * `JL0102` here: `form()` is not declared at all, and `meta()` is
+ * inherited from `NeverBuilder` with a `never` parameter, so neither
+ * call compiles either. `nullable()` widens the node and hands back this
+ * pen's base builder, where both are legal again.
  */
 export class FormNeverBuilder<Out = never, In = Out, F extends Flag = never> extends NeverBuilder<Out, In, F> {
   optional(): FormNeverBuilder<Out, In, F | 'optional'>;
@@ -212,7 +226,7 @@ export function named<B extends AnyBuilder>(name: string, builder: B): FormNamed
 export function ref<T = unknown>(name: string): FormBuilder<T, T>;
 export function lazy<T, I = T>(thunk: () => NamedLike<T, I>): FormBuilder<T, I>;
 export function any(): FormBuilder<unknown, unknown>;
-export function never(): FormBuilder<never, never>;
+export function never(): FormNeverBuilder;
 export function when(cond: AnyBuilder): FormWhenBuilder;
 export function from<T = unknown>(json: JsonSchema | boolean): FormBuilder<T, T>;
 export function document(root: AnyBuilder, options?: { draft?: '2020-12' }): JsonSchema | boolean;

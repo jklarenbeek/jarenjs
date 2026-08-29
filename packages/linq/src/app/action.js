@@ -75,14 +75,16 @@ function closedTo(spec, members, what) {
 /**
  * A schema builder that TYPES something the document does not carry.
  * @param {any} value
- * @param {string} what
+ * @param {string} what - the member's own name, a NOUN: the message makes
+ *   it the subject of a sentence, so a phrase here reads as nonsense
+ * @param {string} types - what the builder types, for the clause after it
  * @param {string} at
  */
-function typeOnly(value, what, at) {
+function typeOnly(value, what, types, at) {
   if (!isSchemaBuilder(value)) {
     throw new LinqBuildError('JL0101',
-      `${what} is a schema-pen builder — the app format carries no schema for it, so `
-      + `nothing is emitted for it; got ${describeValue(value)}`, at);
+      `${what} is a schema-pen builder — it types ${types}, and the app format carries no `
+      + `schema for it, so nothing is emitted for it; got ${describeValue(value)}`, at);
   }
 }
 
@@ -161,7 +163,7 @@ export function action(fn, options = undefined) {
     }
     closedTo(options, ACTION_MEMBERS, 'action()');
     if (options.payload !== undefined) {
-      typeOnly(options.payload, "action() payload types the dispatch's $payload", '/payload');
+      typeOnly(options.payload, 'action() payload', "the dispatch's $payload", '/payload');
     }
     if (options.event !== undefined) readEventFields(options.event, 'action()');
   }

@@ -80,32 +80,14 @@ const DOCS = [
   ['client', 'the client', 'DB-CLIENT.md', 4],
   ['contract', 'the contract pen', 'CONTRACT-PEN.md', 6],
   ['flow', 'the flow pen', 'FLOW-PEN.md', 7],
-  ['app', 'the app pen', 'APP-PEN.md', 2],
-  ['forms', 'the forms pen', 'FORMS-PEN.md', 2],
+  ['app', 'the app pen', 'APP-PEN.md', 7],
+  ['forms', 'the forms pen', 'FORMS-PEN.md', 6],
 ];
 
 /** `DB-CLIENT.md`'s §2 answers a different question — the client writes
  * no document, so it enumerates a surface rather than mapping a method to
  * the member it emits, and the document says so in the section itself. */
 const MAPPING_HEADING = { db: '## 2. The surface' };
-
-/**
- * The pens whose §2 does not yet name their whole surface, and their
- * measured gap. Every pen stays in the table: a gate that covers eight
- * of nine because the ninth was left out is a gate nobody notices has
- * stopped asking.
- * @type {Record<string, string>}
- */
-const MAPPING_TODO = {
-  app: '6 of 13 unnamed: add, copy, move, remove, replace, test',
-  forms: '29 of 31 unnamed, the schema-pen vocabulary the forms pen re-exports among them',
-};
-
-/** The same, for §5's named exclusions: the eight builder classes, the
- * one constant and the one guard each of these three subpaths exports. */
-const TYPES_TODO = {
-  forms: 'its 8 builder classes, SCHEMA_BUILDER and isSchemaBuilder',
-};
 
 for (const [pen, what, file, atLeast] of DOCS) {
   describe(`${file} — ${what}'s worked examples are what it emits`, () => {
@@ -300,10 +282,14 @@ describe('the mapping table names the whole surface', () => {
   // so rows legitimately outnumber names in several documents. What
   // cannot happen is a name the caller can write and the table never
   // mentions.
+  //
+  // Both loops below run for all ten subpaths with no exemption. They
+  // carried one while the documents were being written, and a pen that
+  // arrives short now FAILS rather than reporting a todo — an exemption
+  // list on a finished gate is how the next gap lands unnoticed.
   for (const [pen, , file] of DOCS) {
     const subpath = pen === 'client' ? 'db' : pen;
-    const todo = MAPPING_TODO[subpath];
-    const check = async () => {
+    it(`${file} §2 names every one of ${subpath}'s callable names`, async () => {
       const markdown = fs.readFileSync(new URL(file, DOCS_DIR), 'utf8');
       const section = bodyOf(markdown, MAPPING_HEADING[subpath] ?? '## 2. The mapping table');
       assert.notStrictEqual(section, '', `${file} carries its §2`);
@@ -311,9 +297,7 @@ describe('the mapping table names the whole surface', () => {
       const missing = vocabulary.filter((name) => !names(section, name));
       assert.deepStrictEqual(missing, [],
         `${file} §2 does not name ${missing.length} of ${vocabulary.length}: ${missing.join(', ')}`);
-    };
-    if (todo) it.todo(`${file} §2 names every one of ${subpath}'s callable names — ${todo}`, check);
-    else it(`${file} §2 names every one of ${subpath}'s callable names`, check);
+    });
   }
 
   // The three kinds the gate above excludes, asserted BY NAME against
@@ -322,8 +306,7 @@ describe('the mapping table names the whole surface', () => {
   // builder class would arrive undocumented.
   for (const [pen, , file] of DOCS) {
     const subpath = pen === 'client' ? 'db' : pen;
-    const todo = TYPES_TODO[subpath];
-    const check = async () => {
+    it(`${file} §5 names ${subpath}'s builder classes, constants and guards`, async () => {
       const markdown = fs.readFileSync(new URL(file, DOCS_DIR), 'utf8');
       const section = bodyOf(markdown, '## 5. The types');
       assert.notStrictEqual(section, '', `${file} carries its §5`);
@@ -333,9 +316,7 @@ describe('the mapping table names the whole surface', () => {
       assert.deepStrictEqual(missing, [],
         `${file} §5 does not name ${missing.length} of the ${excluded.length} excluded from §2: `
         + `${missing.join(', ')}`);
-    };
-    if (todo) it.todo(`${file} §5 names ${subpath}'s builder classes, constants and guards — ${todo}`, check);
-    else it(`${file} §5 names ${subpath}'s builder classes, constants and guards`, check);
+    });
   }
 });
 

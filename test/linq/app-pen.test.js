@@ -570,7 +570,12 @@ describe('the app pen — what it refuses, by code', () => {
     assert.throws(() => action(7), (e) => e.code === 'JL0101');
     assert.throws(() => action(() => transition({}), { nope: 1 }), (e) => e.code === 'JL0101');
     assert.throws(() => action(() => transition({}), { payload: {} }),
-      (e) => e.code === 'JL0101' && /schema-pen builder/.test(e.message));
+      (e) => e.code === 'JL0101'
+        // the member's NAME is the subject: the message is a sentence, and
+        // the clause that says what the builder types comes after it
+        && e.message.startsWith('JL0101: action() payload is a schema-pen builder — '
+          + "it types the dispatch's $payload, and the app format carries no schema for it")
+        && e.docPath === '/payload');
     assert.throws(() => transition({ nope: 1 }), (e) => e.code === 'JL0101');
     assert.throws(() => transition({ patch: 'x' }), (e) => e.code === 'JL0101');
     assert.throws(() => transition({ effects: [{ run: 'x' }] }),

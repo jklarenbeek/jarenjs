@@ -147,18 +147,33 @@ export interface AppDocument<State = unknown, Actions extends string = string> {
   readonly subs?: readonly SubDeclaration[];
 }
 
-/** What `defineApp()` answers: the document, and the state's schema
- * beside it — never merged, because the format has no slot for one. */
-export interface AppResult<State = unknown, Actions extends string = string> {
+/**
+ * What `defineApp()` answers: the document, and the state's schema
+ * beside it — never merged, because the format has no slot for one.
+ *
+ * `Schema` is the third phantom because the SLOT is not always filled:
+ * `defineApp()` answers `null` for a plain-JSON state with no `schema`
+ * beside it, and a `JsonSchema | boolean` for the two overloads that
+ * were given a builder. Carrying that per overload is what lets the one
+ * line every consumer writes —
+ * `new JarenValidator().compile(stateSchema)` — compile without a narrow
+ * on the overloads that can never answer `null`. It defaults to the
+ * whole union, so `AppResult<State, Actions>` still names any result.
+ */
+export interface AppResult<
+  State = unknown,
+  Actions extends string = string,
+  Schema extends JsonSchema | boolean | null = JsonSchema | boolean | null,
+> {
   readonly document: AppDocument<State, Actions>;
-  readonly stateSchema: JsonSchema | boolean | null;
+  readonly stateSchema: Schema;
 }
 
 /** The state an app document describes — what `app.getState()` answers. */
-export type StateOf<A> = A extends AppResult<infer S, any> ? S
+export type StateOf<A> = A extends AppResult<infer S, any, any> ? S
   : A extends AppDocument<infer S, any> ? S : never;
 /** The action names an app declares — what a `bind<>()` is checked against. */
-export type ActionsOf<A> = A extends AppResult<any, infer N> ? N
+export type ActionsOf<A> = A extends AppResult<any, infer N, any> ? N
   : A extends AppDocument<any, infer N> ? N : never;
 
 // ————— the surface —————
@@ -260,7 +275,7 @@ export function defineApp<
   readonly view: unknown;
   readonly actions?: A;
   readonly subs?: readonly SubDeclaration[];
-}): AppResult<Infer<B>, keyof A & string>;
+}): AppResult<Infer<B>, keyof A & string, JsonSchema | boolean>;
 export function defineApp<
   B extends AnyBuilder, const A extends Record<string, ActionDeclaration<any>> = {},
 >(spec: {
@@ -269,10 +284,10 @@ export function defineApp<
   readonly view: unknown;
   readonly actions?: A;
   readonly subs?: readonly SubDeclaration[];
-}): AppResult<Infer<B>, keyof A & string>;
+}): AppResult<Infer<B>, keyof A & string, JsonSchema | boolean>;
 export function defineApp<const A extends Record<string, ActionDeclaration<any>> = {}>(spec: {
   readonly state?: Json;
   readonly view: unknown;
   readonly actions?: A;
   readonly subs?: readonly SubDeclaration[];
-}): AppResult<unknown, keyof A & string>;
+}): AppResult<unknown, keyof A & string, null>;

@@ -208,18 +208,36 @@ const flag: BooleanBuilder = s.boolean();
 const nothing: NullBuilder = s.nil();
 void [flag, nothing, named];
 
-const never: NeverBuilder = s.never() as NeverBuilder;
+// never() ANSWERS a NeverBuilder — no cast: the factory used to be
+// declared SchemaBuilder<never, never>, so a caller who wanted the class
+// the runtime really builds had to assert it, and every method this class
+// refuses type-checked on the way through.
+const never: NeverBuilder = s.never();
 const isNever: boolean = s.never() instanceof NeverBuilder;
 // nullable() widens what `false` admits, so it hands back the base
-// builder: the annotations JL0102 refuses above are legal after it, and
-// that is the remedy the refusal names.
+// builder: the annotations JL0102 refuses below are legal after it, and
+// that is the remedy the refusal names — under test, because a message
+// that names a way out needs a way out that works.
 const widened: SchemaBuilder<never | null, never | null> = never.nullable();
 const annotated: unknown = never.nullable().title('t').describe('d').schema;
-// before nullable() the same call is declared not to come back, which is
-// what JL0102 does at run time
-const refusedTitle: Equals<ReturnType<typeof never.title>, never> = true;
-const refusedCheck: Equals<ReturnType<typeof never.check>, never> = true;
-void [refusedTitle, refusedCheck];
+// before nullable(), each refusal is a COMPILE error and not merely a
+// `never` return: a method declared only `: never` still type-checks at
+// its call site, so the parameter is `never` too and nothing is
+// assignable to it. Each line below is what JL0102 does at run time.
+// @ts-expect-error — `false` carries no `title`
+never.title('t');
+// @ts-expect-error — `false` carries no `description`
+never.describe('d');
+// @ts-expect-error — `false` carries no annotation of any name
+never.meta({ deprecated: true });
+// @ts-expect-error — `false` carries no `default`
+never.default(0);
+// @ts-expect-error — `false` carries no `examples`
+never.example(0);
+// @ts-expect-error — `false` carries no `errorMessage`
+never.message('m');
+// @ts-expect-error — nothing reaches a check on `false`
+never.check((v) => v);
 // the pen wiring, called the way ./model and ./forms call it
 const pen = createFactories({
   Base: SchemaBuilder, String: SchemaBuilder, Number: SchemaBuilder,
