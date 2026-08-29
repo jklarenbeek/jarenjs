@@ -249,7 +249,9 @@ export class EntityWhenBuilder<F extends Flag = never> extends WhenBuilder<F> {
  */
 export class EntityNeverBuilder<Out = never, In = Out, F extends Flag = never> extends NeverBuilder<Out, In, F> {
   optional(): EntityNeverBuilder<Out, In, F | 'optional'>;
-  nullable(): EntityNeverBuilder<Out | null, In | null, F>;
+  /** As on the schema pen: widening to admit `null` is what makes the
+   * vocabulary writable, so it answers this pen's base builder. */
+  nullable(): EntityBuilder<Out | null, In | null, F>;
   /** The migration hint: a rename is recorded beside the schema, not in it. */
   renamedFrom(name: string): this;
 }

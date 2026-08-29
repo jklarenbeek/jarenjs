@@ -488,18 +488,29 @@ export class WhenBuilder extends SchemaBuilder {
   else(builder) { return this.with({ else: requireBuilder(builder, 'else()') }); }
 }
 
-/** `false` — the schema nothing satisfies; it carries no keywords. */
+/**
+ * `false` — the schema nothing satisfies; it carries no keywords.
+ *
+ * The refusals below are about that boolean document, not about this
+ * class: once `nullable()` has been applied the node emitted is
+ * `{ anyOf: [false, { type: 'null' }] }`, an object that carries
+ * keywords like any other, and `null` reaches a check on it. So both
+ * overrides step aside there — which is what makes the second remedy
+ * each message names actually work.
+ */
 export class NeverBuilder extends SchemaBuilder {
   /** @param {string} key @param {any} value */
   annotate(key, value) {
-    void value;
+    if (this.state.nullable) return super.annotate(key, value);
     throw new LinqBuildError('JL0102',
       `never() is the boolean schema false, which carries no '${key}' — annotate the member `
       + 'that holds it, or nullable() it first');
   }
   /** @param {any} rule */
   check(rule) {
-    void rule;
-    throw new LinqBuildError('JL0102', 'never() is the boolean schema false; nothing reaches a check on it');
+    if (this.state.nullable) return super.check(rule);
+    throw new LinqBuildError('JL0102',
+      'never() is the boolean schema false; nothing reaches a check on it — check the member '
+      + 'that holds it, or nullable() it first');
   }
 }

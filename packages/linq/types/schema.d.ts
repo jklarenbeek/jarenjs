@@ -357,17 +357,22 @@ export class WhenBuilder<F extends Flag = never> extends SchemaBuilder<unknown, 
 }
 
 /**
- * `false` — the schema nothing satisfies. It carries no keywords at
- * all, so every method that would write one is refused with `JL0102`
- * rather than dropped; the return types below say so. `never()` answers
- * one, and this class is how a caller recognises it (`instanceof`).
+ * `false` — the schema nothing satisfies. While that IS the document it
+ * carries no keywords at all, so every method that would write one is
+ * refused with `JL0102` rather than dropped; the return types below say
+ * so. `nullable()` is the way out and the refusals name it: the node
+ * becomes `{ anyOf: [false, { type: 'null' }] }`, which carries keywords
+ * like any other, so it answers the base builder rather than this class.
+ * `never()` answers one, and this class is how a caller recognises it
+ * (`instanceof`).
  */
 export class NeverBuilder<Out = never, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
   /** `false` carries no members, so the boolean schema is the document. */
   readonly schema: false;
   optional(): NeverBuilder<Out, In, F | 'optional'>;
-  /** Answers another `NeverBuilder`: `with()` keeps the class. */
-  nullable(): NeverBuilder<Out | null, In | null, F>;
+  /** The one method that widens what `false` admits — and so the one
+   * that hands back a builder the annotations below are legal on. */
+  nullable(): SchemaBuilder<Out | null, In | null, F>;
   /** Refused (`JL0102`) — `false` carries no `default`. */
   default(value: Out): never;
   /** Refused (`JL0102`) — `false` carries no `description`. */

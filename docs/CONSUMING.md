@@ -117,7 +117,7 @@ misleading a reader:
 |---|---:|---|
 | `.` | <!--bundle:linq-chain-->173 kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--bundle:linq-schema-->32 kB | the builders and the recording proxy `check()` captures through |
-| `./model` | <!--bundle:linq-model-->40 kB | the schema pen it subclasses |
+| `./model` | <!--bundle:linq-model-->41 kB | the schema pen it subclasses |
 | `./jslt` | <!--bundle:linq-jslt-->19 kB | the body capture; of the schema pen, only the builder brand |
 | `./migration` | <!--bundle:linq-migration-->23 kB | the canonicalizer and hash a shape identity needs |
 | `./contract` | <!--bundle:linq-contract-->44 kB | the schema pen (a contract's inputs and outputs are schemas) |

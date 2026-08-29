@@ -210,6 +210,16 @@ void [flag, nothing, named];
 
 const never: NeverBuilder = s.never() as NeverBuilder;
 const isNever: boolean = s.never() instanceof NeverBuilder;
+// nullable() widens what `false` admits, so it hands back the base
+// builder: the annotations JL0102 refuses above are legal after it, and
+// that is the remedy the refusal names.
+const widened: SchemaBuilder<never | null, never | null> = never.nullable();
+const annotated: unknown = never.nullable().title('t').describe('d').schema;
+// before nullable() the same call is declared not to come back, which is
+// what JL0102 does at run time
+const refusedTitle: Equals<ReturnType<typeof never.title>, never> = true;
+const refusedCheck: Equals<ReturnType<typeof never.check>, never> = true;
+void [refusedTitle, refusedCheck];
 // the pen wiring, called the way ./model and ./forms call it
 const pen = createFactories({
   Base: SchemaBuilder, String: SchemaBuilder, Number: SchemaBuilder,
@@ -217,7 +227,7 @@ const pen = createFactories({
   When: SchemaBuilder, Never: NeverBuilder,
 });
 const hasString: boolean = typeof pen.string === 'function';
-void [never, isNever, hasString];
+void [never, isNever, hasString, widened, annotated];
 
 // A type is not a value: importing one as a value is the mistake the
 // census now makes impossible to ship.

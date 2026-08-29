@@ -182,7 +182,9 @@ export class FormWhenBuilder<F extends Flag = never> extends WhenBuilder<F> {
  */
 export class FormNeverBuilder<Out = never, In = Out, F extends Flag = never> extends NeverBuilder<Out, In, F> {
   optional(): FormNeverBuilder<Out, In, F | 'optional'>;
-  nullable(): FormNeverBuilder<Out | null, In | null, F>;
+  /** As on the schema pen: widening to admit `null` is what makes a rule
+   * writable, so it answers this pen's base builder. */
+  nullable(): FormBuilder<Out | null, In | null, F>;
 }
 
 // ————— the named factories —————

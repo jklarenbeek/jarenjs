@@ -810,19 +810,6 @@ what each does is its own documentation's job
   run, a tree-shaking probe carrying neither chain module nor engine, a
   packed-consumer subpath and a type pin. A JTLT order additionally
   carries the grammar artifact and its tests. None is scheduled.
-- [ ] **The `JL0102` refusal on `never()` names a remedy that also
-  refuses.** Every annotating method on a `NeverBuilder` — `title()`,
-  `describe()`, `example()`, `message()`, `default()`, `meta()` and
-  `check()` — routes through the `annotate` override in
-  `packages/linq/src/schema/builders.js`, which raises `JL0102` "…
-  annotate the member that holds it, or nullable() it first". The first
-  remedy works; the second does not. `with()` keeps the class, so
-  `never().nullable()` answers another `NeverBuilder` and annotating it
-  raises the same refusal — even though its document is
-  `{ anyOf: [false, { type: 'null' }] }`, which can carry keywords. The
-  fix is a decision, not an edit: either `nullable()` answers the base
-  class on this one builder, or the message drops the clause. Both move a
-  message the pen tests assert verbatim.
 - [ ] **A refused `-0` is reported as `0`.** `describeValue` in
   `packages/linq/src/json-boundary.js` renders a number with `String(value)`,
   and `String(-0)` is `'0'` — so `s.number().default(-0)` refuses with

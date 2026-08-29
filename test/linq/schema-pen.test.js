@@ -199,6 +199,41 @@ describe('the schema pen — the document is the deliverable', () => {
     assert.deepStrictEqual(s.any().nullable().schema, { anyOf: [{}, { type: 'null' }] });
   });
 
+  it('the remedy JL0102 names on never() works: nullable() first, then annotate', () => {
+    // `false` carries no keywords, so every annotation on never() is
+    // refused — and the refusal names two ways out. Both must WORK, or
+    // the message sends the reader somewhere that refuses again.
+    assert.throws(() => s.never().title('t'), (e) => e.code === 'JL0102'
+      && /annotate the member that holds it, or nullable\(\) it first/.test(e.message));
+
+    // way out 1: annotate the member that holds it
+    assert.deepStrictEqual(s.object({ n: s.never() }).describe('d').schema,
+      { type: 'object', properties: { n: false }, required: ['n'], additionalProperties: false, description: 'd' });
+
+    // way out 2: nullable() first — the document is an anyOf, which
+    // carries keywords like any other node
+    assert.deepStrictEqual(s.never().nullable().title('t').describe('d').schema,
+      { anyOf: [false, { type: 'null' }], title: 't', description: 'd' });
+    assert.deepStrictEqual(s.never().nullable().default(null).schema,
+      { anyOf: [false, { type: 'null' }], default: null });
+    assert.deepStrictEqual(s.never().nullable().meta({ 'x-note': 1 }).schema,
+      { anyOf: [false, { type: 'null' }], 'x-note': 1 });
+    // and a check reaches it, because null now does
+    assert.deepStrictEqual(s.never().nullable().check({ $eq: [null, null] }).schema,
+      { anyOf: [false, { type: 'null' }], $query: { $eq: [null, null] } });
+
+    // the same two ways out of the check refusal, and the same order rule
+    assert.throws(() => s.never().check(() => true), (e) => e.code === 'JL0102'
+      && /check the member that holds it, or nullable\(\) it first/.test(e.message));
+    assert.deepStrictEqual(s.object({ n: s.never() }).check({ $eq: [1, 1] }).schema,
+      { type: 'object', properties: { n: false }, required: ['n'], additionalProperties: false, $query: { $eq: [1, 1] } });
+
+    // the ORDER is what the message says: annotating before nullable()
+    // is still the boolean schema false, and still refused
+    assert.throws(() => s.never().title('t').nullable(), (e) => e.code === 'JL0102');
+    assert.throws(() => s.never().check(() => true).nullable(), (e) => e.code === 'JL0102');
+  });
+
   it('union and intersection take hand-written JSON beside builders', () => {
     assert.deepStrictEqual(s.union([s.string(), { type: 'number' }]).schema,
       { anyOf: [{ type: 'string' }, { type: 'number' }] });

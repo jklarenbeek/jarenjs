@@ -94,7 +94,7 @@ with identical semantics), **refused** (a coded error naming the reason).
 | `datetime()`, `date()` | `{ type: 'string', format: 'date-time' \| 'date' }` | `DateTime` | native |
 | `time()`, `duration()` | `{ type: 'string', format: 'time' \| 'duration' }` | `string` | native |
 | `any()` | `{}` | `unknown` | native |
-| `never()` | `false` | `never` | native; it carries no annotation and no check (`JL0102`) |
+| `never()` | `false` | `never` | native; no annotation and no check while `false` IS the document (`JL0102`); `nullable()` lifts both |
 
 ### 2.2 Objects
 
@@ -168,7 +168,7 @@ with identical semantics), **refused** (a coded error naming the reason).
 | `.example(v)` | one more entry of `examples`, in call order | — | native |
 | `.meta(annotations)` | the keys verbatim, in the order first set | — | native; a pen-owned keyword is `JL0104` |
 | `.message(spec)` | `errorMessage: spec` (the validator's string, map or `$msgid` forms) | — | native |
-| `.annotate(key, value)` | one annotation keyword — the primitive the four above are written in terms of, and the one a subclass overrides | `this` | native; `never()` overrides it to refuse (`JL0102`) |
+| `.annotate(key, value)` | one annotation keyword — the primitive the four above are written in terms of, and the one a subclass overrides | `this` | native; `never()` overrides it to refuse until `nullable()` widens it (`JL0102`) |
 | `.annotation(key)` | nothing: it READS the annotation a builder already carries, or `undefined` — what a subclass consults before it folds one into a keyword it owns | the value as stored | native |
 
 Annotations are written after the structural keywords and the
@@ -698,7 +698,7 @@ assembly (a shape whose emitted form would mean something else).
 | `s.number().trim()` | `trim() applies to a string; a number carries no whitespace to trim` | `s.string().trim()` |
 | `s.string().pattern(/a/i)` | `pattern() cannot carry the flags 'i' — a JSON Schema pattern is a bare regular expression source; spell the flag inside the expression, or drop it` | `s.string().pattern(/[Aa]/)` |
 | `s.never().describe('x')` | `never() is the boolean schema false, which carries no 'description' — annotate the member that holds it, or nullable() it first` | annotate the member |
-| `s.never().check(fn)` | `never() is the boolean schema false; nothing reaches a check on it` | check the member |
+| `s.never().check(fn)` | `never() is the boolean schema false; nothing reaches a check on it — check the member that holds it, or nullable() it first` | check the member |
 | `s.discriminated('kind', [A, B])` where `B` does not declare `kind` | `discriminated('kind') option 1 does not declare 'kind' as a literal() or enumOf() member — without the tag on every option the oneOf is not a discriminated union; use union() for an untagged one` | `s.union([A, B])`, or give `B` the tag |
 | `s.intersection([closedA, closedB])` | `closed objects do not intersect — under allOf each part rejects the other's members, so the document would accept neither; open() the parts, or merge them with extend()` | `.open()` both, or `A.extend(B's members)` |
 | `s.union([s.string().default('x'), …])` | `a default(), coerce() or trim() under union() never runs — the normalizer does not descend that branch, so the document would promise a normalization that does not happen; move it to the member that holds the branch, or drop it` | move the `default()` to the member holding the union |
