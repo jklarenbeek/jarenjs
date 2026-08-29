@@ -618,3 +618,41 @@ if (stale.length > 0) {
 console.log(`Tree-shaking smoke test passed (docs/CONSUMING.md states all ${linqBundles.size} `
   + `@jarenjs/linq subpath prices, each equal to the bundle measured here: `
   + [...linqBundles].map(([name, bytes]) => `${name} ${kb(bytes)} kB`).join(', ') + ').');
+
+// ---- the pen documents' EXACT figures ----
+// Each pen document's `## 7. Cost` opens with the byte count this script
+// measures. CONSUMING.md's rounded table was gated above and these were
+// not, so 0.52.7's schema-pen change moved five of them 157 bytes out of
+// date at once and nothing said so. Same rule as the table: the number is
+// derived, never typed, and a stale one is red here rather than wrong in
+// a document somebody reads. The chain has no Cost section (QUERY-PEN.md
+// keeps its own twelve, D2) and is not in the map.
+const PEN_DOCS = new Map([
+  ['schema', 'SCHEMA-PEN.md'], ['model', 'MODEL-PEN.md'], ['jslt', 'JSLT-PEN.md'],
+  ['migration', 'MIGRATION-PEN.md'], ['db', 'DB-CLIENT.md'], ['contract', 'CONTRACT-PEN.md'],
+  ['flow', 'FLOW-PEN.md'], ['app', 'APP-PEN.md'], ['forms', 'FORMS-PEN.md'],
+]);
+const grouped = (bytes) => bytes.toLocaleString('en-US');
+const drifted = [];
+for (const [name, file] of PEN_DOCS) {
+  const bytes = linqBundles.get(name);
+  if (bytes === undefined) throw new Error(`no bundle was measured for the ${name} subpath`);
+  const doc = readFileSync(`packages/linq/docs/${file}`, 'utf8');
+  const start = doc.indexOf('\n## 7. Cost');
+  if (start < 0) { drifted.push(`${file} has no '## 7. Cost' section`); continue; }
+  const rest = doc.slice(start + 1);
+  const next = rest.slice(1).search(/^## /m);
+  const section = next < 0 ? rest : rest.slice(0, next + 1);
+  const stated = /\*\*([\d,]+) bytes\*\*/.exec(section);
+  if (stated === null) drifted.push(`${file} §7 states no byte count (measured ${grouped(bytes)})`);
+  else if (stated[1] !== grouped(bytes)) {
+    drifted.push(`${file} §7 states ${stated[1]} bytes, measured ${grouped(bytes)}`);
+  }
+}
+if (drifted.length > 0) {
+  throw new Error('a pen document\'s §7 Cost figure is stale:\n  '
+    + drifted.join('\n  ') + '\nRefresh the figure; it is measured, never typed.');
+}
+
+console.log(`Tree-shaking smoke test passed (${PEN_DOCS.size} pen documents state their §7 Cost `
+  + 'in bytes, each equal to the bundle measured here).');

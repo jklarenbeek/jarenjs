@@ -29,5 +29,5 @@ import { requireJson } from '../json-boundary.js';
 export function queryMember(what, scope, value) {
   if (typeof value !== 'function') return cloneJson(requireJson(value, what));
   const advice = () => ` — ${what} evaluates over ${scope}, which its argument IS`;
-  return cloneJson(captureQuery(what, [], value, { advice, fold: false }));
+  return cloneJson(captureQuery(what, [], value, { advice, fold: false, noun: 'callback' }));
 }

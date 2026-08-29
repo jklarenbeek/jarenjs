@@ -750,7 +750,8 @@ and refusing one here would be an invention rather than a mirror. The
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
 | `m.string().meta({ 'x-entity': { key: true } })` | `meta() cannot write 'x-entity' — the model pen owns that keyword; spell it through key(), identity(), unique(), index(), column(), now(), updated(), fill(), compute() or rel.*` | the method that emits it |
-| `m.string().compute((d, x) => x.root.eq(1))` | `a compute() rule cannot bind 'root' — its query evaluates with no externals — it sees the document being written and nothing else; anything else has nothing to bind to` | read the document: `(d) => d.first.concat(d.last)` |
+| `m.string().compute((d, x) => x.root.eq(1))` | `a compute() rule cannot bind 'root' — its query evaluates with no externals at all; anything else has nothing to bind to — it evaluates over the document being written, which its argument IS; there is nothing else to read` | read the document: `(d) => d.first.concat(d.last)` |
+| `m.collection(User, { key: (d, x) => x.root })` | the same, `a collection() key rule cannot bind 'root'` | `(d) => d.id` |
 
 The ownership is local to this pen. The schema pen does NOT own
 `x-entity`, so `s.string().meta({ 'x-entity': { key: true } })` writes
@@ -969,7 +970,7 @@ check, or know something a builder cannot see, to catch them:
 
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **40,394 bytes** as a minified,
+`@jarenjs/linq/model` builds to **40,718 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded (40
 kB) beside the other nine subpath prices in
@@ -990,7 +991,7 @@ them:
   byte of `packages/linq/src/model/`, because the subclasses are built by
   this subpath rather than patched onto the base classes.
 
-The price above the schema pen's 32,092 is about 8 kB: the mixin, the
+The price above the schema pen's 32,288 is about 8 kB: the mixin, the
 three relation factories, `collection()`/`index()` with their capture,
 `defineModel()` — and the refusal MESSAGES, which are most of what §4
 costs. That is a deliberate trade: naming the rule and the spelling that

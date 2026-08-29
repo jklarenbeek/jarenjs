@@ -17,7 +17,7 @@
  * engine would only refuse it at run time, on the second child.
  */
 
-import { isExpression, liftExpression, toExpression } from '../expression.js';
+import { liftExpression, toExpression } from '../expression.js';
 import { captureQuery } from '../capture-root.js';
 import { describeValue } from '../json-boundary.js';
 import { LinqBuildError } from '../errors.js';
@@ -27,8 +27,11 @@ import { deepFreeze } from '@jarenjs/core/object';
 const RESERVED = ['root', 'path'];
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** The `apply()` markers made inside the bodies in progress. */
-const APPLIES = new WeakSet();
+/** The `{ $apply: … }` NODES `apply()` built, by identity. The node, not
+ * the proxy over it: a proxy is consumed the moment its value is lowered
+ * (into a member, an operand, an argument), while the node it carries is
+ * the very object that lands in the emitted document. */
+const APPLY_NODES = new WeakSet();
 /** How many `body()` captures are in progress (captures nest). */
 let bodies = 0;
 
@@ -70,34 +73,69 @@ function readExternals(options) {
 }
 
 /**
- * The `[]` idiom (§6.3): an object member holds exactly one value, and
- * an `$apply` yields a sequence — so an `apply()` as a bare member
- * value is refused before it lowers. Inside an array literal it is the
- * idiom itself (the brackets splice the sequence); at the top of the
- * body it is the body's own sequence; anywhere else the walk descends
- * plain objects and arrays only — a proxy is an expression, and what
- * `toExpression` refuses it refuses by name.
- * @param {any} value
- * @param {string} at - a pointer into the returned literal, for `docPath`
+ * `an object member takes exactly one value` — the `[]` idiom's refusal.
+ * @param {string} key @param {string} at
  */
-function refuseBareApply(value, at) {
-  if (value === null || typeof value !== 'object' || isExpression(value)) return;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) refuseBareApply(value[i], `${at}/${i}`);
+function bareApply(key, at) {
+  return new LinqBuildError('JL0102',
+    `an object member takes exactly one value — '${key}' holds an apply(), which yields `
+    + 'a SEQUENCE and fails at run time on the second child (JQ2001); wrap the apply in '
+    + `[] (JSLT-FORMAT §6.3: ${key}: [apply(…)])`, at);
+}
+
+/**
+ * The `[]` idiom (§6.3): an object member holds exactly one value, and
+ * an `$apply` yields a sequence — so an `apply()` in a member position
+ * is refused. Inside an array constructor it is the idiom itself (the
+ * brackets splice the sequence); as an operator's operand it is an
+ * ordinary expression (`apply(…).count()`); at the top of the body it is
+ * the body's own sequence.
+ *
+ * The walk runs over the CAPTURED DOCUMENT rather than over the value
+ * the callback returned, because a callback may hand an `apply()` to an
+ * operator (`op('$if', [f, { children: apply(…) }, null])`) and the
+ * object literal is lowered before the callback ever returns — the
+ * marker is gone, and only the node it left in the document is still
+ * there to find. The document is plain JSON at this point and the nodes
+ * are the same objects `apply()` built, so identity is the whole test.
+ *
+ * Member position is read the way `toExpression` writes it, three lines
+ * earlier: a map CONSTRUCTOR has no `$`-prefixed key (a data object that
+ * does is spelled `$map`, as pairs), and everything else with one is an
+ * operator or FLWOR phrase whose operands are expressions.
+ * @param {any} node - a node of the captured document
+ * @param {string} at - its JSON pointer, for `docPath`
+ */
+function refuseBareApply(node, at) {
+  if (node === null || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) refuseBareApply(node[i], `${at}/${i}`);
     return;
   }
-  const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) return;
-  for (const key of Object.keys(value)) {
-    const member = value[key];
-    if (APPLIES.has(member)) {
-      throw new LinqBuildError('JL0102',
-        `an object member takes exactly one value — '${key}' holds an apply(), which yields `
-        + 'a SEQUENCE and fails at run time on the second child (JQ2001); wrap the apply in '
-        + `[] (JSLT-FORMAT §6.3: ${key}: [apply(…)])`, `${at}/${key}`);
+  const keys = Object.keys(node);
+  if (!keys.some((k) => k.charCodeAt(0) === 0x24)) {
+    for (const key of keys) {
+      if (APPLY_NODES.has(node[key])) throw bareApply(key, `${at}/${key}`);
+      refuseBareApply(node[key], `${at}/${key}`);
     }
-    refuseBareApply(member, `${at}/${key}`);
+    return;
   }
+  // `$map` is the one phrase whose operands ARE members: it spells a data
+  // object with `$`-prefixed keys as [key, value] pairs (`toExpression`).
+  if (keys.length === 1 && keys[0] === '$map' && Array.isArray(node.$map)) {
+    node.$map.forEach((pair, i) => {
+      if (!Array.isArray(pair) || pair.length !== 2) {
+        refuseBareApply(pair, `${at}/$map/${i}`);
+        return;
+      }
+      if (APPLY_NODES.has(pair[1])) {
+        throw bareApply(typeof pair[0] === 'string' ? pair[0] : String(i), `${at}/$map/${i}/1`);
+      }
+      refuseBareApply(pair[1], `${at}/$map/${i}/1`);
+    });
+    return;
+  }
+  for (const key of keys) refuseBareApply(node[key], `${at}/${key}`);
 }
 
 /**
@@ -134,9 +172,8 @@ export function apply(selector, mode = undefined) {
     }
     node = { $apply: [doc, mode] };
   }
-  const marker = liftExpression(node);
-  APPLIES.add(marker);
-  return marker;
+  APPLY_NODES.add(node);
+  return liftExpression(node);
 }
 
 /**
@@ -176,11 +213,8 @@ export function body(fn, options = undefined) {
     ` — a stylesheet parameter is declared first: body(fn, { externals: ['${name}'] })`;
   bodies++;
   try {
-    const doc = captureQuery('body()', RESERVED.concat(declared), (value, x) => {
-      const out = fn(value, x);
-      refuseBareApply(out, '');
-      return out;
-    }, { advice, fold: false });
+    const doc = captureQuery('body()', RESERVED.concat(declared), fn, { advice, fold: false });
+    refuseBareApply(doc, '');
     // a body spells a literal as the format's own constructor (never a
     // folded `$const`); the tree may still share a caller's array or
     // object, so it is copied before it is frozen

@@ -250,7 +250,7 @@ beside the spelling that works; the binder's shared table
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **44,250 bytes** as a minified,
+`@jarenjs/linq/contract` builds to **44,446 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in

@@ -18,6 +18,14 @@ import { LinqBuildError } from '../errors.js';
 import { requireJson, requireName } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
 
+/** What a captured model default or member path evaluates over, for the
+ * `JL0104` a second callback argument raises: the document being
+ * written, which the callback's own first argument already is. The
+ * shared capture cannot say this — it holds for this pen and not for the
+ * others (`capture-root.js`). */
+export const DOCUMENT_SCOPE = ' — it evaluates over the document being written, '
+  + 'which its argument IS; there is nothing else to read';
+
 /** The keyword every entity method writes. */
 const KEYWORD = 'x-entity';
 
@@ -198,7 +206,7 @@ export function withEntity(Base) {
      */
     compute(rule) {
       const query = typeof rule === 'function'
-        ? captureQuery('compute()', [], rule)
+        ? captureQuery('compute()', [], rule, { advice: () => DOCUMENT_SCOPE })
         : requireJson(rule, 'compute()');
       return this.entity({ default: { query } });
     }

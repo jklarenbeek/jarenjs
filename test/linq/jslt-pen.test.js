@@ -237,6 +237,24 @@ describe('apply() — the two forms and the [] idiom', () => {
         && /exactly one value/.test(e.message) && /children: \[apply/.test(e.message));
     assert.throws(() => body((v) => ({ a: { b: [{ c: apply(v.x) }] } })),
       (e) => e.code === 'JL0102' && e.docPath === '/a/b/0/c');
+    // an object literal handed to an OPERATOR is lowered before the callback
+    // returns, so the marker is gone and only the node in the document is
+    // left to find — the walk runs over the captured document for that reason
+    assert.throws(() => body((v) => ({ out: op('$if', [v.flag, { children: apply(v.x) }, null]) })),
+      (e) => e.code === 'JL0102' && e.docPath === '/out/$if/1/children');
+    assert.throws(() => body((v) => op('$seq', [{ children: apply(v.x) }])),
+      (e) => e.code === 'JL0102' && e.docPath === '/$seq/0/children');
+    assert.throws(() => body((v) => ({ out: v.title.eq({ children: apply(v.x) }) })),
+      (e) => e.code === 'JL0102' && e.docPath === '/out/$eq/1/children');
+    // a `$`-keyed data object is spelled `$map` as [key, value] pairs, and the
+    // value half of a pair is a member position too
+    assert.throws(() => body((v) => ({ $weird: apply(v.x) })),
+      (e) => e.code === 'JL0102' && e.docPath === '/$map/0/1' && /'\$\$weird'/.test(e.message));
+    // an apply as an OPERAND is an ordinary expression and stays legal
+    assert.deepStrictEqual(body((v) => ({ n: apply(v.items.all()).count() })),
+      { n: { $count: { $apply: '$.items[*]' } } });
+    assert.deepStrictEqual(body((v) => ({ a: { b: [{ c: [apply(v.x)] }] } })),
+      { a: { b: [{ c: [{ $apply: '$.x' }] }] } });
     // the engine would only say so at RUN time, on the second child
     const hand = [rule({ schema: { type: 'object', required: ['isbn'] } }, { title: '$.title', children: { $apply: '$.chapters[*]' } })];
     const transform = compileJsltStylesheet(hand, { compileTypeTest });

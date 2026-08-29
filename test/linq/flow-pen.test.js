@@ -275,7 +275,15 @@ describe('the fsm pen beyond §2', () => {
     assert.throws(() => effect('x', { with: Symbol('s') }), (e) => e.code === 'JL0101');
     // an external is JL0104 here, where the fix can be named — not JQ2006 at step time
     assert.throws(() => on('a', 'go').when((sc, x) => x.root),
-      (e) => e.code === 'JL0104' && /step scope/.test(e.message));
+      (e) => e.code === 'JL0104' && /step scope/.test(e.message)
+        // this pen has no "rules", and its scope is NOT a document under
+        // construction — the shared message must state neither
+        && /a when\(\) callback cannot bind/.test(e.message)
+        && !/document being written/.test(e.message));
+    assert.throws(() => effect('x', (sc, y) => ({ n: y.rate })),
+      (e) => e.code === 'JL0104' && /an effect\(\) with callback cannot bind/.test(e.message));
+    assert.throws(() => edge('a', 'b', { select: (v, x) => x.root }),
+      (e) => e.code === 'JL0104' && /an edge\(\) select callback cannot bind/.test(e.message));
   });
 
   it('the document is a value: not the caller\'s objects, and the caller\'s stay unfrozen', () => {

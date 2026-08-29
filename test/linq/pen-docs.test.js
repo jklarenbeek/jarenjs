@@ -75,11 +75,11 @@ function fencePairs(markdown, heading, doc) {
 const DOCS = [
   ['schema', 'the schema pen', 'SCHEMA-PEN.md', 10],
   ['model', 'the model pen', 'MODEL-PEN.md', 6],
-  ['jslt', 'the JSLT pen', 'JSLT-PEN.md', 3],
+  ['jslt', 'the JSLT pen', 'JSLT-PEN.md', 8],
   ['migration', 'the migration pen', 'MIGRATION-PEN.md', 5],
   ['client', 'the client', 'DB-CLIENT.md', 1],
   ['contract', 'the contract pen', 'CONTRACT-PEN.md', 2],
-  ['flow', 'the flow pen', 'FLOW-PEN.md', 2],
+  ['flow', 'the flow pen', 'FLOW-PEN.md', 7],
   ['app', 'the app pen', 'APP-PEN.md', 2],
   ['forms', 'the forms pen', 'FORMS-PEN.md', 2],
 ];

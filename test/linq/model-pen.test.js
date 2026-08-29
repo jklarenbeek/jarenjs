@@ -277,7 +277,13 @@ describe('the model pen — refusals, each with the fix in the message', () => {
 
   it('JL0104 — x-entity is owned here; a compute() sees only the document', () => {
     assert.throws(() => m.string().meta({ 'x-entity': { key: true } }), (e) => e.code === 'JL0104');
-    assert.throws(() => m.string().compute((d, x) => x.root.eq(1)), (e) => e.code === 'JL0104' && /no externals/.test(e.message));
+    assert.throws(() => m.string().compute((d, x) => x.root.eq(1)),
+      (e) => e.code === 'JL0104' && /no externals at all/.test(e.message)
+        // the scope is this pen's fact, so this pen supplies it: the shared
+        // capture knows how MANY externals are bound and nothing about where
+        && /document being written, which its argument IS/.test(e.message));
+    assert.throws(() => m.collection(m.object({ id: m.string() }), { key: (d, x) => x.root }),
+      (e) => e.code === 'JL0104' && /document being written/.test(e.message));
     // the schema pen does not own it: an annotation there passes through
     assert.deepStrictEqual(s.string().meta({ 'x-entity': { key: true } }).schema['x-entity'], { key: true });
   });

@@ -9,8 +9,11 @@
  * action capture already in progress.
  *
  * `run` is a name the pen writes and never resolves — the host's
- * registry owns the handler, and an unregistered name is the engine's
- * refusal (`JF0011`, `JA2006`), never the pen's.
+ * registry owns the handler. What an unregistered name costs differs by
+ * engine and neither cost is the pen's: an app document's action loop
+ * refuses it (`JA2006`), while `compileFsm` never looks one up at all,
+ * because FLOW-FORMAT §1.1 makes effect EXECUTION a non-goal — the
+ * descriptor comes back as data and the host decides what to do with it.
  */
 
 import { LinqBuildError } from './errors.js';

@@ -13,7 +13,7 @@ import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { requireJson, requireName } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
-import { refuseStrandedRename } from './entity.js';
+import { DOCUMENT_SCOPE, refuseStrandedRename } from './entity.js';
 
 /** The index options the grammar names beside `name` and `path`. */
 const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 'physical']);
@@ -33,7 +33,7 @@ const MEMBER_PATH = /^\$(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 function capturePath(lambda, what) {
   let captured;
   try {
-    captured = captureQuery(what, [], lambda);
+    captured = captureQuery(what, [], lambda, { advice: () => DOCUMENT_SCOPE });
   }
   catch (error) {
     // a member named like a surface method (`at`, `get`, …) reads as the

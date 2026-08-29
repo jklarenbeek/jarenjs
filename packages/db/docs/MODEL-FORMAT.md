@@ -1201,7 +1201,7 @@ all — a `$for` over a member the model does not name, or over a
 scalar — is `JD0033` at compile, never an empty answer. The
 array-constructor spelling `["$.<Entity>[*]"]`, which `@jarenjs/linq`
 emits so that an item that is itself an array stays one item
-(QUERY-PEN §5), names the same whole-entity source; the planner
+(QUERY-PEN §3), names the same whole-entity source; the planner
 reads through it for collections (`["$[*]"]`) and entities alike.
 
 An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
