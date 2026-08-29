@@ -13,7 +13,7 @@ pre-push:
       run: npm run lint
     tests:
       run: npm run test
-    figures:
+    derived:
       run: npm run docs:check
     documents:
       run: npm run test:documents

@@ -411,7 +411,7 @@ A **directive** is a value in a document that a machine derives and a
 human reads:
 
 ```markdown
-Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
+Jaren is <!--fact:jsonpath.ctsRatio-->23.1<!--/fact-->x faster on the CTS mean.
 ```
 
 The carrier is an HTML comment, and the choice is the whole design:

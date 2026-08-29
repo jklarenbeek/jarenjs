@@ -1,5 +1,9 @@
 # The Jaren migration pen (normative)
 
+> `./migration` — `$migration` 0.1 documents: the two shape hashes and
+> the ordered steps the runner takes. **Read it when** you are moving a
+> store from one model to the next
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -670,10 +674,10 @@ from a drop plus a create, and guessing risks silent data loss.
 
 ## 7. Cost
 
-`@jarenjs/linq/migration` builds to **23,599 bytes** as a minified,
+`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->23,599<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (24
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.migration.kb-->24<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-step migration as a
@@ -703,4 +707,4 @@ proxy behind it, and the canonicalizer — and the two model documents
 themselves arrive as data, deep-frozen JSON that the consumer's own model
 module built. So a consumer who ships migrations to a browser does not
 ship the model pen with them; a consumer who OPENS a store does, and pays
-`./model`'s 40,718 bytes for it.
+`./model`'s <!--fact:bundle.model-->40,812<!--/fact--> bytes for it.

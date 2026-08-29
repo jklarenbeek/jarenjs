@@ -210,13 +210,13 @@ delete it or fix it.
   is ≥ 25% of the per-request cost on the committed dispatch table. The
   measured share (`benchmark/contract.js`, the in-process table's
   heaviest row — the 5×4-body PUT)
-  is <!--bm:contract.serialization.share-->11.6%<!--/bm--> of the whole
+  is <!--fact:contract.serialization.share-->11.6%<!--/fact--> of the whole
   jaren request, so a perfect serializer that cost nothing
   would move the pipeline by about a tenth. Not scheduled. Revisit only
   if a consumer's real payloads push the share past the criterion — the
   suite prints the share on every run, so the number stays checkable.
   (The larger measured lever is output validation,
-  at <!--bm:contract.validateOutput.share-->29%<!--/bm--> of the same row;
+  at <!--fact:contract.validateOutput.share-->29%<!--/fact--> of the same row;
   it is a correctness feature, declared off per server with
   `validateOutput: 'never'`, whose cost the benchmark's fourth column
   keeps visible. For a large cached representation the contract README's
@@ -834,7 +834,7 @@ theirs.
 - [ ] **A program is authored per question, and nothing reuses one.** A question
   over everything at once — which two of forty records are closest — is
   unanswerable from a compacted transcript at any budget
-  (<!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->)
+  (<!--fact:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/fact-->)
   and is answered by a compiled program over the environment, which is what
   `packages/ai/README.md` now documents. What is open is everything around the
   single run: an authored program is thrown away after it answers, so a session
@@ -910,7 +910,7 @@ theirs.
   through an injected embedder and refuses without one, and
   `benchmark/retrieval.js` scores both — recall@k and MRR over a seeded corpus,
   the ranked row through the deterministic hashed-trigram reference embedder,
-  published whichever way it falls (<!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->).
+  published whichever way it falls (<!--fact:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/fact-->).
   What is open is what that instrument cannot say. The corpus is synthetic and the
   reference embedder is lexical, so the numbers are mechanism scores: they prove
   the sweep, the identity check and the ranking work over the shipped code path
@@ -925,14 +925,14 @@ theirs.
   a cut the store performs and the ledger re-scores; `benchmark/retrieval.js
   --store=db` runs both and asserts their quality columns equal, so only
   latency moves. Both are linear in candidates times dimensions, and the
-  constant is fitted rather than guessed: <!--bm:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/bm-->.
+  constant is fitted rather than guessed: <!--fact:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/fact-->.
   Past that ceiling the answer is an approximate index, and it is deliberately
   not built: approximation trades the exactness that lets one query document
   answer identically in the JavaScript engine, in SQLite through the Node
   driver and in a real wasm build for a recall number nobody here has
   measured. If it is ever built, the terms are the ones
   already on the table — it starts by benchmarking against the extension this
-  design already publishes itself against (<!--bm:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/bm-->),
+  design already publishes itself against (<!--fact:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->),
   it publishes the RECALL it loses against exact top-k and not only the
   latency it wins, and the committed instrument above is what scores it.
 

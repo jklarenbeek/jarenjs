@@ -1,5 +1,9 @@
 # The Jaren model pen (normative)
 
+> `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model`
+> 0.1 document `openStore` accepts unchanged. **Read it when** you are
+> declaring a store's entities, their keys and their relations
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -970,10 +974,10 @@ check, or know something a builder cannot see, to catch them:
 
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **40,812 bytes** as a minified,
+`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->40,812<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (40
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.model.kb-->41<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-member model as a
@@ -991,7 +995,7 @@ them:
   byte of `packages/linq/src/model/`, because the subclasses are built by
   this subpath rather than patched onto the base classes.
 
-The price above the schema pen's 32,288 is about 8 kB: the mixin, the
+The price above the schema pen's <!--fact:bundle.schema-->32,382<!--/fact--> is about 8 kB: the mixin, the
 three relation factories, `collection()`/`index()` with their capture,
 `defineModel()` — and the refusal MESSAGES, which are most of what §4
 costs. That is a deliberate trade: naming the rule and the spelling that

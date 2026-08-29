@@ -1,5 +1,9 @@
 # The Jaren JSLT pen (normative)
 
+> `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose
+> bodies are captured over the matched value. **Read it when** you are
+> transforming one document into another
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -868,10 +872,10 @@ non-judgement is itself gated.
 
 ## 7. Cost
 
-`@jarenjs/linq/jslt` builds to **19,124 bytes** as a minified,
+`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->19,124<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (19
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.jslt.kb-->19<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report. Building a stylesheet as a consumer
@@ -897,8 +901,8 @@ source. That makes it the SMALLEST of the nine pen bundles, and the
 reason is that a stylesheet is mostly bodies, and a body is the shared
 machine every pen already pays for.
 
-Two figures worth reading beside it: `./migration` (23,505 bytes) carries
-this pen's `body()` and pays for it, which is why the two prices sit so
-close; and `./flow` (19,087 bytes) is within 60 bytes of this one despite
-writing two formats, because it shares the same capture and adds almost
-nothing but member checks and their messages.
+Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->23,599<!--/fact--> bytes)
+carries this pen's `body()` and pays for it, which is why the two prices
+sit so close; and `./flow` (<!--fact:bundle.flow-->19,181<!--/fact--> bytes) is within 60 bytes of this one
+despite writing two formats, because it shares the same capture and adds
+almost nothing but member checks and their messages.

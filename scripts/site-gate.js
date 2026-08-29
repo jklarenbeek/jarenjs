@@ -7,9 +7,9 @@
  * Measured on the reference host, the serial chain spent ~85% of its wall
  * clock in the browser matrix and built the website twice (once as its own
  * stage, once again inside `test:browser`). The independent read-only
- * stages — lint, the test suite, the dead-code audit, the figure check and
- * the document check — ran one after another although nothing orders them.
- * So this runner:
+ * stages — lint, the test suite, the dead-code audit, the derived-text
+ * check and the document check — ran one after another although nothing
+ * orders them. So this runner:
  *
  *   1. runs those five stages CONCURRENTLY (wall clock: the slowest one,
  *      the ~30s dead-code audit, instead of their sum),

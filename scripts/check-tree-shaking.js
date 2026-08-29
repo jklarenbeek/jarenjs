@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { build } from 'esbuild';
 
@@ -629,81 +629,51 @@ if (schemaFormsLeak.length > 0)
 
 console.log(`Tree-shaking smoke test passed (${formsPenBytes} byte forms-pen bundle; no chain module, no @jarenjs/forms bytes, no model pen).`);
 
-// ---- the published prices (D11) ----
-// docs/CONSUMING.md states one figure per `@jarenjs/linq` subpath, each
-// beside a `<!--bundle:NAME-->` marker. Every one is compared with the
-// bundle measured above, so a published price cannot go stale without
-// this gate going red — and no number in that table was ever typed.
-const consuming = readFileSync('docs/CONSUMING.md', 'utf8');
+// ---- the measured baseline (D11) ----
+// Every figure this repository publishes about a `@jarenjs/linq` subpath
+// — docs/CONSUMING.md's rounded table, each pen document's `## 7. Cost`
+// headline, the chain's four §17 figures, and every sentence in one
+// document that quotes another subpath's price — is baked from the file
+// written here, through the same marker layer the benchmark figures use
+// (`npm run docs:derive`). This script is where the measuring
+// happens and therefore where the baseline is written; it is not where
+// prose is read.
+//
+// That split is the point. Reading the documents HERE is what this
+// script used to do, with one bespoke regex per shape, and it could only
+// check the shapes somebody remembered to write a regex for: the ten
+// sentences that quote another subpath's price had none, and were 94
+// bytes stale across seven documents before anything noticed. A baked
+// figure has no such gap — there is one number, and every quotation of
+// it is spliced from that number.
+const BASELINE = 'benchmark/bundle-sizes.json';
 const kb = (bytes) => Math.round(bytes / 1000);
-const stale = [];
-for (const [name, bytes] of linqBundles) {
-  const marker = `<!--bundle:linq-${name}-->`;
-  const stated = new RegExp(`${marker}(\\d+) kB`).exec(consuming);
-  if (stated === null) stale.push(`${marker} is missing (measured ${kb(bytes)} kB)`);
-  else if (Number(stated[1]) !== kb(bytes)) {
-    stale.push(`${marker} states ${stated[1]} kB, measured ${kb(bytes)} kB (${bytes} bytes)`);
+const measured = {
+  bundles: Object.fromEntries(linqBundles),
+  chain: { own: chainOwnBytes, withSchemaPen: chainPairBytes, shared: chainSharedBytes },
+};
+const asJson = `${JSON.stringify(measured, null, 2)}\n`;
+
+if (process.argv.includes('--write')) {
+  writeFileSync(BASELINE, asJson);
+  console.log(`Tree-shaking baseline WRITTEN to ${BASELINE} (${linqBundles.size} subpaths). `
+    + 'Run `npm run docs:derive` to bake the documents from it.');
+}
+else {
+  const committed = readFileSync(BASELINE, 'utf8');
+  if (committed !== asJson) {
+    const was = JSON.parse(committed);
+    const moved = [...linqBundles]
+      .filter(([name, bytes]) => was.bundles?.[name] !== bytes)
+      .map(([name, bytes]) => `  ${name}: committed ${was.bundles?.[name] ?? '(absent)'}, measured ${bytes}`);
+    for (const [key, bytes] of Object.entries(measured.chain)) {
+      if (was.chain?.[key] !== bytes) moved.push(`  chain.${key}: committed ${was.chain?.[key] ?? '(absent)'}, measured ${bytes}`);
+    }
+    throw new Error(`${BASELINE} is stale:\n${moved.join('\n') || '  (formatting only)'}\n`
+      + 'Re-measure with `npm run test:tree-shaking -- --write`, then bake the documents '
+      + 'with `npm run docs:derive`. Every published subpath price derives from this file.');
   }
+  console.log(`Tree-shaking smoke test passed (${linqBundles.size} @jarenjs/linq subpath bundles `
+    + `equal to the committed baseline: `
+    + [...linqBundles].map(([name, bytes]) => `${name} ${kb(bytes)} kB`).join(', ') + ').');
 }
-if (stale.length > 0) {
-  throw new Error('docs/CONSUMING.md\'s subpath prices are stale:\n  '
-    + stale.join('\n  ') + '\nRefresh the figure beside each marker.');
-}
-
-console.log(`Tree-shaking smoke test passed (docs/CONSUMING.md states all ${linqBundles.size} `
-  + `@jarenjs/linq subpath prices, each equal to the bundle measured here: `
-  + [...linqBundles].map(([name, bytes]) => `${name} ${kb(bytes)} kB`).join(', ') + ').');
-
-// ---- the pen documents' EXACT figures ----
-// Each pen document's `## 7. Cost` opens with the byte count this script
-// measures. CONSUMING.md's rounded table was gated above and these were
-// not, so 0.52.7's schema-pen change moved five of them 157 bytes out of
-// date at once and nothing said so. Same rule as the table: the number is
-// derived, never typed, and a stale one is red here rather than wrong in
-// a document somebody reads. The chain's own document is checked below
-// the loop: it carries four figures, not one, and its Cost section is
-// numbered §17.
-const PEN_DOCS = new Map([
-  ['schema', 'SCHEMA-PEN.md'], ['model', 'MODEL-PEN.md'], ['jslt', 'JSLT-PEN.md'],
-  ['migration', 'MIGRATION-PEN.md'], ['db', 'DB-CLIENT.md'], ['contract', 'CONTRACT-PEN.md'],
-  ['flow', 'FLOW-PEN.md'], ['app', 'APP-PEN.md'], ['forms', 'FORMS-PEN.md'],
-]);
-const grouped = (bytes) => bytes.toLocaleString('en-US');
-const drifted = [];
-for (const [name, file] of PEN_DOCS) {
-  const bytes = linqBundles.get(name);
-  if (bytes === undefined) throw new Error(`no bundle was measured for the ${name} subpath`);
-  const doc = readFileSync(`packages/linq/docs/${file}`, 'utf8');
-  const start = doc.indexOf('\n## 7. Cost');
-  if (start < 0) { drifted.push(`${file} has no '## 7. Cost' section`); continue; }
-  const rest = doc.slice(start + 1);
-  const next = rest.slice(1).search(/^## /m);
-  const section = next < 0 ? rest : rest.slice(0, next + 1);
-  const stated = /\*\*([\d,]+) bytes\*\*/.exec(section);
-  if (stated === null) drifted.push(`${file} §7 states no byte count (measured ${grouped(bytes)})`);
-  else if (stated[1] !== grouped(bytes)) {
-    drifted.push(`${file} §7 states ${stated[1]} bytes, measured ${grouped(bytes)}`);
-  }
-}
-
-// The chain's document keeps its own twelve sections (D2 forbids
-// renumbering it), so its Cost section is §17 — and it publishes FOUR
-// figures rather than one: the bundle, the chain's own modules inside
-// it, the bundle a consumer taking the schema pen as well pays, and what
-// the two share. All four are read in the order the section states them.
-const chainDoc = readFileSync('packages/linq/docs/QUERY-PEN.md', 'utf8');
-const chainCost = chainDoc.slice(chainDoc.indexOf('\n## 17. Cost') + 1);
-const chainStated = [...chainCost.matchAll(/\*\*([\d,]+) bytes\*\*/g)].map((m) => m[1]);
-const chainExpected = [chainBytes, chainOwnBytes, chainPairBytes, chainSharedBytes].map(grouped);
-if (chainStated.join(' | ') !== chainExpected.join(' | ')) {
-  drifted.push(`QUERY-PEN.md §17 states ${chainStated.join(', ') || '(nothing)'}, `
-    + `measured ${chainExpected.join(', ')}`);
-}
-
-if (drifted.length > 0) {
-  throw new Error('a pen document\'s §7 Cost figure is stale:\n  '
-    + drifted.join('\n  ') + '\nRefresh the figure; it is measured, never typed.');
-}
-
-console.log(`Tree-shaking smoke test passed (${PEN_DOCS.size} pen documents state their §7 Cost `
-  + `in bytes and QUERY-PEN.md its §17's four, each equal to a bundle measured here).`);

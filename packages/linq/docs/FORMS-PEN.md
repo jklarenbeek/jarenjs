@@ -1,5 +1,9 @@
 # The Jaren forms pen (normative)
 
+> `./forms` — the `x-form` vocabulary on JSON Schema, and
+> `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it
+> when** you are turning a schema into a form
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -851,7 +855,7 @@ unchanged here, because 27 of this pen's 31 names are its names.
 
 ## 7. Cost
 
-`@jarenjs/linq/forms` builds to **36,542 bytes** as a minified,
+`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->36,542<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -859,8 +863,8 @@ beside the other nine subpath prices in
 pen it subclasses, and no chain module, no `@jarenjs/forms` byte and no
 model pen.
 
-Most of that figure is the schema pen: `@jarenjs/linq/schema` alone is
-32,288 bytes, so the whole `x-form` vocabulary — the mixin, the rule
+Most of that figure is the schema pen: `@jarenjs/linq/schema` alone
+is <!--fact:bundle.schema-->32,382<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
 capture, the submit transform and their refusal messages — is about 4 kB
 on top of a pen a form-shaped consumer usually already carries. A
 consumer importing both subpaths pays the schema pen once.

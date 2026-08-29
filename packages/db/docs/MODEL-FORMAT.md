@@ -163,9 +163,9 @@ Three things follow, and none of them is optional:
   per-mapping cell.
 
 **What it costs, both halves** (`benchmark/spatial.js`, the store's own
-rows over 50 000 points): the same `$within` measures <!--bm:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/bm-->, and loading them
-costs <!--bm:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/bm-->. Isolated from the store on a raw
-connection, the same probe is <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/bm-->. Read speed bought with write cost and a
+rows over 50 000 points): the same `$within` measures <!--fact:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/fact-->, and loading them
+costs <!--fact:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/fact-->. Isolated from the store on a raw
+connection, the same probe is <!--fact:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/fact-->. Read speed bought with write cost and a
 second table: choose it deliberately, per index, which is why it is
 neither automatic nor a store-wide option.
 
@@ -198,11 +198,11 @@ Three things follow:
 
 **What it buys, and what it costs.** Measured against the same query
 over a collection with no such column — the whole embedding parsed out
-of the stored JSON per row — the column is worth <!--bm:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/bm-->
-on the read, and costs <!--bm:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/bm-->
+of the stored JSON per row — the column is worth <!--fact:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/fact-->
+on the read, and costs <!--fact:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->
 on the way in, because every write pays a JSON round trip of the member
 plus the normalize and the pack. On
-disk it is <!--bm:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/bm-->
+disk it is <!--fact:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/fact-->
 per vector — smaller than the member, and *added* to it, since the
 document still carries what the column is derived from. Choose it the
 way `physical: 'rtree'` is chosen: per index, with both halves in view
@@ -967,15 +967,15 @@ changing state. Measured on the same terms as the `$sqrt` rows
 mean of 20 executions after a warm one; the residual comparator
 pushes everything BUT the spatial conjunct):
 
-<!--bm:spatial.udfTable-->
+<!--fact:spatial.udfTable-->
 | shape | pushed (ms) | residual (ms) | verdict |
 |---|---|---|---|
 | solo `$within` over a full scan | 94 | 80 | ~even |
 | indexed `$eq` **and** `$within` (~5 % pass the index) | 5.7 | 52 | push **9.1×** |
 | `$within` with `LIMIT 10` | 1.9 | 77 | push **41.0×** |
-<!--/bm-->
+<!--/fact-->
 
-So the spatial hatch <!--bm:spatial.udfVerdict-->earns its row: 9.1× beside the selective conjunct and 41.0× under the LIMIT<!--/bm-->,
+So the spatial hatch <!--fact:spatial.udfVerdict-->earns its row: 9.1× beside the selective conjunct and 41.0× under the LIMIT<!--/fact-->,
 by the same rule as `$sqrt`: a sole `$within` over a full scan is a
 loss (the UDF re-parses every row in the callback, and the exact
 containment test is dearer than a square root), a `$within` beside

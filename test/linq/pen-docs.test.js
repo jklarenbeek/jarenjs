@@ -136,7 +136,15 @@ describe('LINQ-FORMAT §1.3 — the code table is the code', () => {
   it('lists exactly the JL01xx codes LINQ_CODES carries, each with a condition', async () => {
     const { LINQ_CODES } = await import('@jarenjs/linq');
     const markdown = fs.readFileSync(BINDER, 'utf8');
-    const documented = [...markdown.matchAll(/^\| `(JL01\d\d)` \|/gm)].map((m) => m[1]);
+    // §1.3's own subsection, not the whole file: the binder also carries a
+    // DERIVED table keyed by the same codes (which document raises each),
+    // and a scan over both would hold the mirror equal to itself twice.
+    const start = markdown.indexOf('### 1.3');
+    assert.notStrictEqual(start, -1, 'LINQ-FORMAT.md carries its §1.3');
+    const from = markdown.indexOf('\n', start) + 1;
+    const next = markdown.slice(from).search(/^#{2,3} /m);
+    const section = markdown.slice(start, next < 0 ? markdown.length : from + next);
+    const documented = [...section.matchAll(/^\| `(JL01\d\d)` \|/gm)].map((m) => m[1]);
     const carried = Object.keys(LINQ_CODES).filter((code) => /^JL01/.test(code));
     assert.deepStrictEqual(documented, carried);
   });

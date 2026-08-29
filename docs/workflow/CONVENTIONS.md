@@ -55,8 +55,10 @@ Concurrent first phase:
    deliberately changed behavior and says so;
 3. `npm run benchmark:coverage` — every dead-code finding resolved (removed,
    covered, or a justified, ideally excluded, keep);
-4. `npm run docs:check` — every published figure still derives from the committed
-   measurements (`npm run docs:benchmarks` refreshes them; §4.6);
+4. `npm run docs:check` — every derived span in every committed document still
+   agrees with its source: measured figures with the committed measurements, the
+   `@jarenjs/linq` binder's combined tables with the pen documents beside it
+   (`npm run docs:derive` rewrites them; §4.6);
 5. `npm run test:documents` — every ```` ```mermaid ```` fence in the committed
    Markdown parses through `@jarenjs/mermaid` and every ```` ```json ```` fence
    parses as JSON (JSON-shaped *notation* is fenced ```` ```jsonc ```` and is not
@@ -154,10 +156,14 @@ without counts is not a record.
    in the package docs and the entry is closed or narrowed to the genuinely open
    decision — never deleted to make a section look finished, never kept out of
    caution.
-6. **Published figures are derived, never hand-written.** Numbers in committed
-   Markdown come from the committed measurements through the benchmark-figure
-   gate (`npm run docs:benchmarks`, `npm run docs:check`); a pass that re-measures
-   refreshes them, it does not retype them.
+6. **Published figures are derived, never hand-written.** Numbers and tables in
+   committed Markdown sit between `<!--fact:key-->` … `<!--/fact-->` markers and
+   are written by `npm run docs:derive` from their source — a committed
+   measurement, or another committed document; `npm run docs:check` fails on
+   drift. A pass that re-measures refreshes them, it does not retype them. **One
+   namespace, one runner** (`scripts/lib/derive.js`), several registries: pairing
+   and the orphan report are per-namespace, so a second spelling of the same idea
+   is a second blind spot.
 7. **Report the loss.** A measurement that comes out worse than a rival's is
    published beside the wins.
 8. **A fenced block claims what it is.** ```` ```json ```` is a value a reader can

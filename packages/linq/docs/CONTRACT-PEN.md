@@ -1,5 +1,10 @@
 # The Jaren contract pen (normative)
 
+> `./contract` — `$contract` 0.1 documents: the operations, their
+> schemas, their declared behavior and their REST binding. **Read it
+> when** you are declaring an API and want its client, its server and
+> its tools typed from one document
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -1107,10 +1112,10 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **44,599 bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->44,599<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (45
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.contract.kb-->45<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a one-operation contract as a
@@ -1119,8 +1124,8 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  32,288 of the 44,599 bytes are the schema pen's own bundle. The
-  contract pen's own share is the remaining ~12 kB, most of it the
+  the bundle carries <!--fact:bundle.schema-->32,382<!--/fact--> of its <!--fact:bundle.contract-->44,599<!--/fact--> bytes as the schema pen's own.
+  The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,
   `concurrency.js`, `provider.js` or `sources.js` contributes a byte, and
@@ -1135,6 +1140,6 @@ them:
 A consumer who writes a contract and also compiles it pays both prices
 and they add rather than overlap. That is the shape the separation is
 for: a browser bundle that only needs the TYPES a contract implies —
-`typedClient` over an HTTP binding, say — ships the pen's 45 kB and none
+`typedClient` over an HTTP binding, say — ships the pen's <!--fact:bundle.contract.kb-->45<!--/fact--> kB and none
 of the compiler, while the server that serves the contract imports
 `@jarenjs/contract` and does not need the pen at all.

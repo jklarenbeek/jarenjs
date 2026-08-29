@@ -1,10 +1,10 @@
-#!/usr/bin/env node
 //@ts-check
 /**
- * The benchmark-figure gate: every measured number quoted in committed
+ * The measured-figure registry: every measured number quoted in committed
  * markdown is derived here from `packages/website/public/benchmarks/*.json`
- * — the same files the website's Benchmarks page reads — and written into
- * the docs between `<!--bm:key-->` … `<!--/bm-->` markers.
+ * — the same files the website's Benchmarks page reads — plus
+ * `benchmark/bundle-sizes.json`, and written into the docs between
+ * `<!--fact:key-->` … `<!--/fact-->` markers by `scripts/derive-docs.js`.
  *
  * Why this exists: those numbers used to be hand-copied out of a
  * benchmark run and never touched again. By the time this was written 19
@@ -18,26 +18,25 @@
  * separate, deliberate act (`npm run benchmark:generate`) that only ever
  * happens where the numbers are meant to be measured.
  *
- *   node scripts/generate-benchmark-facts.js          # rewrite the docs
- *   node scripts/generate-benchmark-facts.js --check  # fail on drift
+ *   npm run docs:derive          # rewrite the docs
+ *   npm run docs:check           # fail on drift
  *
  * Markers are HTML comments, so GitHub renders the documents unchanged.
  * The prose AROUND a marker stays human: when a band moves far enough
  * that the sentence reads wrong, the gate makes a person read it.
  *
- * The marker layer itself is `@jarenjs/md`'s (`bake`, and the directive
- * scanner behind it) — this file is a registry of DERIVATIONS over the
- * committed measurements, and nothing else. The derivations stay in
- * JavaScript on purpose: bands, means and whole tables read worse as
- * query one-liners, and D8 governs template vocabularies, not build
- * scripts.
+ * The marker layer is `@jarenjs/md`'s (`bake`) and the baking is
+ * `scripts/lib/derive.js`'s — this file is a registry of DERIVATIONS over
+ * the committed measurements, and nothing else. That split is the point:
+ * one namespace and one runner for every derived span in the repository,
+ * one registry per source. The derivations stay in JavaScript on purpose:
+ * bands, means and whole tables read worse as query one-liners, and D8
+ * governs template vocabularies, not build scripts.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import { bake } from '@jarenjs/md';
 
 import { ratioSummary } from '../benchmark/derive.js';
 import { buildSiteContent } from './generate-site-data.js';
@@ -48,6 +47,28 @@ const DATA = join(ROOT, 'packages/website/public/benchmarks');
 /** @type {Record<string, any>} */
 const cache = {};
 const data = (name) => (cache[name] ??= JSON.parse(readFileSync(join(DATA, `${name}.json`), 'utf8')));
+
+/**
+ * The `@jarenjs/linq` subpath bundle sizes, measured by
+ * `scripts/check-tree-shaking.js` and committed as its baseline. It lives
+ * outside `benchmarks/` because it is not a suite — nothing on the
+ * Benchmarks page reads it, and the manifest gate holds that directory
+ * equal to `benchmark/website-data.js`'s suite lists.
+ * @type {any}
+ */
+let bundleCache;
+const bundles = () => (bundleCache ??= JSON.parse(
+  readFileSync(join(ROOT, 'benchmark/bundle-sizes.json'), 'utf8')));
+
+/** One subpath's measured bundle, in bytes. */
+function bundleBytes(name) {
+  const bytes = bundles().bundles[name];
+  if (typeof bytes !== 'number') {
+    throw new Error(`benchmark/bundle-sizes.json has no '${name}' bundle `
+      + '— re-measure with `npm run test:tree-shaking -- --write`');
+  }
+  return bytes;
+}
 
 /**
  * The package census, read through the ONE builder that enumerates the
@@ -1180,6 +1201,26 @@ const FACTS = {
       `${ratio(r.ratio)}× for the ${r.shape.split(' ')[0]}`);
     return `${parts.join(' and ')} at ${size.toLocaleString('en-US')} readings`;
   },
+
+  // ——— @jarenjs/linq: what one subpath costs a consumer who imports it
+  // and nothing else. Measured by `scripts/check-tree-shaking.js`, which
+  // runs esbuild and is far too slow for this script; it commits its
+  // measurement, and every figure below is spliced from that one number.
+  // Ten sentences quoting another subpath's price used to be typed, and
+  // one schema-pen change left every one of them 94 bytes stale.
+  ...Object.fromEntries(['schema', 'chain', 'model', 'jslt', 'migration', 'db',
+    'contract', 'flow', 'app', 'forms'].flatMap((name) => [
+    [`bundle.${name}`, () => thousands(bundleBytes(name))],
+    // the rounded kB docs/CONSUMING.md publishes: decimal, so a reader
+    // comparing it with the exact figure beside it can do the division
+    [`bundle.${name}.kb`, () => String(Math.round(bundleBytes(name) / 1000))],
+  ])),
+  // the chain's document publishes three more: what of its bundle is the
+  // chain's own modules rather than the engine under them, what a
+  // consumer taking the schema pen as well pays, and what the two share
+  'bundle.chain.own': () => thousands(bundles().chain.own),
+  'bundle.chain.withSchemaPen': () => thousands(bundles().chain.withSchemaPen),
+  'bundle.chain.shared': () => thousands(bundles().chain.shared),
 };
 
 /** One named row of the vector suite's flat rows at the largest leg. */
@@ -1242,10 +1283,26 @@ function seriesRows(route) {
   return /** @type {any} */ (data('series').rows.find((r) => r.route === route && r.n === leg.n)).results;
 }
 
-//#region rewriting
+//#region the registry
 
+/**
+ * Every document that quotes a measured figure. A registry declares the
+ * documents it reads and may write; `scripts/lib/derive.js` walks the
+ * union of every registry's.
+ */
 const DOCS = [
   'README.md',
+  'docs/CONSUMING.md',
+  'packages/linq/docs/QUERY-PEN.md',
+  'packages/linq/docs/SCHEMA-PEN.md',
+  'packages/linq/docs/MODEL-PEN.md',
+  'packages/linq/docs/JSLT-PEN.md',
+  'packages/linq/docs/MIGRATION-PEN.md',
+  'packages/linq/docs/CONTRACT-PEN.md',
+  'packages/linq/docs/FLOW-PEN.md',
+  'packages/linq/docs/APP-PEN.md',
+  'packages/linq/docs/FORMS-PEN.md',
+  'packages/linq/docs/DB-CLIENT.md',
   'docs/ROADMAP.md',
   'benchmark/README.md',
   'packages/contract/README.md',
@@ -1265,114 +1322,11 @@ const DOCS = [
   'packages/core/docs/SERIES.md',
 ];
 
-/**
- * @typedef {object} GateReport
- * @property {number} code - 0 green, 1 failed
- * @property {string[]} unanswered - markers no derivation could answer
- * @property {string[]} drift - documents whose figure differs from the data
- * @property {string[]} unused - derivations no document quotes
- * @property {string[]} seen - the facts that resolved
- * @property {number} rewritten - documents written (write mode only)
- */
-
-/**
- * Bake (or check) every marker in `docs` against `facts`.
- *
- * There are two ways a document and the data can disagree, and only one
- * of them is repairable by rewriting. A figure that has MOVED is the
- * gate's daily work: `--check` reports it, the write mode fixes it. A
- * marker the data cannot ANSWER — no derivation, or a derivation that
- * throws because the file it reads was never regenerated — is not
- * repairable, and a run that rewrote its way past one would leave last
- * month's number sitting in the document under a success line. So an
- * unanswered marker fails both modes, and fails BEFORE anything is
- * written.
- *
- * @param {{ docs?: string[], facts?: Record<string, () => string>, check?: boolean }} [options]
- * @returns {GateReport}
- */
-export function runFactsGate(options = {}) {
-  const docs = options.docs ?? DOCS;
-  const facts = options.facts ?? FACTS;
-  const check = options.check ?? false;
-  /** @type {string[]} */
-  const unanswered = [];
-  /** @type {string[]} */
-  const drift = [];
-  const seen = new Set();
-  /** @type {{ file: string, text: string }[]} */
-  const pending = [];
-
-  for (const rel of docs) {
-    const file = resolve(ROOT, rel);
-    const before = readFileSync(file, 'utf8');
-    // The marker grammar, the pairing and the byte-local splice belong to
-    // @jarenjs/md — this script owns the DERIVATIONS and nothing else. It
-    // used to carry its own regex, which meant the repository had two
-    // ideas of what a directive is and only one of them was tested.
-    const result = bake(before, {
-      ns: 'bm',
-      resolve: (key, directive) => {
-        if (facts[key] === undefined) {
-          unanswered.push(`${rel}: unknown fact '${key}' — no derivation exists for this marker`);
-          return undefined;
-        }
-        const value = facts[key]();
-        // counted only once the derivation ANSWERED: a fact whose data is
-        // missing throws, and counting it here would let the success line
-        // report a coverage the run did not have
-        seen.add(key);
-        if (value !== directive.body) {
-          drift.push(`${rel}: ${key}\n    doc:  ${directive.body.trim()}\n    data: ${value.trim()}`);
-        }
-        return value;
-      },
-    });
-    // a diagnostic is a marker that did NOT bake — a resolver that threw,
-    // or a marker the renderer will never see
-    for (const message of result.diagnostics) unanswered.push(`${rel}: ${message}`);
-    if (result.changed) pending.push({ file, text: result.text });
-  }
-
-  const unused = Object.keys(facts).filter((key) => !seen.has(key));
-  let rewritten = 0;
-  if (unanswered.length === 0 && !check) {
-    for (const entry of pending) {
-      writeFileSync(entry.file, entry.text);
-      rewritten += 1;
-    }
-  }
-  const failed = unanswered.length > 0 || (check && (drift.length > 0 || unused.length > 0));
-  return { code: failed ? 1 : 0, unanswered, drift, unused, seen: [...seen], rewritten };
-}
-
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const check = process.argv.includes('--check');
-  const report = runFactsGate({ check });
-
-  if (report.unanswered.length > 0) {
-    console.error(`benchmark markers the committed measurements cannot answer `
-      + `(${report.unanswered.length}):\n\n${report.unanswered.join('\n')}\n`);
-    console.error('nothing was rewritten: regenerate the data these markers derive from, '
-      + 'or remove the markers.');
-  }
-  else if (check) {
-    const stale = [...report.drift, ...(report.unused.length > 0
-      ? [`facts with no marker in any document: ${report.unused.join(', ')}`]
-      : [])];
-    if (stale.length > 0) {
-      console.error(`benchmark figures are stale (${stale.length}):\n\n${stale.join('\n')}\n`);
-      console.error('run `npm run docs:benchmarks` to refresh them from the committed measurements.');
-    }
-    else {
-      console.log(`benchmark figures current (${report.seen.length} facts across ${DOCS.length} documents).`);
-    }
-  }
-  else {
-    console.log(`benchmark figures: ${report.seen.length} facts, ${report.rewritten} document(s) rewritten.`);
-    if (report.unused.length > 0) console.warn(`WARNING: ${report.unused.join(', ')}`);
-  }
-  process.exit(report.code);
-}
+/** @type {import('./lib/derive.js').Registry} */
+export const measuredFigures = {
+  name: 'measured figures',
+  docs: () => DOCS,
+  facts: () => FACTS,
+};
 
 //#endregion

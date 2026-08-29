@@ -22,10 +22,10 @@ the *wrong sign* on near-collinear input, which makes containment
 contradict itself. `orient2dFast` is the naive form, exported for
 callers that provably do not care. Every winding and containment answer
 in this module rests on this sign; its cost is the deliberate
-point-in-polygon loss on the benchmark page (<!--bm:geo.pip2000-->0.5×<!--/bm--> against
+point-in-polygon loss on the benchmark page (<!--fact:geo.pip2000-->0.5×<!--/fact--> against
 Turf at 2000 vertices, kept on purpose). Every loss the kernel carries is
 published in [ARCHITECTURE](../ARCHITECTURE.md), derived from the committed
-measurement: <!--bm:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.9× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/bm-->.
+measurement: <!--fact:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.9× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
 
 ## Distance — `distance.js`
 

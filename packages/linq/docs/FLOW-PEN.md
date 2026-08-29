@@ -1,5 +1,9 @@
 # The Jaren flow pen (normative)
 
+> `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows,
+> every query-valued member captured. **Read it when** you are declaring
+> a state machine or a dependency graph of tasks
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -929,10 +933,10 @@ meaning is a `$return` that constructs an array explicitly.
 
 ## 7. Cost
 
-`@jarenjs/linq/flow` builds to **19,181 bytes** as a minified,
+`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->19,181<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (19
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.flow.kb-->19<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report. Building a machine with a guard and
@@ -959,8 +963,8 @@ two effects as a consumer would — `defineFsm`, `state`, `on` and
   `packages/linq/src/flow/`.
 
 Two documents, two grammars, thirteen exported names — and 57 bytes more
-than `./jslt`'s 19,030, which writes one. The reason is that most of both
-prices is the same shared machinery: the recording proxy
+than `./jslt`'s <!--fact:bundle.jslt-->19,124<!--/fact-->, which writes one. The reason is that most of
+both prices is the same shared machinery: the recording proxy
 (`expression.js`), the root capture (`capture-root.js`) and the JSON
 boundary (`json-boundary.js`). What this pen adds on top of them is 685
 lines of member checks and the messages §4 quotes — and, as the model

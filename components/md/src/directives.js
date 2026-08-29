@@ -4,7 +4,7 @@
  * human reads.
  *
  * ```markdown
- * Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
+ * Jaren is <!--fact:jsonpath.ctsRatio-->23.1<!--/fact-->x faster on the CTS mean.
  * ```
  *
  * Every markdown renderer on earth drops HTML comments, so GitHub, an
@@ -19,11 +19,13 @@
  * as literal gibberish anywhere the transform has not run — usable only
  * in documents nobody reads raw.
  *
- * **The layer never interprets the payload.** `bm` puts a fact key
- * there, `mdx` puts a query expression; the vocabulary belongs to the
+ * **The layer never interprets the payload.** `fact` puts a derivation
+ * key there, `mdx` puts a query expression; the vocabulary belongs to the
  * consumer, and this module owns exactly one thing — the marker grammar
  * and the pairing — so two consumers cannot disagree about what a
- * directive is.
+ * directive is. The namespace is the consumer's too, and one consumer
+ * SHOULD claim one: pairing and the orphan report are per-namespace, so a
+ * repository that spells the same idea two ways has two blind spots.
  *
  * There are two ways in, because there are two questions:
  *

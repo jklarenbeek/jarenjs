@@ -541,19 +541,19 @@ benchmark-figure gate so no number here is typed by hand:
 
 - **Route match**: the compiled matcher resolves the probe mix —
   static hot paths, variables, the static-beats-variable case, a miss —
-  at <!--bm:contract.match.vs-fmw-->172 ns per lookup vs find-my-way's 180 ns<!--/bm-->;
-  hono's TrieRouter is <!--bm:contract.match.vs-hono-->1.8x<!--/bm--> behind, and its RegExpRouter refuses this
+  at <!--fact:contract.match.vs-fmw-->172 ns per lookup vs find-my-way's 180 ns<!--/fact-->;
+  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.8x<!--/fact--> behind, and its RegExpRouter refuses this
   route table outright (a static path registered after a param sibling).
 - **Dispatch, in-process**: the whole pipeline (route, decode, validate
   input, handler, validate output,
-  serialize) is <!--bm:contract.dispatch.vs-fastify-->2.8–15.1x<!--/bm-->
+  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.8–15.1x<!--/fact-->
   faster than Fastify driven through its own `inject` — a number that
   includes Fastify's mock-stream harness, which is why the next row
   exists.
 - **The honest loss**: the bare pieces Fastify composes — find-my-way +
   Ajv + fast-json-stringify, called directly with no harness and no
   response validation
-  — are <!--bm:contract.dispatch.losses-->2.4–7.5x<!--/bm--> faster than
+  — are <!--fact:contract.dispatch.losses-->2.4–7.5x<!--/fact--> faster than
   this pipeline. The wide end of that band is the bare `{ok:true}`
   route, where the rival's compiled serializer answers in ~200 ns and
   there is almost no work to amortize the pipeline against; on the
@@ -563,7 +563,7 @@ benchmark-figure gate so no number here is typed by hand:
   server kept its own contract before a byte leaves. Over a real
   loopback socket the two stacks are level: the socket dominates both.
 - **Revision**: computing it
-  costs <!--bm:contract.revision.ms-->1.4 ms<!--/bm--> for the 123-operation
+  costs <!--fact:contract.revision.ms-->1.4 ms<!--/fact--> for the 123-operation
   contract, once per process.
 
 ## What it is not

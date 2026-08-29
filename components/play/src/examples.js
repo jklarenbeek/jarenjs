@@ -436,7 +436,7 @@ first-reference order. An uncited definition renders nothing at all.
   { id: 'md-directives', label: 'Directives: a number a machine derives', engine: 'markdown', datasets: [],
     source: { source: `# Comment-carried data
 
-Jaren is <!--bm:jsonpath.ctsRatio-->23.1<!--/bm-->x faster on the CTS mean.
+Jaren is <!--fact:jsonpath.ctsRatio-->23.1<!--/fact-->x faster on the CTS mean.
 
 Every markdown renderer on earth drops HTML comments, so that line reads as
 plain, correct, static text — here, on GitHub and on npm. A directive-aware
@@ -446,10 +446,10 @@ rather than a number that quietly stopped being true.
 
 This repository's own published figures work exactly this way.
 
-<!--bm:example-->
+<!--fact:example-->
 A block directive wraps whole blocks — a table, a list, anything the
 resolver produces.
-<!--/bm-->
+<!--/fact-->
 
 One rule: an inline marker must not begin a line. A comment at the start of
 a line opens an HTML block and swallows the rest of that line.

@@ -1,5 +1,9 @@
 # The Jaren linq client (normative)
 
+> `./db` — the client: the store's typed front door, not a pen, and the
+> package's one runtime edge. **Read it when** you are reading or
+> writing rows: `load`, `include`, `link`/`unlink`, `live`
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -688,10 +692,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **478,172 bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->478,172<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (478
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.db.kb-->478<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather
@@ -717,8 +721,9 @@ What the probe asserts, and fails the build on:
   installs nothing new. The same probe run over each pen's own bundle
   asserts the same exclusion.
 
-A consumer who wants the model pen's types without the store pays 40,718
-bytes for `./model` and installs no peer; one who wants to run queries
-against an array rather than a database pays the chain's price (§17 of
-[QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is the one subpath whose `package.json` entry
-carries an optional peer at all.
+A consumer who wants the model pen's types without the store pays
+`./model`'s <!--fact:bundle.model-->40,812<!--/fact--> bytes and installs no peer; one who wants to run
+queries against an array rather than a database pays the chain's price
+(§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
+the one subpath whose `package.json` entry carries an optional peer at
+all.

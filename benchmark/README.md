@@ -724,7 +724,7 @@ through the in-memory adapter's JSON copy; the scores are unchanged by it.
 
 The corpus ([`fixtures/retrieval-corpus.json`](./fixtures/retrieval-corpus.json),
 written by `scripts/generate-retrieval-corpus.js`, seeded and byte-identical run
-to run — a test proves it) is **synthetic**: <!--bm:retrieval.corpus-->240 facts over 20 topic vocabularies, 160 questions<!--/bm-->,
+to run — a test proves it) is **synthetic**: <!--fact:retrieval.corpus-->240 facts over 20 topic vocabularies, 160 questions<!--/fact-->,
 one gold memory per fact, and distractors built to defeat one cheap signal each —
 the same tag with a different fact, and the same words with a different fact.
 A quarter of the questions never name their topic, which is the honest failure
@@ -733,8 +733,8 @@ and some two or three, so recall@k is not trivially recall@1. The memory list is
 a prefix design: the first 1 000 records are the small corpus and all 10 000 the
 large one, so one question set scores both sizes.
 
-What it measured, for the default, is that over <!--bm:retrieval.incumbent-->10,000 memories today's recall puts a gold memory in the top 10 for 1.3% of questions (recency alone 0.0%, a random draw 0.0%); at 1,000 memories the same policy reaches 17.5%<!--/bm-->.
-The ranked path, through the reference embedder, reaches <!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+What it measured, for the default, is that over <!--fact:retrieval.incumbent-->10,000 memories today's recall puts a gold memory in the top 10 for 1.3% of questions (recency alone 0.0%, a random draw 0.0%); at 1,000 memories the same policy reaches 17.5%<!--/fact-->.
+The ranked path, through the reference embedder, reaches <!--fact:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/fact-->.
 Read the rows as mechanism, not language: they say whether a POLICY can find the
 right record among distractors, and nothing about whether any model understands
 a question — no deterministic row involves one.

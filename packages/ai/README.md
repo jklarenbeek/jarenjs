@@ -541,13 +541,13 @@ that work — never an approximation.
 One table, derived from the benchmark rather than asserted, on the realistic payload shape
 (the fact behind the padding) at the budget where compaction's defect is clearest:
 
-<!--bm:horizon.campaign-->
+<!--fact:horizon.campaign-->
 | configuration | needle | pairwise | what it cost the request |
 | --- | --- | --- | --- |
 | compaction alone (budget 6000) | 17.5% | 0.0% | 5781 chars |
 | + a ledger (same budget) | 100.0% via recall | 0.0% | 5739 chars |
 | + the environment and a program | 100.0% | 100.0% | 937 chars, against a 17719-char corpus |
-<!--/bm-->
+<!--/fact-->
 
 Read the last column, not just the first two: the environment answers a *harder* question in
 **fewer** characters than compaction spends failing the easy one, because the corpus never
@@ -569,7 +569,7 @@ question about the last message.
 
 **`historyBudget` is not the long-horizon answer**, and this package measures rather than
 asserts it. It still works, it is still deterministic to the character, and with a `ledger`
-nothing it cuts is destroyed. But a question that needs *every* fact at once scores <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->
+nothing it cuts is destroyed. But a question that needs *every* fact at once scores <!--fact:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/fact-->
 under it, at every budget, with a ledger or without — because the information required to
 answer is spread across rounds that no longer fit. Compaction is the right tool for a long
 *conversation*; an environment and a program are the right tools for a long *job*. Reach for
@@ -607,8 +607,8 @@ own writer. The returned transcript is always the full, uncompacted history.
 On its own that is lossy, and worth being precise about, because the loss has a shape.
 Each dropped tool call leaves one line whose result excerpt is capped at 60 characters, so
 the synopsis remembers **that** `fetch_record` was called and returned a `REC0007` and
-loses **what the record said**. Measured on <!--bm:horizon.measured-->2026-08-13, Node v22.22.2, 40 tool rounds<!--/bm--> of ~440-character results at a
-6 000-character budget, with the fact behind the padding, the request keeps <!--bm:horizon.synopsisGap-->15 of 40 record ids and 7 of their 40 values<!--/bm--> (`npm run benchmark:long-horizon`). A model can see the label and answer confidently from
+loses **what the record said**. Measured on <!--fact:horizon.measured-->2026-08-13, Node v22.22.2, 40 tool rounds<!--/fact--> of ~440-character results at a
+6 000-character budget, with the fact behind the padding, the request keeps <!--fact:horizon.synopsisGap-->15 of 40 record ids and 7 of their 40 values<!--/fact--> (`npm run benchmark:long-horizon`). A model can see the label and answer confidently from
 a record it no longer has. **Compaction alone is not the answer to a long session.**
 
 ### Compaction that moves instead of destroying
@@ -724,7 +724,7 @@ const { memories, scores, skipped } = await ledger.recall({
   `explain()` naming the mode (its ARCHITECTURE, "The k-nearest plan").
 - **Measured, whichever way it fell.** `benchmark/retrieval.js` scores the ranked path beside the
   default over the same seeded corpus, through the deterministic reference embedder
-  (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+  (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--fact:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/fact-->.
   A real model's number is the host's to measure through the same instrument's `--live` tier.
 
 #### A durable ledger over `@jarenjs/db`
@@ -923,14 +923,14 @@ the model fetches a round back when it needs one — a normal tool call that sho
 
 The contract, asserted over every budget the benchmark sweeps in both payload shapes
 (`test/ai/compaction-recovery.test.js`): **every fact the full transcript held is either
-still in the request verbatim or reachable through an address the request names** — <!--bm:horizon.ledgerRecovered-->40 of 40<!--/bm--> record values at the same budget, where the same runs without a ledger keep <!--bm:horizon.synopsisBand-->1 to 28<!--/bm--> of them. What that
+still in the request verbatim or reachable through an address the request names** — <!--fact:horizon.ledgerRecovered-->40 of 40<!--/fact--> record values at the same budget, where the same runs without a ledger keep <!--fact:horizon.synopsisBand-->1 to 28<!--/fact--> of them. What that
 costs is a few characters of verbatim retention at the tightest budgets, published beside
 the win.
 
 That is the model-free half. Here is a real model on the same contexts — the realistic
 payload shape, one needle question per trial, scored by whether the answer is right:
 
-<!--bm:horizon.liveNeedle-->
+<!--fact:horizon.liveNeedle-->
 | history budget | without a ledger | with a ledger | recall calls |
 | --- | --- | --- | --- |
 | 20000 | 66.7% | 66.7% | 0 |
@@ -938,7 +938,7 @@ payload shape, one needle question per trial, scored by whether the answer is ri
 | 6000 | 0.0% | 50.0% | 3 |
 | 4000 | 33.3% | 100.0% | 3 |
 | 2000 | 0.0% | 100.0% | 5 |
-<!--/bm-->
+<!--/fact-->
 
 The last column is the point: those answers were fetched, not remembered. A ledger row
 that scored well with **zero** recalls would have scored on what was still in front of it,
@@ -949,7 +949,7 @@ is the check that a model can actually use them.
 **And here is what it does not fix.** A question that needs *every* fact at once (which two
 of forty records are closest?) is unanswerable the instant one round is cut, and a ledger
 does not change that: forty rounds fetched one at a time do not fit the budget they were
-cut to fit. The benchmark scores that question too and publishes it beside the needle: <!--bm:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/bm-->.
+cut to fit. The benchmark scores that question too and publishes it beside the needle: <!--fact:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/fact-->.
 Recall is the wrong shape of answer for it: the fact is not missing, the *relation* is, and
 no number of one-at-a-time fetches reconstructs it inside the budget. Moving that number
 needs the corpus held *outside* the context and worked on programmatically, which is what
@@ -957,7 +957,7 @@ needs the corpus held *outside* the context and worked on programmatically, whic
 [the action language](#the-action-language--a-program-the-model-writes-and-the-compiler-checks)
 below are for — the same question, asked of an environment, is answered by a program that
 visits every record by address while the root carries a plan and a step report. The live
-tier of the numbers above ran on <!--bm:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 146 model calls<!--/bm-->.
+tier of the numbers above ran on <!--fact:horizon.live-->qwen/qwen3.6-35b-a3b, 3 trial(s) per row, 146 model calls<!--/fact-->.
 
 Without a `ledger`, all of this is inert and compaction behaves exactly as it always did.
 
@@ -1200,17 +1200,17 @@ Three properties, each asserted rather than intended:
 The RLM paper this design follows states its own limitation plainly: its sub-calls are
 sequential, and "RLMs without asynchronous LM calls are slow". Running the fan-out in a
 harness rather than inside an evaluator is what makes concurrency available at all — the
-same program and the same sub-calls, run one at a time and then four at a time, is worth <!--bm:horizon.programFanout-->3.9x (814ms sequential vs 209ms at concurrency 4, 40 sub-calls of 20ms each)<!--/bm-->.
+same program and the same sub-calls, run one at a time and then four at a time, is worth <!--fact:horizon.programFanout-->3.9x (814ms sequential vs 209ms at concurrency 4, 40 sub-calls of 20ms each)<!--/fact-->.
 The per-call latency there is synthetic and deliberately so: a benchmark that made eighty
 real calls to time its own scheduler would be measuring the provider's queue.
 
 **What it answers, and what the root pays for it.** The pairwise question that compaction
-scores 0% on at every budget is answered at a ceiling of <!--bm:horizon.program-->100%, with 40 of 40 records reaching the reduce over 40 sub-calls, while the root request carried 937 characters against a corpus of 17719<!--/bm-->.
+scores 0% on at every budget is answered at a ceiling of <!--fact:horizon.program-->100%, with 40 of 40 records reaching the reduce over 40 sub-calls, while the root request carried 937 characters against a corpus of 17719<!--/fact-->.
 By contrast a needle question over the same environment costs **one** sub-call, because
 `grep` narrows to the piece that mentions the record before anything is spent on it.
 
 **On the cheap tier** (D8 — the campaign targets the weak model deliberately, and publishes
-the result whichever way it falls), the measurement is <!--bm:horizon.programLive-->2 of 3 authored programs compiled — but 1 of those attempts never came back at all (the 300 s deadline), so of the 2 that answered, 2 compiled. Answering 40 sub-calls itself it reached 40 of 40 records (0 sub-call(s) failed) and named the CORRECT pair<!--/bm-->.
+the result whichever way it falls), the measurement is <!--fact:horizon.programLive-->2 of 3 authored programs compiled — but 1 of those attempts never came back at all (the 300 s deadline), so of the 2 that answered, 2 compiled. Answering 40 sub-calls itself it reached 40 of 40 records (0 sub-call(s) failed) and named the CORRECT pair<!--/fact-->.
 Read that second half as the campaign's own result and the first half as a caveat about the
 transport, not the tier: the sub-calls are where the model does the work, and it did it.
 
@@ -1305,7 +1305,7 @@ Published because it is the campaign's own bet (D8) and because half of it lost.
 qwen tier, the **program** path works: it authored plans that compile, answered all forty
 sub-calls itself, and named the right pair — the number is in §"The action language" above.
 
-The **recursive** path did not. Measured at depths 1 and 2, it managed <!--bm:horizon.depthLive-->0 of 4 tasks at depths 1 and 2 — every one of them died on the 300-second deadline during its first authoring call, so what this measured is that the recursive path does not currently RUN on this tier, not that it runs badly<!--/bm-->.
+The **recursive** path did not. Measured at depths 1 and 2, it managed <!--fact:horizon.depthLive-->0 of 4 tasks at depths 1 and 2 — every one of them died on the 300-second deadline during its first authoring call, so what this measured is that the recursive path does not currently RUN on this tier, not that it runs badly<!--/fact-->.
 
 Read that precisely, because the distinction matters: this is not "recursion answers badly
 on a small model". It is "recursion did not get far enough to be scored". The authoring call
@@ -1361,7 +1361,7 @@ are collected here so nobody has to rediscover them the hard way.
   model, no tokenizer and no download ship here, so no default can rank, and this package
   publishes no opinion on which model should. What it does publish is the instrument:
   `benchmark/retrieval.js` scores the default and the ranked path over one seeded corpus,
-  through the deterministic reference embedder, whichever way it falls — <!--bm:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/bm-->.
+  through the deterministic reference embedder, whichever way it falls — <!--fact:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/fact-->.
   That is a mechanism score (the reference embedder is lexical); a real model's number is the
   host's to measure through the same instrument's `--live` tier, never this package's to claim.
 - **On the cheap tier, the transport is the fragile part, not the reasoning.** In the

@@ -319,16 +319,16 @@ every write (LIVE-FORMAT §7 states the cost). An ordering by
 `$distance` or a spatial aggregate re-runs on invalidation with the
 reason in `live.mode` — declared, never silent.
 
-**The numbers, the loss included.** `benchmark/spatial.js` stores <!--bm:spatial.corpus-->50,000 points<!--/bm-->
-over the Netherlands and probes one box at <!--bm:spatial.rows-->258 of 50,000 (0.5 %)<!--/bm--> selectivity,
+**The numbers, the loss included.** `benchmark/spatial.js` stores <!--fact:spatial.corpus-->50,000 points<!--/fact-->
+over the Netherlands and probes one box at <!--fact:spatial.rows-->258 of 50,000 (0.5 %)<!--/fact--> selectivity,
 asserting every plan case of the committed spatial corpus and every timed shape against the JavaScript
-engine before a single timing is printed. The `$within` a consumer writes went from <!--bm:spatial.scan-->80 ms<!--/bm-->
-as a full scan to <!--bm:spatial.within-->2 ms<!--/bm--> over the `bbox` index (<!--bm:spatial.scanVsIndexed-->40.0<!--/bm-->×);
-`$bbox-intersects` is <!--bm:spatial.bboxIntersects-->1.9 ms<!--/bm-->, a bounded `$distance` <!--bm:spatial.distance-->1.5 ms<!--/bm-->;
-one geohash cell answers in <!--bm:spatial.cellOne-->0.0068 ms for 0 row(s)<!--/bm--> and the honest nine-cell
-probe in <!--bm:spatial.cellNine-->0.026 ms for 2 row(s)<!--/bm-->. The row the store had to win is the same
-`$within` in the in-memory engine over the parsed array, no database at all: <!--bm:spatial.engine-->32 ms<!--/bm-->.
-The indexed store is now <!--bm:spatial.engineVsIndexed-->16.1× faster than<!--/bm--> it — but the un-indexed scan
+engine before a single timing is printed. The `$within` a consumer writes went from <!--fact:spatial.scan-->80 ms<!--/fact-->
+as a full scan to <!--fact:spatial.within-->2 ms<!--/fact--> over the `bbox` index (<!--fact:spatial.scanVsIndexed-->40.0<!--/fact-->×);
+`$bbox-intersects` is <!--fact:spatial.bboxIntersects-->1.9 ms<!--/fact-->, a bounded `$distance` <!--fact:spatial.distance-->1.5 ms<!--/fact-->;
+one geohash cell answers in <!--fact:spatial.cellOne-->0.0068 ms for 0 row(s)<!--/fact--> and the honest nine-cell
+probe in <!--fact:spatial.cellNine-->0.026 ms for 2 row(s)<!--/fact-->. The row the store had to win is the same
+`$within` in the in-memory engine over the parsed array, no database at all: <!--fact:spatial.engine-->32 ms<!--/fact-->.
+The indexed store is now <!--fact:spatial.engineVsIndexed-->16.1× faster than<!--/fact--> it — but the un-indexed scan
 is not, and the comparison is not an even one either way: the engine starts from parsed objects where the
 store starts from bytes on a page and pays JSON materialisation for every row it returns. Both rows stay
 published. The deterministic-UDF hatch takes a literal `$within` on a collection with no derived index, and
@@ -343,10 +343,10 @@ columns (MODEL-FORMAT §2.1). The logical model is unchanged — the
 spatial corpus runs every entry under both mappings, in all three
 executors, with no special-cased entry — and the pushed conjunct becomes
 a `rowid` subquery over the virtual table. Through the store the same
-`$within` measures <!--bm:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/bm-->; loading the same rows
-costs <!--bm:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/bm-->, because the R\*Tree is a
+`$within` measures <!--fact:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/fact-->; loading the same rows
+costs <!--fact:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/fact-->, because the R\*Tree is a
 second table written inside every write transaction. Isolated from the
-store on a raw connection the probe is <!--bm:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/bm-->.
+store on a raw connection the probe is <!--fact:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/fact-->.
 Both halves are published because both are the price. One honest
 difference comes with it: an R\*Tree stores 32-bit floats rounded
 outward, so its box is a superset and `$bbox-intersects` is refined
@@ -469,11 +469,11 @@ wrong width is refused at plan time and `explain()` says why; an
 that count, and a consumer who binds probes from a model should watch it.
 
 **The numbers, the losses included.** `benchmark/vector.js` measures one
-k-nearest query every physical way it can run — over <!--bm:vector.grid-->10,000 and 50,000 vectors at 384 and 768 dimensions, k = 10, the median of 10 probes<!--/bm--> —
+k-nearest query every physical way it can run — over <!--fact:vector.grid-->10,000 and 50,000 vectors at 384 and 768 dimensions, k = 10, the median of 10 probes<!--/fact--> —
 and asserts that every path returns the identical top-k, ids and order,
 on every probe before a single timing prints. The flagship row is the
-plan a consumer's own document runs, which measures <!--bm:vector.plan-->206 ms at 50,000 × 768<!--/bm-->:
-<!--bm:vector.table-->
+plan a consumer's own document runs, which measures <!--fact:vector.plan-->206 ms at 50,000 × 768<!--/fact-->:
+<!--fact:vector.table-->
 | path (ms) | 10,000 × 384 | 10,000 × 768 | 50,000 × 384 | 50,000 × 768 |
 |---|---:|---:|---:|---:|
 | engine resident sweep (no database) | 3.3 | 6.7 | 17 | 32 |
@@ -482,14 +482,14 @@ plan a consumer's own document runs, which measures <!--bm:vector.plan-->206 ms 
 | `ORDER BY` over a registered function | 18 | 31 | 121 | 180 |
 | JSON-doc sweep (no vector column) | 249 | 501 | — | — |
 | sqlite-vec | 3.6 | 7.5 | 18 | 38 |
-<!--/bm-->
+<!--/fact-->
 
 The row the column exists to beat is the last one that has no column: the
 same query document over a collection that stores the embedding only
-inside the document costs <!--bm:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/bm-->,
+inside the document costs <!--fact:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/fact-->,
 because every row's vector is parsed out of JSON before it can be
 compared. The row the store **cannot** beat is the one with no database
-in it: the same top-k over a resident `Float32Array` is <!--bm:vector.resident-->32 ms, which the plan is 6.4× slower than<!--/bm-->.
+in it: the same top-k over a resident `Float32Array` is <!--fact:vector.resident-->32 ms, which the plan is 6.4× slower than<!--/fact-->.
 That comparison is not an even one and the direction is the point — the
 sweep starts from decoded floats in RAM and pays nothing for durability,
 for filters that compose with the ranking, or for a process that can
@@ -498,16 +498,16 @@ price should be able to say what the price is.
 
 **Both halves of the price.** The column costs on the way in as well as
 saving on the way out: writing the same documents with
-the index costs <!--bm:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/bm-->,
+the index costs <!--fact:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->,
 because every write pays a JSON round trip of the member plus a
-normalize and a pack. On disk one vector is <!--bm:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/bm--> —
+normalize and a pack. On disk one vector is <!--fact:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/fact--> —
 smaller, but *added*, since the document still carries the member the
 column is derived from.
 
 **Pushing the rank into SQL, re-measured.** A registered similarity
 function inside an `ORDER BY … LIMIT k` is the obvious alternative, and
 the suite measures it against the real column with the probe hoisted out
-of the per-row call: <!--bm:vector.udf-->180 ms against 202 ms at 50,000 × 768, and 0.87–1.00× the fetch-and-rank across the grid — rough parity on speed<!--/bm-->.
+of the per-row call: <!--fact:vector.udf-->180 ms against 202 ms at 50,000 × 768, and 0.87–1.00× the fetch-and-rank across the grid — rough parity on speed<!--/fact-->.
 The plan does not emit it, and after that measurement the reasons are not
 speed: `bun` has no user-function API, so a plan that needed one would
 exclude an executor outright; and an ordering decided in SQL cannot break
@@ -516,15 +516,15 @@ executors have to agree on.
 
 **The rival, and the ceiling.** `sqlite-vec` is the extension built for
 exactly this, and it is measured rather than described: it answers the
-same probes in <!--bm:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/bm-->,
-over <!--bm:vector.agreement-->40 probes, no disagreements<!--/bm-->. It is a
+same probes in <!--fact:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->,
+over <!--fact:vector.agreement-->40 probes, no disagreements<!--/fact-->. It is a
 loadable native extension, which is the one thing this store will not
 require — it would exclude the wasm tab and stock `bun`, half the
 execution story — so the comparison is published as what it is: a faster
 engine you may prefer, and a dependency this one does not take. What
 neither of them is, is an approximate index. Exact brute force is linear
 in `n · d`, and the suite states the envelope as arithmetic rather than
-opinion: <!--bm:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/bm-->.
+opinion: <!--fact:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/fact-->.
 Past that this design is the wrong tool and no margin changes it; what
 lies beyond is an approximate index, and this store does not have one.
 
@@ -581,13 +581,13 @@ same range, the same buckets, the same rolling window and the same
 as-of join over one seeded corpus by plain references, by the temporal
 kernel, by a generic query document, by hand-written SQL and by the
 store — every route checked against the others before a timing is
-taken. At <!--bm:series.corpus-->100,000 samples at 1-second spacing, Node v24.19.0<!--/bm-->,
-the store is measured three ways at once — <!--bm:series.storeShapes-->the planned range costs 4.2× the hand-written statement and 1535.5× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.6× FASTER than the generic query route, and 155.1× the one-pass loop<!--/bm-->.
+taken. At <!--fact:series.corpus-->100,000 samples at 1-second spacing, Node v24.19.0<!--/fact-->,
+the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.2× the hand-written statement and 1535.5× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.6× FASTER than the generic query route, and 155.1× the one-pass loop<!--/fact-->.
 The range row is not the planner's price: the statement selects two
 COLUMNS where the store renders and parses a whole JSON document per
 row, which is what storing documents costs.
 
-And what a refinement costs, with the loss in it: <!--bm:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 18.5× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 99,129 rows in 1 statement and costs 1424.3× fifty-one separate index reads — a bound is what it buys, not a speed-up, and without a tolerance a backward join can only be bounded above.<!--/bm-->
+And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 18.5× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 99,129 rows in 1 statement and costs 1424.3× fifty-one separate index reads — a bound is what it buys, not a speed-up, and without a tolerance a backward join can only be bounded above.<!--/fact-->
 
 **A refinement is named, never quiet.** `explain().series` reports
 `mode` — `native`, `hybrid` or `engine` — the declared index the fetch
@@ -721,16 +721,16 @@ before a single timing is printed — a fast live view with the wrong
 answer is not a fast live view — and the run exits non-zero if they
 disagree.
 
-<!--bm:live.eventTimeTable-->
+<!--fact:live.eventTimeTable-->
 | view | maintained | re-run | ratio |
 |---|---:|---:|---:|
 | bucket (60 s ladder, mean), 1000 rows | 119 µs | 1.09 ms | 9.2× |
 | rolling (5 min window, mean), 1000 rows | 407 µs | 3.86 ms | 9.5× |
 | bucket (60 s ladder, mean), 10000 rows | 136 µs | 10.9 ms | 80.2× |
 | rolling (5 min window, mean), 10000 rows | 13.7 ms | 62.7 ms | 4.6× |
-<!--/bm-->
+<!--/fact-->
 
-The gain is <!--bm:live.eventTimeBand-->80.2× for the bucket and 4.6× for the rolling at 10,000 readings<!--/bm-->. A bucket
+The gain is <!--fact:live.eventTimeBand-->80.2× for the bucket and 4.6× for the rolling at 10,000 readings<!--/fact-->. A bucket
 view is nearly flat in the series length, because a write folds one
 bucket again and the rest of the ladder is untouched. A rolling view is
 not, and the table says so: its answer is one row per reading, so the

@@ -365,7 +365,7 @@ an editable data pane.
 ### Directives — a number a machine derives and a human reads
 
 ```markdown
-Jaren is <!--bm:jsonpath.ctsRatio-->8.8<!--/bm-->x faster across the CTS queries.
+Jaren is <!--fact:jsonpath.ctsRatio-->8.8<!--/fact-->x faster across the CTS queries.
 ```
 
 Every markdown renderer on earth drops HTML comments, so GitHub, an editor
@@ -389,7 +389,7 @@ being true. It splices only the spans between markers — a document with
 no directives comes back byte-identical — because `toMarkdown` is a
 canonicalizing printer and re-printing a hand-written README would reflow
 every list for no reason. This repository's own figures work exactly this
-way (`npm run docs:benchmarks`, `npm run docs:check`).
+way (`npm run docs:derive`, `npm run docs:check`).
 
 The layer never interprets the payload: `bm` puts a derivation key there,
 `mdx` puts a query expression, and the vocabulary belongs to the
@@ -451,25 +451,25 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 
 ## Performance contract
 
-Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->2026-08-11, Node v24.19.0<!--/bm-->
+Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2026-08-11, Node v24.19.0<!--/fact-->
 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: <!--bm:md.parseTimes-->~0.099 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/bm--> — linear in input. A CPU profile puts the
+- **Parse to AST**: <!--fact:md.parseTimes-->~0.099 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/fact--> — linear in input. A CPU profile puts the
   inline phase at ~36% of that and the source hash for `meta.hash` at
   ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
   `/\s+$/` regex at paragraph close with a scan was worth 4–17%
   depending on how paragraph-dense the document is — measured as an A/B
   on this corpus, because the same change looked like noise on a
   differently shaped one.)
-- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--bm:md.vsPeers-->0.6–1.1<!--/bm-->x the time `marked` and `markdown-it` take — <!--bm:md.vsPeersDetail-->faster than both at every size measured except one — `markdown-it` is ahead at ~10 kB (1.1x)<!--/bm--> — and is <!--bm:md.vsMicromark-->12.9–21.4<!--/bm-->x faster than `micromark`, on the same GFM documents.
+- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--fact:md.vsPeers-->0.6–1.1<!--/fact-->x the time `marked` and `markdown-it` take — <!--fact:md.vsPeersDetail-->faster than both at every size measured except one — `markdown-it` is ahead at ~10 kB (1.1x)<!--/fact--> — and is <!--fact:md.vsMicromark-->12.9–21.4<!--/fact-->x faster than `micromark`, on the same GFM documents.
   Through the **vnode** path the same documents cost roughly twice that
   — keys, memoization and a tree the patcher can reconcile are not free,
   and the benchmark publishes that row beside this one rather than
   quoting only the flattering half.
 - **Where the time goes** (~100 kB, the phase split the benchmark now
-  prints and publishes): <!--bm:md.phaseSplit-->parse 35%, AST→vnode 50%, vnode→HTML 16%<!--/bm-->. The projection, not
-  the parse, is the expensive half — and <!--bm:md.keyCost-->53%<!--/bm--> of the projection is
-  computing the content-hash **keys** (<!--bm:md.unkeyedMs-->3.3 ms against 6.9 ms<!--/bm--> without them).
+  prints and publishes): <!--fact:md.phaseSplit-->parse 35%, AST→vnode 50%, vnode→HTML 16%<!--/fact-->. The projection, not
+  the parse, is the expensive half — and <!--fact:md.keyCost-->53%<!--/fact--> of the projection is
+  computing the content-hash **keys** (<!--fact:md.unkeyedMs-->3.3 ms against 6.9 ms<!--/fact--> without them).
   Keys are what let the patcher reorder blocks instead of rebuilding
   them, so they are worth it for a tree that will be patched — and worth
   nothing to a caller that renders once and throws the tree away. That
@@ -483,7 +483,7 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
   output will be patched, and guessing wrong turns O(1) reconciliation
   into a rebuild with no error to show for it.
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
-  the cached projection in <!--bm:md.cachedNs-->39–82<!--/bm--> ns — and because block vnodes carry
+  the cached projection in <!--fact:md.cachedNs-->39–82<!--/fact--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
   vnodes, the view patcher skips unchanged blocks in O(1). A JSLT
   identity transform returns the document by reference; a partial
@@ -491,12 +491,12 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
   the one-shot HTML render — is what this package is optimized for.
 - **CommonMark scorecard**, both paths, because the difference between
   them *is* the safety boundary:
-  - `toHtml` (`html: 'raw'`, the like-for-like row): <!--bm:md.scorecard-->655 of 655 (100.0%)<!--/bm-->; for scale, <!--bm:md.scorecardPeers-->marked 620, markdown-it 655, micromark 650<!--/bm-->.
+  - `toHtml` (`html: 'raw'`, the like-for-like row): <!--fact:md.scorecard-->655 of 655 (100.0%)<!--/fact-->; for scale, <!--fact:md.scorecardPeers-->marked 620, markdown-it 655, micromark 650<!--/fact-->.
     **No dialect gap remains on this path**: every example the spec
     contains passes, and the round-trip suite additionally asserts that
     all 655 survive `parseMarkdown → toMarkdown → parseMarkdown` with an
     identical AST and an unchanged canonical form.
-  - `mdToVnode` + SSR: <!--bm:md.scorecardVnode-->593 of 655 (90.5%)<!--/bm-->. **Every** example the two
+  - `mdToVnode` + SSR: <!--fact:md.scorecardVnode-->593 of 655 (90.5%)<!--/fact-->. **Every** example the two
     paths disagree on contains raw HTML — asserted, not asserted-at:
     [`test/md/to-html.test.js`](../../test/md/to-html.test.js) checks that no
     vnode-path failure is free of an `html` node. The spec renders raw
@@ -508,9 +508,9 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--bm:md.measured-->202
 - **GFM extension scorecard**, the five extension sections of the GFM
   specification with every engine's extensions switched on — because the
   CommonMark corpus says nothing about any of them, and the part of the
-  dialect every engine advertises was the only part nobody measured: <!--bm:md.gfmScorecard-->22 of 24 (91.7%)<!--/bm--> through `toHtml`, and <!--bm:md.gfmScorecardVnode-->22 of 24 (91.7%)<!--/bm--> through the vnode
-  path; for scale, <!--bm:md.gfmPeers-->marked 22, markdown-it 14, micromark 23<!--/bm-->.
-  Autolink literals are <!--bm:md.gfmAutolinks-->11 of 11<!--/bm-->, ahead of every rival here. The two
+  dialect every engine advertises was the only part nobody measured: <!--fact:md.gfmScorecard-->22 of 24 (91.7%)<!--/fact--> through `toHtml`, and <!--fact:md.gfmScorecardVnode-->22 of 24 (91.7%)<!--/fact--> through the vnode
+  path; for scale, <!--fact:md.gfmPeers-->marked 22, markdown-it 14, micromark 23<!--/fact-->.
+  Autolink literals are <!--fact:md.gfmAutolinks-->11 of 11<!--/fact-->, ahead of every rival here. The two
   this package does not pass are **stated boundaries, not to-do items**:
   - **table alignment is written as `style="text-align:center"`, not the
     deprecated `align` attribute** (1 example). Both render identically;

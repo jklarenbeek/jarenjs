@@ -1,5 +1,10 @@
 # The Jaren schema pen (normative)
 
+> `./schema` — JSON Schema 2020-12: every keyword `@jarenjs/validate`
+> supports, `$query`, `$defs`/`$ref` recursion, the normalizer's
+> annotations. **Read it when** you are describing the shape of data —
+> for validation, for a form, or as the base of an entity
+
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. The rules every pen keeps, the
 shared refusal table and the index of the other pens are the binder,
@@ -964,10 +969,10 @@ they are used to having.
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **32,382 bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->32,382<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded (32
-kB) beside the other nine subpath prices in
+measures and `npm run test:tree-shaking` reports, published rounded
+(<!--fact:bundle.schema.kb-->32<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building

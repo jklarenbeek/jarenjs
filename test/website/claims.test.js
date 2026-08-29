@@ -262,8 +262,8 @@ describe('the homepage engine cards', function () {
 //#region the repository's front page states no figure it cannot derive
 
 describe('the root README bakes its load-bearing claims', function () {
-  /** A marker body, as the gate writes it: `<!--bm:key-->…<!--/bm-->`. */
-  const marker = (key) => `<!--bm:${key}-->[^<]*<!--/bm-->`;
+  /** A marker body, as the gate writes it: `<!--fact:key-->…<!--/fact-->`. */
+  const marker = (key) => `<!--fact:${key}-->[^<]*<!--/fact-->`;
 
   // Each entry is the CLAIM as it must read: the authored words with a
   // marker wherever a number stands. Replace one of these markers with a

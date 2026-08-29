@@ -414,15 +414,15 @@ one more route in every table beside Prisma, Drizzle and Kysely over the
 same SQLite corpus, equality asserted before anything is timed and
 statement counts printed beside the timings.
 
-Against the store it fronts, the door is nearly free: <!--bm:orm.clientDoorPrice-->0.9× on a point read, 1.4× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/bm-->
+Against the store it fronts, the door is nearly free: <!--fact:orm.clientDoorPrice-->0.9× on a point read, 1.4× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/fact-->
 — because it issues the same documents the store would. What it does
 NOT amortize is capture: a chain re-captures its callbacks and re-emits
 its document on **every** call, by design, which is the predicate row's
 difference and which a caller with a hot query removes by holding the
 `Sequence` (or the emitted document) instead of rebuilding it.
 
-Against the rivals, at this corpus, it is faster on <!--bm:orm.clientVsRivals-->8 of 9 against Prisma, 4 of 9 against Drizzle, 1 of 9 against Kysely<!--/bm-->,
-and here is every row where the *fastest* rival beats it — <!--bm:orm.clientLosses-->update one column by primary key 18.8× (Drizzle), nested json member filter 6.3× (Kysely), cold start 3.0× (Prisma), posts per user 2.4× (Kysely), graph load 2.2× (Kysely), indexed predicate over 500 users, ids only 2.0× (Kysely), pagination over 5000 comments, page size 20 1.6× (Kysely), insert 1.4× (Kysely), point read by primary key 1.2× (Drizzle)<!--/bm-->.
+Against the rivals, at this corpus, it is faster on <!--fact:orm.clientVsRivals-->8 of 9 against Prisma, 4 of 9 against Drizzle, 1 of 9 against Kysely<!--/fact-->,
+and here is every row where the *fastest* rival beats it — <!--fact:orm.clientLosses-->update one column by primary key 18.8× (Drizzle), nested json member filter 6.3× (Kysely), cold start 3.0× (Prisma), posts per user 2.4× (Kysely), graph load 2.2× (Kysely), indexed predicate over 500 users, ids only 2.0× (Kysely), pagination over 5000 comments, page size 20 1.6× (Kysely), insert 1.4× (Kysely), point read by primary key 1.2× (Drizzle)<!--/fact-->.
 
 Three things make that list readable rather than damning, and none of
 them removes a row from it. **Kysely is a SQL builder**: on every row it
@@ -442,7 +442,7 @@ whatever the corpus and whatever the clock says.
 A pen builds a **definition** — once, at module load — and the engine
 compiles the document it emitted. That is the only place its price is
 paid, and `benchmark/db.js` measures it as ns per build beside the
-hand-written literal each pen must emit byte for byte — <!--bm:linq.penBuildCost-->schema 61.1×, model 87.1×, JSLT 72.1× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same two shape hashes<!--/bm-->.
+hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 61.1×, model 87.1×, JSLT 72.1× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same two shape hashes<!--/fact-->.
 
 Multiples that size are what typed builders, `$defs` hoisting, a
 deep-freeze and a coded refusal per mistake cost against typing the JSON

@@ -628,9 +628,9 @@ direction is *not* claimed, because WKT whitespace, the `M` measure and number
 spelling are normalized on the way through.
 
 Against [`wellknown`](https://www.npmjs.com/package/wellknown), the established
-WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--bm:geo.node-->v24.19.0<!--/bm-->):
+WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.19.0<!--/fact-->):
 
-<!--bm:geo.wktTable-->
+<!--fact:geo.wktTable-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
 | wkt parse (POINT) | 431.1 ns | 1.31 µs (wellknown) | **3.1×** |
@@ -638,7 +638,7 @@ WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--bm:geo.node-->v24.19.
 | wkt stringify (2000-vertex polygon) | 163.40 µs | 229.70 µs (wellknown) | **1.4×** |
 | wkt validate (POINT) | 242.7 ns | 1.28 µs (wellknown) | **5.3×** |
 | wkt validate (2000-vertex polygon) | 496.00 µs | 1.90 ms (wellknown) | **3.8×** |
-<!--/bm-->
+<!--/fact-->
 
 The last two rows are the ones the sink exists for: `wellknown` has no
 predicate, so validating means parsing and throwing the geometry away. And the
@@ -677,7 +677,7 @@ RFC 7946 removed coordinate-reference-system support and mandates WGS 84, so
 there is no SRID table and no reprojection: conformance removes the need rather
 than an omission hiding it.
 
-**Measured against the field** (`npm run benchmark:geo`, Node <!--bm:geo.node-->v24.19.0<!--/bm-->). Every
+**Measured against the field** (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.19.0<!--/fact-->). Every
 scenario asserts result equivalence before any timing, and the harness refuses
 to print a table if the engines disagree: distance, area, length and bounding
 box come out *bit-identical* to Turf, containment agrees on a 400-point sweep,
@@ -685,7 +685,7 @@ and the index returns exactly Flatbush's answer on 200 queries. Ratios are the
 rival's time over this kernel's, so above 1 means Jaren is faster; the rows
 below derive from the committed measurement and are refreshed with it.
 
-<!--bm:geo.table-->
+<!--fact:geo.table-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
 | distance (two positions) | 28.3 ns | 111.0 ns (turf) | **3.9×** |
@@ -700,11 +700,11 @@ below derive from the committed measurement and are refreshed with it.
 | index build (100k boxes) | 12.70 ms | 10.62 ms (flatbush) | 0.8× |
 | index probe (100k boxes) | 602.3 ns | 668.9 ns (flatbush) | **1.1×** |
 | linear scan (100k boxes, no index) | 141.50 µs | — | — |
-<!--/bm-->
+<!--/fact-->
 
-The losses are kept, and named by the same measurement: on the committed run <!--bm:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.9× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/bm-->.
+The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.9× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
 **Point-in-polygon on a large ring runs at about half Turf's speed**
-(<!--bm:geo.pip2000-->0.5×<!--/bm--> at 2000 vertices) because every edge that could
+(<!--fact:geo.pip2000-->0.5×<!--/fact--> at 2000 vertices) because every edge that could
 matter goes through the exact orientation predicate, where Turf uses naive
 floating-point arithmetic. That is the trade this module exists to make — it
 is the difference between a containment test that is right on near-collinear
@@ -713,7 +713,7 @@ predicate on edges that cannot affect the answer, which took this from 0.2×
 to about 0.5×; the rest is the predicate itself, and the campaign that made
 geography reachable across the suite never traded it away. The bounding box
 of the same ring and the index build against Flatbush sit within a few tenths
-of level (<!--bm:geo.bbox2000-->0.9×<!--/bm--> and <!--bm:geo.indexBuild-->0.8×<!--/bm-->) and move
+of level (<!--fact:geo.bbox2000-->0.9×<!--/fact--> and <!--fact:geo.indexBuild-->0.8×<!--/fact-->) and move
 between runs and Node versions; they are published as measured rather than
 rounded to a win.
 

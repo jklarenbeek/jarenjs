@@ -108,23 +108,26 @@ itself (`npm install @jarenjs/db @jarenjs/validate @jarenjs/formats`;
 pnpm's isolated layout resolves declared peers the same way).
 
 The prices are published rather than hidden — one minified, tree-shaken
-bundle per subpath (esbuild, `platform: 'neutral'`, `node:*` external),
-each figure below compared with the measured bundle by the tree-shaking
-gate on every run, so a stale number fails the gate rather than
-misleading a reader:
+bundle per subpath (esbuild, `platform: 'neutral'`, `node:*` external).
+No figure below is typed: `npm run test:tree-shaking` measures the ten
+bundles and commits the measurement, and `npm run docs:derive` bakes
+every published copy of it — this table, each pen document's Cost
+section, and every sentence in one document that quotes another
+subpath's price. One number, one bake, so a price cannot be current in
+the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--bundle:linq-chain-->173 kB | the query engine — a chain's document has to run somewhere |
-| `./schema` | <!--bundle:linq-schema-->32 kB | the builders and the recording proxy `check()` captures through |
-| `./model` | <!--bundle:linq-model-->41 kB | the schema pen it subclasses |
-| `./jslt` | <!--bundle:linq-jslt-->19 kB | the body capture; of the schema pen, only the builder brand |
-| `./migration` | <!--bundle:linq-migration-->24 kB | the canonicalizer and hash a shape identity needs |
-| `./contract` | <!--bundle:linq-contract-->45 kB | the schema pen (a contract's inputs and outputs are schemas) |
-| `./flow` | <!--bundle:linq-flow-->19 kB | the capture; of the schema pen, only the brand |
-| `./app` | <!--bundle:linq-app-->47 kB | the schema pen and the JSLT pen (state, and views) |
-| `./forms` | <!--bundle:linq-forms-->37 kB | the schema pen it subclasses |
-| `./db` | <!--bundle:linq-db-->478 kB | the store, the validator and the formats, by construction |
+| `.` | <!--fact:bundle.chain.kb-->173<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `./schema` | <!--fact:bundle.schema.kb-->32<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
+| `./model` | <!--fact:bundle.model.kb-->41<!--/fact--> kB | the schema pen it subclasses |
+| `./jslt` | <!--fact:bundle.jslt.kb-->19<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
+| `./migration` | <!--fact:bundle.migration.kb-->24<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
+| `./contract` | <!--fact:bundle.contract.kb-->45<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./flow` | <!--fact:bundle.flow.kb-->19<!--/fact--> kB | the capture; of the schema pen, only the brand |
+| `./app` | <!--fact:bundle.app.kb-->47<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
+| `./forms` | <!--fact:bundle.forms.kb-->37<!--/fact--> kB | the schema pen it subclasses |
+| `./db` | <!--fact:bundle.db.kb-->478<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both

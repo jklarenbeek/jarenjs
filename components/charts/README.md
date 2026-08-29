@@ -251,17 +251,17 @@ property-tested over thousands of random frames rather than assumed.
 
 Measured (`npm run benchmark:charts`, one appended point):
 
-<!--bm:charts.sessionTable-->
+<!--fact:charts.sessionTable-->
 | points × series | session tick | wholesale tick | frames incremental |
 |---|---:|---:|---:|
 | 100 × 5 | 6.26 µs | 301 µs | 1100 of 1100 |
 | 1,000 × 5 | 4.84 µs | 1.1 ms | 1100 of 1100 |
 | 10,000 × 5 | 4.44 µs | 8.61 ms | 1100 of 1100 |
 | 10,000 × 5 *(sampled)* | 3.25 ms | 2.53 ms | 0 of 1100 |
-<!--/bm-->
+<!--/fact-->
 
 The session tick is *flat* in n — it
-moves <!--bm:charts.sessionFlatness-->0.7× while the wholesale tick grows 28.6×<!--/bm-->. Supported types: `line` (appends
+moves <!--fact:charts.sessionFlatness-->0.7× while the wholesale tick grows 28.6×<!--/fact-->. Supported types: `line` (appends
 and ring-buffer evictions), `bar` (live counts and sums) and
 `candlestick` (keyed kline upserts — one candle group re-renders). The
 website's Binance demo runs on it.
@@ -331,17 +331,17 @@ reports the data rather than the drawing.
 
 Measured (`npm run benchmark:charts`, one series):
 
-<!--bm:charts.samplingTable-->
+<!--fact:charts.samplingTable-->
 | source points | drawn | method | source → AST | source → svg |
 |---:|---:|---|---:|---:|
 | 2,000 | 2,000 | none | 73.4 µs → 72.3 µs | 587 µs → 515 µs |
 | 20,000 | 560 | lttb | 838 µs → 1.28 ms | 5.84 ms → 1.05 ms |
 | 100,000 | 560 | lttb | 4.35 ms → 5.36 ms | 27.8 ms → 5.42 ms |
-<!--/bm-->
+<!--/fact-->
 
 Choosing the points costs about what mapping them costs — the sampler
 reads every reading either way — so the AST column is a small **loss**.
-What it buys is the render — <!--bm:charts.samplingWin-->100,000 points draw as 560 and render 5.1× faster<!--/bm-->. The invariants above are asserted in the benchmark
+What it buys is the render — <!--fact:charts.samplingWin-->100,000 points draw as 560 and render 5.1× faster<!--/fact-->. The invariants above are asserted in the benchmark
 before a single timing is printed.
 
 **Sampling is not retention.** `createStreamAdapter`'s `maxPoints`

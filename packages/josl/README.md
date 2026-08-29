@@ -365,7 +365,7 @@ this is text.
 [csv-spectrum](https://www.npmjs.com/package/csv-spectrum), the de-facto
 acceptance corpus, and on a scorecard of damaged documents.
 
-<!--bm:csv.table-->
+<!--fact:csv.table-->
 | engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |
 | --- | --- | --- | --- | --- |
 | **jaren** | **11/11** | 2.0 ms | 3.6 ms | 1.4 ms |
@@ -374,7 +374,7 @@ acceptance corpus, and on a scorecard of damaged documents.
 | csv-parse | 11/11 | 20.2 ms | 14.0 ms | 12.4 ms |
 | d3-dsv | 11/11 | 4.3 ms | 6.3 ms | 2.6 ms |
 | @vanillaes/csv | n/a | 7.5 ms | 9.6 ms | 6.1 ms |
-<!--/bm-->
+<!--/fact-->
 
 (The suite's twelfth fixture, `location_coordinates`, is excluded: its
 expectation is a bare object where every other case is an array, its
