@@ -77,16 +77,17 @@ const DOCS = [
   ['model', 'the model pen', 'MODEL-PEN.md', 6],
   ['jslt', 'the JSLT pen', 'JSLT-PEN.md', 8],
   ['migration', 'the migration pen', 'MIGRATION-PEN.md', 5],
-  ['client', 'the client', 'DB-CLIENT.md', 1],
-  ['contract', 'the contract pen', 'CONTRACT-PEN.md', 2],
+  ['client', 'the client', 'DB-CLIENT.md', 4],
+  ['contract', 'the contract pen', 'CONTRACT-PEN.md', 6],
   ['flow', 'the flow pen', 'FLOW-PEN.md', 7],
   ['app', 'the app pen', 'APP-PEN.md', 2],
   ['forms', 'the forms pen', 'FORMS-PEN.md', 2],
 ];
 
 /** `DB-CLIENT.md`'s §2 answers a different question — the client writes
- * no document, so its table divides the store's surface from its own. */
-const MAPPING_HEADING = { db: '## 2. What is the store\'s and what is the client\'s' };
+ * no document, so it enumerates a surface rather than mapping a method to
+ * the member it emits, and the document says so in the section itself. */
+const MAPPING_HEADING = { db: '## 2. The surface' };
 
 /**
  * The pens whose §2 does not yet name their whole surface, and their
@@ -96,7 +97,6 @@ const MAPPING_HEADING = { db: '## 2. What is the store\'s and what is the client
  * @type {Record<string, string>}
  */
 const MAPPING_TODO = {
-  contract: '1 of 11 unnamed: error',
   app: '6 of 13 unnamed: add, copy, move, remove, replace, test',
   forms: '29 of 31 unnamed, the schema-pen vocabulary the forms pen re-exports among them',
 };

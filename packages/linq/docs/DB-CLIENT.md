@@ -8,70 +8,228 @@ shared refusal table and the index of the other pens are the binder,
 ## 1. What it writes
 
 The store's front door: `open(model, options)` opens `@jarenjs/db`'s
-store and fronts it with handles typed from the model pen. It is not a
-pen in LINQ-FORMAT §1's sense — it emits no document of its own — but
-it keeps the pen rules where they apply: every read is a chain (the
-query document) or the store's own `load` specification, EMITTED here
-and never run here; the types are the pen's phantoms (`InferMeta<>`, no cast, no
-generate step); refusals are coded (`JL0107`, `JL0101`); and the store
-stays the engine — the client adds no storage semantics and duplicates
-no algorithm.
+store and fronts it with handles typed from the model pen. It is **not a
+pen** in [LINQ-FORMAT.md](LINQ-FORMAT.md) §1's sense — it emits no
+document of its own, so there is no format it writes and no grammar to
+validate against — but it keeps the pen rules where they apply:
 
-**The edge.** This subpath is the package's one runtime import edge:
+- every read is a document, EMITTED here and run by the store: a chain
+  over a handle is the query document ([QUERY-PEN.md](QUERY-PEN.md) §8),
+  and a load graph is the `load` specification MODEL-FORMAT §10.4 reads.
+  Both are plain, deep-frozen JSON, and `toJSON()` answers them as a
+  pen's does;
+- the types are the pen's phantoms (`InferMeta<>` of the model pen's
+  document), with no cast and no generate step;
+- refusals are coded `JL01xx` build errors (`JL0107`, `JL0101`), raised
+  where the client can see them earlier than the store and mirrored from
+  the store's own rules, never invented;
+- the store stays the engine. The client adds no storage semantics and
+  duplicates no algorithm: `include` emits the spec the store already
+  runs, membership is the store's own `link`/`unlink`, `live` is the
+  store's registration, and every read is one an `explain()` can name.
+
+That distinction is why this document is `DB-CLIENT.md` and not
+`DB-PEN.md`, and it is visible in every section below — most of all in
+§2, which enumerates a surface rather than a mapping, and in §3, whose
+fences are specifications the client hands over rather than documents it
+authored.
+
+### 1.1 The edge
+
+This subpath is the package's one runtime import edge:
 `packages/linq/src/db/` imports `@jarenjs/db`, `@jarenjs/validate` and
 `@jarenjs/formats`, declared under `peerDependencies` with
-`peerDependenciesMeta.optional: true` and never under `dependencies`.
-A consumer of `.` (the chain) or of any pen installs nothing new; a
+`peerDependenciesMeta.optional: true` and never under `dependencies`. A
+consumer of `.` (the chain) or of any pen installs nothing new; a
 consumer of `./db` installs the three; the store never imports this
-package. Three gates hold it: the tree-shaking probes (the `.` entry
-carries no client module and not one byte of the three; the `./db`
-bundle carries all three and no other pen — its size is stated in
-CONSUMING and checked against the measured bundle), the packed-consumer
-gate (every subpath is imported WITHOUT the peers first — `./db` must
-fail by a peer's name and nothing else may fail — then with them
-installed from the tarballs), and the edge suite in
-`test/db/provider.test.js` (both manifests, and every source and
-declaration file of both packages, for every import spelling).
+package.
 
-## 2. What is the store's and what is the client's
+Three gates hold it, and §7 states what it costs:
+
+- the **tree-shaking probes** — the `.` entry carries no client module
+  and not one byte of the three; the `./db` bundle carries all three and
+  no other pen;
+- the **packed-consumer gate** — every subpath is imported WITHOUT the
+  peers first, where `./db` must fail by a peer's name and nothing else
+  may fail, then with them installed from the tarballs;
+- the **edge suite** in `test/db/provider.test.js` — both manifests, and
+  every source and declaration file of both packages, for every import
+  spelling.
+
+## 2. The surface
+
+**A note on this section's title.** Every other document in this family
+titles its §2 "The mapping table", because a pen maps a method to the
+member it emits. The client maps nothing: it opens a store and hands
+back typed handles, so a table with an "Emits" column would have to
+invent one. §2 keeps its D3 slot and its meaning — this is where every
+name a caller writes is named — under the title that describes what it
+holds.
+
+The vocabulary is small and the surface is not. Two exported names, and
+then whatever those two hand back: a client of frozen handles, each of
+which is the store's own set plus the chain plus three additions. §2.1
+divides the two; §2.2 to §2.5 enumerate them.
+
+### 2.1 What is the store's and what is the client's
 
 | Member | Whose | What the client does |
 |---|---|---|
 | `open(model, { driver, …, validator? })` | the store's `openStore`, every option forwarded verbatim (`capture`, `live`, `jobs`, `profile`, … included) | wires `validator` as `compileSchema` — the default, `defaultValidator()`, is `new JarenValidator({ collectErrors: true })` with the string and date-time formats registered (the configuration MIGRATING-FROM-ZOD's recipe reproduces, so `s.string().email()` asserts out of the box); an explicit `compileSchema` wins; `validator: null` opens unvalidated, by name (`capabilities.validated === false`) |
-| `client.entities.<Name>` | one frozen handle per declared entity, built at open (no Proxy; an unknown name is `undefined`, and for a pen model a compile error) | the store's typed entity set, every member — `create get update delete load explainLoad add put remove discard link unlink asNoTracking execute explain root scope relations` — plus the rows below |
-| `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` (QUERY-PEN §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); `explain()` without a document explains the empty chain, `explain(document)` is the store's; two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
-| `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§3), typed `Loaded<>` by what it included; `where`/`orderBy`/`orderByDescending`/`thenBy`/`thenByDescending`/`take`/`skip`/`after`/`maxDepth` are the root's clauses; `asNoTracking()` the untracked load; `toSpec()`/`toJSON()` the document; `toArray()` is `load(spec)`; `explain()` is `explainLoad(spec)` — the SQL, the includes, the pagination strategy |
-| `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the declared members) — then records through the store; `saveChanges()` writes the join rows; typed over exactly the many-to-many members (the ones the generated input type also carries) |
-| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `explain().bindings` as the externals (`options.externals` merge over them); the strategy, the reason and the maintenance are the store's — an entity chain re-runs, declared, a translatable collection chain is incremental; without capture the store's `JD0050` surfaces unchanged; a chain split by `mapAsync` has no document (`JL0005`); the rows are typed by the chain's item |
-| `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema |
-| `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs (`saveChanges` and `live` exist exactly when the model declares entities, as on the store); `store` is the escape hatch, typed `TypedStore` |
+| `client.entities.<Name>` | one frozen handle per declared entity, built at open (no Proxy; an unknown name is `undefined`, and for a pen model a compile error) | the store's typed entity set, every member — `create get update delete load explainLoad add put remove discard link unlink asNoTracking execute explain root scope relations` — plus §2.3's additions |
+| `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` ([QUERY-PEN.md](QUERY-PEN.md) §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
+| `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
+| `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
+| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `explain().bindings` as the externals (`options.externals` merge over them); the strategy, the reason and the maintenance are the store's |
+| `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
+| `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
-## 3. Worked examples
+### 2.2 The two exported names
 
-`include((u) => u.posts, spec)` captures the member's NAME — `(u) =>
-u.posts`, or `u.get('posts')` for a name that collides with a method; a
-scalar member, or one the model does not declare, is `JL0107` naming the
-declared relations — and lowers the spec to exactly what MODEL-FORMAT
-§10.4 reads. Every callback is captured over `$it` through the chain's
-recording proxy with no parameters (a load clause binds no externals:
-`p.min` is `JL0004`):
+| Name | Answers | Type reading |
+|---|---|---|
+| `open(model, options)` | a promise of the frozen client — `store`, `capabilities`, `entities`, `collections`, `transaction`, `close`, and `saveChanges`/`live` when the model declares entities | `Client<InferMeta<typeof model>>` for a pen model; `Client<E>` for `open<E>(json, …)`; the wide map for a bare JSON model |
+| `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
+
+`open` is the only door, and it is deliberately not a coded refusal: a
+missing `options`, or a `validator` that is not a `JarenValidator`, is a
+plain `TypeError` naming the driver imports (`open needs { driver } from
+@jarenjs/db/node, /bun or /wasm`). A `JL01xx` is a refusal to write
+something into a document, and neither of those is about a document.
+
+`defaultValidator()` is exported so a host can build the same validator
+and add to it — `defaultValidator().addFormats(myFormats)` — rather than
+reconstruct the configuration by reading this paragraph.
+
+### 2.3 The entity handle
+
+A handle is 59 members and no Proxy: 18 from the store's entity set, 40
+from the chain, one name in both (`explain`, resolved below), and two of
+the client's own.
+
+| Group | Members |
+|---|---|
+| the unit of work | `create` `get` `update` `delete` `add` `put` `remove` `discard` `asNoTracking` |
+| the store's reads | `load` `explainLoad` `execute` |
+| the provider seam | `root` `scope` `relations` |
+| membership | `link` `unlink` — the store's, behind §4.2's check |
+| the chain | every `AsyncSequence` operator and terminal: `where` `select` `selectMany` `orderBy` `orderByDescending` `thenBy` `thenByDescending` `groupBy` `aggregate` `join` `groupJoin` `skip` `take` `distinct` `reverse` `concat` `defaultIfEmpty` `ofType` `cast` `zip` `mapAsync` `params` `toDocument` `toArray` `first` `firstOrDefault` `single` `singleOrDefault` `last` `lastOrDefault` `elementAt` `elementAtOrDefault` `count` `sum` `average` `min` `max` `any` `all`, and `Symbol.asyncIterator` |
+| the client's own | `include` (§2.4) and `live` |
+| in both | `explain` |
+
+**`explain` is the one name the store's set and the chain both carry, and
+it is resolved by arity rather than by precedence.** `handle.explain()`
+with no argument explains the EMPTY chain — `{ barriers: [], hops: [],
+bindings: {}, document: '$.Post[*]' }` — and `handle.explain(document,
+options?)` is the store's own explanation of that document, the one that
+names the translator, the SQL and the referenced roots. It is the only
+collision: a sweep of the chain's 40 names against the entity set's 18
+finds `explain` and nothing else, which is what makes the delegation
+safe to state as a rule rather than as a list of exceptions.
+
+A chain over a handle is the query document and pushes down:
+
+```js
+client.entities.Post.where((p) => p.stars.ge(3)).toDocument()
+```
+```jsonc
+{ "$for": { "it": "$.Post[*]" }, "$where": { "$ge": ["$it.stars", 3] }, "$return": "$it" }
+```
+
+That document is the chain's, not the client's — `fromAsync(handle)`
+would build the same one — which is exactly the claim "nothing is
+duplicated" makes checkable. `test/linq/client.test.js` asserts it, then
+hands it to `explain()` and asserts `mode: 'native'` with no residual.
+
+### 2.4 The graph
+
+`include(pick, spec?)` opens a graph: an immutable builder of the store's
+`load` specification, with 15 members of its own.
+
+| Member | Emits | Note |
+|---|---|---|
+| `include(pick, spec?)` | one entry of `include` | `pick` is `(u) => u.posts`, or `u.get('posts')` for a name that collides with a proxy method |
+| `where(predicate)` | `where` | consecutive calls conjoin under one `$and` |
+| `orderBy(key, options?)`, `orderByDescending(key, options?)` | `orderBy` | replaces; `options` is `{ empty?, collation? }` |
+| `thenBy(key, options?)`, `thenByDescending(key, options?)` | appends to `orderBy` | `JL0005` when no `orderBy` precedes it |
+| `take(n)`, `skip(n)` | `take`, `skip` | the offset window |
+| `after(cursor)` | `after` | the keyset cursor (§10.5); the ROOT only |
+| `maxDepth(n)` | `maxDepth` | the include depth bound (§10.4) |
+| `asNoTracking()` | — | changes the load, never the document |
+| `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document |
+| `toArray()` | — | `load(spec)`: the store's one statement |
+| `explain()` | — | `explainLoad(spec)`: the SQL, the includes, the pagination strategy |
+
+The spec's member order is fixed — `where, orderBy, take, skip, after,
+maxDepth, include` at the root; `where, orderBy, take, skip, count,
+include` in an include — so one graph is one document however it was
+built. An include spec is `true` (or absent) for the rows, `{ count:
+true }` for the number, or an object of clauses:
 
 | Spec member | Emitted | Note |
 |---|---|---|
 | absent, or `true` | `true` | the rows |
 | `{ count: true }` | `{ count: true }` | the number; any other member beside it is the store's `JD0032` |
-| `where: (p) => p.stars.ge(3)` | `where: { $ge: ['$it.stars', 3] }` | the target row is `it`; translatability is the store's verdict (`JD0032`), a relation hop is a plain path here and refused there |
-| `orderBy: (p) => p.pid` | `orderBy: '$it.pid'` | a bare key, ascending |
-| `orderBy: { key: (p) => p.stars, desc: true, empty?, collation? }` | `orderBy: { $key: '$it.stars', $dir: 'desc', $empty?, $collation? }` | as the chain spells `$orderby`; an array of either is an array |
+| `where: (p) => p.stars.ge(3)` | `where: { $ge: ["$it.stars", 3] }` | the target row is `it`; translatability is the store's verdict (`JD0032`), and a relation hop is a plain path here and refused there |
+| `orderBy: (p) => p.pid` | `orderBy: "$it.pid"` | a bare key, ascending |
+| `orderBy: { key, desc?, empty?, collation? }` | `orderBy: { $key, $dir, $empty, $collation }` | as the chain spells `$orderby`; an array of either is an array |
 | `take`, `skip` | `take`, `skip` | the window inside the subquery (a non-integer is the store's `JD0032`) |
-| `include: { comments: spec }` | `include: { comments: <lowered> }` | over the TARGET's relation table (the scope carries every root's); an undeclared member is `JL0107` |
-| anything else | `JL0101` | the vocabulary is closed; `after` paginates the root (`.after(cursor)` on the graph), never an include |
+| `include: { comments: spec }` | `include: { comments: <lowered> }` | over the TARGET's relation table (the scope carries every root's) |
+| anything else | `JL0101` | the vocabulary is closed; `after` paginates the root, never an include |
 
-Member order is fixed — `where, orderBy, take, skip, count, include` in
-an include; `where, orderBy, take, skip, after, maxDepth, include` at the
-root — and consecutive root `where`s conjoin under one `$and`, so one
-graph is one deep-frozen document (a snapshot: mutating it changes
-nothing; two builds are one document).
+Every callback is captured over `$it` through the chain's recording proxy
+with **no parameters** — a load clause binds no externals, so `p.min` is
+`JL0004` and a value that varies belongs in a JavaScript constant the
+capture closes over.
+
+What comes back from `explain()` is the store's, and it is worth showing
+once because it is the answer to "did my graph become one statement":
+
+```jsonc
+// client.entities.User.include((u) => u.posts).explain(), abridged
+{
+  "sql": "SELECT \"r\".*, … (SELECT json_group_array(…) FROM \"Post\" …) AS \"__posts\" FROM \"User\" AS \"r\" …",
+  "pagination": "none",
+  "includes": [{ "path": "posts", "kind": "oneToMany", "count": false }]
+}
+```
+
+One `sql`, one `pagination` strategy, and one `includes` entry per loaded
+relation with the path it was reached by. `test/linq/client.test.js`
+counts the driver's statement executions and asserts exactly one for a
+graph with two includes.
+
+### 2.5 The collection handle
+
+A collection handle is 49 members: 10 from the store's collection
+(`stats` `get` `insert` `put` `patch` `delete` `execute` `query`
+`explain` `live`), the same 40 chain members, and the same one overlap on
+`explain`. It has no `include`, no `link`/`unlink` and no unit of work,
+because a collection has no relations and no tracking — and neither does
+its client: a collections-only model opens a client with no
+`saveChanges` and no `live` of its own, exactly as the store does.
+
+## 3. Worked examples
+
+The client's examples are not builder-to-document pairs, and this is
+where a reader who has read a pen document should slow down. A `js`
+fence here exports a **graph**, and the `json` fence beside it is the
+`load` specification that graph emits — a document the client hands the
+store, not one it authored. Every pair is executed by
+`test/linq/pen-docs.test.js`, and each graph in it also loads: the
+fences were run through `explain()` and `toArray()` against a real
+`node:sqlite` store before they were written down.
+
+A chain over a handle cannot be a pair, because the chain's document is
+not read by `schemaOf`; §2.3 shows one as prose with its assertion cited
+from `test/linq/client.test.js`, and §2.4 does the same for an
+`explain()`. Four pairs is what the graph surface supports honestly, and
+four is what §3 carries.
+
+Each fence opens its own store over the smallest model that carries the
+relations it needs, so a reader can run any one of them alone.
+
+### 3.1 An include with a spec, and a counted membership
 
 ```js
 import { open } from '@jarenjs/linq/db';
@@ -88,33 +246,302 @@ const Post = m.object({ pid: m.integer().identity('auto'), stars: m.integer(), a
 const Label = m.object({ name: m.string().key() });
 const client = await open(m.defineModel({ entities: { User, Post, Label } }), { driver: nodeDriver() });
 
-// the graph EMITS the load spec below; toArray() is load(spec) — one statement — and
-// explain() is explainLoad(spec); the rows type as User & { posts: Post[]; labels: number }
+// the graph EMITS the spec below; toArray() is load(spec) — one statement — and
+// explain() is explainLoad(spec). The rows type as User & { posts: Post[]; labels: number }
 export const graph = client.entities.User
-  .include((u) => u.posts, { where: (p) => p.stars.ge(3), take: 2 })
+  .include((u) => u.posts, { where: (p) => p.stars.ge(3), orderBy: { key: (p) => p.stars, desc: true }, take: 2 })
   .include((u) => u.labels, { count: true });
 ```
 ```json
-{ "include": { "posts": { "where": { "$ge": ["$it.stars", 3] }, "take": 2 }, "labels": { "count": true } } }
+{
+  "include": {
+    "posts": {
+      "where": { "$ge": ["$it.stars", 3] },
+      "orderBy": { "$key": "$it.stars", "$dir": "desc" },
+      "take": 2
+    },
+    "labels": { "count": true }
+  }
+}
 ```
+
+`labels` is a many-to-many member and `{ count: true }` is the shape that
+answers "how many" without loading the rows — a number on the loaded
+row, not an array. The include's `where` and `orderBy` are captured over
+the TARGET (`p` is a `Post`), which is the one thing about `include`
+that a reader coming from the chain has to re-learn.
+
+### 3.2 The root clauses, and the keyset cursor
+
+```js
+import { open } from '@jarenjs/linq/db';
+import * as m from '@jarenjs/linq/model';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const User = m.object({
+  id: m.string().identity('uuid'),
+  email: m.string().email(),
+  posts: m.rel.hasMany('Post', { via: 'authorId', onDelete: 'cascade' }),
+  labels: m.rel.belongsToMany('Label'),
+});
+const Post = m.object({
+  pid: m.integer().identity('auto'),
+  title: m.string(),
+  stars: m.integer(),
+  authorId: m.string(),
+  author: m.rel.hasOne('User', { via: 'authorId', onDelete: 'cascade' }),
+  comments: m.rel.hasMany('Comment', { via: 'postId', onDelete: 'cascade' }),
+});
+const Comment = m.object({ cid: m.integer().identity('auto'), text: m.string(), postId: m.integer() });
+const Label = m.object({ name: m.string().key() });
+const entities = { User, Post, Comment, Label };
+const client = await open(m.defineModel({ entities }), { driver: nodeDriver() });
+
+// the root clauses: two where()s conjoin under one $and, orderBy is a bare key
+// ascending, and after() is the keyset cursor the store pages on
+export const graph = client.entities.Post
+  .include((p) => p.author, { include: { labels: true } })
+  .include((p) => p.comments, { count: true })
+  .where((p) => p.stars.ge(1))
+  .where((p) => p.title.ne('none'))
+  .orderBy((p) => p.pid)
+  .take(2)
+  .after(1)
+  .maxDepth(4);
+```
+```json
+{
+  "where": { "$and": [{ "$ge": ["$it.stars", 1] }, { "$ne": ["$it.title", "none"] }] },
+  "orderBy": "$it.pid",
+  "take": 2,
+  "after": 1,
+  "maxDepth": 4,
+  "include": { "author": { "include": { "labels": true } }, "comments": { "count": true } }
+}
+```
+
+Three facts the fence carries that a sentence would only assert. The
+member order is the spec's, not the call order — `include` was called
+first and is written last. Two `where`s became one `$and` rather than
+two members, because a spec has one `where`. And `include: { labels:
+true }` under `author` resolved against **`User`**'s relation table, not
+`Post`'s: a nested include walks the TARGET's relations, which the graph
+finds through the provider scope every root of one store shares.
+`explain().pagination` for this graph is `"keyset"`; drop the `after`
+and add a `skip` and it is `"offset"`.
+
+### 3.3 Every ordering spelling
+
+```js
+import { open } from '@jarenjs/linq/db';
+import * as m from '@jarenjs/linq/model';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const Post = m.object({
+  pid: m.integer().identity('auto'),
+  title: m.string(),
+  stars: m.integer(),
+  comments: m.rel.hasMany('Comment', { via: 'postId', onDelete: 'cascade' }),
+});
+const Comment = m.object({ cid: m.integer().identity('auto'), text: m.string(), postId: m.integer() });
+const client = await open(m.defineModel({ entities: { Post, Comment } }), { driver: nodeDriver() });
+
+// a bare key is ascending; anything more is the $orderby spec the chain writes;
+// an include's own orderBy takes the same spellings, and an array of them
+export const graph = client.entities.Post
+  .include((p) => p.comments, { orderBy: [(c) => c.postId, { key: (c) => c.text, desc: true }], skip: 1, take: 5 })
+  .orderByDescending((p) => p.stars)
+  .thenBy((p) => p.title, { empty: 'greatest' })
+  .thenByDescending((p) => p.pid)
+  .skip(1)
+  .take(2);
+```
+```json
+{
+  "orderBy": [
+    { "$key": "$it.stars", "$dir": "desc" },
+    { "$key": "$it.title", "$empty": "greatest" },
+    { "$key": "$it.pid", "$dir": "desc" }
+  ],
+  "take": 2,
+  "skip": 1,
+  "include": {
+    "comments": {
+      "orderBy": ["$it.postId", { "$key": "$it.text", "$dir": "desc" }],
+      "take": 5,
+      "skip": 1
+    }
+  }
+}
+```
+
+One term is written as the bare key and the rest as `{ $key, … }`,
+because the spec form is what carries a direction, an empty-ordering or
+a collation and the bare form is what a plain ascending key needs. The
+rule is mechanical: a term with nothing but a key IS the key. Note the
+second term — `thenBy(key, { empty: 'greatest' })` — carries `$empty`
+and no `$dir`, since ascending is the default and §1.1's no-defaults
+rule is the chain's too.
+
+### 3.4 A bracketed pick, a two-level include, and `asNoTracking()`
+
+```js
+import { open } from '@jarenjs/linq/db';
+import * as m from '@jarenjs/linq/model';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const User = m.object({
+  id: m.string().identity('uuid'),
+  email: m.string().email(),
+  posts: m.rel.hasMany('Post', { via: 'authorId', onDelete: 'cascade' }),
+  labels: m.rel.belongsToMany('Label'),
+});
+const Post = m.object({
+  pid: m.integer().identity('auto'),
+  title: m.string(),
+  stars: m.integer(),
+  authorId: m.string(),
+  author: m.rel.hasOne('User', { via: 'authorId', onDelete: 'cascade' }),
+  comments: m.rel.hasMany('Comment', { via: 'postId', onDelete: 'cascade' }),
+});
+const Comment = m.object({ cid: m.integer().identity('auto'), text: m.string(), postId: m.integer() });
+const Label = m.object({ name: m.string().key() });
+const entities = { User, Post, Comment, Label };
+const client = await open(m.defineModel({ entities }), { driver: nodeDriver() });
+
+// a member picked by its bracketed name (u.get('labels')), a two-level include
+// over the TARGET's relation table, and asNoTracking() — which changes the load,
+// never the document
+export const graph = client.entities.User
+  .include((u) => u.get('labels'))
+  .include((u) => u.posts, { include: { comments: { where: (c) => c.text.ne(''), take: 3 } } })
+  .asNoTracking();
+```
+```json
+{
+  "include": {
+    "labels": true,
+    "posts": { "include": { "comments": { "where": { "$ne": ["$it.text", ""] }, "take": 3 } } }
+  }
+}
+```
+
+`u.get('labels')` and `u.labels` capture the same member. The bracketed
+spelling exists for a member whose name collides with a method of the
+recording proxy — `at`, `get`, `all`, `count` and their kin — where the
+plain read would answer the proxy's function instead of recording a
+path. A model that names a relation `count` needs `u.get('count')`, and
+nothing else about it changes.
+
+`asNoTracking()` is absent from the emitted spec, and that is correct:
+it selects `set.asNoTracking().load(spec)` over `set.load(spec)`, which
+is a choice about the unit of work rather than about the query. Two
+graphs that differ only in it are one document.
 
 ## 4. Refusals
 
-The client raises these `LinqBuildError` codes and no others —
+The client raises these two `LinqBuildError` codes and no others —
 `test/linq/pen-docs.test.js` holds this list equal, in both directions,
-to the codes `packages/linq/src/db/` throws. The full condition each
-code states across every pen is the binder's,
+to the codes `packages/linq/src/db/` names. The full condition each code
+states across every pen is the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3.
 
 | Code | What this pen raises it for |
 |---|---|
-| `JL0101` | a value this pen cannot spell, or a name → value map it cannot read |
+| `JL0101` | a value the client cannot put in a specification: a clause that is not a callback, a spec member the vocabulary does not carry, or a value that is not JSON |
 | `JL0107` | a member that is not the relation kind the operation needs |
 
-The message names the fix, and `docPath` is the JSON pointer of the node
-being assembled where the refusal has one.
+Every message below is the one the client raised when the spelling beside
+it was run, with the code prefix removed. None of them carries a
+`docPath`: a load specification's positions are named in the message text
+itself (`the include spec at posts.comments`), because a spec is not
+assembled node by node the way a pen's document is.
+
+Two codes the client does NOT raise, and a reader will meet both. `JL0004`
+and `JL0005` are the chain's, and they reach a graph unchanged — a load
+clause that binds an external is `JL0004` (`parameter 'x' is not
+declared`), and a `thenBy()` with no `orderBy` before it is `JL0005`.
+Everything the store's own vocabulary cannot carry is the store's
+refusal, raised where the store raises it: `JD0032` for a spec the load
+engine cannot translate, `JD2003` for a write or a membership target the
+store rejects, `JD0050` for a live query on a store opened without
+capture.
+
+### 4.1 `JL0101` — the clause and the spec member
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `include('posts')` | `include() takes a callback over the row, got a string` | `include((u) => u.posts)` |
+| `include((u) => u.posts, { wehre: 1 })` | `the include spec at posts does not take 'wehre' — the members are where, orderBy, take, skip, count, include` | `{ where: (p) => … }` |
+| `include((u) => u.posts, { after: 1 })` | `the include spec at posts does not take 'after' — the members are where, orderBy, take, skip, count, include; a keyset cursor paginates the root: after() on the graph` | `.after(cursor)` on the graph |
+| `include((u) => u.posts, 7)` | `the include spec at posts is true or { where?, orderBy?, take?, skip?, count?, include? }, got 7` | `true`, or a spec object |
+| `include((u) => u.posts, { count: 1 })` | `the include spec at posts: count takes true` | `{ count: true }` |
+| `include((u) => u.posts, { orderBy: 5 })` | `posts orderBy takes a key callback ((p) => p.stars) or { key, desc?, empty?, collation? }, got 5` | `{ orderBy: (p) => p.pid }` |
+| `include((u) => u.posts, { include: 3 })` | `include at posts is a record of relation members, got 3` | `{ include: { comments: true } }` |
+| `include((u) => u.posts, { take: new Date(0) })` | `posts take received a Date instance, which is not JSON — a document carries null, booleans, finite numbers (never -0), strings, arrays and plain objects, and nothing else` | `{ take: 2 }` |
+| `.orderBy(5)`, `.thenBy(5)`, `.thenByDescending(5)`, `.where(5)` | `orderBy() takes a callback over the row, got 5` | a callback |
+
+Rows two, three and four are one rule seen three ways, and they are held
+to each other: the member list the shape message shows is DERIVED from
+the same constant the member check reads, so the two cannot disagree.
+They did — the message named `after?` while the check refused `after` by
+name — and `test/linq/client.test.js` now reads the members out of the
+message and asserts the spec accepts every one of them, which is the
+check that would have caught it.
+
+### 4.2 `JL0107` — the relation kind
+
+`JL0107` is the client's own code — no pen raises it — and it has exactly
+two conditions, one per operation that reads the relation table.
+
+**`include()` picks a declared relation member.** The pick is captured to
+a member PATH and looked up; a scalar member, a name the model does not
+declare, or a callback that is not a bare member read is refused naming
+what the entity does declare.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `client.entities.User.include((u) => u.email)` | `'email' is not a relation member of 'User' — include() loads a declared relation ('posts', 'labels')` | `include((u) => u.posts)` |
+| `client.entities.User.include((u) => u.nope)` | `'nope' is not a relation member of 'User' — include() loads a declared relation ('posts', 'labels')` | a declared relation |
+| `client.entities.User.include((u) => u.age.ge(1))` | `include() picks one relation member of 'User' by name ((u) => u.posts); got an operator result` | a bare member read |
+| `include((u) => u.posts, { include: { nope: true } })` | `'nope' is not a relation member of 'Post' — a nested include loads a declared relation ('author', 'comments')` | a relation of the TARGET |
+
+The last row names `Post`'s relations rather than `User`'s, which is the
+whole point of resolving a nested include against the target's table: a
+reader who mistyped a member is shown the members that exist where they
+mistyped it.
+
+**`link()` and `unlink()` attach many-to-many memberships only.** The
+member must be a `manyToMany` relation of the entity; anything else is
+refused naming the kind it actually is, or the many-to-many members the
+entity does declare.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `client.entities.User.link('u1', 'posts', 1)` | `'posts' is a oneToMany relation of 'User' — link() attaches many-to-many memberships only; write the related entity's foreign key instead` | `post.authorId = 'u1'` and `put()` |
+| `client.entities.Post.link(1, 'author', 'u1')` | `'author' is a oneToOne relation of 'Post' — link() attaches many-to-many memberships only; write the related entity's foreign key instead` | write the foreign key |
+| `client.entities.User.unlink('u1', 'email', 'x')` | `'email' is not a relation member of 'User' — unlink() attaches a many-to-many membership ('labels')` | `unlink('u1', 'labels', 'admin')` |
+| `client.entities.Comment.link(1, 'nope', 'x')` | `'nope' is not a relation member of 'Comment' — link() attaches a many-to-many membership, and 'Comment' declares none` | declare a `belongsToMany` |
+
+The two messages differ in what they can name. When the member exists,
+the client knows its kind and says it; when it does not, the client lists
+the many-to-many members the entity has — or says plainly that it has
+none, which is the case where a caller is looking for a feature the model
+never declared.
+
+The store would refuse the same members itself (`JD2003`, MODEL-FORMAT
+§11.7); the client sees it earlier, from a table it already reads, and
+the check is mirrored rather than invented. What stays the store's is
+everything about the TARGET: a document with no key, and an own side
+whose `auto` key the save has not allocated yet (`JD2003`: "save the
+entity first, then attach").
 
 ## 5. The types
+
+The client is typed from the model pen's phantom with no cast and no
+generate step. `open()` reads `InferMeta<>` off a pen model; a JSON
+literal is never inferred, so a bare JSON model opens the honest wide map
+and a caller who has a generated map names it.
 
 ```ts
 import { open } from '@jarenjs/linq/db';
@@ -136,29 +563,161 @@ open<EntityMetaMap>(json, { driver });                 // a JSON model with a na
 open(json, { driver });                                // Client<Record<string, EntityMeta>> — a literal is never inferred
 ```
 
-The honest limits: `where`/`orderBy` inside an include are typed over
-the target entity but checked for translatability by the store, not by
-TypeScript; a `link` target is typed as the target's key or document,
-and the store's own reading of it applies (`JD2003` for a document
-without the key); a JSON model opened without a named map is the wide
-map — every name exists at the type level and an unknown one is
-`undefined` at run time; and the client's members mirror the store's
-presence, so a collections-only model has no `saveChanges` and no
-`live` (a compile error on a pen model, `undefined` on the wide map).
+### 5.1 `NoInfer` is what keeps a spec's callbacks typed
+
+`include<K, const I extends IncludeSpec<…> = true>(pick, spec?: I |
+NoInfer<IncludeSpec<…>>)` looks redundant and is not. `I` has to be
+inferred from the spec LITERAL, because `Loaded<>` reads it to widen the
+row; the callbacks inside that literal have to be contextually typed from
+`IncludeSpec`, because `(p) => p.stars.ge(3)` has no annotation. Without
+the `NoInfer` arm TypeScript fixes `I` to its default before it types
+them, and `p` arrives as `any` — which compiles, and silently stops
+catching the mistake the pin's third negative is about (`{ where: (p) =>
+p.email.eq('x') }` over a target that has no `email`).
+
+### 5.2 The auto key is in `required`, and the exemption is the store's
+
+`identity('auto')` emits `{ key: true, default: 'auto' }` and the member
+stays in the entity schema's `required`, because the model pen writes the
+schema of a STORED document. The write-time exemption is the store's
+(MODEL-FORMAT §9.6), and the types say the same from the other side:
+`generated` makes the member optional on `EntityInput` and required on
+`EntityDoc`. `create({ title, stars, authorId })` therefore type-checks
+with no `pid`, and every row that comes back has one. Spelling it
+`optional()` in the model to "fix" the emission would make the READ shape
+wrong — see [MODEL-PEN.md](MODEL-PEN.md) §5.
+
+### 5.3 Two `include` behaviours a reader meets at run time otherwise
+
+- **An include that is `skip`ped still renders.** `skip` is an include's
+  own member and the store runs it inside the subquery, so
+  `include((u) => u.posts, { skip: 1, take: 2 })` emits `{ take: 2, skip:
+  1 }` and loads the second and third rows. Empty is not absent either: a
+  `true` include that matched nothing renders `[]` and a `{ count: true }`
+  one renders `0`, so a `??` guard on an included member is dead code and
+  the widened type (`posts: Post[]`, `labels: number`) is honest.
+- **An include that arrives `after` is refused.** `after` is the one
+  window member an include does NOT take: a keyset cursor pages the root
+  and only the root, because the cursor is a key of the root entity and
+  there is one root per load. `{ after: 1 }` inside a spec is `JL0101`
+  naming the graph's own `after()` (§4.1); `.after(cursor)` on the graph
+  is the spelling that works, and the graph's `after` is typed `M['key']`
+  so a cursor of the wrong type does not compile.
+
+### 5.4 What the pin holds
+
+`test/consumer/linq-db.ts`, compiled by `npm run test:types`, proves over
+the model corpus: `open()` inferring `Client<Meta, {}>` from a pen model;
+the chain over a handle typed by the entity document, including a join
+between two handles; `include` widening the loaded rows by exactly what
+it included, two levels deep and through `asNoTracking()`; membership
+typed over the many-to-many members with the target as its key or its
+document; `live` rows typed by the chain's item; the pass-throughs and
+the escape hatch; the wide map and the named map; and a collection handle
+typed from the pen's collection schema.
+
+Nine negatives sit beside them, each of which FAILS the build the day it
+starts compiling:
+
+```ts
+void client.entities.Post.where((p) => p.strs.ge(3));        // a misspelled member
+void client.entities.User.include((u) => u.email);           // not a relation member
+void client.entities.User.include((u) => u.posts, { where: (p) => p.email.eq('x') });  // the target's shape
+void client.entities.Post.include((p) => p.author, { include: { nope: true } });       // the target's relations
+void client.entities.Post.include((p) => p.author).after('one');  // the cursor is the key's type
+client.entities.User.link('u1', 'posts', 1);                 // oneToMany is not a membership
+client.entities.Post.link(1, 'author', 'u1');                // oneToOne is not a membership
+client.entities.User.link('u1', 'labels', 42);               // the target's key type
+void places.saveChanges;                                     // a collections-only model has no unit of work
+void named.entities.Nope;                                    // the named map declares no such entity
+```
+
+The honest limits, stated where a reader will look for them:
+`where`/`orderBy` inside an include are typed over the target entity but
+checked for TRANSLATABILITY by the store, not by TypeScript, so
+`c.text.length().gt(1)` compiles and is `JD0032` at `explain()`; a `link`
+target is typed as the target's key or document and the store's own
+reading of it still applies (`JD2003` for a document carrying no key);
+and a JSON model opened without a named map is the wide map, where every
+name exists at the type level and an unknown one is `undefined` at run
+time.
 
 ## 6. What it cannot spell
 
-The client writes no document of its own — it hands the store a
-specification and reads back rows — so it has no construct set to refuse
-as unspellable and raises no `JL0102`. What it refuses instead is a
-member that is not the relation kind the operation needs (`JL0107`, §4),
-and everything the store's own vocabulary cannot carry is the store's
-refusal, raised where the store raises it.
+The client writes no document of its own, so it has no construct set to
+refuse as unspellable and raises no `JL0102`. This section is therefore
+about something else: what the client deliberately does not do, and where
+the edges of what it can express actually are.
+
+**It is not a second engine.** The store's planner, its unit of work, its
+translator and its live maintenance are `@jarenjs/db`'s, and nothing here
+reimplements one. `include` emits a specification and hands it over;
+`link` records through the store's own membership API;`live` calls the
+store's registration. The consequence a reader should expect is that a
+verdict about a query — is it translatable, is it one statement, is it
+incremental — comes from `explain()` and never from this document.
+
+**A join across two different sources is not expressible.** Two entity
+sets of one store join in one document, because they share a provider
+scope; a join between two STORES, or between a store and an array, would
+need one query document with two inputs and there is no such document.
+Three or more bindings the entity translator names a residual. Both are
+on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under `@jarenjs/linq &
+@jarenjs/db`, "Cross-source linq joins beyond one store".
+
+**A many-to-many join table is not a queryable root in this version.**
+`u.labels` as a chain HOP is `JL0105` — the join table has no root to
+bind, so there is no phrase to lower to — and the way to read a
+membership is `include`: `client.entities.User.include((u) => u.labels)`
+loads the rows and `{ count: true }` counts them. A question ABOUT the
+membership ("which pairs were attached since Friday") is reachable only
+by loading and then asking in JavaScript. The change that closes all of
+it is one change, on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under
+`@jarenjs/linq & @jarenjs/db`, "Join tables are not queryable roots".
+
+**A chain split by a host callback has no document to register.**
+`mapAsync` runs a JavaScript function per row, so the chain after it is
+not one query document; `live()` over such a chain is the chain's own
+`JL0005` naming the operator that split it. Register the part before the
+split, or write the document by hand.
+
+**The client is not the place a model is authored.** `open()` takes a
+`$model` document, from [MODEL-PEN.md](MODEL-PEN.md) or from JSON, and
+never builds one; the migration between two of them is
+[MIGRATION-PEN.md](MIGRATION-PEN.md)'s.
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **477,874 bytes** as a minified,
+`@jarenjs/linq/db` builds to **477,861 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
-measures and `npm run test:tree-shaking` reports, published rounded
-beside the other nine subpath prices in
-[docs/CONSUMING.md](../../../docs/CONSUMING.md). The store, the validator and the formats ride by construction — they are what the client opens — and no other pen does.
+measures and `npm run test:tree-shaking` reports, published rounded (478
+kB) beside the other nine subpath prices in
+[docs/CONSUMING.md](../../../docs/CONSUMING.md).
+
+It is by far the largest of the ten, and the reason is §1.1's edge rather
+than the client itself: the store, the validator and the formats ride by
+construction, because they are what the client opens. The client's own
+six modules are under 600 source lines. Taking `./db` means taking a SQL
+planner, a unit of work, a live-maintenance engine and a JSON Schema
+validator, and the honest way to read the figure is as the price of the
+database, not of the front door.
+
+What the probe asserts, and fails the build on:
+
+- **all three peers ride** — `@jarenjs/db`, `@jarenjs/validate` and
+  `@jarenjs/formats` each contribute bytes. This direction matters as
+  much as the exclusions: a bundle that had shaken one of them away
+  would mean the client had stopped opening a real store;
+- **no other pen** — not the contract, flow, app or forms pens, and no
+  `@jarenjs/emit` or `@jarenjs/refs` byte;
+- **the edge is droppable everywhere else** — the `.` entry (the chain,
+  172,668 bytes) carries no module of `packages/linq/src/db/` and not one
+  byte of the three peers, which is the tree-shaken proof that a
+  consumer of the chain or of any pen installs nothing new. The same
+  probe run over each pen's own bundle asserts the same exclusion.
+
+A consumer who wants the model pen's types without the store pays 40,718
+bytes for `./model` and installs no peer; one who wants to run queries
+against an array rather than a database pays the chain's 172,668 and
+installs no peer. `./db` is the one subpath whose `package.json` entry
+carries an optional peer at all.

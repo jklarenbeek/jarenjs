@@ -35,8 +35,15 @@ import { bundleSameDocument } from '../bundle.js';
 /**
  * A client as the tools read it — any binding's client. The members are
  * `any` so a client whose `invoke` narrows its own context type (the http
- * client's `InvokeContext`) still assigns.
- * @typedef {{ invoke: (op: string, input: any, ctx?: any) => any }} ToolClient
+ * client's `InvokeContext`) still assigns, and `invoke` is declared as a
+ * METHOD rather than as a function-valued property: a method's parameters
+ * are bivariant, so a client whose `invoke` narrows its OPERATION type to
+ * a literal union — `@jarenjs/linq/contract`'s `typedClient`, whose whole
+ * purpose is that narrowing — assigns here too. Under
+ * `strictFunctionTypes` the property form rejects it, and there is
+ * nothing to reject: this module only ever CALLS `invoke`, with an id it
+ * read out of the contract the client was opened on.
+ * @typedef {{ invoke(op: string, input: any, ctx?: any): any }} ToolClient
  */
 
 /**

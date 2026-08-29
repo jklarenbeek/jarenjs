@@ -56,6 +56,13 @@ const model = m.defineModel({ entities: { User, Post, Comment, Label } });
 const codeIs = (code, pattern = undefined) => (e) =>
   e.code === code && (pattern === undefined || pattern.test(e.message));
 
+/** The error a build raises, for a message a test reads rather than matches. */
+function refusalOf(build) {
+  try { build(); }
+  catch (err) { return /** @type {any} */ (err); }
+  return assert.fail('expected a refusal');
+}
+
 /** A counting shim: every statement execution counted. */
 function countedDriver(counters) {
   const db = new DatabaseSync(':memory:');
@@ -310,6 +317,19 @@ describe('include(): the emitted load spec, the one statement, the widened rows'
     assert.throws(() => users.include((u) => u.posts, /** @type {any} */ ({ include: 3 })), codeIs('JL0101', /record of relation members/));
     assert.throws(() => users.include((u) => u.posts, /** @type {any} */ ({ take: new Date(0) })), codeIs('JL0101', /Date/));
     assert.throws(() => users.include((u) => u.posts, /** @type {any} */ (7)), codeIs('JL0101'));
+    // the shape message and the member check must not disagree: the first
+    // listed `after?` while the second refused `after` by name, so a reader
+    // who believed the message met the refusal. The list is derived from
+    // INCLUDE_KEYS now, and this holds the two together.
+    const shape = refusalOf(() => users.include((u) => u.posts, /** @type {any} */ (7)));
+    const named = [...shape.message.matchAll(/(\w+)\?/g)].map((m) => m[1]);
+    assert.ok(named.length >= 5, `the shape message lists its members: ${shape.message}`);
+    for (const member of named) {
+      // an `undefined` value passes the member-SET check and is then skipped,
+      // so anything that throws here is a member the spec does not take
+      assert.doesNotThrow(() => users.include((u) => u.posts, /** @type {any} */ ({ [member]: undefined })),
+        `the shape message names '${member}', which the member check refuses`);
+    }
     assert.throws(() => users.include((u) => u.posts).thenBy((u) => u.email), codeIs('JL0005', /orderBy/));
     assert.throws(() => users.include((u) => u.posts).where(/** @type {any} */ ((u, p) => u.age.gt(p.min))), codeIs('JL0004'));
     // the store's: a count beside a take, a clause the load engine cannot translate

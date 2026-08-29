@@ -9,6 +9,7 @@
 // test/linq/contract-pen.test.js.
 import { compileContract } from '@jarenjs/contract';
 import { openLocalClient } from '@jarenjs/contract/local';
+import { contractTools } from '@jarenjs/contract/project';
 import type {
   ContractOf, Failure, HandlerContext, InvokableOf, InvokeContext, Meta, Outcome,
   SubscribableOf, TypedTool, WireError,
@@ -125,6 +126,18 @@ const shortHandlers = typedHandlers(Shop, { 'catalog.load': () => ({ revision: 1
 void shortHandlers;
 
 // ——— typedTools: a tool's name and its execute argument ———
+//
+// `contractTools` must take the TYPED client as well as the binding it
+// wrapped. Its `ToolClient` is structural and `typedClient` narrows
+// `invoke`'s operation type to a literal union — the pen's whole purpose —
+// so the property form of that typedef rejected the very client this pen
+// hands its user, and the spelling CONTRACT-PEN.md §5 shows did not
+// compile. Both spellings are pinned here because only one of them was.
+const toolsFromBinding = typedTools(contractTools(compiled, openLocalClient(compiled, handlers)), Shop);
+const toolsFromTypedClient = typedTools(contractTools(compiled, api), Shop);
+const toolNamesAgree: Equals<typeof toolsFromBinding, typeof toolsFromTypedClient> = true;
+void [toolsFromBinding, toolsFromTypedClient, toolNamesAgree];
+
 declare const rawTools: readonly unknown[];
 const tools: TypedTool<typeof Shop>[] = typedTools(rawTools, Shop);
 for (const tool of tools) {

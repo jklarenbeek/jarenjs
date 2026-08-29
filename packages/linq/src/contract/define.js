@@ -28,7 +28,7 @@ import { describeValue, requireJson, requireNameMap } from '../json-boundary.js'
 import { isSchemaBuilder } from '../schema/brand.js';
 import { createHoist, emitInto, hoistedDefs } from '../schema/emit.js';
 import { http as httpBinding, isHttpBinding } from './http.js';
-import { emitPolicy, isOperation, KINDS, readErrors } from './operation.js';
+import { checkOperation, emitPolicy, isOperation, KINDS, readErrors } from './operation.js';
 
 const CONTRACT_VERSION = '0.1';
 const HEAD_MEMBERS = ['id', 'version', 'compat'];
@@ -64,6 +64,14 @@ function schemaAt(value, ctx, at) {
  * The kind and spec of one declared operation: a `read()`/`command()`/
  * `subscribe()` declaration, or the same members written by hand with a
  * `kind`.
+ *
+ * The hand-written form is checked HERE by the same predicate the three
+ * declaration functions run, against its own position in the document.
+ * It is a second door into one emitter, and a door with no check behind
+ * it is worse than no door: an unknown member would be dropped in
+ * silence (the pen never sees it again, and the compiler never sees it
+ * at all), and a non-string `doc` would be written into a document
+ * `jaren-contract` refuses.
  * @param {any} declared
  * @param {string} at
  * @returns {{ kind: string, spec: any }}
@@ -80,6 +88,7 @@ function declarationOf(declared, at) {
       `${at}/kind`);
   }
   const { kind, ...spec } = declared;
+  checkOperation(kind, spec, at);
   return { kind, spec };
 }
 

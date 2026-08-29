@@ -255,27 +255,46 @@ export function readErrors(errors, at) {
 }
 
 /**
+ * One operation spec, checked against §3's member set. There are two
+ * doors into `defineContract`'s emitter and both run this: a
+ * `read()`/`command()`/`subscribe()` declaration, which has no position
+ * in the document yet, and an operation written by hand as `{ kind,
+ * …members }`, which does. A member this pen does not know must not
+ * reach the document whichever door it came through — the pen emits only
+ * what it was given, so an unchecked member is either dropped in silence
+ * or written into a document the grammar refuses.
+ * @param {string} kind
+ * @param {any} spec
+ * @param {string} [at] - the docPath of the operation being assembled;
+ *   absent at declaration, where the operation has no id yet
+ */
+export function checkOperation(kind, spec, at) {
+  const base = at ?? '';
+  if (!isPlainObject(spec)) {
+    throw new LinqBuildError('JL0101',
+      `${kind}() takes { input?, output, errors?, policy?, http?, doc? }, got `
+      + `${describeValue(spec)}`, at);
+  }
+  closedTo(spec, OPERATION_MEMBERS, `${kind}()`, base);
+  if (spec.output === undefined) {
+    throw new LinqBuildError('JL0101',
+      `${kind}() needs an output — every operation declares one (true for "any value")`,
+      `${base}/output`);
+  }
+  if (spec.doc !== undefined && typeof spec.doc !== 'string') {
+    throw new LinqBuildError('JL0101',
+      `${kind}() doc is a string, got ${describeValue(spec.doc)}`, `${base}/doc`);
+  }
+}
+
+/**
  * One operation declaration of `kind`.
  * @param {string} kind
  * @param {any} spec
  * @returns {any}
  */
 function operation(kind, spec) {
-  if (!isPlainObject(spec)) {
-    throw new LinqBuildError('JL0101',
-      `${kind}() takes { input?, output, errors?, policy?, http?, doc? }, got `
-      + `${describeValue(spec)}`);
-  }
-  closedTo(spec, OPERATION_MEMBERS, `${kind}()`, '');
-  if (spec.output === undefined) {
-    throw new LinqBuildError('JL0101',
-      `${kind}() needs an output — every operation declares one (true for "any value")`,
-      '/output');
-  }
-  if (spec.doc !== undefined && typeof spec.doc !== 'string') {
-    throw new LinqBuildError('JL0101',
-      `${kind}() doc is a string, got ${describeValue(spec.doc)}`, '/doc');
-  }
+  checkOperation(kind, spec);
   const out = { kind, spec };
   Object.defineProperty(out, OPERATION, { value: true, enumerable: false });
   return Object.freeze(out);

@@ -295,6 +295,40 @@ describe('the contract pen: the refusals it can see earlier than the compiler', 
     assert.match(err.reason, /read, command, subscribe/);
   });
 
+  it('a hand-written operation is checked exactly as a declaration is, at its own position', () => {
+    // `{ kind, …members }` is a second door into the same emitter. Before
+    // it ran the declaration's checks an unknown member was DROPPED (the
+    // pen never emitted it and the compiler never saw it) and a non-string
+    // `doc` was written into a document `jaren-contract` refuses.
+    const cases = [
+      [{ kind: 'read', output: true, extra: 1 }, /does not take 'extra'/, '/operations/a/extra'],
+      [{ kind: 'read', output: true, doc: 42 }, /doc is a string/, '/operations/a/doc'],
+      [{ kind: 'read' }, /needs an output/, '/operations/a/output'],
+    ];
+    for (const [declared, message, docPath] of cases) {
+      const err = refusal(() => defineContract({}, { a: declared }));
+      assert.strictEqual(err.code, 'JL0101', JSON.stringify(declared));
+      assert.match(err.reason, /** @type {RegExp} */ (message));
+      assert.strictEqual(err.docPath, docPath, 'the docPath is the operation\'s, not the spec\'s');
+    }
+    // the same three through the declaration door: same reasons, and the
+    // docPath is relative because a declaration has no id yet
+    for (const [spec, message, docPath] of [
+      [{ output: true, extra: 1 }, /does not take 'extra'/, '/extra'],
+      [{ output: true, doc: 42 }, /doc is a string/, '/doc'],
+      [{}, /needs an output/, '/output'],
+    ]) {
+      const err = refusal(() => read(/** @type {any} */ (spec)));
+      assert.strictEqual(err.code, 'JL0101');
+      assert.match(err.reason, /** @type {RegExp} */ (message));
+      assert.strictEqual(err.docPath, docPath);
+    }
+    // and a well-formed hand-written operation still emits and compiles
+    const doc = defineContract({}, { a: { kind: 'read', output: true, doc: 'ok' } }).document;
+    assert.deepStrictEqual(doc.operations.a, { kind: 'read', output: true, doc: 'ok' });
+    assert.doesNotThrow(() => compileContract(doc));
+  });
+
   it('a value that is not JSON is JL0101', () => {
     assert.strictEqual(refusal(() => defineContract({}, {
       a: read({ output: { type: 'string', default: () => 1 } }),

@@ -134,8 +134,12 @@ function lowerInclude(spec, entityName, relationsOf, path) {
   if (spec === undefined || spec === true) return true;
   const at = path.join('.');
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
+    // the member list is DERIVED from the same constant the check below
+    // reads: typed out, it named `after` — a member that check refuses —
+    // and a reader who believed the first message met the second
     throw new LinqBuildError('JL0101',
-      `the include spec at ${at} is true or { where?, orderBy?, take?, skip?, after?, count?, include? }, got ${describeValue(spec)}`);
+      `the include spec at ${at} is true or `
+      + `{ ${INCLUDE_KEYS.map((key) => `${key}?`).join(', ')} }, got ${describeValue(spec)}`);
   }
   for (const key of Object.keys(spec)) {
     if (!INCLUDE_KEYS.includes(key)) {
@@ -175,7 +179,7 @@ function lowerIncludes(includes, entityName, relationsOf, path) {
   const relations = relationsOf(entityName) ?? {};
   const out = {};
   for (const member of Object.keys(includes)) {
-    const { entry } = requireRelation(relations, entityName, member, 'include');
+    const { entry } = requireRelation(relations, entityName, member, 'a nested include');
     setObjectMember(out, member, lowerInclude(includes[member], entry.to, relationsOf, [...path, member]));
   }
   return out;
@@ -254,7 +258,7 @@ export class Graph {
 
   /** @param {(it: any) => any} key @param {{ empty?: string, collation?: string }} [options] */
   thenByDescending(key, options) {
-    return this.#then(orderTerm(key, true, options, 'thenByDescending'), 'thenByDescending');
+    return this.#then(orderTerm(key, true, options, 'thenByDescending()'), 'thenByDescending');
   }
 
   /** @param {any} term @param {string} what */

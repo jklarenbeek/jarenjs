@@ -120,7 +120,7 @@ misleading a reader:
 | `./model` | <!--bundle:linq-model-->41 kB | the schema pen it subclasses |
 | `./jslt` | <!--bundle:linq-jslt-->19 kB | the body capture; of the schema pen, only the builder brand |
 | `./migration` | <!--bundle:linq-migration-->24 kB | the canonicalizer and hash a shape identity needs |
-| `./contract` | <!--bundle:linq-contract-->44 kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./contract` | <!--bundle:linq-contract-->45 kB | the schema pen (a contract's inputs and outputs are schemas) |
 | `./flow` | <!--bundle:linq-flow-->19 kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--bundle:linq-app-->47 kB | the schema pen and the JSLT pen (state, and views) |
 | `./forms` | <!--bundle:linq-forms-->36 kB | the schema pen it subclasses |
