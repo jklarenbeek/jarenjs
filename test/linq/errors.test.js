@@ -90,7 +90,8 @@ describe('every JL code fires', () => {
   });
 
   it('JL0101 — a pen received a value it cannot spell', () => {
-    // not JSON: the constant rule of QUERY-PEN §3, applied to defaults and literals
+    // not JSON: the constant rule of QUERY-PEN §5 ('a captured constant crosses a
+    // real JSON boundary'), applied to defaults and literals
     assert.throws(() => s.literal(new Date(0)), (e) => e instanceof LinqBuildError && e.code === 'JL0101' && /Date instance/.test(e.message));
     assert.throws(() => s.string().default(() => 'x'), (e) => e.code === 'JL0101' && /function/.test(e.message));
     assert.throws(() => s.enumOf([1, NaN]), (e) => e.code === 'JL0101');
@@ -178,6 +179,33 @@ describe('every JL code fires', () => {
     queue.end();
     assert.throws(() => queue.feed(1),
       (e) => e instanceof LinqRuntimeError && e.code === 'JL2005' && /closed/.test(e.message));
+  });
+
+  it('a refusal names the value the caller wrote, -0 included', () => {
+    // `String(-0)` is '0', so the message named a DIFFERENT number than
+    // the one refused — and a reader who greps their source for the
+    // literal the message names finds the wrong one. Both doors are
+    // pinned: the pens' JSON boundary and the chain's parameter check.
+    assert.throws(() => s.number().default(-0),
+      (e) => e.code === 'JL0101' && /received -0, which is not JSON/.test(e.message));
+    assert.throws(() => from([]).params({ z: -0 }),
+      (e) => e.code === 'JL0004' && /bound to -0, which is not query data/.test(e.message));
+    // and the ordinary numbers still read as themselves
+    assert.throws(() => s.number().default(NaN),
+      (e) => e.code === 'JL0101' && /received NaN/.test(e.message));
+    assert.throws(() => from([]).params({ z: Infinity }),
+      (e) => e.code === 'JL0004' && /bound to Infinity/.test(e.message));
+  });
+
+  it('a refused type reads as English: an undefined value, a symbol value', () => {
+    // `typeof undefined` IS 'undefined', so the guard that was meant to
+    // fix the article compared a string with itself and did nothing.
+    assert.throws(() => from([1]).select(() => undefined).toDocument(),
+      (e) => e.code === 'JL0005' && /cannot embed an undefined value/.test(e.message));
+    assert.throws(() => from([1]).select(() => Symbol('s')).toDocument(),
+      (e) => e.code === 'JL0005' && /cannot embed a symbol value/.test(e.message));
+    assert.throws(() => from([1]).select(() => 1n).toDocument(),
+      (e) => e.code === 'JL0005' && /cannot embed a bigint value/.test(e.message));
   });
 
   it('LINQ_CODES is frozen and covers exactly the raised codes', () => {

@@ -141,7 +141,7 @@ export class AsyncSequence {
    * @param {(sink: ReturnType<typeof createHopSink>) => readonly any[]} [rootsOf]
    * @returns {{ expression: any, hops: readonly any[] }}
    */
-  #capture(fn, rootsOf = (sink) => [rowRoot('it', this.#relations, sink)]) {
+  #capture(fn, rootsOf = (sink) => [this.#rowRoot('it', sink)]) {
     if (typeof fn !== 'function') {
       throw new LinqBuildError('JL0005', 'this operator takes a callback function');
     }
@@ -150,9 +150,19 @@ export class AsyncSequence {
     return { expression, hops: sink.hops };
   }
 
+  /** Whether this sequence's items are a `groupBy`'s `{ key, items }`,
+   * as on the synchronous surface. */
+  #grouped() {
+    for (let i = this.#stages.length - 1; i >= 0; i--) {
+      const kind = this.#stages[i].kind;
+      if (PROJECTING_STAGES.has(kind) || kind === 'mapAsync') return kind === 'groupBy';
+    }
+    return false;
+  }
+
   /** @param {string} name @param {ReturnType<typeof createHopSink>} sink */
   #rowRoot(name, sink) {
-    return rowRoot(name, this.#relations, sink);
+    return rowRoot(name, this.#relations, sink, this.#grouped());
   }
 
   /** The relation hops every stage's callbacks navigated, in order. */

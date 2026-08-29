@@ -26,6 +26,7 @@
  */
 
 import { LinqBuildError } from './errors.js';
+import { GROUP_ITEMS } from './document.js';
 
 /** The unwrap key: proxy → its internal record. */
 const NODE = Symbol('jaren-linq-node');
@@ -159,7 +160,8 @@ export function requireJsonBinding(name, value) {
   if (isPlainJson(value)) return;
   const what = value !== null && typeof value === 'object'
     ? `a ${value.constructor?.name ?? 'non-plain'} instance`
-    : typeof value === 'number' ? String(value) : `a ${typeof value}`;
+    : typeof value === 'number' ? (Object.is(value, -0) ? '-0' : String(value))
+      : `a ${typeof value}`;
   throw new LinqBuildError('JL0004',
     `parameter '${name}' is bound to ${what}, which is not query data — convert it `
     + 'first (a Date to its ISO string or epoch number, a Map to an object, NaN or -0 to a number)');
@@ -247,7 +249,9 @@ export function toExpression(value, fold = true) {
     return out;
   }
   throw new LinqBuildError('JL0005',
-    `a captured expression cannot embed a ${t === 'undefined' ? 'undefined' : t} value`);
+    // `typeof undefined` IS 'undefined', so the two arms of the article
+    // are what differ here — not the noun
+    `a captured expression cannot embed ${t === 'undefined' ? 'an' : 'a'} ${t} value`);
 }
 
 /** Binary operator helper. @param {string} op */
@@ -461,7 +465,7 @@ const METHODS = {
       // method name (`get('count')`), not a stored member of that name
       if (navigates(record, name)) return startHop(record, name);
       if (record.hop !== undefined) return extendHop(record, bracketName(name));
-      if (record.pathable) return makeExpr(`${record.doc}${bracketName(name)}`, record.epoch, true);
+      if (record.pathable) return pathStep(record, name, bracketName(name));
     }
     return makeExpr({ $get: [record.doc, toExpression(name)] }, record.epoch, false);
   },
@@ -638,18 +642,24 @@ export function createHopSink() {
 
 /**
  * A binding root whose items are an entity's rows: the bare name when
- * there is no relation table to navigate, else the root record carrying
- * the table, the resolver for the other roots of its scope, and the
- * capture's sink.
+ * there is nothing to carry, else the root record with the relation
+ * table, the resolver for the other roots of its scope, the capture's
+ * sink, and — after a `groupBy` — the member the group's rows live in.
  * @param {string} name - the binding (`it`, `it2`)
  * @param {{ table: any, resolve: (name: string) => any } | null} relations
  * @param {ReturnType<typeof createHopSink>} sink
+ * @param {boolean} [grouped] - whether the items are a `{ key, items }`
+ *   group, whose `items` aggregate as rows ({@link pathStep})
  * @returns {any}
  */
-export function rowRoot(name, relations, sink) {
-  return relations === null
-    ? name
-    : { doc: '$' + name, pathable: true, nav: { table: relations.table, resolve: relations.resolve, sink } };
+export function rowRoot(name, relations, sink, grouped = false) {
+  if (relations === null && !grouped) return name;
+  const root = { doc: '$' + name, pathable: true };
+  if (grouped) root.group = GROUP_ITEMS;
+  if (relations !== null) {
+    root.nav = { table: relations.table, resolve: relations.resolve, sink };
+  }
+  return root;
 }
 
 /**
@@ -675,18 +685,22 @@ export function groupRoot(relations, sink) {
  * @param {number} epoch - the owning capture
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
- * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any }} [extra] -
+ * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
+ *   group?: string }} [extra] -
  *   `seq`: for a value standing for an array or a hop, the fanned form
  *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
  *   relation table of the rows the value stands for, with the resolver
  *   for the other roots and the capture's hop sink; `navOnFan`: the
- *   table applies to the fan, not the value; `hop`: the hop chain
+ *   table applies to the fan, not the value; `hop`: the hop chain;
+ *   `group`: the member this value carries a GROUP's rows in, whose
+ *   aggregates therefore range over the rows
  * @returns {any}
  */
 function makeExpr(doc, epoch, pathable, extra = undefined) {
   const record = {
     doc, epoch, pathable,
     seq: extra?.seq, nav: extra?.nav, navOnFan: extra?.navOnFan === true, hop: extra?.hop,
+    group: extra?.group,
   };
   return new Proxy(record, {
     get(target, prop) {
@@ -715,8 +729,26 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
 function member(target, prop) {
   if (navigates(target, prop)) return startHop(target, prop);
   if (target.hop !== undefined) return extendHop(target, memberSegment(prop));
-  if (target.pathable) return makeExpr(`${target.doc}${memberSegment(prop)}`, target.epoch, true);
+  if (target.pathable) return pathStep(target, prop, memberSegment(prop));
   return makeExpr({ $get: [target.doc, prop] }, target.epoch, false);
+}
+
+/**
+ * One path step off a pathable value, member access or `get()`.
+ *
+ * A GROUP's rows aggregate as rows: after `groupBy` the item is
+ * `{ key, items }` and `items` holds the group, so `g.items.count()`
+ * ranges over the rows the way a group-join's `g.count()` already does
+ * ({@link groupRoot}). `g.items` itself is still the array — a member
+ * takes it whole (`{ matches: g.items }`), `at()` indexes it and
+ * `all()` fans it — so only the aggregates change, and only for the one
+ * member the emitter writes the group into.
+ * @param {any} target @param {string|number} prop @param {string} segment
+ */
+function pathStep(target, prop, segment) {
+  const doc = `${target.doc}${segment}`;
+  return makeExpr(doc, target.epoch, true,
+    target.group === prop ? { seq: `${doc}[*]` } : undefined);
 }
 
 /**

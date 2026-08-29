@@ -123,7 +123,7 @@ misleading a reader:
 | `./contract` | <!--bundle:linq-contract-->45 kB | the schema pen (a contract's inputs and outputs are schemas) |
 | `./flow` | <!--bundle:linq-flow-->19 kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--bundle:linq-app-->47 kB | the schema pen and the JSLT pen (state, and views) |
-| `./forms` | <!--bundle:linq-forms-->36 kB | the schema pen it subclasses |
+| `./forms` | <!--bundle:linq-forms-->37 kB | the schema pen it subclasses |
 | `./db` | <!--bundle:linq-db-->478 kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store

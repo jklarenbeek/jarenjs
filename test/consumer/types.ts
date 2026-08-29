@@ -963,6 +963,17 @@ void asyncUntyped;
 // @ts-expect-error — a root is a path expression string
 void linqFrom({ root: 42, execute: linqProvider.execute });
 
+// the two operators §4 records as `unsupported` do not compile. A
+// `never` RETURN alone is half an encoding — order 06 settled that for
+// the pens' `never()` builders — so `zip` takes a `never` PARAMETER and
+// neither spelling reaches the run-time `JL0006`, on either surface.
+// @ts-expect-error — zip is unsupported: no positional co-iteration
+void linqFrom(linqUsers).zip();
+// @ts-expect-error — and passing something does not help
+void linqFrom(linqUsers).zip(linqUsers);
+// @ts-expect-error — aggregate needs a seed: JSON cannot spell the implicit first element
+void linqFrom(linqUsers).aggregate((acc: unknown) => acc);
+
 // @jarenjs/linq — the async surface: promise terminals, the typed
 // mapAsync re-typing, the split-aware explain
 import { fromAsync, createPushQueue } from '@jarenjs/linq';

@@ -163,6 +163,13 @@ const chainResult = await build({
 const chainBytes = chainResult.outputFiles[0].contents.length;
 linqBundles.set('chain', chainBytes);
 const chainInputs = Object.values(chainResult.metafile.outputs)[0].inputs;
+// What of the chain bundle is the CHAIN, and what is the engine under
+// it. QUERY-PEN.md §17 publishes both, because "173 kB" alone reads as
+// the price of the fluent surface when it is mostly the price of running
+// a query at all.
+const chainOwnBytes = Object.entries(chainInputs)
+  .filter(([file]) => file.includes('packages/linq/src/'))
+  .reduce((total, [, info]) => total + info.bytesInOutput, 0);
 const penLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/schema/') && info.bytesInOutput > 0);
 if (penLeak.length > 0)
@@ -183,6 +190,34 @@ if (chainBytes > 180000)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
+
+// The chain and a pen SHARE the expression capture and the coded errors,
+// and a bundler counts a shared module once — so the two figures do not
+// add up, and QUERY-PEN.md §17 says by how much. Measured rather than
+// asserted: the saving moves whenever `expression.js` does.
+const chainPairResult = await build({
+  stdin: {
+    contents: "import { from } from '@jarenjs/linq'; import * as s from '@jarenjs/linq/schema'; "
+      + "export const both = [from([1]).toArray(), s.object({ id: s.string() }).schema];",
+    resolveDir: process.cwd(),
+    sourcefile: 'chain-and-schema-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+const chainPairBytes = chainPairResult.outputFiles[0].contents.length;
+const chainSharedBytes = chainBytes + schemaBytes - chainPairBytes;
+if (chainSharedBytes <= 0)
+  throw new Error(`The chain and the schema pen share nothing (${chainPairBytes} bytes together).`);
+
+console.log(`Tree-shaking smoke test passed (${chainOwnBytes} of the chain bundle's `
+  + `${chainBytes} bytes are the chain's own modules; with the schema pen it is `
+  + `${chainPairBytes}, sharing ${chainSharedBytes}).`);
 
 // The model pen (`@jarenjs/linq/model`) subclasses the schema pen: a
 // model-only bundle carries the schema pen's classes and no chain module,
@@ -625,8 +660,9 @@ console.log(`Tree-shaking smoke test passed (docs/CONSUMING.md states all ${linq
 // not, so 0.52.7's schema-pen change moved five of them 157 bytes out of
 // date at once and nothing said so. Same rule as the table: the number is
 // derived, never typed, and a stale one is red here rather than wrong in
-// a document somebody reads. The chain has no Cost section (QUERY-PEN.md
-// keeps its own twelve, D2) and is not in the map.
+// a document somebody reads. The chain's own document is checked below
+// the loop: it carries four figures, not one, and its Cost section is
+// numbered §17.
 const PEN_DOCS = new Map([
   ['schema', 'SCHEMA-PEN.md'], ['model', 'MODEL-PEN.md'], ['jslt', 'JSLT-PEN.md'],
   ['migration', 'MIGRATION-PEN.md'], ['db', 'DB-CLIENT.md'], ['contract', 'CONTRACT-PEN.md'],
@@ -649,10 +685,25 @@ for (const [name, file] of PEN_DOCS) {
     drifted.push(`${file} §7 states ${stated[1]} bytes, measured ${grouped(bytes)}`);
   }
 }
+
+// The chain's document keeps its own twelve sections (D2 forbids
+// renumbering it), so its Cost section is §17 — and it publishes FOUR
+// figures rather than one: the bundle, the chain's own modules inside
+// it, the bundle a consumer taking the schema pen as well pays, and what
+// the two share. All four are read in the order the section states them.
+const chainDoc = readFileSync('packages/linq/docs/QUERY-PEN.md', 'utf8');
+const chainCost = chainDoc.slice(chainDoc.indexOf('\n## 17. Cost') + 1);
+const chainStated = [...chainCost.matchAll(/\*\*([\d,]+) bytes\*\*/g)].map((m) => m[1]);
+const chainExpected = [chainBytes, chainOwnBytes, chainPairBytes, chainSharedBytes].map(grouped);
+if (chainStated.join(' | ') !== chainExpected.join(' | ')) {
+  drifted.push(`QUERY-PEN.md §17 states ${chainStated.join(', ') || '(nothing)'}, `
+    + `measured ${chainExpected.join(', ')}`);
+}
+
 if (drifted.length > 0) {
   throw new Error('a pen document\'s §7 Cost figure is stale:\n  '
     + drifted.join('\n  ') + '\nRefresh the figure; it is measured, never typed.');
 }
 
 console.log(`Tree-shaking smoke test passed (${PEN_DOCS.size} pen documents state their §7 Cost `
-  + 'in bytes, each equal to the bundle measured here).');
+  + `in bytes and QUERY-PEN.md its §17's four, each equal to a bundle measured here).`);

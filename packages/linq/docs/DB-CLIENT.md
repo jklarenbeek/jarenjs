@@ -688,7 +688,7 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **477,861 bytes** as a minified,
+`@jarenjs/linq/db` builds to **478,172 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded (478
 kB) beside the other nine subpath prices in
@@ -711,13 +711,14 @@ What the probe asserts, and fails the build on:
 - **no other pen** — not the contract, flow, app or forms pens, and no
   `@jarenjs/emit` or `@jarenjs/refs` byte;
 - **the edge is droppable everywhere else** — the `.` entry (the chain,
-  172,668 bytes) carries no module of `packages/linq/src/db/` and not one
-  byte of the three peers, which is the tree-shaken proof that a
-  consumer of the chain or of any pen installs nothing new. The same
-  probe run over each pen's own bundle asserts the same exclusion.
+  priced in [QUERY-PEN.md](QUERY-PEN.md) §17) carries no module of
+  `packages/linq/src/db/` and not one byte of the three peers, which is
+  the tree-shaken proof that a consumer of the chain or of any pen
+  installs nothing new. The same probe run over each pen's own bundle
+  asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays 40,718
 bytes for `./model` and installs no peer; one who wants to run queries
-against an array rather than a database pays the chain's 172,668 and
-installs no peer. `./db` is the one subpath whose `package.json` entry
+against an array rather than a database pays the chain's price (§17 of
+[QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is the one subpath whose `package.json` entry
 carries an optional peer at all.

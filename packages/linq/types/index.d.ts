@@ -293,8 +293,13 @@ export interface ArrayExpr<E> extends ExprBase<E[]>, SeriesMethods, SpatialMetho
    * computed index is an expression — the engine's `$get` — which is
    * what an app-pen patch path lowers to a `$concat` pointer. */
   at(index: number | NumberExpr): Expr<E>;
-  /** `$count` over the fanned elements requires `all()` first; this
-   * counts the ARRAY as one item — see the format doc. */
+  /** `$count`. Over a GROUP — a `groupBy`'s `items`, a group-join's
+   * group — this is the number of rows, because the chain knows those
+   * are rows and fans them (QUERY-PEN.md §13.3). Over an array a caller
+   * stored, it counts the array as one item, because at capture time an
+   * array member and a scalar member are the same path: fan it first
+   * (`u.tags.all().count()`), or ask `exists()` what this would
+   * otherwise be answering. */
   count(): NumberExpr;
   /** Cosine similarity to another vector (§8.15): a captured array
    * embeds as a literal, a `params()` binding stays an external. Only a
@@ -567,8 +572,12 @@ export class Sequence<T = unknown, P = {}> {
   cast<S>(schema: SchemaBuilder<S, any, any>): Sequence<S, P>;
   cast<S = unknown>(schema: object): Sequence<S, P>;
 
-  /** Recorded unsupported: throws `JL0006`. */
-  zip(...args: never[]): never;
+  /** Recorded unsupported (§4, §16): the grammar has no positional
+   * co-iteration. The parameter is `never`, not just the return type:
+   * a rest parameter accepts zero arguments, so `q.zip()` — the one
+   * spelling a caller would actually write — type-checked and failed at
+   * run time instead. JavaScript callers still get `JL0006`. */
+  zip(unsupported: never): never;
 
   params<Q extends Record<string, unknown>>(bindings: Q): Sequence<T, P & Q>;
 
@@ -708,7 +717,8 @@ export class AsyncSequence<T = unknown, P = {}> {
   ofType<S = unknown>(schema: object): AsyncSequence<S, P>;
   cast<S>(schema: SchemaBuilder<S, any, any>): AsyncSequence<S, P>;
   cast<S = unknown>(schema: object): AsyncSequence<S, P>;
-  zip(...args: never[]): never;
+  /** Recorded unsupported, as on the synchronous surface. */
+  zip(unsupported: never): never;
   params<Q extends Record<string, unknown>>(bindings: Q): AsyncSequence<T, P & Q>;
 
   /** The bounded-concurrency boundary (§11): re-types the element to

@@ -11,7 +11,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { from } from '@jarenjs/linq';
+import { from, fromAsync } from '@jarenjs/linq';
 import { compileJsonQuery } from '@jarenjs/json/query';
 
 const USERS = [
@@ -125,6 +125,49 @@ describe('the mapping table, native row by native row', () => {
     assert.strictEqual(groups.length, 2);
     assert.deepStrictEqual(groups[0].key, true);
     assert.deepStrictEqual(groups[0].items.map((u) => u.id), [1, 3]);
+  });
+
+  it("a group's items aggregate as ROWS, and the array stays an array", async () => {
+    // The rule a group-JOIN's group has always kept, now kept by a
+    // group-BY's `items` too: an aggregate over the group counts the
+    // rows. `g.items` on its own is still the packed array — a member
+    // takes it whole, `at()` indexes it, `all()` fans it — so only the
+    // aggregates moved, and only for the member the emitter writes the
+    // group into.
+    const orders = [
+      { id: 1, city: 'Delft', total: 12 },
+      { id: 2, city: 'Delft', total: 30 },
+      { id: 3, city: 'Gouda', total: 7 },
+    ];
+    const q = from(orders).groupBy((o) => o.city)
+      .select((g) => ({ city: g.key, rows: g.items.count() }));
+    assert.deepStrictEqual(q.toDocument().$return.rows, { $count: '$it.items[*]' },
+      'the aggregate ranges over the fan, not over the one array value');
+    assert.deepStrictEqual(q.toArray(),
+      [{ city: 'Delft', rows: 2 }, { city: 'Gouda', rows: 7 - 6 }]);
+
+    // get() is the same step, so the escape agrees with the member
+    assert.deepStrictEqual(from(orders).groupBy((o) => o.city)
+      .select((g) => g.get('items').count()).toArray(), [2, 1]);
+
+    // the array itself is untouched, in the document and in the answer
+    const whole = from(orders).groupBy((o) => o.city)
+      .select((g) => ({ city: g.key, rows: g.items, first: g.items.at(0).id }));
+    assert.deepStrictEqual(whole.toDocument().$return.rows, '$it.items');
+    assert.deepStrictEqual(whole.toArray().map((r) => [r.rows.length, r.first]), [[2, 1], [1, 3]]);
+
+    // and an explicit fan still reads the same, member and all
+    assert.deepStrictEqual(from(orders).groupBy((o) => o.city)
+      .select((g) => g.items.all().total.sum()).toArray(), [42, 7]);
+
+    // the two surfaces agree, as they must
+    assert.deepStrictEqual(await fromAsync(orders).groupBy((o) => o.city)
+      .select((g) => g.items.count()).toArray(), [2, 1]);
+
+    // an array a CALLER stored is not a group: at capture time it is a
+    // path like any other, so it counts as one item until it is fanned
+    assert.deepStrictEqual(from([{ tags: ['a', 'b'] }])
+      .select((u) => [u.tags.count(), u.tags.all().count()]).toArray(), [[1, 2]]);
   });
 
   it('join → nested $for + $where equality (the hash-join shape)', () => {

@@ -84,11 +84,26 @@ export class Sequence {
       this.#stages, params, this.#options, this.#relations);
   }
 
+  /** Whether this sequence's items are a `groupBy`'s `{ key, items }`
+   * — the last stage that reseated them was the grouping. Read from the
+   * stages rather than carried, so it cannot fall out of step with what
+   * the emitter writes. */
+  #grouped() {
+    for (let i = this.#stages.length - 1; i >= 0; i--) {
+      if (PROJECTING_STAGES.has(this.#stages[i].kind)) {
+        return this.#stages[i].kind === 'groupBy';
+      }
+    }
+    return false;
+  }
+
   /** The `it` (or `it2`) root of a capture over this sequence's items:
-   * an entity's rows carry their relation table, so a relation name hops.
+   * an entity's rows carry their relation table, so a relation name
+   * hops; a group's rows carry their member, so `g.items` aggregates as
+   * rows.
    * @param {string} name @param {ReturnType<typeof createHopSink>} sink */
   #rowRoot(name, sink) {
-    return rowRoot(name, this.#relations, sink);
+    return rowRoot(name, this.#relations, sink, this.#grouped());
   }
 
   /** The group root of a group-join over this sequence's items as the

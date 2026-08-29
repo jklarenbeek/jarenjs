@@ -3,7 +3,8 @@
  * @file The JSON boundary every value entering a pen's document crosses
  * (`JL0101`): a default, a literal, an annotation, a hand-written
  * schema or query document, a mode name, a priority. One predicate for
- * every pen — the constant rule of QUERY-PEN §3, applied at the door:
+ * every pen — the constant rule of QUERY-PEN §5 ('a captured constant
+ * crosses a real JSON boundary'), applied at the door:
  * null, booleans, finite numbers (never `-0`), strings, arrays and plain
  * objects, and nothing else — a function, symbol, bigint, `NaN`,
  * `±Infinity`, a class instance or a cycle is refused by name.
@@ -33,10 +34,14 @@ function hasNegativeZero(value) {
   return Object.keys(value).some((key) => hasNegativeZero(value[key]));
 }
 
-/** What a refused value is, for a message. @param {any} value */
+/** What a refused value is, for a message. `-0` is spelled out: it is
+ * the one value whose `String()` names a DIFFERENT value (`'0'`), so a
+ * reader who greps their source for the literal the message names would
+ * find the wrong one — and it is exactly the value the tail of the
+ * message goes on to forbid by name. @param {any} value */
 export function describeValue(value) {
   if (value === null) return 'null';
-  if (typeof value === 'number') return String(value);
+  if (typeof value === 'number') return Object.is(value, -0) ? '-0' : String(value);
   if (isExpression(value)) return 'an expression'; // a proxy: reading `.constructor` would record a path
   if (typeof value === 'object') return `a ${value.constructor?.name ?? 'non-plain'} instance`;
   return `a ${typeof value}`;

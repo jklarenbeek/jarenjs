@@ -810,17 +810,6 @@ what each does is its own documentation's job
   run, a tree-shaking probe carrying neither chain module nor engine, a
   packed-consumer subpath and a type pin. A JTLT order additionally
   carries the grammar artifact and its tests. None is scheduled.
-- [ ] **A refused `-0` is reported as `0`.** `describeValue` in
-  `packages/linq/src/json-boundary.js` renders a number with `String(value)`,
-  and `String(-0)` is `'0'` — so `s.number().default(-0)` refuses with
-  "default() received 0, which is not JSON", naming a value the caller did
-  not write. The tail of the same message says "finite numbers (never -0)",
-  so the information is there, but a reader who greps their source for the
-  literal the message names finds the wrong one. The constraint is that
-  `describeValue` is the shared boundary every pen's `JL0101` message is
-  built from and its output appears in assertions across the pen tests, so
-  special-casing `-0` there is a message change with a wide blast radius
-  and wants its own pass over those assertions.
 
 ## @jarenjs/ai
 

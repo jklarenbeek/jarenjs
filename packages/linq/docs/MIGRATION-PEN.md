@@ -670,7 +670,7 @@ from a drop plus a create, and guessing risks silent data loss.
 
 ## 7. Cost
 
-`@jarenjs/linq/migration` builds to **23,505 bytes** as a minified,
+`@jarenjs/linq/migration` builds to **23,599 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded (24
 kB) beside the other nine subpath prices in

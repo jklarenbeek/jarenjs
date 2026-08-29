@@ -42,10 +42,21 @@ const BINDER = new URL('LINQ-FORMAT.md', DOCS_DIR);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const CACHE = path.join(ROOT, 'node_modules', '.cache-pen-docs');
 
-/** A fence's emission: a builder's document (`schemaOf`), or a pen
- * builder's `toJSON()` — a migration is a builder whose document is
- * read that way. @param {any} value */
+/** A fence's emission: the chain's query document (`toDocument()`), a
+ * builder's document (`schemaOf`), or a pen builder's `toJSON()` — a
+ * migration is a builder whose document is read that way.
+ *
+ * `toDocument()` is asked FIRST and by name. A `Sequence` is neither a
+ * schema builder nor a `toJSON` carrier, so the two routes below hand
+ * the sequence object back and the fence would be compared against
+ * itself; and the sequence is the one value here whose document is a
+ * deep snapshot rather than a live view (QUERY-PEN.md §5), so reading
+ * it is also what a caller does.
+ * @param {any} value */
 function documentOf(value) {
+  if (value !== null && typeof value === 'object' && typeof value.toDocument === 'function') {
+    return value.toDocument();
+  }
   const emitted = schemaOf(value);
   return emitted !== null && typeof emitted === 'object' && typeof emitted.toJSON === 'function'
     ? emitted.toJSON() : emitted;
@@ -89,10 +100,15 @@ const DOCS = [
  * the member it emits, and the document says so in the section itself. */
 const MAPPING_HEADING = { db: '## 2. The surface' };
 
-for (const [pen, what, file, atLeast] of DOCS) {
+/** One document's worked examples, executed. The heading is a parameter
+ * because `QUERY-PEN.md` keeps its own twelve sections (D2 forbids
+ * renumbering it) and appends its examples as §13. @param {string} pen
+ * @param {string} what @param {string} file @param {string} heading
+ * @param {number} atLeast */
+function workedExamples(pen, what, file, heading, atLeast) {
   describe(`${file} — ${what}'s worked examples are what it emits`, () => {
     const markdown = fs.readFileSync(new URL(file, DOCS_DIR), 'utf8');
-    const pairs = fencePairs(markdown, '## 3. Worked examples', file);
+    const pairs = fencePairs(markdown, heading, file);
     fs.mkdirSync(CACHE, { recursive: true });
 
     it('has worked examples to run', () => {
@@ -101,15 +117,19 @@ for (const [pen, what, file, atLeast] of DOCS) {
 
     pairs.forEach((pair, i) => {
       it(`example ${i + 1} emits its json fence`, async () => {
-        const file = path.join(CACHE, `${pen}-example-${i + 1}.mjs`);
-        fs.writeFileSync(file, pair.js);
-        const mod = await import(`${file}?${Date.now()}`);
+        const module = path.join(CACHE, `${pen}-example-${i + 1}.mjs`);
+        fs.writeFileSync(module, pair.js);
+        const mod = await import(`${module}?${Date.now()}`);
         const names = Object.keys(mod);
         assert.strictEqual(names.length, 1, `one export per fence, got ${names.join(', ')}`);
         assert.deepStrictEqual(documentOf(mod[names[0]]), JSON.parse(pair.json));
       });
     });
   });
+}
+
+for (const [pen, what, file, atLeast] of DOCS) {
+  workedExamples(pen, what, file, '## 3. Worked examples', atLeast);
 }
 
 describe('LINQ-FORMAT §1.3 — the code table is the code', () => {
@@ -249,10 +269,10 @@ describe('LINQ-FORMAT §1.1 — a pen reads a name → value map by its OWN keys
  * the test is a third place to forget a new method. The three excluded
  * kinds come back too, so a caller asserts them rather than trusting a
  * filter it cannot see.
- * @param {string} subpath
+ * @param {string} subpath - a pen's, or `''` for the `.` entry (the chain)
  */
 const vocabularyOf = async (subpath) => {
-  const mod = await import(`@jarenjs/linq/${subpath}`);
+  const mod = await import(subpath === '' ? '@jarenjs/linq' : `@jarenjs/linq/${subpath}`);
   const names = Object.keys(mod);
   const classes = names.filter((n) => /^[A-Z]/.test(n) && !/^[A-Z0-9_]+$/.test(n));
   const constants = names.filter((n) => /^[A-Z0-9_]+$/.test(n));
@@ -347,4 +367,84 @@ describe('the refusal section is the pen\'s own codes', () => {
         `${file} §4 and packages/linq/src/${subpath}/ disagree`);
     });
   }
+});
+
+// ——— the chain's own document ———
+//
+// `QUERY-PEN.md` is not a pen document: D2 fixes its twelve sections
+// where 72 citations point at them, so its worked examples are §13, its
+// refusals §14 and its types §15, and its mapping table (§4) is keyed by
+// C# operator name rather than by the JavaScript spelling. The three
+// gates below therefore ask the same three questions as the loops above
+// with the answers read from different places — never a relaxed version
+// of them.
+
+workedExamples('query', 'the chain', 'QUERY-PEN.md', '## 13. Worked examples', 8);
+
+describe('QUERY-PEN.md — the chain\'s surface and its codes', () => {
+  const markdown = fs.readFileSync(new URL('QUERY-PEN.md', DOCS_DIR), 'utf8');
+
+  it('names every callable name of the `.` entry, somewhere', async () => {
+    // The WHOLE document, not one section: §4's rows are keyed by the C#
+    // name a reader arrives with (`Where`, `OrderByDescending`), and the
+    // JavaScript spelling of an operator is as likely to be settled in
+    // §3's capture rules, §6's terminal semantics or §10's async table
+    // as in the table. What must not happen is a name the caller can
+    // write that the document never spells.
+    const { vocabulary } = await vocabularyOf('');
+    const missing = vocabulary.filter((name) => !names(markdown, name));
+    assert.deepStrictEqual(missing, [],
+      `QUERY-PEN.md does not name ${missing.length} of ${vocabulary.length}: ${missing.join(', ')}`);
+  });
+
+  it('§15 names the chain\'s classes and constants', async () => {
+    const section = bodyOf(markdown, '## 15. The types');
+    assert.notStrictEqual(section, '', 'QUERY-PEN.md carries its §15');
+    const { classes, constants, guards } = await vocabularyOf('');
+    const excluded = [...classes, ...constants, ...guards];
+    const missing = excluded.filter((name) => !section.includes(name));
+    assert.deepStrictEqual(missing, [],
+      `QUERY-PEN.md §15 does not name ${missing.length} of the ${excluded.length} excluded `
+      + `from the surface gate: ${missing.join(', ')}`);
+  });
+
+  // The chain's modules are the top-level files of `packages/linq/src/`,
+  // less the three that are the PENS' shared doors: `json-boundary.js`
+  // (every value entering a pen's document), `capture-root.js` (a pen's
+  // query-valued member) and `effect.js` (the `{ run, with? }`
+  // descriptor the flow and app pens spell identically). No chain
+  // callback reaches any of them, and every code they raise belongs to
+  // the binder's JL01xx table (LINQ-FORMAT.md §1.3) — which the
+  // assertion below proves rather than assumes, so the exclusion cannot
+  // hide a chain refusal.
+  const SRC = new URL('../../packages/linq/src/', import.meta.url);
+  const PEN_DOORS = new Set(['json-boundary.js', 'capture-root.js', 'effect.js']);
+  /** Every code a `throw new Linq…Error('JLxxxx'` raises, per file. The
+   * source is read, never imported: a code thrown from a branch no test
+   * takes must still count. A `throw` is matched rather than a bare
+   * mention, because `errors.js` carries the whole table — every pen's
+   * codes included — in prose. */
+  const raisedIn = (name) => {
+    const source = fs.readFileSync(new URL(name, SRC), 'utf8');
+    return [...source.matchAll(/throw new Linq(?:Build|Runtime)Error\('(JL\d{4})'/g)]
+      .map((m) => m[1]);
+  };
+  const chainFiles = fs.readdirSync(SRC, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.js')).map((e) => e.name);
+
+  it('the pen doors raise only the binder\'s JL01xx codes', () => {
+    const doors = [...PEN_DOORS].flatMap(raisedIn);
+    assert.notDeepStrictEqual(doors, [], 'the pen doors still raise something');
+    assert.deepStrictEqual(doors.filter((code) => !/^JL01/.test(code)), [],
+      'a chain-numbered refusal moved into a pen door — it needs a §14 row, not an exclusion');
+  });
+
+  it('§14 lists exactly the codes the chain\'s modules raise', () => {
+    const raised = new Set(chainFiles.filter((name) => !PEN_DOORS.has(name)).flatMap(raisedIn));
+    const section = bodyOf(markdown, '## 14. Refusals');
+    assert.notStrictEqual(section, '', 'QUERY-PEN.md carries its §14');
+    const documented = [...section.matchAll(/^\| `(JL\d{4})` \|/gm)].map((m) => m[1]);
+    assert.deepStrictEqual(documented, [...raised].sort(),
+      'QUERY-PEN.md §14 and the chain\'s modules disagree');
+  });
 });

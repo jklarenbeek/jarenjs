@@ -58,6 +58,12 @@ export function isReservedBinding(name) {
 /** The reserved names, for a refusal's message. */
 export const RESERVED_BINDINGS_TEXT = 'it, it2, acc, g, and r1, r2, … for relation hops';
 
+/** The member a `groupBy`'s items carry the group's rows in. Spelled
+ * once: the emitter writes it here and `expression.js` gives that member
+ * its fan, so `g.items.count()` counts the ROWS the way a group-join's
+ * `g.count()` already does. */
+export const GROUP_ITEMS = 'items';
+
 /** The stage kinds after which the items are no longer the source's
  * rows: a relation name on them is an ordinary member (QUERY-PEN §3).
  * The async surface adds its host boundary, `mapAsync`. */
@@ -183,7 +189,7 @@ function closePhrase(phrase) {
   // so the member sequence packs into an array constructor and an
   // empty grouping key reads as null
   doc.$return = phrase.ret !== EMPTY ? phrase.ret : (phrase.groupby !== EMPTY
-    ? { key: { $default: ['$g', null] }, items: ['$it'] }
+    ? { key: { $default: ['$g', null] }, [GROUP_ITEMS]: ['$it'] }
     : '$it');
   return doc;
 }

@@ -146,9 +146,9 @@ describe('every citation into packages/linq/docs resolves', () => {
 
   it('checked enough to have failed', () => {
     // a matcher that stopped matching reports nothing and passes
-    assert.ok(links + sections >= 110,
+    assert.ok(links + sections >= 290,
       `only ${links + sections} citations (${links} links, ${anchors} of them anchored, ${sections} sections)`);
-    assert.ok(citing.size >= 30, `only ${citing.size} files cite these documents`);
+    assert.ok(citing.size >= 50, `only ${citing.size} files cite these documents`);
     assert.strictEqual(documents.length, 11, `${DOCS} holds ${documents.length} documents`);
   });
 });
@@ -167,5 +167,25 @@ describe('the binder indexes every document beside it', () => {
     const linked = new Set([...index.matchAll(/\]\(([A-Za-z0-9._-]+\.md)\)/g)].map((m) => m[1]));
     assert.deepStrictEqual(documents.filter((doc) => doc !== BINDER && !linked.has(doc)), [],
       `${BINDER}'s index does not link these`);
+  });
+
+  // The index states each document's length, which is what tells a
+  // reader whether they are opening a ten-minute read or an afternoon.
+  // A stated length is a figure like any other: derived, never typed
+  // (CONVENTIONS.md §4.6), so it is compared with the file here rather
+  // than trusted. Every document in the directory must have a row,
+  // including the binder's own.
+  it('states each document\'s length, and the length is the file\'s', () => {
+    const binder = fs.readFileSync(path.join(ROOT, DOCS, BINDER), 'utf8');
+    const index = binder.slice(0, binder.indexOf('\n### '));
+    const stated = new Map([...index.matchAll(/^\| \[([A-Za-z0-9._-]+\.md)\][^|]*\| ([\d,]+) \|/gm)]
+      .map((m) => [m[1], Number(m[2].replace(/,/g, ''))]));
+    const wrong = documents.map((doc) => {
+      const lines = fs.readFileSync(path.join(ROOT, DOCS, doc), 'utf8').split('\n').length - 1;
+      const said = stated.get(doc);
+      return said === lines ? null
+        : `${doc}: the index says ${said ?? '(no row)'}, the file is ${lines} lines`;
+    }).filter((problem) => problem !== null);
+    assert.deepStrictEqual(wrong, [], `${BINDER}'s index is stale`);
   });
 });

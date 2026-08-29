@@ -868,7 +868,7 @@ non-judgement is itself gated.
 
 ## 7. Cost
 
-`@jarenjs/linq/jslt` builds to **19,030 bytes** as a minified,
+`@jarenjs/linq/jslt` builds to **19,124 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded (19
 kB) beside the other nine subpath prices in

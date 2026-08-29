@@ -964,7 +964,7 @@ they are used to having.
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **32,288 bytes** as a minified,
+`@jarenjs/linq/schema` builds to **32,382 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded (32
 kB) beside the other nine subpath prices in
@@ -991,9 +991,12 @@ class method cannot be tree-shaken away), and every factory function,
 built as one closure per class set so the model and forms pens construct
 their subclasses through the same wiring.
 
-A consumer who takes the chain as well pays for both, and the two prices
-add rather than overlap: the chain's own bundle is 172,668 bytes and
-carries nothing from this directory, because `ofType`/`cast` recognise a
-builder by the registry symbol `SCHEMA_BUILDER` rather than by an import.
-A consumer who takes only the pen — which is what a shared `schemas.js`
-module in an application usually is — pays the first alone.
+A consumer who takes the chain as well pays LESS than the two figures
+suggest. The chain carries nothing from this directory — `ofType`/`cast`
+recognise a builder by the registry symbol `SCHEMA_BUILDER` rather than
+by an import — but both bundles carry `expression.js` and the coded
+errors under it, and a bundler counts a shared module once:
+[QUERY-PEN.md](QUERY-PEN.md) §17 publishes the pair's measured size and
+the saving, both derived by the same probe. A consumer who takes only
+the pen — which is what a shared `schemas.js` module in an application
+usually is — pays the figure above alone.

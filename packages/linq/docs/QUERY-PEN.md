@@ -34,6 +34,34 @@ and the pens are the only inference route); and it promises nothing the
 query grammar cannot express — §4 records every such gap as
 `unsupported`, by name.
 
+**How to read this document.** The ten pen documents this one is indexed
+beside share a fixed seven-section shape, and a reader who has learned
+one of them arrives here expecting it. This document keeps its own twelve
+sections instead — 72 citations across the repository point at them by
+number, and moving one would break them silently — so the same seven
+questions are answered where they already were, and the five that had no
+home were appended rather than inserted:
+
+| What you came for | Read |
+|---|---|
+| what it writes, and the one-import example | §1 Scope, §2 The surface |
+| the mapping table: every operator and what it emits | §4 |
+| worked examples, executed by the docs gate | §13 |
+| refusals: the spelling that trips each code, and the one that works | §14 (§9 is the normative code table) |
+| the types | §15 |
+| what it cannot spell | §16 |
+| cost | §17 |
+
+The eight sections the table does not name have no counterpart in a pen
+document at all, because they are the chain's own subject: §3 expression
+capture, §5 deferred execution and re-enumeration, §6 terminal
+semantics, §7 parameters, §8 the provider contract, and §§10–12 the
+asynchronous surface, its concurrency boundary and its source adapters.
+A reader following the suite from the binder,
+[LINQ-FORMAT.md](LINQ-FORMAT.md), can skip to the row they need; a
+reader learning the chain should read §3, §5 and §6 in order first,
+because everything else assumes them.
+
 ## 2. The surface
 
 ```js
@@ -335,7 +363,9 @@ from(rows)
   .params({ tenantId: 'a7' })
   .where((r, p) => r.tenant.eq(p.tenantId))
   .toDocument();
-// { "$for": { "it": "$[*]" }, "$where": { "$eq": ["$it.tenant", "$tenantId"] }, "$return": "$it" }
+// { "$for": { "it": ["$[*]"] },
+//   "$where": { "$eq": ["$it.tenant", "$tenantId"] },
+//   "$return": "$it" }
 ```
 
 The emitted document carries `$tenantId` as an external parameter
@@ -624,3 +654,906 @@ What this surface does NOT do, by design: it does not make the query
 engine async (`packages/json` is untouched and strictly synchronous),
 it does not add a second operator table, and it does not add
 `selectAwait`/`whereAwait` variants.
+
+## 13. Worked examples
+
+Every `js` fence below is EXECUTED. `test/linq/pen-docs.test.js` writes
+it as a module beside the workspace's `node_modules` — so `@jarenjs/linq`
+resolves exactly as it does for a consumer — imports it, and asserts that
+the single export's `toDocument()` equals the `json` fence beside it. A
+fence that drifts from the emitter fails the suite; nothing here is a
+sketch.
+
+The eight are chosen to teach the CAPTURE MODEL rather than to cover the
+operator table (§4 is the table). Read them in order: the first shows
+what a chain is, and each one after it adds one thing the emitted
+document does that the source does not obviously say.
+
+### 13.1 The chain, whole
+
+The opening example of the README and of §2, executed. `where` becomes
+the FLWOR `$where`, `orderBy` an `$orderby` key spec
+(`orderByDescending`, `thenBy` and `thenByDescending` extend the same
+clause), and `select` the `$return` constructor — one phrase, in the
+order a reader writes it.
+
+```js
+import { from } from '@jarenjs/linq';
+
+const users = [
+  { id: 1, name: 'Ada', age: 36 },
+  { id: 2, name: 'Bo', age: 19 },
+];
+
+export const adults = from(users)
+  .where((u) => u.age.gt(21))
+  .orderBy((u) => u.name)
+  .select((u) => ({ id: u.id, name: u.name }));
+```
+
+```json
+{
+  "$for": { "it": ["$[*]"] },
+  "$where": { "$gt": ["$it.age", 21] },
+  "$orderby": { "$key": "$it.name" },
+  "$return": { "id": "$it.id", "name": "$it.name" }
+}
+```
+
+`adults.toArray()` answers `[{ "id": 1, "name": "Ada" }]`. The source is
+bound through an array constructor, `["$[*]"]`, and §5 says why: the
+engine unpacks an item that is an array one level, which is right for a
+path and wrong for a row.
+
+### 13.2 A join is a nested `$for` and an equality
+
+Both sides read ONE input, so a join's other side derives from the same
+source — or, as here, from a second provider sharing its `scope`: two
+entity sets of one store are two roots of one multi-entity document, and
+the store answers the equijoin in a single statement (§8).
+
+```js
+import { from } from '@jarenjs/linq';
+
+// two entity sets of ONE store: two roots of one multi-entity input,
+// which is what a shared `scope` declares (§8)
+const scope = {};
+const postSet = { execute: () => [], root: '$.Post[*]', scope };
+const userSet = { execute: () => [], root: '$.User[*]', scope };
+
+export const bylines = from(postSet).join(
+  from(userSet),
+  (p) => p.authorId,
+  (u) => u.id,
+  (p, u) => ({ title: p.title, author: u.name }),
+);
+```
+
+```json
+{
+  "$for": { "it": "$.Post[*]", "it2": "$.User[*]" },
+  "$where": { "$eq": ["$it.authorId", "$it2.id"] },
+  "$return": { "title": "$it.title", "author": "$it2.name" }
+}
+```
+
+There is no `$join` operator in the emitted document and there is no need
+for one: the engine recognises this shape at COMPILE time and runs a hash
+join (QUERY-FORMAT §6). It recognises it **only when both key
+expressions are plain member paths** — `(p) => p.authorId` and
+`(u) => u.id` are; `(p) => p.title.lower()` is not, and that join runs as
+a nested loop with the same answer and a different cost. A provider's
+roots stay bare (`"$.Post[*]"`, not `["$.Post[*]"]`): a stored document
+is an object, so the unpacking rule §5 guards against cannot arise.
+
+### 13.3 A group is a phrase, and its items are an array
+
+`groupBy` emits `$groupby` and reseats: the downstream items are
+`{ key, items }` objects, and every operator after it reads THOSE. The
+`key` carries a `$default` to `null` because a group whose key expression
+yielded nothing still has rows.
+
+```js
+import { from } from '@jarenjs/linq';
+
+const orders = [
+  { id: 1, city: 'Delft', total: 12 },
+  { id: 2, city: 'Delft', total: 30 },
+  { id: 3, city: 'Gouda', total: 7 },
+];
+
+export const perCity = from(orders)
+  .groupBy((o) => o.city)
+  .select((g) => ({ city: g.key, orders: g.items.count(), total: g.items.all().total.sum() }));
+```
+
+```json
+{
+  "$for": {
+    "it": [
+      {
+        "$for": { "it": ["$[*]"] },
+        "$groupby": { "g": "$it.city" },
+        "$return": { "key": { "$default": ["$g", null] }, "items": ["$it"] }
+      }
+    ]
+  },
+  "$return": {
+    "city": "$it.key",
+    "orders": { "$count": "$it.items[*]" },
+    "total": { "$sum": "$it.items[*].total" }
+  }
+}
+```
+
+`perCity.toArray()` answers `[{ city: 'Delft', orders: 2, total: 42 },
+{ city: 'Gouda', orders: 1, total: 7 }]`.
+
+**A group aggregates as its ROWS.** `g.items.count()` is the number of
+rows in the group: the chain knows `items` holds a group and emits
+`{ "$count": "$it.items[*]" }` — the fan — rather than `$count` over the
+one array value, which would answer `1` for every group. This is the
+same rule a group-JOIN's group has always kept (`g.count()` there is the
+number of matches, §4), and the two group shapes now spell it the same
+way.
+
+`g.items` itself is still the array, and everything an array can do it
+still does: a member takes it whole (`{ rows: g.items }` emits
+`"$it.items"`), `at(0)` indexes it, and `all()` fans it explicitly —
+which is what `g.items.all().total.sum()` above needs, because summing a
+MEMBER of each row means fanning the rows first and then reading the
+member (`"$it.items[*].total"`). Only the aggregates changed, and only
+for the member the emitter writes the group into.
+
+An array a CALLER stored is a different thing and keeps the older rule:
+`u.tags.count()` is `1`. At capture time an array member and a scalar
+member are the same path — the chain has no type to tell them apart, and
+inventing one would be a guess — so `u.tags.all().count()` is how the
+elements are counted, and `u.tags.exists()` is what the un-fanned form
+was really answering.
+
+### 13.4 A relation name hops, and the document never carries it
+
+When the items are the rows of an entity whose provider carries a
+relation table, a member access naming a declared relation records a HOP
+and is lowered, at capture, into the correlated phrase §4's "relation
+navigation" rows spell. What the reader writes is `p.author.name`; what
+the store receives has no member called `author` anywhere in it.
+
+```js
+import { from } from '@jarenjs/linq';
+
+// a store's entity set: its rows carry the entity's relation table
+// (MODEL-FORMAT §10.1), which is what makes a relation name hop
+const postSet = {
+  execute: () => [],
+  root: '$.Post[*]',
+  scope: {
+    relations: {
+      Post: { author: { to: 'User', kind: 'oneToOne', via: 'authorId', targetKey: 'id' } },
+      User: { posts: { to: 'Post', kind: 'oneToMany', via: 'authorId', targetKey: 'id' } },
+    },
+  },
+  relations: { author: { to: 'User', kind: 'oneToOne', via: 'authorId', targetKey: 'id' } },
+};
+
+export const bylines = from(postSet)
+  .select((p) => ({ title: p.title, author: p.author.name, siblings: p.author.posts.count() }));
+```
+
+```json
+{
+  "$for": { "it": "$.Post[*]" },
+  "$return": {
+    "title": "$it.title",
+    "author": {
+      "$for": { "r1": "$.User[*]" },
+      "$where": { "$eq": ["$r1.id", "$it.authorId"] },
+      "$return": "$r1.name"
+    },
+    "siblings": {
+      "$count": {
+        "$for": { "r2": "$.User[*]" },
+        "$where": { "$eq": ["$r2.id", "$it.authorId"] },
+        "$return": {
+          "$for": { "r3": "$.Post[*]" },
+          "$where": { "$eq": ["$r3.authorId", "$r2.id"] },
+          "$return": "$r3"
+        }
+      }
+    }
+  }
+}
+```
+
+Three things this document shows that the source does not:
+
+- **The hop bindings are numbered per CAPTURE, not per hop site.** Both
+  members are captured by one `select` callback, so the first hop takes
+  `r1` and the chained one takes `r2` and `r3`. A second callback — a
+  `where` before this `select` — would start again at `r1` in its own
+  phrase.
+- **`kind` decides which side of the equality carries the key.** The
+  to-one hop compares the TARGET's key with the row's foreign key
+  (`$r1.id` against `$it.authorId`); the to-many hop inside it compares
+  the target's foreign key with the row's key (`$r3.authorId` against
+  `$r2.id`).
+- **A chained hop re-binds its source.** `p.author.posts` is not one
+  phrase with two roots; it is a phrase inside a phrase, the inner one
+  correlated with the outer's binding. The scope's `relations` is what
+  lets the second link find `User`'s table — without it the first hop
+  lowers and `posts` would be an ordinary member of the target.
+
+`p.author` and `p.author.posts` are declarations of intent, not
+instructions: `explain().hops` lists what the callbacks navigated, and
+no lowered shape pushes natively in this version — a store runs the
+phrase as a named residual and says so (§8).
+
+### 13.5 A parameter is a seam, not a value
+
+`.params()` DECLARES and BINDS in one call. The declaration is what the
+document carries — `$tenantId`, an external (QUERY-FORMAT §9) — and the
+binding is what the runner is handed beside it. The same document serves
+every tenant, which is what makes it cacheable, loggable and pushable to
+a provider as a prepared statement.
+
+```js
+import { from } from '@jarenjs/linq';
+
+const invoices = [{ id: 1, tenant: 'a7', total: 12 }];
+
+export const ours = from(invoices)
+  .params({ tenantId: 'a7' })
+  .where((r, p) => r.tenant.eq(p.tenantId));
+```
+
+```json
+{
+  "$for": { "it": ["$[*]"] },
+  "$where": { "$eq": ["$it.tenant", "$tenantId"] },
+  "$return": "$it"
+}
+```
+
+`ours.explain().externals` is `['tenantId']` and `explain().bindings` is
+`{ tenantId: 'a7' }` — the two halves the seam keeps apart. Reading an
+undeclared name is `JL0004` at build time rather than `JQ0005` at compile
+time (§14), and `.params({ tenantId: 'b3' })` on the result re-runs the
+same document under the new value.
+
+### 13.6 `selectMany` unpacks exactly one level
+
+The projected value is iterated once — an array member's elements, a
+constructed array's members, a scalar as itself — and the FLWOR `$return`
+concatenates per tuple. That is a nested `$for` whose binding legally
+shadows the outer `it`.
+
+```js
+import { from } from '@jarenjs/linq';
+
+const posts = [{ id: 1, tags: ['linq', 'json'] }, { id: 2, tags: [] }];
+
+export const tags = from(posts).selectMany((p) => p.tags);
+```
+
+```json
+{
+  "$for": { "it": ["$[*]"] },
+  "$return": {
+    "$for": { "it": "$it.tags" },
+    "$return": "$it"
+  }
+}
+```
+
+`tags.toArray()` answers `["linq", "json"]`: the second post contributes
+nothing, and an array of arrays would come back as an array of arrays —
+one level, never a deep flatten.
+
+### 13.7 `ofType` is a `$valid` filter, and it needs a compiler
+
+`ofType` emits a `$valid` over a JSON Schema literal and `cast` an
+`$assert` per item. Both are SCHEMA operators, and the query engine
+compiles a schema operator only when a type-test compiler is injected —
+so the option travels with the source, not with the operator.
+
+```js
+import { from } from '@jarenjs/linq';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
+
+const contacts = [{ id: 1, email: 'ada@example.com' }, { id: 2 }];
+
+export const reachable = from(contacts, { compileTypeTest: createTypeTestCompiler() })
+  .ofType({ type: 'object', required: ['email'] });
+```
+
+```json
+{
+  "$for": { "it": ["$[*]"] },
+  "$where": { "$valid": ["$it", { "type": "object", "required": ["email"] }] },
+  "$return": "$it"
+}
+```
+
+The document is the same with or without the hook — emission never needs
+it. What needs it is running: `from(contacts).ofType(…).toArray()` is
+`JL0003` with the fix in the message (§14), and a schema-pen builder may
+stand in for the literal (`s.object({ email: s.string() })`), whose
+document is taken.
+
+### 13.8 A hand-written document is a source of items
+
+`fromDocument` attaches a stored or hand-written query document; its
+result is the item sequence, and every operator chains over it. Only the
+envelope this version knows is unwrapped — anything else is handed to the
+engine so ITS verdict is what surfaces (§14).
+
+```js
+import { fromDocument } from '@jarenjs/linq';
+
+const users = [{ id: 1, name: 'Ada', age: 36 }];
+const saved = {
+  $query: '0.1',
+  $expr: { $for: { it: ['$[*]'] }, $where: { $gt: ['$it.age', 21] }, $return: '$it' },
+};
+
+export const names = fromDocument(users, saved).select((u) => u.name);
+```
+
+```json
+{
+  "$for": {
+    "it": [
+      {
+        "$for": { "it": ["$[*]"] },
+        "$where": { "$gt": ["$it.age", 21] },
+        "$return": "$it"
+      }
+    ]
+  },
+  "$return": "$it.name"
+}
+```
+
+`names.toArray()` answers `["Ada"]`. The saved document became the source
+of a new phrase rather than being merged into one — which is what keeps a
+document a reader did not write from being reinterpreted. A
+`fromDocument` chain never hops (§3): there the document decides what the
+items are, so a relation table has nothing to attach to.
+
+## 14. Refusals
+
+§9 is the normative code table: every `JL` code this package can raise,
+held equal to the runtime's `LINQ_CODES` by
+`test/errors/code-tables.test.js`. This section is the other half a
+reader needs — the SPELLING that trips each one and the spelling that
+works.
+
+The chain raises fourteen of the twenty: `JL0001`–`JL0007` at build
+time, `JL2001`–`JL2006` while a terminal runs, and `JL0105`, which sits
+in the `JL01xx` block because a relation hop is a pen-shaped refusal but
+is raised by the chain's own expression capture. The other six —
+`JL0101`–`JL0104`, `JL0106` and `JL0107` — are the PENS' and the
+CLIENT's. Their per-code conditions are the binder's,
+[LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3, and the spelling that trips each
+one is in §4 of the document of the pen that raises it:
+[SCHEMA-PEN.md](SCHEMA-PEN.md#4-refusals),
+[MODEL-PEN.md](MODEL-PEN.md#4-refusals),
+[JSLT-PEN.md](JSLT-PEN.md#4-refusals),
+[MIGRATION-PEN.md](MIGRATION-PEN.md#4-refusals),
+[CONTRACT-PEN.md](CONTRACT-PEN.md#4-refusals),
+[FLOW-PEN.md](FLOW-PEN.md#4-refusals),
+[APP-PEN.md](APP-PEN.md#4-refusals),
+[FORMS-PEN.md](FORMS-PEN.md#4-refusals), and
+[DB-CLIENT.md](DB-CLIENT.md#4-refusals) for the client.
+
+`test/linq/pen-docs.test.js` holds the list below equal, in both
+directions, to the codes thrown by the chain's own modules —
+`packages/linq/src/*.js` less `json-boundary.js` and `capture-root.js`,
+which are the pens' shared doors and raise only `JL01xx` (the gate
+proves that too, so the exclusion cannot hide a chain refusal).
+
+| Code | What the chain raises it for |
+|---|---|
+| `JL0001` | `from()`/`fromAsync()` received a source that is neither a supported shape nor a provider |
+| `JL0002` | an expression proxy was used outside the capture it belongs to |
+| `JL0003` | `ofType`/`cast` compiled a schema operator with no type-test compiler injected |
+| `JL0004` | a parameter was read undeclared, declared under a reserved or invalid name, bound to a non-JSON value, or bound to two values by one join |
+| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an async-surface rule |
+| `JL0006` | an operator §4 records as `unsupported` was invoked |
+| `JL0007` | a provider serves several entity roots and has none of its own |
+| `JL0105` | a relation hop cannot lower to a phrase |
+| `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
+| `JL2002` | `single`/`singleOrDefault` over two or more elements |
+| `JL2003` | `elementAt` out of range |
+| `JL2004` | a provider's `execute()` answered a promise on the synchronous surface |
+| `JL2005` | a push queue was fed after `end()` |
+| `JL2006` | a provider answered an element terminal with something other than one array |
+
+Every message below is the one the chain raised when the spelling beside
+it was run, with the code prefix (`JL0005: `) removed. Where a refusal
+carries a `docPath`, it is appended to the message text as well
+(`… at /0/$where/$valid`).
+
+### 14.1 `JL0001` — the source
+
+Dispatch happens ONCE, at `from()`/`fromAsync()` time, never at
+enumeration time: an `execute` duck is a provider and is never
+enumerated locally, any iterable gets the in-memory reference semantics,
+and anything else is refused before a single row is read.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from(42)` | `from() needs an iterable or a provider exposing execute(document, options)` | an array, a string, a `Set`, a generator, or a provider |
+| `fromAsync(42)` | `fromAsync() needs an async iterable, an iterable, a cursor ({ next, return? }) or a push queue` | one of the five shapes §12 lists |
+| `fromAsync('abc')` | the same message | a string is a CHUNK on the async surface, not a character stream — feed it through `createPushQueue()`. `from('abc')` iterates characters, and the twins differ here by design (§12) |
+
+### 14.2 `JL0002` — the proxy left its capture
+
+A recording proxy belongs to exactly ONE capture. The two conditions read
+alike and mean different things, so they carry different messages.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `let saved; from(rows).where((u) => { saved = u; return u.id.gt(0); }); from(rows).where(() => saved.id.gt(0))` | `an expression proxy escaped its capture callback; expressions cannot be stored and replayed across operators` | capture in the callback that uses it — the document would otherwise reference a binding this phrase does not have |
+| `from(rows).select((u) => ({ n: from(rows).where((v) => v.id.eq(u.id)).count() }))` | `an expression proxy of an enclosing capture was used inside a nested capture — a correlated subquery cannot be spelled this way (the inner document rebinds the item); compute the inner query first and use its result` | compute the inner query first, or — over a provider with a relation table — write the hop (§13.4), which is what a correlated phrase is |
+
+Captures NEST legally: a chain built and run inside a callback
+(`select((u) => ({ n: from(other).count() }))`) is ordinary, because it
+touches none of the enclosing proxies. `===` between proxies is
+untrappable and therefore undetectable; do not compare proxies.
+
+### 14.3 `JL0003` — the schema operators need a compiler
+
+`ofType` and `cast` emit `$valid` and `$assert`, and the query engine
+compiles those only against an injected type-test compiler. The refusal
+arrives when the document COMPILES, not when it is emitted (§13.7), and
+it carries the `docPath` of the operator that needed it.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from(rows).ofType({ type: 'object' }).toArray()` | `ofType/cast compile schema operators, which need a type-test compiler — pass options.compileTypeTest to from()/fromDocument() (e.g. createTypeTestCompiler() from @jarenjs/validate/query)` — `docPath` `/0/$where/$valid` | `from(rows, { compileTypeTest: createTypeTestCompiler() })` |
+| `from(rows).cast({ type: 'object' }).toArray()` | the same message — `docPath` `/0/$return/$assert` | the same option |
+
+The fix is one option on the source, and it is the same fix whether the
+operator came from `ofType`/`cast` or from a hand-written document: the
+engine's own `JQ0008` is re-reported under this code for that reason
+(§9).
+
+### 14.4 `JL0004` — the parameters
+
+`.params({ … })` declares AND binds. Everything that can go wrong with a
+name or a value is one code, because the reader's next action is the same
+in every case: fix the `params()` call.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from(rows).where((r, p) => r.tenant.eq(p.tenantId))` | `parameter 'tenantId' is not declared — declare it first: .params({ tenantId: value })` | declare it, as the message spells |
+| `from(rows).params(42)` | `params takes an object of name → value bindings` | an object literal |
+| `from(rows).params({ 'a-b': 1 })` | `'a-b' is not a valid parameter name` | an identifier: letters, digits and `_`, not starting with a digit |
+| `from(rows).params({ it: 1 })` | `'it' is reserved (the emitted document's own binding names: it, it2, acc, g, and r1, r2, … for relation hops)` | any other name |
+| `from(rows).params({ r1: 1 })` | the same message | `r`-plus-digits is reserved for the bindings a hop allocates (§13.4) |
+| `from(rows).params({ d: new Date() })` | `parameter 'd' is bound to a Date instance, which is not query data — convert it first (a Date to its ISO string or epoch number, a Map to an object, NaN or -0 to a number)` | `d: date.toISOString()` |
+| `from(rows).params({ z: -0 })` | `parameter 'z' is bound to -0, which is not query data — …` (the same tail) | `0`, or negate at query time — and note the message names `-0`, not the `0` its JSON text would suggest |
+| `a.params({ k: 1 }).join(b.params({ k: 2 }), …)` | `parameter 'k' is bound to different values by the two sides of join — one document carries one binding per name; bind it once, or rename one side` | bind it once on the outer side, or rename one |
+
+A binding is not a captured constant: it becomes an external, and later a
+bound SQL parameter. A `Date` there would compare against nothing and
+answer `[]` with no error anywhere — which is why the check is at
+`params()` time and not at the boundary.
+
+### 14.5 `JL0005` — the build-time catch-all
+
+The widest code the chain has, and deliberately one code: every condition
+under it is a defect in the chain as WRITTEN, found before anything runs.
+They group into four families.
+
+**A value the document cannot carry.** The query data model is JSON
+(§5).
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `select(() => NaN)` | `a captured expression cannot embed NaN — the query data model is JSON, which has no NaN or Infinity, and lenient serialization would fold it into null` | a finite number |
+| `select(() => Infinity)` | the same message, naming `Infinity` | a finite number, or a bound |
+| `select(() => -0)` | `a captured expression cannot embed -0 — it shares its JSON text with 0 while dividing to the opposite infinity, so a document holding it cannot be keyed, stored or compared faithfully; use 0, or negate at query time` | `0` |
+| `where((u) => u.at.eq(new Date()))` | `a captured expression cannot embed a Date instance — it carries no own enumerable members, so it would embed as {}. Convert it to query data first (a Date to its ISO string or epoch number, a Map to an object), or bind it through params().` | the ISO string, or `.params({ when })` |
+| `select(() => new Map())` | the same message, naming `Map` | a plain object |
+| `select(() => MyArray.from([1]))` | `a captured expression cannot embed an Array subclass instance — its behaviour is not expressible as query data` | a plain array |
+| `select(() => undefined)` | `a captured expression cannot embed an undefined value` | `null`, which IS a value (§5) — a callback that forgot its `return` is the usual cause |
+
+`-0` is the one nobody guesses, and it is worth the sentence. It is
+JSON-representable by TEXT and not by value: `JSON.stringify(-0)` is
+`"0"`, so a document holding it round-trips to a different number, while
+`1 / -0` is `-Infinity` and `1 / 0` is `+Infinity`. A key built from it
+would not match itself, a stored document would not compare equal to the
+one that was written, and a cached compilation keyed by the document's
+text would serve the `0` query for the `-0` one. There is no spelling
+that preserves it, so there is no spelling that is allowed to.
+
+**A stage in the wrong place, or an argument that is not one.**
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from(rows).thenBy((u) => u.id)` | `thenBy/thenByDescending must directly follow orderBy/orderByDescending` | an `orderBy` first — `thenBy` extends that clause, it does not open one |
+| `select((u) => u.age.add(1).all())` | `all() fans out a PATH ('$it.tags[*]'); it cannot follow an operator result` | `all()` on the path, then the operator |
+| `select((u) => u.posts.title)` (a to-many hop) | `.title is read off a to-many relation, which holds an array of related rows — fan them first (.all().title), index one (.at(0)), or aggregate the array` | `u.posts.all().title`, `u.posts.at(0).title` |
+| `from(rows).skip(-1)` | `skip takes a non-negative integer, got -1` | a non-negative integer |
+| `from(rows).take(1.5)` | `take takes a non-negative integer, got 1.5` | an integer |
+| `from(rows).where(42)` | `this operator takes a callback function` | a callback |
+| `from(rows).join([], …)` | `join takes another sequence as its inner side` | `from(sameSource)` |
+| `from(a).join(from(b), …)` | `join's other side must derive from the same source, or from two providers sharing one scope (one store's entity sets) — a query document reads one input; load both collections under one root, or join two entity sets of one store` | one source, or one store's two entity sets (§13.2) |
+| `from(rows).concat(42)` | `concat takes a sequence or a constant array` | a sequence over the same source, or an array |
+| `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object; it is read once when the query compiles, so it cannot be an expression or carry a captured value` | a literal spec |
+
+**A provider or a document that is not shaped as the contract says.**
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from({ execute, root: 7 })` | `a provider's root is a path expression string ('$.Post[*]'), got number` | a path expression, or no `root` at all |
+| `createPushQueue({ highWaterMark: 0 })` | `highWaterMark must be a positive integer` | a positive integer (1024 by default) |
+
+A malformed VERSION envelope is not this code: `fromDocument(rows,
+{ $query: '0.2', $expr })` is compiled by the engine first, so the
+engine's own verdict is what surfaces — `JQ0006: unknown query format
+version "0.2"` — and a future document is never silently run as a 0.1
+one. Only a spelling the engine accepts and this version does not
+reaches `JL0005` (`a version envelope is exactly { $query: '0.1',
+$expr: … } (QUERY-FORMAT §4.1)`).
+
+**The async surface's own rules** (§§10–12).
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `fromAsync(rows).mapAsync(fn, {})` | `mapAsync requires { concurrency: <positive integer> } — an unbounded default is a denial of service waiting for a slow downstream` | `{ concurrency: 8 }` |
+| `mapAsync(fn, { concurrency: 2, mode: 'x' })` | `mapAsync mode must be one of parallel\|concat\|switch\|exhaust, got 'x'` | one of the four |
+| `mapAsync(42, { concurrency: 1 })` | `mapAsync takes an async callback` | a callback |
+| `fromAsync(rows).concat(fromAsync(rows))` | `concat on an async sequence takes a constant array — an async source cannot be re-iterated for a second sequence` | a constant array, or `concat` on the sync surface |
+| `fromAsync(rows).join(fromAsync(rows), …)` | `join on the async surface is pushed whole to a provider — it needs a provider source and comes before any mapAsync; over an iterable, a cursor or a push queue there is no join, because a single-pass source cannot be read twice (QUERY-PEN.md §10)` | join over a provider, join on the sync surface, or collect the stream first |
+| `fromAsync(rows).mapAsync(fn, { concurrency: 1 }).toDocument()` | `toDocument() cannot represent mapAsync (a host callback); explain() reports the split` | `explain()`, which reports `{ split: { pushed, residual } }` |
+
+### 14.6 `JL0006` — an operator §4 records as `unsupported`
+
+Two operators, both refused by NAME rather than emulated wrongly. §16
+carries the reasons.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from(rows).zip(other)` | `zip is unsupported: the query grammar has no positional co-iteration (see QUERY-PEN.md §4)` | there is none — index both sides and join on the index, in host code |
+| `from(rows).aggregate((acc, it) => …)` | `aggregate(fn) is unsupported: JSON cannot spell the implicit first element as a lambda seed — pass a seed, aggregate(seed, fn) (see QUERY-PEN.md §4)` | `aggregate(0, (acc, it) => acc.add(it.n))` |
+
+### 14.7 `JL0007` — a provider with several roots and none of its own
+
+A store is a provider that serves many entity roots. `$[*]` over its
+entity map would answer every entity's rows mixed together, or count the
+SETS rather than the rows — an answer that looks like an answer. So the
+chain refuses at `from()` time and names the roots to chain over.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from(store)` where the store serves `User` and `Post` | `this provider serves entity roots User, Post and has no root of its own — chain over one of them: from(store.entity(name)) (QUERY-PEN.md §8)` | `from(store.sync.entity('User'))` |
+| `fromAsync(store)` | the same message | `fromAsync(store.entity('User'))` |
+
+`fromDocument` keeps its own rule and is not refused here: there the
+document IS the root, so there is nothing to choose.
+
+### 14.8 `JL0105` — a hop that cannot lower
+
+A relation hop is lowered at CAPTURE into the correlated phrase §4
+spells. Four conditions have no phrase to lower to, and each names what
+is missing.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `u.labels` where `labels` is many-to-many | `'labels' is a many-to-many relation: the join table 'UserLabel' is not a queryable root in this version, so the hop has no phrase to lower to — read the memberships with load({ include: { labels: true } })` | `load({ include: { labels: true } })` through the client ([DB-CLIENT.md](DB-CLIENT.md) §2) |
+| a relation entry that is not a relation record | `the relation table names 'labels' but its entry is not a relation record ({ to, kind, via, fkEntity, fkTargets, targetKey } — MODEL-FORMAT §10.1)` | a provider whose `relations` is the store's own table |
+| a relation whose `kind` is neither of the two | `'labels' has relation kind 'oneToNone', which is not one this surface lowers (oneToOne, oneToMany)` | `oneToOne` or `oneToMany` |
+| a relation over a composite or undeclared key | `'labels' cannot lower: its foreign key or the key it references is composite or undeclared, and the hop's equality would need a tuple the vocabulary does not spell` | a single-column key, or `load({ include })` |
+
+The first is the one a reader meets: a many-to-many member is exactly
+the relation that has no direction to correlate in. The hop would need
+to bind the JOIN TABLE as a root and correlate twice, and a join table
+is not a queryable root in this version — so there is no phrase, and an
+honest refusal that names the join table beats a document that quietly
+reads the wrong rows. `load({ include })` reads the memberships through
+the client instead, which is the operation the store already has.
+
+### 14.9 The runtime codes
+
+`JL2001`–`JL2006` are raised while a terminal RUNS. The first three are
+the C# semantics, exactly (§6); the last three are the seam between a
+terminal and the provider behind it.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `from([]).first()` | `first() found no element` | `firstOrDefault()`, which answers `undefined` |
+| `from([]).single()` | `single() found no element` | `singleOrDefault(d)` |
+| `from([]).last()` | `last() found no element` | `lastOrDefault(d)` |
+| `from([]).average()` | `average() of an empty sequence` | guard with `any()`; `sum()` of nothing is `0` and `count()` of nothing is `0` |
+| `from([]).min()` | `min() of an empty sequence` | as above |
+| `from([]).max()` | `max() of an empty sequence` | as above |
+| `from([1, 2]).single()` | `single() found more than one element` | `first()`, or a narrower `where` |
+| `from([1, 2]).singleOrDefault(0)` | `singleOrDefault() found more than one element` | the default covers EMPTY, never ambiguity |
+| `from([1]).elementAt(5)` | `elementAt(5) is out of range` | `elementAtOrDefault(5, d)` |
+| `from(asyncProvider).toArray()` | `this provider's execute() answered a promise, and a Sequence terminal is a value — an asynchronous provider cannot back the synchronous surface. Emit the document with toDocument() and await the provider directly, or use a synchronous provider.` | `fromAsync(provider)` (§12), or `toDocument()` and await |
+| `q.end(); q.feed(1)` on a push queue | `feed() after end(): the push queue is closed and takes no more values` | feed before `end()`; `end(error)` fails the stream |
+| a provider answering `toArray()` with `undefined` | `the provider answered toArray() with undefined — an element terminal emits an array constructor, so a conforming execute() answers exactly one array (QUERY-PEN.md §8)` | answer the one array the window constructor yields (`[]` for none) |
+
+`JL2004` is worth the sentence its message spends. The old seam let the
+promise through under the value's type: `count()` handed back a `Promise`
+typed `number`, and `first()` indexed the promise and returned
+`undefined`. A wrong answer with no error anywhere is worse than a slow
+one, so the synchronous surface refuses an asynchronous provider by name.
+
+`JL2006` is the same argument one layer out: an element terminal emits
+`[window]` precisely so a single array-valued item cannot be confused
+with several items (§6), so a provider that answers anything but one
+array is named rather than indexed into a `TypeError`. `count()` and the
+other scalar terminals are not windowed and are not checked — a provider
+answering `3` there is answering correctly.
+
+## 15. The types
+
+The declarations are HAND-AUTHORED, in `packages/linq/types/index.d.ts`
+— chosen over emitting them from JSDoc, so the implementation stays
+plain JavaScript and this file is the public type contract. The line it
+holds, stated in the README and at the top of the file:
+
+> the common path is precisely typed; the exotic path is honestly
+> `unknown`; nothing is ever a WRONG type.
+
+Every claim below has two pins. `test/consumer/types.ts` compiles it as
+a consumer would (`strict`, `skipLibCheck: false`, NodeNext — the chain's
+block runs from its `@jarenjs/linq` import to the end of the file), and
+`test/linq/types.test.js` is its runtime twin: the same spelling, asserted
+to emit and to answer what the type says it does. A claim with only one
+of the two is half a claim.
+
+### 15.1 The recording proxy is a type, not a shape
+
+§3 describes what a proxy RECORDS; this is what it is declared as. The
+callback's first argument is `Expr<T>` — a conditional that picks the
+expression family from the element type, in an order that matters
+because the `DateTime` brand is a string subtype and must match first:
+
+| The element is | The proxy is | It carries |
+|---|---|---|
+| a `DateTime`-branded string | `DateTimeExpr` | the whole §8.13 date family |
+| a `string` | `StringExpr` | comparison, the string operators, the spatial family (a geohash is a string) |
+| a `number` | `NumberExpr` | comparison and arithmetic |
+| a `boolean` | `BoolExpr` | `and`, `or`, `not` |
+| an array | `ArrayExpr<E>` | `all()`, `at()`, `count()`, `similarity()`, the §8.16 sequence operators |
+| an object | `ObjectExpr<T>` | exactly its members, recursively typed |
+| anything else | `UnknownExpr` | everything, precisely nothing |
+
+`UnknownExpr` is the honest top and the whole reason the line above can
+be kept: where inference ends — a dynamic `get(name)`, a member read
+after an operator, an element the source never declared — the surface
+widens rather than guesses. `from(users).select((u) => u.get('odd key'))
+.first()` is `unknown`, and a caller who knows better narrows it
+themselves.
+
+A member's type goes through `MemberExpr<V>`, which has one job: an
+`unknown` (or `any`) member answers `UnknownExpr` rather than the first
+arm `Expr<>` would otherwise pick for it. An OPTIONAL member is its
+non-nullable expression — `u.address.city` on `address?: { city: string }`
+is a `StringExpr`, and the projection's element type is `string` — because
+absence is a query-time fact (§4: an empty operand compares false,
+`exists()`/`isEmpty()` say which), not a type-level one.
+
+Method names shadow member access on the proxy (§3), and the types say
+so: `u.count` is the aggregate, and the escape `u.get('count')` is
+declared to answer `UnknownExpr` because a dynamic key cannot be looked
+up in `T`.
+
+### 15.2 The sequence carries two type parameters
+
+`Sequence<T, P>` and `AsyncSequence<T, P>`: `T` is the element, `P` the
+parameters declared so far.
+
+- `select` re-types through `Unwrap<R>` — an expression by its `__value`
+  phantom, an object or array literal recursively, a literal as itself —
+  so `select((u) => ({ id: u.id, name: u.name }))` is
+  `Sequence<{ id: number, name: string }>` with nothing written down.
+- `selectMany` unwraps and then takes the ELEMENT, one level, exactly as
+  the runtime does (§13.6).
+- `groupBy` reseats to `Sequence<{ key: K | null, items: T[] }>` — the
+  `| null` is the `$default` the emitted document carries.
+- `params<Q>(bindings: Q)` answers `Sequence<T, P & Q>`, and every
+  callback's last argument is `ParamsExpr<P>`: exactly the declared
+  names, each typed from its bound value. Reading an undeclared name is
+  a compile error before it is `JL0004` (§14.4).
+- `mapAsync<R>` crosses to `AsyncSequence<Awaited<R>, P>`: the element
+  becomes the callback's RESOLVED type, and every terminal becomes a
+  promise.
+- `min()`/`max()` follow the operand family — a sequence of strings
+  answers a string, everything else a number.
+
+### 15.3 A document is a document
+
+`fromDocument<T = unknown>(source, document, options?)` infers NOTHING
+from the document it is handed: a query document is data, not a type,
+and there is no honest way to read an element type out of it. It answers
+`Sequence<unknown>` until the caller states otherwise
+(`fromDocument<User>(rows, saved)`), and so does a parsed JSON literal
+handed to `from()` — `from(JSON.parse(text)).toArray()` is `unknown[]`.
+The pens are the inference route: `ofType`/`cast` given a schema-pen
+builder re-type the sequence from the builder's own `Infer<>`
+(`ofType<S>(schema: SchemaBuilder<S, …>): Sequence<S, P>`), and a
+hand-written schema literal is caller-asserted with `unknown` as the
+default, because a JSON Schema is not a TypeScript type.
+
+The same rule runs through the provider seam: `Provider<T>` carries an
+`__item` phantom, so a typed entity set infers its rows without a cast
+and an untyped provider is `unknown`.
+
+### 15.4 The exports that are not vocabulary
+
+Five exports are surface a caller meets without ever calling:
+
+| Export | Why a caller meets it |
+|---|---|
+| `Sequence` | to ANNOTATE (`function page(q: Sequence<User>)`). Its constructor is `private`: a sequence is built by `from`/`fromDocument`, never with `new` |
+| `AsyncSequence` | the same, for the asynchronous surface (`fromAsync`) |
+| `LinqBuildError` | `instanceof` on the build-time refusals — `code`, `reason` and `docPath` are declared readonly |
+| `LinqRuntimeError` | `instanceof` on the terminal-time refusals, same three members |
+| `LINQ_CODES` | the runtime code table §9 is held equal to; a `Readonly<Record<string, string>>` a host can render |
+
+`DateTime` is a type-only export and costs nothing at run time: it is
+`string & { __jarenTag: 'date-time' }`, a marker that turns on the date
+family for a member without making every string a date.
+
+**A refusal encoded in the types takes a `never` PARAMETER, not just a
+`never` return.** `zip(unsupported: never): never` makes both
+`from(rows).zip()` and `from(rows).zip(other)` compile errors. The
+return type alone does not: `zip(...args: never[])` refuses an argument
+and accepts none, so the one spelling a caller would actually write
+type-checked and failed at run time instead. A JavaScript caller still
+gets the coded refusal (`JL0006`, §14.6) — the encoding closes the
+TypeScript half, and `test/consumer/types.ts` pins both spellings with
+`@ts-expect-error`.
+
+## 16. What it cannot spell
+
+§4's table records three constructs as `unsupported` — a status that
+means "throws a coded error naming the reason", never "emits something
+close". This section gathers them with their reasons, and adds the
+boundaries the package draws on purpose, so a reader can check each one
+rather than discover it.
+
+### 16.1 The three refused operators
+
+| Construct | Why there is no emission | What it raises |
+|---|---|---|
+| `aggregate(fn)`, unseeded | C#'s unseeded overload means "the first element is the seed". A query document is data: there is no clause that says "start from whichever item comes first", and inventing one would make the document mean something the grammar does not define | `JL0006`, naming the seeded form |
+| `zip()` | positional co-iteration — pair the *n*th of one input with the *n*th of another — has no operator in the grammar, and a FLWOR phrase reads ONE input. Emulating it would mean materialising both sides in the host, which is exactly the "runs somewhere other than the document says" the chain exists to avoid | `JL0006` |
+| a many-to-many hop (`u.labels`) | the phrase would have to bind the JOIN TABLE as a root and correlate twice, and a join table is not a queryable root in this version | `JL0105`, naming the join table and pointing at `load({ include })` |
+
+All three are checked in both directions: `test/linq/pen-docs.test.js`
+holds §14's code list equal to what the chain's modules throw, and the
+spellings above are the ones §14 shows raising them.
+
+### 16.2 The operators that are not on the surface at all
+
+The C# operator set is larger than the query grammar, and the chain does
+not carry a method for an operator it cannot lower. `union`,
+`intersect`, `except`, `skipWhile`, `takeWhile`, `chunk`, `append`,
+`prepend`, `sequenceEqual`, `toDictionary` and `toLookup` are not
+declared and not defined — reaching for one is a plain `TypeError`, not a
+coded refusal, because there is no method to refuse from.
+
+Two of them are compositions a reader can write today, and they are
+worth naming because the absence otherwise reads as a gap:
+
+- **`Union`** is `.concat(other).distinct()` — `$seq` followed by
+  `$distinct`, whose equality is the grammar's deep structural one.
+- **`Append`** is `.concat([value])`: a constant array's elements join
+  the stream. There is no general `Prepend`, because `concat` appends;
+  starting from the single-element source and concatenating the rest
+  (`from([first]).concat(rest)`) works only when `rest` is a constant
+  array.
+
+The rest have no composition on this surface. `skipWhile`/`takeWhile`
+need a predicate-terminated window and `$subsequence` takes positions;
+`chunk` needs a windowing operator; `sequenceEqual`, `toDictionary` and
+`toLookup` are host-side shapes rather than query results — read the
+sequence and build them.
+
+### 16.3 The boundaries this package draws on purpose
+
+Each of these is a design commitment, checkable in the source:
+
+- **No `Function.prototype.toString`, anywhere.** A callback is executed
+  ONCE against recording proxies; nothing parses its text. `grep -rn
+  'toString()' packages/linq/src/` finds none — the only `toString` in
+  the package is a radix conversion escaping a control character in a
+  path segment.
+- **No per-element callback evaluation.** A predicate runs at BUILD
+  time, produces an expression, and the engine evaluates that expression
+  per row. This is why a JavaScript operator inside a callback is a trap
+  rather than a slow path (§3): `&&`, `||`, `!`, `?:`, `in`, `typeof`,
+  `Object.keys` and `===` evaluate against the proxy and yield a
+  silently wrong document, while `>` and `+` throw a plain `TypeError`.
+  Use `.and()`, `.or()`, `.not()` and the comparison methods.
+- **No second grammar.** The chain emits the published query language
+  and nothing else; `toDocument()` is compilable by a bare
+  `compileJsonQuery` with no linq involvement, which is what makes a
+  query loggable, storable, diffable and authorable by a constrained
+  decoder.
+- **No inference from a document.** `fromDocument` and a parsed JSON
+  literal answer `unknown` (§15.3). The pens are the inference route.
+- **No clock.** There is no `now()`: §8.13 has no clock operator, and a
+  fluent surface does not get to add one. Bind the instant with
+  `.params({ now })`.
+- **No `knn` method.** k-nearest is `orderByDescending(… similarity …)`
+  then `take(k)` — the composition the emitted document already is (§4).
+- **No async query engine.** `packages/json` is strictly synchronous.
+  `fromAsync` makes the SOURCE and the host boundary asynchronous and
+  emits byte-identical documents (§10); there are no `selectAwait` or
+  `whereAwait` variants, because a per-element async predicate is
+  `mapAsync` then `where` (§11).
+- **No correlated subquery through a captured proxy.** An enclosing
+  capture's proxy used inside a nested one is `JL0002` (§14.2) — the
+  inner document rebinds `$it`. Over a provider with a relation table
+  the correlated phrase has a spelling: the hop (§13.4).
+- **No non-JSON constant.** A `Date`, `Map`, `Set`, `RegExp`, class
+  instance, `NaN`, `±Infinity` or `-0` in a captured expression is
+  `JL0005`, and in a `params()` binding `JL0004` (§14.4, §14.5). The
+  query data model is JSON, and a value that cannot survive the
+  round-trip cannot be compared faithfully.
+- **No document form for a host callback.** A chain carrying `mapAsync`
+  has no `toDocument()`; `explain()` reports `{ split: { pushed,
+  residual } }` instead (§11). The split is stated rather than hidden,
+  which is the same honesty a SQL pushdown owes its residual.
+
+## 17. Cost
+
+A consumer importing `from` from `@jarenjs/linq` and calling one
+terminal bundles **173,080 bytes** (esbuild, ESM, minified, tree-shaken,
+`platform: 'neutral'`). The figure is measured by
+`scripts/check-tree-shaking.js`'s chain probe and compared with this
+section on every `npm run test:tree-shaking`: it is derived, never typed,
+and a stale one is red here rather than wrong in a document somebody
+reads.
+
+Of that, **39,025 bytes** are the chain's own modules — `sequence.js`,
+`async.js`, `expression.js`, `document.js`, `provider.js`,
+`concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
+is the query ENGINE and the core it stands on: a chain's document has to
+run somewhere, and the in-memory runner is the reference semantics every
+provider is measured against (§8). A consumer that only ever hands
+`toDocument()` to a provider still pays it today, because the terminal
+that emits the document is the same terminal that would run it.
+
+The probe asserts four exclusions, and they are the cost claims worth
+making:
+
+- **no schema-pen module** — `ofType`/`cast` reach a builder through a
+  registry symbol looked up by key (`schema-of.js`), so the chain
+  imports nothing from `src/schema/`;
+- **no client module** — `src/db/` is the package's one runtime edge and
+  is not on this path;
+- **not one byte of `@jarenjs/db`, `@jarenjs/validate` or
+  `@jarenjs/formats`** — the client's optional peers. A consumer of the
+  chain alone installs nothing new;
+- **no pen bytes at all**, in either direction: the pens carry no chain
+  module either, which is what keeps a 19 kB JSLT pen 19 kB.
+
+`docs/CONSUMING.md` states the rounded price of all ten subpaths in one
+table, each figure held equal to the same measurements. Two of its rows
+are the ones to read together: the chain at 173 kB and `./db` at 478 kB.
+The client costs what the store costs, by construction, and the chain
+costs what running a query costs.
+
+**Taking a pen as well costs less than the two figures suggest**, and
+the reason is worth knowing: a bundler counts a shared module once, and
+the chain and every pen share the expression capture (`expression.js`)
+and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
+and object helpers). A consumer importing the chain AND the schema pen
+bundles **194,110 bytes** — **11,352 bytes** less than the sum of the
+figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
+what those shared modules weigh. The probe measures that pair too, so
+the saving is derived like everything else here. What the chain does NOT
+share with a pen is the pens' own two shared doors, `capture-root.js`
+and `json-boundary.js`: no chain callback reaches either, and neither is
+in the figure above. Every pen document's §7 carries its own
+subpath's figure; nothing here restates one.

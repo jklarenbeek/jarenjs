@@ -929,7 +929,7 @@ meaning is a `$return` that constructs an array explicitly.
 
 ## 7. Cost
 
-`@jarenjs/linq/flow` builds to **19,087 bytes** as a minified,
+`@jarenjs/linq/flow` builds to **19,181 bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded (19
 kB) beside the other nine subpath prices in
