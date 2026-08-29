@@ -1,15 +1,26 @@
-# The Jaren forms pen (normative)
+# The Jaren forms pen
 
 > `./forms` — the `x-form` vocabulary on JSON Schema, and
 > `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it
 > when** you are turning a schema into a form
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+You have a schema for some data and now you need a form over it — this
+field only when that one is filled, this one required when the company
+box is not empty, this one computed rather than typed. Those are rules
+about the same members the schema already describes, and keeping them in
+a second file beside it is how a renamed member breaks a form silently.
+This pen puts them on the member: one JSON Schema, with the form's rules
+annotated onto it.
 
 ```js
 import * as f from '@jarenjs/linq/forms';
@@ -43,6 +54,15 @@ The pen imports nothing of `@jarenjs/forms`: the reader is the only
 judge of what a rule means, and `assertOnSubmit()` is pinned deep-equal
 to `formRulesToQueryAssertions` over the whole corpus
 (`test/linq/forms-pen.test.js`).
+
+**The running example.** §3 is one shop's checkout, field by field: the
+terms box that is the smallest rule the pen can write, the shipping
+address where all three context names appear at once, the invoice block
+whose VAT id is required only for companies, that same block's submit
+twin, the project's own VAT string kind carrying the rules through a
+subclass, and the delivery parcel whose map preview is derived rather
+than authored. §5 reads the types off the same documents, and finds them
+identical to the schema pen's — which is the point.
 
 ### 1.1 The rule context, and its three names
 
@@ -131,6 +151,16 @@ the linked class plus `form()`.
 | `named(name, b)`, `ref(name)`, `lazy(thunk)`, `from(json)` | [SCHEMA-PEN.md §2.7](SCHEMA-PEN.md#27-references-and-defs) | `FormBuilder` (a `named()` builder is one of its own) |
 | `document(root, { draft })`, `schemaOf(value)` | [SCHEMA-PEN.md §2.10](SCHEMA-PEN.md#210-the-document-and-the-builder-itself) | — (both answer a document, not a builder) |
 
+This is the **grouped re-export row**, the row kind
+[LINQ-FORMAT.md](LINQ-FORMAT.md) §5 defines: one row per family, linking
+the schema pen's row rather than restating it, with a third column
+carrying the one thing that IS different here. For this pen that column
+is the class, because nothing else differs — the emission is byte for
+byte the schema pen's. [MODEL-PEN.md
+§2.5](MODEL-PEN.md#25-the-schema-pens-vocabulary-re-exported) uses the
+same row kind with a status in that column instead, because there the
+re-exports do gain behaviour.
+
 Every builder METHOD the schema pen documents is reachable on these too
 and behaves identically — the string constraints of
 [§2.4](SCHEMA-PEN.md#24-strings), the number constraints of
@@ -162,6 +192,8 @@ Two of the 27 carry a wrinkle worth reading before you meet it:
 
 ### 2.2 Re-exported and extended — `meta()`
 
+One name whose behaviour this pen changes, and the reason it had to.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | `.meta(annotations)` | the keys verbatim, in the order first set — exactly [SCHEMA-PEN.md §2.8](SCHEMA-PEN.md#28-annotations-and-messages)'s behaviour | — | native; a schema-pen-owned keyword is `JL0104` there, and `'x-form'` is `JL0104` HERE: the forms pen owns that keyword, and the fix is to spell it through `form()` |
@@ -174,6 +206,10 @@ a rule written through `meta()` would bypass every check `form()` makes
 refusal. The override closes that door and names the one that is open.
 
 ### 2.3 Forms-only — three names
+
+The pen's own surface: the method that writes a rule, the call that turns
+the rules into their submit-time twin, and the door a third pen comes in
+by.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
@@ -248,7 +284,7 @@ BYTE-equal to their fences by `test/linq/forms-pen.test.js`.
 
 ### 3.1 One field, one rule
 
-The smallest thing the pen writes that the schema pen cannot: a
+**The checkout's terms box.** The smallest thing the pen writes that the schema pen cannot: a
 checkbox that must be ticked, with the message its failure renders.
 Everything except `x-form` is the schema pen's document.
 
@@ -259,7 +295,7 @@ export const consent = f.object({
   newsletter: f.boolean().default(false),
   terms: f.boolean().form({
     assert: (c) => c.value.eq(true),
-    message: { $msgid: 'signup.terms-required', message: 'Please accept the terms' },
+    message: { $msgid: 'checkout.terms-required', message: 'Please accept the terms' },
   }),
 });
 ```
@@ -272,7 +308,7 @@ export const consent = f.object({
       "type": "boolean",
       "x-form": {
         "assert": { "$eq": ["$value", true] },
-        "message": { "$msgid": "signup.terms-required", "message": "Please accept the terms" }
+        "message": { "$msgid": "checkout.terms-required", "message": "Please accept the terms" }
       }
     }
   },
@@ -289,7 +325,7 @@ built through `@jarenjs/linq/schema` — which is what
 
 ### 3.2 The rule context: `root`, `value`, `pointer`, and nothing else
 
-All three names in one document, and each in the position a reader will
+**The shipping address.** All three names in one document, and each in the position a reader will
 want it: `c.root` for a cross-field read, `c.value` for the field's own,
 `c.pointer` for a rule that needs to name itself.
 
@@ -340,7 +376,7 @@ in, so two authors writing the same rule write the same bytes.
 
 ### 3.3 A cross-field form: visibility, an assert, an item template and a computed total
 
-An invoice: a VAT id visible only for companies and required when one is
+**The invoice block.** A VAT id visible only for companies and required when one is
 named, a per-line assert on the item TEMPLATE, and a total derived from
 the lines.
 
@@ -402,7 +438,7 @@ Three things a reader should take from this document:
 
 ### 3.4 The same rule on submit
 
-One call, over the document the pen just wrote. The branch the validator
+**The same invoice block, on submit.** One call, over the document the pen just wrote. The branch the validator
 enforces carries the `visible` guard, the `null` binding and the
 message:
 
@@ -453,7 +489,7 @@ with no assert answers that document unchanged.
 
 ### 3.5 `withForm()` over your own builder class
 
-The rules ride on every builder because `./forms` built its eight
+**The shop's own VAT string kind.** The rules ride on every builder because `./forms` built its eight
 classes with the mixin. A project that wants its own vocabulary BESIDE
 them takes the same route: subclass a schema-pen class, wrap the eight
 in `withForm()`, and hand them to `createFactories()`.
@@ -510,7 +546,7 @@ path.
 
 ### 3.6 A format that DERIVES its preview
 
-`preview` is not something an author writes. The registry carries it
+**The delivery parcel, drawn on a map.** `preview` is not something an author writes. The registry carries it
 against the FORMAT, and `buildFormModel` reads it from there — so what
 this pen emits for a previewable field is a plain `format`:
 
@@ -659,6 +695,10 @@ messages differ by one word — "the forms pen" against "the pen" — which
 is how a reader tells which pen refused them.
 
 ## 5. The types
+
+§3.3's invoice block again, this time with the `Doc` annotation that types
+its three context names — and read through both readers, so the schema
+half and the rule half are visible together.
 
 ```ts
 import { buildFormModel, compileFormRules, evaluateFormRules } from '@jarenjs/forms';
@@ -851,11 +891,41 @@ for a member that is not there:
 Everything else a reader might expect to be missing is present and
 belongs to the schema pen: the constructs THAT pen cannot spell are
 [SCHEMA-PEN.md §6](SCHEMA-PEN.md#6-what-it-cannot-spell) and are
-unchanged here, because 27 of this pen's 31 names are its names.
+unchanged here, because 27 of this pen's 31 names are its names. §6.1
+closes the section with the cases where the honest answer is not to reach
+for this pen at all.
+
+### 6.1 When not to reach for this pen
+
+- **The schema carries no rules.** A form over a document with no
+  `visible`, `enabled`, `assert` or `computed` is the schema pen's
+  document and `buildFormModel` builds a form from it perfectly well.
+  This subpath's whole addition is `x-form`; where there is none, taking
+  it costs a bundle and buys nothing (§7 has the figure).
+- **You already have the schema, from anywhere else.** `x-form` is an
+  annotation keyword: a hand-written schema, one from `@jarenjs/emit`, or
+  one this pen never touched can carry it, and `form()` is a convenience
+  rather than the only way in. A schema you do not author is a schema you
+  should annotate where it lives, not re-author here.
+- **The rule is about the world, not the document.** A context is
+  `root`, `value` and `pointer` and nothing else (§3.2, §4.3) — no clock,
+  no session, no server lookup. A field that is required only for users
+  in a country the server decides is a field whose rule reads a member
+  the server put in the document; put it there first.
+- **The rules must run somewhere that does not read `x-form`.** The
+  keyword is safe to ignore, which cuts both ways: a form rendered by a
+  library that has never heard of it renders every field and asserts
+  nothing. `assertOnSubmit()` (§3.4) is the answer where the rules have
+  to hold on a plain validator, and it is worth deciding that before the
+  rules are written.
+- **The validation is the schema's job.** `assert` is for what
+  `minLength` cannot say — a rule across two members, or one that depends
+  on a third. A rule that restates a constraint the schema already
+  carries is a second place to change it.
 
 ## 7. Cost
 
-`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->36,542<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->36,587<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -864,7 +934,7 @@ pen it subclasses, and no chain module, no `@jarenjs/forms` byte and no
 model pen.
 
 Most of that figure is the schema pen: `@jarenjs/linq/schema` alone
-is <!--fact:bundle.schema-->32,382<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
+is <!--fact:bundle.schema-->32,427<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
 capture, the submit transform and their refusal messages — is about 4 kB
 on top of a pen a form-shaped consumer usually already carries. A
 consumer importing both subpaths pays the schema pen once.

@@ -810,6 +810,27 @@ what each does is its own documentation's job
   run, a tree-shaking probe carrying neither chain module nor engine, a
   packed-consumer subpath and a type pin. A JTLT order additionally
   carries the grammar artifact and its tests. None is scheduled.
+- [ ] **Twenty-five keywords the validator compiles have no schema-pen
+  method.** `@jarenjs/linq/schema` owns 69 keyword names
+  (`packages/linq/src/schema/builders.js`) and has a builder method for 44
+  of them; the rest are reachable only through `.keyword(key, value)` or
+  `from(json)`, which write verbatim and change no phantom type. They are
+  `not`; `unevaluatedProperties` and `unevaluatedItems`;
+  `dependentSchemas` and `dependencies`; `minContains` and `maxContains`;
+  `contentEncoding`, `contentMediaType` and `contentSchema`;
+  `formatMinimum`, `formatMaximum`, `formatExclusiveMinimum` and
+  `formatExclusiveMaximum`; `$id`, `$anchor` and `$vocabulary`;
+  `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef` and
+  `$recursiveAnchor`; `definitions` (the draft-07 spelling of `$defs`);
+  `additionalItems`; and `$data` with its bare `data` spelling. `@jarenjs/validate` compiles every one. The constraint is that
+  a method is not the whole cost: each wants a type reading that stays
+  honest — `not` has no sound `Infer<>` narrowing, the unevaluated pair is
+  an annotation-dependent keyword whose result depends on sibling
+  applicators, and the dynamic references would make `named()`'s
+  one-name-one-definition identity rule ambiguous — so the ones worth
+  adding first are the ones whose type reading is simply `this`
+  (`minContains`/`maxContains`, the content family, the format bounds).
+  The forms and model pens inherit whatever lands here.
 
 ## @jarenjs/ai
 

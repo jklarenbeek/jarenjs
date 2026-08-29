@@ -1,15 +1,26 @@
-# The Jaren JSLT pen (normative)
+# The Jaren JSLT pen
 
 > `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose
 > bodies are captured over the matched value. **Read it when** you are
 > transforming one document into another
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+You have one shape of JSON and you need another one — a record reshaped
+for an API, a document rendered as a view, a value converted everywhere it
+appears in a tree. A stylesheet is the declarative way to say that, and
+writing one by hand means writing JSONPath strings and operator objects
+into JSON literals with nothing checking either. This pen lets you write
+each rule's body as a JavaScript arrow function and hands you the document
+it recorded.
 
 ```js
 import { stylesheet, rule, body, apply, op } from '@jarenjs/linq/jslt';
@@ -28,6 +39,14 @@ The pen imports no engine and judges nothing the compiler judges — path
 syntax (`JT0003`), the body's operators (`JT0007`), a `schema` match's
 hook (`JT0006`), the depth guard (`JT2001`) — with one exception it can
 see earlier: the `[]` idiom of JSLT-FORMAT §6.3.
+
+**The running example.** §3 is one publisher's catalogue, seen eight ways:
+summarised, walked as a book of chapters, repriced in another currency,
+rendered twice under two modes, appraised through a registered operator,
+sorted by an importer's log records, rendered as a view, and matched by a
+schema builder. Each rule set stands alone — that is what the gate runs —
+but they are all over the same kind of document, so a member you meet in
+§3.1 means the same thing in §3.8.
 
 **A stylesheet is recursive, and a two-rule example hides it.** The whole
 point of a template language is that a rule's body dispatches BACK into
@@ -64,11 +83,11 @@ time, against a recording proxy** — the same proxy the chain's `select()`
 records — and the document is what the recording left behind. Five
 consequences, in the order a writer meets them:
 
-1. **A member read records a path.** `v.customer.name` is not a value; it
+1. **A member read records a path.** `v.author.name` is not a value; it
    is a proxy that answers another proxy for every member read and
    remembers the walk. When the callback returns, that walk has become the
-   string `"$.customer.name"`. `v.lines.all()` records the wildcard
-   segment (`"$.lines[*]"`), `v.get('sub title')` records a bracket
+   string `"$.author.name"`. `v.chapters.all()` records the wildcard
+   segment (`"$.chapters[*]"`), `v.get('sub title')` records a bracket
    segment (`"$['sub title']"`), and an operator method records the
    operator (`v.price.mul(1.21)` → `{ "$mul": ["$.price", 1.21] }`). The
    operators are the chain's own and are documented once, in
@@ -196,10 +215,10 @@ import { stylesheet, rule } from '@jarenjs/linq/jslt';
 
 export const summary = stylesheet([
   rule('$', (v) => ({
-    id: v.id,
-    customer: v.customer.name.upper(),
-    total: v.lines.all().price.sum(),
-    lines: v.lines.all().count(),
+    isbn: v.isbn,
+    author: v.author.name.upper(),
+    pages: v.chapters.all().pages.sum(),
+    chapters: v.chapters.all().count(),
   })),
 ]);
 ```
@@ -208,18 +227,18 @@ export const summary = stylesheet([
 { "$jslt": "0.1",
   "rules": [
     { "match": "$",
-      "body": { "id": "$.id",
-                "customer": { "$upper": "$.customer.name" },
-                "total": { "$sum": "$.lines[*].price" },
-                "lines": { "$count": "$.lines[*]" } } }
+      "body": { "isbn": "$.isbn",
+                "author": { "$upper": "$.author.name" },
+                "pages": { "$sum": "$.chapters[*].pages" },
+                "chapters": { "$count": "$.chapters[*]" } } }
   ] }
 ```
 
-Over `{ id: 'o-1', customer: { name: 'ada' }, lines: [{ price: 3 }, { price: 4 }] }`
+Over `{ isbn: '978-1', author: { name: 'ada' }, chapters: [{ pages: 3 }, { pages: 4 }] }`
 the compiled transform answers
-`{ id: 'o-1', customer: 'ADA', total: 7, lines: 2 }`. Note
-`v.lines.all().count()`, not `v.lines.count()`: the first counts the
-ITEMS the wildcard yields, the second counts the one value `$.lines` is.
+`{ isbn: '978-1', author: 'ADA', pages: 7, chapters: 2 }`. Note
+`v.chapters.all().count()`, not `v.chapters.count()`: the first counts the
+ITEMS the wildcard yields, the second counts the one value `$.chapters` is.
 That distinction is the chain's, not this pen's, and QUERY-PEN §4 is
 where it is stated.
 
@@ -338,7 +357,7 @@ and no chain builder spells it.
 import { stylesheet, rule, op } from '@jarenjs/linq/jslt';
 
 export const appraisal = stylesheet([
-  rule('$.projects[*]', (v) => ({
+  rule('$.titles[*]', (v) => ({
     name: v.name,
     npv: op('$npv', [v.rate, v.cashflows.all()]),
   })),
@@ -348,7 +367,7 @@ export const appraisal = stylesheet([
 ```json
 { "$jslt": "0.1",
   "rules": [
-    { "match": "$.projects[*]",
+    { "match": "$.titles[*]",
       "body": { "name": "$.name",
                 "npv": { "$npv": ["$.rate", "$.cashflows[*]"] } } }
   ] }
@@ -419,9 +438,9 @@ here for it — and how a `jslt` node in a dataflow renders
 ```js
 import { stylesheet, rule, apply } from '@jarenjs/linq/jslt';
 
-export const todoList = stylesheet([
-  rule('$', (v) => ['ul', { class: 'todos' }, [apply(v.todos.all())]]),
-  rule('$.todos[*]', (v) => ['li', { 'data-id': v.id }, v.title]),
+export const catalogue = stylesheet([
+  rule('$', (v) => ['ul', { class: 'catalogue' }, [apply(v.books.all())]]),
+  rule('$.books[*]', (v) => ['li', { 'data-isbn': v.isbn }, v.title]),
 ]);
 ```
 
@@ -429,16 +448,16 @@ export const todoList = stylesheet([
 { "$jslt": "0.1",
   "rules": [
     { "match": "$",
-      "body": ["ul", { "class": "todos" }, [ { "$apply": "$.todos[*]" } ]] },
-    { "match": "$.todos[*]",
-      "body": ["li", { "data-id": "$.id" }, "$.title"] }
+      "body": ["ul", { "class": "catalogue" }, [ { "$apply": "$.books[*]" } ]] },
+    { "match": "$.books[*]",
+      "body": ["li", { "data-isbn": "$.isbn" }, "$.title"] }
   ] }
 ```
 
 The `[]` idiom is doing its usual work in the children position, and for
 once the brackets look like what they are: an array constructor holding
-one spliced sequence. Over two todos this renders
-`['ul', { class: 'todos' }, [['li', { 'data-id': 1 }, 'ship'], ['li', { 'data-id': 2 }, 'rest']]]`.
+one spliced sequence. Over two books this renders
+`['ul', { class: 'catalogue' }, [['li', { 'data-isbn': '978-1' }, 'Ada'], ['li', { 'data-isbn': '978-2' }, 'Grace']]]`.
 
 ### 3.8 An `.open()` match, and the honest top
 
@@ -655,7 +674,8 @@ every claim below is pinned at compile level in
 `test/linq/jslt-pen.test.js`. This subpath exports **no builder class, no
 constant and no type guard** — the three kinds the mapping table excludes
 (LINQ-FORMAT's D5 reading) are empty here, so §2 names the whole runtime
-surface and this section is about the compile-time one.
+surface and this section is about the compile-time one. The shapes below
+are §3.2's book and its chapters, declared.
 
 ```ts
 import { stylesheet, rule, body, apply } from '@jarenjs/linq/jslt';
@@ -869,6 +889,33 @@ two rules of equal priority conflict (§4 decides by document order and
 never errors). Every one of those is built through the pen and asserted
 at the engine's own code in `test/linq/jslt-pen.test.js` — the pen's
 non-judgement is itself gated.
+
+### 6.6 When not to reach for this pen
+
+- **The stylesheet is data.** A `$jslt` document loaded from a file,
+  authored by a model ([@jarenjs/ai](../../ai/README.md)'s authoring
+  profile writes them) or edited in the studio is a value;
+  `compileJsltStylesheet` takes it directly and nothing here has to be in
+  the path.
+- **You are transforming one value, once, in JavaScript.** A stylesheet
+  is a document because it has to travel — into a migration step, into a
+  flow node, into an app's view, into a database. Code that runs in one
+  process and stays there should be a function: it can branch, loop and
+  call libraries, and §1.1's five consequences are five ways a callback
+  that looks like ordinary JavaScript is not.
+- **The transform needs a condition JavaScript would express better.** A
+  body cannot use `if`, `&&`, `||` or a ternary — §1.1 rule 2 says what
+  they do instead, and it is silent and wrong. A transform whose shape is
+  mostly conditional is a set of rules with narrower `match` paths, or it
+  is not a stylesheet.
+- **You need an operator the query language does not have.** `op()`
+  reaches a REGISTERED operator, so the escape exists — but registering
+  one is a decision about the engine everywhere it runs, not a local
+  convenience, and a transform that needs three of them is a program.
+- **The output is not JSON.** A stylesheet's result is a JSON value. Text,
+  bytes and streams are somebody else's job — a `jaren-vnode` tree
+  (§3.7) is JSON and renders to HTML downstream, which is the pattern to
+  copy rather than the exception to it.
 
 ## 7. Cost
 

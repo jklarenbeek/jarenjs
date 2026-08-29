@@ -1,15 +1,28 @@
-# The Jaren app pen (normative)
+# The Jaren app pen
 
 > `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON
 > Schema of its state beside it. **Read it when** you are declaring a
 > whole application: state, view, actions, effects
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+An app document is a whole interactive application as one JSON value —
+its state, the view that renders it, the actions that change it, the
+subscriptions that feed it. Written by hand it is JSON Pointers in
+strings, action names in strings, and query expressions in object
+literals, none of which anything checks until the app runs. This pen
+makes each of them a function call over the state you declared, so a
+pointer is derived from the shape, an action name a view binds is checked
+against the actions map, and a patch you can spell wrong does not
+compile.
 
 ```js
 import { defineApp, action, transition, effect, bind, sub } from '@jarenjs/linq/app';
@@ -29,6 +42,16 @@ once: `defineApp()` writes the document; `action()`, `transition()`,
 `effect()` write a transition; the seven patch operations write the
 `patch` inside it; and `bind()` and `sub()` write the two places the
 outside world reaches in — an event, and a subscription.
+
+**The running example.** §3 is one project board, taken a feature at a
+time: the tag list whose patch semantics catch everybody out first, the
+estimate counter that is the smallest complete app, the card promotion
+that exercises all seven patch operations, the filter box that reads the
+event, the card list with an effect beside its patch, the live columns
+that fan a subscription out per column, and the grid whose view binds
+actions. Each fence is a whole document — that is what the gate runs —
+and read in order they are the same application growing. §5 reads the
+types back off it.
 
 ### 1.1 One document, one capture
 
@@ -93,6 +116,9 @@ reason).
 
 ### 2.1 The document
 
+The one call that assembles an application, and the two members it
+answers.
+
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `defineApp({ state, initial?, schema?, view, actions?, subs? })` | `{ document: { $app: '0.1', state?, view, actions?, subs? }, stateSchema }` — only the members the author declared, deep-frozen | `AppResult<State, Actions>`; `StateOf<>` and `ActionsOf<>` read it back | native; a member the pen does not know, a missing `view`, a `schema` beside a builder state `JL0101`; an underivable initial state, or a view binding an undeclared action, `JL0102` |
@@ -104,6 +130,9 @@ reason).
 | `subs` | the `subs` array, one `sub()` entry per element | `readonly SubDeclaration[]` | native; a value that is not a `sub()` `JL0101` |
 
 ### 2.2 The transition
+
+What an action returns: the patch to apply, the effects to hand the host,
+and nothing else — a transition is data, so a test can read it.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
@@ -156,6 +185,9 @@ rather than written as data, because a `$`-keyed object in a captured
 tree is otherwise a constructor (the `$map` escape).
 
 ### 2.4 The two doors in
+
+The two places the outside world reaches an app: an event a view binds,
+and a subscription the host runs.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
@@ -219,6 +251,7 @@ rebuilt the same way and held BYTE-equal to those docs' own fences by
 
 ### 3.1 `add(path, value)` replaces an array; `append(path, value)` adds to it
 
+**The board's tag list**, and the trap everyone meets first.
 Two actions, one array, one document — because the only way to read the
 difference is to see both pointers beside each other:
 
@@ -228,24 +261,24 @@ import { rule } from '@jarenjs/linq/jslt';
 import * as s from '@jarenjs/linq/schema';
 
 export const list = defineApp({
-  state: s.object({ items: s.array(s.string()).default([]) }),
-  view: [rule('$', (v) => ['ul', {}, v.items.all()])],
+  state: s.object({ tags: s.array(s.string()).default([]) }),
+  view: [rule('$', (v) => ['ul', {}, v.tags.all()])],
   actions: {
     // RFC 6902 'add' at a path that NAMES the array replaces the array
-    'items/set': action((st, x) => transition({ patch: [add((c) => c.items, x.payload)] })),
+    'tags/set': action((st, x) => transition({ patch: [add((c) => c.tags, x.payload)] })),
     // 'add' at the array's '-' position appends one element to it
-    'items/append': action((st, x) => transition({ patch: [append((c) => c.items, x.payload)] })),
+    'tags/append': action((st, x) => transition({ patch: [append((c) => c.tags, x.payload)] })),
   },
 }).document;
 ```
 ```json
 {
   "$app": "0.1",
-  "state": { "items": [] },
-  "view": [{ "match": "$", "body": ["ul", {}, "$.items[*]"] }],
+  "state": { "tags": [] },
+  "view": [{ "match": "$", "body": ["ul", {}, "$.tags[*]"] }],
   "actions": {
-    "items/set": { "patch": [{ "op": "add", "path": "/items", "value": "$payload" }] },
-    "items/append": { "patch": [{ "op": "add", "path": "/items/-", "value": "$payload" }] }
+    "tags/set": { "patch": [{ "op": "add", "path": "/tags", "value": "$payload" }] },
+    "tags/append": { "patch": [{ "op": "add", "path": "/tags/-", "value": "$payload" }] }
   }
 }
 ```
@@ -254,13 +287,13 @@ Both operations are `"op": "add"`. The only difference in the emitted
 document is the last two characters of the pointer, `/-`, and that is
 the whole of it:
 
-| Dispatched with | `items/set` leaves | `items/append` leaves |
+| Dispatched with | `tags/set` leaves | `tags/append` leaves |
 |---|---|---|
 | `'a'` on `[]` | `"a"` — the array is GONE, replaced by a string | `["a"]` |
 | `'c'` on `['a', 'b']` | `"c"` | `["a", "b", "c"]` |
 
-`items/set` is not a bug; it is the operation a reader wants when the
-payload IS the new list (`add((c) => c.items, x.payload)` where the
+`tags/set` is not a bug; it is the operation a reader wants when the
+payload IS the new list (`add((c) => c.tags, x.payload)` where the
 payload is an array replaces the list wholesale). It is a bug when the
 payload is one element, and the state schema is what catches it — the
 next state fails `validateState`, the transition is blocked, and the
@@ -268,13 +301,14 @@ loop reports `JA2005`. Reaching for `append()` is how a reader never
 sees that.
 
 `replace()` and `add()` differ once more, at an array ELEMENT:
-`add((c) => c.items.at(1), x)` INSERTS at index 1 and shifts the rest,
-where `replace((c) => c.items.at(1), x)` overwrites it. On an object
+`add((c) => c.tags.at(1), x)` INSERTS at index 1 and shifts the rest,
+where `replace((c) => c.tags.at(1), x)` overwrites it. On an object
 member the two are the same operation.
 
 ### 3.2 An app with state, one action and a view
 
-The whole shape in one document: a state whose defaults ARE the initial
+**The board's estimate counter**, and the smallest app that is a whole
+one. The whole shape in one document: a state whose defaults ARE the initial
 value, a view that reads it and binds an action, and an action that
 patches it.
 
@@ -322,6 +356,7 @@ existed ([§4.3](#43-jl0102--the-state-the-pointer-and-the-binding)).
 
 ### 3.3 A patch chain over a nested path
 
+**Promoting a card between the board's columns.**
 Every one of the seven operations, the pointer each writes, and the two
 places a pointer is not plain text:
 
@@ -373,6 +408,7 @@ What to read off it:
 
 ### 3.4 An action reading `$event`
 
+**The board's filter box**, where the action reads the keystroke.
 `$event` is the serializable slice of a DOM event: the default four
 members (`type`, `value`, `checked`, `key`) plus one per field the
 BINDING requested. The `action()`'s own `event` option requests nothing
@@ -444,20 +480,22 @@ What this document cannot ask for is `event.target` — see
 
 ### 3.5 An action reading `$payload`, with an effect in the same scope
 
+**Adding a card**, where the patch and the effect read the same payload.
+
 ```js
 import { action, append, defineApp, effect, replace, transition } from '@jarenjs/linq/app';
 import { rule } from '@jarenjs/linq/jslt';
 import * as s from '@jarenjs/linq/schema';
 
-const Todo = s.object({ id: s.string(), text: s.string(), done: s.boolean().default(false) });
+const Card = s.object({ id: s.string(), text: s.string(), done: s.boolean().default(false) });
 
-export const todos = defineApp({
-  state: s.object({ todos: s.array(Todo).default([]), pending: s.integer().default(0) }),
-  view: [rule('$', (v) => ['ul', {}, v.todos.all().text])],
+export const cards = defineApp({
+  state: s.object({ cards: s.array(Card).default([]), pending: s.integer().default(0) }),
+  view: [rule('$', (v) => ['ul', {}, v.cards.all().text])],
   actions: {
-    'todo/add': action((st, x) => transition({
+    'card/add': action((st, x) => transition({
       patch: [
-        append((c) => c.todos, { id: x.payload.id, text: x.payload.text, done: false }),
+        append((c) => c.cards, { id: x.payload.id, text: x.payload.text, done: false }),
         replace((c) => c.pending, st.pending.add(1)),
       ],
       effects: [effect('persist', { id: x.payload.id, at: st.pending.add(1) })],
@@ -468,12 +506,12 @@ export const todos = defineApp({
 ```json
 {
   "$app": "0.1",
-  "state": { "todos": [], "pending": 0 },
-  "view": [{ "match": "$", "body": ["ul", {}, "$.todos[*].text"] }],
+  "state": { "cards": [], "pending": 0 },
+  "view": [{ "match": "$", "body": ["ul", {}, "$.cards[*].text"] }],
   "actions": {
-    "todo/add": {
+    "card/add": {
       "patch": [
-        { "op": "add", "path": "/todos/-",
+        { "op": "add", "path": "/cards/-",
           "value": { "id": "$payload.id", "text": "$payload.text", "done": false } },
         { "op": "replace", "path": "/pending", "value": { "$add": ["$.pending", 1] } }
       ],
@@ -499,7 +537,7 @@ costs a document nothing.
 
 ### 3.6 A subscription with `for` and `$item`
 
-A static entry and a dynamic fan-out in one document:
+**The board's live columns.** A static entry and a dynamic fan-out in one document:
 
 ```js
 import { defineApp, sub } from '@jarenjs/linq/app';
@@ -509,17 +547,17 @@ import * as s from '@jarenjs/linq/schema';
 export const chat = defineApp({
   state: s.object({
     online: s.boolean().default(false),
-    rooms: s.array(s.object({ id: s.string(), unread: s.integer().default(0) })).default([]),
+    columns: s.array(s.object({ id: s.string(), unread: s.integer().default(0) })).default([]),
   }),
-  view: [rule('$', (v) => ['ul', {}, v.rooms.all().id])],
+  view: [rule('$', (v) => ['ul', {}, v.columns.all().id])],
   subs: [
     // static: verbatim props, never restarts
     sub('clock', { with: { ms: 1000, tick: 'clock/tick' } }),
-    // dynamic fan-out: one instance per room, keyed by the room's id
-    sub('room', {
+    // dynamic fan-out: one instance per column, keyed by the column's id
+    sub('column', {
       when: (st) => st.online,
-      for: (st) => st.rooms.all(),
-      withQuery: (st, x) => ({ id: x.item.id, since: st.rooms.all().unread.sum() }),
+      for: (st) => st.columns.all(),
+      withQuery: (st, x) => ({ id: x.item.id, since: st.columns.all().unread.sum() }),
       key: (st, x) => x.item.id,
     }),
   ],
@@ -528,15 +566,15 @@ export const chat = defineApp({
 ```json
 {
   "$app": "0.1",
-  "state": { "online": false, "rooms": [] },
-  "view": [{ "match": "$", "body": ["ul", {}, "$.rooms[*].id"] }],
+  "state": { "online": false, "columns": [] },
+  "view": [{ "match": "$", "body": ["ul", {}, "$.columns[*].id"] }],
   "subs": [
     { "run": "clock", "with": { "ms": 1000, "tick": "clock/tick" } },
-    { "run": "room",
+    { "run": "column",
       "when": "$.online",
-      "withQuery": { "id": "$item.id", "since": { "$sum": "$.rooms[*].unread" } },
+      "withQuery": { "id": "$item.id", "since": { "$sum": "$.columns[*].unread" } },
       "key": "$item.id",
-      "for": "$.rooms[*]" }
+      "for": "$.columns[*]" }
   ]
 }
 ```
@@ -552,13 +590,14 @@ time rather than `JA0008` at `createApp` time
 `since` does: `$item.id` beside a query over the whole state.
 
 The two entries also show the restart rule from the document's side. The
-`clock` entry has `with` and no query, so it never restarts. The `room`
+`clock` entry has `with` and no query, so it never restarts. The `column`
 entry restarts one instance whenever its `key` changes, and
 `stableStringify(item)` would have been the key had none been declared —
 `key` is the opt-out from recomputing a deep key per transaction.
 
 ### 3.7 A view binding an action, and the refusal when it is undeclared
 
+**The board's grid**, and what a view may bind.
 APP-FORMAT §4 gives a binding two forms and the pen reads both: a string
 under an `on` map, and an object carrying an `action` member ANYWHERE,
 because that member is §4's vocabulary and a widget's `emit` will find
@@ -1052,9 +1091,36 @@ not look for them:
   the binder's rule 1: a pen refuses only what it can see, and inventing
   a check the engine does not make would be a second, weaker validator.
 
+### 6.1 When not to reach for this pen
+
+- **The app document is data.** One read from a file, authored in the
+  studio, projected from a machine by `fsmToApp`
+  ([FLOW-PEN.md](FLOW-PEN.md)), or written by a model is a value;
+  `createApp` takes it directly.
+- **You are writing a component, not an application.** An app document is
+  one state, one view and one action map — the unit `createApp` runs. A
+  reusable widget is a view function and a set of props, and it lives in
+  `@jarenjs/view` where it can take children and callbacks; an app
+  document has no slot for either.
+- **The logic is mostly awaiting.** §6 above says it plainly: a
+  transition is pure and an effect reaches back only by dispatching. An
+  application whose interesting part is a sequence of awaited calls is
+  mostly host code with an app document attached, and the reading order
+  should follow — write the tasks, then the document that dispatches
+  them.
+- **The state does not fit in a document.** Every value in the state is
+  JSON: no DOM nodes, no class instances, no functions, no handles. A
+  canvas, a media element or a socket lives in the host and reaches the
+  document only as the data it produces.
+- **You would be fighting the patch.** A state shape that needs deep
+  rewrites on every event is a shape that wants normalizing before it
+  wants a pen. §3.1 is the first place this shows: `add` at a path that
+  names an array replaces it, and a reader who wanted `append` had a
+  shape question rather than a spelling one.
+
 ## 7. Cost
 
-`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->46,817<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->46,862<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -1064,8 +1130,8 @@ pen and the JSLT pen (state, and views), and no chain module, no
 
 It is the second-largest pen bundle after the client, and the two pens
 it carries are most of it. The three figures the same probe measures,
-side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->32,382<!--/fact--> bytes,
-`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,124<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->46,817<!--/fact-->. The subpath sums do not add — all
+side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->32,427<!--/fact--> bytes,
+`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,124<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->46,862<!--/fact-->. The subpath sums do not add — all
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:

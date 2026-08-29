@@ -1,13 +1,26 @@
-# The Jaren query pen (normative)
+# The Jaren query pen
 
 > the chain, `.` — query documents (`jaren-query`) and the provider
 > seam. **Read it when** you are querying data, or implementing a
 > provider that answers a query document
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119.
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose normative section is
+[§4 The mapping table](#4-the-mapping-table); the rules every pen keeps,
+the shared refusal table, the index of the other pens and every pen's
+mapping table collected in one place are the normative reference,
+[LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. Scope
+
+You have data — an array in memory, a store's rows, a stream — and a
+question to ask it, and you would like to write that question the way you
+write code: filter, order, project, join, group. What you actually need
+to hand the engine is a JSON document. So you either write the document,
+in a grammar your editor knows nothing about, or you write JavaScript
+and lose the ability to send it anywhere. This is the third option: a
+method chain that RECORDS what you wrote and hands you the document.
 
 `@jarenjs/linq` is a fluent front-end to the Jaren JSON Query language
 ([QUERY-FORMAT.md](../../json/docs/QUERY-FORMAT.md)): a C#-familiar
@@ -37,6 +50,23 @@ document — `from(json)` is `unknown` until the caller says otherwise,
 and the pens are the only inference route); and it promises nothing the
 query grammar cannot express — §4 records every such gap as
 `unsupported`, by name.
+
+**Why this one is the longest.** The other ten documents target 600–1000
+lines; this one is half again as long, and it stays one document. Its
+§1–§12 are cited by section number from more than seventy places, so the
+numbering is fixed and the sections cannot be split or moved. It also
+covers three surfaces no pen has — the chain, the asynchronous surface
+and the provider contract — each of which a different reader arrives for.
+A reader who wants only one of the three should use the section list: §1
+to §7 are the chain, §8 and §12 the provider seam, §10 and §11 the
+asynchronous surface, and §13 to §17 the same seven sections every pen
+document carries.
+
+**The running example.** §13's eight fences are one question asked eight
+ways over one small blog's data — the users, the posts they wrote and the
+orders placed against them — and §15 reads the types back off the same
+chains. Two of the eight need a PROVIDER rather than an array, and they
+are that same blog seen as a store's entity sets.
 
 **How to read this document.** The ten pen documents this one is indexed
 beside share a fixed seven-section shape, and a reader who has learned
@@ -673,6 +703,14 @@ operator table (§4 is the table). Read them in order: the first shows
 what a chain is, and each one after it adds one thing the emitted
 document does that the source does not obviously say.
 
+They are also one question, asked eight ways, over one small blog's data
+— the users, the posts they wrote and the orders placed against them.
+Nothing is shared between the fences at run time (each is a whole module,
+and that is what the gate runs), but the shapes are the same throughout,
+so a member you meet in §13.1 means the same thing in §13.8, and the two
+fences that need a PROVIDER rather than an array — the join and the hop —
+are that same blog seen as a store's entity sets.
+
 ### 13.1 The chain, whole
 
 The opening example of the README and of §2, executed. `where` becomes
@@ -904,9 +942,9 @@ a provider as a prepared statement.
 ```js
 import { from } from '@jarenjs/linq';
 
-const invoices = [{ id: 1, tenant: 'a7', total: 12 }];
+const orders = [{ id: 1, tenant: 'a7', total: 12 }];
 
-export const ours = from(invoices)
+export const ours = from(orders)
   .params({ tenantId: 'a7' })
   .where((r, p) => r.tenant.eq(p.tenantId));
 ```
@@ -965,9 +1003,9 @@ so the option travels with the source, not with the operator.
 import { from } from '@jarenjs/linq';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
-const contacts = [{ id: 1, email: 'ada@example.com' }, { id: 2 }];
+const users = [{ id: 1, email: 'ada@example.com' }, { id: 2 }];
 
-export const reachable = from(contacts, { compileTypeTest: createTypeTestCompiler() })
+export const reachable = from(users, { compileTypeTest: createTypeTestCompiler() })
   .ofType({ type: 'object', required: ['email'] });
 ```
 
@@ -980,7 +1018,7 @@ export const reachable = from(contacts, { compileTypeTest: createTypeTestCompile
 ```
 
 The document is the same with or without the hook — emission never needs
-it. What needs it is running: `from(contacts).ofType(…).toArray()` is
+it. What needs it is running: `from(users).ofType(…).toArray()` is
 `JL0003` with the fix in the message (§14), and a schema-pen builder may
 stand in for the literal (`s.object({ email: s.string() })`), whose
 document is taken.
@@ -1509,6 +1547,39 @@ Each of these is a design commitment, checkable in the source:
   residual } }` instead (§11). The split is stated rather than hidden,
   which is the same honesty a SQL pushdown owes its residual.
 
+### 16.4 When not to reach for the chain
+
+The chain earns its place when a query has to TRAVEL — to a store, into a
+saved document, across a version. Where it does not, the honest answers
+are shorter:
+
+- **The data is in memory and the query stays there.** `rows.filter()`
+  and `rows.map()` are the language's own, need no import, and any
+  JavaScript reader can follow them. A chain over an array buys one
+  thing: a document you could have sent somewhere. If you are not going
+  to send it, you are paying for a capture you never read.
+- **The query is one statement of SQL you already know.** A store takes
+  raw statements. A reporting query with three joins and a window
+  function is a statement; expressing it as a chain either does not
+  translate (§4 records every such gap) or translates into something
+  nobody can review against the original.
+- **The document already exists.** A saved `$query` is run with
+  `fromDocument` (§13.8) or handed to the engine directly. Re-authoring
+  it through the chain to "keep it typed" makes two spellings of one
+  query, and the one that runs in production is whichever the deploy
+  picked.
+- **The predicate needs JavaScript.** A callback runs ONCE, at build
+  time, against a proxy — so `if`, `&&`, a loop, a call into a library
+  and a closure over a mutable variable all either throw or record
+  something you did not mean (§3). A predicate that genuinely needs the
+  language is `mapAsync`'s host boundary (§11), and a chain that is
+  mostly host boundary is a program with a `where` at the front.
+- **You want a type, not a query.** `ofType` and `cast` narrow a
+  sequence's element type; neither validates unless a compiler was
+  handed in (§13.7, §14.3). A chain reached for as a type assertion is a
+  cast with extra steps — `from(rows)` already answers
+  `Sequence<unknown>` and `as` is the language's own spelling.
+
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
@@ -1555,7 +1626,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->194,110<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,352<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->194,155<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,352<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

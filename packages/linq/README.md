@@ -107,10 +107,11 @@ played by the provider seam below.
 ## By code: the schema pen
 
 The chain is the first pen; `@jarenjs/linq/schema` is the second. It
-builds standard JSON Schema 2020-12 documents in code — every keyword
-`@jarenjs/validate` supports, cross-field rules captured into `$query`
-through the same recording proxy the chain uses, `$defs`/`$ref`
-recursion, the normalizer's per-field annotations — and carries
+builds standard JSON Schema 2020-12 documents in code — the structural
+keywords, the constraints and the annotations, each with a method of its
+own, cross-field rules captured into `$query` through the same recording
+proxy the chain uses, `$defs`/`$ref` recursion, the normalizer's
+per-field predicates — and carries
 `Infer<>`/`Input<>` types that a gate proves equal to `@jarenjs/emit`'s
 generated declarations and consistent with the validator's verdicts over
 one corpus.

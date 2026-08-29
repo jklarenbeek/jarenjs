@@ -1,15 +1,27 @@
-# The Jaren flow pen (normative)
+# The Jaren flow pen
 
 > `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows,
 > every query-valued member captured. **Read it when** you are declaring
 > a state machine or a dependency graph of tasks
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+You have a process to describe — a document that moves between states as
+events arrive, or a pipeline that takes one value and hands it through
+named steps — and you want it as data, so a diagram, a runner and a test
+can all read the same thing. Writing that data by hand means typing state
+ids into a transition table and JSONPath strings into guards, with
+nothing checking that either exists. This pen makes both a function call:
+the ids are literal types, and every query-valued member is a callback it
+records.
 
 **This subpath writes two different documents, compiled by two different
 engines.** `defineFsm()` writes a `jaren-fsm` 0.1 machine — control
@@ -52,6 +64,15 @@ and the mermaid projection's meet where the format says they do (§6.4).
 
 The pen imports nothing of `@jarenjs/flow`: the compilers stay the only
 judge of what the documents mean, and §7's tree-shaking probe holds it.
+
+**The running example.** §3 is one editorial workflow, told twice because
+the subpath writes two documents. The machine half (§3.1–§3.3) is an
+article moving from draft to published: the transition table, then the
+same table with effects, then the guard that reads a score against a
+threshold. The dataflow half (§3.4–§3.7) is the pipeline around it: draft
+and critique, filter the submissions that are long enough, render the
+accepted ones as a view, and answer a question about them through a task
+registry. §5 reads the types back off the same two documents.
 
 ## 2. The mapping table
 
@@ -238,35 +259,35 @@ a path — and there is no string a writer could type that means it.
 import * as s from '@jarenjs/linq/schema';
 import { defineFsm, on } from '@jarenjs/linq/flow';
 
-export const basket = defineFsm({
-  initial: 'shopping',
-  states: ['shopping', 'checkout'],
+export const scored = defineFsm({
+  initial: 'review',
+  states: ['review', 'published'],
   transitions: [
-    on('shopping', 'pay', { payload: s.object({ amount: s.number() }) })
-      .when((sc) => sc.context.balance.ge(sc.payload.amount).and(sc.event.eq('pay')))
-      .to('checkout'),
+    on('review', 'approve', { payload: s.object({ score: s.number() }) })
+      .when((sc) => sc.context.threshold.le(sc.payload.score).and(sc.event.eq('approve')))
+      .to('published'),
   ],
-  context: s.object({ balance: s.number() }),
+  context: s.object({ threshold: s.number() }),
 });
 ```
 
 ```json
 {
   "$fsm": "0.1",
-  "initial": "shopping",
-  "states": ["shopping", "checkout"],
+  "initial": "review",
+  "states": ["review", "published"],
   "transitions": [
-    { "from": "shopping", "event": "pay",
-      "guard": { "$and": [ { "$ge": ["$.context.balance", "$.payload.amount"] },
-                           { "$eq": ["$.event", "pay"] } ] },
-      "to": "checkout" }
+    { "from": "review", "event": "approve",
+      "guard": { "$and": [ { "$le": ["$.context.threshold", "$.payload.score"] },
+                           { "$eq": ["$.event", "approve"] } ] },
+      "to": "published" }
   ]
 }
 ```
 
-`compileFsm(basket).step('shopping', 'pay', { payload: { amount: 10 }, context: { balance: 25 } })`
-fires; the same call with `{ amount: 30 }` reports
-`{ changed: false, state: 'shopping', … }` — an unhandled step, not an
+`compileFsm(scored).step('review', 'approve', { payload: { score: 8 }, context: { threshold: 5 } })`
+fires; the same call with `{ score: 3 }` reports
+`{ changed: false, state: 'review', … }` — an unhandled step, not an
 error (§4).
 
 This is what §4.2's refusal is protecting. A writer who wants this
@@ -277,14 +298,14 @@ is the route.
 **A TypeScript caller writes one more thing here.** `sc.payload` is typed
 by the event's own declaration on the same call, but `sc.context` is not:
 `on()` is evaluated before `defineFsm()` ever sees the `context` builder,
-so the scope's context is the honest top and `sc.context.balance` does
+so the scope's context is the honest top and `sc.context.threshold` does
 not compile. The annotation is where the type comes from —
 
 ```ts
-on('shopping', 'pay', { payload: Amount })
-  .when((sc: Scope<{ balance: number }, { amount: number }>) =>
-    sc.context.balance.ge(sc.payload.amount))
-  .to('checkout')
+on('review', 'approve', { payload: Score })
+  .when((sc: Scope<{ threshold: number }, { score: number }>) =>
+    sc.context.threshold.le(sc.payload.score))
+  .to('published')
 ```
 
 — and §5.1 says why it cannot be inferred. The emitted document is
@@ -357,13 +378,13 @@ something the chain emits (it packs and names its binding `it`).
 ```js
 import { defineDag, edge, input, output, query } from '@jarenjs/linq/flow';
 
-export const adults = defineDag({
+export const longEnough = defineDag({
   nodes: {
-    rows: input(),
-    grown: query({ $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' }),
+    subs: input(),
+    long: query({ $for: { r: '$[*]' }, $where: { $ge: ['$r.words', 500] }, $return: '$r' }),
     out: output(),
   },
-  edges: [edge('rows', 'grown'), edge('grown', 'out')],
+  edges: [edge('subs', 'long'), edge('long', 'out')],
 });
 ```
 
@@ -371,14 +392,14 @@ export const adults = defineDag({
 {
   "$dag": "0.1",
   "nodes": {
-    "rows": { "kind": "input" },
-    "grown": { "kind": "query",
-      "query": { "$for": { "r": "$[*]" }, "$where": { "$ge": ["$r.age", 18] }, "$return": "$r" } },
+    "subs": { "kind": "input" },
+    "long": { "kind": "query",
+      "query": { "$for": { "r": "$[*]" }, "$where": { "$ge": ["$r.words", 500] }, "$return": "$r" } },
     "out": { "kind": "output" }
   },
   "edges": [
-    { "from": "rows", "to": "grown" },
-    { "from": "grown", "to": "out" }
+    { "from": "subs", "to": "long" },
+    { "from": "long", "to": "out" }
   ]
 }
 ```
@@ -424,14 +445,14 @@ import { apply, rule, stylesheet } from '@jarenjs/linq/jslt';
 
 export const listing = defineDag({
   nodes: {
-    rows: input(),
+    articles: input(),
     list: jslt(stylesheet([
       rule('$', (v) => ['ul', {}, [apply(v.all())]]),
-      rule('$[*]', (v) => ['li', {}, v.name]),
+      rule('$[*]', (v) => ['li', {}, v.title]),
     ])),
     out: output(),
   },
-  edges: [edge('rows', 'list'), edge('list', 'out')],
+  edges: [edge('articles', 'list'), edge('list', 'out')],
 });
 ```
 
@@ -439,21 +460,21 @@ export const listing = defineDag({
 {
   "$dag": "0.1",
   "nodes": {
-    "rows": { "kind": "input" },
+    "articles": { "kind": "input" },
     "list": { "kind": "jslt",
       "stylesheet": { "$jslt": "0.1", "rules": [
         { "match": "$", "body": ["ul", {}, [{ "$apply": "$[*]" }]] },
-        { "match": "$[*]", "body": ["li", {}, "$.name"] } ] } },
+        { "match": "$[*]", "body": ["li", {}, "$.title"] } ] } },
     "out": { "kind": "output" }
   },
   "edges": [
-    { "from": "rows", "to": "list" },
+    { "from": "articles", "to": "list" },
     { "from": "list", "to": "out" }
   ]
 }
 ```
 
-Over `[{ name: 'ada' }, { name: 'lin' }]` this runs to
+Over `[{ title: 'ada' }, { title: 'lin' }]` this runs to
 `['ul', {}, [['li', {}, 'ada'], ['li', {}, 'lin']]]` — a `jaren-vnode`
 tree, which is what [JSLT-PEN.md](JSLT-PEN.md) §3.7 is about. The
 envelope form and the bare rules array are both accepted here; the
@@ -743,7 +764,7 @@ type Event = EventsOf<typeof review>;      // 'submit' | 'approve'   (a wildcard
 type NoCtx = ContextOf<typeof review>;     // unknown
 
 // over §3.3's machine, which declared one
-type Ctx = ContextOf<typeof basket>;       // { balance: number }
+type Ctx = ContextOf<typeof scored>;       // { threshold: number }
 
 const machine = compileFsm(review);
 machine.step('review', 'approve', { payload: { fresh: true, by: 'ada' } });
@@ -780,8 +801,8 @@ that matters:
 | Where | How it is typed | Why not by inference |
 |---|---|---|
 | a guard's `sc.payload` | the event's own declaration: `on(from, event, { payload })` | it is the same call — nothing to defer |
-| a guard's `sc.context` | ANNOTATION: `.when((sc: Scope<Cart>) => …)` | `on()` is evaluated before `defineFsm()` sees the `context` builder |
-| an `effect()`'s scope | ANNOTATION: `effect('x', (sc: Scope<Cart, Approval>) => …)` | an `effect()` is written before the transition that carries it exists |
+| a guard's `sc.context` | ANNOTATION: `.when((sc: Scope<Thresholds>) => …)` | `on()` is evaluated before `defineFsm()` sees the `context` builder |
+| an `effect()`'s scope | ANNOTATION: `effect('x', (sc: Scope<Thresholds, Approval>) => …)` | an `effect()` is written before the transition that carries it exists |
 | a `query`/`task`/`select` value | ANNOTATION: `query((v: Expr<Row[]>) => …)` | a node's input scope is decided by its inbound EDGES, which are declared after it |
 
 What `defineFsm({ context })` types is the MACHINE — `ContextOf<>` — and
@@ -930,6 +951,30 @@ decision: a `query` node's result is a value, an array or `null`
 depending on how many items the query yielded, and the document cannot
 say which it wants. Until the format answers, the spelling that has one
 meaning is a `$return` that constructs an array explicitly.
+
+### 6.5 When not to reach for this pen
+
+- **The machine or the graph is data.** A `jaren-fsm` or `jaren-dag`
+  document read from a file, drawn in the studio, or projected from
+  mermaid is a value; `compileFsm`/`compileDag` take it directly.
+- **The control flow is a function.** A pipeline that runs in one
+  process, never crosses a boundary and is never drawn is three
+  `await`s. A dataflow document buys checkpointing, a diagram, a task
+  registry a host substitutes and a document a test can assert — pay for
+  it when you want one of those.
+- **The states are not a closed set.** `defineFsm` types state ids as
+  literals, which is most of what it buys you; a machine whose states are
+  computed, loaded, or numerous enough that nobody would type them is
+  better as data.
+- **The work is long-running and needs to survive a restart.** §6.2 says
+  it plainly: there is no workflow pen and there will not be one.
+  Durability, retries, timers and compensation belong to a workflow
+  engine, and a dataflow document that grew them would be one wearing the
+  wrong name.
+- **A guard needs to ask something the query language cannot.** Guards
+  evaluate over the step scope with one `$` and no externals (§4.4), so a
+  clock, a lookup, or a call into a service has no spelling. Decide it in
+  the host and send a different EVENT — which is what an event is for.
 
 ## 7. Cost
 

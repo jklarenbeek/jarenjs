@@ -1,10 +1,11 @@
 # The Jaren pens (normative)
 
-> this file, the binder: what a pen is, the rules all of them keep, the
-> shared `JL01xx` table, and the cross-pen views derived from the ten
-> documents it indexes. **Read it when** you want a rule that is true of
-> every pen, an index of the eleven documents, or one place to look up a
-> method without knowing which pen owns it
+> this file, the binder and the family's **normative reference**: what a
+> pen is, the rules all of them keep, the shared `JL01xx` table, and the
+> cross-pen views derived from the ten guides it indexes. **Read it when**
+> you want a rule that is true of every pen, an index of the eleven
+> documents, or one place to look up a method without knowing which pen
+> owns it
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119.
@@ -16,27 +17,35 @@ named functions that build a standard document — a JSON Schema, a
 `$model`, a `$jslt` stylesheet — the way the chain builds a query
 document. `@jarenjs/linq` exports each pen under its own subpath
 (`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`, `/contract`,
-`/flow`, `/app` and `/forms`); `.` stays the chain. This document is
-the binder, and it is normative for every pen: §1 states the rules they
-all keep and §1.3 the error codes they share. One document per pen
-carries that pen's mapping table — method, emitted member, type
-reading, status — and the worked examples a test executes; this is the
-index of the ten, and it is how a reader reaches any of them.
+`/flow`, `/app` and `/forms`); `.` stays the chain.
+
+**This document is the family's normative reference**: §1 states the
+rules every pen keeps, §1.3 the error codes they share, and §4–§7 the
+cross-pen views — the census, the refusal map, the measured price of each
+subpath, and every pen's mapping table in one place — none of which is
+written here, all of it derived from the ten documents beside it. Those
+ten are **guides**: each opens with the problem its pen solves, builds one
+document across its sections, and carries exactly one normative section
+of its own, the mapping table its rows here come from. So the two
+questions have two homes and neither is a copy of the other — "what is
+true of every pen, and where do I look this method up" is answered here;
+"how do I write one of these documents" is answered there. This section
+is the index of the ten, and it is how a reader reaches any of them.
 
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 790 | this file, the binder: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten documents it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,565 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,007 | `./schema` — JSON Schema 2020-12: every keyword `@jarenjs/validate` supports, `$query`, `$defs`/`$ref` recursion, the normalizer's annotations. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
-| [MODEL-PEN.md](MODEL-PEN.md) | 1,004 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
-| [JSLT-PEN.md](JSLT-PEN.md) | 908 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | 710 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,145 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
-| [FLOW-PEN.md](FLOW-PEN.md) | 981 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
-| [APP-PEN.md](APP-PEN.md) | 1,074 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
-| [FORMS-PEN.md](FORMS-PEN.md) | 870 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
-| [DB-CLIENT.md](DB-CLIENT.md) | 729 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 812 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,636 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,218 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
+| [MODEL-PEN.md](MODEL-PEN.md) | 1,083 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
+| [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | 781 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,217 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
+| [FLOW-PEN.md](FLOW-PEN.md) | 1,026 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
+| [APP-PEN.md](APP-PEN.md) | 1,140 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
+| [FORMS-PEN.md](FORMS-PEN.md) | 940 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
+| [DB-CLIENT.md](DB-CLIENT.md) | 784 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 <!--/fact-->
 
 Every row of that table is derived, and none of it is written here: the
@@ -192,18 +201,18 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 790 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,565 | 34 | 8 | 14 | 173,080 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,007 | 66 | 10 | 4 | 32,382 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,004 | 28 | 6 | 3 | 40,812 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 908 | 17 | 8 | 3 | 19,124 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 710 | 11 | 5 | 4 | 23,599 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,145 | 37 | 6 | 3 | 44,599 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 981 | 16 | 7 | 3 | 19,181 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,074 | 22 | 7 | 3 | 46,817 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 870 | 18 | 6 | 3 | 36,542 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 729 | 36 | 4 | 2 | 478,172 B |
-| **eleven documents** | | **10,783** | **285** | **67** | | |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 812 | — | — | — | — |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,636 | 34 | 8 | 14 | 173,080 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 32,427 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 40,857 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,124 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 23,599 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,217 | 37 | 6 | 3 | 44,644 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,181 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,140 | 22 | 7 | 3 | 46,862 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 36,587 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 784 | 36 | 4 | 2 | 478,172 B |
+| **eleven documents** | | **11,592** | **285** | **67** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -246,14 +255,14 @@ it and each document publishes it. The rounded column is what
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
 | `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 173,080 B | 173 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 32,382 B | 32 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 40,812 B | 41 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 32,427 B | 32 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 40,857 B | 41 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,124 B | 19 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 23,599 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 44,599 B | 45 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 44,644 B | 45 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,181 B | 19 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 46,817 B | 47 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 36,542 B | 37 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 46,862 B | 47 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 36,587 B | 37 kB |
 | `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 478,172 B | 478 kB |
 <!--/fact-->
 
@@ -279,6 +288,19 @@ file agrees with all ten again. That is what lets each pen's document be
 a guide with a shape of its own while the normative rows stay collected
 in one place — neither is a copy of the other, so neither can drift from
 it.
+
+**The grouped re-export row.** Two pens are the schema pen with a
+vocabulary added — `./model` and `./forms` — and neither restates the
+rows it inherits. Both use one row kind for them, defined here so
+the two tables below can be read as the same shape: one row per FAMILY of
+names, a link to the schema pen's row for that family, and a third column
+carrying the one thing that IS different in this pen. That third column
+is a status for the model pen, whose re-exported builders gain behaviour
+the moment an `x-entity` method is called on one, and the class that
+comes back for the forms pen, where nothing gains behaviour and the class
+is the whole difference. A grouped row is never an abridgement: the
+completeness gate holds every callable name named somewhere in the
+section, families included.
 
 Only the rows travel. A table's surrounding prose, its refusals, its
 types and its examples stay in the document that owns them, and each

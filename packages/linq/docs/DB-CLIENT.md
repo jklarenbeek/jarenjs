@@ -1,18 +1,31 @@
-# The Jaren linq client (normative)
+# The Jaren linq client
 
 > `./db` — the client: the store's typed front door, not a pen, and the
 > package's one runtime edge. **Read it when** you are reading or
 > writing rows: `load`, `include`, `link`/`unlink`, `live`
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The surface](#2-the-surface); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
 
+You have a store declared with the model pen and you want to read it — a
+list with a filter, the related rows beside each one, a page after the
+last key you saw. The store already answers a query document and a load
+specification; what you would rather not do is write either by hand,
+naming entities and relations in strings that nothing checks. This is the
+door that types both from the model you already wrote.
+
 The store's front door: `open(model, options)` opens `@jarenjs/db`'s
-store and fronts it with handles typed from the model pen. It is **not a
+store and fronts it with handles typed from the model pen. **The running example**
+throughout is the blog store [MODEL-PEN.md](MODEL-PEN.md) §3 declares —
+users, their posts, the labels a post carries and the comments under it —
+read four ways in §3 and typed in §5. It is **not a
 pen** in [LINQ-FORMAT.md](LINQ-FORMAT.md) §1's sense — it emits no
 document of its own, so there is no format it writes and no grammar to
 validate against — but it keeps the pen rules where they apply:
@@ -77,6 +90,10 @@ divides the two; §2.2 to §2.5 enumerate them.
 
 ### 2.1 What is the store's and what is the client's
 
+Which half of every member you meet belongs to `@jarenjs/db` and which
+is added here — the line to have in mind before the tables, because it
+decides which document answers a question about behaviour.
+
 | Member | Whose | What the client does |
 |---|---|---|
 | `open(model, { driver, …, validator? })` | the store's `openStore`, every option forwarded verbatim (`capture`, `live`, `jobs`, `profile`, … included) | wires `validator` as `compileSchema` — the default, `defaultValidator()`, is `new JarenValidator({ collectErrors: true })` with the string and date-time formats registered (the configuration MIGRATING-FROM-ZOD's recipe reproduces, so `s.string().email()` asserts out of the box); an explicit `compileSchema` wins; `validator: null` opens unvalidated, by name (`capabilities.validated === false`) |
@@ -89,6 +106,9 @@ divides the two; §2.2 to §2.5 enumerate them.
 | `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
 ### 2.2 The two exported names
+
+The whole export surface: a door, and a type-level reader for what it
+hands back.
 
 | Name | Answers | Type reading |
 |---|---|---|
@@ -231,7 +251,13 @@ from `test/linq/client.test.js`, and §2.4 does the same for an
 four is what §3 carries.
 
 Each fence opens its own store over the smallest model that carries the
-relations it needs, so a reader can run any one of them alone.
+relations it needs, so a reader can run any one of them alone — but they
+are all the same store, the blog [MODEL-PEN.md](MODEL-PEN.md) §3
+declares: users, their posts, the labels a post carries and the comments
+under it. Read in order, the four are one reading session against it: an
+include with a spec and a counted membership, then the root clauses and a
+cursor, then every way to spell an ordering, then a bracketed pick with a
+two-level include.
 
 ### 3.1 An include with a spec, and a counted membership
 
@@ -545,7 +571,8 @@ entity first, then attach").
 The client is typed from the model pen's phantom with no cast and no
 generate step. `open()` reads `InferMeta<>` off a pen model; a JSON
 literal is never inferred, so a bare JSON model opens the honest wide map
-and a caller who has a generated map names it.
+and a caller who has a generated map names it. The model below is §3's —
+the blog — and every line is a reading of it.
 
 ```ts
 import { open } from '@jarenjs/linq/db';
@@ -650,8 +677,9 @@ time.
 
 The client writes no document of its own, so it has no construct set to
 refuse as unspellable and raises no `JL0102`. This section is therefore
-about something else: what the client deliberately does not do, and where
-the edges of what it can express actually are.
+about something else: what the client deliberately does not do, where the
+edges of what it can express actually are, and — in §6.1 — when the
+honest answer is to open the store some other way.
 
 **It is not a second engine.** The store's planner, its unit of work, its
 translator and its live maintenance are `@jarenjs/db`'s, and nothing here
@@ -690,6 +718,33 @@ split, or write the document by hand.
 never builds one; the migration between two of them is
 [MIGRATION-PEN.md](MIGRATION-PEN.md)'s.
 
+### 6.1 When not to reach for this door
+
+- **You want the store, not the types.** `openStore` from `@jarenjs/db`
+  is the same store with untyped handles, and it is what a program that
+  reads its model from JSON at boot already has. This subpath's whole
+  value is the phantoms; where there is no model constant to read them
+  off, there is nothing to buy. §7 is what the difference costs.
+- **The model is not the model pen's.** `InferMeta<>` reads a model-pen
+  document's phantoms. A `$model` parsed from a file carries no phantom, so
+  `InferMeta<>` over it is the honest wide map, the handles come back
+  untyped, and the door is `openStore` with a generated map named
+  explicitly (§5) — or a model-pen constant the parsed document is
+  checked against.
+- **The question is about the plan, not the rows.** `explain()` answers
+  whether a chain translates, in how many statements, and what stayed
+  residual. Read it there. Nothing in this document decides it, and a
+  spelling change made to please a sentence here rather than an
+  `explain()` output is a guess.
+- **The read is one statement of SQL you already know.** The store takes
+  raw statements; a reporting query with three joins and a window
+  function is a statement, not a chain, and pretending otherwise costs a
+  residual nobody sees until it is slow.
+- **The relation is a membership you want to interrogate.** §6 says it
+  above: a join table is not a queryable root, so a question about the
+  pairs themselves is a load and then JavaScript. That is a real cost and
+  it is worth knowing before the model is shaped around it.
+
 ## 7. Cost
 
 `@jarenjs/linq/db` builds to **<!--fact:bundle.db-->478,172<!--/fact--> bytes** as a minified,
@@ -722,7 +777,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->40,812<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->40,857<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

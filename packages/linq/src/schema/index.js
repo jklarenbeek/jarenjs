@@ -1,9 +1,12 @@
 //@ts-check
 /**
  * @file `@jarenjs/linq/schema` — JSON Schema by code. Named builders
- * write standard 2020-12 documents (every keyword the validator
- * supports, `$query` through the chain's own capture, `$defs`/`$ref`
- * recursion, the normalizer's annotations), and the hand-authored
+ * write standard 2020-12 documents (the structural keywords, the
+ * constraints and the annotations, each with a method of its own;
+ * `$query` through the chain's own capture; `$defs`/`$ref` recursion;
+ * the normalizer's predicates — SCHEMA-PEN.md §6.2 lists the
+ * twenty-five owned keywords that have no method and are written with
+ * `keyword()` or `from()` instead), and the hand-authored
  * declarations beside them carry `Infer<>`/`Input<>`, proven against
  * emit's generated types and the validator's verdicts over one corpus.
  * The document is the deliverable; nothing here imports an engine.

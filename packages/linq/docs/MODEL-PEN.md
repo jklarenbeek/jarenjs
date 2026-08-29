@@ -1,15 +1,26 @@
-# The Jaren model pen (normative)
+# The Jaren model pen
 
 > `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model`
 > 0.1 document `openStore` accepts unchanged. **Read it when** you are
 > declaring a store's entities, their keys and their relations
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps,
+the shared refusal table, the index of the other pens and every pen's
+mapping table collected in one place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+You have a database to declare — its entities, their keys, which members
+become columns, which relations the store may follow — and the format for
+that is a JSON document with a JSON Schema inside it. Writing one by hand
+means keeping a schema and a mapping vocabulary in step in the same file,
+by eye. This pen is the schema pen with that vocabulary added to every
+builder, so the mapping is a method on the member it belongs to and the
+document is assembled for you.
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -77,6 +88,13 @@ const ada = await store.entity('User').create({ email: 'ada@x.test' });
 ada.id;        // the store allocated it
 ada.created;   // the store stamped it
 ```
+
+**The running example.** The round trip above is one blog's store, and it
+is the store §3 declares in full — the authors and their posts, the
+labels on a post, the comments the store stamps and fills, the two kinds
+of key, and the collections that hold what is not an entity. §5 opens the
+same model through `typedStore` and reads its types back. One example in
+§3 stands outside the blog and says so where it starts.
 
 What the store then DOES with the document — the hybrid column mapping,
 relations and referential integrity, identity, defaults, the relational
@@ -186,6 +204,9 @@ The option set is exactly `name`, `unique`, `derive`, `precision`,
 
 ### 2.4 The model document
 
+The three calls that assemble the whole thing — the document, the
+collection declaration inside it, and the index declaration inside that.
+
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `defineModel({ entities?, collections? })` | `{ $model: '0.1', collections?, entities? }`, deep-frozen; each entity is `{ schema, 'x-rename'? }` | `ModelDocument<E, C>`, whose phantoms `InferMeta<>` and the migration pen read | native; neither member given, a member outside the two, a name that is not an identifier, or a declaration of the wrong kind, all `JL0101`; an undeclared relation target or a `collection()` under `entities`, `JL0102` |
@@ -206,6 +227,16 @@ unchanged** — the row is [SCHEMA-PEN.md](SCHEMA-PEN.md)'s, and this table
 links it rather than repeating it. The one difference is the class of the
 builder that comes back: it carries §2.1's methods, so any of these can
 be a key, an index, a column override or a store-written default.
+
+This is the **grouped re-export row**, the row kind
+[LINQ-FORMAT.md](LINQ-FORMAT.md) §5 defines: one row per family, linking
+the schema pen's row rather than restating it, with a third column
+carrying the one thing that IS different here. For this pen that column
+is the status, because these builders gain behaviour — `x-entity` lands
+on them the moment a §2.1 method is called. [FORMS-PEN.md
+§2.1](FORMS-PEN.md#21-re-exported-unchanged--27-names) uses the same row
+kind with the class in that column instead, because there nothing gains
+behaviour and the class is the whole difference.
 
 | Method | Row | Status |
 |---|---|---|
@@ -270,7 +301,15 @@ and asserts the document. Every model here also opens under the node
 driver, normalizes through `normalizeModel`/`normalizeEntities` and
 validates against `jaren-model.schema.json`.
 
-MODEL-FORMAT §9.1's own entity, with both sides of one edge declared:
+One blog's store, declared piece by piece. Each fence is a complete model
+on its own — that is what the gate runs — and read in order they are one
+store's entities and then its collections: the authors and their posts,
+the two ways posts carry labels, the comments with every store-written
+default on them, the two kinds of key, and the collections that hold what
+is not an entity. Only the last stands apart, and it says so.
+
+The spine — MODEL-FORMAT §9.1's own entity, with both sides of one edge
+declared:
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -335,7 +374,8 @@ construction. The two declarations are one edge (same `via`, one `many`
 side and one `one` side, agreeing on `onDelete`), which is what
 `normalizeEntities` checks and `JD0031` refuses.
 
-The two many-to-many spellings, one implicit and one named:
+A post carries labels two ways, and the difference is who names the join
+table — the two many-to-many spellings, one implicit and one named:
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -396,14 +436,16 @@ record which entity each column references (§2.2's `joinTables` block).
 An implicit name is safe to derive and unsafe to parse — a rename follows
 the endpoints, not the string.
 
-An entity with every store-written default, and a rename hint:
+A comment is where the store writes the most on your behalf: an entity
+with every store-written default, and a rename hint for the migration
+that follows:
 
 ```js
 import * as m from '@jarenjs/linq/model';
 
 export const model = m.defineModel({
   entities: {
-    Note: m.object({
+    Comment: m.object({
       id: m.string().identity('uuid'),
       text: m.string(),
       slug: m.string().compute((d) => d.text.lower()).optional(),
@@ -411,7 +453,7 @@ export const model = m.defineModel({
       touched: m.datetime().updated().column('integer').optional(),
       kind: m.string().enumOf(['memo', 'todo']).fill('memo').optional(),
       weight: m.integer().fill(1).optional(),
-    }).renamedFrom('Memo'),
+    }).renamedFrom('Remark'),
   },
 });
 ```
@@ -420,7 +462,7 @@ export const model = m.defineModel({
 {
   "$model": "0.1",
   "entities": {
-    "Note": {
+    "Comment": {
       "schema": {
         "type": "object",
         "properties": {
@@ -439,7 +481,7 @@ export const model = m.defineModel({
         "required": ["id", "text"],
         "additionalProperties": false
       },
-      "x-rename": "Memo"
+      "x-rename": "Remark"
     }
   }
 }
@@ -453,7 +495,8 @@ why a second parameter is `JL0104` (§4.3). `x-rename` rides on the
 ENTITY: `.renamedFrom()` writes builder state and `defineModel` lifts it
 (`src/model/define.js:116`), and on a member it is refused (§4.2).
 
-Keys: one store-allocated, one composite, and what each does to
+The store's two kinds of key, on a revision and on a follow — one
+store-allocated, one composite, and what each does to
 `required`:
 
 ```js
@@ -461,14 +504,14 @@ import * as m from '@jarenjs/linq/model';
 
 export const model = m.defineModel({
   entities: {
-    Ticket: m.object({
-      tid: m.integer().identity('auto'),
+    Revision: m.object({
+      rid: m.integer().identity('auto'),
       title: m.string(),
       rev: m.integer().version().optional(),
     }),
-    Grade: m.object({
-      student: m.string().key(),
-      course: m.string().key(),
+    Follow: m.object({
+      follower: m.string().key(),
+      followed: m.string().key(),
       score: m.integer().optional(),
     }),
   },
@@ -479,27 +522,27 @@ export const model = m.defineModel({
 {
   "$model": "0.1",
   "entities": {
-    "Ticket": {
+    "Revision": {
       "schema": {
         "type": "object",
         "properties": {
-          "tid": { "type": "integer", "x-entity": { "key": true, "default": "auto" } },
+          "rid": { "type": "integer", "x-entity": { "key": true, "default": "auto" } },
           "title": { "type": "string" },
           "rev": { "type": "integer", "x-entity": { "version": true } }
         },
-        "required": ["tid", "title"],
+        "required": ["rid", "title"],
         "additionalProperties": false
       }
     },
-    "Grade": {
+    "Follow": {
       "schema": {
         "type": "object",
         "properties": {
-          "student": { "type": "string", "x-entity": { "key": true } },
-          "course": { "type": "string", "x-entity": { "key": true } },
+          "follower": { "type": "string", "x-entity": { "key": true } },
+          "followed": { "type": "string", "x-entity": { "key": true } },
           "score": { "type": "integer" }
         },
-        "required": ["student", "course"],
+        "required": ["follower", "followed"],
         "additionalProperties": false
       }
     }
@@ -507,7 +550,7 @@ export const model = m.defineModel({
 }
 ```
 
-**`tid` is still in `required`, and that is deliberate.** The pen writes
+**`rid` is still in `required`, and that is deliberate.** The pen writes
 the schema of a STORED document, and a stored ticket always has its key.
 The exemption belongs to the write: a store-allocated key is allocated
 after validation, so the store validates an insert with that member
@@ -515,11 +558,13 @@ dropped from `required` (MODEL-FORMAT §9.6), and the type says the same
 from the other side — `identity('auto')` marks the member `generated`, so
 it is optional on `EntityInput` and required on `EntityDoc` (§5.2).
 Spelling it `optional()` to "fix" the emission would make the READ shape
-wrong. `Grade` has no such member: a composite key is caller-supplied,
+wrong. `Follow` has no such member: a composite key is caller-supplied,
 both parts are required, and `EntityKey` is
-`{ student: string; course: string }`.
+`{ follower: string; followed: string }`.
 
-A collection with a captured key, and one whose key the store allocates:
+Not everything in the store is an entity. A collection is a document
+schema with a key pointer, and the blog keeps two: one with a captured
+key and one whose key the store allocates:
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -571,7 +616,10 @@ the RFC 6901 pointer `/id` (`src/model/collection.js:116-129`, escaping
 `~` and `/` as `~0`/`~1`) — a pointer string is accepted verbatim, and
 `key: null` says the store allocates, with `identity` naming how.
 
-Indexes: a composite, a geohash and a vector, over one collection:
+**The one example here that is not part of the blog**, and why: an index
+is only worth reading on members that show what the three kinds do, and
+the blog has no coordinate and no embedding. This collection has both — a
+composite, a geohash and a vector, over one collection:
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -777,7 +825,7 @@ import { openStore } from '@jarenjs/db';
 import { typedStore } from '@jarenjs/db/typed';
 import { nodeDriver } from '@jarenjs/db/node';
 
-const model = m.defineModel({ entities: { User, Post } });
+const model = m.defineModel({ entities: { User, Post } });   // §3's first model
 const store = typedStore<InferMeta<typeof model>>(
   await openStore(model, { driver: nodeDriver() }));
 
@@ -908,9 +956,10 @@ relation hop ([QUERY-PEN.md](QUERY-PEN.md) §3, §4).
 The model pen's own limits are `JL0102`s (§4.2) and one absence. They
 divide into two lists a reader must not conflate, because the two fail at
 different times and a reader looking in the wrong one will hunt the wrong
-error.
+error. A third list closes the section: the cases where the honest answer
+is not to reach for this pen at all.
 
-**What the FORMAT cannot carry** — refused here, at build:
+### 6.1 What the format cannot carry — refused here, at build
 
 - **A composite or derived index on an entity, or a key pointer.** The
   vocabulary is `unique: true` and `index: true` per member, and nothing
@@ -946,9 +995,11 @@ error.
   (MODEL-FORMAT §9.2) because a silently ignored mapping directive is a
   data-loss bug waiting to happen; `entity()` holds the same set.
 
-**What the pen does NOT check, and the store does.** These emit happily
-and fail at `openStore` — the pen would have to re-implement a compile
-check, or know something a builder cannot see, to catch them:
+### 6.2 What the pen does not check, and the store does
+
+These emit happily and fail at `openStore` — the pen would have to
+re-implement a compile check, or know something a builder cannot see, to
+catch them:
 
 - **Inverse agreement.** Two declarations naming the same `via` must be
   one `many` side and one `one` side and must agree on `onDelete`;
@@ -972,9 +1023,37 @@ check, or know something a builder cannot see, to catch them:
   primitive both are built on and writes what it is given. The store's
   `JD0030` is the backstop.
 
+### 6.3 When not to reach for this pen
+
+- **The model is data.** A `$model` read from a file, fetched over the
+  wire or produced by a tool is a value, and `openStore(model, …)` takes
+  it as it stands. Nothing here has to be in the path.
+- **The database already exists and you are matching it.** Planning runs
+  one way — the model describes what the store should build — and reading
+  a model back out of a live database is open work, tracked in
+  [docs/ROADMAP.md](../../../docs/ROADMAP.md) under the data pair
+  ("Introspection of an existing database"). Until it lands, a model over
+  a database somebody else made is a transcription, and a transcription
+  is as easy to get wrong in code as in JSON.
+- **Nothing carries `x-entity`.** A collection takes a builder from any
+  pen — `m.collection(s.object({ id: s.string() }), { key: '/id' })` is
+  accepted and emits the same document — so a store of plain document
+  collections with no keys, no relations and no column overrides needs
+  the schema pen and `collection()`, not this whole subpath. §7 is what
+  the difference costs.
+- **It is one entity in a test.** `{ $model: '0.1', entities: { A: {
+  schema: … } } }` is shorter than the import. The pen earns its place at
+  the point where a relation has two ends to keep in agreement, or a
+  member's mapping and its schema are edited together.
+- **You want the store's own vocabulary and not the format's.** This pen
+  writes `$model` 0.1 and refuses what MODEL-FORMAT §9.2 does not define.
+  A directive the store would honour but the format has not published has
+  no spelling here and should not get one — it belongs in the format
+  first.
+
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->40,812<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->40,857<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.model.kb-->41<!--/fact--> kB) beside the other nine subpath prices in
@@ -995,7 +1074,7 @@ them:
   byte of `packages/linq/src/model/`, because the subclasses are built by
   this subpath rather than patched onto the base classes.
 
-The price above the schema pen's <!--fact:bundle.schema-->32,382<!--/fact--> is about 8 kB: the mixin, the
+The price above the schema pen's <!--fact:bundle.schema-->32,427<!--/fact--> is about 8 kB: the mixin, the
 three relation factories, `collection()`/`index()` with their capture,
 `defineModel()` — and the refusal MESSAGES, which are most of what §4
 costs. That is a deliberate trade: naming the rule and the spelling that

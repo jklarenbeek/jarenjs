@@ -1,4 +1,4 @@
-# The Jaren contract pen (normative)
+# The Jaren contract pen
 
 > `./contract` — `$contract` 0.1 documents: the operations, their
 > schemas, their declared behavior and their REST binding. **Read it
@@ -6,11 +6,22 @@
 > its tools typed from one document
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+You have a service with an API, and three things need to agree about it:
+the server that implements it, the client that calls it, and whatever
+else reads it — a generated OpenAPI file, a tool set handed to a model, a
+test. A contract is the one document all three read, and writing it by
+hand means keeping JSON Schemas, HTTP verbs and error names in step by
+eye. This pen writes that document from typed calls, and the same typed
+calls then check the client, the handlers and the tools against it.
 
 ```js
 import { defineContract, read, command, subscribe, http, error } from '@jarenjs/linq/contract';
@@ -29,7 +40,18 @@ error schemas instead.
 
 The pen imports nothing of `@jarenjs/contract`: the compiler stays the
 only judge of what the document means, and a tree-shaking probe holds it
-(§7). What the pen adds over writing the JSON by hand is three things —
+(§7).
+
+**The running example.** §3 is one shop's service surface, and it is six
+contracts rather than one on purpose: a `$contract` document is the unit
+a service publishes, so a product with a health endpoint, a catalog, an
+order intake, a live picking board, a document store and an internal
+notes service publishes six of them. Read in order they build the whole
+surface up — the smallest possible contract, then a shared definition,
+then declared failures and the whole policy, then a stream, then the
+binding's harder cases, and last one contract driving a client, a handler
+map and a tool set at once. §5 reads the types back off the last of
+them. What the pen adds over writing the JSON by hand is three things —
 the member order the revision hashes, the `$defs` hoisting, and the
 phantom types the three consumers of §5 read.
 
@@ -73,6 +95,9 @@ constructs one.
 
 ### 2.1 The document
 
+The two calls that make a contract: the envelope, and the identity
+members the format compares two revisions by.
+
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `defineContract({ id?, version?, compat? }, operations)` | `{ $contract: '0.1', id?, version?, compat?, $defs?, operations }` in §12.1's root order, deep-frozen | `Contract<Ops>`; `ContractOf<typeof c>` is the operation map §5 reads | native; a head member the pen does not know, an `id` outside `[A-Za-z_][A-Za-z0-9_-]*`, a non-string `version`, a `compat` that is not an array of strings, or no operation at all, `JL0101` |
@@ -89,6 +114,10 @@ because CONTRACT-FORMAT §2.2's pattern
 enforce, at `JC0003`.
 
 ### 2.2 The three operation kinds
+
+An operation declares what it is by which of these three writes it, and
+the kind decides what the format lets it do — whether it may repeat
+safely, whether it may change state, whether it streams.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
@@ -129,6 +158,10 @@ builder reached from anywhere is one definition.
 
 ### 2.4 The errors map
 
+The failures an operation DECLARES, as opposed to the ones any operation
+can raise: each a name the caller matches on, with a status and an
+optional payload schema.
+
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9-]*$`, or an entry that is not a plain object, `JL0101` |
@@ -168,6 +201,9 @@ writes and the compiler refuses (`JC0014`).
 
 ### 2.6 The HTTP binding
 
+Where an operation lands on a URL, and where each input member goes when
+it gets there — the one part of a contract that is about transport.
+
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `http({ method, path, in?, body?, status?, media? })` | the binding in §12.1's http order, declared members only | `HttpBinding<H>`; a non-JSON `media` makes the operation `opaque: true` | native; a member the binding does not take, a method outside the seven tokens, a non-string `body`, a status outside 200–299 or a non-string `media`, `JL0101`; a reserved path-template form or a member mapped to `path` the template does not declare, `JL0102` |
@@ -195,6 +231,10 @@ checks, the same messages — so the two spellings differ only in when the
 refusal arrives.
 
 ### 2.7 The three consumers
+
+Three identity wrappers that type a client, a handler map or a tool set
+against the contract that describes it. None of them emits anything;
+they exist so a mismatch is a compile error rather than a 404.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
@@ -245,7 +285,8 @@ drift apart either.
 
 ### 3.1 The smallest complete contract
 
-One `read`, one binding, and a `doc` string. Nothing else is required:
+**The health endpoint** — the smallest complete contract the shop
+publishes. One `read`, one binding, and a `doc` string. Nothing else is required:
 no `version`, no `$defs`, no `policy`.
 
 ```js
@@ -285,7 +326,7 @@ lets a server add a member without breaking a client that validates.
 
 ### 3.2 A shared definition, hoisted once
 
-`Product` is reached by four positions across two operations and is one
+**The catalog.** `Product` is reached by four positions across two operations and is one
 `$defs` entry with four `$ref`s. The hoist is the contract's, so a
 definition never appears inside an operation.
 
@@ -363,7 +404,8 @@ contract's.
 
 ### 3.3 Declared failures, and the whole policy
 
-`errors` and `policy` together — every policy member the format declares,
+**Order intake**, where a failure is a thing you declare rather than a
+status you hope for. `errors` and `policy` together — every policy member the format declares,
 including the two the public projection drops.
 
 ```js
@@ -464,7 +506,7 @@ that could only name declared codes could not say "retry a timeout".
 
 ### 3.4 A subscribe operation and its stream binding
 
-`subscribe`'s `output` is the SNAPSHOT schema (§17); the emissions that
+**The picking board, live.** `subscribe`'s `output` is the SNAPSHOT schema (§17); the emissions that
 follow travel the stream wire as patches against it.
 
 ```js
@@ -543,6 +585,7 @@ what its media says.
 
 ### 3.5 Path templates, member locations and an opaque operation
 
+**The document store**, which is where the HTTP binding gets interesting.
 The two template spellings, the four locations, a whole-body member, a
 declared success status, and a media type that makes an operation
 opaque.
@@ -635,7 +678,7 @@ only.
 
 ### 3.6 One document, three consumers
 
-The pen's whole value in one fence: one authored contract, and a client,
+**The internal notes service**, and the pen's whole value in one fence: one authored contract, and a client,
 a handler table and an AI toolbox all typed off it with no generate step.
 The three wrappers are identity at run time, so what this fence proves is
 that a pen contract IS a contract — it compiles, it serves, it invokes,
@@ -951,7 +994,9 @@ through both doors and asserts the reason and the `docPath` of each.
 The pen is the only inference route (the binder's §1.1 rule 2): a
 `Contract<Ops>` carries a phantom that `ContractOf<>` reads, and every
 consumer below narrows off that one reading. Nothing here exists at run
-time.
+time. The `shop` contract below is a catalog like §3.2's with declared
+failures like §3.3's on it — the two features a consumer's types show off
+at once.
 
 ```ts
 import { compileContract } from '@jarenjs/contract';
@@ -1077,7 +1122,9 @@ void liveApi.subscribe('board.set', input, {});  // 'board.set' is a command
 The contract pen's limits are narrow, because a `$contract` document is
 mostly a map of schemas and the schema pen carries those limits
 ([SCHEMA-PEN.md](SCHEMA-PEN.md#6-what-it-cannot-spell) §6 is the list
-that matters most to a contract author). What is left is three groups.
+that matters most to a contract author). What is left is three groups,
+and then §6.1 — the cases where the answer is not to reach for this pen
+at all.
 
 - **The reserved path-template forms.** RFC 6570's operators and
   modifiers, the `*` wildcard, the optional `:name?` segment, and a
@@ -1110,9 +1157,34 @@ are the compiler's, they need the materialized defaults the pen refuses
 to write, and reaching them means one import of `@jarenjs/contract` over
 `contract.document`. §7 is what that separation buys.
 
+### 6.1 When not to reach for this pen
+
+- **The contract is data.** A `$contract` read from a file, fetched from
+  a running service's `describe()`, or produced by another tool is a
+  value; `compileContract` takes it directly.
+- **You are consuming a contract you do not own.** The three wrappers of
+  §2.7 type a client, a handler map or a tool set against a contract
+  DOCUMENT — they do not need this pen to have written it. Import the
+  document the service publishes and wrap that; authoring a second copy
+  of somebody else's contract is how the two drift.
+- **The service is not one.** A contract is a published surface with a
+  version and a compatibility list, and its whole value is that two
+  parties can compare two revisions. One function called over a local
+  import is not a service, and giving it a contract buys nothing but a
+  build step.
+- **The API is not request/response.** Three operation kinds is the whole
+  vocabulary — a read, a command and a subscription. A protocol that
+  negotiates, that is bidirectional beyond a subscription, or that is
+  really a stream of bytes has no spelling here, and §6's third bullet
+  says why the wire's own frames deliberately have no pen.
+- **You want what the compiler produces, not what the pen writes.**
+  Defaults materialized, a public projection, an OpenAPI file, a
+  TypeScript declaration — all of those are `@jarenjs/contract`'s over
+  `contract.document`, and none of them needs this subpath at run time.
+
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->44,599<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->44,644<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->45<!--/fact--> kB) beside the other nine subpath prices in
@@ -1124,7 +1196,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->32,382<!--/fact--> of its <!--fact:bundle.contract-->44,599<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->32,427<!--/fact--> of its <!--fact:bundle.contract-->44,644<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,

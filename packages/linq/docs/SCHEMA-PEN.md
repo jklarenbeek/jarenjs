@@ -1,24 +1,41 @@
-# The Jaren schema pen (normative)
+# The Jaren schema pen
 
-> `./schema` — JSON Schema 2020-12: every keyword `@jarenjs/validate`
-> supports, `$query`, `$defs`/`$ref` recursion, the normalizer's
-> annotations. **Read it when** you are describing the shape of data —
+> `./schema` — JSON Schema 2020-12: the structural keywords, the
+> constraints and the annotations, each with a method of its own, plus
+> `$query`, `$defs`/`$ref` recursion and the normalizer's per-field
+> predicates. **Read it when** you are describing the shape of data —
 > for validation, for a form, or as the base of an entity
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps,
+the shared refusal table, the index of the other pens and every pen's
+mapping table collected in one place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+You have a JSON Schema to write — to validate a request, to generate a
+form, or as the base of a store's entity — and you would rather write it
+in code, where the editor completes the keyword, the compiler knows the
+shape, and a member you rename is renamed everywhere at once. That is
+what this pen is for. It is not a schema library with a JSON exporter
+bolted on: the document IS the deliverable, and every method on this
+surface exists because some keyword of the format needs a spelling.
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 ```
 
-builds JSON Schema 2020-12 documents: every keyword `@jarenjs/validate`
-supports, `$query` captured through the chain's proxy, `$defs`/`$ref`
-recursion, the normalizer's per-field annotations. The type reading is
+builds JSON Schema 2020-12 documents: the structural keywords, the
+constraints and the annotations, each with a method of its own; `$query`
+captured through the chain's proxy; `$defs`/`$ref` recursion; the
+normalizer's per-field predicates. Twenty-five further keywords that
+`@jarenjs/validate` also compiles have no method on this surface and are
+written through `.keyword()` or `from()` instead —
+[§6.2](#62-the-absences-twenty-five-keywords-with-no-method) lists them
+by family. The type reading is
 emit's (EMIT-FORMAT §5–§7), because the agreement pins them equal; a
 constraint (`min`, `pattern`, `format`) never changes a type — the honest
 widening emit documents — with one addition: a string with
@@ -72,6 +89,19 @@ The rules this pen keeps because every pen keeps them — immutability,
 identity, the name → value map rule, the shared refusal table — are in
 [LINQ-FORMAT.md](LINQ-FORMAT.md) and are not restated here.
 
+**The running example.** `User` above is the document this guide grows.
+Everything from §3 on is one small account service: the stored profile
+first, then the shapes around it — the group tree it belongs to, the
+audit record that names it, the sign-in it produces, what a signup hands
+IN before the normalizer runs, the access level it carries, the write
+bodies an endpoint derives from it, the annotations a generated form
+reads, and the settings file the service loads. §5 then reads the types
+back off the same document. One example in §3 stands outside that story
+deliberately — the cross-field rule the `@jarenjs/validate` README
+publishes as hand-written JSON, kept because a rule whose twin is
+published elsewhere is a rule a reader can check — and it says so where
+it begins.
+
 ## 2. The mapping table
 
 Every name `@jarenjs/linq/schema` exports that a caller writes, and every
@@ -84,6 +114,11 @@ Status: **native** (emits the named keyword), **emulated** (a composition
 with identical semantics), **refused** (a coded error naming the reason).
 
 ### 2.1 Primitives, literals and enums
+
+The leaves: the five scalar types, the two ways to pin a value to a fixed
+set, the four string formats that carry a date or a time, and the two
+ends of the lattice — `any()`, which admits everything, and `never()`,
+which admits nothing.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
@@ -103,6 +138,11 @@ with identical semantics), **refused** (a coded error naming the reason).
 
 ### 2.2 Objects
 
+Everything about a member — whether it is required, whether it may be
+null, whether names the object never declared are allowed — plus the
+methods that derive one object from another rather than declaring it
+afresh.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | `object(props)` | `{ type: 'object', properties, required, additionalProperties: false }` — `required` lists every member not `optional()`, in declaration order, and is omitted when empty | a closed object: members required unless `optional()`; no index signature; `object({})` is `Record<string, never>` | native |
@@ -121,6 +161,10 @@ with identical semantics), **refused** (a coded error naming the reason).
 
 ### 2.3 Arrays and tuples
 
+A homogeneous list and a fixed-position one, with their bounds; the
+difference that matters is that a tuple's tail is open until `rest()`
+closes it.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | `array(items)` | `{ type: 'array', items }` | `T[]` | native |
@@ -132,6 +176,9 @@ with identical semantics), **refused** (a coded error naming the reason).
 
 ### 2.4 Strings
 
+The string assertions — a length, a pattern, a named `format` — and the
+three formats common enough to have a method of their own.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | string `.min(n)`, `.max(n)`, `.length(n)` | `minLength`, `maxLength`, both | — | native |
@@ -141,6 +188,11 @@ with identical semantics), **refused** (a coded error naming the reason).
 
 ### 2.5 Numbers
 
+The numeric bounds, inclusive and exclusive, and the one keyword that
+constrains a number's spacing rather than its range. Retyping a number as
+an integer is `.int()`, in §2.1 beside `integer()` because they are one
+document.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | number `.min(n)`, `.max(n)` | `minimum`, `maximum` | — | native |
@@ -148,6 +200,9 @@ with identical semantics), **refused** (a coded error naming the reason).
 | number `.multipleOf(n)` | `multipleOf` | — | native; zero or a negative is `JL0101` |
 
 ### 2.6 Composition
+
+The four ways to say "one of these", "all of these" or "this only when
+that" — and which of them the type reading can follow.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
@@ -158,6 +213,10 @@ with identical semantics), **refused** (a coded error naming the reason).
 
 ### 2.7 References and `$defs`
 
+How a schema is spelled once and reached many times — by value, by name,
+and through a thunk that closes a recursion — plus `from()`, the door a
+hand-written schema comes in by.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | `named(name, b)` | `$defs[name]` at the document root, `{ $ref: '#/$defs/name' }` where reached — once, however many places reach it | `Infer<b>` | native; a name outside `[A-Za-z_][A-Za-z0-9_.-]*` is `JL0101`; two distinct builders under one name are `JL0103` |
@@ -166,6 +225,11 @@ with identical semantics), **refused** (a coded error naming the reason).
 | `from(json)` | the JSON, verbatim (cloned, so the document is its own tree) | `T` as asserted (`from<T>`) | native; anything but an object or a boolean is `JL0101` |
 
 ### 2.8 Annotations and messages
+
+What a document says about itself rather than about its data — a title, a
+description, examples — plus the validator's author-supplied error
+messages, the verbatim escape hatch, and the two primitives the four
+named methods are written in terms of.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
@@ -183,6 +247,12 @@ rule through `.keyword()`.
 
 ### 2.9 Validation extensions
 
+Two of the three keyword families §1 names as riding beside standard JSON
+Schema, each ignored by a validator that does not know it: the
+cross-field rule the query language carries, and the normalizer's two
+per-field predicates. The third, `errorMessage`, is §2.8's, because a
+message is something the document says about itself.
+
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
 | `.check(fn)` | `$query`: the callback captured through the chain's proxy — `fn(value, { root, path })`, the value at `$`, the two externals the validator binds; two checks conjoin with `$and` | — (a dropped constraint) | native; another external is `JL0104` |
@@ -191,6 +261,11 @@ rule through `.keyword()`.
 | `.trim()` | `'x-trim': true` on a string | — | native; off a string, `JL0102` |
 
 ### 2.10 The document, and the builder itself
+
+The two ways out of the builder graph — the assembled document, and the
+standalone file with its draft declared — plus the methods that read or
+rebuild a builder rather than adding a keyword to it, and the three
+exports a pen built over this one comes in by.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
@@ -224,12 +299,18 @@ Three rules the tables imply, spelled out:
 
 ## 3. Worked examples
 
-Every `js` fence below exports exactly one builder (or one document),
-and the `json` fence that follows it is what the pen emits — executed by
-`test/linq/pen-docs.test.js`, which imports each fence from the
-workspace and asserts the document.
+One account service, built up. Every `js` fence below exports exactly one
+builder (or one document), and the `json` fence that follows it is what
+the pen emits — executed by `test/linq/pen-docs.test.js`, which imports
+each fence from the workspace and asserts the document. Read them in
+order and the service assembles: the stored profile, the group tree it
+sits in, the audit record that names it, the sign-in it produces, what a
+signup hands in, the access it carries, the bodies an endpoint derives
+from it, the annotations a form generator reads, and the file the service
+loads at boot.
 
-A closed object with the common member shapes:
+The stored profile — a closed object with the member shapes most
+documents are made of:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
@@ -264,7 +345,12 @@ export const User = s.object({
 and `tags` are out of it, `role` is in it because a `default()` does not
 make a member optional (it makes it optional on the way IN; see §5).
 
-The validator README's own invoice rule, as a captured `check()`:
+**The one example in this section that is not part of the account
+service**, and the reason it is here: the `$query` it emits is the rule
+`packages/validate/README.md` publishes as hand-written JSON — the same
+operators over the same paths — so a reader can compare the two spellings
+of one rule side by side. `check()` is the method this pen exists for,
+and it is worth meeting on a rule whose twin is already published:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
@@ -305,49 +391,51 @@ the query language has an operator for, and why an `if` or a `for` in the
 callback would silently capture one branch: build a `union()` or a
 `when()` instead.
 
-A recursion — a named builder, reached again through `lazy()`, hoisted to
-`$defs` once:
+Back to the service. A user sits in a group, and a group sits in a group
+— a named builder reached again through `lazy()`, hoisted to `$defs`
+once:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
-export const Node = s.named('Node', s.object({
-  label: s.string(),
-  children: s.array(s.lazy(() => Node)).optional(),
+export const Group = s.named('Group', s.object({
+  name: s.string(),
+  children: s.array(s.lazy(() => Group)).optional(),
 }));
 ```
 
 ```json
 {
   "$defs": {
-    "Node": {
+    "Group": {
       "type": "object",
       "properties": {
-        "label": { "type": "string" },
-        "children": { "type": "array", "items": { "$ref": "#/$defs/Node" } }
+        "name": { "type": "string" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
       },
-      "required": ["label"],
+      "required": ["name"],
       "additionalProperties": false
     }
   },
-  "$ref": "#/$defs/Node"
+  "$ref": "#/$defs/Group"
 }
 ```
 
-A definition reached from three places, one of them by name — the
-identity rule made visible. `Uuid` is spelled once and appears in `$defs`
-once; every place that reaches it emits a `$ref`, including `ref('Uuid')`,
-which reaches it by name rather than by value:
+The audit record the service writes on every change reaches ONE
+definition from three places, one of them by name — the identity rule
+made visible. `Uuid` is spelled once and appears in `$defs` once; every
+place that reaches it emits a `$ref`, including `ref('Uuid')`, which
+reaches it by name rather than by value:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
 const Uuid = s.named('Uuid', s.string().uuid());
 
-export const Trace = s.object({
+export const Audit = s.object({
   id: Uuid,
-  parent: Uuid.optional(),
-  seen: s.array(s.ref('Uuid')).optional(),
+  actor: Uuid.optional(),
+  touched: s.array(s.ref('Uuid')).optional(),
 });
 ```
 
@@ -359,25 +447,27 @@ export const Trace = s.object({
   "type": "object",
   "properties": {
     "id": { "$ref": "#/$defs/Uuid" },
-    "parent": { "$ref": "#/$defs/Uuid" },
-    "seen": { "type": "array", "items": { "$ref": "#/$defs/Uuid" } }
+    "actor": { "$ref": "#/$defs/Uuid" },
+    "touched": { "type": "array", "items": { "$ref": "#/$defs/Uuid" } }
   },
   "required": ["id"],
   "additionalProperties": false
 }
 ```
 
-A discriminated union, a nullable, a tuple closed by `never()`:
+A sign-in: the factor is a discriminated union, the device may be null,
+and the coordinates are a tuple closed by `never()` so a third number is
+rejected rather than ignored:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
-export const Shape = s.object({
-  shape: s.discriminated('kind', [
-    s.object({ kind: s.literal('circle'), r: s.number() }),
-    s.object({ kind: s.literal('square'), side: s.number() }),
+export const Signin = s.object({
+  factor: s.discriminated('kind', [
+    s.object({ kind: s.literal('password'), rounds: s.number() }),
+    s.object({ kind: s.literal('totp'), digits: s.number() }),
   ]),
-  label: s.string().nullable(),
+  device: s.string().nullable(),
   at: s.tuple([s.number(), s.number()]).rest(s.never()),
 });
 ```
@@ -386,23 +476,23 @@ export const Shape = s.object({
 {
   "type": "object",
   "properties": {
-    "shape": {
+    "factor": {
       "oneOf": [
         {
           "type": "object",
-          "properties": { "kind": { "const": "circle" }, "r": { "type": "number" } },
-          "required": ["kind", "r"],
+          "properties": { "kind": { "const": "password" }, "rounds": { "type": "number" } },
+          "required": ["kind", "rounds"],
           "additionalProperties": false
         },
         {
           "type": "object",
-          "properties": { "kind": { "const": "square" }, "side": { "type": "number" } },
-          "required": ["kind", "side"],
+          "properties": { "kind": { "const": "totp" }, "digits": { "type": "number" } },
+          "required": ["kind", "digits"],
           "additionalProperties": false
         }
       ]
     },
-    "label": { "type": ["string", "null"] },
+    "device": { "type": ["string", "null"] },
     "at": {
       "type": "array",
       "prefixItems": [{ "type": "number" }, { "type": "number" }],
@@ -410,28 +500,28 @@ export const Shape = s.object({
       "minItems": 2
     }
   },
-  "required": ["shape", "label", "at"],
+  "required": ["factor", "device", "at"],
   "additionalProperties": false
 }
 ```
 
-A coercion. `Infer<>` and `Input<>` differ here and nowhere else in this
-section, so both are printed:
+What a signup hands IN is not what the service stores, and this is the
+one example where `Infer<>` and `Input<>` differ, so both are printed:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
-// Infer<typeof Config> = { port: number; on?: boolean; name: string;
-//                          ratio: number; label?: string | null }
-// Input<typeof Config> = { port: number | string; on?: boolean | string;
-//                          name: string; ratio?: number | string;
-//                          label?: string | null }
-export const Config = s.object({
-  port: s.integer().coerce(),
-  on: s.boolean().coerce().optional(),
+// Infer<typeof Signup> = { seats: number; newsletter?: boolean; name: string;
+//                          discount: number; nickname?: string | null }
+// Input<typeof Signup> = { seats: number | string; newsletter?: boolean | string;
+//                          name: string; discount?: number | string;
+//                          nickname?: string | null }
+export const Signup = s.object({
+  seats: s.integer().coerce(),
+  newsletter: s.boolean().coerce().optional(),
   name: s.string().trim(),
-  ratio: s.number().coerce().default(1),
-  label: s.string().nullable().optional(),
+  discount: s.number().coerce().default(1),
+  nickname: s.string().nullable().optional(),
 });
 ```
 
@@ -439,31 +529,31 @@ export const Config = s.object({
 {
   "type": "object",
   "properties": {
-    "port": { "type": "integer", "x-coerce": true },
-    "on": { "type": "boolean", "x-coerce": true },
+    "seats": { "type": "integer", "x-coerce": true },
+    "newsletter": { "type": "boolean", "x-coerce": true },
     "name": { "type": "string", "x-trim": true },
-    "ratio": { "type": "number", "x-coerce": true, "default": 1 },
-    "label": { "type": ["string", "null"] }
+    "discount": { "type": "number", "x-coerce": true, "default": 1 },
+    "nickname": { "type": ["string", "null"] }
   },
-  "required": ["port", "name", "ratio"],
+  "required": ["seats", "name", "discount"],
   "additionalProperties": false
 }
 ```
 
-`ratio` is in `required` and optional on `Input` — a defaulted member is
-absent on the way in and present on the way out, which is the whole point
-of the two types. `x-coerce` and `x-trim` are not assertions: they are
-predicates the NORMALIZER reads, and a document validated without running
-the normalizer first will reject `{ port: '80' }`.
+`discount` is in `required` and optional on `Input` — a defaulted member
+is absent on the way in and present on the way out, which is the whole
+point of the two types. `x-coerce` and `x-trim` are not assertions: they
+are predicates the NORMALIZER reads, and a document validated without
+running the normalizer first will reject `{ seats: '3' }`.
 
-A typed enum, on both sides of a nullable. `null` is folded into the
-`enum` list rather than added as a union arm, because an enum admits
-exactly what it lists:
+The access a user carries is a typed enum on both sides of a nullable.
+`null` is folded into the `enum` list rather than added as a union arm,
+because an enum admits exactly what it lists:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
-export const Level = s.object({
+export const Access = s.object({
   level: s.integer().enumOf([1, 2, 3]).coerce(),
   role: s.string().enumOf(['admin', 'user']).nullable().optional(),
 });
@@ -481,19 +571,21 @@ export const Level = s.object({
 }
 ```
 
-Object reshaping — the emulated rows of §2.2, and the `required` order
-they produce. `extend()` replaces a name and moves it to the end,
+The bodies the endpoints take are DERIVED from the stored shape rather
+than declared again — which is why §2.2's reshaping methods exist, and
+what their `required` order comes out as. `Account` below is `User`'s
+first three members; `extend()` replaces a name and moves it to the end,
 `omit()` and `pick()` keep the original order, `partial()` empties
 `required` and `required(['id'])` puts one member back:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
-const Base = s.object({ id: s.string(), name: s.string(), age: s.integer().optional() });
+const Account = s.object({ id: s.string(), name: s.string(), age: s.integer().optional() });
 
-export const Derived = s.object({
-  one: Base.extend({ email: s.string() }).omit(['name']).partial().required(['id']),
-  two: Base.pick(['name']).optional(),
+export const Wire = s.object({
+  create: Account.extend({ email: s.string() }).omit(['name']).partial().required(['id']),
+  summary: Account.pick(['name']).optional(),
 });
 ```
 
@@ -501,7 +593,7 @@ export const Derived = s.object({
 {
   "type": "object",
   "properties": {
-    "one": {
+    "create": {
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -511,30 +603,31 @@ export const Derived = s.object({
       "required": ["id"],
       "additionalProperties": false
     },
-    "two": {
+    "summary": {
       "type": "object",
       "properties": { "name": { "type": "string" } },
       "required": ["name"],
       "additionalProperties": false
     }
   },
-  "required": ["one"],
+  "required": ["create"],
   "additionalProperties": false
 }
 ```
 
-Annotations, in the order they were first set, on a member and on the
-object that holds it:
+The same two members again, annotated for the form generator that reads
+them — in the order the annotations were first set, on a member and on
+the object that holds it:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 
-export const Annotated = s.object({
-  id: s.string().describe('The id').title('Id').example('abc').example('def')
+export const Profile = s.object({
+  id: s.string().describe('The account id').title('Id').example('abc').example('def')
     .meta({ 'x-vendor': { a: 1 }, deprecated: true })
     .message('need an id'),
-  n: s.integer().min(18).message({ minimum: 'Must be an adult', _: 'Invalid age' }).optional(),
-}).title('Annotated').describe('An annotated object');
+  age: s.integer().min(18).message({ minimum: 'Must be an adult', _: 'Invalid age' }).optional(),
+}).title('Profile').describe('An account profile');
 ```
 
 ```json
@@ -543,14 +636,14 @@ export const Annotated = s.object({
   "properties": {
     "id": {
       "type": "string",
-      "description": "The id",
+      "description": "The account id",
       "title": "Id",
       "examples": ["abc", "def"],
       "x-vendor": { "a": 1 },
       "deprecated": true,
       "errorMessage": "need an id"
     },
-    "n": {
+    "age": {
       "type": "integer",
       "minimum": 18,
       "errorMessage": { "minimum": "Must be an adult", "_": "Invalid age" }
@@ -558,8 +651,8 @@ export const Annotated = s.object({
   },
   "required": ["id"],
   "additionalProperties": false,
-  "title": "Annotated",
-  "description": "An annotated object"
+  "title": "Profile",
+  "description": "An account profile"
 }
 ```
 
@@ -568,8 +661,9 @@ replaces the value and keeps the position; `meta()` writes its keys
 verbatim, which is how `deprecated` — a 2020-12 annotation the pen has no
 method for — and a vendor extension both reach the document.
 
-A standalone file — `document()` with the draft declared — over an open
-object extended with a conditional:
+Last, the file the service loads at boot. It is a standalone document
+rather than a member of another — `document()` with the draft declared —
+over an open object extended with a conditional:
 
 ```js
 import * as s from '@jarenjs/linq/schema';
@@ -729,14 +823,14 @@ Raised at assembly, when the `$defs` block is closed and every name a
 
 "Two distinct builders" is by identity, not by shape: the same builder
 under one name, reached from anywhere, is one definition — that is the
-identity rule §3's `Trace` example shows. Two builders that emit the same
+identity rule §3's `Audit` example shows. Two builders that emit the same
 JSON are still two, and still a collision.
 
 ### 4.4 `JL0104` — the keyword, and the external
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
-| `s.string().meta({ type: 'x' })` | `meta() cannot write 'type' — the pen owns that keyword; spell it through the builder method that emits it, or wrap a hand-written schema with from()` | the method that emits it, or `s.from({ … })` |
+| `s.string().meta({ type: 'x' })` | `meta() cannot write 'type' — the pen owns that keyword; spell it through the builder method that emits it, keyword('type', value) where no method does, or wrap a hand-written schema with from()` | the method that emits it — or, for a keyword §6.2 lists, `s.keyword(…)` or `s.from({ … })` |
 | `.check((o, x) => x.foo.eq(1))` | `a check() rule cannot bind 'foo' — its query evaluates with exactly 2 externals, 'root' and 'path'; anything else has nothing to bind to` | `x.root` and `x.path`, and nothing else |
 
 The owned set is every keyword the pen writes itself plus every keyword
@@ -747,7 +841,10 @@ constraints, `$schema`/`$id`/`$ref`/`$defs` and the anchors, `$query`,
 annotation the pen has no method for (`deprecated`, `readOnly`,
 `writeOnly`), and any vendor extension. The type declaration carries the
 same set as `OwnedKeyword`, so a forbidden key does not compile either
-(§5).
+(§5). Twenty-five of the sixty-nine have no method to be spelled through,
+which is why the message names `keyword()` as well;
+[§6.2](#62-the-absences-twenty-five-keywords-with-no-method) lists them
+and the two doors that stay open for them.
 
 `check()`'s two externals are the two the validator binds on every
 `$query` evaluation. The refusal is raised at BUILD time, earlier than
@@ -755,31 +852,40 @@ the validator's own compile error and with the same meaning.
 
 ## 5. The types
 
+The service of §3 gets its types from the same constants that emitted its
+documents — there is no second declaration to keep in step. Here is
+`Signup`, three of its five members, read both ways:
+
 ```ts
 import * as s from '@jarenjs/linq/schema';
 import type { Infer, Input } from '@jarenjs/linq/schema';
 
-const Config = s.object({
-  host: s.string().optional().default('localhost'),
-  port: s.integer().coerce(),
-  name: s.string(),
+const Signup = s.object({
+  seats: s.integer().coerce(),
+  name: s.string().trim(),
+  discount: s.number().coerce().default(1),
 });
-type Config = Infer<typeof Config>;   // { host: string; port: number; name: string }
-type Raw = Input<typeof Config>;      // { host?: string; port: number | string; name: string }
+type Stored = Infer<typeof Signup>;    // { seats: number; name: string; discount: number }
+type Arriving = Input<typeof Signup>;  // { seats: number | string; name: string;
+                                       //   discount?: number | string }
 ```
 
 `Infer<>` is the shape AFTER the normalizer ran with the pen's own profile
 — `useDefaults: true`, `coerceTypes`/`trimStrings` as the `x-coerce`/`x-trim`
 predicates — which is what the rest of a program handles; `Input<>` is
-what a caller may hand in before it. Where nothing is defaulted or
-coerced the two are one type. A recursive definition is annotated, as
-every recursive inference must be:
+what a caller may hand in before it. That is the whole shape of a request
+handler: take `Arriving`, normalize, and every function below it takes
+`Stored`. Where nothing is defaulted or coerced the two are one type, and
+`User`, `Audit` and `Access` are all in that case.
+
+A recursive definition is annotated, as every recursive inference must be
+— §3's group tree, typed:
 
 ```ts
-interface Node { label: string; children?: Node[] }
-const Node: s.NamedBuilder<Node> = s.named('Node', s.object({
-  label: s.string(),
-  children: s.array(s.lazy(() => Node)).optional(),
+interface Group { name: string; children?: Group[] }
+const Group: s.NamedBuilder<Group> = s.named('Group', s.object({
+  name: s.string(),
+  children: s.array(s.lazy(() => Group)).optional(),
 }));
 ```
 
@@ -806,7 +912,7 @@ the flags, and they are deliberately different:
 | `.optional().default(v)` | **yes** | no |
 
 That is the one asymmetry to carry: a `default()`ed member is present
-afterwards and absent-able before, which is exactly what §3's `Config`
+afterwards and absent-able before, which is exactly what §3's `Signup`
 example prints.
 
 A builder-shaped position is typed `BuilderLike<Out, In, F>`, an
@@ -904,11 +1010,19 @@ arm, recursion typed all the way down, a closed tuple having no rest,
 
 ## 6. What it cannot spell
 
-Everything below is a `JL0102` or an absence, and each has the same
-cause: the deliverable is a JSON document, so a construct that cannot BE
-one has nowhere to go. This is the section a reader arriving from a
-JavaScript-first schema library needs, because four of these are methods
-they are used to having.
+Two different kinds of limit live here and it is worth knowing which one
+you have hit. The first is a **refusal**: the deliverable is a JSON
+document, and a construct that cannot BE one has nowhere to go, so the
+pen raises a `JL0102` rather than emitting something it cannot honour.
+The second is an **absence**: a keyword the format has, the validator
+compiles, and this surface has no method for — reachable, but not by a
+name your editor will complete. Every entry below says which it is.
+
+This is the section a reader arriving from a JavaScript-first schema
+library needs, because four of the refusals are methods they are used to
+having.
+
+### 6.1 The refusals
 
 - **`refine`, `superRefine`, `transform`, `preprocess`.** They do not
   exist — calling one is a `TypeError`, not a coded refusal, because
@@ -967,9 +1081,106 @@ they are used to having.
   `packages/json/docs/QUERY-FORMAT.md` §8; a rule outside it is
   application code, run beside validation rather than inside it.
 
+### 6.2 The absences: twenty-five keywords with no method
+
+The pen's own list of the keywords it owns
+(`packages/linq/src/schema/builders.js`) is sixty-nine names, and it holds
+two kinds — the keywords a method emits, and the ones that "would change
+what a document asserts" and are kept out of `meta()` for that reason
+alone (the comment above the list says so). The second kind has no
+spelling of its own on this surface:
+
+| Family | Keywords with no method |
+|---|---|
+| negation | `not` |
+| unevaluated | `unevaluatedProperties`, `unevaluatedItems` |
+| conditional members | `dependentSchemas`, `dependencies` |
+| `contains` bounds | `minContains`, `maxContains` |
+| content | `contentEncoding`, `contentMediaType`, `contentSchema` |
+| format bounds | `formatMinimum`, `formatMaximum`, `formatExclusiveMinimum`, `formatExclusiveMaximum` |
+| identification | `$id`, `$anchor`, `$vocabulary` |
+| dynamic references | `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor` |
+| legacy and extension spellings | `definitions`, `additionalItems`, `$data`, `data` |
+
+`@jarenjs/validate` compiles every one of them — `not` in `combine.js`,
+the unevaluated pair in `unevaluated.js`, `dependentSchemas` in
+`object.js`, the `contains` bounds in `array.js`, the content family in
+`content.js`, the dynamic references in `dynamic-ref.js`, `$data` in
+`dollar-data.js` — so the gap is this pen's surface, not the format and
+not the engine. It is tracked in
+[docs/ROADMAP.md](../../../docs/ROADMAP.md) under the data pair, and
+`test/linq/schema-pen.test.js` holds this table equal to the pen's own
+owned set, so a method that lands for one of them fails the suite until
+its row goes.
+
+Two doors are open in the meantime, and both are rows of
+[§2.10](#210-the-document-and-the-builder-itself):
+
+```js
+s.string().keyword('not', { type: 'number' })
+// { "type": "string", "not": { "type": "number" } }
+
+s.object({ a: s.string() }).keyword('unevaluatedProperties', false)
+// { "type": "object", …, "unevaluatedProperties": false }
+```
+
+`.keyword(key, value)` writes one keyword onto the node the builder is
+assembling, in the order first set, exactly as a named method does;
+`from(json)` wraps a hand-written subschema whole. Neither changes the
+type reading — `.keyword()` answers `this` and `from<T>()` carries the
+type the caller asserts — which is the honest trade rather than a
+shortfall: a keyword with no method has no phantom to read either.
+
+`definitions` is the draft-07 spelling of `$defs`, and `named()` writes
+`$defs`: the pen emits one definitions block under one name, so the older
+keyword is owned to keep a document from carrying both and reached, like
+the rest of the table, through `keyword()` or `from()`.
+
+**`meta()` is not a third door.** Every name in the table is owned, so
+`meta()` refuses it with `JL0104`
+([§4.4](#44-jl0104--the-keyword-and-the-external)) — and the message
+names both doors that ARE open, `keyword()` and `from()`. One name is on
+the owned list for the opposite reason: `nullable` is refused because
+`.nullable()` already exists and emits a type union
+(`type: ['string', 'null']`) — `nullable` as a keyword is an OpenAPI
+spelling that 2020-12 does not carry, and refusing it is what keeps one
+document from claiming both.
+
+### 6.3 When not to reach for this pen
+
+A guide that never says "don't" is a brochure. Write the JSON Schema by
+hand, or generate it some other way, when:
+
+- **The schema is data, not code.** A schema loaded from a file, received
+  over the wire, or stored in a database is a value; wrap it with
+  `from()` if a builder has to hold it, and otherwise leave it alone. The
+  pen is a way of AUTHORING a document, and authoring is a thing you do
+  once.
+- **Another document already carries it.** An entity's schema lives in a
+  `$model` ([MODEL-PEN.md](MODEL-PEN.md)), an operation's in a
+  `$contract` ([CONTRACT-PEN.md](CONTRACT-PEN.md)), a form's in the same
+  schema its rules annotate ([FORMS-PEN.md](FORMS-PEN.md)). Those
+  subpaths are this pen with a vocabulary added, so a schema written here
+  and copied there is two shapes that have to stay equal; write it in the
+  document that owns it.
+- **It is one line in a test.** `{ type: 'string' }` is shorter than
+  `s.string().schema` and reads the same to everyone. The pen earns its
+  import when a document is big enough that a rename, a reshape or a
+  shared definition would otherwise be a find-and-replace.
+- **You need a keyword from §6.2 in most of the document.** One
+  `.keyword()` beside twenty methods is a fair trade; twenty
+  `.keyword()` calls beside one method is a hand-written schema with
+  extra syntax.
+- **The consumer is not a Jaren validator.** Nothing here is
+  Jaren-specific — the output is standard 2020-12 — but `$query`,
+  `errorMessage`, `x-coerce` and `x-trim` are ignored by a validator that
+  does not know them, so a document whose rules live in those keywords
+  asserts less elsewhere than it does here. §1 names the three families;
+  check that the reader of your document implements them.
+
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->32,382<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->32,427<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.schema.kb-->32<!--/fact--> kB) beside the other nine subpath prices in

@@ -1,15 +1,25 @@
-# The Jaren migration pen (normative)
+# The Jaren migration pen
 
 > `./migration` — `$migration` 0.1 documents: the two shape hashes and
 > the ordered steps the runner takes. **Read it when** you are moving a
 > store from one model to the next
 
 Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
-interpreted as described in RFC 2119. The rules every pen keeps, the
-shared refusal table and the index of the other pens are the binder,
+interpreted as described in RFC 2119. This document is a **guide** — read
+it in order and you can write the format — whose one normative section is
+[§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
+index of the other pens and every pen's mapping table collected in one
+place are the normative reference,
 [LINQ-FORMAT.md](LINQ-FORMAT.md).
 
 ## 1. What it writes
+
+Your model changed and the database has rows in it. Somebody has to write
+the step that carries those rows across, and the part of that step no
+planner can infer — the data transform — is the part you would most like
+the compiler to check. That is this pen: the planner renders the DDL, you
+write the transform against the OLD row shape and the NEW one, and the
+document that comes out is what `migrate()` runs.
 
 ```js
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
@@ -22,6 +32,12 @@ draft-07 twin beside it), whose one specification is
 `@jarenjs/db`'s `migrate()` takes what this pen emits unchanged. The
 document is two shape hashes and an ordered list of steps; the order is
 the contract.
+
+**The running example.** §3 is one project's `migrations/` directory read
+in order — the migration that adds a member, the one that rewrites it,
+the one that backfills a derived column, the same first migration as the
+planner actually leaves it, and one over a column-mapped date. §5 reads
+the types the transforms are checked against off the same models.
 
 Four things are worth naming before the tables:
 
@@ -141,8 +157,20 @@ fence that follows it is the document the pen emits — executed by
 and reads its `toJSON()`. Every document here also validates against both
 published artifacts, the 2020-12 one and its draft-07 twin.
 
-A migration by hand between two model-pen models: the DDL the planner
-would render, a typed transform, a precondition:
+One project's `migrations/` directory, in the order the files are
+numbered: `0002` gives every user a handle, `0003` shouts their names,
+`0004` backfills a derived column, then `0002` again as the planner
+actually leaves it, and `0005` splits a date out of a timestamp. Read in
+order they are one database's history.
+
+One caveat about every fence here, because it is the thing a reader will
+misread: each declares only the entities the step touches, so the fences
+stay readable. A real migration's `from` and `to` are the hashes of the
+WHOLE model at those two points — that is what the database recorded and
+what `migrate()` compares against.
+
+**0002, by hand.** A migration between two model-pen models: the DDL the
+planner would render, a typed transform, a precondition:
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -191,7 +219,8 @@ behind is the `body` above. The assertion names the VIOLATION — no user
 may have an empty name — because `expect` defaults to `'empty'` and is
 absent from the document when it does.
 
-A stylesheet transform written with the JSLT pen, and an `ebv`
+**0003.** The same `User`, transformed with a stylesheet written through
+the JSLT pen rather than a lambda, and an `ebv`
 assertion — the other direction, where the matching rows are the witness:
 
 ```js
@@ -236,7 +265,9 @@ carries an array and nothing else (MIGRATION-FORMAT §2), which is why an
 envelope carrying `unmatched` or `modes` is refused rather than silently
 truncated (§4.2).
 
-A backfill: a `sql` data step, a `derive` recompute, and a `rebuild`
+**0004** touches the other half of the same database — the collection
+that holds coordinates. A backfill: a `sql` data step, a `derive`
+recompute, and a `rebuild`
 handed through verbatim:
 
 ```js
@@ -292,7 +323,9 @@ re-implement it to type it, and LINQ-FORMAT §1.1 rule 1 forbids that. It
 is still checked — a `rebuild` without `create`, `copy` or `indexes` is
 `JL0101` (§4.1).
 
-The bridge: the document `jaren-db plan --model ./model.js` wrote, with
+**0002 again, as the planner actually leaves it.** This is the route you
+take in practice, and the one the first fence skipped: the document
+`jaren-db plan --model ./model.js` wrote, with
 its draft replaced by a typed transform:
 
 ```js
@@ -353,7 +386,7 @@ author never written the transform, the draft would have ridden through
 untouched and `migrate()` would have refused the whole migration
 (`JD0021`) — which the same file asserts against a seeded store.
 
-A transform over a COLUMN-MAPPED member — the pair that decides whether
+**0005.** A transform over a COLUMN-MAPPED member — the pair that decides whether
 a reader trusts this pen with real data:
 
 ```js
@@ -539,6 +572,10 @@ a model it was not given.
 
 ## 5. The types
 
+§3's first migration, as a project actually keeps it: the previous model
+in a module beside the current one, and the transform checked against
+both.
+
 ```ts
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
 import type { DocOf, MigrationDocument } from '@jarenjs/linq/migration';
@@ -621,9 +658,12 @@ or clears it.
 This pen's limits are unusual for the family: almost nothing is refused
 as unspellable, because a migration document is mostly rendered SQL and
 the pen's job is to carry it. What it cannot do is REASON about that SQL,
-and the honest statement of that is the section.
+and the honest statement of that is the section. §6.4 closes it with the
+cases where the answer is not to reach for this pen at all.
 
-**The physical step kinds ride verbatim.** `ddl` and `sql` are strings —
+### 6.1 The physical step kinds ride verbatim
+
+ `ddl` and `sql` are strings —
 the pen checks that a statement is a non-empty string and nothing more.
 It does not parse SQL, does not know the dialect, and cannot tell an
 `ALTER TABLE` from a `DROP TABLE`. `rebuild` goes further: it has no
@@ -634,7 +674,8 @@ be re-implementing the planner. The alternative for all three is the same
 one the format intends: let `jaren-db plan` render them, and take the
 document up with `fromPlanned`.
 
-**`defineMigration` does not validate a migration against a database.**
+### 6.2 `defineMigration` does not validate a migration against a database
+
 This is the sentence a reader most needs, because believing otherwise
 loses data. What the pen checks is in §4 and nothing else. Everything
 below is `@jarenjs/db`'s `migrate()`, and none of it has happened when
@@ -663,7 +704,9 @@ below is `@jarenjs/db`'s `migrate()`, and none of it has happened when
   that disagrees with the history record, and `jaren-db check`'s drift
   detection, are the CLI's and the runner's (MIGRATION-FORMAT §5, §12).
 
-**And two the format itself does not carry.** Down migrations are not
+### 6.3 Two the format itself does not carry
+
+Down migrations are not
 shipped in 0.1 — a JSLT transform is not generally invertible, and a
 reverse step that silently loses data is worse than a restore from backup
 (MIGRATION-FORMAT §7); the recommended path is to branch the shape,
@@ -671,6 +714,34 @@ migrate forward and drop the old table once verified. A rename is
 DECLARED, never inferred, with `.renamedFrom()` on the model pen's
 builder ([MODEL-PEN.md](MODEL-PEN.md) §2.1) — a diff cannot tell a rename
 from a drop plus a create, and guessing risks silent data loss.
+
+### 6.4 When not to reach for this pen
+
+- **The planner's document already runs.** If `jaren-db plan` produced no
+  draft — a pure DDL change, an index added, a column widened — the
+  document it wrote is finished. Commit it. This pen exists for the step
+  the planner left blank, and reaching for it to retype a document that
+  was already correct adds a build step and a chance to diverge.
+- **The migration is one SQL statement and no data moves.** `.ddl()`
+  around a string you would otherwise commit as JSON buys the shape hash
+  and nothing else, and the shape hash is what `plan` computes anyway.
+- **The transform cannot be spelled as a query.** A body is captured
+  through the JSLT pen and lowers to `$jslt`, so it can only do what the
+  query language has operators for (§4.3, and
+  [JSLT-PEN.md](JSLT-PEN.md) §6). A transform that needs to call out —
+  a hash, a network lookup, a library — is a `sql` step against a table
+  you populate beforehand, or a program run outside the migration
+  entirely.
+- **You want to undo something.** There are no down migrations in 0.1
+  and §6.3 says why. Branch the shape and migrate forward; a restore from
+  backup is a better answer than a reverse step that loses a column
+  quietly.
+- **The document is generated per environment.** A `$migration` is
+  identified by two shape hashes and applied once, recorded in history.
+  Anything that would make the document differ between two databases of
+  the same shape — an environment name in a statement, a conditional step
+  — is not a migration, it is deployment configuration, and it belongs
+  outside the document.
 
 ## 7. Cost
 
@@ -707,4 +778,4 @@ proxy behind it, and the canonicalizer — and the two model documents
 themselves arrive as data, deep-frozen JSON that the consumer's own model
 module built. So a consumer who ships migrations to a browser does not
 ship the model pen with them; a consumer who OPENS a store does, and pays
-`./model`'s <!--fact:bundle.model-->40,812<!--/fact--> bytes for it.
+`./model`'s <!--fact:bundle.model-->40,857<!--/fact--> bytes for it.

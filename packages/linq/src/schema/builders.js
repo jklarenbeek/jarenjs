@@ -32,6 +32,15 @@ const NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
  * The keywords the pen writes itself, or that would change what a
  * document asserts: `meta()` refuses them so an annotation is never a
  * back door around a builder.
+ *
+ * The two kinds are not the same size. 44 of these have a builder method
+ * that emits them; the other 25 — `not`, the unevaluated pair,
+ * `dependentSchemas`/`dependencies`, the `contains` bounds, the content
+ * family, the four format bounds, the identification and dynamic-
+ * reference families, `definitions`, `additionalItems` and `$data` — are
+ * owned only by the second clause, and are written with `keyword()` or
+ * `from()`. SCHEMA-PEN.md §6.2 lists them and `test/linq/schema-pen.test.js`
+ * holds that list equal to this set.
  */
 const OWNED = new Set([
   '$schema', '$id', '$ref', '$defs', 'definitions', '$anchor', '$dynamicRef',
@@ -233,7 +242,8 @@ export class SchemaBuilder {
       if (OWNED.has(key)) {
         throw new LinqBuildError('JL0104',
           `meta() cannot write '${key}' — the pen owns that keyword; spell it through the `
-          + 'builder method that emits it, or wrap a hand-written schema with from()');
+          + `builder method that emits it, keyword('${key}', value) where no method does, `
+          + 'or wrap a hand-written schema with from()');
       }
       next = next.annotate(key, requireJson(annotations[key], `meta().${key}`));
     }
