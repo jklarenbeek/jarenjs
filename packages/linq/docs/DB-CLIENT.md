@@ -782,3 +782,33 @@ queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at
 all.
+
+### 7.1 What the door costs at run time, measured
+
+`benchmark/orm.js` runs the client as one more route in every table
+beside Prisma, Drizzle and Kysely over the same SQLite corpus, equality
+asserted before anything is timed and statement counts printed beside
+the timings.
+
+Against the store it fronts, the door is nearly free: <!--fact:orm.clientDoorPrice-->0.9× on a point read, 1.4× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/fact-->
+— because it issues the same documents the store would. What it does
+NOT amortize is capture: a chain re-captures its callbacks and re-emits
+its document on **every** call, by design, which is the predicate row's
+difference and which a caller with a hot query removes by holding the
+`Sequence` (or the emitted document) instead of rebuilding it.
+
+Against the rivals, at this corpus, it is faster on <!--fact:orm.clientVsRivals-->8 of 9 against Prisma, 4 of 9 against Drizzle, 1 of 9 against Kysely<!--/fact-->,
+and here is every row where the *fastest* rival beats it — <!--fact:orm.clientLosses-->update one column by primary key 18.8× (Drizzle), nested json member filter 6.3× (Kysely), cold start 3.0× (Prisma), posts per user 2.4× (Kysely), graph load 2.2× (Kysely), indexed predicate over 500 users, ids only 2.0× (Kysely), pagination over 5000 comments, page size 20 1.6× (Kysely), insert 1.4× (Kysely), point read by primary key 1.2× (Drizzle)<!--/fact-->.
+
+Three things make that list readable rather than damning, and none of
+them removes a row from it. **Kysely is a SQL builder**: on every row it
+wins, you wrote the SQL — the comparison it belongs in is against a
+hand-written statement, not against a schema-first ORM. **The update row
+is the widest loss and has one cause**: the client's only write door is
+the unit of work (`get`, mutate, `saveChanges`), where a rival issues one
+prepared `UPDATE`; the store's own `update()` sits in the same table so
+the difference is visible rather than argued. And **the claim that
+survives is structural, not temporal** — the graph load's statement
+counts are printed beside its timings, and the client answers a
+two-level graph in ONE statement where the schema-first ORM takes three,
+whatever the corpus and whatever the clock says.

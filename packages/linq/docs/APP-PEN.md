@@ -247,7 +247,10 @@ follows is what the pen emits — executed by
 `contract/catalog.load/start` action CONTRACT-FORMAT §11.1 generates are
 rebuilt the same way and held BYTE-equal to those docs' own fences by
 `test/linq/app-pen.test.js`, which also boots every example shape under
-`createApp` with a headless host and dispatches into it.
+`createApp` with a headless host and dispatches into it. The same suite
+boots an emitted document beside its hand-written twin and compares the
+two applications frame for frame — the pen's document is the same
+application, not merely the same bytes.
 
 ### 3.1 `add(path, value)` replaces an array; `append(path, value)` adds to it
 

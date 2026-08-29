@@ -74,16 +74,10 @@ createApp(counter.document, { node: document.getElementById('app') });
 ```
 
 It is the same application — the test suite boots both and compares
-them frame for frame — with one spelling difference: the emitted paths
-read `$['count']` where the hand-written document reads `$.count`, the
-same RFC 9535 path, because `count` names a method on the chain's
-expression surface and `get()` is the escape for a member that collides
-with one. A `bind()` to an action `actions` does not declare is refused
-at build time (`JL0102`) rather than dropped per click (`JA2001`), and
-the state's required members must have defaults or an explicit
-`initial`. The mapping table is
-[APP-PEN.md](../linq/docs/APP-PEN.md); this package depends on
-none of it.
+them frame for frame. The mapping table, every refusal and the
+member-name escape this example's `get('count')` spells are
+[APP-PEN.md](../linq/docs/APP-PEN.md); this package depends on none of
+it.
 
 ## The view
 

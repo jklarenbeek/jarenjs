@@ -257,10 +257,8 @@ compileFsm(doc).step('idle', 'start', { context: { url: '/rows' } });
 ```
 
 A model-authored document and a pen-written one go through the SAME
-gate — `compileFsm`/`compileDag` — which is the point: the pen refuses
-only what it cannot spell (a plain-string guard is `JL0102`, because
-§3 makes a non-`$` literal vacuously true), and everything the format
-governs is still the compiler's `JF0xxx`. The mapping table is
+gate — `compileFsm`/`compileDag`. The mapping table, and where the pen's
+refusals end and the compiler's begin, are
 [FLOW-PEN.md](../linq/docs/FLOW-PEN.md).
 
 ## Development

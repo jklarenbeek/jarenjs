@@ -106,13 +106,10 @@ export const signup = f.object({
 const model = buildFormModel(signup.schema);
 ```
 
-`f.object({...})` closes the object (`additionalProperties: false`) —
-`.open()` is what the hand-written schema above says by leaving the
-keyword out — and every member is required unless `.optional()` says
-otherwise, which is the same `required: ['username', 'email']`. Every
-rule of the next section is a `.form({ … })` on the member it belongs
-to; nothing in this package depends on that one, and the schema is the
-contract.
+Every rule of the next section is a `.form({ … })` on the member it
+belongs to; the pen's document is
+[FORMS-PEN.md](../linq/docs/FORMS-PEN.md), and nothing in this package
+depends on it — the schema is the contract.
 
 ## Layer 1 — preemptive per-field validation
 

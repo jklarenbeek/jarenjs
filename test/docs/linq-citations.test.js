@@ -13,7 +13,9 @@
  *     Markdown link, or a repo-relative path written out — names a file
  *     that exists;
  *  2. every `#anchor` on such a link names a heading that document
- *     carries, by GitHub's slug rule;
+ *     carries, by GitHub's slug rule — including a same-file `](#…)`
+ *     inside one of the documents themselves, which carries no path and
+ *     so never enters the link matcher;
  *  3. every `§N` / `§N.M` citation whose sentence names one of those
  *     documents names a section number that document carries;
  *  4. the binder's index names every other document in the directory —
@@ -87,6 +89,7 @@ const OTHER_DOC = /[A-Z][A-Z0-9]+-[A-Z0-9]+/;
 const failures = [];
 let links = 0;
 let anchors = 0;
+let selfAnchors = 0;
 let sections = 0;
 const citing = new Set();
 
@@ -123,6 +126,20 @@ for (const file of FILES) {
       fail(ref.index, ref.cited, `${doc} carries no heading with the id '${id}'`);
   }
 
+  // 2b. a same-file fragment inside one of the documents themselves:
+  // `](#4-refusals)` has no path, so the matcher above never sees it —
+  // it must name a heading of the very file that carries it
+  if (file.startsWith(`${DOCS}/`)) {
+    const own = HEADINGS.get(file.slice(DOCS.length + 1));
+    for (const m of text.matchAll(/\]\(#([^)\s]+)\)/g)) {
+      selfAnchors += 1;
+      citing.add(file);
+      if (!own.anchors.has(m[1]))
+        fail(m.index, `](#${m[1]})`,
+          `${file.slice(DOCS.length + 1)} carries no heading with the id '${m[1]}'`);
+    }
+  }
+
   // 3. every `§N` citation whose sentence names one of the documents
   for (const stem of STEMS) {
     const carried = HEADINGS.get(`${stem}.md`).sections;
@@ -148,6 +165,8 @@ describe('every citation into packages/linq/docs resolves', () => {
     // a matcher that stopped matching reports nothing and passes
     assert.ok(links + sections >= 290,
       `only ${links + sections} citations (${links} links, ${anchors} of them anchored, ${sections} sections)`);
+    assert.ok(selfAnchors >= 20,
+      `only ${selfAnchors} same-file anchors — the documents carry dozens`);
     assert.ok(citing.size >= 50, `only ${citing.size} files cite these documents`);
     assert.strictEqual(documents.length, 11, `${DOCS} holds ${documents.length} documents`);
   });

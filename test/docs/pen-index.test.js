@@ -33,23 +33,25 @@ const BINDER = 'LINQ-FORMAT.md';
 const REL = `packages/linq/docs/${BINDER}`;
 
 /**
- * The measured figures these documents also carry, answered from the
- * documents themselves. The sandbox is a copy of a baked tree, so
- * echoing each `bundle.*` marker's current body keeps them answered
- * without dragging the measured-figure registry — and its twenty-nine
- * documents, none of which the sandbox holds — into these fixtures.
+ * The measured figures these documents also carry — every key the pen
+ * registry does not claim (`bundle.*` subpath prices, the client's
+ * `orm.*` rows) — answered from the documents themselves. The sandbox is
+ * a copy of a baked tree, so echoing each marker's current body keeps
+ * them answered without dragging the measured-figure registry — and its
+ * twenty-nine documents, none of which the sandbox holds — into these
+ * fixtures.
  * @param {string} dir
  */
-function bundleEcho(dir) {
+function measuredEcho(dir) {
   /** @type {Record<string, () => string>} */
   const facts = {};
   for (const file of readdirSync(dir).filter((name) => name.endsWith('.md'))) {
     for (const directive of scanSourceDirectives(readFileSync(join(dir, file), 'utf8'), { ns: NS })
       .directives) {
-      if (directive.key.startsWith('bundle.')) facts[directive.key] = () => directive.body;
+      if (!directive.key.startsWith('pens.')) facts[directive.key] = () => directive.body;
     }
   }
-  return { name: 'bundle sizes (echoed)', docs: () => [], facts: () => facts };
+  return { name: 'measured figures (echoed)', docs: () => [], facts: () => facts };
 }
 
 /** A throwaway root holding a copy of the eleven documents. */
@@ -58,7 +60,7 @@ function sandbox() {
   const dir = join(root, 'packages/linq/docs');
   mkdirSync(dir, { recursive: true });
   cpSync(DOCS, dir, { recursive: true });
-  return { root, dir, registries: [penTables, bundleEcho(dir)] };
+  return { root, dir, registries: [penTables, measuredEcho(dir)] };
 }
 
 const binderOf = (dir) => readFileSync(join(dir, BINDER), 'utf8');

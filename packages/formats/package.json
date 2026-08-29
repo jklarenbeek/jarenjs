@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/formats",
   "private": false,
-  "version": "0.54.1",
+  "version": "0.55.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -43,7 +43,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.54.1",
-    "@jarenjs/json": "^0.54.1"
+    "@jarenjs/core": "^0.55.0",
+    "@jarenjs/json": "^0.55.0"
   }
 }

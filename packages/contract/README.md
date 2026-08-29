@@ -132,10 +132,8 @@ compileContract(shop.document);                    // the same compile, the same
 
 The types come with it, without the `types` projection: `ContractOf<typeof
 shop>` is the operation map, and `typedClient`, `typedHandlers` and
-`typedTools` carry it onto a client, a handler table and an AI toolbox —
-proven type for type equal to what `toTypeScript` declares for the same
-document, the `DateTime` brand on a date-formatted string included.
-The pen's normative document is
+`typedTools` carry it onto a client, a handler table and an AI toolbox.
+The pen's document is
 [CONTRACT-PEN.md](../linq/docs/CONTRACT-PEN.md); it imports nothing of
 this package.
 

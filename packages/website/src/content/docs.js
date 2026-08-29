@@ -60,7 +60,7 @@ export const DOCS_SECTIONS = [
   {
     id: 'further-reading', title: 'Further reading', tail: true,
     blocks: [
-      p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, FLOW-FORMAT.md, ERROR-MESSAGES.md and the JOSL FORMAT.md. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),
+      p('The language contracts live with their packages: QUERY-FORMAT.md, JSLT-FORMAT.md, XQUERY-FRONTEND.md, VIEW-FORMAT.md, APP-FORMAT.md, FLOW-FORMAT.md, ERROR-MESSAGES.md, the JOSL FORMAT.md, and LINQ-FORMAT.md — the binder off which every by-code pen document hangs. The repository README maps the whole suite; benchmark/README.md documents how every number on this site is measured.'),
       callout('The code is the reference', 'Every public function carries JSDoc. When in doubt, open the source — the packages are written to be read.'),
     ],
   },

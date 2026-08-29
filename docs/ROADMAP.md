@@ -1183,6 +1183,18 @@ still open is listed here, each with its reason.
   the guard belongs: move the clean-checkout assertion out of `npm test` into
   `predeploy`, where it already runs, or teach it that an untracked new file
   whose key is in the suite order is registration rather than drift.
+- [ ] **Citations into the repository's other format documents are held by
+  nobody.** `test/docs/linq-citations.test.js` resolves every relative link,
+  `#anchor` and `§N` citation into `packages/linq/docs/` across the whole
+  repository — and only there, by its own stated scope. The other format
+  documents (QUERY-FORMAT.md, JSLT-FORMAT.md, MODEL-FORMAT.md, APP-FORMAT.md,
+  FLOW-FORMAT.md and the rest) are cited the same way — by basename, section
+  number and anchor, from prose, JSDoc and tests — and a moved section or a
+  renamed heading in one of them still leaves a reader on a dead reference no
+  gate notices. The constraint is scale, not mechanism: the walk generalizes (a
+  directory list, a heading census per document, the same matchers), but the
+  first run over the whole repository will surface a backlog of already-stale
+  citations that has to be triaged rather than asserted empty on day one.
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident
   matrix, and finishes in about ninety seconds; a memory-constrained runner

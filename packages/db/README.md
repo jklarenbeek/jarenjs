@@ -57,8 +57,9 @@ const adults = await users.execute({
 });
 ```
 
-Or, by code — the same document, written by the model pen and typed
-without a generate step (`InferMeta<typeof model>` binds the typed store):
+Or, by code — the same document, written by the model pen
+([MODEL-PEN.md](../linq/docs/MODEL-PEN.md)) and typed without a generate
+step (`InferMeta<typeof model>` binds the typed store):
 
 ```js
 import * as m from '@jarenjs/linq/model';
@@ -205,6 +206,7 @@ shape binds at `store.collection<User>('users')`.
   checksummed history refuses edited or reordered migrations; a
   narrowing without an adequate transform is refused against the REAL
   data, inside the transaction. And by code: `@jarenjs/linq/migration`
+  ([MIGRATION-PEN.md](../linq/docs/MIGRATION-PEN.md))
   writes the same document with the data transform typed old row → new
   row, `jaren-db` loads model and migration MODULES beside JSON, plans
   from the committed `model.snapshot.json`, refuses a module that is

@@ -1,27 +1,139 @@
 # @jarenjs/linq
 
-**The suite, by code.** Every engine in this repository takes a JSON
-document — a query, a schema, a database model, a migration, a contract,
-a stylesheet, a state machine, a dataflow, an application, a form — and
-this is the one package that writes those documents from typed
-JavaScript. The chain is the pen; the document is the deliverable.
+**Write it once, in typed JavaScript. Keep it as data.**
+
+Every engine in this repository runs a JSON document. The validator runs
+a schema, the store runs a model and a query, the transformer runs a
+stylesheet, the flow engine runs a state machine, the app runtime runs a
+whole application, the form evaluator runs a form. That is a rare
+strength, and until now it came with a price: a document can be stored,
+versioned, diffed, sent to a browser, handed to a model and pushed down
+to a database — everything a closure cannot do — but you had to write
+it by hand, as JSON, with nothing checking it until it ran.
+
+This package removes the price. You write the query, the schema, the
+model, the migration, the contract, the stylesheet, the state machine,
+the dataflow, the application or the form as ordinary typed JavaScript,
+and what comes back is the document — exactly the one its engine
+already takes, byte for byte, with its types derived beside it. The
+chain is the pen; the document is the deliverable.
+
+```js
+import { fromAsync } from '@jarenjs/linq';
+import * as m from '@jarenjs/linq/model';
+import { open } from '@jarenjs/linq/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+// One function. It never says where the users live.
+const adults = (users) => fromAsync(users).where((u) => u.age.gt(21)).orderBy((u) => u.name);
+
+await adults(rows).toArray();     // over an array: runs in memory, in the @jarenjs/json engine
+adults(rows).toDocument();        // { $for: { it: ['$[*]'] }, $where: { $gt: ['$it.age', 21] }, $orderby: { $key: '$it.name' }, $return: '$it' }
+
+const model = m.defineModel({ entities: {
+  User: m.object({ id: m.string().identity('uuid'), name: m.string(), age: m.integer() }),
+} });
+const db = await open(model, { driver: nodeDriver() });
+await adults(db.entities.User).toArray();   // User[] — the same function, the same document, pushed down to SQL
+```
+
+Look at what the second line answers: not a closure, a value. That
+value can be saved next to the rows it queries, replayed a year later,
+shipped to a browser and run there, put in a pull request where a
+reviewer can read it, or handed to a language model as the thing to
+produce. The last line runs it against a database without a line of
+SQL — and nothing is hidden: the chain's `explain()` shows the document
+it sent, and the store's `explain(document)` shows what that became,
+`SELECT … FROM "User" WHERE "age" > ? ORDER BY "name"`.
+
+## What you gain
+
+- **One idiom for ten kinds of document.** `(u) => u.age.gt(21)` is a
+  query predicate. The same shape is a schema's cross-field `check()`,
+  a form's `assert`, a state machine's guard, a stylesheet rule's body,
+  an app action's patch. Every callback is recorded by one proxy over
+  one expression vocabulary — one [mapping table](docs/QUERY-PEN.md) —
+  so what you learn writing your first query is what writes everything
+  else in this repository.
+- **Types you did not generate.** `Infer<>` reads a schema, `InferMeta<>`
+  a model, `ContractOf<>` a contract; they come out of the builder as you
+  write it. A gate holds them equal to the declarations `@jarenjs/emit`
+  generates from the same documents, so the generate step becomes
+  optional — keep it or delete it, they agree.
+- **Mistakes move to the earliest place they can be caught.** A
+  transition into a state you never declared, a field your migration
+  transform forgot, a view binding an action `actions` does not list —
+  these stop compiling, or refuse at build time with a code that names
+  the fix (`JL0101`–`JL0107`). Not at dispatch, not in production, not
+  in a log.
+- **Data you can do anything with.** A closure can be called. A
+  document can also be inspected, serialized, diffed, cached, signed,
+  sent, stored and executed somewhere else. Every pen answers the
+  document, and the chain answers it on demand with `toDocument()`.
+- **One chain, everywhere data lives.** In memory, over an async cursor
+  or stream, or pushed down to SQL through `@jarenjs/db`: the same chain
+  emits a byte-identical document through every driver (test-pinned),
+  so a streaming answer equals the in-memory answer by construction, and
+  a query written against an array is already a query against the store.
+- **Small, and honest about the rest.** A pen imports no engine — a
+  schema-only bundle carries no chain and no validator — and
+  `npm install @jarenjs/linq` installs nothing else. What a pen costs is
+  measured and printed [below](#what-a-pen-costs); where the store's
+  front door loses to Prisma, Drizzle or Kysely is a published table,
+  not a footnote.
+
+## The map
+
+| You want to write | Import | The engine that runs it, unchanged | Start here |
+| --- | --- | --- | --- |
+| a query | `@jarenjs/linq` | `@jarenjs/json` in memory; `@jarenjs/db` pushed down | [the chain](#the-chain) · [QUERY-PEN](docs/QUERY-PEN.md) |
+| a JSON Schema | `@jarenjs/linq/schema` | `@jarenjs/validate` | [schema pen](#by-code-the-schema-pen) · [SCHEMA-PEN](docs/SCHEMA-PEN.md) |
+| a database model | `@jarenjs/linq/model` | `@jarenjs/db`'s `openStore` | [model pen](#by-code-the-model-pen) · [MODEL-PEN](docs/MODEL-PEN.md) |
+| a transform | `@jarenjs/linq/jslt` | `@jarenjs/json/jslt` | [JSLT pen](#by-code-the-jslt-pen) · [JSLT-PEN](docs/JSLT-PEN.md) |
+| a migration | `@jarenjs/linq/migration` | `jaren-db` | [migration pen](#by-code-the-migration-pen) · [MIGRATION-PEN](docs/MIGRATION-PEN.md) |
+| an API contract | `@jarenjs/linq/contract` | `@jarenjs/contract` — client, server and AI tools | [contract pen](#by-code-the-contract-pen) · [CONTRACT-PEN](docs/CONTRACT-PEN.md) |
+| a state machine, a dataflow | `@jarenjs/linq/flow` | `@jarenjs/flow` | [flow pen](#by-code-the-flow-pen) · [FLOW-PEN](docs/FLOW-PEN.md) |
+| an application | `@jarenjs/linq/app` | `@jarenjs/app` | [app pen](#by-code-the-app-pen) · [APP-PEN](docs/APP-PEN.md) |
+| a form | `@jarenjs/linq/forms` | `@jarenjs/forms` | [forms pen](#by-code-the-forms-pen) · [FORMS-PEN](docs/FORMS-PEN.md) |
+| typed handles on the store | `@jarenjs/linq/db` | the front door, not a pen | [the front door](#the-front-door-jarenjslinqdb) · [DB-CLIENT](docs/DB-CLIENT.md) |
+
+The rules every pen keeps — what a pen may spell, what it must refuse,
+how its document and its types are held equal to the engine's — are one
+binder, [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md). Every worked example
+in every pen document is executed by a test, so what a document shows
+is what runs.
+
+## If you are a model reading this
+
+You can produce every document in this repository two ways: emit the
+JSON directly, or write the pen's JavaScript and let it emit the JSON.
+Prefer the pen whenever you can run code, because it fails early and
+specifically. The vocabulary is closed and each method is a row in a
+mapping table, so there is nothing to guess; a method that is not in the
+table is `JL0001`–`JL0007` at build time, a shape a format cannot carry
+is `JL0101`–`JL0107`, and every message names the fix. Three rules keep
+you out of the traps:
+
+1. **Spell comparisons and logic as methods.** `u.age.gt(21)`,
+   `a.and(b)`, `x.not()`, `s.eq('')`. A proxy cannot overload
+   JavaScript's own operators: `u.age > 21` throws a plain `TypeError`,
+   and `a && b` or `cond ? x : y` evaluate against the proxy object and
+   produce a wrong document silently.
+2. **Reach for the builder where you would write a schema.** Every pen
+   that carries a schema takes a schema-pen builder in that position —
+   a contract's `input`, a machine's `payload`, an app's `state`.
+3. **Read the pen document before its format.** The pen document is the
+   mapping table for what you are writing; the format document is what
+   the engine reads. Start with the table's row, and copy its example —
+   a test executed it.
+
+## The chain
 
 `.` is the chain: you write `from(users).where(u =>
 u.age.gt(21)).orderBy(u => u.name)`, and what exists afterwards is data
 — inspectable, serializable, executable by the `@jarenjs/json` engine in
 memory, streamed over a cursor, or pushed into a database by any
-provider. Each subpath is a **pen** for one other format —
-[`./schema`](#by-code-the-schema-pen), [`./model`](#by-code-the-model-pen),
-[`./jslt`](#by-code-the-jslt-pen),
-[`./migration`](#by-code-the-migration-pen),
-[`./contract`](#by-code-the-contract-pen), [`./flow`](#by-code-the-flow-pen),
-[`./app`](#by-code-the-app-pen), [`./forms`](#by-code-the-forms-pen) —
-emitting exactly the document that format's engine already takes, and
-carrying `Infer<>` types a gate proves equal to `@jarenjs/emit`'s
-generated declarations. [`./db`](#the-front-door-jarenjslinqdb) is not a
-pen: it is the store's typed front door, and the package's one runtime
-edge. The rules every pen keeps, and the index of the ten pen
-documents, are [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md).
+provider.
 
 ```js
 import { from } from '@jarenjs/linq';
@@ -106,56 +218,65 @@ played by the provider seam below.
 
 ## By code: the schema pen
 
-The chain is the first pen; `@jarenjs/linq/schema` is the second. It
-builds standard JSON Schema 2020-12 documents in code — the structural
-keywords, the constraints and the annotations, each with a method of its
-own, cross-field rules captured into `$query` through the same recording
-proxy the chain uses, `$defs`/`$ref` recursion, the normalizer's
-per-field predicates — and carries
-`Infer<>`/`Input<>` types that a gate proves equal to `@jarenjs/emit`'s
-generated declarations and consistent with the validator's verdicts over
-one corpus.
+`@jarenjs/linq/schema` writes standard JSON Schema 2020-12 documents —
+the structural keywords, the constraints and the annotations, each with
+a method of its own, plus `$query` cross-field rules, `$defs`/`$ref`
+recursion and the normalizer's per-field predicates — with
+`Infer<>`/`Input<>` types a gate proves equal to `@jarenjs/emit`'s
+generated declarations. Reach for it when you are describing the shape
+of data: for validation, for a form, or as the base of an entity.
 
 ```js
 import * as s from '@jarenjs/linq/schema';
 import type { Infer } from '@jarenjs/linq/schema';
+import { JarenValidator } from '@jarenjs/validate';
 
 const User = s.object({
   id: s.string().uuid(),
   name: s.string().min(1),
   created: s.datetime(),
   age: s.integer().optional(),
-}).check((u) => u.created.year().ge(1970));
+}).check((u) => u.created.year().ge(1970));   // a cross-field rule, captured into $query
 
-User.schema;              // { type: 'object', properties: {…}, required: [...], additionalProperties: false, $query: {…} }
-type User = Infer<typeof User>;   // { id: string; name: string; created: DateTime; age?: number }
-from(rows).ofType(User);  // Sequence<User> — the chain takes a builder where it took a document
+User.schema;                       // { type: 'object', properties: {…}, required: [...], additionalProperties: false, $query: {…} }
+type User = Infer<typeof User>;    // { id: string; name: string; created: DateTime; age?: number }
+
+const isUser = new JarenValidator().compile(User.schema);   // @jarenjs/validate takes the document unchanged
+isUser(input);                                              // true | false, the validator's verdict
+from(rows).ofType(User);                                    // Sequence<User> — the chain takes a builder where it took a document
 ```
 
-Objects are closed by default (`.open()` admits more); a document is a
-frozen value (`JSON.stringify(builder)` is the document); a pen imports
-no engine, so a schema-only bundle carries no chain and no validator.
-What a pen cannot spell it refuses with a coded error (`JL0101`–`JL0107`)
-naming the fix — there is no `.transform()` and no function `refine`;
-cross-field rules are `check()`, transforms are application code. The
-normative mapping table and the worked examples a test executes are
-[docs/SCHEMA-PEN.md](docs/SCHEMA-PEN.md); the rules every pen keeps are
-[docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md).
+How to read it: every method writes one keyword, so the builder and the
+document are the same thing read from two sides — `JSON.stringify(User)`
+is the document, frozen, and `User.schema` is the same value. Objects are
+closed by default (`.open()` admits more), `.optional()` is what leaves a
+property out of `required`, and a `check()` is a rule over several
+fields, recorded by the same proxy the chain uses. A pen imports no
+engine, so a schema-only bundle carries no chain and no validator. What
+a pen cannot spell it refuses at build time with a coded error
+(`JL0101`–`JL0107`) naming the fix — there is no `.transform()` and no
+function `refine`: cross-field rules are `check()`, transforms are
+application code. The mapping table, the worked examples a test
+executes and every refusal are [docs/SCHEMA-PEN.md](docs/SCHEMA-PEN.md);
+the rules every pen keeps are [docs/LINQ-FORMAT.md](docs/LINQ-FORMAT.md).
 
 ## By code: the model pen
 
 `@jarenjs/linq/model` is the schema pen with the store's vocabulary
-subclassed onto it: the same builders, plus the `x-entity` members
-`@jarenjs/db` reads — `key()`, `unique()`, `index()`, `version()`,
-`identity('uuid' | 'auto')`, `default()`, `column('integer' | 'json')`
-and the three relation spellings — and `defineModel({ entities,
-collections })`, which emits exactly the `$model` 0.1 document
-`openStore` takes. Its shape hash equals the store's own, so a model
-written this way is a model the migration engine already understands.
+subclassed onto it — the `x-entity` members `@jarenjs/db` reads
+(`key()`, `unique()`, `index()`, `version()`, `identity('uuid' |
+'auto')`, `default()`, `column('integer' | 'json')`), the three relation
+spellings, and `defineModel({ entities, collections })`, which emits
+exactly the `$model` 0.1 document `openStore` takes. Reach for it when a
+store's entities, keys and relations should be declared once and typed
+everywhere: `InferMeta<>` is the `EntityMetaMap` `typedStore<E>` wants,
+with no generate step.
 
 ```js
 import * as m from '@jarenjs/linq/model';
 import type { InferMeta } from '@jarenjs/linq/model';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
 
 export const model = m.defineModel({ entities: {
   User: m.object({
@@ -171,56 +292,69 @@ export const model = m.defineModel({ entities: {
   }),
 } });
 
+model;                                  // { $model: '0.1', entities: {…} } — the document itself, shape-hashed as the store hashes it
 const store = await openStore(model, { driver: nodeDriver() });   // @jarenjs/db takes it unchanged
-type Meta = InferMeta<typeof model>;   // the EntityMetaMap typedStore<E> wants — no generate step
+type Meta = InferMeta<typeof model>;    // the EntityMetaMap typedStore<E> wants — no generate step
 ```
 
-`InferMeta<>` is the point: `@jarenjs/db`'s typed surface wanted an
-`EntityMetaMap` that `@jarenjs/emit` had to generate from a model file,
-and a repo gate holds the pen's type equal to that generated map for the
-fixture model — so the codegen step is optional rather than load-bearing.
-The mapping table, member by member, is
-[docs/MODEL-PEN.md](docs/MODEL-PEN.md);
-what the model document itself means is
-[MODEL-FORMAT.md](../db/docs/MODEL-FORMAT.md).
+How to read it: an entity is a schema-pen object whose members carry
+store annotations; a relation is a member like any other, spelled
+`rel.hasOne` / `rel.hasMany` / `rel.belongsToMany`, and it is what lets a
+chain over this store navigate `p.author.email` as a hop. The value
+`defineModel` returns IS the `$model` document, and its shape hash equals
+the store's own, so a model written this way is a model the migration
+engine already understands. `InferMeta<>` is the point: `@jarenjs/db`'s
+typed surface wanted an `EntityMetaMap` that `@jarenjs/emit` had to
+generate from a model file, and a repo gate holds the pen's type equal
+to that generated map — so the codegen step is optional rather than
+load-bearing. The mapping table, member by member, is
+[docs/MODEL-PEN.md](docs/MODEL-PEN.md); what the model document itself
+means is [MODEL-FORMAT.md](../db/docs/MODEL-FORMAT.md).
 
 ## By code: the JSLT pen
 
-`@jarenjs/linq/jslt` writes `$jslt` 0.1 stylesheets the same way: rule
-bodies are callbacks captured over the matched value, with `root`/`path`
-and the declared parameters as typed externals; `apply()` spells the
-apply-templates operator (and refuses the one shape the engine only
-catches at run time — an `apply` as a bare object member, `JL0102`);
-`rule()`/`stylesheet()` write the rule object and the envelope byte-equal
-to the format's own Appendix A.
+`@jarenjs/linq/jslt` writes `$jslt` 0.1 stylesheets: rule bodies are
+callbacks captured over the matched value, with `root`/`path` and the
+declared parameters as typed externals, and `apply()` spells the
+apply-templates operator. Reach for it when one document is being
+transformed into another and the rules should be typed rather than
+hand-written JSON.
 
 ```js
 import { stylesheet, rule, apply } from '@jarenjs/linq/jslt';
+import { compileJsltStylesheet } from '@jarenjs/json/jslt';
+import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 const book = stylesheet([
   rule({ schema: { type: 'object', required: ['isbn'] } },
-    (v) => ({ title: v.title, children: [apply(v.chapters.all())] })),
+    (v) => ({ title: v.title, children: [apply(v.chapters.all())] })),   // apply-templates over every chapter
   rule({ schema: { type: 'object', required: ['heading'] } },
     (v) => ({ name: v.heading })),
 ]);
-compileJsltStylesheet(book, { compileTypeTest })(input);   // @jarenjs/json/jslt takes it unchanged
+
+const transform = compileJsltStylesheet(book, { compileTypeTest: createTypeTestCompiler() });   // @jarenjs/json/jslt takes it unchanged
+transform({ isbn: '1', title: 'T', chapters: [{ heading: 'A' }] });   // { title: 'T', children: [{ name: 'A' }] }
 ```
 
-The mapping table and the worked examples are
+How to read it: a `rule` is a match (a path, or a `schema` the type-test
+compiler judges) and a body; the body's callback is recorded over the
+matched value, so `v.title` becomes the `$` path the engine reads and
+`v.chapters.all()` a query over the array. `apply()` hands the matched
+values back to the stylesheet, which is how the second rule runs once
+per chapter. `rule()`/`stylesheet()` write the rule object and the
+envelope byte-equal to the format's own Appendix A, and the pen refuses
+the one shape the engine only catches at run time — an `apply` as a bare
+object member (`JL0102`). The mapping table and the worked examples are
 [docs/JSLT-PEN.md](docs/JSLT-PEN.md).
 
 ## By code: the migration pen
 
-`@jarenjs/linq/migration` closes the first picture — a schema by the
-schema pen, a model by the model pen, a chain over the model's entity
-sets, and a migration between two models whose data transform is typed
-old row → new row. `defineMigration({ id, from, to })` hashes the two
-models' shapes exactly as the store does; `.ddl()`, `.sql()`,
-`.transform()`, `.assert()`, `.derive()` and `.step()` write the step
-kinds MIGRATION-FORMAT names; `fromPlanned(planned, { from, to })` takes
-the document `jaren-db plan` wrote and lets a typed `transform` replace
-the draft the planner could not fill — the planner still plans, the pen
-types the human part, and a draft left alone still refuses to run.
+`@jarenjs/linq/migration` writes `$migration` 0.1 documents between two
+models, hashing their shapes exactly as the store does, with the data
+transform typed old row → new row. Reach for it when `jaren-db plan` has
+drafted a migration and a human has to fill the part the planner could
+not: `fromPlanned(planned, { from, to })` lets a typed `transform`
+replace the draft, and a draft left alone still refuses to run.
 
 ```js
 import { fromPlanned } from '@jarenjs/linq/migration';
@@ -232,29 +366,32 @@ export default fromPlanned(planned, { from: v1, to: v2 })
 //                     ^ the old row, typed        ^ the new row, checked: a dropped `handle` does not compile
 ```
 
-`jaren-db` loads model and migration modules beside JSON, plans from the
-committed `model.snapshot.json`, refuses a module that is not pure and,
-in CI, a model that moved without a plan (`jaren-db check`). The mapping
-table and the worked examples are
+How to read it: a migration is the two models' shape hashes plus a list
+of steps. `defineMigration({ id, from, to })` writes one from scratch and
+`.ddl()`, `.sql()`, `.transform()`, `.assert()`, `.derive()` and
+`.step()` write the step kinds MIGRATION-FORMAT names; `fromPlanned`
+starts from the document `jaren-db plan` wrote instead — the planner
+still plans, the pen types the human part. `jaren-db` loads model and
+migration modules beside JSON, plans from the committed
+`model.snapshot.json`, refuses a module that is not pure and, in CI, a
+model that moved without a plan (`jaren-db check`). The mapping table
+and the worked examples are
 [docs/MIGRATION-PEN.md](docs/MIGRATION-PEN.md).
 
 ## By code: the contract pen
 
 `@jarenjs/linq/contract` writes `$contract` 0.1 documents — the
 operations two ends exchange, their schemas, their policy and their HTTP
-binding — with the operations' `named()` schemas hoisted into the
-contract's own `$defs` and every member in the order CONTRACT-FORMAT
-§12.1 fixes, so the pen's document and its own public projection differ
-by nothing but the defaults the compiler materializes. The types come
-with it: `ContractOf<typeof shop>` is the operation map, and
+binding. Reach for it when one declared API should type all three
+consumers: `ContractOf<typeof shop>` is the operation map, and
 `typedClient`, `typedHandlers` and `typedTools` carry it onto a client,
-a handler table and an AI toolbox without running the TypeScript
-projection.
+a handler table and an AI toolbox.
 
 ```js
 import * as s from '@jarenjs/linq/schema';
-import { defineContract, command, error, http } from '@jarenjs/linq/contract';
-import { typedClient, typedHandlers } from '@jarenjs/linq/contract';
+import { defineContract, command, error, http, typedClient } from '@jarenjs/linq/contract';
+import { compileContract } from '@jarenjs/contract';
+import { openHttpClient } from '@jarenjs/contract/client';
 
 const Product = s.named('Product', s.object({ id: s.integer(), name: s.string() }).open());
 
@@ -267,11 +404,21 @@ export const shop = defineContract({ id: 'shop' }, {
   }),
 });
 
+shop.document;   // { $contract: '0.1', id: 'shop', $defs: { Product: {…} }, operations: {…} } — @jarenjs/contract takes it unchanged
 const api = typedClient(openHttpClient(compileContract(shop.document), { baseUrl }), shop);
-const outcome = await api.invoke('product.save', { id: 1, product });   // Outcome<Product>
+const outcome = await api.invoke('product.save', { id: 1, product });   // Outcome<Product>: ok | conflict, both typed
 ```
 
-The mapping table and the worked examples are
+How to read it: an operation is a kind (`read`, `command`, `subscribe`),
+its input and output schemas by the schema pen, its named errors and its
+binding. A `named()` schema is hoisted into the contract's own `$defs`
+and referenced from every operation that uses it, and every member is
+written in the order CONTRACT-FORMAT §12.1 fixes, so the pen's document
+and the compiler's own public projection differ by nothing but the
+defaults the compiler materializes. The types come with it and never
+run the TypeScript projection: the same `shop` that typed the client
+types the server's `typedHandlers` table and an AI toolbox's
+`typedTools`. The mapping table and the worked examples are
 [docs/CONTRACT-PEN.md](docs/CONTRACT-PEN.md).
 
 ## By code: the flow pen
@@ -280,53 +427,56 @@ The mapping table and the worked examples are
 `jaren-fsm` 0.1 machine and a `jaren-dag` 0.1 dataflow. State ids, event
 names and node ids are literal types, so a transition into an undeclared
 state or an edge from an undeclared node is a compile error; guards,
-effect props, node queries and edge selectors are callbacks captured
-over the scope the engine evaluates them in, never a path typed as a
-string — which is also how the pen can refuse the one trap FLOW-FORMAT
-§3 names itself, a plain-string guard that is vacuously true (`JL0102`).
+effect props, node queries and edge selectors are captured callbacks,
+never a path typed as a string.
 
 ```js
-import { defineFsm, on, state, effect } from '@jarenjs/linq/flow';
+import { defineFsm, on, state } from '@jarenjs/linq/flow';
+import * as s from '@jarenjs/linq/schema';
+import { compileFsm, fsmToApp } from '@jarenjs/flow';
+
+const Approval = s.object({ fresh: s.boolean() });
 
 const review = defineFsm({
   initial: 'draft',
   states: ['draft', 'review', state('published', { final: true })],
   transitions: [
     on('draft', 'submit').to('review'),
-    on('review', 'approve', { payload: Approval }).when((s) => s.payload.fresh).to('published'),
+    on('review', 'approve', { payload: Approval }).when((x) => x.payload.fresh).to('published'),
     on('review').to('draft'),                    // a wildcard, listed last: document order is the priority
   ],
-  context: Cart,
 });
 
-compileFsm(review).step('review', 'approve', { payload: { fresh: true } });   // @jarenjs/flow takes it unchanged
+compileFsm(review).step('review', 'approve', { payload: { fresh: true } });   // { state: 'published', final: true, … } — @jarenjs/flow takes it unchanged
 fsmToApp(review);                                                            // and so does the app projection
 ```
 
+How to read it: `on(from, event)` opens a transition, `.when()` guards
+it with a callback over the payload and the context, `.to()` closes it;
+a transition without an event is a wildcard, and document order is the
+engine's priority order. A guard is recorded, never typed as a string,
+which is also how the pen refuses the one trap FLOW-FORMAT §3 names
+itself — a plain-string guard that is vacuously true (`JL0102`). A
+dataflow is written the same way with `defineDag`, `node` and `edge`.
 The mapping table and the worked examples are
 [docs/FLOW-PEN.md](docs/FLOW-PEN.md).
 
 ## By code: the app pen
 
-`@jarenjs/linq/app` writes the `jaren-app` 0.1 document `createApp`
-runs — a whole interactive application as one JSON value — and answers
-the state's JSON Schema beside it for `validateState`, never merged in
-(the format has no slot for one). The initial state comes from the
-state schema's own `default()`s; actions are captured over APP-FORMAT
-§3.1's three names, so a patch value and an effect's props are the SAME
-expression when they should be; and a patch PATH is a lambda over the
-state that lowers to a JSON Pointer — `st.todos.at(2).done` is
-`/todos/2/done`, and a computed index becomes the pointer expression
-`{ "$concat": ["/todos/", "$payload.i", "/done"] }`. Two refusals the
-loop can only report per dispatch land at build time instead: a view
-binding an action `actions` does not declare (`JA2001`), and an
-`$event` field §3.1 excludes because `$event` must survive
-`JSON.stringify` (`JL0102`).
+`@jarenjs/linq/app` writes the `jaren-app` 0.1 document `createApp` runs
+— a whole interactive application as one JSON value — and answers the
+state's JSON Schema beside it for `validateState`. Reach for it when the
+state shape, the view, the actions and their patch pointers should be
+one typed declaration: the initial state comes from the state schema's
+own `default()`s, and a patch path is a lambda over the state that
+lowers to a JSON Pointer.
 
 ```js
 import { action, append, bind, defineApp, transition } from '@jarenjs/linq/app';
 import { rule } from '@jarenjs/linq/jslt';
 import * as s from '@jarenjs/linq/schema';
+import { createApp } from '@jarenjs/app';
+import { JarenValidator } from '@jarenjs/validate';
 
 const { document, stateSchema } = defineApp({
   state: s.object({ todos: s.array(s.string()).default([]), draft: s.string().default('') }),
@@ -337,26 +487,38 @@ const { document, stateSchema } = defineApp({
   },
 });
 
-createApp(document, { node, validateState: new JarenValidator().compile(stateSchema) });
+document;      // { $app: '0.1', state: { todos: [], draft: '' }, view: [...], actions: {…} } — the initial state from the schema's defaults
+createApp(document, { node, validateState: new JarenValidator().compile(stateSchema) });   // @jarenjs/app takes it unchanged
 ```
 
-The mapping table and the worked examples are
+How to read it: the view is JSLT rules over the state (the same pen),
+`bind()` names the action a DOM event dispatches with its payload, and
+an action's callback is captured over APP-FORMAT §3.1's three names
+(`$` the state, `$payload`, `$event`), so a patch value and an effect's props
+are the SAME expression when they should be. A patch path is a lambda
+over the state that lowers to a JSON Pointer — `(c) => c.todos.at(2).done`
+is `/todos/2/done`, and a computed index becomes the pointer expression
+`{ "$concat": ["/todos/", "$payload.i", "/done"] }`. Two refusals the
+loop can only report per dispatch land at build time instead: a view
+binding an action `actions` does not declare (`JA2001`), and an `$event`
+field §3.1 excludes because `$event` must survive `JSON.stringify`
+(`JL0102`). The mapping table and the worked examples are
 [docs/APP-PEN.md](docs/APP-PEN.md).
 
 ## By code: the forms pen
 
 `@jarenjs/linq/forms` is the schema pen plus the `x-form` vocabulary —
-`form({ visible, enabled, assert, computed, message })` on every
-builder — and `assertOnSubmit()`, which answers the same rules' layer-3
-`$query` twin in one call. A rule is an ANNOTATION: nothing about what
-the schema validates moves, and `Infer<>` reads exactly as it does on
-`./schema`. The rules are callbacks over the three names the evaluator
-binds — `c.root` the whole document, `c.value` the field, `c.pointer`
-its location — so a rule is written, never typed as a path string.
+`form({ visible, enabled, assert, computed, message })` on every builder
+— and `assertOnSubmit()`, which answers the same rules' layer-3 `$query`
+twin in one call. A rule is an annotation: nothing about what the schema
+validates moves, and the rules are callbacks over `c.root`, `c.value`
+and `c.pointer`, never a path typed as a string.
 
 ```js
 import * as f from '@jarenjs/linq/forms';
 import { assertOnSubmit } from '@jarenjs/linq/forms';
+import { buildFormModel, compileFormRules } from '@jarenjs/forms';
+import { JarenValidator } from '@jarenjs/validate';
 
 const invoice = f.object({
   company: f.string().optional(),
@@ -367,12 +529,20 @@ const invoice = f.object({
   }),
 });
 
-compileFormRules(buildFormModel(invoice.schema));         // per keystroke
-new JarenValidator().compile(assertOnSubmit(invoice));    // on submit, the same rule
+invoice.schema;                                              // a JSON Schema whose vatId carries x-form: { visible, assert, message }
+compileFormRules(buildFormModel(invoice.schema));            // @jarenjs/forms: per keystroke — visibility, enablement, the message
+new JarenValidator().compile(assertOnSubmit(invoice));       // @jarenjs/validate: on submit — the same rule, as a $query assertion
 ```
 
-The mapping table and the worked examples are
-[docs/FORMS-PEN.md](docs/FORMS-PEN.md).
+How to read it: `form()` writes the `x-form` annotation beside the
+keywords the schema already has, so `Infer<>` reads exactly as it does
+on `./schema` and a validator that ignores `x-form` validates the same
+data. Each rule's callback is recorded over the three names the form
+evaluator binds — `c.root` the whole document, `c.value` this field,
+`c.pointer` its location — and `assertOnSubmit()` rewrites the `assert`
+rules into the `$query` keyword so the server checks on submit what the
+form showed per keystroke. The mapping table and the worked examples
+are [docs/FORMS-PEN.md](docs/FORMS-PEN.md).
 
 ## The front door: `@jarenjs/linq/db`
 
@@ -391,52 +561,29 @@ import { model } from './model.js';                          // defineModel(…)
 
 const db = await open(model, { driver: nodeDriver() });     // validated by default: formats assert
 const hot = await db.entities.Post
-  .where((p) => p.stars.ge(3)).orderBy((p) => p.pid).toArray();   // Post[], pushed down
+  .where((p) => p.stars.ge(3)).orderBy((p) => p.pid).toArray();   // Post[], pushed down to SQL
 const users = await db.entities.User
   .include((u) => u.posts, { where: (p) => p.stars.ge(3), take: 2 })   // one statement, whatever the depth
   .include((u) => u.labels, { count: true })
   .toArray();                                                // posts: Post[], labels: number
 db.entities.User.link(users[0], 'labels', 'admin');          // 'labels' only: the many-to-many members
-await db.saveChanges();
+await db.saveChanges();                                      // the unit of work: get, mutate, save
 const live = await db.live(db.entities.Post.where((p) => p.stars.ge(3)));   // { result, subscribe, close, mode }
 ```
 
-The edge is one, declared, and proven: this subpath imports
-`@jarenjs/db`, `@jarenjs/validate` and `@jarenjs/formats` as OPTIONAL
-peer dependencies — `npm install @jarenjs/linq` alone installs nothing
-new, the `.` entry carries not one byte of them (the tree-shaking gate
-holds it), a `./db` consumer installs the three, and the bundle price is
-published in [CONSUMING](../../docs/CONSUMING.md). What is the store's
-and what is the client's is one table in
+How to read it: `db.entities.Post` is a chain root typed from the model,
+so `p.stars` is a number in the editor and `p.author.email` is a
+declared hop; `include` is a typed `load` spec and answers a two-level
+graph in ONE statement; a write is the unit of work — get an entity,
+mutate it, `saveChanges()` — and `live` re-answers a chain when the
+store changes. This subpath is the package's one runtime edge: it
+imports `@jarenjs/db`, `@jarenjs/validate` and `@jarenjs/formats` as
+OPTIONAL peer dependencies, so `npm install @jarenjs/linq` alone
+installs nothing new and the `.` entry carries not one byte of them
+(a tree-shaking gate holds it). What is the store's and what is the
+client's — the surface, the refusals, and what the door costs, measured
+against Prisma, Drizzle and Kysely — is
 [docs/DB-CLIENT.md](docs/DB-CLIENT.md).
-
-**What the door costs, measured.** `benchmark/orm.js` runs the client as
-one more route in every table beside Prisma, Drizzle and Kysely over the
-same SQLite corpus, equality asserted before anything is timed and
-statement counts printed beside the timings.
-
-Against the store it fronts, the door is nearly free: <!--fact:orm.clientDoorPrice-->0.9× on a point read, 1.4× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/fact-->
-— because it issues the same documents the store would. What it does
-NOT amortize is capture: a chain re-captures its callbacks and re-emits
-its document on **every** call, by design, which is the predicate row's
-difference and which a caller with a hot query removes by holding the
-`Sequence` (or the emitted document) instead of rebuilding it.
-
-Against the rivals, at this corpus, it is faster on <!--fact:orm.clientVsRivals-->8 of 9 against Prisma, 4 of 9 against Drizzle, 1 of 9 against Kysely<!--/fact-->,
-and here is every row where the *fastest* rival beats it — <!--fact:orm.clientLosses-->update one column by primary key 18.8× (Drizzle), nested json member filter 6.3× (Kysely), cold start 3.0× (Prisma), posts per user 2.4× (Kysely), graph load 2.2× (Kysely), indexed predicate over 500 users, ids only 2.0× (Kysely), pagination over 5000 comments, page size 20 1.6× (Kysely), insert 1.4× (Kysely), point read by primary key 1.2× (Drizzle)<!--/fact-->.
-
-Three things make that list readable rather than damning, and none of
-them removes a row from it. **Kysely is a SQL builder**: on every row it
-wins, you wrote the SQL — the comparison it belongs in is against a
-hand-written statement, not against a schema-first ORM. **The update row
-is the widest loss and has one cause**: the client's only write door is
-the unit of work (`get`, mutate, `saveChanges`), where a rival issues one
-prepared `UPDATE`; the store's own `update()` sits in the same table so
-the difference is visible rather than argued. And **the claim that
-survives is structural, not temporal** — the graph load's statement
-counts are printed beside its timings, and the client answers a
-two-level graph in ONE statement where the schema-first ORM takes three,
-whatever the corpus and whatever the clock says.
 
 ## What a pen costs
 
