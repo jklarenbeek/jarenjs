@@ -74,9 +74,9 @@ function fencePairs(markdown, heading, doc) {
  * its fences are the specifications it hands the store. */
 const DOCS = [
   ['schema', 'the schema pen', 'SCHEMA-PEN.md', 10],
-  ['model', 'the model pen', 'MODEL-PEN.md', 2],
+  ['model', 'the model pen', 'MODEL-PEN.md', 6],
   ['jslt', 'the JSLT pen', 'JSLT-PEN.md', 3],
-  ['migration', 'the migration pen', 'MIGRATION-PEN.md', 2],
+  ['migration', 'the migration pen', 'MIGRATION-PEN.md', 5],
   ['client', 'the client', 'DB-CLIENT.md', 1],
   ['contract', 'the contract pen', 'CONTRACT-PEN.md', 2],
   ['flow', 'the flow pen', 'FLOW-PEN.md', 2],
@@ -96,7 +96,6 @@ const MAPPING_HEADING = { db: '## 2. What is the store\'s and what is the client
  * @type {Record<string, string>}
  */
 const MAPPING_TODO = {
-  model: '25 of 44 unnamed, the schema-pen vocabulary the model pen re-exports among them',
   contract: '1 of 11 unnamed: error',
   app: '6 of 13 unnamed: add, copy, move, remove, replace, test',
   forms: '29 of 31 unnamed, the schema-pen vocabulary the forms pen re-exports among them',
@@ -105,7 +104,6 @@ const MAPPING_TODO = {
 /** The same, for §5's named exclusions: the eight builder classes, the
  * one constant and the one guard each of these three subpaths exports. */
 const TYPES_TODO = {
-  model: 'its 8 builder classes, SCHEMA_BUILDER and isSchemaBuilder',
   forms: 'its 8 builder classes, SCHEMA_BUILDER and isSchemaBuilder',
 };
 

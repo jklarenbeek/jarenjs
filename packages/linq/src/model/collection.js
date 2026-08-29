@@ -13,6 +13,7 @@ import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { requireJson, requireName } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
+import { refuseStrandedRename } from './entity.js';
 
 /** The index options the grammar names beside `name` and `path`. */
 const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 'physical']);
@@ -139,6 +140,7 @@ export function collection(builder, options = {}) {
   if (!isSchemaBuilder(builder)) {
     throw new LinqBuildError('JL0101', 'collection() takes a schema builder as its document schema');
   }
+  refuseStrandedRename(builder, 'collection()');
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw new LinqBuildError('JL0101', 'collection() takes an options object');
   }

@@ -236,7 +236,7 @@ export class NumberBuilder<Out = number, In = Out, F extends Flag = never> exten
 }
 
 /** `{ type: 'boolean' }`. */
-export class BooleanBuilder<Out = boolean, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
+declare class BooleanBuilder<Out = boolean, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
   optional(): BooleanBuilder<Out, In, F | 'optional'>;
   nullable(): BooleanBuilder<Out | null, In | null, F>;
   default(value: Out): BooleanBuilder<Out, In, F | 'defaulted'>;
@@ -245,7 +245,7 @@ export class BooleanBuilder<Out = boolean, In = Out, F extends Flag = never> ext
 }
 
 /** `{ type: 'null' }`. */
-export class NullBuilder<Out = null, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
+declare class NullBuilder<Out = null, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
   optional(): NullBuilder<Out, In, F | 'optional'>;
   default(value: Out): NullBuilder<Out, In, F | 'defaulted'>;
   /** `x-coerce`: the empty string is accepted and becomes `null`. */
@@ -328,12 +328,23 @@ type AsRequired<B> = B extends BuilderLike<infer O, infer I, infer G> ? BuilderL
 
 /** A definition: hoisted to `$defs`, referenced where used. The
  * phantom `__named` is what `lazy()` demands. */
-export class NamedBuilder<Out, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
+declare class NamedBuilder<Out, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
   readonly __named: true;
   optional(): NamedBuilder<Out, In, F | 'optional'>;
   nullable(): NamedBuilder<Out | null, In | null, F>;
   default(value: Out): NamedBuilder<Out, In, F | 'defaulted'>;
 }
+
+/**
+ * The three builders above are TYPES, not values: `boolean()`, `nil()`
+ * and `named()` all answer a plain `SchemaBuilder` at run time, so
+ * there is no class to export and importing one as a value would
+ * resolve to `undefined`. They are reached through the factory that
+ * answers them and extended by the model and forms pens; the census in
+ * `test/linq/types.test.js` holds the value half of this file equal to
+ * what the module actually exports.
+ */
+export type { BooleanBuilder, NullBuilder, NamedBuilder };
 
 /** `{ if, then, else }` — typed `unknown`, as emit reads a conditional. */
 export class WhenBuilder<F extends Flag = never> extends SchemaBuilder<unknown, unknown, F> {
@@ -343,6 +354,34 @@ export class WhenBuilder<F extends Flag = never> extends SchemaBuilder<unknown, 
   then(builder: AnyBuilder): WhenBuilder<F>;
   /** The `else` branch. */
   else(builder: AnyBuilder): WhenBuilder<F>;
+}
+
+/**
+ * `false` — the schema nothing satisfies. It carries no keywords at
+ * all, so every method that would write one is refused with `JL0102`
+ * rather than dropped; the return types below say so. `never()` answers
+ * one, and this class is how a caller recognises it (`instanceof`).
+ */
+export class NeverBuilder<Out = never, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
+  /** `false` carries no members, so the boolean schema is the document. */
+  readonly schema: false;
+  optional(): NeverBuilder<Out, In, F | 'optional'>;
+  /** Answers another `NeverBuilder`: `with()` keeps the class. */
+  nullable(): NeverBuilder<Out | null, In | null, F>;
+  /** Refused (`JL0102`) — `false` carries no `default`. */
+  default(value: Out): never;
+  /** Refused (`JL0102`) — `false` carries no `description`. */
+  describe(text: string): never;
+  /** Refused (`JL0102`) — `false` carries no `title`. */
+  title(text: string): never;
+  /** Refused (`JL0102`) — `false` carries no `examples`. */
+  example(value: Out): never;
+  /** Refused (`JL0102`) — `false` carries no annotation of any name. */
+  meta(annotations: Annotations): never;
+  /** Refused (`JL0102`) — `false` carries no `errorMessage`. */
+  message(spec: Json): never;
+  /** Refused (`JL0102`) — nothing reaches a check on `false`. */
+  check(rule: CheckRule<Out>): never;
 }
 
 /** `{ type: 'string' }`. */
@@ -414,3 +453,33 @@ export function isSchemaBuilder(value: unknown): value is BuilderLike;
 export function schemaOf(value: unknown): unknown;
 /** The JSON boundary every value entering a document crosses (`JL0101`). */
 export function requireJson<T>(value: T, what: string): T;
+
+/** A builder class as the factory wiring receives it — the pen supplies
+ * eight, and every factory answers an instance of the one it was handed.
+ * A pen's classes guard their constructors (`protected`: a builder is
+ * never constructed by hand), and no construct signature accepts one, so
+ * what this asks for is the class object itself. */
+type BuilderClass = { readonly prototype: unknown };
+
+/**
+ * Build the named factories above for ONE set of builder classes. The
+ * schema pen calls it with the classes in this file; `./model` and
+ * `./forms` call it with their subclasses, so the wiring exists exactly
+ * once and no subpath patches another's prototype.
+ *
+ * The answer is typed as the record it is, not as the twenty-six
+ * signatures above: what each factory returns depends on the classes
+ * handed in, which no signature here can name. A caller building a pen
+ * of their own destructures it and annotates what they re-export — the
+ * way `./model` and `./forms` do.
+ */
+export function createFactories(classes: {
+  readonly Base: BuilderClass;
+  readonly String: BuilderClass;
+  readonly Number: BuilderClass;
+  readonly Array: BuilderClass;
+  readonly Tuple: BuilderClass;
+  readonly Object: BuilderClass;
+  readonly When: BuilderClass;
+  readonly Never: BuilderClass;
+}): Readonly<Record<string, (...args: any[]) => unknown>>;

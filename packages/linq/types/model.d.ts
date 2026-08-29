@@ -18,6 +18,7 @@ import type {
   Annotations, BuilderLike, CheckRule, Flag, FlagsOf, Infer, Input, Json, JsonSchema,
   NamedLike, Simplify, SchemaBuilder, StringBuilder, NumberBuilder, BooleanBuilder,
   NullBuilder, ArrayBuilder, TupleBuilder, ObjectBuilder, NamedBuilder, WhenBuilder,
+  NeverBuilder,
 } from './schema.js';
 
 type AnyBuilder = BuilderLike<any, any, any>;
@@ -26,6 +27,39 @@ type Nullify<T, N extends boolean> = N extends true ? T | null : T;
 
 /** A store-written default marks the member `generated`; `key()` marks it `key`. */
 type Generated<F extends Flag> = F | 'generated';
+
+/**
+ * The closed `x-entity` vocabulary (MODEL-FORMAT §9.2), as `entity()`
+ * writes it. A member outside this set is `JL0102`: the store refuses a
+ * mapping directive it cannot read rather than ignoring it, so the pen
+ * refuses it first. The named methods below are the way to spell each of
+ * these — they also carry the FLAGS `InferMeta<>` reads, which the
+ * untyped primitive cannot.
+ */
+export interface EntityBlock {
+  /** (Part of) the primary key. */
+  readonly key?: true;
+  /** A unique index over the member's column. */
+  readonly unique?: true;
+  /** A non-unique index over the member's column. */
+  readonly index?: true;
+  /** The optimistic-concurrency token: one plain integer column (§11.5). */
+  readonly version?: true;
+  /** An epoch column beside a date string, or stay in the document (§9.3). */
+  readonly column?: 'integer' | 'json';
+  /** Applied on write, in JavaScript (§9.6). */
+  readonly default?: 'now' | 'updated' | 'uuid' | 'auto'
+    | { readonly value: Json }
+    | { readonly query: { readonly [keyword: string]: unknown } };
+  /** A relation, as `rel.*` spells one (§9.4). */
+  readonly relation?: {
+    readonly to: string;
+    readonly many?: true;
+    readonly via?: string;
+    readonly through?: string;
+    readonly onDelete?: 'cascade' | 'restrict' | 'setNull';
+  };
+}
 
 // ————— the entity-aware builders —————
 
@@ -46,6 +80,10 @@ export class EntityBuilder<Out = unknown, In = Out, F extends Flag = never> exte
   fill(value: Out): EntityBuilder<Out, In, Generated<F>>;
   /** `default: { query }` — over the document being written (`$`); no externals. */
   compute(rule: ComputeRule): EntityBuilder<Out, In, Generated<F>>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   /** As in the schema pen, but `x-entity` is owned here. */
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
@@ -72,6 +110,10 @@ export class EntityStringBuilder<Out = string, In = Out, F extends Flag = never>
   updated(): EntityStringBuilder<Out, In, Generated<F>>;
   fill(value: Out): EntityStringBuilder<Out, In, Generated<F>>;
   compute(rule: ComputeRule): EntityStringBuilder<Out, In, Generated<F>>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
@@ -91,6 +133,10 @@ export class EntityNumberBuilder<Out = number, In = Out, F extends Flag = never>
   identity(kind: 'auto'): EntityNumberBuilder<Out, In, Generated<F> | 'key'>;
   fill(value: Out): EntityNumberBuilder<Out, In, Generated<F>>;
   compute(rule: ComputeRule): EntityNumberBuilder<Out, In, Generated<F>>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
@@ -105,6 +151,10 @@ declare class EntityBooleanBuilder<Out = boolean, In = Out, F extends Flag = nev
   column(storage: 'json'): this;
   fill(value: Out): EntityBooleanBuilder<Out, In, Generated<F>>;
   compute(rule: ComputeRule): EntityBooleanBuilder<Out, In, Generated<F>>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
@@ -115,6 +165,10 @@ declare class EntityNullBuilder<Out = null, In = Out, F extends Flag = never> ex
   column(storage: 'json'): this;
   fill(value: Out): EntityNullBuilder<Out, In, Generated<F>>;
   compute(rule: ComputeRule): EntityNullBuilder<Out, In, Generated<F>>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
@@ -124,6 +178,10 @@ export class EntityArrayBuilder<Out = unknown[], In = Out, F extends Flag = neve
   default(value: Out): EntityArrayBuilder<Out, In, F | 'defaulted'>;
   fill(value: Out): EntityArrayBuilder<Out, In, Generated<F>>;
   compute(rule: ComputeRule): EntityArrayBuilder<Out, In, Generated<F>>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
@@ -134,6 +192,10 @@ export class EntityTupleBuilder<
   optional(): EntityTupleBuilder<T, R, RIn, N, F | 'optional'>;
   nullable(): EntityTupleBuilder<T, R, RIn, true, F>;
   rest<B extends AnyBuilder>(builder: B): EntityTupleBuilder<T, Infer<B>, Input<B>, N, F>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
@@ -152,19 +214,44 @@ export class EntityObjectBuilder<
   renamedFrom(name: string): this;
   /** `column: 'json'` keeps the object in the document (where it lives anyway). */
   column(storage: 'json'): this;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
 declare class EntityNamedBuilder<Out, In = Out, F extends Flag = never> extends NamedBuilder<Out, In, F> {
   optional(): EntityNamedBuilder<Out, In, F | 'optional'>;
   nullable(): EntityNamedBuilder<Out | null, In | null, F>;
+  /** Merge into the `x-entity` block — the primitive every method above
+   * writes through, held to the closed vocabulary. It carries no flag, so
+   * `key()`/`identity()`/`fill()` and the rest stay the way to spell one. */
+  entity(patch: EntityBlock): this;
   meta(annotations: Annotations & { readonly 'x-entity'?: never }): this;
 }
 
 export class EntityWhenBuilder<F extends Flag = never> extends WhenBuilder<F> {
   optional(): EntityWhenBuilder<F | 'optional'>;
+  entity(patch: EntityBlock): this;
   then(builder: AnyBuilder): EntityWhenBuilder<F>;
   else(builder: AnyBuilder): EntityWhenBuilder<F>;
+}
+
+/**
+ * `never()` on this pen. `false` carries no keywords, so the entity
+ * vocabulary cannot be written on it: `entity()`, `key()`, `unique()`,
+ * `index()`, `version()`, `column()`, `now()`, `updated()`, `fill()`,
+ * `compute()` and `meta()` all raise `JL0102` and `identity()` raises
+ * `JL0101`. None is declared, so the refusal arrives at compile time as
+ * well. `renamedFrom()` is the one that writes outside the schema and
+ * so survives.
+ */
+export class EntityNeverBuilder<Out = never, In = Out, F extends Flag = never> extends NeverBuilder<Out, In, F> {
+  optional(): EntityNeverBuilder<Out, In, F | 'optional'>;
+  nullable(): EntityNeverBuilder<Out | null, In | null, F>;
+  /** The migration hint: a rename is recorded beside the schema, not in it. */
+  renamedFrom(name: string): this;
 }
 
 /** A `compute()` rule: the document being written at `$`, no externals. */
@@ -178,10 +265,18 @@ export type RelationKind = 'oneToMany' | 'oneToOne' | 'manyToMany';
 
 /** A relation member: no type of its own, optional by construction; the
  * phantom `__relation` is what `InferMeta` and `defineModel` read. */
-export class RelationBuilder<To extends string, Many extends boolean, Kind extends RelationKind>
+declare class RelationBuilder<To extends string, Many extends boolean, Kind extends RelationKind>
   extends SchemaBuilder<unknown, unknown, 'optional'> {
   readonly __relation: { readonly to: To; readonly many: Many; readonly kind: Kind };
 }
+
+/**
+ * A TYPE, not a value: a relation member is a plain builder over an
+ * `any` schema at run time, so there is no class to export. It is met
+ * through `rel.hasMany()`, `rel.hasOne()` and `rel.belongsToMany()`,
+ * which are how one is ever made.
+ */
+export type { RelationBuilder };
 
 export interface ForeignKeyOptions {
   /** The foreign-key property name. */

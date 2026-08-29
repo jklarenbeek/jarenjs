@@ -216,7 +216,15 @@ const modelEngineLeak = Object.entries(modelInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (modelEngineLeak.length > 0)
   throw new Error(`The model pen pulled an engine or the store into the bundle: ${modelEngineLeak.map(([file]) => file).join(', ')}`);
-if (modelBytes > 40000)
+// The ceiling moved from 40,000 to 41,000 when the pen started mirroring
+// four more of the store's member rules — `key()`/`unique()`/`index()`
+// off a kind that can hold no column, `version()` off an integer, an
+// `x-entity` member outside the closed vocabulary, and a `renamedFrom()`
+// hint the document has no place for. Almost all of it is message text:
+// a refusal that names the rule and the spelling that works is the point
+// of raising it at build rather than at `openStore`, so the honest move
+// is to raise the ceiling with the reason, never to shave the message.
+if (modelBytes > 41000)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);

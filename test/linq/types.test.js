@@ -31,6 +31,7 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 
 import { from } from '@jarenjs/linq';
 import * as s from '@jarenjs/linq/schema';
@@ -147,4 +148,52 @@ describe('a provider keeps its item type through the phantom (the runtime twin)'
     assert.deepStrictEqual(fromAsync(USERS).params({ min: 21 }).explain().bindings, { min: 21 });
     assert.deepStrictEqual(fromAsync(USERS).explain().bindings, {});
   });
+});
+
+describe('the declared export set and the runtime export set are one set', () => {
+  // The two sets drifted in three pens at once because nothing held them
+  // equal: a name the `.d.ts` exports as a VALUE and the module does not
+  // is an import that type-checks and throws at run time; a name the
+  // module exports and the declaration omits is a class a `strict`
+  // consumer cannot reach. Both directions are asserted per pen, so a
+  // failure names the pen and the names.
+  const PENS = ['schema', 'model', 'jslt', 'migration', 'db', 'contract', 'flow', 'app', 'forms'];
+
+  // The forms a `.d.ts` uses to export a VALUE. `export type`, `export
+  // interface`, `export type { … }` and a type-only re-export are
+  // deliberately absent: those are exactly what the repaired surface
+  // uses for a name that has no runtime class.
+  const VALUE_EXPORT = /^export\s+(?:declare\s+)?(?:abstract\s+)?(?:class|function|const|let|var)\s+([A-Za-z_$][\w$]*)/gm;
+
+  const declaredValuesOf = (pen) => {
+    const source = fs.readFileSync(new URL(`../../packages/linq/types/${pen}.d.ts`, import.meta.url), 'utf8');
+    // a Set: an overloaded `export function` writes its name once per signature
+    return [...new Set([...source.matchAll(VALUE_EXPORT)].map((m) => m[1]))].sort();
+  };
+
+  it('the nine pens are every subpath the package publishes beside the chain', () => {
+    // A tenth pen must not arrive unnoticed: the list above is what the
+    // suite below iterates, and this holds it to the package's own map.
+    const manifest = JSON.parse(
+      fs.readFileSync(new URL('../../packages/linq/package.json', import.meta.url), 'utf8'));
+    const published = Object.keys(manifest.exports)
+      .filter((key) => key !== '.' && key !== './package.json')
+      .map((key) => key.slice(2)).sort();
+    assert.deepStrictEqual(published, [...PENS].sort());
+  });
+
+  for (const pen of PENS) {
+    it(`@jarenjs/linq/${pen}: every declared value is exported and every export is declared`, async () => {
+      const runtime = Object.keys(await import(`@jarenjs/linq/${pen}`)).sort();
+      const declared = declaredValuesOf(pen);
+      // Assert what was checked: a matcher that stops matching finds
+      // nothing, and a floor is what tells the reader it still matches.
+      assert.ok(declared.length > 0, `types/${pen}.d.ts declares at least one value export`);
+      assert.ok(runtime.length > 0, `@jarenjs/linq/${pen} exports at least one name`);
+      assert.deepStrictEqual(declared, runtime,
+        `types/${pen}.d.ts value exports vs @jarenjs/linq/${pen} runtime exports — `
+        + `declared-only: [${declared.filter((n) => !runtime.includes(n))}]; `
+        + `runtime-only: [${runtime.filter((n) => !declared.includes(n))}]`);
+    });
+  }
 });

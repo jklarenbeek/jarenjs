@@ -8,7 +8,8 @@
 // (allowJs), so the runtime gate and this file read the same objects.
 // The runtime twins live in test/linq/schema-pen.test.js.
 import * as s from '@jarenjs/linq/schema';
-import type { Infer, Input, NamedBuilder, SchemaBuilder } from '@jarenjs/linq/schema';
+import type { Infer, Input, BooleanBuilder, NamedBuilder, NullBuilder } from '@jarenjs/linq/schema';
+import { NeverBuilder, SchemaBuilder, createFactories } from '@jarenjs/linq/schema';
 import type * as G from './linq-schema-generated.js';
 import { from } from '@jarenjs/linq';
 import type { DateTime, Sequence } from '@jarenjs/linq';
@@ -196,3 +197,33 @@ const json: string = JSON.stringify(User);
 const isOne: boolean = s.isSchemaBuilder(User);
 const unwrapped: unknown = s.schemaOf(User);
 void [asBase, doc, json, isOne, unwrapped];
+
+// ——— the declared surface and the runtime surface are one set ———
+// The census in test/linq/types.test.js holds these two halves equal;
+// these are the compile-level pins for the names it moved. The three
+// builders below are TYPES (`boolean()`, `nil()` and `named()` all
+// answer a plain SchemaBuilder at run time, so there is no class), and
+// the two names below them are VALUES the module really exports.
+const flag: BooleanBuilder = s.boolean();
+const nothing: NullBuilder = s.nil();
+void [flag, nothing, named];
+
+const never: NeverBuilder = s.never() as NeverBuilder;
+const isNever: boolean = s.never() instanceof NeverBuilder;
+// the pen wiring, called the way ./model and ./forms call it
+const pen = createFactories({
+  Base: SchemaBuilder, String: SchemaBuilder, Number: SchemaBuilder,
+  Array: SchemaBuilder, Tuple: SchemaBuilder, Object: SchemaBuilder,
+  When: SchemaBuilder, Never: NeverBuilder,
+});
+const hasString: boolean = typeof pen.string === 'function';
+void [never, isNever, hasString];
+
+// A type is not a value: importing one as a value is the mistake the
+// census now makes impossible to ship.
+// @ts-expect-error BooleanBuilder is exported as a type only
+void s.BooleanBuilder;
+// @ts-expect-error NullBuilder is exported as a type only
+void s.NullBuilder;
+// @ts-expect-error NamedBuilder is exported as a type only
+void s.NamedBuilder;

@@ -4,7 +4,8 @@
 // document (db-generated.ts), member by member and as a whole; the typed
 // store binds to it with no generate step; the negatives are pinned.
 import * as m from '@jarenjs/linq/model';
-import type { InferMeta, EntityDoc, EntityInput } from '@jarenjs/linq/model';
+import type { InferMeta, EntityDoc, EntityInput, RelationBuilder } from '@jarenjs/linq/model';
+import { EntityNeverBuilder } from '@jarenjs/linq/model';
 import type * as G from './db-generated.js';
 import { typedStore } from '@jarenjs/db/typed';
 import type { Store } from '@jarenjs/db';
@@ -69,6 +70,14 @@ void [noteInput, noteDoc, noRelations, noEntities];
 void m.collection(Place, { key: (d) => d.id, indexes: [m.index((p) => p.embedding, { derive: 'vector', dims: 4 })] });
 void m.collection(Place, { indexes: [m.index([(p) => p.series, (p) => p.t])] });
 
+// the x-entity primitive is typed to the closed vocabulary, and carries no flag
+void m.string().entity({ key: true, unique: true });
+void m.datetime().entity({ column: 'integer', default: 'now' });
+void m.integer().entity({ version: true });
+// an array's unique() is the schema pen's uniqueItems, and keeps the subclass
+const uniq: m.EntityArrayBuilder<string[], string[]> = m.array(m.string()).unique();
+void uniq;
+
 // ——— the negatives ———
 // @ts-expect-error — a relation target the model does not declare
 void m.defineModel({ entities: { User: m.object({ id: m.string().key(), posts: m.rel.hasMany('Psot', { via: 'authorId', onDelete: 'cascade' }) }), Post: m.object({ pid: m.integer().key() }) } });
@@ -86,8 +95,30 @@ void m.string().column('integer');
 void m.string().meta({ 'x-entity': { key: true } });
 // @ts-expect-error — the schema pen's builders carry no vocabulary
 void (await import('@jarenjs/linq/schema')).string().key();
+// @ts-expect-error — entity() writes the closed x-entity vocabulary
+void m.string().entity({ bogus: true });
+// @ts-expect-error — the concurrency token is an integer column
+void m.string().version();
+// @ts-expect-error — an object member has no column of its own
+void m.object({ a: m.string() }).key();
+// @ts-expect-error — nor does an array member
+void m.array(m.string()).index();
 
 // the surface, named
 const doc: EntityDoc<{ A: typeof Place }, 'A'> = { id: 'a', loc: [1], series: 's', t: 1 };
 const input: EntityInput<{ A: typeof Place }, 'A'> = doc;
 void [input];
+
+// ——— the declared surface and the runtime surface are one set ———
+// RelationBuilder is a TYPE — a relation member is a plain builder at
+// run time, met through rel.* — and EntityNeverBuilder is a VALUE the
+// module really exports. The census in test/linq/types.test.js holds
+// both halves equal for every pen.
+const authored: RelationBuilder<'User', false, 'oneToOne'> =
+  m.rel.hasOne('User', { via: 'authorId', onDelete: 'cascade' });
+const many: RelationBuilder<'Tag', true, 'manyToMany'> = m.rel.belongsToMany('Tag');
+const isNever: boolean = m.never() instanceof EntityNeverBuilder;
+void [authored, many, isNever];
+
+// @ts-expect-error RelationBuilder is exported as a type only
+void m.RelationBuilder;

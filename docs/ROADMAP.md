@@ -810,26 +810,19 @@ what each does is its own documentation's job
   run, a tree-shaking probe carrying neither chain module nor engine, a
   packed-consumer subpath and a type pin. A JTLT order additionally
   carries the grammar artifact and its tests. None is scheduled.
-- [ ] **Three pens declare a class the runtime does not export, and export
-  a class the declaration does not name.** `packages/linq/types/schema.d.ts`
-  declares `BooleanBuilder`, `NullBuilder` and `NamedBuilder` with
-  `export class`, which declares a VALUE as well as a type, while
-  `packages/linq/src/schema/index.js` exports neither them nor a binding
-  under those names — so `import { NamedBuilder } from '@jarenjs/linq/schema'`
-  type-checks and is `undefined` at run time, and an `instanceof` against
-  it throws. The other direction holds too: `NeverBuilder` and
-  `createFactories` are runtime exports no declaration names, so a
-  consumer who wants either cannot import it under `strict`. `model`
-  repeats both halves (`EntityNeverBuilder` runtime-only, `RelationBuilder`
-  declared-only) and `forms` the first (`FormNeverBuilder`). The
-  constraint is that the three declared-only classes are load-bearing as
-  TYPES — `types/model.d.ts` and `types/forms.d.ts` extend all three, the
-  schema corpus annotates its recursive definition with `NamedBuilder`,
-  and `test/consumer/linq-schema.ts` pins it — so the repair is not a
-  deletion but a decision per name: export the class from the subpath, or
-  declare it as an `interface`/`type` that carries no value. Either way it
-  is an export-surface change, and the packed-consumer and type gates are
-  what must prove it.
+- [ ] **The `JL0102` refusal on `never()` names a remedy that also
+  refuses.** Every annotating method on a `NeverBuilder` — `title()`,
+  `describe()`, `example()`, `message()`, `default()`, `meta()` and
+  `check()` — routes through the `annotate` override in
+  `packages/linq/src/schema/builders.js`, which raises `JL0102` "…
+  annotate the member that holds it, or nullable() it first". The first
+  remedy works; the second does not. `with()` keeps the class, so
+  `never().nullable()` answers another `NeverBuilder` and annotating it
+  raises the same refusal — even though its document is
+  `{ anyOf: [false, { type: 'null' }] }`, which can carry keywords. The
+  fix is a decision, not an edit: either `nullable()` answers the base
+  class on this one builder, or the message drops the clause. Both move a
+  message the pen tests assert verbatim.
 - [ ] **A refused `-0` is reported as `0`.** `describeValue` in
   `packages/linq/src/json-boundary.js` renders a number with `String(value)`,
   and `String(-0)` is `'0'` — so `s.number().default(-0)` refuses with

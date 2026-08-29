@@ -5,8 +5,9 @@
  * refuses here only what it can see and the store's model walk would
  * refuse anyway: a relation whose target is not a declared entity, a
  * store-allocated default on a composite key, a collection spec where
- * an entity was expected. Inverse agreement, foreign-key types and the
- * rest stay the engine's (`JD00xx`), never re-implemented.
+ * an entity was expected, and a `renamedFrom()` hint on a member, which
+ * the document has no place for. Inverse agreement, foreign-key types
+ * and the rest stay the engine's (`JD00xx`), never re-implemented.
  */
 
 import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
@@ -15,6 +16,7 @@ import { LinqBuildError } from '../errors.js';
 import { requireNameMap } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { COLLECTION } from './collection.js';
+import { refuseStrandedRename } from './entity.js';
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -94,6 +96,7 @@ export function defineModel(spec) {
       if (!isSchemaBuilder(builder)) {
         throw new LinqBuildError('JL0101', `entities.${name} is not a schema builder`, at);
       }
+      refuseStrandedRename(builder, `entities.${name}`, at);
       const blocks = entityBlocks(builder);
       const keys = blocks.filter(([, block]) => block.key === true);
       for (const [member, block] of blocks) {

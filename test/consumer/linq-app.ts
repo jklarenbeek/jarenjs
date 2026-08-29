@@ -17,7 +17,7 @@ import * as s from '@jarenjs/linq/schema';
 import type { Expr } from '@jarenjs/linq';
 import type { Infer } from '@jarenjs/linq/schema';
 import * as f from '@jarenjs/linq/forms';
-import { assertOnSubmit } from '@jarenjs/linq/forms';
+import { assertOnSubmit, FormNeverBuilder } from '@jarenjs/linq/forms';
 import type { RuleContext } from '@jarenjs/linq/forms';
 
 /** Identical types, in both directions — the strict check, not assignability. */
@@ -155,3 +155,10 @@ f.string().form<Doc>({
   // @ts-expect-error — the document declares `company`, not `firm`
   visible: (c: RuleContext<Doc, string>) => c.root.firm.ne(''),
 });
+
+// ——— the declared surface and the runtime surface are one set ———
+// FormNeverBuilder is a VALUE the forms pen really exports; it had no
+// declaration until the census in test/linq/types.test.js held the two
+// halves equal for every pen.
+const isFormNever: boolean = f.never() instanceof FormNeverBuilder;
+void isFormNever;

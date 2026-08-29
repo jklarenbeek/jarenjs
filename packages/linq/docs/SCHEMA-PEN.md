@@ -861,12 +861,12 @@ is written once and no subpath patches another's prototype. A consumer
 subclassing them takes the same route — `with()` keeps the subclass
 through every method, so a subclass never has to re-declare one.
 
-The declaration file and the runtime export set are not identical today:
-`BooleanBuilder`, `NullBuilder` and `NamedBuilder` are declared as
-classes — and are load-bearing as TYPES, which the model and forms
-declarations extend — while the subpath exports no binding under those
-names; `NeverBuilder` and `createFactories` are the other way round. Use
-those five as types, never as values. `docs/ROADMAP.md` carries the entry.
+All ten are VALUES, exported at run time and declared as one.
+`BooleanBuilder`, `NullBuilder` and `NamedBuilder` are TYPES only —
+`boolean()`, `nil()` and `named()` each build a plain `SchemaBuilder`, so
+there is no class to export, though model and forms extend the
+declaration. Importing one as a value does not compile, and
+`test/linq/types.test.js` holds each pen's two export sets equal.
 
 ### 5.4 What the pins hold
 

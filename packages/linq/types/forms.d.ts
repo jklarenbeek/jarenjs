@@ -21,7 +21,7 @@ import type { BoolExpr, DateTime, MemberExpr, StringExpr } from './index.js';
 import type {
   Annotations, BuilderLike, Flag, Infer, Input, Json, JsonSchema, NamedLike, Simplify,
   SchemaBuilder, StringBuilder, NumberBuilder, BooleanBuilder, NullBuilder, ArrayBuilder,
-  TupleBuilder, ObjectBuilder, NamedBuilder, WhenBuilder,
+  TupleBuilder, ObjectBuilder, NamedBuilder, WhenBuilder, NeverBuilder,
 } from './schema.js';
 
 type AnyBuilder = BuilderLike<any, any, any>;
@@ -173,6 +173,16 @@ export class FormWhenBuilder<F extends Flag = never> extends WhenBuilder<F> {
   optional(): FormWhenBuilder<F | 'optional'>;
   then(builder: AnyBuilder): FormWhenBuilder<F>;
   else(builder: AnyBuilder): FormWhenBuilder<F>;
+}
+
+/**
+ * `never()` on this pen. A rule is an annotation and `false` carries no
+ * annotation, so `form()` and `meta()` both raise `JL0102` here; neither
+ * is declared, so the refusal arrives at compile time as well.
+ */
+export class FormNeverBuilder<Out = never, In = Out, F extends Flag = never> extends NeverBuilder<Out, In, F> {
+  optional(): FormNeverBuilder<Out, In, F | 'optional'>;
+  nullable(): FormNeverBuilder<Out | null, In | null, F>;
 }
 
 // ————— the named factories —————

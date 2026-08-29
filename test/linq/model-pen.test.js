@@ -77,10 +77,13 @@ describe('the model pen — every corpus model, five ways', () => {
 
 describe('the model pen — the vocabulary, member by member', () => {
   it('every x-entity method writes its member, in the order first set', () => {
-    const b = m.string().unique().index().version().identity('uuid');
+    const b = m.string().unique().index().identity('uuid');
     assert.deepStrictEqual(b.schema, {
-      type: 'string', 'x-entity': { unique: true, index: true, version: true, key: true, default: 'uuid' },
+      type: 'string', 'x-entity': { unique: true, index: true, key: true, default: 'uuid' },
     });
+    // the same rule for the token, on the one kind that can carry it
+    assert.deepStrictEqual(m.integer().index().version().schema['x-entity'],
+      { index: true, version: true });
     assert.deepStrictEqual(m.integer().identity('auto').schema['x-entity'], { key: true, default: 'auto' });
     // the schema pen's uuid() is the FORMAT shortcut, on the model pen too
     assert.deepStrictEqual(m.string().uuid().identity('uuid').schema,
@@ -186,6 +189,90 @@ describe('the model pen — refusals, each with the fix in the message', () => {
     assert.throws(() => m.defineModel({}), (e) => e.code === 'JL0101');
     assert.throws(() => m.string().enumOf([1]), (e) => e.code === 'JL0101');
     assert.throws(() => m.integer().enumOf([1.5]), (e) => e.code === 'JL0101');
+  });
+
+  it('JL0102 — key()/unique()/index() on a kind that can never hold a column', () => {
+    // the store's own rule (JD0005, "only a top-level scalar takes a
+    // column"), seen at build: the pen refuses the kinds it is CERTAIN
+    // about and leaves the position to the walk
+    for (const build of [
+      () => m.object({}).key(), () => m.array(m.string()).index(),
+      () => m.tuple([m.string()]).unique(), () => m.record(m.string()).key(),
+      () => m.object({}).unique(), () => m.when(m.string()).index(),
+      () => m.enumOf(['a']).index(), () => m.literal('a').key(),
+      () => m.any().unique(), () => m.never().key(),
+      () => m.union([m.string()]).index(), () => m.when(m.string()).key(),
+      () => m.rel.hasMany('B', { via: 'a', onDelete: 'cascade' }).key(),
+    ]) {
+      assert.throws(build, (e) => e instanceof LinqBuildError && e.code === 'JL0102'
+        && /column of its own/.test(e.message), String(build));
+    }
+    // an ARRAY's unique() is the schema pen's uniqueItems, not an entity
+    // index: the base owns the name, so the mixin must not change what
+    // the document asserts
+    assert.deepStrictEqual(m.array(m.string()).unique().schema,
+      s.array(s.string()).unique().schema);
+    assert.strictEqual(m.array(m.string()).unique() instanceof m.EntityArrayBuilder, true,
+      'and the subclass survives it');
+    // a kind the pen cannot resolve is NOT refused: the store merges
+    // allOf and resolves $ref before it reads the type
+    assert.doesNotThrow(() => m.from({ type: 'string' }).key());
+    assert.doesNotThrow(() => m.ref('Id').key());
+    assert.doesNotThrow(() => m.intersection([m.from({ type: 'string' })]).unique());
+    assert.deepStrictEqual(m.string().key().schema['x-entity'], { key: true });
+    // and the store agrees with the mirror on the one that got through
+    assert.doesNotThrow(() => normalizeEntities(m.defineModel({ entities: {
+      A: m.object({ id: m.string().key(), n: m.integer().index().optional() }) } })));
+  });
+
+  it('JL0102 — version() is an integer column, and the kind is visible here', () => {
+    assert.throws(() => m.string().version(), (e) => e.code === 'JL0102' && /integer\(\)/.test(e.message));
+    assert.throws(() => m.number().version(), (e) => e.code === 'JL0102' && /'number'/.test(e.message));
+    assert.throws(() => m.datetime().version(), (e) => e.code === 'JL0102');
+    assert.deepStrictEqual(m.integer().version().schema['x-entity'], { version: true });
+    // the store's twin, on the spelling that works
+    assert.doesNotThrow(() => normalizeEntities(m.defineModel({ entities: {
+      A: m.object({ id: m.string().key(), rev: m.integer().version().optional() }) } })));
+  });
+
+  it('JL0102 — entity() writes the CLOSED vocabulary, and nothing else', () => {
+    assert.deepStrictEqual(m.string().entity({ key: true, unique: true }).schema['x-entity'],
+      { key: true, unique: true });
+    assert.throws(() => m.string().entity({ bogus: true }),
+      (e) => e.code === 'JL0102' && /closed x-entity vocabulary/.test(e.message));
+    assert.throws(() => m.string().entity(/** @type {any} */ (null)), (e) => e.code === 'JL0101');
+    assert.throws(() => m.string().entity(/** @type {any} */ ([])), (e) => e.code === 'JL0101');
+    // the store's twin: the same member reached through the schema pen's
+    // annotate() bypasses the pen and is JD0030 at openStore
+    assert.throws(() => normalizeEntities(m.defineModel({ entities: {
+      A: m.object({ id: m.string().key(), b: s.string().meta({ 'x-entity': { bogus: true } }).optional() }),
+    } })), (e) => e instanceof DbCompileError && e.code === 'JD0030');
+  });
+
+  it("JL0102 — a renamedFrom() hint the document has no place for", () => {
+    // lifted on the declaration's own builder …
+    assert.strictEqual(m.defineModel({ entities: { A: m.object({ id: m.string().key() })
+      .renamedFrom('Old') } }).entities.A['x-rename'], 'Old');
+    assert.strictEqual(m.collection(m.object({ id: m.string() }).renamedFrom('old'),
+      { key: '/id' })['x-rename'], 'old');
+    // … and refused anywhere else, at whatever depth, naming the path
+    assert.throws(() => m.defineModel({ entities: { A: m.object({
+      id: m.string().key(),
+      p: m.object({ x: m.string() }).renamedFrom('oldP').optional(),
+    }) } }), (e) => e instanceof LinqBuildError && e.code === 'JL0102'
+      && /entities\.A\.p/.test(e.message) && e.docPath === '/entities/A');
+    assert.throws(() => m.defineModel({ entities: { A: m.object({
+      id: m.string().key(),
+      p: m.array(m.object({ q: m.object({}).renamedFrom('z') })).optional(),
+    }) } }), (e) => e.code === 'JL0102' && /entities\.A\.p\.items\.q/.test(e.message));
+    assert.throws(() => m.collection(m.object({
+      id: m.string(), p: m.object({ x: m.string() }).renamedFrom('oldP'),
+    }), { key: '/id' }), (e) => e.code === 'JL0102' && /collection\(\)\.p/.test(e.message));
+    // a recursion terminates: the lazy() thunk is never invoked
+    const Node = m.named('Node', m.object({
+      label: m.string(), children: m.array(m.lazy(() => Node)).optional() }));
+    assert.doesNotThrow(() => m.defineModel({ entities: {
+      A: m.object({ id: m.string().key(), n: Node.optional() }) } }));
   });
 
   it('JL0104 — x-entity is owned here; a compute() sees only the document', () => {
