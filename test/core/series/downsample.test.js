@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import * as assert from '../../assert.node.js';
 
 import { downsampleSeries } from '@jarenjs/core/series';
-import { mulberry32 } from '../../../scripts/lib/series-corpus.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 // Downsampling is the one kernel here with no single right answer: two
 // pictures of the same hundred thousand points can both be honest. So

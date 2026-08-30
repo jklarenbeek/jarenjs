@@ -14,17 +14,7 @@ import { createChartComponent } from '@jarenjs/charts/component';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 import { createJsonxStreamReader } from '@jarenjs/josl';
 import { renderToString } from '@jarenjs/view';
-
-/** Deterministic PRNG (mulberry32) — property tests must replay. */
-function prng(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { mulberry32 } from '@jarenjs/core/random';
 
 function feedDoc(adapter, message) {
   const reader = createJsonxStreamReader({ mode: 'json', onEvent: adapter.onEvent });
@@ -43,7 +33,7 @@ const ADAPTER_SPEC = {
  * @returns {{unchanged: number, incremental: number, rebuilt: number, evictIncremental: number}}
  */
 function runProperty(config, adapterSpec, frames, seed) {
-  const rand = prng(seed);
+  const rand = mulberry32(seed);
   const adapter = createStreamAdapter('line', adapterSpec);
   const session = createChartSession(config, adapter);
   const names = ['alpha', 'beta', 'gamma'];
@@ -239,7 +229,7 @@ describe('bar session', function () {
   });
 
   it('every frame stays byte-equal to the wholesale compile', function () {
-    const rand = prng(0x8A12);
+    const rand = mulberry32(0x8A12);
     const adapter = createStreamAdapter('bar', BAR_SPEC);
     const session = createChartSession(COUNTS, adapter);
     const buckets = ['win', 'loss', 'skip'];
@@ -348,7 +338,7 @@ describe('candlestick session', function () {
 
   it('every upsert frame stays byte-equal to the wholesale compile', function () {
     const { adapter, session } = seeded(PINNED);
-    const rand = prng(0xCAFE);
+    const rand = mulberry32(0xCAFE);
     for (let frame = 0; frame < 60; frame++) {
       const at = Math.floor(rand() * 8) * 60_000;
       feedDoc(adapter, k(at, 100 + rand() * 10, 100 + rand() * 10, 2 + rand() * 3));

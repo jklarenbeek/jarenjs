@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.55.0",
+  "version": "0.56.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -39,6 +39,10 @@
     "./array": {
       "types": "./dist/types/array.d.ts",
       "default": "./src/array.js"
+    },
+    "./async": {
+      "types": "./dist/types/async.d.ts",
+      "default": "./src/async.js"
     },
     "./bigint": {
       "types": "./dist/types/bigint.d.ts",
@@ -104,6 +108,10 @@
       "types": "./dist/types/object.d.ts",
       "default": "./src/object.js"
     },
+    "./random": {
+      "types": "./dist/types/random.d.ts",
+      "default": "./src/random.js"
+    },
     "./scan": {
       "types": "./dist/types/scan.d.ts",
       "default": "./src/scan.js"
@@ -119,6 +127,10 @@
     "./series/*": {
       "types": "./dist/types/series/*.d.ts",
       "default": "./src/series/*.js"
+    },
+    "./stats": {
+      "types": "./dist/types/stats.d.ts",
+      "default": "./src/stats.js"
     },
     "./string": {
       "types": "./dist/types/string.d.ts",

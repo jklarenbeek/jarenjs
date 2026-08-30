@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import * as assert from '../../assert.node.js';
 
 import { createIntervalIndex } from '@jarenjs/core/series';
-import { mulberry32 } from '../../../scripts/lib/series-corpus.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 // What "O(log n + k)" has to mean if it is a claim rather than a hope:
 // a query must not read the rows, and answering a fixed question over a

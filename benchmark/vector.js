@@ -73,9 +73,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { openStore, sqliteDialect, probeVector, columnScore } from '@jarenjs/db';
 import { adaptNodeDatabase } from '@jarenjs/db/node';
 import { packVector, unpackVector, l2Normalize, dotProduct } from '@jarenjs/core/vector';
+import { mulberry32 } from '@jarenjs/core/random';
 
 import { formatNs } from './lib/fmt.js';
-import { quantile } from './lib/horizon.js';
+import { quantile } from '@jarenjs/core/stats';
 
 //#region flags
 
@@ -123,18 +124,6 @@ const JSON_DOC_MAX = 10_000;
 //#endregion
 
 //#region corpus
-
-/** A deterministic PRNG, so every host measures the same corpus. */
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const SCHEMA = {
   type: 'object',
@@ -266,7 +255,8 @@ async function medianMs(run, queries) {
     await run(query);
     samples.push(Number(process.hrtime.bigint() - start) / 1e6);
   }
-  return quantile(samples, 0.5);
+  // nearest rank — a measured value, never one interpolated between two
+  return /** @type {number} */ (quantile(samples, 0.5, { method: 'nearest-rank' }));
 }
 
 /** The database's own size, in bytes — pages times page size. */

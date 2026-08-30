@@ -13,23 +13,17 @@ import {
   isVector, dotProduct, cosineSimilarity, euclideanSimilarity, l2Normalize,
   packVector, unpackVector,
 } from '@jarenjs/core/vector';
+import { mulberry32 } from '@jarenjs/core/random';
 
 /** `actual` within `tol` of `expected`, with a message that names the case. */
 const near = (actual, expected, tol, what) =>
   assert.ok(Math.abs(actual - expected) <= tol,
     `${what}: ${actual} is not within ${tol} of ${expected}`);
 
-/** A deterministic vector — seeded mulberry32, so every run sees the same numbers. */
+/** A deterministic vector in [-1, 1) — seeded, so every run sees the same numbers. */
 function seeded(dims, seed) {
-  let s = seed >>> 0;
-  const out = new Array(dims);
-  for (let i = 0; i < dims; i++) {
-    s = (s + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    out[i] = (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
-  }
-  return out;
+  const random = mulberry32(seed);
+  return Array.from({ length: dims }, () => random() * 2 - 1);
 }
 
 const MALFORMED = [

@@ -52,6 +52,7 @@ import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { containsPosition, geohashEncode } from '@jarenjs/core/geo';
+import { mulberry32 } from '@jarenjs/core/random';
 
 import { deepEquals } from './lib/equals.js';
 import { formatNs } from './lib/fmt.js';
@@ -95,18 +96,8 @@ const KINDS = 20;
 const KIND = 'k7';
 const LIMIT = 10;
 
-/** A deterministic PRNG, so the corpus is the same on every machine. */
-function seededRandom(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-const rand = seededRandom(20260822);
+// a seeded stream, so the corpus is the same on every machine
+const rand = mulberry32(20260822);
 const DOCS = [];
 for (let i = 0; i < N; i++) {
   const lon = NL[0] + rand() * (NL[2] - NL[0]);

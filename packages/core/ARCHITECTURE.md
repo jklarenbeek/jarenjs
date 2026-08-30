@@ -161,6 +161,15 @@ flowchart TB
 
         subgraph FunctionModule["Function Utilities"]
             FunctionUtil["function.js<br/>trueThat, falseThat"]
+            AsyncUtil["async.js<br/>Bounded ordered asynchronous map"]
+        end
+
+        subgraph RandomModule["Randomness"]
+            RandomUtil["random.js<br/>Seeded generator, integer draw, shuffle, distinct draw"]
+        end
+
+        subgraph StatsModule["Statistics"]
+            StatsUtil["stats.js<br/>Mean, sample variance, median, named quantile"]
         end
 
         subgraph StringModules["String &amp; Scanning"]

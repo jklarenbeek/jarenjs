@@ -44,6 +44,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { queryJson } from '@jarenjs/json/query';
+import { mulberry32 } from '@jarenjs/core/random';
 
 const OUT = fileURLToPath(new URL('../test/json/fixtures/vector-corpus.json', import.meta.url));
 
@@ -52,22 +53,6 @@ export const CORPUS_SEED = 20260825;
 
 /** The width of the generated vectors — small enough to read in a diff. */
 export const DIMS = 8;
-
-/**
- * A small deterministic PRNG (mulberry32) — the same generator the other
- * seeded corpora in this repository use.
- * @param {number} seed
- * @returns {() => number} uniform in [0, 1)
- */
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function random() {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 //#region the generated vectors
 

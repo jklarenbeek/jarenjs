@@ -357,6 +357,22 @@ delete it or fix it.
   and its constraints are stated once, under `@jarenjs/studio` above;
   the engine remains the product either way.
 
+- [ ] **Nothing composes a DAG and an FSM into one workflow.** Task,
+  fan-out/fan-in, switch, bounded loop, nested flow and durable wait/resume
+  are each expressible today — static regions as `jaren-dag`, dynamic control
+  as `jaren-fsm`, effects host-executed with the idempotency key honored by
+  the effectful system (FLOW-FORMAT says so) — but a host that needs all six
+  in one document has to write the composition and the lowering itself, and
+  a third scheduler is the usual result. A small composition layer that
+  lowers one neutral document deterministically onto the two engines, with
+  trace and checkpoint records referring to the lowered revisions, is the
+  generic part; roles, prompts, model profiles, tools and domain state are
+  host registries and stay out. The constraint is that this repository has
+  no composed workflow of its own to lower — the website assistant and the
+  benchmark harness are the candidates — and a lowering layer without a
+  deterministic lowering/concurrency/resume test over a real one would be
+  the third scheduler with better manners. Built when that consumer exists.
+
 ## @jarenjs/md
 
 - [ ] **`meta.hash` costs ~11% of a parse and cannot simply go lazy** — hashing
@@ -366,6 +382,20 @@ delete it or fix it.
   opt-out flag would leave a document carrying a hash that is a lie. Measured
   and left alone deliberately — the honest fix is the `Math.imul` item above,
   which halves it for everyone.
+
+- [ ] **Chunking is text-only; a block sequence has no packer.** `@jarenjs/core/chunk`
+  cuts one string by size, line or separator with offsets back into it,
+  which is what a tool result or a transcript needs. A document that already
+  has structure — the block tree this package parses, or a host's typed
+  elements with headings, roles and page boxes — wants deterministic packing
+  over an ordered block sequence (a stable id, text, an optional role, a
+  hierarchy path, opaque metadata) that preserves order and attribution,
+  honors a hard size bound, exposes the overlap it actually produced and
+  takes boundary and size policy as injected functions. Nothing in the suite
+  consumes such a packer yet; the block tree here is rendered, not retrieved.
+  It is built when a suite surface needs it — this package's own tree is the
+  first candidate — and not before, so that the shape is fitted to a real
+  consumer rather than to a description of one.
 
 ## @jarenjs/mermaid
 
@@ -1017,6 +1047,41 @@ theirs.
   into decoding itself, at the price of a keyword provider implementations
   support unevenly — worth revisiting once that support is measurable rather
   than assumed.
+
+- [ ] **The guarded-document refiner is ledger-shaped.** `createRefiner` runs
+  four stages — the patch's shape against a constrained schema, the patch
+  applied to a COPY through the injected engine, every record the candidate
+  would store validated, then commit through the ledger's own API with a
+  snapshot to roll back to — and every one of them is hard-wired to the
+  ledger's supplemental state: the reader is `getGoal`/`listMemories`/
+  `listSkills`, the legal paths are `/memories`, `/skills` and
+  `/goal/progress`, the commit is `addMemory`/`addSkill`/`recordProgress`.
+  The mechanism is reusable and the shape is not: a host with a different
+  durable document (a learned skill file, a forecast checkpoint, a research
+  plan) wants the same read → validate shape → apply to a copy → validate
+  candidate → derive a commit plan → commit-or-rollback, behind an injected
+  contract — the patch schema, the patch engine, the candidate validator and
+  the commit transaction as seams, pointered problems out, and the rule that
+  a model's generation never gets a weaker gate than a hand-written patch.
+  The constraint that keeps this open is that the generic layer must not
+  invent one universal artifact schema, and the only honest proof that it
+  has not is `createRefiner` itself rewritten as its first consumer without
+  losing a ledger rule or a test — an extraction, not a second refiner.
+
+- [ ] **A claim/evidence envelope has no record to validate.** Grounded
+  answers, clinical assistants, graph retrieval, trading notes and research
+  logs all repeat the same structural checks — a claim has a stable id, an
+  evidence reference resolves to an admitted artifact, a visible citation
+  names evidence that was used, an unresolved critical claim is explicit —
+  and each host writes them again, subtly differently. A generic schema plus
+  a pure referential validator would end that, and it must stop exactly
+  there: it may check structure and reference integrity, never that prose is
+  supported, never source authority, never fetch a URL, never a domain's
+  policy. What is missing is the internal consumer: the ledger's memory
+  carries free-text `evidence`, not a reference, so there is nothing in the
+  suite for such a validator to validate. The entry lifts when the
+  memory/evidence pair grows a referential form and a bad-reference fixture
+  comes with it.
 
 ## Dates & times (cross-package)
 

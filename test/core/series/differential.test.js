@@ -5,7 +5,7 @@ import {
   mergeIntervals, subtractIntervals, gapsWithin, coverageOf, containsInstant,
   overlapsInterval, intersectInterval, normalizeSeries, lowerBoundTime, upperBoundTime,
 } from '@jarenjs/core/series';
-import { mulberry32 } from '../../../scripts/lib/series-corpus.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 // The oracle is a row of instants, one boolean each, and nothing else.
 // Every operation the kernel performs with binary searches and merged

@@ -128,32 +128,4 @@ export function describeAiEnv(config) {
     + ` ${config.maxConcurrency} concurrent`;
 }
 
-/**
- * Run `task` over `items` with at most `limit` in flight, preserving
- * input order in the result. The spend guard `JAREN_AI_MAX_CONCURRENCY`
- * is what this exists to honour — a fan-out that ignored it would be a
- * bill, not a benchmark.
- * @template T, R
- * @param {T[]} items
- * @param {number} limit
- * @param {(item: T, index: number) => Promise<R>} task
- * @returns {Promise<R[]>}
- */
-export async function mapLimit(items, limit, task) {
-  /** @type {R[]} */
-  const out = new Array(items.length);
-  let next = 0;
-  const workers = new Array(Math.max(1, Math.min(limit, items.length)))
-    .fill(null)
-    .map(async () => {
-      for (;;) {
-        const index = next++;
-        if (index >= items.length) return;
-        out[index] = await task(items[index], index);
-      }
-    });
-  await Promise.all(workers);
-  return out;
-}
-
 //#endregion

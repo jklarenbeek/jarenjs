@@ -34,6 +34,7 @@ import {
   createAgent, createToolbox, slotAddressesIn, createEnvironment, createProgramRunner,
 } from '@jarenjs/ai';
 import { compileJsonQuery } from '@jarenjs/json/query';
+import { mulberry32 } from '@jarenjs/core/random';
 
 /** The baseline's parameters. Changing one changes every published row. */
 export const DEFAULTS = {
@@ -56,23 +57,6 @@ export const TASKS = {
 };
 
 //#region corpus
-
-/**
- * A small deterministic PRNG (mulberry32). A benchmark whose corpus
- * changes between runs cannot state a delta, so the seed is a parameter
- * and it is published beside the numbers.
- * @param {number} seed
- * @returns {() => number}
- */
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function random() {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /** Record ids are fixed-width, so a record's size never depends on its index. */
 export const recordId = (i) => `REC${String(i).padStart(4, '0')}`;
@@ -751,26 +735,6 @@ export async function programProbe({
 //#endregion
 
 //#region the recursion tier
-
-/**
- * The order statistic a cost distribution has to be published as.
- *
- * The paper's own headline is quality at COMPARABLE cost, with median
- * runs cheaper and a few outlier trajectories inflating the average — so
- * a mean is exactly the number that would hide the behaviour a caller
- * needs to budget for. Median says what a run usually costs; p95 says
- * what to provision for.
- * @param {number[]} values
- * @param {number} q - 0..1
- */
-export function quantile(values, q) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  // nearest-rank: with the handful of tasks a benchmark row runs,
-  // interpolating between two samples invents a number nobody measured
-  const rank = Math.max(1, Math.ceil(q * sorted.length));
-  return sorted[rank - 1];
-}
 
 /**
  * Run one question at one depth, model-free, and report what the tree

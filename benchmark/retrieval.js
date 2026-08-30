@@ -89,12 +89,14 @@ import { readAiEnv, describeAiEnv } from './lib/env.js';
 import { formatNs } from './lib/fmt.js';
 import { KS, LIVE_BATCH, POLICY_SEED, loadCorpus, runSize } from './lib/retrieval.js';
 import { createDbStorage } from './lib/ledger-db.js';
+import { REPLAY_CACHE_DIR, createFileReplayCache } from './lib/replay-cache.js';
 
 //#region flags
 
 function parseArgs(argv) {
   const options = {
     live: false,
+    fresh: false,
     store: null,
     verbose: false,
     sizes: null,
@@ -113,6 +115,7 @@ function parseArgs(argv) {
     }
     switch (argv[i]) {
       case '--live': options.live = true; break;
+      case '--fresh': options.fresh = true; break;
       case '--verbose': case '-v': options.verbose = true; break;
       case '--sizes': options.sizes = argv[++i].split(',').map((s) => parseInt(s.trim(), 10)); break;
       case '--seed': options.seed = parseInt(argv[++i], 10); break;
@@ -123,6 +126,7 @@ function parseArgs(argv) {
         console.log('  --sizes a,b         corpus sizes to score (default: every size the corpus carries)');
         console.log(`  --seed N            the random policy's seed (default ${POLICY_SEED})`);
         console.log('  --live              add the near-live row: rank through the live /embeddings provider (lib/env.js, JAREN_AI_EMBED_MODEL)');
+        console.log(`  --fresh             live tier: ignore the replay store under ${REPLAY_CACHE_DIR} (what is bought is still remembered)`);
         console.log('  --store=db          add the durable rows: the same corpus through a @jarenjs/db adapter, ranked by its vector column and by the sweep');
         console.log('  --verbose, -v       print every question the incumbent missed at the largest k');
         console.log('  --output json --filepath PATH');
@@ -252,10 +256,11 @@ const NOTE = 'The corpus is synthetic: statements composed from twenty topic voc
  * The live tier's embedder, or the reason there is none. Probes the
  * wire once (one attempt, five seconds) so a wrong key, URL or model
  * is one stated skip rather than a retried failure inside the sweep.
+ * @param {boolean} fresh - ignore the replay store (still remember what is bought)
  * @returns {Promise<{ embedder: any, provider: string, maxCalls: number, reason: null }
  *   | { embedder: null, reason: string }>}
  */
-async function liveEmbedder() {
+async function liveEmbedder(fresh) {
   const env = readAiEnv();
   if (!env.live) return { embedder: null, reason: env.reason ?? 'no live configuration' };
   if (env.embedModel === '') return { embedder: null, reason: 'no embedding model — set JAREN_AI_EMBED_MODEL in .env (see .env.example)' };
@@ -263,7 +268,10 @@ async function liveEmbedder() {
   const probe = await probeEmbeddings(options);
   if (!probe.ok) return { embedder: null, reason: `the /embeddings probe failed for ${env.provider} · ${env.embedModel}: ${probe.error}` };
   console.log(`live tier: ${describeAiEnv(env)}; embeddings via ${env.embedModel} (${probe.dims} dims)`);
-  return { embedder: createEmbeddingClient({ ...options, dims: probe.dims }), provider: env.provider, maxCalls: env.maxCalls, reason: null };
+  // every vector the tier buys is remembered under benchmark/cache/, so a
+  // second run over the same corpus and model makes no embedding call
+  const cache = createFileReplayCache(REPLAY_CACHE_DIR, { fresh });
+  return { embedder: createEmbeddingClient({ ...options, dims: probe.dims, cache }), provider: env.provider, maxCalls: env.maxCalls, reason: null };
 }
 
 async function main() {
@@ -272,7 +280,7 @@ async function main() {
 
   // the live tier: a line always prints, so a run can never be mistaken
   // for one that scored a live model when it did not
-  const live = flags.live ? await liveEmbedder() : { embedder: null, reason: '--live not requested' };
+  const live = flags.live ? await liveEmbedder(flags.fresh) : { embedder: null, reason: '--live not requested' };
   /** @type {string[]} */
   const liveNotes = [];
 

@@ -30,7 +30,7 @@ import {
   DEFAULTS, makeCorpus, probe, retention, ceilingFor, needleTargets, pairSurvived,
   needleQuestion, pairwiseQuestion, scoreNeedle, scorePairwise,
 } from '../../benchmark/lib/horizon.js';
-import { readAiEnv, describeAiEnv, mapLimit, AI_ENV } from '../../benchmark/lib/env.js';
+import { readAiEnv, describeAiEnv, AI_ENV } from '../../benchmark/lib/env.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHAPES = /** @type {const} */ (['front', 'late']);
@@ -289,20 +289,6 @@ describe('ai benchmark — the live-tier environment seam', function () {
     const line = describeAiEnv(readAiEnv({ OPENROUTER_AI_KEY: 'sk-secret-xyz', JAREN_AI_MODEL: 'a/b' }));
     assert.ok(!line.includes('sk-secret-xyz'), 'the key must never reach a log line');
     assert.match(line, /key from OPENROUTER_AI_KEY/);
-  });
-
-  it('honours the concurrency ceiling and preserves order', async function () {
-    let inFlight = 0;
-    let peak = 0;
-    const out = await mapLimit([1, 2, 3, 4, 5, 6, 7], 2, async (item) => {
-      inFlight++;
-      peak = Math.max(peak, inFlight);
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      inFlight--;
-      return item * 2;
-    });
-    assert.deepStrictEqual(out, [2, 4, 6, 8, 10, 12, 14]);
-    assert.ok(peak <= 2, `concurrency guard exceeded: ${peak} in flight`);
   });
 });
 

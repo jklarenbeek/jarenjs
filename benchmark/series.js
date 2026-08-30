@@ -87,7 +87,7 @@ import {
 } from '../scripts/lib/series-corpus.js';
 
 import { formatNs } from './lib/fmt.js';
-import { quantile } from './lib/horizon.js';
+import { quantile } from '@jarenjs/core/stats';
 
 //#region flags
 
@@ -155,6 +155,9 @@ const WARMUP = flags.quick ? 1 : flags.warmup;
  * clock's own noise until it is repeated.
  */
 const ROUNDS = Object.freeze({ default: 9, query: 5, asof: 51 });
+
+/** Every published order statistic here is a value that was measured. */
+const NEAREST = /** @type {const} */ ({ method: 'nearest-rank' });
 
 /** The width of the measured range, and of a bucket. */
 const RANGE_MS = 3600_000;
@@ -457,10 +460,12 @@ function medianNs(run, rounds) {
     run();
     samples.push(Number(process.hrtime.bigint() - start));
   }
-  const lo = quantile(samples, 0.25);
+  // nearest rank: with nine rounds, interpolating between two samples
+  // invents a number nobody measured; `samples` is never empty (rounds ≥ 1)
+  const lo = /** @type {number} */ (quantile(samples, 0.25, NEAREST));
   return {
-    ns: quantile(samples, 0.5),
-    spread: lo === 0 ? 1 : Math.round((quantile(samples, 0.75) / lo) * 100) / 100,
+    ns: /** @type {number} */ (quantile(samples, 0.5, NEAREST)),
+    spread: lo === 0 ? 1 : Math.round((/** @type {number} */ (quantile(samples, 0.75, NEAREST)) / lo) * 100) / 100,
   };
 }
 

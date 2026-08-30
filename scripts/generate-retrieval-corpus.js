@@ -49,6 +49,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
+import { mulberry32, shuffle } from '@jarenjs/core/random';
+
 const OUT = fileURLToPath(new URL('../benchmark/fixtures/retrieval-corpus.json', import.meta.url));
 
 /** The corpus seed. Published beside every number the instrument prints. */
@@ -66,22 +68,6 @@ const QUESTION_SHAPE = [1, 1, 1, 1, 1, 2, 2, 3];
 /** The synthetic year every `at` falls in. */
 const YEAR_START = Date.UTC(2025, 0, 1);
 const YEAR_SECONDS = 365 * 24 * 60 * 60;
-
-/**
- * A small deterministic PRNG (mulberry32) — the same generator the other
- * seeded corpora in this repository use.
- * @param {number} seed
- * @returns {() => number} uniform in [0, 1)
- */
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function random() {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 //#region vocabularies
 
@@ -257,15 +243,6 @@ const sentence = (subject, predicate, object) =>
 
 /** One uniform pick from a list. */
 const pick = (random, list) => list[Math.floor(random() * list.length)];
-
-/** Fisher–Yates, in place, from the given stream. */
-function shuffle(random, list) {
-  for (let i = list.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [list[i], list[j]] = [list[j], list[i]];
-  }
-  return list;
-}
 
 /** Zero to two secondary tags, distinct. */
 function secondaryTags(random) {

@@ -24,7 +24,7 @@ import * as assert from 'node:assert';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { resampleSeries, rollingSeries } from '@jarenjs/core/series';
-import { seededRandom } from './oracle/harness.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 const T0 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
 const MINUTE = 60_000;
@@ -357,7 +357,7 @@ describe('a differential stream against the kernel', function () {
     it(`${label}: 200 shuffled writes agree after every one of them`, async function () {
       const store = await open();
       const readings = store.collection('readings');
-      const random = seededRandom(0x5e21e5);
+      const random = mulberry32(0x5e21e5);
       const live = await readings.live(document, { eventTime: EVENT_TIME });
       assert.strictEqual(live.mode.mode, 'incremental');
       /** @type {string[]} */

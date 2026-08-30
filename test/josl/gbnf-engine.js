@@ -11,6 +11,8 @@
 // about ambiguity or left recursion, so the grammar under test can stay
 // written the way a human would read it next to the TOML ABNF.
 
+import { mulberry32 } from '@jarenjs/core/random';
+
 //#region grammar reader
 
 class Reader {
@@ -447,16 +449,6 @@ export function recognizes(bnf, text, start = 'root') {
 //#endregion
 
 //#region generation
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 // Random text derived from the grammar. `budget` shrinks with depth so a
 // left-recursive repetition rule terminates instead of running away.

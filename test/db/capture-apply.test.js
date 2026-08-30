@@ -17,7 +17,9 @@ import * as assert from 'node:assert';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
-import { deepEquals, seededRandom } from './oracle/harness.js';
+import { mulberry32 } from '@jarenjs/core/random';
+
+import { deepEquals } from './oracle/harness.js';
 
 const MODEL = {
   $model: '0.1',
@@ -112,7 +114,7 @@ function randomDoc(rand, id) {
 async function runCorpus(mode, seed, steps) {
   const store = await openStore(MODEL,
     { driver: nodeDriver(), capture: { mode } });
-  const rand = seededRandom(seed);
+  const rand = mulberry32(seed);
   let mirror = { docs: {}, Item: {}, Tag: {}, Grade: {}, Item_Tag: {} };
   store.observe((record) => {
     mirror = applyJSONPatch(mirror, record.patch);

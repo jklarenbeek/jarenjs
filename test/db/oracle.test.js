@@ -17,8 +17,9 @@ import * as assert from 'node:assert';
 
 import {
   loadGroups, storeForGroup, runCase, recordConstructs, coverageTable,
-  seededRandom, DEFAULT_SCHEMA, DEFAULT_INDEXES,
+  DEFAULT_SCHEMA, DEFAULT_INDEXES,
 } from './oracle/harness.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 const startedAt = process.hrtime.bigint();
 const tally = new Map();
@@ -55,7 +56,7 @@ for (const mode of /** @type {const} */ (['native', 'residual'])) {
 }
 
 describe('oracle — generated mode (seeded)', () => {
-  const random = seededRandom(0x5eed_09);
+  const random = mulberry32(0x5eed_09);
   const pick = (list) => list[Math.floor(random() * list.length)];
   const chance = (p) => random() < p;
   const int = (max) => Math.floor(random() * max);

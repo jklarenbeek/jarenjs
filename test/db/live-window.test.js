@@ -16,7 +16,7 @@ import * as assert from 'node:assert';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { openStore, compareCodepoint } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
-import { seededRandom } from './oracle/harness.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 const MODEL = {
   $model: '0.1',
@@ -166,7 +166,7 @@ describe('the maintained window', () => {
   it('the seeded window oracle: EXACT order equals the documented total order', async () => {
     const store = await open();
     const scores = store.collection('scores');
-    const rand = seededRandom(0x11fe20);
+    const rand = mulberry32(0x11fe20);
     const KEYS = ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7'];
     const present = new Set();
 

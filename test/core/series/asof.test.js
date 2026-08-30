@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import * as assert from '../../assert.node.js';
 
 import { asOfJoin } from '@jarenjs/core/series';
-import { mulberry32 } from '../../../scripts/lib/series-corpus.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 // The reference is the O(n·m) join: for every left row, look at every
 // right row and keep the best one under the stated rule. It cannot be

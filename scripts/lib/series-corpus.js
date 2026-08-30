@@ -32,6 +32,8 @@
 
 import { readFileSync } from 'node:fs';
 
+import { mulberry32 } from '@jarenjs/core/random';
+
 /** The instant the corpus starts at — `2026-01-01T00:00:00Z`. */
 export const SERIES_ORIGIN = 1767225600000;
 
@@ -53,22 +55,6 @@ export const SERIES_CORPUS_PATH = 'test/json/fixtures/series-corpus.json';
 
 /** The value law, as the corpus documents it to a reader. */
 export const VALUE_LAW = `round((sin(i / 31) + (i % 7)) * ${VALUE_SCALE}) / ${VALUE_SCALE}`;
-
-/**
- * A deterministic PRNG (mulberry32) — the generator the other seeded
- * corpora in this repository use.
- * @param {number} seed
- * @returns {() => number} uniform in [0, 1)
- */
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function random() {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /**
  * @typedef {Object} Sample

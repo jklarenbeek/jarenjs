@@ -29,8 +29,10 @@ import { readFileSync } from 'node:fs';
 
 import { createLedger, createHashEmbedder } from '@jarenjs/ai';
 
-import { mulberry32, tokens } from '../../scripts/generate-retrieval-corpus.js';
-import { quantile } from './horizon.js';
+import { mulberry32, drawDistinct } from '@jarenjs/core/random';
+
+import { tokens } from '../../scripts/generate-retrieval-corpus.js';
+import { quantile } from '@jarenjs/core/stats';
 
 /** The committed corpus. */
 const CORPUS = new URL('../fixtures/retrieval-corpus.json', import.meta.url);
@@ -215,18 +217,9 @@ export function makePolicies({ ledger, memories, tags, seed = POLICY_SEED, embed
     { key: 'oracle', label: 'oracle (gold first)',
       run: async (question) => [...question.gold] },
     { key: 'random', label: 'random',
-      run: async (_question, k) => {
-        // k distinct draws without replacement; the partial Fisher–Yates
-        // over a fresh index list keeps the stream independent of n
-        const pool = ids.map((_, i) => i);
-        const out = [];
-        for (let i = 0; i < k && i < pool.length; i++) {
-          const j = i + Math.floor(random() * (pool.length - i));
-          [pool[i], pool[j]] = [pool[j], pool[i]];
-          out.push(ids[pool[i]]);
-        }
-        return out;
-      } },
+      // k distinct draws without replacement from ONE stream across
+      // every question, so the row is reproducible for the whole run
+      run: async (_question, k) => drawDistinct(random, ids.length, k).map((i) => ids[i]) },
     recencyPolicy(ledger, 'recency', 'recency'),
     tagPolicy(ledger, tags, 'tag+recency', 'tag+recency (today\'s recall)'),
     ...(embedder === undefined ? []
@@ -268,8 +261,10 @@ export async function scorePolicy(policy, questions, ks = KS) {
   return {
     recall: Object.fromEntries(ks.map((k) => [k, hits[k] / n])),
     mrr: reciprocal / n,
-    latencyMs: quantile(latencies, 0.5),
-    latencyP95Ms: quantile(latencies, 0.95),
+    // nearest rank: a published latency is one that was measured; a row
+    // over no questions publishes null, which the site contract allows
+    latencyMs: quantile(latencies, 0.5, { method: 'nearest-rank' }) ?? null,
+    latencyP95Ms: quantile(latencies, 0.95, { method: 'nearest-rank' }) ?? null,
     questions: n,
     misses,
   };

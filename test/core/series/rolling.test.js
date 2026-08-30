@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import * as assert from '../../assert.node.js';
 
 import { rollingSeries } from '@jarenjs/core/series';
-import { mulberry32 } from '../../../scripts/lib/series-corpus.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 // The oracle is the implementation nobody would ship: for every output,
 // walk back through the whole series and reduce whatever falls in the

@@ -74,14 +74,17 @@ import {
 import { createChatClient } from '@jarenjs/ai/client';
 import { resolveEndpoint } from '@jarenjs/ai/providers';
 import { compileJsonQuery } from '@jarenjs/json/query';
+import { quantile } from '@jarenjs/core/stats';
+import { mapConcurrent } from '@jarenjs/core/async';
 import querySchema from '@jarenjs/json/schemas/jaren-query.llm-profile.schema.json' with { type: 'json' };
 
-import { readAiEnv, describeAiEnv, mapLimit, AI_ENV } from './lib/env.js';
+import { readAiEnv, describeAiEnv, AI_ENV } from './lib/env.js';
+import { REPLAY_CACHE_DIR, createFileReplayCache } from './lib/replay-cache.js';
 import {
   DEFAULTS, SHAPES, makeCorpus, needleTargets, probe, ceilingFor,
   needleQuestion, pairwiseQuestion, scoreNeedle, scorePairwise,
   pairwiseProgram, needleProgram, programProbe, extractingClient, corpusText,
-  recursionProbe, quantile,
+  recursionProbe,
 } from './lib/horizon.js';
 
 //#region flags
@@ -89,6 +92,7 @@ import {
 function parseArgs(argv) {
   const options = {
     live: false,
+    fresh: false,
     quick: false,
     verbose: false,
     rounds: DEFAULTS.rounds,
@@ -103,6 +107,7 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--live': options.live = true; break;
+      case '--fresh': options.fresh = true; break;
       case '--quick': options.quick = true; break;
       case '--verbose': case '-v': options.verbose = true; break;
       case '--rounds': options.rounds = parseInt(argv[++i], 10); break;
@@ -116,6 +121,7 @@ function parseArgs(argv) {
       case '--help': case '-h':
         console.log('Usage: node [--env-file-if-exists=.env] benchmark/long-horizon.js [options]\n');
         console.log('  --live              also score a real model over the same corpora');
+        console.log(`  --fresh             live tier: ignore the replay store under ${REPLAY_CACHE_DIR} (what is bought is still remembered)`);
         console.log(`  --quick             live tier: one trial per row (default $${AI_ENV.trials})`);
         console.log('  --rounds N          tool rounds gathered (default 40)');
         console.log('  --padding N         padding characters per tool result (default 400)');
@@ -342,8 +348,11 @@ async function ask(client, context, question, ledger) {
   // QUESTIONS and called them calls would under-report this benchmark's
   // own spend, which is the one number a benchmark may never fudge.
   let calls = 0;
-  const add = (u) => {
-    calls += 1;
+  // a replay is not a call: only what was bought counts against the
+  // ceiling, while the usage keeps every answer's purchase-time tokens
+  const add = (completion) => {
+    if (completion?.replayed === undefined) calls += 1;
+    const u = completion?.usage;
     if (u === null || u === undefined) return;
     usage.prompt += u.prompt_tokens ?? 0;
     usage.completion += u.completion_tokens ?? 0;
@@ -367,14 +376,14 @@ async function ask(client, context, question, ledger) {
       messages: [...context, { role: 'user', content: question }],
       signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
     });
-    add(completion.usage);
+    add(completion);
     return { text: completion.message?.content ?? '', usage, calls, recalls: 0 };
   }
 
   const agent = createAgent({
     client: {
       complete: (call) => client.complete({ ...request, ...call }).then((completion) => {
-        add(completion.usage);
+        add(completion);
         return completion;
       }),
     },
@@ -409,6 +418,7 @@ async function runLive(corpus, ceilings, config) {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: config.model,
+    cache: config.cache,
   });
 
   // every call this run will make, laid out first so the spend guard is
@@ -446,7 +456,9 @@ async function runLive(corpus, ceilings, config) {
   // what was still in front of it, not on the mechanism
   let made = 0;
   let recalled = 0;
-  const results = await mapLimit(work, config.maxConcurrency, async (item) => {
+  // the spend guard JAREN_AI_MAX_CONCURRENCY is what the bound honours —
+  // a fan-out that ignored it would be a bill, not a benchmark
+  const results = await mapConcurrent(work, config.maxConcurrency, async (item) => {
     const question = item.task === 'needle'
       ? needleQuestion(corpus, item.target)
       : pairwiseQuestion();
@@ -563,16 +575,22 @@ async function runDepths(corpus) {
     }
     const calls = runs.map((r) => r.calls);
     const tokens = runs.map((r) => r.tokens);
+    // the paper's headline is quality at COMPARABLE cost, with median runs
+    // cheaper and a few outliers inflating the average — so the row
+    // publishes the median and the p95 by nearest rank (a measured value,
+    // never one interpolated between two tasks), and a depth that ran no
+    // task publishes 0 beside its `tasks: 0` rather than an empty cell
+    const nearest = (values, p) => quantile(values, p, { method: 'nearest-rank' }) ?? 0;
     rows.push({
       depth,
       tasks: runs.length,
       ok: runs.filter((r) => r.ok).length,
       correct: runs.filter((r, i) => scoreNeedle(r.answer, corpus, targets[i])).length,
-      callsMedian: quantile(calls, 0.5),
-      callsP95: quantile(calls, 0.95),
-      tokensMedian: quantile(tokens, 0.5),
-      tokensP95: quantile(tokens, 0.95),
-      msMedian: quantile(runs.map((r) => r.ms), 0.5),
+      callsMedian: nearest(calls, 0.5),
+      callsP95: nearest(calls, 0.95),
+      tokensMedian: nearest(tokens, 0.5),
+      tokensP95: nearest(tokens, 0.95),
+      msMedian: nearest(runs.map((r) => r.ms), 0.5),
       deepest: Math.max(...runs.flatMap((r) => r.depths)),
     });
   }
@@ -669,6 +687,7 @@ async function runLivePrograms(corpus, config) {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: config.model,
+    cache: config.cache,
   });
 
   const usage = { prompt: 0, completion: 0, total: 0 };
@@ -676,7 +695,6 @@ async function runLivePrograms(corpus, config) {
   const counting = {
     endpoint: client.endpoint,
     complete: async (request) => {
-      calls += 1;
       const result = await client.complete({
         ...request,
         // streaming is FORCED, not defaulted, and this is the one place
@@ -689,6 +707,10 @@ async function runLivePrograms(corpus, config) {
         temperature: 0,
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
+      // a replay is not a call: the ceiling charges what was bought, while
+      // the usage below keeps the purchase's tokens so the row still
+      // reports what the answer cost when it was bought
+      if (result.replayed === undefined) calls += 1;
       const u = result.usage;
       usage.prompt += u?.prompt_tokens ?? 0;
       usage.completion += u?.completion_tokens ?? 0;
@@ -1168,6 +1190,9 @@ async function main() {
     ...env,
     model: flags.model ?? env.model,
     trials: flags.quick ? 1 : (flags.trials ?? env.trials),
+    // every reply the live tier buys is remembered under benchmark/cache/,
+    // so a re-run over the same corpus, model and prompts spends nothing
+    cache: createFileReplayCache(REPLAY_CACHE_DIR, { fresh: flags.fresh }),
   };
 
   const corpus = makeCorpus({ n: flags.rounds, seed: flags.seed });

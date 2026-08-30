@@ -19,7 +19,7 @@ import * as assert from 'node:assert';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
-import { seededRandom } from './oracle/harness.js';
+import { mulberry32 } from '@jarenjs/core/random';
 
 const MODEL = {
   $model: '0.1',
@@ -402,7 +402,7 @@ describe('the maintenance oracle (seeded)', () => {
   it('every strategy equals a fresh re-query after every mutation', async () => {
     const store = await open();
     const users = store.collection('users');
-    const rand = seededRandom(0x11fe19);
+    const rand = mulberry32(0x11fe19);
     const DEPTS = ['x', 'y', 'z', null];
 
     const documents = {

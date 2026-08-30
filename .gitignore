@@ -98,6 +98,9 @@ benchmark/results/
 benchmark/qt3-json/
 benchmark/qt3-baseline.seed.json
 
+# the live benchmark tiers' replay store (replies already paid for) — delete to start fresh
+benchmark/cache/
+
 # TODO: AI integration
 .gitignore
 TODO*.md

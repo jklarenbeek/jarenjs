@@ -82,6 +82,36 @@ the round limit): they plan the document in the reasoning channel, so removing i
 the planning. Turn it off for classification, extraction and rewriting; leave it on for
 tool use.
 
+**A replay is a seam, and the client keys it.** `createChatClient({ …, cache })` takes
+`{ get(key), set(key, value) }` — each sync or async, a `Map` in a test, SQLite or a
+directory of files in a host — and answers a repeated request from it with **zero**
+transport calls. The client builds the key, not the host: after endpoint resolution and
+default application, from the exact credential-free body it would POST — provider,
+normalized base, model, messages, tools, `tool_choice`, `temperature`, `max_tokens`,
+`reasoning`, `response_format` — canonicalized collision-free (`semanticKey` from
+`@jarenjs/core/object`). `stream`, the signal, the callbacks and the headers never enter
+it, and because the key is the body rather than an allow-list, an option added later
+cannot alias an old key. A replay comes back marked `replayed: { ms }` with the
+purchase's wall time and the purchase's `usage`, and fires `onDelta`/`onReasoning` once
+each with the whole text, so a streaming caller sees one code path; a purchase is
+remembered as `{ value, ms }`. The seam **fails closed**: an adapter that throws fails the
+call, a stored entry that does not verify is `AI0003`, a request that cannot be keyed (a
+function inside `tools`) is `AI0001` before any wire call — an adapter that wants to keep
+buying while its storage is broken catches its own errors and answers `undefined`. The key
+is the complete canonical request; an adapter that needs a fixed-width id hashes it with a
+cryptographic hash, never a 32-bit one, or two prompts a token apart will one day share an
+answer. A call ceiling counts wire calls at the injected `fetch`, which a replay never
+reaches.
+
+```js
+const store = new Map();
+const client = createChatClient({ provider: 'ollama', model: 'qwen3:4b',
+  cache: { get: (key) => store.get(key), set: (key, value) => { store.set(key, value); } } });
+const bought = await client.complete({ messages });        // one wire call, remembered
+const replay = await client.complete({ messages });        // zero wire calls
+replay.replayed;                                           // { ms: <the purchase's wall time> }
+```
+
 **Probe before the first turn.** `probeProvider({ provider, baseUrl, apiKey })` GETs the
 provider's `/models` listing with exactly the auth a chat call would use and never throws:
 `{ ok: true, models }` or `{ ok: false, status?, error }` — the contract a settings UI
@@ -125,6 +155,16 @@ malformed 200) back off with the same `retry` option and the same `Retry-After` 
 ends everything at once. There is no default timeout, as `complete()` has none — a batch of
 long texts on a local runtime legitimately takes a while; `timeoutMs` bounds each attempt when
 you want one, and a timed-out attempt retries like a network failure.
+
+**Replays are per text.** `createEmbeddingClient({ …, cache })` takes the same seam the chat
+client documents and keys every input separately — the credential-free endpoint, the model
+and the text — so a batch that repeats three of five texts fetches two: the remembered
+vectors are placed, the rest travel in one wire call in input order, and every bought vector
+is remembered as `{ vector: number[], ms }` (the batch's wall time; the array is JSON-only,
+so a file or a SQL column stores it as it is). A call whose every text is remembered makes
+no wire call, and its first replay settles `dims` exactly as a first reply would — a stored
+vector of another width is `AI0003`, never mixed. Replays are observable at the seam (every
+`set` is a purchase, every answering `get` a replay); `probeEmbeddings` never consults one.
 
 **Probe before relying on it.** `probeEmbeddings({ provider, baseUrl, apiKey, model })` embeds
 one word in one attempt (5 000 ms, as `probeProvider`) and never throws:

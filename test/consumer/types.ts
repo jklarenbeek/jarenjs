@@ -1404,3 +1404,53 @@ async function recallBlock() {
   void (await tool.execute({ slot: names[0] ?? name }));
 }
 void recallBlock;
+
+// @jarenjs/core/random — the seeded stream and its three draws, typed:
+// the stream is a plain `() => number`, the draws take it first.
+import { mulberry32, randomInt, shuffle, drawDistinct } from '@jarenjs/core/random';
+
+const stream: () => number = mulberry32(20260830);
+const die: number = randomInt(stream, 1, 7);
+const deck: string[] = shuffle(stream, ['a', 'b', 'c']);
+const picks: number[] = drawDistinct(stream, deck.length, 2);
+void [die, picks];
+
+// @jarenjs/core/stats — every summary may be `undefined` (an empty
+// sample), and a quantile does not compile without its method.
+import { mean, median, quantile, stddev } from '@jarenjs/core/stats';
+
+const readings: number[] = [3, 1, 2];
+const summary: Array<number | undefined> = [
+  mean(readings), median(readings), stddev(readings),
+  quantile(readings, 0.95, { method: 'nearest-rank' }),
+  quantile(readings, 0.5, { method: 'linear' }),
+];
+void summary;
+
+// @jarenjs/core/async — the bounded ordered map keeps the worker's
+// result type and the input order; the signal is optional.
+import { mapConcurrent } from '@jarenjs/core/async';
+
+async function fanOut(): Promise<number[]> {
+  const controller = new AbortController();
+  const lengths: number[] = await mapConcurrent(['a', 'bb'], 2,
+    async (word: string, index: number) => word.length + index, { signal: controller.signal });
+  return lengths;
+}
+void fanOut;
+
+// @jarenjs/ai — the replay seam on both clients: a Map-backed adapter
+// types as the option, sync or async, and a replay marks itself.
+import { createChatClient, createEmbeddingClient } from '@jarenjs/ai';
+
+async function replays(): Promise<number | undefined> {
+  const store = new Map<string, unknown>();
+  const cache = { get: (key: string) => store.get(key), set: async (key: string, value: unknown) => { store.set(key, value); } };
+  const chat = createChatClient({ provider: 'ollama', model: 'qwen3:4b', cache });
+  const embedder = createEmbeddingClient({ provider: 'ollama', model: 'nomic-embed-text', cache });
+  const reply = await chat.complete({ messages: [{ role: 'user', content: 'hi' }] });
+  const vectors: Float32Array[] = await embedder.embed(['hi']);
+  void vectors;
+  return reply.replayed?.ms;
+}
+void replays;

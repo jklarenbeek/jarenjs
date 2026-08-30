@@ -311,15 +311,3 @@ export function coverageTable(tally) {
     .map((name) => `${name.padEnd(16)} ${String(tally.get(name) ?? 0).padStart(4)}`);
   return { table: rows.join('\n'), missing };
 }
-
-/** A tiny seeded PRNG (mulberry32) — no Math.random in the oracle. */
-export function seededRandom(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}

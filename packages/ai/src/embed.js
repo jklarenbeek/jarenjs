@@ -37,6 +37,7 @@ import { resolveEndpoint } from './providers.js';
 import {
   normalizeRetry, withRetry, isTransientFailure, httpFailure, transportFailure, abortError,
 } from './retry.js';
+import { normalizeCache, replayKey, verifyEmbeddingEntry, now } from './replay.js';
 
 /**
  * The embedder seam: what every consumer of embeddings in this package
@@ -76,8 +77,17 @@ function assertTexts(texts) {
  * @param {{ provider?: string, baseUrl?: string, apiKey?: string,
  *   model?: string, dims?: number, headers?: Record<string, string>,
  *   fetch?: typeof fetch, timeoutMs?: number,
- *   retry?: import('./retry.js').RetryOptions }} [options]
+ *   retry?: import('./retry.js').RetryOptions,
+ *   cache?: import('./replay.js').ReplayCache }} [options]
  *   - `model` is required: it is half of every vector's identity.
+ *   - `cache` is the replay seam (`createChatClient` documents the
+ *     contract). Here it is PER TEXT: each input is keyed by the
+ *     credential-free endpoint, the model and the text; the texts the
+ *     adapter remembers come back from it, only the rest travel — in one
+ *     wire call, in input order — and every bought vector is remembered
+ *     as `{ vector: number[], ms }` (the wall time of the batch). A
+ *     call whose every text is remembered makes no wire call at all, and
+ *     its first replay settles `dims` exactly as a first reply would.
  *   - `dims` pins the other half up front; left out, the width of the
  *     first reply becomes the client's, and every later reply must
  *     match it. Give it when the identity must be known before the
@@ -105,6 +115,7 @@ export function createEmbeddingClient(options = {}) {
   const url = `${endpoint.base}/embeddings`;
   const fetchFn = options.fetch ?? ((u, init) => globalThis.fetch(u, init));
   const retry = normalizeRetry(options.retry);
+  const cache = normalizeCache(options.cache);
   /** @type {number | undefined} */
   let dims = options.dims;
 
@@ -171,7 +182,38 @@ export function createEmbeddingClient(options = {}) {
   async function embed(texts, options = {}) {
     assertTexts(texts);
     const { signal } = options;
-    return withRetry(retry, () => attemptOnce(texts, signal), { signal, retryable: isTransientFailure });
+    /** @param {string[]} batch */
+    const buy = (batch) => withRetry(retry, () => attemptOnce(batch, signal), { signal, retryable: isTransientFailure });
+    if (cache === null) return buy(texts);
+
+    // per text: what the adapter remembers is placed, what it does not
+    // is bought in one call and remembered; a remembered vector's width
+    // is held to the settled one, and settles it when nothing has
+    const keys = texts.map((text) => replayKey('embeddings', endpoint, { model, input: text }));
+    /** @type {Float32Array[]} */
+    const out = new Array(texts.length);
+    /** @type {number[]} */
+    const missing = [];
+    for (let i = 0; i < texts.length; i++) {
+      const hit = await cache.get(keys[i]);
+      if (hit === undefined) {
+        missing.push(i);
+        continue;
+      }
+      const vector = verifyEmbeddingEntry(hit, dims);
+      if (dims === undefined) dims = vector.length;
+      out[i] = vector;
+    }
+    if (missing.length > 0) {
+      const started = now();
+      const vectors = await buy(missing.map((i) => texts[i]));
+      const ms = now() - started;
+      for (let j = 0; j < missing.length; j++) {
+        out[missing[j]] = vectors[j];
+        await cache.set(keys[missing[j]], { vector: Array.from(vectors[j]), ms });
+      }
+    }
+    return out;
   }
 
   return {
@@ -253,8 +295,10 @@ export async function probeEmbeddings(options = {}) {
   /** @type {ReturnType<typeof createEmbeddingClient>} */
   let client;
   try {
+    // never through a cache: a probe's job is to prove the wire answers today
     client = createEmbeddingClient({
       ...options,
+      cache: undefined,
       retry: { attempts: 1 },
       timeoutMs: options.timeoutMs ?? 5000,
     });

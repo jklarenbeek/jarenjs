@@ -53,6 +53,7 @@
 
 import { CodedError } from '@jarenjs/core/errors';
 import { excerpt } from '@jarenjs/core/chunk';
+import { mapConcurrent } from '@jarenjs/core/async';
 import { JarenValidator } from '@jarenjs/validate';
 
 import { MAX_PROGRAM_CHARS, NAME_PATTERN, PROGRAM_SCHEMA, programSchema } from './schemas/program.js';
@@ -340,37 +341,6 @@ export function programGate(options = {}) {
 //#endregion
 
 //#region the runner
-
-/**
- * Run `worker` over `items`, never more than `limit` at once.
- *
- * The whole of §3's "fan-out is parallel" is this function: the paper
- * states its own sub-calls are sequential and that "RLMs without
- * asynchronous LM calls are slow", and doing the fan-out in the harness
- * instead of inside an evaluator is what makes concurrency available at
- * all. `limit` of 1 is the sequential mode the benchmark compares
- * against — one implementation, so the comparison is of scheduling and
- * nothing else.
- * @template T, R
- * @param {T[]} items
- * @param {number} limit
- * @param {(item: T, index: number) => Promise<R>} worker
- * @returns {Promise<R[]>}
- */
-async function pool(items, limit, worker) {
-  /** @type {any[]} */
-  const results = new Array(items.length);
-  let next = 0;
-  const lanes = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    for (;;) {
-      const index = next++;
-      if (index >= items.length) return;
-      results[index] = await worker(items[index], index);
-    }
-  });
-  await Promise.all(lanes);
-  return results;
-}
 
 /** The address a step's result is stored under, derived from its binding. */
 const resultSlot = (as) => `${RESULT_PREFIX}${as}`;
@@ -689,7 +659,15 @@ export function createProgramRunner(options) {
         /** @type {any[]} */
         let results;
         try {
-          results = await pool(budgeted, concurrency, (name, index) => {
+          // the whole of §3's "fan-out is parallel" is this call: the
+          // paper states its own sub-calls are sequential and that "RLMs
+          // without asynchronous LM calls are slow", and doing the fan-out
+          // in the harness instead of inside an evaluator is what makes
+          // concurrency available at all. `concurrency` of 1 is the
+          // sequential mode the benchmark compares against — one
+          // implementation, so the comparison is of scheduling and
+          // nothing else
+          results = await mapConcurrent(budgeted, concurrency, (name, index) => {
             // BEFORE the call, at every depth: an exhausted budget
             // refuses rather than overruns, and the pieces it did not
             // reach are recorded rather than silently missing
@@ -699,12 +677,13 @@ export function createProgramRunner(options) {
               return Promise.resolve({ slot: name, error: `stopped: ${reason}` });
             }
             return (options.subcall ?? subcall)(name, step.prompt, signal, index);
-          });
+          }, { signal });
         }
         catch (err) {
-          // the only way out of the pool is an abort: a sub-call's own
+          // the only way out of the map is an abort: a sub-call's own
           // failure is a value (§3), so a throw here is the run being
-          // cancelled and the partial work is kept
+          // cancelled — the sub-calls that were in flight have settled
+          // by now, and the partial work is kept
           if (signal?.aborted !== true) throw err;
           stopped = 'aborted';
           break;

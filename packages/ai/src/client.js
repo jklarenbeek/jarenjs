@@ -17,6 +17,7 @@ import {
   normalizeRetry, withRetry, isTransientFailure, httpFailure, transportFailure,
 } from './retry.js';
 import { createSseDecoder } from './sse.js';
+import { normalizeCache, replayKey, verifyChatEntry, cloneJson, now } from './replay.js';
 
 /**
  * The reasoning text one streamed chunk carries: the OpenRouter/`o`-
@@ -190,9 +191,23 @@ function completionFromText(text) {
  *   fetch?: typeof fetch, maxTokens?: number,
  *   reasoning?: { effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high',
  *     enabled?: boolean, exclude?: boolean, max_tokens?: number },
- *   retry?: import('./retry.js').RetryOptions }} [options]
+ *   retry?: import('./retry.js').RetryOptions,
+ *   cache?: import('./replay.js').ReplayCache }} [options]
  *   - `reasoning` is the default thinking control for every request (see
  *     `ChatRequest.reasoning`); a per-request value overrides it.
+ *   - `cache` is the replay seam: `{ get(key), set(key, value) }`, each
+ *     sync or async. The client keys every request by its effective
+ *     credential-free wire body after endpoint resolution and default
+ *     application (`stream`, the signal and the callbacks never enter
+ *     the key), answers a remembered reply with ZERO transport calls,
+ *     marked `replayed: { ms }` — the wall time of the purchase — with
+ *     `onDelta`/`onReasoning` fired once each with the whole text, and
+ *     remembers a bought reply as `{ value, ms }`. The seam fails closed:
+ *     an adapter that throws fails the call; a stored entry that does not
+ *     verify is `AI0003`; a request that cannot be keyed (a function
+ *     inside `tools`) is `AI0001` before any wire call. The key is the
+ *     complete canonical request — an adapter wanting a fixed-width id
+ *     hashes it cryptographically, never with a 32-bit hash.
  *   - `retry.attempts` is the TOTAL number of tries (default 3; 1
  *     disables retrying); backoff is exponential with full jitter,
  *     capped at `maxMs`. A provider `Retry-After` (seconds or HTTP-date)
@@ -209,16 +224,17 @@ export function createChatClient(options = {}) {
   const endpoint = resolveEndpoint(options);
   const fetchFn = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const retry = normalizeRetry(options.retry);
+  const cache = normalizeCache(options.cache);
 
   /**
-   * One request/response cycle. `state.delivered` flips as soon as a
-   * streamed delta reaches the caller's `onDelta` — the point of no
-   * return for the retry loop (the caller has observed output).
+   * The body one request POSTs, defaults applied. One construction for
+   * the wire and for the replay key, so the two cannot drift: what is
+   * keyed is exactly what would be sent.
    * @param {ChatRequest} request
-   * @param {{ delivered: boolean }} state
+   * @returns {any}
    */
-  async function attemptOnce(request, state) {
-    const { messages, tools, toolChoice, signal, onDelta, onReasoning } = request;
+  function requestBody(request) {
+    const { messages, tools, toolChoice } = request;
     const model = request.model ?? endpoint.model;
     const stream = request.stream ?? true;
     /** @type {any} */
@@ -251,6 +267,20 @@ export function createChatClient(options = {}) {
           },
         };
     }
+    return body;
+  }
+
+  /**
+   * One request/response cycle. `state.delivered` flips as soon as a
+   * streamed delta reaches the caller's `onDelta` — the point of no
+   * return for the retry loop (the caller has observed output).
+   * @param {ChatRequest} request
+   * @param {{ delivered: boolean }} state
+   */
+  async function attemptOnce(request, state) {
+    const { signal, onDelta, onReasoning } = request;
+    const body = requestBody(request);
+    const stream = body.stream;
 
     /** @type {any} */
     let response;
@@ -346,10 +376,36 @@ export function createChatClient(options = {}) {
     // own is the `!state.delivered` guard, which keeps a retry from ever
     // re-sending after the caller has observed streamed output
     const state = { delivered: false };
-    return withRetry(retry, () => attemptOnce(request, state), {
+    const buy = () => withRetry(retry, () => attemptOnce(request, state), {
       signal,
       retryable: (failure) => isTransientFailure(failure) && !state.delivered,
     });
+    if (cache === null) return buy();
+
+    // the key is the body the wire would see, minus `stream`: a reply
+    // streamed or answered whole is the same reply, and the callbacks
+    // are fired on a replay so a streaming caller sees one path
+    const { stream: _stream, ...keyed } = requestBody(request);
+    const key = replayKey('chat', endpoint, keyed);
+    const hit = await cache.get(key);
+    if (hit !== undefined) {
+      const { value, ms } = verifyChatEntry(hit);
+      const result = cloneJson(value);
+      const reasoning = result.message.reasoning;
+      if (typeof reasoning === 'string' && reasoning !== '' && request.onReasoning !== undefined)
+        request.onReasoning(reasoning);
+      const content = result.message.content;
+      if (typeof content === 'string' && content !== '' && request.onDelta !== undefined)
+        request.onDelta(content);
+      return { ...result, replayed: { ms } };
+    }
+    const started = now();
+    const result = await buy();
+    // a `set` that throws fails the call AFTER the purchase — the reply
+    // was bought and is lost, which is the loud failure a broken cache
+    // deserves (fail closed; an adapter that wants otherwise catches)
+    await cache.set(key, { value: cloneJson(result), ms: now() - started });
+    return result;
   }
 
   return { endpoint, complete };
