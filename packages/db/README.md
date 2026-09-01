@@ -658,14 +658,25 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   reporting a success it never had.
 - **Transaction ownership** (MODEL-FORMAT §5.1): the store a transaction
   callback receives IS the transaction — `tx.collection`, `tx.entity`,
-  `tx.sync`, `tx.saveChanges()`, and `tx.transaction()` nesting through
-  its savepoint. A store-level handle is by construction somebody else:
-  it holds the connection for its own extent, so an unrelated writer on a
-  shared store keeps its own fate rather than sharing a rollback it knows
-  nothing about. Contention waits under `queueTimeout` and then names
-  itself `JD0012`, or refuses at once under
+  `tx.sync`, `tx.jobs`, `tx.saveChanges()`, and `tx.transaction()`
+  nesting through its savepoint. A store-level handle is by construction
+  somebody else: it holds the connection for its own extent, so an
+  unrelated writer on a shared store keeps its own fate rather than
+  sharing a rollback it knows nothing about. Contention waits under
+  `queueTimeout` and then names itself `JD0012`, or refuses at once under
   `openStore(model, { transactions: 'strict' })`. One store is safe for a
-  handler per request.
+  handler per request. Every `tx` view is pinned to its EXACT scope: a
+  handle retained past its callback, or an outer handle used while an
+  async inner savepoint is open, refuses `JD2070` instead of joining a
+  transaction it does not own — and a transaction view carries no
+  `close`, because it never owns the connection's lifetime.
+- **Named savepoints** (MODEL-FORMAT §5.2): `tx.savepoints.create /
+  rollbackTo / release` give a live transaction checkpoint-and-continue
+  without a sentinel exception — the target stays active after a
+  rollback, `release` keeps the rows, labels never reach SQL, and the
+  tracker, capture stream and `tx.jobs` outbox all agree with the
+  database after every partial rollback. The synchronous twin is
+  `tx.sync.savepoints`; a blank, duplicate or unknown label is `JD2071`.
 - **Generated types**: `entityEmitModel` + `@jarenjs/emit` render the
   model into entity interfaces, input variants and an `EntityMetaMap`;
   `typedStore` (from `@jarenjs/db/typed`) types every read, checks
@@ -719,9 +730,16 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   expired or superseded attempt cannot mark a job done over the live
   one's result, and is told which of three things happened rather than
   answered `false`. `jobs.renew()` replaces a lease while a handler runs;
-  the worker does it automatically and aborts an attempt whose lease it
-  loses. Settlement is exactly-once **against the store** — an external
-  effect is still the handler's to make idempotent.
+  the worker does it automatically, retries a renewal that failed for a
+  mere storage reason, and aborts only an attempt whose lease is proven
+  lost by a fence code. Settlement is exactly-once **against the store**
+  — an external effect is still the handler's to make idempotent.
+  Ownership follows the handle: root `store.jobs.*` and all worker I/O
+  take the store gate and never join an open application transaction,
+  while `tx.jobs` is the transactional outbox that co-commits with it;
+  and `worker.stop()` quiesces every claim, renewal, checkpoint and
+  settlement before it resolves, so closing the store releases the
+  database file deterministically.
 - **The browser** (`@jarenjs/db/wasm`): the same store, the same
   queries, the same live updates run on the official SQLite wasm build
   over the header-free OPFS SAH-pool VFS — one tab owns the

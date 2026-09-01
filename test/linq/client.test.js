@@ -648,3 +648,83 @@ describe('transaction(): a typed client bound to the transaction', () => {
     await client.close();
   });
 });
+
+describe('the typed client over the corrected scopes (order 07)', () => {
+  it("capture + unitOfWork: 'own' keeps client and transaction trackers independent", async () => {
+    // the C4 twin, through the typed door: the capture wrapper used to
+    // drop ownWork, so the transaction consumed the client's pending state
+    const { client, ada } = await seeded({ capture: true });
+    const seed = await client.entities.User.get(ada.id);
+    client.entities.User.put({ ...seed, age: 99 });   // staged on the CLIENT
+    const inside = await client.transaction(async (tx) => {
+      const mine = await tx.entities.User.get(ada.id);
+      tx.entities.User.put({ ...mine, age: 7 });
+      return (await tx.saveChanges()).updated;
+    });
+    assert.strictEqual(inside, 1, "the transaction's value lands first");
+    assert.strictEqual((await client.saveChanges()).updated, 1,
+      "the client's pending value still saves once afterwards");
+    assert.strictEqual((await client.entities.User.asNoTracking().get(ada.id)).age, 99);
+    await client.close();
+  });
+
+  it('a cancelled queued transaction never runs, capture on (JD2064)', async () => {
+    const { client, ada } = await seeded({ capture: true });
+    /** @type {(value?: any) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    const holder = client.transaction(async () => { await gate; return 'held'; });
+    const controller = new AbortController();
+    let ran = false;
+    const queued = client.transaction(async (tx) => {
+      ran = true;
+      await tx.entities.Post.create({ title: 'never', stars: 0, authorId: ada.id });
+    }, { signal: controller.signal }).then(() => 'ran', (error) => error.code);
+    controller.abort();
+    const outcome = await queued;
+    release();
+    assert.strictEqual(await holder, 'held');
+    assert.strictEqual(ran, false);
+    assert.strictEqual(outcome, 'JD2064');
+    assert.strictEqual(await client.entities.Post.where((p) => p.title.eq('never')).count(), 0);
+    await client.close();
+  });
+
+  it('forwards tx.savepoints: partial rollback with the tracker agreeing', async () => {
+    const { client, ada } = await seeded();
+    await client.transaction(async (tx) => {
+      await tx.savepoints.create('before-optional');
+      tx.entities.Post.add({ title: 'optional', stars: 0, authorId: ada.id });
+      assert.strictEqual((await tx.saveChanges()).inserted, 1);
+      await tx.savepoints.rollbackTo('before-optional');
+      // the database inside the transaction no longer holds the row,
+      // and the withdrawn intention is PENDING again…
+      assert.strictEqual(
+        await tx.entities.Post.where((p) => p.title.eq('optional')).count(), 0);
+      // …so the next save retries it exactly once
+      assert.strictEqual((await tx.saveChanges()).inserted, 1);
+      await tx.savepoints.release('before-optional');
+    });
+    assert.strictEqual(await client.entities.Post.where((p) => p.title.eq('optional')).count(), 1,
+      'the retried save wrote once, never twice');
+    assert.strictEqual(/** @type {any} */ (client).savepoints, undefined,
+      'the root client deliberately has no twin');
+    await client.close();
+  });
+
+  it('a client handle retained past its transaction is JD2070, never a later write', async () => {
+    const { client, ada } = await seeded();
+    /** @type {any} */
+    let escaped;
+    await client.transaction(async (tx) => { escaped = tx.entities.Post; });
+    assert.throws(() => escaped.add({ title: 'smuggled', stars: 0, authorId: ada.id }),
+      (error) => /** @type {any} */ (error).code === 'JD2070',
+      'local bookkeeping refuses before touching any tracker');
+    await assert.rejects(() => escaped.create({ title: 'direct', stars: 0, authorId: ada.id }),
+      (error) => /** @type {any} */ (error).code === 'JD2070');
+    const later = await client.transaction(async (tx) => (await tx.saveChanges()).inserted);
+    assert.strictEqual(later, 0, 'no later scope inherits the escaped handle\'s work');
+    assert.strictEqual(await client.entities.Post.where((p) => p.title.eq('smuggled')).count(), 0);
+    await client.close();
+  });
+});

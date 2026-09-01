@@ -502,6 +502,11 @@ export function createCaptureEngine(options) {
    * Run `fn` inside the capture scope: the OUTERMOST scope opens a
    * session (or journal buffer) plus a transaction, translates and
    * persists inside it, and delivers to observers after commit.
+   *
+   * The transaction's scope arguments are FORWARDED to `fn`: the store
+   * pins a transaction view to the exact scope its callback runs in,
+   * and with capture that is the scope this wrap opens, not the one
+   * around it. Callers that need no scope simply ignore the arguments.
    */
   const wrap = (fn) => {
     if (depth > 0) return fn();
@@ -518,8 +523,8 @@ export function createCaptureEngine(options) {
     };
     let outcome;
     try {
-      outcome = connection.transaction(() =>
-        chain(fn(), (result) =>
+      outcome = connection.transaction((...scopeArgs) =>
+        chain(fn(...scopeArgs), (result) =>
           chain(collect(), (patch) => {
             if (patch.length === 0) return { result, delivery: null };
             const at = Date.now();
@@ -582,11 +587,28 @@ export function createCaptureEngine(options) {
     return outcome;
   };
 
+  /**
+   * The journal's checkpoint pair for NAMED partial rollback
+   * (MODEL-FORMAT §5.2). A named `SAVEPOINT` takes a mark; a
+   * `ROLLBACK TO` truncates the buffer to it, so records the engine
+   * undid vanish from the commit's patch exactly as a session drops
+   * rows undone by `ROLLBACK TO`. Session mode needs neither half —
+   * SQLite's own changeset already excludes the undone rows — and
+   * answers `null` so the caller stores nothing.
+   */
+  const mark = () => (mode === 'journal' ? journal.length : null);
+  /** @param {number | null} at - a value {@link mark} answered */
+  const truncate = (at) => {
+    if (mode === 'journal' && at !== null && journal.length > at) journal.length = at;
+  };
+
   return {
     mode,
     ready,
     wrap,
     nest,
+    mark,
+    truncate,
     record,
     observe(fn) {
       if (typeof fn !== 'function')

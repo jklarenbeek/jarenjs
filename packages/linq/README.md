@@ -589,7 +589,24 @@ request handlers on one client hold two records for the same entity key
 and neither sees the other's pending state. The outer `db.entities.X` is
 by construction an unrelated caller: from inside, it waits for the commit
 and then names itself `JD0012` rather than joining a transaction it is
-not part of. One client is safe for a handler per request.
+not part of. One client is safe for a handler per request. The
+transaction client is pinned to its EXACT scope — a handle kept past its
+callback refuses `JD2070` instead of following a later transaction — and
+forwards the store's `tx.savepoints` (MODEL-FORMAT §5.2), so a callback
+can create, roll back to and release a named checkpoint mid-transaction
+without throwing for control flow:
+
+```js
+await db.transaction(async (tx) => {
+  await tx.savepoints.create('before-optional-import');
+  tx.entities.Post.add({ title: 'optional', stars: 0, authorId: users[0].id });
+  const report = await tx.saveChanges();                     // landed inside the transaction
+  if (report.fallbacks > 0) {                                // …until the caller changes its mind
+    await tx.savepoints.rollbackTo('before-optional-import');  // the add is pending again
+  }
+  await tx.savepoints.release('before-optional-import');     // the checkpoint is spent; the rest commits
+});
+```
 
 This subpath is the package's one runtime edge: it
 imports `@jarenjs/db`, `@jarenjs/validate` and `@jarenjs/formats` as

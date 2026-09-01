@@ -344,9 +344,16 @@ export interface Store {
    * `signal` abandons the call while it is still QUEUED — the callback
    * then never runs and no statement is issued (`JD2064`). A transaction
    * that has already taken the connection runs to its own end.
+   *
+   * `unitOfWork: 'own'` gives the callback a tracker of its own, so two
+   * concurrent handlers hold two records for one entity key and neither
+   * sees the other's pending state; `'shared'` (the default) writes
+   * through the store's, which is what lets a caller `add()` a document
+   * outside the transaction and save it inside. Both behave identically
+   * with and without capture.
    */
   transaction<R>(fn: (store: TransactionStore) => R | Promise<R>,
-    options?: { signal?: AbortSignal }): Promise<Awaited<R>>;
+    options?: TransactionScopeOptions): Promise<Awaited<R>>;
   /** Register a change observer; requires capture. Returns unsubscribe. */
   observe(fn: (record: ChangeRecord) => void): () => void;
   /** Read the persisted log forward (JD2051 without capture.log). */
@@ -360,24 +367,85 @@ export interface Store {
    * `graceMs` to wind up; the connection closes whether or not they
    * did, and a handler still in flight is reported as JD2062. */
   close(options?: { graceMs?: number }): Promise<void>;
-  /** The queue surface; present when opened with `jobs` (JOBS-FORMAT). */
+  /** The queue surface; present when opened with `jobs` (JOBS-FORMAT).
+   * Root calls here take the store gate — an unrelated enqueue, claim,
+   * checkpoint or settlement never joins an open application
+   * transaction's fate. The transactional-outbox spelling is the
+   * `tx.jobs` a transaction callback receives, which runs as the exact
+   * scope and co-commits with the domain transaction. */
   readonly jobs?: JobsApi;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
 }
 
+/** The options a top-level transaction takes. An unknown `unitOfWork`
+ * value is a compile error here and runtime API misuse there. */
+export interface TransactionScopeOptions {
+  /** Abandons the call while it is still QUEUED (`JD2064`); a
+   * transaction that has taken the connection runs to its own end. */
+  signal?: AbortSignal;
+  /** `'own'` gives the callback an independent tracker; `'shared'`
+   * (the default) writes through the store's. */
+  unitOfWork?: 'own' | 'shared';
+}
+
+/**
+ * The named-savepoint group a live transaction view carries
+ * (MODEL-FORMAT §5.2): checkpoint-and-continue without a sentinel
+ * exception. The label is a map key and diagnostic for that exact
+ * transaction — never SQL; the driver generates the identifier. A
+ * blank, duplicate or unknown label is `JD2071`; a stale or
+ * cross-scope view is `JD2070` first. `rollbackTo` keeps the target
+ * active (repeated rollback is defined) and invalidates every later
+ * checkpoint; `release` removes the target and every later checkpoint,
+ * keeping their rows — the engine's own semantics, exactly.
+ */
+export interface SavepointController {
+  create(label: string): Promise<void>;
+  rollbackTo(label: string): Promise<void>;
+  release(label: string): Promise<void>;
+}
+
+/** The synchronous twin of {@link SavepointController}, answering
+ * values (present under `tx.sync` on a synchronous driver). */
+export interface SyncSavepointController {
+  create(label: string): void;
+  rollbackTo(label: string): void;
+  release(label: string): void;
+}
+
+/** The synchronous surface a transaction view carries: the store's,
+ * plus the transaction-only savepoint group. */
+export interface TransactionSyncStore extends SyncStore {
+  readonly savepoints: SyncSavepointController;
+}
+
 /**
  * The store a transaction callback receives: the same surface, with
- * every handle bound to THIS transaction's scope.
+ * every handle bound to THIS transaction's exact scope.
  *
- * `tx.collection(...)`, `tx.entity(...)`, `tx.sync` and `tx.saveChanges()`
- * run as the transaction's owner, and `tx.transaction(...)` nests through
- * its savepoint. The outer store's handles are, by construction, an
- * unrelated caller: they wait for the commit, and one awaited from inside
- * the callback is a self-wait that `JD0012` names rather than a hang.
+ * `tx.collection(...)`, `tx.entity(...)`, `tx.sync`, `tx.jobs` and
+ * `tx.saveChanges()` run as the transaction's owner, and
+ * `tx.transaction(...)` nests through its savepoint. The outer store's
+ * handles are, by construction, an unrelated caller: they wait for the
+ * commit, and one awaited from inside the callback is a self-wait that
+ * `JD0012` names rather than a hang.
+ *
+ * The view lives exactly as long as its own scope: any stateful member
+ * used after the transaction settled, or while an async inner savepoint
+ * is current, refuses `JD2070` before touching tracker state or the
+ * database. There is deliberately no `close` — a transaction view does
+ * not own the store lifetime; the root store remains the only owner of
+ * the connection.
  */
-export interface TransactionStore extends Store {
+export interface TransactionStore extends Omit<Store, 'close' | 'transaction' | 'sync'> {
   transaction<R>(fn: (store: TransactionStore) => R | Promise<R>): Promise<Awaited<R>>;
+  /** Named partial rollback over the transaction's one savepoint stack
+   * (MODEL-FORMAT §5.2). Root stores, clients, workers and checkpoint
+   * stores expose none of it. */
+  readonly savepoints: SavepointController;
+  /** Present exactly when the driver is synchronous, as on the store. */
+  readonly sync?: TransactionSyncStore;
 }
 
 /** One committed transaction's change record (LIVE-FORMAT §§1–5). */

@@ -226,3 +226,79 @@ describe('bounded shutdown', () => {
     await store.close();
   });
 });
+
+describe('stop quiesces store I/O before close (order 07)', () => {
+  it('stop_quiesces_store_io_before_close: a queued claim is cancelled, not left behind', async () => {
+    // C7's mechanism: a worker claim queued behind an open application
+    // transaction used to stay in the connection queue after stop(),
+    // holding the database file — the Windows EPERM. The shutdown
+    // signal now takes it off the queue, and stop() resolves while the
+    // unrelated transaction is STILL open.
+    const store = await open();
+    await store.jobs.enqueue('work', null, { id: 'j' });
+    /** @type {(value?: any) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    /** @type {(value?: any) => void} */
+    let held = () => {};
+    const holding = new Promise((resolve) => { held = resolve; });
+    const transaction = store.transaction(async (tx) => {
+      await tx.collection('x').put({ id: 'r' }, 'r');
+      held();
+      await gate; // the gate is owned for the whole test
+    });
+    await holding;
+
+    const worker = store.jobs.createWorker({
+      handlers: { work: () => null }, pollInterval: 5,
+    });
+    worker.start();
+    // give the loop time to issue its claim, which queues behind the
+    // open transaction
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const stopped = await worker.stop();
+    assert.deepStrictEqual(stopped, { drained: true, inFlight: 0 },
+      'stop() resolved while the unrelated transaction still owns the connection');
+    assert.strictEqual(worker.stats().claims, 0, 'the cancelled claim never ran');
+    assert.strictEqual(worker.stats().claimErrors, 0,
+      'a shutdown cancellation is not a storage error');
+
+    release();
+    await transaction;
+    // after stop resolved, no control path writes, claims or arms a
+    // timer: the job is untouched and stays claimable by someone else
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual((await store.jobs.get('j')).state, 'pending');
+    assert.strictEqual(worker.stats().claims, 0);
+    await store.close();
+  });
+
+  it('after stop() resolves, no renewal timer survives the drained path either', async () => {
+    const store = await open();
+    /** @type {(value?: any) => void} */
+    let entered = () => {};
+    const inHandler = new Promise((resolve) => { entered = () => resolve(undefined); });
+    /** @type {(value?: any) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    const worker = store.jobs.createWorker({
+      handlers: { hold: (_payload, { signal }) => {
+        entered();
+        signal.addEventListener('abort', () => release(), { once: true });
+        return gate;
+      } },
+      leaseMs: 120, // renewEvery 40ms: renewals would keep coming if armed
+      pollInterval: 5,
+    });
+    worker.start();
+    await store.jobs.enqueue('hold', null, { id: 'h' });
+    await inHandler;
+    const stopped = await worker.stop();
+    assert.deepStrictEqual(stopped, { drained: true, inFlight: 0 });
+    const renewalsAtStop = worker.stats().renewals;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.strictEqual(worker.stats().renewals, renewalsAtStop,
+      'no renewal fires after stop() resolved');
+    await store.close();
+  });
+});

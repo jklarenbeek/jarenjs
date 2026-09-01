@@ -774,21 +774,6 @@ what each does is its own documentation's job
   changed resumes happily from checkpoints computed by the old one.
   Hashing a closure is not a version; a real task version would have to
   be declared, which is a format change.
-- [ ] **Four harness-portability defects, repaired but worth naming.**
-  On Windows the suite was 21 assertions red for reasons that had
-  nothing to do with any product: `new URL(…).pathname` yields
-  `/C:/…` (three test files, plus two dynamic imports of a generated
-  module, since a Windows absolute path is not a legal ESM specifier);
-  `readdirSync(dir, { recursive: true })` yields the platform separator
-  against a forward-slash predicate; a CRLF checkout of the CommonMark
-  spec found zero examples; and `rmSync` of a temp directory raced a
-  SQLite handle that had not been closed yet. All five sites are
-  repaired. `scripts/check-packed-consumers.js` needed the same
-  treatment — GNU tar reads a `C:…` argument as a host — without
-  which `npm run test:packed` could not run at all on Windows. Named
-  here because a suite that is red for the platform is a suite nobody
-  trusts, and the next Windows-shaped defect should be recognised
-  quickly rather than rediscovered.
 - [ ] **An as-of join with no tolerance is bounded above and not below.**
   The batched fetch is one statement whatever the probes number, which is the
   bound it was built for — but a backward join with no `tolerance` can only

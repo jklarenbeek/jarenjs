@@ -79,7 +79,14 @@ describe('exactly-once execution under contention', () => {
         assert.strictEqual(claims, JOBS,
           `round ${round}: claims across workers equal the jobs — no double-claim`);
 
-        await Promise.all(workers.map((worker) => worker.stop()));
+        // every ordinary stop drains and quiesces BEFORE its store
+        // closes: this is what keeps the database file releasable —
+        // the Windows EPERM was a claim loop still holding it, and
+        // more cleanup retries cannot cure that
+        const stopped = await Promise.all(workers.map((worker) => worker.stop()));
+        assert.deepStrictEqual(stopped,
+          workers.map(() => ({ drained: true, inFlight: 0 })),
+          `round ${round}: every worker drained and left nothing in flight`);
         await Promise.all(stores.map((store) => store.close()));
         await producer.close();
       }

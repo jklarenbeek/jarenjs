@@ -77,6 +77,8 @@ export const DB_CODES = Object.freeze({
   JD2067: 'the lease expired before the call',
   JD2068: 'a settling call needs the lease the claim returned',
   JD2069: 'a resumed run does not match the workflow or input it was checkpointed under',
+  JD2070: 'the transaction handle does not belong to the live scope',
+  JD2071: 'the savepoint label is blank, duplicate or unknown',
 });
 
 /**

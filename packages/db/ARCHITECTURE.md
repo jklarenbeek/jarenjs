@@ -633,8 +633,12 @@ diff engine and maps operations to minimal statements (column writes,
 fallback); inserts batch parent-first, deletes run child-first,
 foreign-key cycles among the changed set are `JD0040`, and a declared
 `version` property turns every update into an optimistic
-`WHERE version = ?` with `JD2040` on conflict. The tracker mutates
-ONLY after commit: a failed save retries.
+`WHERE version = ?` with `JD2040` on conflict. A save that FAILS leaves
+the tracker exactly as it was, so it retries; a save whose statements
+all succeed advances at once — inside an enclosing transaction too,
+where the database already holds the rows — and registers the exact
+withdrawal of that advance on the owning scope, whose rollback takes it
+back so the retry plans the same statements again.
 
 ## The migration engine, relationally (`src/migrate.js`, `src/cli.js`)
 
@@ -723,22 +727,40 @@ re-query to keep a promise rather than a number.
 
 ## Durable runs and the job queue (`src/jobs.js`, `src/dag-job.js`)
 
-The queue's whole correctness story is one guarded statement: the
-claim UPDATE selects the earliest eligible row (pending, failed, or an
-expired lease — so recovery IS the next claim, not a sweeper) whose
-kind the worker registered, sets it leased with a deadline, and
-RETURNs it. One statement is one transaction, so no two workers claim
-the same job without any distributed lock; every later transition
-wears `state='leased' AND lease_owner=?`, making execution
-at-least-once and completion exactly-once (proven by four workers on
-four connections over one WAL file). The `@jarenjs/flow` composition
-injects `compileDag` (db never imports flow — an import-graph test
-enforces it) and binds a per-job checkpoint store; a DAG run's
-completion records the result, marks the job done and prunes the
-checkpoint rows in ONE transaction, so a crash resumes from its
-checkpointed nodes rather than restarting. Non-goals stated plainly: a
-shared SQLite file over a network filesystem is not a safe
-coordination substrate.
+The queue's correctness story has two halves. The claim UPDATE selects
+the earliest eligible row (pending, failed, or an expired lease — so
+recovery IS the next claim, not a sweeper) whose kind the worker
+registered, MINTS the fence — a fresh opaque `lease_token` and the next
+`lease_generation` — sets the row leased with a deadline, and RETURNs
+it. One statement is one transaction, so no two workers claim the same
+job without any distributed lock. Every later settling transition —
+renew, checkpoint save, complete, fail — then wears the fence:
+`state='leased' AND lease_token=? AND lease_until > ?`, the token plus
+CURRENT validity, never the owner (one worker reuses one owner for
+every attempt it ever makes, so an owner cannot say which attempt is
+speaking). A lease is immutable — `renew` answers a replacement and the
+superseded token settles nothing — and a guard that matches nothing is
+a coded refusal naming which of the three reasons applied (`JD2065`
+settled/unknown, `JD2066` superseded, `JD2067` expired), never a silent
+`false`. A renewal that fails for any OTHER reason is a storage problem
+the next renewal may survive; only the three fence codes prove loss.
+Checkpoint rows are stamped with the attempt's generation: `load` reads
+up to it, and a settlement prunes no further, so a stale attempt cannot
+erase a live one's work. Execution stays at-least-once; settlement is
+exactly-once AGAINST THE STORE (proven by four workers on four
+connections over one WAL file) — an external effect a handler already
+made is still the handler's to make idempotent. Ownership follows the
+handle: root `store.jobs.*` and all worker control I/O take the store
+gate, while `tx.jobs` runs as its exact transaction scope — the
+transactional outbox. The `@jarenjs/flow` composition injects
+`compileDag` (db never imports flow — an import-graph test enforces it)
+and binds a per-ATTEMPT checkpoint store that follows the current
+lease; a DAG run's completion records the result, marks the job done
+and prunes the checkpoint rows in ONE transaction, so a crash resumes
+from its checkpointed nodes rather than restarting, and a resume must
+match the persisted workflow revision and input hash (`JD2069`).
+Non-goals stated plainly: a shared SQLite file over a network
+filesystem is not a safe coordination substrate.
 
 ## The wasm driver (`src/drivers/wasm.js`)
 

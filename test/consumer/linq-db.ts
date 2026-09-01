@@ -108,10 +108,18 @@ async function main(): Promise<void> {
       const nestedRows: Post[] = await inner.entities.Post.toArray();
       void nestedRows;
     });
+    // named savepoints are the transaction's alone, forwarded from the store
+    await tx.savepoints.create('mid');
+    await tx.savepoints.rollbackTo('mid');
+    await tx.savepoints.release('mid');
     // @ts-expect-error — a transaction client has no close(); the client owns the store
     void tx.close;
+    // @ts-expect-error — nor does the scope-bound store the escape hatch exposes
+    void tx.store.close;
     return tx.entities.Post.select((p) => p.title).toArray();
   }, { unitOfWork: 'own' });
+  // @ts-expect-error — the root client has no savepoint controller
+  void client.savepoints;
   void txTitles;
   // @ts-expect-error — the unit-of-work choice is one of exactly two words
   await client.transaction(async () => 1, { unitOfWork: 'private' });

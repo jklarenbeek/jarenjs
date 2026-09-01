@@ -191,12 +191,24 @@ function isLease(value) {
  * The queue engine over one open connection.
  * @param {{ connection: any, now?: () => number,
  *   random?: () => number,
+ *   gate?: (fn: () => any, what?: string, signal?: AbortSignal) => any,
  *   defaults?: Partial<typeof JOB_DEFAULTS> }} options
  */
 export function createJobEngine(options) {
   const { connection } = options;
   const now = options.now ?? Date.now;
   const random = options.random ?? Math.random;
+  /**
+   * The store gate a WORKER's control-plane I/O takes: a worker is a
+   * root-owned long-lived component, so its claims, renewals,
+   * checkpoint stores and settlements are unrelated callers that wait
+   * for an open application transaction instead of joining its fate —
+   * even when the worker was created through a transaction view. The
+   * engine's bare operations stay ungated here: the STORE decides per
+   * handle (root `store.jobs` gates them, `tx.jobs` runs as the exact
+   * scope, which is the transactional outbox).
+   */
+  const gate = options.gate ?? ((/** @type {() => any} */ fn) => fn());
   const defaults = { ...JOB_DEFAULTS, ...options.defaults };
 
   /** Every queue statement failure rides the store's own wrap (§9):
@@ -648,6 +660,35 @@ export function createJobEngine(options) {
      */
     const attempts = new Map();
 
+    /**
+     * Every store operation this worker itself starts — claims,
+     * renewals, its checkpoint stores, settlements — while it is in
+     * flight. `stop()` waits for the set to drain after the timers are
+     * disarmed, so no worker-started database operation can still be
+     * running when the caller closes the store: the quiescence half of
+     * shutdown, separate from (and never sharing a promise with) the
+     * grace-bounded handler drain.
+     * @type {Set<Promise<any>>}
+     */
+    const controlIo = new Set();
+    /**
+     * Run one worker-owned store operation through the root gate,
+     * tracked for quiescence. A `signal` (the worker's shutdown) takes
+     * a still-queued call off the connection's queue, so a stop never
+     * waits out a stranger's transaction just to cancel a claim.
+     * @param {() => any} fn
+     * @param {string} what
+     * @param {AbortSignal} [signal]
+     * @returns {Promise<any>}
+     */
+    const io = (fn, what, signal) => {
+      const running = Promise.resolve().then(() => gate(fn, what, signal));
+      controlIo.add(running);
+      const done = () => controlIo.delete(running);
+      running.then(done, done);
+      return running;
+    };
+
     let running = false;
     /** @type {Promise<void>[]} */
     let loops = [];
@@ -707,13 +748,14 @@ export function createJobEngine(options) {
     };
 
     /** Arm the next renewal. Each one REPLACES the lease (D2), so the
-     * attempt's newest lease is the only one that settles anything. */
+     * attempt's newest lease is the only one that settles anything.
+     * Never re-armed once the worker is stopping: after `stop()`
+     * resolves, no control path may arm a timer. */
     const armRenewal = (attempt) => {
-      if (!renewing || attempt.lost !== null || attempt.settled) return;
+      if (!renewing || !running || attempt.lost !== null || attempt.settled) return;
       attempt.timer = setTimeout(() => {
         if (attempt.lost !== null || attempt.settled) return;
-        Promise.resolve()
-          .then(() => renew(attempt.lease, { leaseMs }))
+        io(() => renew(attempt.lease, { leaseMs }), 'a lease renewal', shutdown.signal)
           .then((next) => {
             if (attempt.settled) return;
             attempts.delete(attempt.lease.token);
@@ -722,7 +764,19 @@ export function createJobEngine(options) {
             stats.renewals += 1;
             armRenewal(attempt);
           })
-          .catch((error) => loseLease(attempt, error));
+          .catch((error) => {
+            // Only the fence's three codes (LOST_CODES) prove this
+            // attempt no longer holds the job. Anything else — a busy
+            // database, a queue refusal, the shutdown cancelling a
+            // queued renewal — is a storage problem the NEXT renewal may
+            // well survive: the current immutable lease stays in force,
+            // the handler's signal stays live, and the next renewal is
+            // armed while there is time. If the lease truly expires
+            // first, the next fenced call answers JD2067 and THAT is the
+            // one lost outcome; no uncoded "maybe lost" is ever minted.
+            if (isLeaseLost(error)) loseLease(attempt, error);
+            else armRenewal(attempt);
+          });
       }, renewEvery);
       attempt.timer.unref?.();
     };
@@ -738,13 +792,19 @@ export function createJobEngine(options) {
       };
       // the checkpoint store follows the attempt's CURRENT lease: a
       // renewal replaced the token, and a store bound to the old one
-      // would be refused by the fence it is supposed to satisfy
+      // would be refused by the fence it is supposed to satisfy. Its
+      // operations are worker control I/O — root-gated and tracked —
+      // so a checkpoint can neither join an unrelated application
+      // transaction nor still be writing when stop() has resolved
       attempt.checkpoints = {
-        load: (runId) => checkpointsFor({ ...job, lease: attempt.lease }).load(runId),
-        save: (runId, nodeId, value) =>
+        load: (runId) => io(() =>
+          checkpointsFor({ ...job, lease: attempt.lease }).load(runId), 'a checkpoint read'),
+        save: (runId, nodeId, value) => io(() =>
           checkpointsFor({ ...job, lease: attempt.lease }).save(runId, nodeId, value),
-        complete: (runId, result) =>
+        'a checkpoint save'),
+        complete: (runId, result) => io(() =>
           checkpointsFor({ ...job, lease: attempt.lease }).complete(runId, result),
+        'a checkpoint settlement'),
       };
       attempts.set(job.lease.token, attempt);
       armRenewal(attempt);
@@ -784,7 +844,7 @@ export function createJobEngine(options) {
      */
     const recordFailure = async (attempt, error) => {
       try {
-        await Promise.resolve(fail(attempt.lease, error, workerOptions));
+        await io(() => fail(attempt.lease, error, workerOptions), 'a job settlement');
       }
       catch (refusal) {
         if (isLeaseLost(refusal)) {
@@ -835,7 +895,7 @@ export function createJobEngine(options) {
         try {
           // a §7 handler may have completed transactionally already;
           // settling twice from ONE attempt is idempotent
-          await Promise.resolve(complete(attempt.lease, result ?? null));
+          await io(() => complete(attempt.lease, result ?? null), 'a job settlement');
         }
         catch (error) {
           if (isLeaseLost(error)) {
@@ -865,12 +925,15 @@ export function createJobEngine(options) {
       while (running && !loopSession.cancelled) {
         let job;
         try {
-          job = await Promise.resolve(claim({ kinds, owner, leaseMs }));
+          job = await io(() => claim({ kinds, owner, leaseMs }),
+            'a worker claim', shutdown.signal);
         }
-        catch {
+        catch (error) {
           // a storage failure backs off to the poll — COUNTED, so a
-          // worker on a read-only store is not silently idle forever
-          stats.claimErrors += 1;
+          // worker on a read-only store is not silently idle forever.
+          // A claim the shutdown cancelled out of the queue (JD2064) is
+          // the stop working, not a storage error, and counts nothing.
+          if (/** @type {any} */ (error)?.code !== 'JD2064') stats.claimErrors += 1;
           job = undefined;
         }
         if (!running || loopSession.cancelled) return;
@@ -916,6 +979,19 @@ export function createJobEngine(options) {
        * A loop the grace period could not drain is cancelled outright:
        * when its handler finally settles it exits without another
        * claim, store write or poll timer.
+       *
+       * Two obligations, never sharing one unresolved promise:
+       *
+       *  1. handler DRAIN is bounded by `graceMs` — a hostile handler is
+       *     reported through `{ drained: false, inFlight }` rather than
+       *     waited out;
+       *  2. QUIESCENCE is unconditional — every claim, renewal,
+       *     checkpoint and settlement this worker started is cancelled
+       *     (a queued call leaves the connection queue on the shutdown
+       *     signal) or drained before `stop()` resolves, and no timer is
+       *     left armed, so the caller may close the store knowing no
+       *     control path still touches it. A grace timeout may detach a
+       *     handler; it may not leave a database operation behind it.
        * @param {{ graceMs?: number }} [stopOptions]
        * @returns {Promise<{ drained: boolean, inFlight: number }>}
        */
@@ -935,17 +1011,27 @@ export function createJobEngine(options) {
         if (drained) loops = [];
         else {
           session.cancelled = true; // cancel what could not be drained
-          // …and stop renewing on its behalf. A renewal is a store WRITE,
-          // and §6.1's whole point is that a cancelled loop touches the
-          // store the caller is about to close no further. The abandoned
-          // lease then expires and the job recovers by re-claim (§5),
-          // which is exactly what the cancellation means.
-          for (const abandoned of attempts.values()) {
-            clearTimeout(abandoned.timer);
-            abandoned.timer = null;
-            abandoned.settled = true;
-          }
+          // …and bar it from settling. §6.1's whole point is that a
+          // cancelled loop touches the store the caller is about to
+          // close no further. The abandoned lease then expires and the
+          // job recovers by re-claim (§5), which is exactly what the
+          // cancellation means.
+          for (const abandoned of attempts.values()) abandoned.settled = true;
         }
+        // quiescence, on BOTH paths: no renewal timer stays armed (and
+        // none re-arms — armRenewal refuses once `running` is false)…
+        for (const attempt of attempts.values()) {
+          clearTimeout(attempt.timer);
+          attempt.timer = null;
+        }
+        // …and whatever control I/O is still in flight — a cancelled
+        // queued claim, a renewal a timer fired before the stop, a
+        // settlement the grace deadline raced — settles before stop()
+        // does. Each is signal-cancelled or bounded by the connection's
+        // own timeouts, so this wait is bounded too; the loop re-checks
+        // because a settling failure may record itself with one more
+        // write.
+        while (controlIo.size > 0) await Promise.allSettled([...controlIo]);
         wakers.delete(onWake);
         workers.delete(worker);
         return { drained: drained === true, inFlight };

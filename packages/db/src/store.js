@@ -858,6 +858,19 @@ export function openStore(model, options) {
       let scope = null;
 
       /**
+       * The IDENTITY of the scope that is current right now, or `null`.
+       * One fresh identity per `withScope` invocation: it is what every
+       * transaction view is pinned to (§5.1's exact-scope rule), and the
+       * comparison `currentScope === identity` is the whole lifetime
+       * check — a view whose identity is not current has either settled
+       * or been crossed by an inner scope, and refuses `JD2070` before
+       * reading tracker state or issuing a statement. It must never fall
+       * through to the root and never follow a newer scope.
+       * @type {any}
+       */
+      let currentScope = null;
+
+      /**
        * What the OPEN transaction owes its in-memory callers once the
        * database has agreed, in registration order, or `null` when no
        * transaction is open. One list, owned by the outermost scope: a
@@ -945,9 +958,16 @@ export function openStore(model, options) {
        * scope also settles what was registered against it: commits in
        * registration order when it keeps, rollbacks in reverse when it
        * does not, and only its own when it is an inner savepoint.
+       *
+       * `fn` receives the driver scope and this invocation's fresh
+       * IDENTITY. A user-facing caller builds the transaction view from
+       * the pair; internal nesting (a save's own transaction, a capture
+       * scope, a membership attach) ignores both and runs through the
+       * dynamic connection, which after the view's `JD2070` check is
+       * exactly its own scope.
        * @param {(inner: (s: any) => any) => any} open - the driver's
        *   `transaction`, gated (top level) or nesting (inner)
-       * @param {(store: any) => any} fn
+       * @param {(inner: any, identity: any) => any} fn
        * @param {any} [ownWork] - a unit of work for this scope alone;
        *   without one the scope writes through whatever is already in
        *   force, which is what makes an inner savepoint part of the same
@@ -957,6 +977,7 @@ export function openStore(model, options) {
         return open((inner) => {
           const outer = scope;
           const outerWork = work;
+          const outerIdentity = currentScope;
           const outermost = settlements === null;
           if (outermost) settlements = [];
           const list = /** @type {any[]} */ (settlements);
@@ -964,7 +985,9 @@ export function openStore(model, options) {
           // from here, and everything before it belongs to a scope that
           // is still open
           const mark = list.length;
+          const identity = {};
           scope = inner;
+          currentScope = identity;
           if (ownWork !== undefined) work = ownWork;
           const kept = () => {
             if (outermost) flushSettlements();
@@ -978,11 +1001,12 @@ export function openStore(model, options) {
             else undone();
             scope = outer;
             work = outerWork;
+            currentScope = outerIdentity;
             if (outermost) settlements = null;
           };
           let out;
           try {
-            out = fn(scopedStore());
+            out = fn(inner, identity);
           }
           catch (error) {
             restore(false);
@@ -998,9 +1022,13 @@ export function openStore(model, options) {
         });
       }
 
-      /** Set once the store object exists; the transaction callback's
-       * argument, whose `transaction` NESTS instead of queueing. */
-      let scopedStore = () => undefined;
+      /** Set once the store object exists: builds the transaction
+       * callback's argument for ONE exact scope — a fresh view per
+       * `withScope` invocation, pinned to its identity, whose
+       * `transaction` NESTS instead of queueing. Assigned before any
+       * user-facing transaction can run, so no placeholder is needed.
+       * @type {(driverScope: any, identity: any) => any} */
+      let scopedStore;
 
       /**
        * A TOP-LEVEL store transaction. It takes the connection's gate
@@ -1013,7 +1041,8 @@ export function openStore(model, options) {
        * @param {any} [ownWork]
        */
       let topLevelTransaction = (fn, signal, ownWork) =>
-        withScope((inner) => opened.transaction(inner, signal), fn, ownWork);
+        withScope((inner) => opened.transaction(inner, signal),
+          (inner, identity) => fn(scopedStore(inner, identity)), ownWork);
 
       /**
        * How a store-level call behaves when another caller's transaction
@@ -1046,12 +1075,19 @@ export function openStore(model, options) {
        * so its statements can never fall inside a stranger's transaction
        * and share a rollback it knows nothing about — the defect that
        * made "one store per concurrent writer" the only safe advice.
-       * @param {(store: any) => any} fn
+       *
+       * Root jobs and worker control I/O take exactly this gate too:
+       * an unrelated enqueue, claim, renewal or settlement waits for the
+       * open transaction instead of joining its fate, and a `signal`
+       * (a worker winding down) abandons a call still in the queue.
+       * @param {() => any} fn
+       * @param {string} [what] - what is waiting, for the timeout message
+       * @param {AbortSignal} [signal]
        */
-      const gated = (fn) => {
+      const gated = (fn, what, signal) => {
         if (strictTransactions && opened.mustQueue)
           throw contended("{ transactions: 'strict' } refuses to queue behind it");
-        return withScope(opened.exclusively, fn);
+        return withScope((inner) => opened.exclusively(inner, what, signal), fn);
       };
 
       /** The synchronous surface's gate. It cannot wait — waiting hands
@@ -1275,8 +1311,17 @@ export function openStore(model, options) {
           });
           const guard = capture === null ? (fn) => fn() : capture.wrap;
           if (capture !== null) {
-            topLevelTransaction = (fn) => withScope(opened.transaction,
-              (tx) => capture.nest(() => fn(tx)));
+            // capture changes how records are TRANSLATED, never queue
+            // cancellation or tracker ownership: the replacement has the
+            // ordinary function's exact signature and forwards `signal`
+            // and `ownWork`, with `capture.nest` inside the opened scope.
+            // The view is built from the scope capture's wrap opens —
+            // the INNERMOST one, the exact scope the callback runs in.
+            topLevelTransaction = (fn, signal, ownWork) =>
+              withScope((inner) => opened.transaction(inner, signal),
+                () => capture.nest((innerScope, identity) =>
+                  fn(scopedStore(innerScope, identity))),
+                ownWork);
           }
           // the live registry rides the capture stream; its dispatcher
           // registers FIRST so maintenance sees every record before any
@@ -1293,6 +1338,12 @@ export function openStore(model, options) {
             || (options.jobs !== undefined && options.jobs !== false);
           const jobsEngine = !jobsRequested ? null : createJobEngine({
             connection,
+            // the WORKER's control-plane I/O (claims, renewals, its
+            // checkpoint stores, its settlements) is root-owned and takes
+            // the store gate, so it can never join an open application
+            // transaction; `tx.jobs` bypasses this by running as the
+            // exact scope, which is the transactional-outbox spelling
+            gate: (fn, what, signal) => gated(fn, what, signal),
             now: typeof options.jobs === 'object' ? options.jobs.now : undefined,
             random: typeof options.jobs === 'object' ? options.jobs.random : undefined,
             defaults: typeof options.jobs === 'object' ? options.jobs : undefined,
@@ -1777,8 +1828,46 @@ export function openStore(model, options) {
             return handle;
           }
 
-          /** The entity handle of the unit of work in force right now. */
-          const boundEntity = (name) => work.entityFor(name);
+          /** PRAGMA data_version, read wherever the caller is: the store
+           * wraps it in the gate, a transaction view in its scope check. */
+          const readDataVersion = () => chain(
+            connection.prepare(dialect.introspect.dataVersion()),
+            (statement) => chain(statement.get([]), (row) => Number(row.v)));
+
+          /** Register an entity-root live query (LIVE-FORMAT §7) — the
+           * store's `live` and a transaction view's share one body. */
+          const registerEntityLive = (document, liveOptions) => {
+            if (liveRegistry === null) {
+              throw new DbCompileError('JD0050',
+                'live queries require change capture — open the store with { capture: true }');
+            }
+            refuseAsyncLive();
+            if (liveOptions?.eventTime !== undefined) {
+              throw new DbCompileError('JD0053',
+                'live eventTime maintains a collection view — an entity document re-runs, '
+                + 'so a watermark would describe nothing (LIVE-FORMAT §13)');
+            }
+            const roots = collectEntityRoots(document, entities);
+            if (roots.size === 0) {
+              throw new TypeError(
+                'store.live takes an entity-root document — for a collection, '
+                + 'use store.collection(name).live');
+            }
+            return liveRegistry.register({
+              name: [...roots].join('+'),
+              tables: roots,
+              document,
+              externals: liveOptions?.externals ?? {},
+              demanded: liveOptions?.mode,
+              classification: {
+                strategy: 'rerun',
+                reason: 'entity queries re-run in this version',
+              },
+              execute: (doc, executeOptions) => entityEngine.execute(doc, executeOptions),
+              readRow: null,
+              keyOf: null,
+            });
+          };
 
           /**
            * Every member of a bound handle that issues a statement,
@@ -1816,26 +1905,14 @@ export function openStore(model, options) {
           /** @type {Map<string, any>} */
           const gatedEntities = new Map();
 
-          const bound = {
-            collection: boundCollection,
-            entity: boundEntity,
-            saveChanges: entities.size === 0 ? undefined
-              : lift(() => guard(() => work.tracker.saveChanges())),
-            execute: entityEngine === null ? undefined
-              : (document, queryOptions) => entityEngine.execute(document, queryOptions),
-            explain: entityEngine === null ? undefined
-              : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
-            dataVersion: lift(() => chain(
-              connection.prepare(dialect.introspect.dataVersion()),
-              (statement) => chain(statement.get([]), (row) => Number(row.v)))),
-          };
-
           const store = {
             capabilities,
+            // the ROOT's bookkeeping, always: an open own-unit
+            // transaction changes what its own view reports, never this
             stats: () => ({
               statementCache: { ...queryState.counters },
               udfRegistrations: queryState.registered.size,
-              tracker: work.tracker === null ? null : work.tracker.counts(),
+              tracker: rootWork.tracker === null ? null : rootWork.tracker.counts(),
               liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
             }),
             dialect,
@@ -1861,7 +1938,10 @@ export function openStore(model, options) {
             entity(name) {
               let handle = gatedEntities.get(name);
               if (handle === undefined) {
-                const inner = boundEntity(name);
+                // ALWAYS the root unit of work: a store-level handle
+                // constructed while an own-unit transaction happens to be
+                // open must not capture that transaction's tracker
+                const inner = rootWork.entityFor(name);
                 handle = gatedMembers(inner,
                   ['create', 'get', 'update', 'delete', 'load', 'explain'],
                   ['execute']);
@@ -1887,38 +1967,7 @@ export function openStore(model, options) {
             // entity live queries re-run on invalidation — declared,
             // not attempted (LIVE-FORMAT §7)
             live: entityEngine === null ? undefined
-              : lift((document, liveOptions) => {
-                if (liveRegistry === null) {
-                  throw new DbCompileError('JD0050',
-                    'live queries require change capture — open the store with { capture: true }');
-                }
-                refuseAsyncLive();
-                if (liveOptions?.eventTime !== undefined) {
-                  throw new DbCompileError('JD0053',
-                    'live eventTime maintains a collection view — an entity document re-runs, '
-                    + 'so a watermark would describe nothing (LIVE-FORMAT §13)');
-                }
-                const roots = collectEntityRoots(document, entities);
-                if (roots.size === 0) {
-                  throw new TypeError(
-                    'store.live takes an entity-root document — for a collection, '
-                    + 'use store.collection(name).live');
-                }
-                return liveRegistry.register({
-                  name: [...roots].join('+'),
-                  tables: roots,
-                  document,
-                  externals: liveOptions?.externals ?? {},
-                  demanded: liveOptions?.mode,
-                  classification: {
-                    strategy: 'rerun',
-                    reason: 'entity queries re-run in this version',
-                  },
-                  execute: (doc, executeOptions) => entityEngine.execute(doc, executeOptions),
-                  readRow: null,
-                  keyOf: null,
-                });
-              }),
+              : lift((document, liveOptions) => registerEntityLive(document, liveOptions)),
             // A TOP-LEVEL transaction: it takes the connection's gate, so
             // it never shares a savepoint stack with another one. To nest,
             // use the store the callback RECEIVES — the outer store cannot
@@ -1949,16 +1998,35 @@ export function openStore(model, options) {
             },
             changesSince: capture === null ? undefined
               : lift((after) => gated(() => capture.changesSince(after))),
-            dataVersion: lift(() => gated(() => bound.dataVersion())),
+            dataVersion: lift(() => gated(() => readDataVersion())),
+            // The ROOT jobs surface: every finite call takes the store
+            // gate, exactly as a root collection write does, so an
+            // unrelated enqueue, claim, checkpoint or settlement can
+            // never join an open application transaction's fate. The
+            // transactional-outbox spelling is the explicit `tx.jobs` a
+            // transaction callback receives.
             jobs: jobsEngine === null ? undefined : Object.freeze({
-              enqueue: lift(jobsEngine.enqueue),
-              get: lift(jobsEngine.get),
-              counts: lift(jobsEngine.counts),
-              claim: lift(jobsEngine.claim),
-              renew: lift(jobsEngine.renew),
-              complete: lift(jobsEngine.complete),
-              fail: lift(jobsEngine.fail),
-              checkpointsFor: jobsEngine.checkpointsFor,
+              enqueue: lift((...args) => gated(() => jobsEngine.enqueue(...args), 'a root job enqueue')),
+              get: lift((...args) => gated(() => jobsEngine.get(...args), 'a root job read')),
+              counts: lift(() => gated(() => jobsEngine.counts(), 'a root job read')),
+              claim: lift((...args) => gated(() => jobsEngine.claim(...args), 'a root job claim')),
+              renew: lift((...args) => gated(() => jobsEngine.renew(...args), 'a root lease renewal')),
+              complete: lift((...args) => gated(() => jobsEngine.complete(...args), 'a root job settlement')),
+              fail: lift((...args) => gated(() => jobsEngine.fail(...args), 'a root job settlement')),
+              // a checkpoint store keeps its creator's ROOT ownership:
+              // its later calls take the gate too, never a scope. They
+              // stay value-or-promise like the engine's own — the gate
+              // answers a value when nothing is contended
+              checkpointsFor: (job) => {
+                const inner = jobsEngine.checkpointsFor(job);
+                return Object.freeze({
+                  load: (runId) => gated(() => inner.load(runId), 'a root checkpoint read'),
+                  save: (runId, nodeId, value) =>
+                    gated(() => inner.save(runId, nodeId, value), 'a root checkpoint save'),
+                  complete: (runId, result) =>
+                    gated(() => inner.complete(runId, result), 'a root checkpoint settlement'),
+                });
+              },
               createWorker: jobsEngine.createWorker,
             }),
             /**
@@ -1989,70 +2057,476 @@ export function openStore(model, options) {
             }),
           };
 
-          // The transaction callback's argument, and the ONLY handle that
-          // is inside the transaction. Its `collection`, `entity`, `sync`
-          // and unit of work run as the owner instead of waiting for a
-          // commit they are part of, and its `transaction` NESTS through
-          // the owning savepoint instead of queueing behind it. The
-          // store's own handles are, by construction, somebody else.
-          /** @type {any} */
-          let txStore = null;
-          /** Set with `store.sync`, when the driver is synchronous. */
-          let boundSyncView;
-          /** Nest through the savepoint that owns the connection now. The
-           * capture scope goes INSIDE the savepoint, so a rollback undoes
-           * the translated patch with the rows it describes. */
-          const nested = (/** @type {any} */ fn) => withScope(scope.transaction,
-            (tx) => (capture === null ? fn(tx) : capture.nest(() => fn(tx))));
+          /**
+           * The `JD2070` lifetime check every stateful member of a
+           * transaction view runs FIRST — before reading or mutating
+           * tracker state, and before any statement. A view is pinned to
+           * the exact scope that created it: an identity that is not
+           * current has either settled (the handle escaped its callback)
+           * or been crossed by an inner scope (an outer handle used while
+           * an async inner savepoint is open). It never falls through to
+           * the root and never follows a newer scope.
+           * @param {any} identity
+           */
+          const requireScope = (identity) => {
+            if (currentScope === identity) return;
+            throw new DbRuntimeError('JD2070',
+              'this transaction handle is pinned to a scope that is not current: '
+              + 'its transaction settled, or an inner transaction is open. Use the '
+              + 'store the LIVE transaction callback received (tx.collection / '
+              + 'tx.entity / tx.saveChanges / tx.jobs) — a handle never outlives '
+              + 'or crosses its own scope.');
+          };
+
+          /**
+           * Every stateful member of a scope-view handle, checked against
+           * the exact scope before it runs. `lifted` members answer a
+           * promise (the check rejects); `direct` members answer values
+           * or value-or-promise (the check throws) — the unit-of-work
+           * bookkeeping and the D2 provider members among them.
+           * @param {any} identity
+           * @param {any} handle
+           * @param {string[]} lifted
+           * @param {string[]} [direct]
+           */
+          const scopedMembers = (identity, handle, lifted, direct = []) => {
+            const out = { ...handle };
+            for (const member of lifted) {
+              if (typeof handle[member] !== 'function') continue;
+              out[member] = (/** @type {any[]} */ ...args) =>
+                lift(() => {
+                  requireScope(identity);
+                  return handle[member](...args);
+                })();
+            }
+            for (const member of direct) {
+              if (typeof handle[member] !== 'function') continue;
+              out[member] = (/** @type {any[]} */ ...args) => {
+                requireScope(identity);
+                return handle[member](...args);
+              };
+            }
+            return out;
+          };
+
+          /** A collection handle pinned to one exact scope, its lazy
+           * cursor included: `query()`'s `next()` re-checks the scope on
+           * every pull, so iteration can neither begin nor continue once
+           * that exact scope settled. */
+          const scopedCollection = (identity, name) => {
+            const inner = boundCollection(name);
+            const out = scopedMembers(identity, inner,
+              ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
+              ['execute']);
+            out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
+              /** @type {any} */
+              let cursor = null;
+              const step = (/** @type {string} */ member) => () => {
+                try {
+                  requireScope(identity);
+                  if (cursor === null) cursor = inner.query(document, queryOptions);
+                }
+                catch (error) {
+                  return Promise.reject(error);
+                }
+                return cursor[member]();
+              };
+              /** @type {any} */
+              const wrapped = {
+                next: step('next'),
+                return: step('return'),
+                [Symbol.asyncIterator]: () => wrapped,
+              };
+              return wrapped;
+            };
+            return Object.freeze(out);
+          };
+
+          /** An entity handle over `unit`, pinned to one exact scope —
+           * the statement members and the local tracker bookkeeping both
+           * carry the identity (`add()` on a settled handle is `JD2070`,
+           * not a document smuggled into a later scope's unit of work). */
+          const scopedEntity = (identity, unit, name) => {
+            const inner = unit.entityFor(name);
+            const untracked = Object.freeze(
+              scopedMembers(identity, inner.asNoTracking(), ['get', 'load']));
+            return Object.freeze({
+              ...scopedMembers(identity, inner,
+                ['create', 'get', 'update', 'delete', 'load', 'explain'],
+                ['execute', 'add', 'put', 'remove', 'discard', 'link', 'unlink']),
+              asNoTracking: () => untracked,
+            });
+          };
+
+          /** The synchronous twin, answering values. */
+          const scopedSyncEntity = (identity, unit, name) => {
+            const inner = unit.syncEntityFor(name);
+            const untracked = Object.freeze(
+              scopedMembers(identity, inner.asNoTracking(), [], ['get', 'load']));
+            return Object.freeze({
+              ...scopedMembers(identity, inner, [],
+                ['create', 'get', 'update', 'delete', 'load', 'execute', 'explain',
+                  'add', 'put', 'remove', 'discard', 'link', 'unlink']),
+              asNoTracking: () => untracked,
+            });
+          };
+
+          /** Shared synchronous collection handles over the cores; set
+           * with `store.sync` when the driver is synchronous. The gated
+           * store-level surface and each scope view wrap the same ones.
+           * @type {((name: string) => any) | undefined} */
+          let syncCollectionFor;
+
           /** The overriding member on a view of the FROZEN store: plain
            * assignment cannot shadow a non-writable inherited property. */
           const override = (/** @type {any} */ value) =>
             ({ value, writable: false, enumerable: true, configurable: false });
-          scopedStore = () => {
-            if (txStore === null) {
-              const members = {
-                transaction: override(nested),
-                collection: override(bound.collection),
-                entity: override(bound.entity),
-              };
-              for (const member of ['saveChanges', 'execute', 'explain', 'dataVersion']) {
-                if (bound[member] !== undefined) members[member] = override(bound[member]);
+
+          // The transaction callback's argument, and the ONLY handle that
+          // is inside the transaction: ONE view per exact scope, pinned to
+          // its identity. Its `collection`, `entity`, `sync`, unit of work
+          // and `jobs` run as the owner instead of waiting for a commit
+          // they are part of; its `transaction` NESTS through the owning
+          // savepoint; its `savepoints` move the manual checkpoint stack.
+          // The store's own handles are, by construction, somebody else —
+          // and a view used outside its exact live scope is `JD2070`.
+          scopedStore = (driverScope, identity) => {
+            /** The unit of work in force for THIS scope, captured once:
+             * the view's tracker surface never follows a later scope. */
+            const myWork = work;
+            /** @type {Map<string, any>} */
+            const myCollections = new Map();
+            /** @type {Map<string, any>} */
+            const myEntities = new Map();
+            const collectionFor = (/** @type {string} */ name) => {
+              let handle = myCollections.get(name);
+              if (handle === undefined) {
+                handle = scopedCollection(identity, name);
+                myCollections.set(name, handle);
               }
-              if (capture !== null) {
-                members.changesSince = override(
-                  lift((/** @type {any} */ after) => capture.changesSince(after)));
+              return handle;
+            };
+            const entityFor = (/** @type {string} */ name) => {
+              let handle = myEntities.get(name);
+              if (handle === undefined) {
+                handle = scopedEntity(identity, myWork, name);
+                myEntities.set(name, handle);
               }
-              if (boundSyncView !== undefined) {
-                members.sync = override(Object.freeze(Object.create(boundSyncView,
-                  { transaction: override(nested) })));
+              return handle;
+            };
+
+            /** Nest through THIS scope's savepoint. The capture scope
+             * goes INSIDE the savepoint, so a rollback undoes the
+             * translated patch with the rows it describes. */
+            const nested = (/** @type {any} */ fn) => {
+              requireScope(identity);
+              return withScope(driverScope.transaction,
+                (inner, innerIdentity) => (capture === null
+                  ? fn(scopedStore(inner, innerIdentity))
+                  : capture.nest(() => fn(scopedStore(inner, innerIdentity)))));
+            };
+
+            // ————— named savepoints (MODEL-FORMAT §5.2) —————
+            // One per-exact-scope map from the caller's LABEL to an
+            // opaque driver checkpoint plus the settlement-list mark and,
+            // in journal capture mode, the capture mark. The label is a
+            // map key and diagnostic only — the driver generates the
+            // `jaren_sp_*` identifier structured nesting already uses, so
+            // a label can never become SQL, and both savepoint kinds
+            // share one engine stack. The scope's settlement (commit or
+            // rollback) invalidates whatever names were left active,
+            // because the view itself is then `JD2070`.
+            /** @type {Map<string, any>} */
+            const checkpoints = new Map();
+            const requireLabel = (/** @type {any} */ label, /** @type {string} */ verb) => {
+              if (typeof label === 'string' && label !== '') return;
+              throw new DbRuntimeError('JD2071',
+                `savepoints.${verb}: a savepoint label must be a non-empty string — `
+                + 'it is a map key and diagnostic for this exact transaction, never SQL');
+            };
+            const resolveLabel = (/** @type {string} */ label, /** @type {string} */ verb) => {
+              requireLabel(label, verb);
+              const entry = checkpoints.get(label);
+              if (entry !== undefined) return entry;
+              throw new DbRuntimeError('JD2071',
+                `savepoints.${verb}: no active savepoint '${label}' in this exact `
+                + 'transaction — it was never created here, or a rollback past it or a '
+                + 'release already invalidated it');
+            };
+            const savepointCreate = (/** @type {string} */ label) => {
+              requireScope(identity);
+              requireLabel(label, 'create');
+              if (checkpoints.has(label)) {
+                throw new DbRuntimeError('JD2071',
+                  `savepoints.create: the label '${label}' is already active in this `
+                  + 'transaction — release it, or roll back to it, before creating it again');
               }
-              txStore = Object.freeze(Object.create(store, members));
+              // SAVEPOINT first; the entry is recorded only after success,
+              // so a refused statement leaves label map and marks untouched
+              return chain(driverScope.savepoint(), (checkpoint) => {
+                checkpoints.set(label, {
+                  checkpoint,
+                  settleMark: settlements === null ? 0 : settlements.length,
+                  captureMark: capture === null ? null : capture.mark(),
+                });
+                return undefined;
+              });
+            };
+            const savepointRollbackTo = (/** @type {string} */ label) => {
+              requireScope(identity);
+              const entry = resolveLabel(label, 'rollbackTo');
+              // ROLLBACK TO first; only after database success do the
+              // in-memory effects follow. The target stays active with
+              // the same now-current marks, so repeated rollback is
+              // defined; entries created after it are gone from the
+              // engine stack and invalidated here.
+              return chain(driverScope.rollbackTo(entry.checkpoint), () => {
+                if (settlements !== null) {
+                  const withdrawn = settlements.splice(entry.settleMark);
+                  for (let i = withdrawn.length - 1; i >= 0; i--) withdrawn[i].rollback?.();
+                }
+                if (capture !== null) capture.truncate(entry.captureMark);
+                let seen = false;
+                for (const key of [...checkpoints.keys()]) {
+                  if (seen) checkpoints.delete(key);
+                  if (key === label) seen = true;
+                }
+                return undefined;
+              });
+            };
+            const savepointRelease = (/** @type {string} */ label) => {
+              requireScope(identity);
+              const entry = resolveLabel(label, 'release');
+              // RELEASE removes the target and every later entry WITHOUT
+              // running rollback effects: those rows remain part of the
+              // owning transaction, so their tracker withdrawals stay
+              // registered until outer settlement — the engine semantics,
+              // exactly (both SQLite and PostgreSQL discard the target
+              // and the savepoints nested after it, keeping their rows)
+              return chain(driverScope.release(entry.checkpoint), () => {
+                let seen = false;
+                for (const key of [...checkpoints.keys()]) {
+                  if (key === label) seen = true;
+                  if (seen) checkpoints.delete(key);
+                }
+                return undefined;
+              });
+            };
+
+            const members = {
+              transaction: override((/** @type {any} */ fn) => lift(() => nested(fn))()),
+              collection: override(collectionFor),
+              entity: override(entityFor),
+              // THIS scope's bookkeeping, whatever scope is current later
+              stats: override(() => ({
+                statementCache: { ...queryState.counters },
+                udfRegistrations: queryState.registered.size,
+                tracker: myWork.tracker === null ? null : myWork.tracker.counts(),
+                liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
+              })),
+              dataVersion: override(lift(() => {
+                requireScope(identity);
+                return readDataVersion();
+              })),
+              savepoints: override(Object.freeze({
+                create: lift(savepointCreate),
+                rollbackTo: lift(savepointRollbackTo),
+                release: lift(savepointRelease),
+              })),
+              // a transaction view does not own the store lifetime: the
+              // member is ABSENT rather than a second way to close the
+              // raw connection under its own savepoint
+              close: override(undefined),
+            };
+            if (entities.size > 0) {
+              members.saveChanges = override(lift(() => {
+                requireScope(identity);
+                return guard(() => myWork.tracker.saveChanges());
+              }));
             }
-            return txStore;
+            if (entityEngine !== null) {
+              members.execute = override(
+                (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
+                  requireScope(identity);
+                  return entityEngine.execute(document, queryOptions);
+                });
+              members.explain = override(lift(
+                (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
+                  requireScope(identity);
+                  return entityEngine.explain(document, queryOptions);
+                }));
+              members.live = override(lift(
+                (/** @type {any} */ document, /** @type {any} */ liveOptions) => {
+                  requireScope(identity);
+                  return registerEntityLive(document, liveOptions);
+                }));
+            }
+            if (capture !== null) {
+              members.changesSince = override(lift((/** @type {any} */ after) => {
+                requireScope(identity);
+                return capture.changesSince(after);
+              }));
+            }
+            if (jobsEngine !== null) {
+              // the transactional-outbox spelling: these run as the exact
+              // scope, so an enqueue or settlement here co-commits with
+              // the domain transaction — and a retained handle is JD2070
+              members.jobs = override(Object.freeze({
+                enqueue: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.enqueue(...args);
+                }),
+                get: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.get(...args);
+                }),
+                counts: lift(() => {
+                  requireScope(identity);
+                  return jobsEngine.counts();
+                }),
+                claim: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.claim(...args);
+                }),
+                renew: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.renew(...args);
+                }),
+                complete: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.complete(...args);
+                }),
+                fail: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.fail(...args);
+                }),
+                // a checkpoint store keeps its creator's SCOPE ownership:
+                // its later calls cannot switch scopes, and outlive none
+                checkpointsFor: (/** @type {any} */ job) => {
+                  const inner = jobsEngine.checkpointsFor(job);
+                  return Object.freeze({
+                    load: lift((/** @type {any} */ runId) => {
+                      requireScope(identity);
+                      return inner.load(runId);
+                    }),
+                    save: lift((/** @type {any} */ runId, /** @type {any} */ nodeId,
+                      /** @type {any} */ value) => {
+                      requireScope(identity);
+                      return inner.save(runId, nodeId, value);
+                    }),
+                    complete: lift((/** @type {any} */ runId, /** @type {any} */ result) => {
+                      requireScope(identity);
+                      return inner.complete(runId, result);
+                    }),
+                  });
+                },
+                // a worker is a ROOT-owned long-lived component wherever
+                // it is created: its future loop takes the store gate and
+                // never binds to the transaction that constructed it
+                createWorker: jobsEngine.createWorker,
+              }));
+            }
+            if (connection.synchronous && syncCollectionFor !== undefined) {
+              /** @type {Map<string, any>} */
+              const mySyncCollections = new Map();
+              /** @type {Map<string, any>} */
+              const mySyncEntities = new Map();
+              const forSync = /** @type {(name: string) => any} */ (syncCollectionFor);
+              members.sync = override(Object.freeze({
+                collection: (/** @type {string} */ name) => {
+                  let handle = mySyncCollections.get(name);
+                  if (handle === undefined) {
+                    handle = Object.freeze(scopedMembers(identity, forSync(name), [],
+                      ['get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']));
+                    mySyncCollections.set(name, handle);
+                  }
+                  return handle;
+                },
+                entity: (/** @type {string} */ name) => {
+                  let handle = mySyncEntities.get(name);
+                  if (handle === undefined) {
+                    handle = scopedSyncEntity(identity, myWork, name);
+                    mySyncEntities.set(name, handle);
+                  }
+                  return handle;
+                },
+                transaction: nested,
+                savepoints: Object.freeze({
+                  create: savepointCreate,
+                  rollbackTo: savepointRollbackTo,
+                  release: savepointRelease,
+                }),
+                saveChanges: entities.size === 0 ? undefined
+                  : () => {
+                    requireScope(identity);
+                    return guard(() => myWork.tracker.saveChanges());
+                  },
+                execute: entityEngine === null ? undefined
+                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
+                    requireScope(identity);
+                    return entityEngine.execute(document, queryOptions);
+                  },
+                explain: entityEngine === null ? undefined
+                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
+                    requireScope(identity);
+                    return entityEngine.explain(document, queryOptions);
+                  },
+                roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
+                relations: entityEngine === null ? undefined : entityEngine.relations,
+              }));
+            }
+            return Object.freeze(Object.create(store, members));
           };
 
           if (connection.synchronous) {
             /** @type {Map<string, any>} */
             const syncHandles = new Map();
-            /** The synchronous surface BOUND to whatever scope is open:
-             * the transaction callback's, and what the store-level one
-             * wraps in its gate. */
-            const boundSync = Object.freeze({
+            syncCollectionFor = (name) => {
+              let handle = syncHandles.get(name);
+              if (handle === undefined) {
+                const core = coreFor(name);
+                handle = Object.freeze({
+                  stats: () => core.stats(),
+                  get: (/** @type {any} */ key) => core.get(key),
+                  insert: (/** @type {any} */ doc) => core.insert(doc),
+                  put: (/** @type {any} */ doc, /** @type {any} */ key) => core.put(doc, key),
+                  patch: (/** @type {any} */ key, /** @type {any} */ ops) => core.patch(key, ops),
+                  delete: (/** @type {any} */ key) => core.delete(key),
+                  execute: (/** @type {any} */ document, /** @type {any} */ o) =>
+                    core.execute(document, o),
+                  explain: (/** @type {any} */ document, /** @type {any} */ o) =>
+                    core.explain(document, o),
+                });
+                syncHandles.set(name, handle);
+              }
+              return handle;
+            };
+            const forSync = syncCollectionFor;
+
+            /** Store-level synchronous members, each holding the
+             * connection for its own extent. A contended one refuses
+             * rather than queueing: this surface answers values, and a
+             * queue answers a Promise. */
+            const syncGatedMembers = (handle, names) => {
+              const out = { ...handle };
+              for (const member of names) {
+                if (typeof handle[member] !== 'function') continue;
+                out[member] = (/** @type {any[]} */ ...args) =>
+                  gatedSync(() => handle[member](...args));
+              }
+              return Object.freeze(out);
+            };
+            /** @type {Map<string, any>} */
+            const gatedSyncCollections = new Map();
+            /** @type {Map<string, any>} */
+            const gatedSyncEntities = new Map();
+            store.sync = Object.freeze({
               collection(name) {
-                let handle = syncHandles.get(name);
+                let handle = gatedSyncCollections.get(name);
                 if (handle === undefined) {
-                  const core = coreFor(name);
-                  handle = Object.freeze({
-                    stats: () => core.stats(),
-                    get: (key) => core.get(key),
-                    insert: (doc) => core.insert(doc),
-                    put: (doc, key) => core.put(doc, key),
-                    patch: (key, ops) => core.patch(key, ops),
-                    delete: (key) => core.delete(key),
-                    execute: (document, options) => core.execute(document, options),
-                    explain: (document, options) => core.explain(document, options),
-                  });
-                  syncHandles.set(name, handle);
+                  handle = syncGatedMembers(forSync(name),
+                    ['get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']);
+                  gatedSyncCollections.set(name, handle);
                 }
                 return handle;
               },
@@ -2069,50 +2543,11 @@ export function openStore(model, options) {
                 return topLevelTransaction(fn);
               },
               entity(name) {
-                return work.syncEntityFor(name);
-              },
-              saveChanges: entities.size === 0 ? undefined
-                : () => guard(() => work.tracker.saveChanges()),
-              execute: entityEngine === null ? undefined
-                : (document, queryOptions) => entityEngine.execute(document, queryOptions),
-              explain: entityEngine === null ? undefined
-                : (document, queryOptions) => entityEngine.explain(document, queryOptions),
-              roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
-              relations: entityEngine === null ? undefined : entityEngine.relations,
-            });
-            boundSyncView = boundSync;
-
-            /** The same members, each holding the connection for its own
-             * extent. A contended one refuses rather than queueing: this
-             * surface answers values, and a queue answers a Promise. */
-            const syncGatedMembers = (handle, names) => {
-              const out = { ...handle };
-              for (const member of names) {
-                if (typeof handle[member] !== 'function') continue;
-                out[member] = (/** @type {any[]} */ ...args) =>
-                  gatedSync(() => handle[member](...args));
-              }
-              return Object.freeze(out);
-            };
-            /** @type {Map<string, any>} */
-            const gatedSyncCollections = new Map();
-            /** @type {Map<string, any>} */
-            const gatedSyncEntities = new Map();
-            store.sync = Object.freeze({
-              ...boundSync,
-              collection(name) {
-                let handle = gatedSyncCollections.get(name);
-                if (handle === undefined) {
-                  handle = syncGatedMembers(boundSync.collection(name),
-                    ['get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']);
-                  gatedSyncCollections.set(name, handle);
-                }
-                return handle;
-              },
-              entity(name) {
                 let handle = gatedSyncEntities.get(name);
                 if (handle === undefined) {
-                  const inner = boundSync.entity(name);
+                  // the ROOT unit of work, whatever transaction happens
+                  // to be open when the handle is first constructed
+                  const inner = rootWork.syncEntityFor(name);
                   const untracked = syncGatedMembers(inner.asNoTracking(), ['get', 'load']);
                   handle = Object.freeze({
                     ...syncGatedMembers(inner,
@@ -2131,6 +2566,8 @@ export function openStore(model, options) {
               explain: entityEngine === null ? undefined
                 : (document, queryOptions) =>
                   gatedSync(() => entityEngine.explain(document, queryOptions)),
+              roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
+              relations: entityEngine === null ? undefined : entityEngine.relations,
             });
           }
           return chain(capture === null ? null : capture.ready,

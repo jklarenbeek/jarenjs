@@ -58,6 +58,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { runNpm } from './lib/portable.js';
+import { tarExtractArgs } from './lib/tar-extract-args.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const requireBun = process.argv.includes('--require-bun');
@@ -520,14 +521,16 @@ try {
       installed.add(dep);
       const dest = join(modulesDir, dep);
       mkdirSync(dest, { recursive: true });
-      // A Windows path reaches tar as `C:\…`, which GNU tar reads as the
-      // archive `…` on the host `C` and whose separators it then mangles.
-      // Forward slashes plus `--force-local` are understood by both the
-      // GNU tar on PATH and the bsdtar Windows ships.
-      const local = (/** @type {string} */ path) => path.replaceAll('\\', '/');
-      execFileSync('tar', ['--force-local', '-xzf',
-        local(/** @type {string} */ (tarballs.get(dep))),
-        '--strip-components=1', '-C', local(dest)]);
+      // Extraction is relative to ONE working directory: the tarball and
+      // the destination both live below `work`, so tar runs with
+      // `cwd: work` and plain relative forward-slash arguments. No
+      // argument carries a Windows drive colon (which GNU tar reads as
+      // `host:file`), so no brand detection and no brand-specific flag —
+      // the GNU-only force-local spelling is refused by the bsdtar
+      // Windows ships, before it extracts anything.
+      execFileSync('tar',
+        tarExtractArgs(work, /** @type {string} */ (tarballs.get(dep)), dest),
+        { cwd: work });
     };
     for (const dep of declaredClosure(byName, name)) install(dep);
 

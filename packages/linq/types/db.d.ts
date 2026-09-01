@@ -20,7 +20,7 @@ import type {
 } from '@jarenjs/db/typed';
 import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
-  SaveReport, StoreCapabilities, TransactionStore,
+  SavepointController, SaveReport, StoreCapabilities, TransactionStore,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 
@@ -197,13 +197,20 @@ export interface TransactionOptions {
  * is part of, which `JD0012` names rather than hangs on.
  */
 export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown>> = {
-  /** The scope-bound store — the escape hatch, still inside. */
+  /** The scope-bound store — the escape hatch, still inside. It carries
+   * no `close`: a transaction never owns the connection's lifetime. */
   readonly store: TransactionStore;
   readonly capabilities: StoreCapabilities;
   readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
   /** Nest through this transaction's savepoint. */
   transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>): Promise<Awaited<R>>;
+  /** Named partial rollback (MODEL-FORMAT §5.2) — the store's
+   * `tx.savepoints`, forwarded unchanged: create, roll back to and
+   * release a checkpoint by label without a sentinel exception. Only a
+   * live transaction has it; the root client deliberately has no twin,
+   * and a handle kept past its callback is `JD2070`. */
+  readonly savepoints: SavepointController;
 } & ([keyof E] extends [never] ? {} : EntityClientMembers);
 
 /** The client: one frozen record of handles per declared name, the

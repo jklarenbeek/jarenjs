@@ -924,9 +924,12 @@ export function createTracker(context) {
   };
 
   /**
-   * Commit phase: only reached once the transaction that ran the
-   * statements has committed, which is why it is registered as a
-   * settlement effect rather than run on the save's own savepoint.
+   * Advance phase: runs as soon as every statement of the save has
+   * succeeded — inside an enclosing transaction too, where the database
+   * already holds these rows and every later read, plan and optimistic
+   * guard must agree. What is registered as a settlement effect is only
+   * the WITHDRAWAL of this advance ({@link restore} over `undo`), which
+   * the owning scope runs if it rolls back.
    *
    * `undo` is the state the save started from. It is read for one
    * decision: an edit made to a tracked record AFTER this save was

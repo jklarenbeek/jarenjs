@@ -163,13 +163,14 @@ export function tempDbPath() {
     // with a backoff — and POSIX, which unlinks an open file immediately,
     // never reaches it.
     //
-    // This hardens the RACE. It does not cure a handle that is genuinely
-    // still open: `jobs-concurrency.test.js` still fails here on Windows
-    // because `worker.stop()` keeps its claim loops running when they do
-    // not drain inside the grace period, and those loops hold the
-    // database — which is also why that file's process outlives its
-    // assertions. That is a @jarenjs/db shutdown defect, not a cleanup
-    // one, and it needs fixing there rather than papering over here.
+    // This hardens the RACE, and only the race: retries cannot cure a
+    // handle that is genuinely still open. The one caller that used to
+    // hold one — a worker claim loop `stop()` left running — is closed at
+    // the source: `worker.stop()` now cancels or drains every claim,
+    // renewal, checkpoint and settlement before it resolves, and
+    // `jobs-concurrency.test.js` asserts every stop is
+    // `{ drained: true, inFlight: 0 }` before its store closes. Do not
+    // answer a future EPERM here by lengthening these retries.
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   };
 }

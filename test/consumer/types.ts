@@ -1054,6 +1054,31 @@ async function dbBlock(): Promise<void> {
   const inTx = await store.transaction(async () => 'done');
   void inTx;
 
+  // the transaction options are declared: unitOfWork is one of exactly
+  // two words, signal rides beside it — with or without capture
+  await store.transaction(async () => 1, { unitOfWork: 'own' });
+  await store.transaction(async () => 1,
+    { unitOfWork: 'shared', signal: new AbortController().signal });
+  // @ts-expect-error — an unknown unit-of-work value is a compile error
+  await store.transaction(async () => 1, { unitOfWork: 'private' });
+
+  // the transaction view: exact-scope handles, the named-savepoint
+  // group (async and sync twins), the outbox jobs — and NO close
+  await store.transaction(async (tx) => {
+    await tx.savepoints.create('checkpoint');
+    await tx.savepoints.rollbackTo('checkpoint');
+    await tx.savepoints.release('checkpoint');
+    tx.sync?.savepoints.create('sync-checkpoint');
+    const staged: Promise<string> = tx.jobs === undefined
+      ? Promise.resolve('') : tx.jobs.enqueue('kind', { n: 1 });
+    void staged;
+    // @ts-expect-error — a transaction view does not own the store lifetime
+    void tx.close;
+    return null;
+  });
+  // @ts-expect-error — the root store exposes no savepoint controller
+  void store.savepoints;
+
   // the handle binds the document shape; a read answers it and a write
   // takes it — a wrong document never types
   interface DbUser { id: string; name?: string }

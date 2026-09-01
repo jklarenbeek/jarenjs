@@ -145,3 +145,60 @@ describe('the design sweep', function () {
     }
   });
 });
+
+describe('the packed-consumer extraction is implementation-neutral', function () {
+  it('produces colon-free relative arguments from POSIX and Windows-shaped trees', async function () {
+    const { tarExtractArgs, workRelative } = await import('../../scripts/lib/tar-extract-args.js');
+    assert.deepStrictEqual(
+      tarExtractArgs('/tmp/jaren-packed-x',
+        '/tmp/jaren-packed-x/tarballs/jarenjs-core-1.0.0.tgz',
+        '/tmp/jaren-packed-x/consumer/node_modules/@jarenjs/core'),
+      ['-xzf', 'tarballs/jarenjs-core-1.0.0.tgz',
+        '--strip-components=1', '-C', 'consumer/node_modules/@jarenjs/core']);
+    const windowsArgs = tarExtractArgs('C:\\Users\\ci\\AppData\\Local\\Temp\\jaren-packed-x',
+      'C:\\Users\\ci\\AppData\\Local\\Temp\\jaren-packed-x\\tarballs\\jarenjs-core-1.0.0.tgz',
+      'C:\\Users\\ci\\AppData\\Local\\Temp\\jaren-packed-x\\consumer\\node_modules\\@jarenjs\\core');
+    assert.deepStrictEqual(windowsArgs,
+      ['-xzf', 'tarballs/jarenjs-core-1.0.0.tgz',
+        '--strip-components=1', '-C', 'consumer/node_modules/@jarenjs/core']);
+    assert.ok(windowsArgs.every((arg) => !arg.includes(':') && !arg.includes('\\')),
+      'no argument carries a drive colon or a backslash for either tar brand to mangle');
+    // a path outside the work tree is a defect in the caller, refused
+    assert.throws(() => workRelative('/tmp/work', '/etc/passwd'), /not under/);
+    assert.throws(() => workRelative('C:\\work', 'C:\\work\\..\\other'), /below/);
+  });
+
+  it('the gate carries no implementation-specific tar flag', function () {
+    const script = read('scripts/check-packed-consumers.js');
+    assert.ok(!script.includes('--force-local'),
+      'bsdtar (the tar Windows ships) refuses --force-local by name');
+    assert.match(script, /tarExtractArgs\(work,/,
+      'extraction goes through the pure helper with the one working directory');
+  });
+
+  it('the produced arguments drive a real tar extraction', async function () {
+    const { tarExtractArgs } = await import('../../scripts/lib/tar-extract-args.js');
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync: readBack,
+      existsSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const work = mkdtempSync(join(tmpdir(), 'jaren-tar-args-'));
+    try {
+      const packageDir = join(work, 'package');
+      mkdirSync(join(packageDir, 'src'), { recursive: true });
+      writeFileSync(join(packageDir, 'src', 'index.js'), 'export const ok = 1;\n');
+      const tarball = join(work, 'tarballs', 'pkg-1.0.0.tgz');
+      mkdirSync(join(work, 'tarballs'));
+      execFileSync('tar', ['-czf', 'tarballs/pkg-1.0.0.tgz', 'package'], { cwd: work });
+      const dest = join(work, 'consumer', 'node_modules', 'pkg');
+      mkdirSync(dest, { recursive: true });
+      execFileSync('tar', tarExtractArgs(work, tarball, dest), { cwd: work });
+      assert.ok(existsSync(join(dest, 'src', 'index.js')), 'the stripped layout landed');
+      assert.strictEqual(readBack(join(dest, 'src', 'index.js'), 'utf8'),
+        'export const ok = 1;\n');
+    }
+    finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+});

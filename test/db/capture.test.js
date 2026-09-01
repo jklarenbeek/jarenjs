@@ -316,3 +316,53 @@ describe('session capture', () => {
     }
   });
 });
+
+describe('capture is transparent to transaction options (order 07)', () => {
+  it('an aborted queued transaction never runs and issues no statement — JD2064', async () => {
+    // C3: at v0.57.0 the capture wrapper dropped `signal`, so the
+    // aborted callback ran anyway and its row landed
+    const store = await open();
+    /** @type {(value?: any) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    const holder = store.transaction(async () => { await gate; return 'held'; });
+    const controller = new AbortController();
+    let ran = false;
+    const queued = store.transaction(async (tx) => {
+      ran = true;
+      await tx.collection('notes').put({ id: 'q', ok: true }, 'q');
+    }, { signal: controller.signal }).then(
+      () => ({ value: 'ran' }), (error) => ({ code: error.code }));
+    controller.abort();
+    const outcome = await queued;
+    release();
+    assert.strictEqual(await holder, 'held');
+    assert.strictEqual(ran, false, 'the callback never started');
+    assert.deepStrictEqual(outcome, { code: 'JD2064' });
+    assert.strictEqual(await store.collection('notes').get('q'), undefined);
+    await store.close();
+  });
+
+  it("unitOfWork: 'own' keeps the transaction and root trackers independent", async () => {
+    // C4: at v0.57.0 the capture wrapper dropped `ownWork`, so the
+    // transaction consumed the root tracker's pending state and the
+    // root save reported updated=0
+    const store = await open();
+    await store.entity('Item').create({ id: 'i1', n: 1 });
+    const mine = await store.entity('Item').get('i1');
+    store.entity('Item').put({ ...mine, n: 100 });   // staged on the ROOT tracker
+    await store.transaction(async (tx) => {
+      const items = tx.entity('Item');
+      const inner = await items.get('i1');
+      items.put({ ...inner, n: 7 });
+      const report = await tx.saveChanges();
+      assert.strictEqual(report.updated, 1, "the transaction's value lands first");
+    }, { unitOfWork: 'own' });
+    const report = await store.saveChanges();
+    assert.strictEqual(report.updated, 1,
+      "the root's pending value still saves once afterwards");
+    assert.deepStrictEqual(await store.entity('Item').asNoTracking().get('i1'),
+      { id: 'i1', n: 100 });
+    await store.close();
+  });
+});

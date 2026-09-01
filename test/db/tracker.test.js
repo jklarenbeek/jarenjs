@@ -8,8 +8,11 @@
  * retains nothing (proven by a forced-GC live set in a subprocess).
  *
  * And the half that makes a save a UNIT OF WORK: the tracker's snapshots
- * are a claim about what the database holds, so they advance when the
- * outermost transaction commits and are withdrawn when it rolls back.
+ * are a claim about what the database holds, so they advance the moment
+ * every statement of a save has run — inside an enclosing transaction
+ * the database already holds those rows — while the owning scope keeps
+ * the exact undo delta: its rollback withdraws the advance, a nested
+ * rollback withdraws only its own effects, and outer commit keeps it.
  * The savepoint a save opens for itself is not a commit, and a caller
  * whose retry planned nothing was the silent data loss that proved it.
  */
@@ -503,5 +506,39 @@ describe('the drift gate the unit of work owes itself', () => {
       'the unit of work registers once');
     assert.ok(/onSettle: \(effects\) => \{/.test(store),
       'and the register itself lives in store.js');
+  });
+
+  it('no committed prose or comment re-states the pre-amendment mechanics', () => {
+    // The order-06 audit found three truth surfaces still describing
+    // behaviour the code does not have. Each is pinned here so it
+    // cannot quietly drift back.
+    const read = (relative) => fs.readFileSync(fileURLToPath(
+      new URL(relative, import.meta.url)), 'utf8');
+
+    // 1. tracker.js: the advance runs with the statements; only the
+    //    withdrawal is a settlement effect. The old JSDoc claimed the
+    //    commit phase itself was "registered as a settlement effect".
+    const tracker = read('../../packages/db/src/tracker.js');
+    assert.ok(!/commit phase[^.]*registered as a\s+settlement effect/is.test(tracker),
+      'the commit JSDoc must not say the advance waits for settlement');
+    assert.match(tracker, /Advance phase: runs as soon as every statement/,
+      'the commit JSDoc states the amended D3 mechanics');
+    assert.ok(!/advance[^.]*waits? for the outermost commit/is.test(tracker),
+      'no tracker comment defers the advance to the outermost commit');
+
+    // 2. packages/db/ARCHITECTURE.md: settlement is fenced by token +
+    //    current validity, never owner-guarded.
+    const architecture = read('../../packages/db/ARCHITECTURE.md');
+    assert.ok(!architecture.includes("lease_owner=?"),
+      'the architecture must not present lease_owner as a settlement guard');
+    assert.ok(!/state='leased' AND lease_owner/.test(architecture),
+      'the pre-fence WHERE clause is gone from the architecture');
+    assert.match(architecture, /lease_token/,
+      'the architecture names the token fence that replaced it');
+
+    // 3. this suite's own header carries the amended wording too
+    const self = read('./tracker.test.js');
+    assert.ok(!/advance when the\s+outermost transaction commits/.test(self),
+      'the suite header no longer defers advancement to the outer commit');
   });
 });

@@ -670,8 +670,8 @@ an overlapping one waits its turn. Two concurrent request handlers
 sharing a store both commit, and both report success.
 
 **The store the callback receives is the transaction.** `tx.collection`,
-`tx.entity`, `tx.sync` and `tx.saveChanges()` run as the transaction's
-owner, and `tx.transaction()` nests through its savepoint:
+`tx.entity`, `tx.sync`, `tx.jobs` and `tx.saveChanges()` run as the
+transaction's owner, and `tx.transaction()` nests through its savepoint:
 
 ```js
 await store.transaction(async (tx) => {
@@ -681,6 +681,43 @@ await store.transaction(async (tx) => {
   });
 });
 ```
+
+**A transaction handle lives exactly as long as its own scope.** Every
+`tx` view is pinned to the exact scope that created it, and every
+stateful member — connection work, unit-of-work bookkeeping like
+`add()`, `tx.stats()`, a lazy `query()` cursor's `next()` — checks that
+pin before reading tracker state or issuing a statement. A handle
+retained past its callback, or an OUTER handle used while an async
+inner savepoint is current, refuses **`JD2070`** naming the live
+callback's handle as the fix; it never falls through to the root and
+never follows a newer scope. Inside an inner transaction, use the inner
+callback's own handle (synchronous nesting is unaffected — nothing can
+interleave while a synchronous body is on the stack). `tx.stats()`
+reports the work captured by its exact scope, and root `store.stats()`
+always reports the root's, whichever scope happens to be current.
+
+**A transaction view does not own the store lifetime.** The view
+carries no `close` member, at runtime or in the declarations: closing
+the connection under the view's own savepoint could only corrupt, so
+the root store (or client) remains the only owner of connection
+lifetime.
+
+**Jobs have the same two spellings.** Root `store.jobs.*` finite calls
+(and every worker's own claim/renewal/checkpoint/settlement I/O, no
+matter where the worker was created) take the store gate, so an
+unrelated job write can never join an open application transaction's
+fate. `tx.jobs.*` runs as the exact scope — the transactional-outbox
+spelling: an enqueue or settlement there co-commits with the domain
+transaction and rolls back with it. A checkpoint store keeps the
+root-or-scope ownership of the jobs view that created it.
+
+**Capture is transparent to transaction options.** `{ capture: true }`
+changes how committed records are translated, never queue cancellation
+or tracker ownership: `store.transaction(fn, { signal, unitOfWork })`
+behaves identically with and without capture — an aborted queued
+callback still never runs (`JD2064`), and `unitOfWork: 'own'` still
+gives the callback a tracker of its own without consuming the root's
+pending state.
 
 Nesting is asked for in one of two ways, and the difference is not
 cosmetic:
@@ -737,7 +774,67 @@ that rolls back withdraws only what was registered inside it.
 …)` hands the callback a typed client whose `tx.entities.X` and
 `tx.collections.Y` are the transaction's, with a unit of work of its own
 by default so two handlers never see each other's pending state
-(`unitOfWork: 'shared'` opts back into the client's).
+(`unitOfWork: 'shared'` opts back into the client's). The typed client
+forwards `tx.savepoints` (§5.2) unchanged, and `tx.store` is the
+underlying `TransactionStore`.
+
+### 5.2 Named savepoints: partial rollback without a sentinel exception
+
+Structured nesting already gives partial rollback around a callback: an
+inner `tx.transaction(fn)` is one savepoint, and an outer callback that
+catches its error continues. What it cannot express is
+checkpoint-and-continue from a LATER point without throwing for control
+flow. A live transaction view carries that as `tx.savepoints`:
+
+```js
+await store.transaction(async (tx) => {
+  await tx.savepoints.create('before-optional-import');
+  await tx.collection('docs').put(optionalDoc, 'optional');
+
+  if (!accepted) {
+    await tx.savepoints.rollbackTo('before-optional-import');
+    // the checkpoint remains active and may be rolled back to again
+  }
+
+  await tx.savepoints.release('before-optional-import');
+});
+```
+
+The synchronous twin is `tx.sync.savepoints`, answering values. Root
+`Store`, root `Client`, workers and checkpoint stores expose **none** of
+it: only the transaction that owns the connection may move its stack,
+and a stale or cross-scope view is `JD2070` before any label is even
+looked at.
+
+- **The label never reaches SQL.** It is a map key and diagnostic for
+  that exact transaction; the driver generates the same monotonic
+  `jaren_sp_*` identifier structured nesting uses, so both savepoint
+  kinds share one engine stack and cannot cross-release one another. A
+  structured inner transaction gets its own exact namespace — it cannot
+  target an outer label, and the `JD2070` rule keeps the outer view
+  from destroying an async inner savepoint.
+- **A blank, duplicate or unknown label is `JD2071`**, raised before
+  any statement, so the database and the settlement/capture marks are
+  untouched.
+- **`rollbackTo` follows the engine's semantics exactly.** The target
+  savepoint stays active (a second rollback to it is defined) while
+  every checkpoint created after it is invalidated; the rows after the
+  target are gone. In-memory effects follow the database: settlement
+  effects registered after the checkpoint run their rollback halves in
+  reverse — a `saveChanges()` advance after the checkpoint is
+  withdrawn, its entity intention pending again, so a corrected
+  `saveChanges()` retries it (and an enclosing rollback still withdraws
+  that later advance). Direct collection writes and `tx.jobs` writes
+  are undone by SQLite itself. Session capture observes the engine's
+  final changeset; journal capture truncates to the checkpoint's mark —
+  the two modes agree.
+- **`release` keeps the rows.** It removes the target and every later
+  checkpoint without running rollback effects: those rows remain part
+  of the owning transaction, and their tracker withdrawals stay
+  registered until outer settlement. An outer commit or rollback
+  invalidates whatever names the callback left active.
+- No observer delivery or persisted capture record occurs before the
+  owning transaction commits, exactly as everywhere else.
 
 ## 6. Identity
 
@@ -805,6 +902,8 @@ error.
 | `JD2067` | the lease expired before the call |
 | `JD2068` | a settling call needs the lease the claim returned |
 | `JD2069` | a resumed run does not match the workflow or input it was checkpointed under |
+| `JD2070` | the transaction handle does not belong to the live scope |
+| `JD2071` | the savepoint label is blank, duplicate or unknown |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
@@ -1556,8 +1655,14 @@ zero rows.) An unguarded delete of a missing row is a no-op.
 `saveChanges()` is all-or-nothing inside one transaction. On ANY
 failure the tracker is left exactly as it was before the call — the
 same save can be retried once the cause is gone; a half-applied
-tracker is worse than a rollback. Only a committed save advances
-snapshots (bumped versions, generated keys) and clears pending work.
+tracker is worse than a rollback. A save whose statements all succeed
+advances snapshots (bumped versions, generated keys) and clears pending
+work **immediately**, even inside an enclosing transaction — inside it
+the database does hold those rows, and every later read, plan and
+optimistic guard must agree. The scope that owns the connection holds
+the exact undo delta: an enclosing rollback (or a named-savepoint
+rollback past the save, §5.2) withdraws the advance, a nested rollback
+withdraws only its own effects, and outer commit keeps it.
 
 The return value is data, not a boolean:
 

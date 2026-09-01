@@ -387,18 +387,46 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
     }, what ?? 'a store-level call', signal);
   };
 
+  /**
+   * The ONE checkpoint primitive both savepoint kinds are built on: a
+   * structured `transaction()` nesting opens one and settles it around
+   * its callback, and a scope's manual `savepoint()` opens one the
+   * caller settles by name. Every checkpoint wears a generated
+   * monotonic identifier from the same sequence, so the two kinds share
+   * one engine stack and no caller-supplied label ever reaches SQL.
+   * The handle is opaque: the store's label bookkeeping lives above it.
+   * @returns {any} value-or-promise of `{ name }`
+   */
+  const openCheckpoint = () => {
+    const name = `jaren_sp_${savepointSeq++}`;
+    return chain(raw.exec(dialect.tx.savepoint(name)),
+      () => Object.freeze({ name }));
+  };
+  /** `ROLLBACK TO` a checkpoint: the engine keeps the target active and
+   * discards every savepoint opened after it.
+   * @param {{ name: string }} checkpoint */
+  const rollbackToCheckpoint = (checkpoint) =>
+    raw.exec(dialect.tx.rollbackTo(checkpoint.name));
+  /** `RELEASE` a checkpoint: the engine removes the target and every
+   * savepoint opened after it, keeping their rows.
+   * @param {{ name: string }} checkpoint */
+  const releaseCheckpoint = (checkpoint) =>
+    raw.exec(dialect.tx.release(checkpoint.name));
+
   /** Open one savepoint around `fn`, at whatever depth we are. `fn`
    * receives the scope so nested work can name itself.
    * @param {(scope: any) => any} fn
    */
   const savepointAround = (fn) => {
-    const name = `jaren_sp_${savepointSeq++}`;
-    const succeed = (result) => chain(raw.exec(dialect.tx.release(name)), () => result);
-    const fail = (error) => chain(raw.exec(dialect.tx.rollbackTo(name)), () =>
-      chain(raw.exec(dialect.tx.release(name)), () => {
+    /** @type {any} */
+    let checkpoint;
+    const succeed = (result) => chain(releaseCheckpoint(checkpoint), () => result);
+    const fail = (error) => chain(rollbackToCheckpoint(checkpoint), () =>
+      chain(releaseCheckpoint(checkpoint), () => {
         throw error;
       }));
-    return chain(raw.exec(dialect.tx.savepoint(name)), () => {
+    return chain(openCheckpoint(), (opened_) => {
+      checkpoint = opened_;
       let out;
       const wasOnStack = onStack;
       onStack = true;
@@ -429,6 +457,20 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
     /** A nested savepoint inside this transaction.
      * @param {(scope: any) => any} fn */
     transaction: (fn) => savepointAround(fn),
+    /** A MANUAL checkpoint at the current depth, settled by the caller
+     * through {@link rollbackTo}/{@link release} rather than around a
+     * callback. It is the same primitive structured nesting uses — one
+     * generated-identifier stack — so the two kinds cannot cross-release
+     * each other by name, and no caller-supplied label reaches SQL. */
+    savepoint: () => { requireOpen(); return openCheckpoint(); },
+    /** `ROLLBACK TO` a manual checkpoint: the target stays active; every
+     * savepoint opened after it is discarded with its rows.
+     * @param {{ name: string }} checkpoint */
+    rollbackTo: (checkpoint) => { requireOpen(); return rollbackToCheckpoint(checkpoint); },
+    /** `RELEASE` a manual checkpoint: the target and every savepoint
+     * opened after it are removed; their rows remain.
+     * @param {{ name: string }} checkpoint */
+    release: (checkpoint) => { requireOpen(); return releaseCheckpoint(checkpoint); },
   });
 
   return Object.freeze({

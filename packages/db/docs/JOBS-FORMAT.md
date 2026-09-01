@@ -158,6 +158,29 @@ checkpoints stay its own). It is what a handler that legitimately
 outlives `leaseMs` uses instead of hoping; the worker does it
 automatically (§6).
 
+### Ownership: root calls and the transactional outbox
+
+The handle decides whose transaction a job write belongs to, exactly as
+it does for collections (MODEL-FORMAT §5.1):
+
+- **Root `store.jobs.*`** finite calls take the store gate. An enqueue,
+  claim, checkpoint or settlement made while an unrelated application
+  transaction is open **waits for its commit** (or refuses under
+  `transactions: 'strict'`) and can never join its rollback.
+- **`tx.jobs.*`** — the jobs view a transaction callback receives — runs
+  as that exact scope. This is the **transactional outbox** spelling: an
+  enqueue there becomes visible with the domain transaction's commit and
+  vanishes with its rollback, atomically. A retained `tx.jobs` view is
+  `JD2070` once its scope settles.
+- **A worker is a root-owned long-lived component**, wherever it was
+  created: its claims, renewals, checkpoint stores and settlements take
+  the root gate even when an application transaction happens to be open,
+  and creating a worker through a transaction view does not bind its
+  future loop to that transaction.
+- **A checkpoint store keeps the ownership of the jobs view that created
+  it** — root stores gate, transaction-scoped stores stay pinned to
+  their exact scope and cannot switch.
+
 ## 4. Retry and dead-lettering
 
 A failed attempt (the handler threw or rejected) records
@@ -221,7 +244,14 @@ renew, onOutcome, backoffBase, backoffCap, stopGraceMs })` returns
 - each in-flight attempt's lease is **renewed** while its handler runs,
   at a third of `leaseMs`, so two renewals may fail before the attempt
   is actually at risk. Every renewal replaces the lease. `renew: false`
-  turns it off for a handler that must not outlive its lease;
+  turns it off for a handler that must not outlive its lease.
+  **A renewal that fails for a storage reason is not lease loss**: only
+  the three fence codes (`JD2065`/`JD2066`/`JD2067`) prove the attempt
+  no longer holds the job. On any other failure — a busy database, a
+  contended gate — the current immutable lease stays in force, the
+  handler's signal stays live, and the next renewal is armed; if the
+  lease truly expires first, the next fenced call answers `JD2067` and
+  that is the one recorded loss;
 - an attempt whose lease is **lost** — superseded or expired — has its
   signal aborted with the refusal as the reason, and is then barred from
   settling. It is its own outcome: `lostSettlements`, never a completion
@@ -292,6 +322,18 @@ re-registers the worker's wake-on-enqueue hook and its place in
 `stopAll`), so a cancelled loop can never be revived as an extra
 claimer.
 
+`stop()` carries a second, UNCONDITIONAL obligation beside the
+grace-bounded handler drain, and the two never share one unresolved
+promise: **quiescence**. Before `stop()` resolves, every claim, renewal,
+checkpoint and settlement the worker itself started is cancelled or
+drained — a claim still queued behind an open application transaction
+leaves the connection's queue on the shutdown signal instead of running
+later against a closing store — and no poll or renewal timer stays
+armed or re-arms. A grace timeout may detach a hostile handler
+(`{ drained: false, inFlight }`); it may not leave a database operation
+behind it. This is what makes `worker.stop()` followed by
+`store.close()` release the database file deterministically.
+
 ## 7. The DAG composition
 
 ```js
@@ -325,6 +367,11 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   handler's: a worker winding down inside its `graceMs`, or an attempt
   whose lease has been lost, reaches every task rather than only the
   outermost await.
+- The runner forwards the worker options it declares — `concurrency`,
+  `pollInterval`, `leaseMs`, `owner`, `renew`, `onOutcome`, the backoff
+  pair and `stopGraceMs`. A `runner.stop()` with no override observes
+  the runner's declared `stopGraceMs` default; an explicit
+  `stop({ graceMs })` still wins.
 - **A resume must be the same run.** The workflow document's revision and
   a hash of the run's input are persisted beside its checkpoints, under a
   reserved node id, and pruned with them. A resume that disagrees with

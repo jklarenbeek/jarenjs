@@ -481,3 +481,56 @@ describe('the DAG runner over the fence', () => {
       'the worker files an attempt under its fence token');
   });
 });
+
+describe('the runner forwards stopGraceMs (order 07)', () => {
+  /** A DAG whose one task wedges until its signal aborts, so `stop()`
+   * always waits out its grace period — which makes the grace bound
+   * itself measurable. */
+  const WEDGE_DAG = {
+    $dag: '0.1',
+    nodes: {
+      in: { kind: 'input' },
+      wedge: { kind: 'task', run: 'wedge' },
+      out: { kind: 'output' },
+    },
+    edges: [{ from: 'in', to: 'wedge' }, { from: 'wedge', to: 'out' }],
+  };
+
+  /** Start a wedged run and measure how long `stop(stopArgs)` waits. */
+  const graceOf = async (runnerOptions, stopArgs) => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), jobs: true });
+    /** @type {(value?: any) => void} */
+    let entered = () => {};
+    const inTask = new Promise((resolve) => { entered = () => resolve(undefined); });
+    const runner = createDagJobRunner(store, {
+      compileDag,
+      documents: { flow: WEDGE_DAG },
+      tasks: { wedge: () => new Promise(() => entered()) },
+      pollInterval: 5,
+      ...runnerOptions,
+    });
+    runner.start();
+    await store.jobs.enqueue('flow', { input: 1 });
+    await inTask;
+    const started = Date.now();
+    const outcome = await runner.stop(stopArgs);
+    const waited = Date.now() - started;
+    assert.deepStrictEqual(outcome, { drained: false, inFlight: 1 });
+    await store.close({ graceMs: 20 }).catch(() => undefined);
+    return waited;
+  };
+
+  it('createDagJobRunner({ stopGraceMs }) is the default a bare stop() observes', async () => {
+    // C6: at v0.57.0 the declaration accepted the option but the runner
+    // never forwarded it, so a bare stop() waited the engine's 5 s
+    const waited = await graceOf({ stopGraceMs: 60 }, undefined);
+    assert.ok(waited >= 50 && waited < 2_000,
+      `stop() observed the runner's declared default (waited ${waited}ms)`);
+  });
+
+  it('an explicit stop({ graceMs }) still wins over the declared default', async () => {
+    const waited = await graceOf({ stopGraceMs: 4_000 }, { graceMs: 40 });
+    assert.ok(waited < 1_000,
+      `the explicit override beat the runner default (waited ${waited}ms)`);
+  });
+});

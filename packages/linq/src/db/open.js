@@ -93,6 +93,10 @@ export async function open(model, options) {
       capabilities: tx.capabilities,
       ...handlesOf(tx),
       transaction: (fn) => tx.transaction((nested) => fn(transactionClient(nested))),
+      // the named-savepoint group (MODEL-FORMAT §5.2), forwarded as it
+      // is: partial rollback belongs to the transaction that owns the
+      // connection, so the root client deliberately has no twin
+      savepoints: tx.savepoints,
     };
     if (tx.saveChanges !== undefined) {
       inner.saveChanges = () => tx.saveChanges();

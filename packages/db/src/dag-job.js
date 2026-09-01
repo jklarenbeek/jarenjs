@@ -50,7 +50,8 @@ const fingerprint = (value) => hashContent(canonicalizeJson(value ?? null));
  *   tasks?: Record<string, Function>,
  *   concurrency?: number, pollInterval?: number, leaseMs?: number,
  *   owner?: string, renew?: boolean, onOutcome?: (event: any) => void,
- *   backoffBase?: number, backoffCap?: number }} options
+ *   backoffBase?: number, backoffCap?: number,
+ *   stopGraceMs?: number }} options
  * @returns {{ start: () => any, stop: (options?: any) => Promise<any>, stats: () => any }}
  */
 export function createDagJobRunner(store, options) {
@@ -109,11 +110,11 @@ export function createDagJobRunner(store, options) {
    * a run's feet, or the same run id handed a different input, both
    * produce checkpoints that describe a computation nobody asked for.
    */
-  const requireSameRun = (context, jobId, revision, inputHash) => {
-    const loaded = context.checkpoints.load(jobId);
+  const requireSameRun = async (context, jobId, revision, inputHash) => {
+    const loaded = await context.checkpoints.load(jobId);
     const stored = loaded?.values?.[RUN_IDENTITY_NODE];
     if (stored === undefined) {
-      context.checkpoints.save(jobId, RUN_IDENTITY_NODE, { revision, inputHash });
+      await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, { revision, inputHash });
       return;
     }
     const differs = [];
@@ -146,7 +147,7 @@ export function createDagJobRunner(store, options) {
       const runKey = runKeyOf(context.job.id, context.job.lease.token);
       active.set(runKey, context);
       try {
-        requireSameRun(context, context.job.id, revision, fingerprint(input));
+        await requireSameRun(context, context.job.id, revision, fingerprint(input));
         // the handler's signal reaches every task: a worker winding down
         // inside its grace period, or a lease this attempt has lost
         return await compiled.run(input, { runId: runKey, signal: context.signal });
@@ -167,5 +168,8 @@ export function createDagJobRunner(store, options) {
     onOutcome: options.onOutcome,
     backoffBase: options.backoffBase,
     backoffCap: options.backoffCap,
+    // the runner's declared default for `stop()` with no override; an
+    // explicit `stop({ graceMs })` still wins inside the worker
+    stopGraceMs: options.stopGraceMs,
   });
 }

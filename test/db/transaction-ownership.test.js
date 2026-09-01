@@ -308,6 +308,10 @@ describe('the store a transaction callback receives carries the whole surface', 
 
     const inside = await store.transaction(async (tx) => {
       const notes = tx.entity('Note');
+      // the untracked door is scope-bound too, async and sync alike
+      assert.deepStrictEqual(await notes.asNoTracking().get('n1'), { id: 'n1', stars: 1 });
+      assert.deepStrictEqual(tx.sync.entity('Note').asNoTracking().get('n1'),
+        { id: 'n1', stars: 1 });
       notes.add({ id: 'n2', stars: 5 });
       const report = await tx.saveChanges();
       assert.strictEqual(report.inserted, 1);
@@ -344,6 +348,22 @@ describe('the store a transaction callback receives carries the whole surface', 
     await store.close();
   });
 
+  it('a transaction view exposes no close, at runtime — the root owns the connection', async () => {
+    // C9: `tx.close()` used to close the raw connection mid-savepoint and
+    // leak raw ERR_INVALID_STATE from settlement. The member is ABSENT
+    // rather than a second way to close.
+    const store = await openStore(ENTITY_MODEL, { driver: nodeDriver() });
+    const out = await store.transaction(async (tx) => {
+      assert.strictEqual(tx.close, undefined);
+      await tx.entity('Note').create({ id: 'kept', stars: 1 });
+      return 'settled-normally';
+    });
+    assert.strictEqual(out, 'settled-normally');
+    assert.deepStrictEqual(await store.entity('Note').asNoTracking().get('kept'),
+      { id: 'kept', stars: 1 });
+    await store.close();
+  });
+
   it('the synchronous store-level surface refuses while a transaction is open', async () => {
     const store = await openStore(ENTITY_MODEL, { driver: nodeDriver() });
     await store.entity('Note').create({ id: 'n1', stars: 1 });
@@ -369,6 +389,163 @@ describe('the store a transaction callback receives carries the whole surface', 
     assert.strictEqual(store.sync.execute(document), 'n1');
     assert.strictEqual(store.sync.entity('Note').load().length, 1);
     assert.strictEqual(typeof store.sync.explain(document), 'object');
+    await store.close();
+  });
+});
+
+describe('a transaction handle is pinned to its exact scope (JD2070)', () => {
+  const isScopeRefusal = (outcome) => {
+    assert.strictEqual(outcome.code, 'JD2070');
+    assert.match(outcome.message, /LIVE transaction callback/);
+  };
+
+  it('settled_transaction_handle_cannot_join_a_later_transaction', async () => {
+    // C1: at v0.57.0 a retained handle followed whatever scope was
+    // current later, and its write shared the later owner's rollback
+    const store = await openStore(MODEL, { driver: nodeDriver() });
+    /** @type {any} */
+    let retained;
+    /** @type {any} */
+    let retainedTx;
+    await store.transaction(async (tx) => {
+      retained = tx.collection('docs');
+      retainedTx = tx;
+      await retained.put({ id: 'first' }, 'first');
+    });
+    // every stateful member of the settled view refuses before a statement
+    isScopeRefusal(await settle(retained.put({ id: 'escaped' }, 'escaped')));
+    isScopeRefusal(await settle(retained.get('first')));
+    isScopeRefusal(await settle(retainedTx.transaction(async () => {})));
+    isScopeRefusal(await settle(retainedTx.dataVersion()));
+    assert.throws(() => retainedTx.sync.collection('docs').put({ id: 's' }, 's'),
+      (error) => /** @type {any} */ (error).code === 'JD2070');
+
+    // the later transaction: its own row rolls back, the escaped
+    // handle's work never ran, so the rollback cannot take it
+    const out = await settle(store.transaction(async (tx) => {
+      await tx.collection('docs').put({ id: 'owner' }, 'owner');
+      await retained.put({ id: 'escaped' }, 'escaped');
+      throw new Error('unreached');
+    }));
+    isScopeRefusal(out);
+    assert.strictEqual(await store.collection('docs').get('owner'), undefined,
+      'the later owner rolled back its own write');
+    assert.strictEqual(await store.collection('docs').get('escaped'), undefined,
+      'the escaped write never ran at all');
+    assert.deepStrictEqual(await store.collection('docs').get('first'), { id: 'first' },
+      'the settled transaction kept its own commit');
+    await store.close();
+  });
+
+  it('a retained entity handle cannot smuggle pending work into a later scope', async () => {
+    const store = await openStore(ENTITY_MODEL, { driver: nodeDriver() });
+    /** @type {any} */
+    let notes;
+    /** @type {any} */
+    let retainedTx;
+    await store.transaction(async (tx) => {
+      notes = tx.entity('Note');
+      retainedTx = tx;
+      await tx.saveChanges();
+    }, { unitOfWork: 'own' });
+    // local unit-of-work bookkeeping carries the identity too: add()
+    // on a settled handle is JD2070, never a document staged into
+    // whatever unit of work is in force later
+    assert.throws(() => notes.add({ id: 'smuggled', stars: 1 }),
+      (error) => /** @type {any} */ (error).code === 'JD2070');
+    isScopeRefusal(await settle(retainedTx.saveChanges()));
+    isScopeRefusal(await settle(notes.create({ id: 'direct', stars: 1 })));
+
+    const report = await store.transaction(async (tx) => {
+      await tx.saveChanges();
+      return tx.stats().tracker;
+    }, { unitOfWork: 'own' });
+    assert.strictEqual(report.pendingInserts, 0,
+      'the later own unit of work holds nothing the retained handle staged');
+    assert.deepStrictEqual(await store.entity('Note').asNoTracking().load(), []);
+    await store.close();
+  });
+
+  it('root stats report rootWork while tx stats report the exact scope, own unit open', async () => {
+    const store = await openStore(ENTITY_MODEL, { driver: nodeDriver() });
+    store.entity('Note').add({ id: 'root-pending', stars: 0 });
+    await store.transaction(async (tx) => {
+      tx.entity('Note').add({ id: 'tx-pending', stars: 1 });
+      tx.entity('Note').add({ id: 'tx-pending-2', stars: 2 });
+      assert.strictEqual(tx.stats().tracker.pendingInserts, 2,
+        "the view's stats are its exact scope's unit of work");
+      assert.strictEqual(store.stats().tracker.pendingInserts, 1,
+        'root stats stay the root tracker while the own-unit scope is current');
+    }, { unitOfWork: 'own' });
+    assert.strictEqual(store.stats().tracker.pendingInserts, 1,
+      'nothing changed merely because a scope opened and settled');
+    await store.close();
+  });
+
+  it('a root entity handle first constructed inside an own-unit transaction binds rootWork', async () => {
+    const store = await openStore(ENTITY_MODEL, { driver: nodeDriver() });
+    await store.transaction(async (tx) => {
+      // FIRST construction of both root handles, while the own-unit
+      // scope is current: the local bookkeeping goes to the ROOT
+      // tracker, never to this transaction's
+      store.entity('Note').add({ id: 'root-staged', stars: 5 });
+      store.sync.entity('Note').add({ id: 'root-staged-sync', stars: 6 });
+      assert.strictEqual(tx.stats().tracker.pendingInserts, 0,
+        "the transaction's own unit of work saw neither");
+      await tx.entity('Note').create({ id: 'tx-own', stars: 1 });
+    }, { unitOfWork: 'own' });
+    const report = await store.saveChanges();
+    assert.strictEqual(report.inserted, 2, 'the root save writes both staged documents once');
+    assert.deepStrictEqual(
+      (await store.entity('Note').asNoTracking().load()).map((note) => note.id).sort(),
+      ['root-staged', 'root-staged-sync', 'tx-own']);
+    await store.close();
+  });
+
+  it('an_outer_handle_cannot_fall_into_an_async_inner_savepoint', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver() });
+    await store.transaction(async (tx) => {
+      await tx.collection('docs').put({ id: 'outer' }, 'outer');
+      const inner = await settle(tx.transaction(async (nested) => {
+        await nested.collection('docs').put({ id: 'inner' }, 'inner');
+        // the OUTER view while the inner scope is current: JD2070, so
+        // the outer handle can never write inside the inner savepoint
+        isScopeRefusal(await settle(tx.collection('docs').put({ id: 'fell-in' }, 'fell-in')));
+        throw new Error('inner rollback');
+      }));
+      assert.strictEqual(inner.message, 'inner rollback');
+      // back in the outer scope the same handle works again
+      await tx.collection('docs').put({ id: 'outer-2' }, 'outer-2');
+    });
+    assert.deepStrictEqual(
+      await Promise.all(['outer', 'inner', 'fell-in', 'outer-2']
+        .map((id) => store.collection('docs').get(id))),
+      [{ id: 'outer' }, undefined, undefined, { id: 'outer-2' }],
+      'exactly the inner rows rolled back; the refused write never ran');
+    await store.close();
+  });
+
+  it('a lazy query cursor can neither begin nor continue outside its exact scope', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver() });
+    /** @type {any} */
+    let begun;
+    /** @type {any} */
+    let unbegun;
+    await store.transaction(async (tx) => {
+      await tx.collection('docs').put({ id: 'a', n: 1 }, 'a');
+      await tx.collection('docs').put({ id: 'b', n: 2 }, 'b');
+      const document = { $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it.id' };
+      // a full for-await inside the scope walks the wrapped cursor
+      const walked = [];
+      for await (const id of tx.collection('docs').query(document)) walked.push(id);
+      assert.deepStrictEqual(walked, ['a', 'b']);
+      begun = tx.collection('docs').query(document);
+      assert.deepStrictEqual(await begun.next(), { value: 'a', done: false },
+        'iteration inside the scope works');
+      unbegun = tx.collection('docs').query(document);
+    });
+    isScopeRefusal(await settle(begun.next()));
+    isScopeRefusal(await settle(unbegun.next()));
     await store.close();
   });
 });

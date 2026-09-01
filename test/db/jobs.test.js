@@ -16,8 +16,11 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { DatabaseSync } from 'node:sqlite';
+
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { wasmDriver } from '@jarenjs/db/wasm';
 
 const MODEL = {
   $model: '0.1',
@@ -664,6 +667,236 @@ it('a cancelled loop stops renewing: no store write after stop() gave up', async
     assert.strictEqual((await store.jobs.get('j')).state, 'failed',
       'the job is scheduled for its retry, as any failed attempt is');
     await worker.stop();
+    await store.close();
+  });
+});
+
+/** A promise plus its resolver, for holding a transaction open. */
+const defer = () => {
+  /** @type {(v?: any) => void} */
+  let resolve = () => {};
+  const promise = new Promise((r) => { resolve = r; });
+  return { promise, resolve };
+};
+
+const settle = (p) => Promise.resolve(p).then(
+  (value) => ({ value }), (error) => ({ code: error.code, message: error.message }));
+
+describe('root jobs and tx.jobs — the ownership split (order 07)', () => {
+  it('concurrent_root_job_enqueue_never_joins_awaited_transaction', async () => {
+    // C2: at v0.57.0 the ungated root enqueue joined the open
+    // transaction and rolled back with it
+    const store = await open();
+    const gate = defer();
+    const doomed = settle(store.transaction(async (tx) => {
+      await tx.collection('x').put({ id: 'doomed-row' }, 'doomed-row');
+      await gate.promise;
+      throw new Error('abort');
+    }));
+    const enqueued = store.jobs.enqueue('work', { n: 1 }, { id: 'survivor' });
+    gate.resolve();
+    await doomed;
+    await enqueued;
+    const job = await store.jobs.get('survivor');
+    assert.strictEqual(job?.state, 'pending',
+      'the root enqueue waited for the gate and survived the unrelated rollback');
+    assert.strictEqual(await store.collection('x').get('doomed-row'), undefined);
+    await store.close();
+  });
+
+  it('tx_jobs_enqueue_co_commits_with_domain_transaction', async () => {
+    const store = await open();
+    await store.transaction(async (tx) => {
+      await tx.jobs.enqueue('work', {}, { id: 'committed' });
+    });
+    assert.strictEqual((await store.jobs.get('committed'))?.state, 'pending');
+    await settle(store.transaction(async (tx) => {
+      await tx.jobs.enqueue('work', {}, { id: 'rolled-back' });
+      assert.notStrictEqual(await tx.jobs.get('rolled-back'), undefined,
+        'inside the transaction the outbox row is visible');
+      throw new Error('abort');
+    }));
+    assert.strictEqual(await store.jobs.get('rolled-back'), undefined,
+      'the outbox enqueue shares the domain transaction\'s fate');
+    await store.close();
+  });
+
+  it('a retained tx.jobs view is JD2070; the root surface it shadows still works', async () => {
+    const store = await open();
+    /** @type {any} */
+    let escapedJobs;
+    /** @type {any} */
+    let escapedCheckpoints;
+    await store.jobs.enqueue('work', {}, { id: 'j1' });
+    const claimed = await store.jobs.claim({ kinds: ['work'], owner: 'w' });
+    await store.transaction(async (tx) => {
+      escapedJobs = tx.jobs;
+      escapedCheckpoints = tx.jobs.checkpointsFor(claimed);
+    });
+    assert.strictEqual((await settle(escapedJobs.enqueue('work', {}))).code, 'JD2070');
+    assert.strictEqual((await settle(escapedJobs.complete(claimed.lease, null))).code, 'JD2070');
+    assert.strictEqual(
+      (await settle(escapedCheckpoints.save('j1', 'node', 1))).code, 'JD2070',
+      'a checkpoint store keeps the scope ownership of the view that created it');
+    assert.strictEqual(await store.jobs.complete(claimed.lease, { ok: true }), true);
+    await store.close();
+  });
+
+  it('root claim and settlement wait for an unrelated transaction, never share its fate', async () => {
+    const store = await open();
+    await store.jobs.enqueue('work', {}, { id: 'j1' });
+    const gate = defer();
+    let released = false;
+    const doomed = settle(store.transaction(async (tx) => {
+      await tx.collection('x').put({ id: 'r' }, 'r');
+      await gate.promise;
+      throw new Error('abort');
+    }));
+    const claiming = store.jobs.claim({ kinds: ['work'], owner: 'w' })
+      .then((job) => ({ job, afterRelease: released }));
+    released = true;
+    gate.resolve();
+    await doomed;
+    const { job, afterRelease } = await claiming;
+    assert.strictEqual(afterRelease, true, 'the claim waited on the gate');
+    assert.strictEqual(job.id, 'j1');
+    assert.strictEqual((await store.jobs.get('j1')).state, 'leased',
+      'the claim landed after — and independent of — the rollback');
+    assert.strictEqual(await store.jobs.complete(job.lease, null), true);
+    await store.close();
+  });
+});
+
+describe('transient renewal failures are not lease loss (order 07)', () => {
+  /** A driver whose renewal statement fails ONCE with the error the
+   * test injects — the C5 reproduction's exact seam. Injected at the
+   * RAW binding, because the worker's gated renewal prepares through
+   * the driver scope, which reaches the raw binding directly. */
+  const failingOnceDriver = (makeError) => {
+    const state = { armed: false, failures: 0 };
+    const handle = {
+      synchronous: true,
+      /** @param {string} dbPath */
+      open: (dbPath) => {
+        const db = new DatabaseSync(dbPath);
+        return {
+          /** @param {string} sql */
+          exec: (sql) => db.exec(sql),
+          /** @param {string} sql */
+          prepare: (sql) => {
+            const statement = db.prepare(sql);
+            const wrapped = {
+              run: (params = []) => statement.run(...params),
+              get: (params = []) => statement.get(...params),
+              all: (params = []) => statement.all(...params),
+            };
+            if (!/SET lease_until=\?, lease_token=\?/.test(sql)) return wrapped;
+            return {
+              ...wrapped,
+              get: (params = []) => {
+                if (state.armed) {
+                  state.armed = false;
+                  state.failures += 1;
+                  throw makeError();
+                }
+                return statement.get(...params);
+              },
+            };
+          },
+          close: () => db.close(),
+        };
+      },
+    };
+    return { state, driver: wasmDriver(handle) };
+  };
+
+  /** Poll until `read()` satisfies `done`, or fail after `ms`. */
+  const until = async (read, done, ms = 8_000) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const value = await read();
+      if (done(value)) return value;
+      assert.ok(Date.now() < deadline, `timed out at ${JSON.stringify(value)}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+
+  it('transient_renewal_storage_failure_does_not_lose_the_attempt', async () => {
+    // C5: at v0.57.0 an injected SQLITE_BUSY on the first renewal
+    // aborted the handler and reported { outcome: 'lost', code: 'JD2005' }
+    const { state, driver } = failingOnceDriver(() => {
+      const error = new Error('database is locked');
+      /** @type {any} */ (error).code = 'SQLITE_BUSY';
+      return error;
+    });
+    const store = await openStore(MODEL, { driver, jobs: {} });
+    /** @type {any[]} */
+    const outcomes = [];
+    const finished = defer();
+    const gate = defer();
+    let sawAbort = false;
+    const worker = store.jobs.createWorker({
+      handlers: {
+        slow: async (_payload, { signal }) => {
+          signal.addEventListener('abort', () => { sawAbort = true; });
+          await gate.promise;
+          return { ok: true };
+        },
+      },
+      leaseMs: 600,
+      pollInterval: 10,
+      onOutcome: (event) => { outcomes.push(event); finished.resolve(); },
+    });
+    await store.jobs.enqueue('slow', {});
+    state.armed = true;
+    worker.start();
+    // the failed renewal happens, no signal aborts, and a LATER renewal
+    // replaces the lease normally
+    await until(() => worker.stats(),
+      (stats) => state.failures === 1 && stats.renewals >= 1);
+    assert.strictEqual(sawAbort, false, 'the handler signal stayed live throughout');
+    gate.resolve();
+    await finished.promise;
+    await worker.stop();
+    assert.deepStrictEqual(outcomes.map((o) => o.outcome), ['completed'],
+      'the one attempt completes');
+    const stats = worker.stats();
+    assert.strictEqual(stats.lostSettlements, 0, 'no lost outcome was minted');
+    assert.strictEqual(stats.completions, 1);
+    await store.close();
+  });
+
+  it('the same failure wearing a fence code aborts and records exactly one loss', async () => {
+    const { state, driver } = failingOnceDriver(() => {
+      const error = new Error('renew() refused: the lease expired');
+      /** @type {any} */ (error).code = 'JD2067';
+      return error;
+    });
+    const store = await openStore(MODEL, { driver, jobs: {} });
+    /** @type {any[]} */
+    const outcomes = [];
+    const finished = defer();
+    const worker = store.jobs.createWorker({
+      handlers: {
+        slow: (_payload, { signal }) => new Promise((resolve) => {
+          signal.addEventListener('abort', () => resolve('too late'), { once: true });
+        }),
+      },
+      leaseMs: 600,
+      pollInterval: 10,
+      onOutcome: (event) => { outcomes.push(event); finished.resolve(); },
+    });
+    await store.jobs.enqueue('slow', {});
+    state.armed = true;
+    worker.start();
+    await finished.promise;
+    await worker.stop();
+    assert.deepStrictEqual(
+      outcomes.map((o) => ({ outcome: o.outcome, code: o.code })),
+      [{ outcome: 'lost', code: 'JD2067' }],
+      'only the three fence codes prove the attempt lost its lease — exactly one loss');
+    assert.strictEqual(worker.stats().lostSettlements, 1);
+    assert.strictEqual(worker.stats().completions, 0);
     await store.close();
   });
 });
