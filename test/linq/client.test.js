@@ -115,8 +115,17 @@ describe('open(): the store behind a client', () => {
     assert.deepStrictEqual(Object.keys(client.collections), []);
     assert.ok(Object.isFrozen(client) && Object.isFrozen(client.entities) && Object.isFrozen(client.entities.User));
     assert.strictEqual(client.entities.Nope, undefined, 'no Proxy: an unknown name is undefined');
-    // the pass-throughs
-    assert.strictEqual(await client.transaction(async (tx) => (await tx.entity('User').get('nope')) ?? 42), 42);
+    // the pass-throughs, and the transaction client: the callback gets a
+    // client of the same shape, over the store INSIDE the transaction
+    assert.strictEqual(await client.transaction(async (tx) => {
+      assert.deepStrictEqual(Object.keys(tx.entities), Object.keys(client.entities));
+      assert.ok(Object.isFrozen(tx) && Object.isFrozen(tx.entities));
+      assert.strictEqual(typeof tx.saveChanges, 'function');
+      assert.strictEqual(typeof tx.transaction, 'function');
+      return (await tx.store.entity('User').get('nope'))
+        ?? (await tx.entities.User.where((u) => u.id.eq('nope')).firstOrDefault())
+        ?? 42;
+    }), 42);
     assert.strictEqual(typeof client.store.entity, 'function');
     await client.close();
   });
@@ -364,12 +373,16 @@ describe('link() and unlink(): the store\'s membership API, typed by the relatio
     assert.throws(() => client.entities.Post.link(1, 'author', ada.id), codeIs('JL0107', /oneToOne/));
     assert.throws(() => client.entities.User.unlink(ada, 'email', 'x'), codeIs('JL0107', /'labels'/));
     assert.throws(() => client.entities.Comment.link(1, 'nope', 'x'), codeIs('JL0107', /declares none/));
+    // a key the SAVE allocates is attached from the insert's RETURNING —
+    // one save, the row and its join row
     const draft = client.entities.Post.add({ title: 'draft', stars: 0, authorId: ada.id });
-    assert.throws(() => client.entities.Post.link(draft, 'tags', 'admin'),
+    client.entities.Post.link(draft, 'tags', 'admin');
+    assert.strictEqual((await client.saveChanges()).joinInserted, 1);
+    // …and a document that belongs to nothing tracked still refuses
+    assert.throws(() => client.entities.Post.link({ title: 'never added' }, 'tags', 'admin'),
       codeIs('JD2003', /save the entity first, then attach/));
-    await client.saveChanges();
     const saved = await client.entities.Post.where((p) => p.title.eq('draft')).single();
-    client.entities.Post.link(saved, 'tags', 'admin');
+    client.entities.Post.link(saved, 'tags', 'dev');
     assert.strictEqual((await client.saveChanges()).joinInserted, 1);
     assert.strictEqual(client.store.stats().tracker.pendingMemberships, 0);
     await client.close();
@@ -512,5 +525,126 @@ describe('the chain and the client emit jaren-query documents', () => {
     finally {
       await client.close();
     }
+  });
+});
+
+describe('transaction(): a typed client bound to the transaction', () => {
+  it('hands the callback the same handles, over the store inside the transaction', async () => {
+    const { client, ada } = await seeded();
+    const out = await client.transaction(async (tx) => {
+      assert.deepStrictEqual(Object.keys(tx.entities), Object.keys(client.entities));
+      assert.deepStrictEqual(Object.keys(tx.collections), Object.keys(client.collections));
+      assert.strictEqual(tx.capabilities, client.capabilities);
+      // the chain, the graph and the unit of work are all there
+      const titles = await tx.entities.Post
+        .where((p) => p.authorId.eq(ada.id)).select((p) => p.title).toArray();
+      const graph = await tx.entities.User.include((u) => u.posts).toArray();
+      tx.entities.Post.add({ title: 'inside', stars: 2, authorId: ada.id });
+      const saved = await tx.saveChanges();
+      assert.strictEqual(saved.inserted, 1);
+      return { titles: titles.sort(), roots: graph.length };
+    });
+    assert.deepStrictEqual(out, { titles: ['p1', 'p2', 'p4'], roots: 2 });
+    assert.strictEqual(await client.entities.Post.where((p) => p.title.eq('inside')).count(), 1);
+    await client.close();
+  });
+
+  it('the transaction rolls back everything its client wrote', async () => {
+    const { client, ada } = await seeded();
+    const before = await client.entities.Post.count();
+    await assert.rejects(() => client.transaction(async (tx) => {
+      tx.entities.Post.add({ title: 'doomed', stars: 0, authorId: ada.id });
+      await tx.saveChanges();
+      await tx.entities.Label.create({ name: 'doomed-label' });
+      throw new Error('abort');
+    }), /abort/);
+    assert.strictEqual(await client.entities.Post.count(), before);
+    assert.strictEqual(await client.entities.Label.where((l) => l.name.eq('doomed-label')).count(), 0);
+    await client.close();
+  });
+
+  it('two transactions hold independent trackers, and neither sees the other', async () => {
+    const { client, ada } = await seeded();
+    const seed = await client.entities.User.get(ada.id);
+    // a change staged on the CLIENT's own unit of work
+    client.entities.User.put({ ...seed, age: 99 });
+
+    const inside = await client.transaction(async (tx) => {
+      const mine = await tx.entities.User.get(ada.id);
+      assert.strictEqual(mine.age, 36, "the client's pending change is not in here");
+      tx.entities.User.put({ ...mine, age: 7 });
+      assert.strictEqual(tx.store.stats().tracker.tracked, 1,
+        'this transaction tracks its own record, not the client’s');
+      return (await tx.saveChanges()).updated;
+    });
+    assert.strictEqual(inside, 1);
+    assert.strictEqual((await client.entities.User.asNoTracking().get(ada.id)).age, 7);
+
+    // one rolling back leaves the other's pending change intact
+    await assert.rejects(() => client.transaction(async (tx) => {
+      const mine = await tx.entities.User.get(ada.id);
+      tx.entities.User.put({ ...mine, age: 1000 });
+      await tx.saveChanges();
+      throw new Error('abort');
+    }), /abort/);
+    assert.strictEqual((await client.saveChanges()).updated, 1,
+      "the client's own pending change survived both transactions");
+    assert.strictEqual((await client.entities.User.asNoTracking().get(ada.id)).age, 99);
+    await client.close();
+  });
+
+  it("unitOfWork: 'shared' saves what was staged outside the transaction", async () => {
+    const { client, ada } = await seeded();
+    const seed = await client.entities.User.get(ada.id);
+    client.entities.User.put({ ...seed, age: 51 });
+    const report = await client.transaction(
+      async (tx) => tx.saveChanges(), { unitOfWork: 'shared' });
+    assert.strictEqual(report.updated, 1);
+    assert.strictEqual((await client.entities.User.asNoTracking().get(ada.id)).age, 51);
+    await client.close();
+  });
+
+  it('a root handle awaited from inside the transaction is JD0012, naming the fix', async () => {
+    const { client } = await seeded({ queueTimeout: 40 });
+    const started = Date.now();
+    await assert.rejects(() => client.transaction(async (tx) => {
+      await tx.entities.User.count();
+      // the mistake: the CLIENT's handle, from inside the transaction
+      // that owns the connection — it waits for itself
+      await client.entities.User.count();
+    }), (error) => /** @type {any} */ (error).code === 'JD0012'
+      && /tx\.entities/.test(/** @type {any} */ (error).message));
+    assert.ok(Date.now() - started < 2000, 'bounded, never a hang');
+    await client.close();
+  });
+
+  it('it nests, and the nested client is bound to the savepoint', async () => {
+    const { client, ada } = await seeded();
+    await client.transaction(async (tx) => {
+      tx.entities.Post.add({ title: 'outer', stars: 1, authorId: ada.id });
+      await tx.saveChanges();
+      await assert.rejects(() => tx.transaction(async (inner) => {
+        inner.entities.Post.add({ title: 'inner', stars: 1, authorId: ada.id });
+        await inner.saveChanges();
+        throw new Error('inner boom');
+      }), /inner boom/);
+    });
+    assert.strictEqual(await client.entities.Post.where((p) => p.title.eq('outer')).count(), 1);
+    assert.strictEqual(await client.entities.Post.where((p) => p.title.eq('inner')).count(), 0);
+    await client.close();
+  });
+
+  it('registers a live query from inside the transaction, and it outlives it', async () => {
+    const { client, ada } = await seeded({ capture: true });
+    const live = await client.transaction(async (tx) =>
+      tx.live(tx.entities.Post.where((p) => p.stars.ge(4))));
+    assert.deepStrictEqual(live.result.rows.map((/** @type {any} */ r) => r.title).sort(),
+      ['p3', 'p4']);
+    // the registration survives the commit, and later writes reach it
+    await client.entities.Post.create({ title: 'p5', stars: 5, authorId: ada.id });
+    assert.deepStrictEqual(live.result.rows.map((/** @type {any} */ r) => r.title).sort(),
+      ['p3', 'p4', 'p5']);
+    live.close();
+    await client.close();
   });
 });

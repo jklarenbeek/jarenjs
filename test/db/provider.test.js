@@ -129,8 +129,10 @@ describe('one edge, one direction (D6)', () => {
     const pattern = new RegExp(`['"](${names.map((n) => n.replace('/', '\\/')).join('|')})(?:\\/[^'"]*)?['"]`, 'g');
     return [...code.matchAll(pattern)].map((m) => m[1]);
   };
+  // `recursive` yields the platform's separator, and the edge predicate
+  // below is spelled with forward slashes — normalise once, here.
   const walk = (dir) => fs.readdirSync(dir, { recursive: true, encoding: 'utf8' })
-    .filter((f) => /\.(js|ts)$/.test(f)).map((f) => `${dir}/${f}`);
+    .filter((f) => /\.(js|ts)$/.test(f)).map((f) => `${dir}/${f.replaceAll('\\', '/')}`);
 
   it("db's manifest and sources never name linq", () => {
     const db = JSON.parse(fs.readFileSync('packages/db/package.json', 'utf8'));

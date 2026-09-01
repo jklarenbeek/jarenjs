@@ -520,8 +520,14 @@ try {
       installed.add(dep);
       const dest = join(modulesDir, dep);
       mkdirSync(dest, { recursive: true });
-      execFileSync('tar', ['-xzf', /** @type {string} */ (tarballs.get(dep)),
-        '--strip-components=1', '-C', dest]);
+      // A Windows path reaches tar as `C:\…`, which GNU tar reads as the
+      // archive `…` on the host `C` and whose separators it then mangles.
+      // Forward slashes plus `--force-local` are understood by both the
+      // GNU tar on PATH and the bsdtar Windows ships.
+      const local = (/** @type {string} */ path) => path.replaceAll('\\', '/');
+      execFileSync('tar', ['--force-local', '-xzf',
+        local(/** @type {string} */ (tarballs.get(dep))),
+        '--strip-components=1', '-C', local(dest)]);
     };
     for (const dep of declaredClosure(byName, name)) install(dep);
 

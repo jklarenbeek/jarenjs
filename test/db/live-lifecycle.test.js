@@ -152,9 +152,10 @@ describe('the leak proof', () => {
       const store = await openStore(MODEL, { driver: nodeDriver(), capture: true });
       const rows = store.collection('rows');
       const blob = 'x'.repeat(500);
-      await store.transaction(async () => {
+      await store.transaction(async (tx) => {
+        const inside = tx.collection('rows');
         for (let i = 0; i < 2000; i++) {
-          await rows.insert({ id: 'r' + i, n: i, blob });
+          await inside.insert({ id: 'r' + i, n: i, blob });
         }
       });
       const round = async () => {

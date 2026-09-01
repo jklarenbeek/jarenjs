@@ -67,7 +67,6 @@ const CORPUS = [
 const UNEMBEDDABLE = memory('bare', 'pi rho sigma', { tags: ['greek'] });
 
 const dir = mkdtempSync(join(tmpdir(), 'jaren-ledger-db-'));
-after(() => rmSync(dir, { recursive: true, force: true }));
 
 /** The adapters a test opened, closed for it whatever it asserted. */
 const opened = [];
@@ -76,8 +75,12 @@ async function storage(options = {}) {
   opened.push(adapter);
   return adapter;
 }
+// the directory goes LAST and with retries: a database file cannot be
+// removed while its handle is open, and Windows releases the handle a
+// moment after close() returns rather than within it
 after(async () => {
   for (const adapter of opened) await adapter.close();
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe('the db-backed ledger adapter — the four methods', function () {

@@ -17,9 +17,15 @@
  * parent-first, deletes child-first, updates in between, join rows
  * after both endpoints exist. A foreign-key cycle among the entities
  * being inserted or deleted is `JD0040`, reported, never a deadlock.
- * The whole save is one transaction; the tracker is mutated ONLY
- * after commit, so a failed save leaves it exactly as it was and a
- * retry is possible.
+ * The whole save is one transaction, and the tracker is mutated only
+ * after its statements have run — so a save that FAILS leaves the
+ * tracker exactly as it was and a retry is possible. A save that
+ * SUCCEEDS inside a larger transaction advances at once (inside it, the
+ * database does hold those rows, and every later plan and optimistic
+ * guard has to agree), and registers the withdrawal of that advance
+ * against the scope that owns the connection: an enclosing rollback
+ * takes it back, so the retry plans the same statements again rather
+ * than reporting a success it never had.
  */
 
 import { createJSONPatch } from '@jarenjs/json/patch';
@@ -206,13 +212,34 @@ export function createTracker(context) {
     });
   };
 
+  /** The pending insert a caller is holding, found by the identity of
+   * the document `add()` handed back: a record whose key the save has
+   * yet to allocate has nothing else to be found by. */
+  const pendingInsertHolding = (entityName, doc) => {
+    for (const record of records.values()) {
+      if (record.pendingInsert === true && record.entity === entityName
+        && record.current === doc) return record;
+    }
+    return undefined;
+  };
+
+  /** What a join op and its membership delta are filed under: the own
+   * key once there is one, and the pending record's own identity while
+   * the save has yet to allocate it. */
+  const ownToken = (entityName, ownKey, ownRecord) => (ownRecord === undefined
+    ? keyOf(entityName, [ownKey])
+    : ownRecord.pendingKey);
+
   /**
    * The pending membership delta a `link`/`unlink` addresses (§11.7):
    * the member must be a many-to-many relation of the entity; the own
-   * key is read from a key or a document (a pending insert whose key
-   * the save allocates has none to attach to); the target is a key or a
+   * key is read from a key or a document; the target is a key or a
    * document carrying the target's key — the reading a membership array
    * gets, so the two attach the same rows.
+   *
+   * A document whose key the save allocates carries none to attach to,
+   * so the delta is filed against the pending INSERT it belongs to and
+   * the join row takes the key that insert returns.
    */
   const membershipOf = (entityName, own, member, target, verb) => {
     const plan = coreFor(entityName).plan;
@@ -225,10 +252,14 @@ export function createTracker(context) {
           + "memberships only; write the related entity's foreign key instead");
     }
     let ownKey;
+    let ownRecord;
     if (own !== null && typeof own === 'object' && !Array.isArray(own)) {
       ownKey = own[plan.keys[0]];
-      if (typeof ownKey !== 'string' && typeof ownKey !== 'number')
-        throw needsOwnKey(entityName, member, `${verb}()`);
+      if (typeof ownKey !== 'string' && typeof ownKey !== 'number') {
+        ownRecord = pendingInsertHolding(entityName, own);
+        if (ownRecord === undefined) throw needsOwnKey(entityName, member, `${verb}()`);
+        ownKey = undefined;
+      }
     }
     else {
       ownKey = coreFor(entityName).normalizeKey(own)[0];
@@ -236,10 +267,11 @@ export function createTracker(context) {
     const targetKey = mapping.entities[relation.to].keys[0];
     const [key] = membershipKeys([target], targetKey, member,
       (reason) => contractError(entityName, reason));
-    const id = `${keyOf(entityName, [ownKey])}${UNIT_SEPARATOR}${member}`;
+    const id = `${ownToken(entityName, ownKey, ownRecord)}${UNIT_SEPARATOR}${member}`;
     let pending = memberships.get(id);
     if (pending === undefined) {
-      pending = { entity: entityName, member, ownKey, links: new Set(), unlinks: new Set() };
+      pending = { entity: entityName, member, ownKey, ownRecord,
+        links: new Set(), unlinks: new Set() };
       memberships.set(id, pending);
     }
     return { pending, key };
@@ -414,7 +446,10 @@ export function createTracker(context) {
   const membershipDelta = (pending) => ({
     ...joinEndpoints(pending.entity, pending.member),
     ownKey: pending.ownKey,
-    beforeKeys: null,
+    ownRecord: pending.ownRecord,
+    // a row the save is about to INSERT has no memberships to read: the
+    // key does not exist yet, so its baseline is empty rather than unknown
+    beforeKeys: pending.ownRecord === undefined ? null : [],
     links: [...pending.links],
     unlinks: [...pending.unlinks],
   });
@@ -437,9 +472,16 @@ export function createTracker(context) {
           + 'projection, not stored state; add the related entities themselves');
       }
       const ownKey = record.current[plan.keys[0]];
-      if (typeof ownKey !== 'string' && typeof ownKey !== 'number')
+      const known = typeof ownKey === 'string' || typeof ownKey === 'number';
+      if (!known && plan.autoKey === null)
         throw needsOwnKey(record.entity, property.name, 'add()');
-      ops.push(joinDiff(record.entity, null, record.current, ownKey, property.name));
+      // the key this row will have is the one its INSERT returns, so the
+      // join row is planned against the record and takes the key at run time
+      ops.push({
+        ...joinDiff(record.entity, null, record.current,
+          known ? ownKey : undefined, property.name),
+        ownRecord: known ? undefined : record,
+      });
     }
     return ops;
   };
@@ -452,6 +494,10 @@ export function createTracker(context) {
     const updates = [];
     /** @type {any[]} */
     const joinOps = [];
+    /** Records this save advances through their join table alone: they
+     * carry no statement of their own, and the commit still settles
+     * them, so the undo delta has to know about them. @type {any[]} */
+    const joinOnly = [];
     let fallbacks = 0;
     const unversioned = new Set();
 
@@ -484,7 +530,10 @@ export function createTracker(context) {
       if (parts.columnSets.size === 0 && parts.docBuild === null
         && !parts.fallback) {
         // nothing but join-table changes (or a no-op put)
-        if (parts.m2mMembers.size > 0) record.joinOnly = true;
+        if (parts.m2mMembers.size > 0) {
+          record.joinOnly = true;
+          joinOnly.push(record);
+        }
         else record.stamped = undefined;
         continue;
       }
@@ -505,7 +554,7 @@ export function createTracker(context) {
     // folds into that op's key set: one intent per entity, own key and
     // member, never two statements racing for one row
     const synced = new Map(joinOps.map((op) =>
-      [`${op.entity}${UNIT_SEPARATOR}${op.ownKey}${UNIT_SEPARATOR}${op.member}`, op]));
+      [`${ownToken(op.entity, op.ownKey, op.ownRecord)}${UNIT_SEPARATOR}${op.member}`, op]));
     for (const [id, pending] of memberships) {
       const diff = synced.get(id);
       if (diff === undefined) {
@@ -652,6 +701,9 @@ export function createTracker(context) {
             + op.added.map((_, i) => `(${parameterAt(i * 2 + 1)}, ${parameterAt(i * 2 + 2)})`).join(', ');
           statements.push({
             kind: 'join-insert', entity: op.joinTable, sql, tableColumns: op.tableColumns,
+            // an own key the save has yet to allocate is filled in from the
+            // insert's RETURNING, which the ordering above guarantees has run
+            ownFrom: op.ownRecord,
             params: op.added.flatMap((key) => [op.ownKey, key]),
             joinRows: op.added.map((key) => ({
               own: op.ownKey, target: key,
@@ -693,7 +745,7 @@ export function createTracker(context) {
         }
       }
 
-      return { statements, fallbacks, unversioned: [...unversioned].sort() };
+      return { statements, fallbacks, joinOnly, unversioned: [...unversioned].sort() };
     };
     return chain(resolveJoins(0), assemble);
   };
@@ -734,6 +786,15 @@ export function createTracker(context) {
     const next = (i) => {
       if (i >= statements.length) return report;
       const statement = statements[i];
+      // a join row whose own key the save allocates: the INSERT that
+      // allocates it has already run (inserts precede join rows), so the
+      // key is on the record by now
+      if (statement.ownFrom !== undefined) {
+        const ownKey = statement.ownFrom.allocatedKey;
+        statement.params = statement.joinRows.flatMap(
+          (/** @type {any} */ row) => [ownKey, row.target]);
+        for (const row of statement.joinRows) row.own = ownKey;
+      }
       return chain(connection.prepare(statement.sql), (prepared) => {
         if (statement.kind === 'insert' && statement.returning === true) {
           let fetched;
@@ -749,6 +810,9 @@ export function createTracker(context) {
             // test, not assumed silently)
             const keys = rows.map((row) => row.key).sort((a, b) => a - b);
             statement.generatedKeys = keys;
+            // a join row planned against one of these records reads its
+            // key from here, before the commit phase re-keys anything
+            statement.records.forEach((record, at) => { record.allocatedKey = keys[at]; });
             report.inserted += statement.records.length;
             report.statements.push({ sql: statement.sql, rows: statement.records.length });
             return next(i + 1);
@@ -783,21 +847,113 @@ export function createTracker(context) {
     return next(0);
   };
 
-  /** Commit phase: only reached after the transaction succeeded. */
-  const commit = (statements) => {
+  /**
+   * The tracker state a save's commit will advance, exactly as it stands
+   * before the save runs: the map slot behind every record the commit
+   * may re-key or drop, the fields it may overwrite on a record it
+   * keeps, and the pending removals and membership deltas, which it
+   * clears whole. Bounded by the save, never by the tracker's size.
+   *
+   * `planSave` names the join-only records because they carry no
+   * statement of their own and the commit still advances them.
+   * @param {any[]} statements
+   * @param {any[]} joinOnly
+   */
+  const undoFor = (statements, joinOnly) => {
+    /** @type {Map<string, any>} */
+    const slots = new Map();
+    /** @type {Map<any, any>} */
+    const fields = new Map();
+    const takeSlot = (key) => {
+      if (!slots.has(key)) slots.set(key, records.get(key));
+    };
+    const takeFields = (record) => {
+      if (record === undefined || fields.has(record)) return;
+      fields.set(record, {
+        snapshot: record.snapshot, current: record.current,
+        stamped: record.stamped, joinOnly: record.joinOnly,
+        pendingInsert: record.pendingInsert, saved: record.saved,
+      });
+    };
+    for (const statement of statements) {
+      if (statement.kind === 'insert') {
+        for (const record of statement.records) {
+          takeSlot(record.pendingKey);
+          takeFields(record);
+        }
+      }
+      else if (statement.kind === 'update') takeFields(statement.record);
+      else if (statement.kind === 'delete') {
+        const key = keyOf(statement.removal.entity, statement.removal.parts);
+        takeSlot(key);
+        takeFields(records.get(key));
+      }
+    }
+    for (const record of joinOnly) takeFields(record);
+    return {
+      slots, fields,
+      removals: [...removals],
+      // the delta sets are mutated in place by a later link()/unlink(),
+      // so the undo needs copies rather than the live ones
+      memberships: [...memberships].map(([id, pending]) => [id, {
+        ...pending, links: new Set(pending.links), unlinks: new Set(pending.unlinks),
+      }]),
+    };
+  };
+
+  /** Put back what {@link undoFor} took a copy of: the save's statements
+   * were rolled back, so every claim they made about the database is
+   * withdrawn and a retry plans them again. */
+  const restore = (undo) => {
+    for (const [key, entry] of undo.slots) {
+      if (entry === undefined) records.delete(key);
+      else records.set(key, entry);
+    }
+    for (const [record, was] of undo.fields) {
+      record.snapshot = was.snapshot;
+      record.current = was.current;
+      record.stamped = was.stamped;
+      record.joinOnly = was.joinOnly;
+      record.pendingInsert = was.pendingInsert;
+      record.saved = was.saved;
+    }
+    removals.clear();
+    for (const [key, removal] of undo.removals) removals.set(key, removal);
+    memberships.clear();
+    for (const [id, pending] of undo.memberships) memberships.set(id, pending);
+  };
+
+  /**
+   * Commit phase: only reached once the transaction that ran the
+   * statements has committed, which is why it is registered as a
+   * settlement effect rather than run on the save's own savepoint.
+   *
+   * `undo` is the state the save started from. It is read for one
+   * decision: an edit made to a tracked record AFTER this save was
+   * planned is still pending work, and only a record left exactly as
+   * the save found it becomes clean.
+   * @param {any[]} statements
+   * @param {any} undo
+   */
+  const commit = (statements, undo) => {
+    const untouched = (record) => !undo.fields.has(record)
+      || undo.fields.get(record).current === record.current;
     for (const statement of statements) {
       if (statement.kind === 'insert') {
         statement.records.forEach((record, i) => {
           const plan = coreFor(statement.entity).plan;
-          let doc = record.current;
-          if (statement.returning === true) {
-            doc = deepFreeze({ ...doc, [plan.autoKey]: statement.generatedKeys[i] });
-          }
+          // the row this statement wrote is the one the save PLANNED; an
+          // edit made to the same record afterwards is not in the database
+          const planned = undo.fields.get(record)?.current ?? record.current;
+          const doc = statement.returning === true
+            ? deepFreeze({ ...planned, [plan.autoKey]: statement.generatedKeys[i] })
+            : planned;
           // re-key under the real identity
           records.delete(record.pendingKey);
           const key = recordKeyFor(statement.entity, doc);
           records.set(/** @type {string} */ (key), {
-            entity: statement.entity, snapshot: doc, current: doc, pendingInsert: false,
+            entity: statement.entity, snapshot: doc,
+            current: untouched(record) ? doc : record.current, pendingInsert: false,
           });
           record.saved = doc;
           captureRecord?.(statement.entity,
@@ -811,8 +967,9 @@ export function createTracker(context) {
         const saved = statement.newVersion === null
           ? record.stamped
           : deepFreeze({ ...record.stamped, [plan.version]: statement.newVersion });
+        const pending = untouched(record) ? null : record.current;
         record.snapshot = deepFreeze(saved);
-        record.current = record.snapshot;
+        record.current = pending ?? record.snapshot;
         record.stamped = undefined;
         captureRecord?.(statement.entity,
           plan.keys.map((k) => record.snapshot[k]), before, record.snapshot);
@@ -846,8 +1003,9 @@ export function createTracker(context) {
     // join-only records: their member state is now persisted
     for (const record of records.values()) {
       if (record.joinOnly === true) {
-        record.snapshot = record.stamped ?? record.current;
-        record.current = record.snapshot;
+        const pending = untouched(record) ? null : record.current;
+        record.snapshot = record.stamped ?? undo.fields.get(record)?.current ?? record.current;
+        record.current = pending ?? record.snapshot;
         record.joinOnly = undefined;
         record.stamped = undefined;
       }
@@ -858,7 +1016,7 @@ export function createTracker(context) {
 
   const saveChanges = () => {
     const startedAt = performance.now();
-    return chain(planSave(), ({ statements, fallbacks, unversioned }) => {
+    return chain(planSave(), ({ statements, fallbacks, joinOnly, unversioned }) => {
     const report = {
       inserted: 0, updated: 0, deleted: 0,
       joinInserted: 0, joinDeleted: 0,
@@ -874,10 +1032,22 @@ export function createTracker(context) {
       report.elapsedMs = performance.now() - startedAt;
       return report;
     }
+    // what the tracker looked like before the save, taken while it still
+    // does: the statements below run in a savepoint whose release is not
+    // a commit, so the right to KEEP what they justify waits for one
+    const undo = undoFor(statements, joinOnly);
     return chain(
       connection.transaction(() => runStatements(statements, report)),
       (finished) => {
-        commit(statements);
+        // The advance itself lands now, because inside the transaction the
+        // database DOES hold these rows: every later read, plan and
+        // optimistic guard in this unit of work has to agree with that, and
+        // a tracker still calling them pending would write them twice.
+        // What waits for the commit is the right to keep the advance — the
+        // enclosing scope withdraws it if it rolls back, which is what
+        // makes a caller's retry plan the same statements again.
+        commit(statements, undo);
+        connection.onSettle({ rollback: () => restore(undo) });
         finished.elapsedMs = performance.now() - startedAt;
         return finished;
       });

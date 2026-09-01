@@ -55,21 +55,65 @@ export async function open(model, options) {
     storeOptions.compileSchema = (schema) => jaren.compile(schema);
   }
   const store = await openStore(model, storeOptions);
-  const entities = {};
-  for (const name of store.roots ?? []) {
-    setObjectMember(entities, name, createEntityHandle(store, name));
-  }
-  const collections = {};
-  for (const name of Object.keys(model.collections ?? {})) {
-    setObjectMember(collections, name, createCollectionHandle(store, name));
-  }
+
+  /**
+   * The typed handles over ONE store view — the root store, or the one
+   * a transaction callback received. Building them from the same two
+   * constructors is what keeps a transaction's `entities.X` the same
+   * surface, with the same inference, as the client's own.
+   * @param {any} over
+   */
+  const handlesOf = (over) => {
+    const entities = {};
+    for (const name of over.roots ?? []) {
+      setObjectMember(entities, name, createEntityHandle(over, name));
+    }
+    const collections = {};
+    for (const name of Object.keys(model.collections ?? {})) {
+      setObjectMember(collections, name, createCollectionHandle(over, name));
+    }
+    return { entities: Object.freeze(entities), collections: Object.freeze(collections) };
+  };
+
+  /**
+   * The client a transaction callback receives: the same shape as the
+   * root client, over the store that is INSIDE the transaction. Its
+   * handles run as the transaction's owner rather than waiting for a
+   * commit they are part of, and its `transaction` nests.
+   *
+   * Built per transaction, because the handles bind to the store view —
+   * and the whole point of a transaction's own unit of work is that two
+   * handlers do not share one.
+   * @param {any} tx - the store the callback received
+   */
+  const transactionClient = (tx) => {
+    /** @type {Record<string, any>} */
+    const inner = {
+      store: tx,
+      capabilities: tx.capabilities,
+      ...handlesOf(tx),
+      transaction: (fn) => tx.transaction((nested) => fn(transactionClient(nested))),
+    };
+    if (tx.saveChanges !== undefined) {
+      inner.saveChanges = () => tx.saveChanges();
+      inner.live = (source, liveOptions) => registerLive(tx.live, source, liveOptions);
+    }
+    return Object.freeze(inner);
+  };
+
   /** @type {Record<string, any>} */
   const client = {
     store,
     capabilities: store.capabilities,
-    entities: Object.freeze(entities),
-    collections: Object.freeze(collections),
-    transaction: (fn) => store.transaction(fn),
+    ...handlesOf(store),
+    // A transaction gets its own unit of work by default: two handlers
+    // on one client then hold two records for the same entity key and
+    // neither can see the other's pending state. `unitOfWork: 'shared'`
+    // opts back into the store's, for a caller who staged changes
+    // outside the transaction and means to save them inside it.
+    transaction: (fn, transactionOptions) => store.transaction(
+      (tx) => fn(transactionClient(tx)),
+      { unitOfWork: 'own', ...transactionOptions }),
     close: (closeOptions) => store.close(closeOptions),
   };
   // the unit of work and entity live queries exist exactly when the

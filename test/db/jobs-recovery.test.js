@@ -108,7 +108,7 @@ describe('recovery: the reclaimed job RESUMES from its checkpoint', () => {
     await store.close();
   });
 
-  it("the stale owner's checkpoint saves and completion are refused", async () => {
+  it("a stale ATTEMPT's checkpoint saves and completion are refused, by name", async () => {
     const clock = makeClock();
     const store = await openStore(MODEL,
       { driver: nodeDriver(), jobs: { now: clock } });
@@ -118,10 +118,16 @@ describe('recovery: the reclaimed job RESUMES from its checkpoint', () => {
     const fresh = await store.jobs.claim({ kinds: ['r'], owner: 'w2' });
     assert.strictEqual(fresh.leaseOwner, 'w2');
 
+    // the two attempts share ONE owner in every real worker, so the
+    // owner cannot tell them apart — the token can, and it says which
+    assert.strictEqual(stale.lease.owner !== fresh.lease.owner, true);
+    assert.notStrictEqual(stale.lease.token, fresh.lease.token);
     const staleStore = store.jobs.checkpointsFor(stale);
-    assert.throws(() => staleStore.save('j', 'n', { v: 1 }), /lease.*lost/,
-      'a stale save ABORTS the stale run fast');
-    assert.throws(() => staleStore.complete('j', { v: 1 }), /lease.*lost/);
+    assert.throws(() => staleStore.save('j', 'n', { v: 1 }),
+      (e) => /** @type {any} */ (e).code === 'JD2066' && /superseded/.test(/** @type {any} */ (e).message),
+      'a stale save ABORTS the stale run fast, and says why');
+    assert.throws(() => staleStore.complete('j', { v: 1 }),
+      (e) => /** @type {any} */ (e).code === 'JD2066');
     assert.strictEqual((await store.jobs.get('j')).state, 'leased',
       'the fresh lease is untouched');
     assert.strictEqual((await store.jobs.get('j')).leaseOwner, 'w2');
@@ -205,7 +211,7 @@ describe('recovery: the reclaimed job RESUMES from its checkpoint', () => {
       const doomed = await store.jobs.claim({ kinds: ['r'], owner: 'w' });
       assert.strictEqual(doomed.id, 'doomed');
       store.jobs.checkpointsFor(doomed).save(doomed.id, 'n', { v: 2 });
-      await store.jobs.fail(doomed.id, 'w', new Error('gone'));
+      await store.jobs.fail(doomed.lease, new Error('gone'));
       assert.strictEqual((await store.jobs.get('doomed')).state, 'dead');
 
       const okJob = await store.jobs.claim({ kinds: ['r'], owner: 'w' });

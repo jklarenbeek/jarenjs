@@ -20,7 +20,7 @@
  * does not commit, tag, push or deploy: those stay the operator's.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -63,8 +63,18 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     console.error(`unknown release '${release}' — patch, minor or major.`);
     process.exit(2);
   }
+  // On Windows `npm` is a `.cmd`, which Node will not spawn as a file —
+  // so the bump refused to start at all rather than refusing for one of
+  // its own reasons. There it goes through the shell as ONE command
+  // string (passing arguments beside `shell: true` is deprecated, and
+  // concatenating them here is the documented shape); every argument
+  // below is a fixed literal, so the shell has nothing to re-interpret.
+  /** @param {string[]} args @param {any} [options] */
+  const npm = (args, options = {}) => (process.platform === 'win32'
+    ? execSync(`npm ${args.join(' ')}`, options)
+    : execFileSync('npm', args, options));
   const pinned = pinnedNpm();
-  const running = execFileSync('npm', ['--version'], { encoding: 'utf8' });
+  const running = npm(['--version'], { encoding: 'utf8' });
   const refusal = npmMismatch(running, pinned);
   if (refusal !== null) {
     console.error(refusal);
@@ -74,7 +84,8 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const before = currentVersion();
   const run = (/** @type {string} */ what, /** @type {string[]} */ args) => {
     console.log(`\n▸ ${what} ${args.join(' ')}`);
-    execFileSync(what, args, { cwd: ROOT, stdio: 'inherit' });
+    if (what === 'npm') npm(args, { cwd: ROOT, stdio: 'inherit' });
+    else execFileSync(what, args, { cwd: ROOT, stdio: 'inherit' });
   };
   run('node', ['./scripts/version-packages.js', release]);
   run('npm', ['install']);

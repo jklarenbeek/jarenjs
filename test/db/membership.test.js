@@ -5,9 +5,10 @@
  * `saveChanges()` writes the join rows against the join table AS READ
  * at save time — so a repeated save changes nothing (the two-run
  * property), the last word on one target wins, a delta beside a
- * `put`-based sync of the same member folds into it, an unsaved own
- * key is refused with the tracker's own message, and a failed save
- * leaves the pending changes exactly as they were.
+ * `put`-based sync of the same member folds into it, a key the SAVE
+ * allocates is attached from the insert's own RETURNING, an own key that
+ * belongs to nothing tracked is refused with the tracker's own message,
+ * and a failed save leaves the pending changes exactly as they were.
  */
 
 import { describe, it } from 'node:test';
@@ -163,7 +164,7 @@ describe('link and unlink through the unit of work (§11.7)', () => {
     await store.close();
   });
 
-  it('a pending insert with a caller-supplied key links in the same save; an auto key cannot', async () => {
+  it('a pending insert links in the same save, caller-supplied key or allocated', async () => {
     const store = await seeded();
     const users = store.entity('User');
     users.add({ id: 'u9', name: 'new' });
@@ -172,25 +173,37 @@ describe('link and unlink through the unit of work (§11.7)', () => {
     assert.strictEqual(report.inserted, 1);
     assert.strictEqual(report.joinInserted, 1);
     assert.deepStrictEqual(await labelsOf(store, 'u9'), ['admin']);
-    // the auto-keyed post has no key to attach to before the save
+
+    // an auto key exists only once the INSERT that allocates it has run,
+    // so the join row takes the key that insert returned — one save,
+    // both rows, and the ordering is what makes it true
     const posts = store.entity('Post');
     const draft = posts.add({ title: 'draft', authorId: 'u1' });
-    assert.throws(() => posts.link(draft, 'tags', 'admin'),
+    posts.link(draft, 'tags', 'admin');
+    const attached = await store.saveChanges();
+    assert.strictEqual(attached.inserted, 1);
+    assert.strictEqual(attached.joinInserted, 1);
+    const saved = (await posts.asNoTracking()
+      .load({ orderBy: '$it.pid', include: { tags: true } })).at(-1);
+    assert.deepStrictEqual(saved.tags.map((/** @type {any} */ tag) => tag.name), ['admin']);
+    assert.match(attached.statements.at(-1).sql, /"post_tags"/,
+      'a through name is the join table');
+
+    // …and the membership ARRAY riding the pending insert does the same
+    const other = await seeded();
+    other.entity('Post').add({ title: 'x', authorId: 'u1', tags: ['admin', 'dev'] });
+    const rode = await other.saveChanges();
+    assert.strictEqual(rode.joinInserted, 2);
+    const [only] = await other.entity('Post').asNoTracking().load({ include: { tags: true } });
+    assert.deepStrictEqual(only.tags.map((/** @type {any} */ tag) => tag.name).sort(),
+      ['admin', 'dev']);
+    await other.close();
+
+    // what stays refused: a document that belongs to nothing the tracker
+    // holds has no key now and none coming
+    assert.throws(() => posts.link({ title: 'never added' }, 'tags', 'admin'),
       (e) => e.code === 'JD2003'
         && /'tags' membership needs the entity's own key at link\(\) time — save the entity first, then attach/.test(e.message));
-    // …and the tracker's add() path says the same thing in its own words,
-    // at save time (a membership array rides the pending insert)
-    const other = await seeded();
-    other.entity('Post').add({ title: 'x', authorId: 'u1', tags: ['admin'] });
-    await assert.rejects(other.saveChanges(),
-      (e) => e.code === 'JD2003' && /at add\(\) time — save the entity first, then attach/.test(e.message));
-    await other.close();
-    await store.saveChanges();
-    const saved = (await posts.asNoTracking().load({ orderBy: '$it.pid' })).at(-1);
-    posts.link(saved.pid, 'tags', 'admin');
-    const tagged = await store.saveChanges();
-    assert.strictEqual(tagged.joinInserted, 1);
-    assert.match(tagged.statements[0].sql, /"post_tags"/, 'a through name is the join table');
     await store.close();
   });
 

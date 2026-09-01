@@ -66,12 +66,13 @@ async function script(store) {
   items.put({ ...item, n: 3, extra: { x: 'z' }, tags: ['t1'] });
   store.entity('Tag').add({ name: 't2' });
   await store.saveChanges();
-  await store.transaction(async () => {
-    await notes.delete('n2');
-    await items.delete('i1'); // cascades nothing; tags row via UoW below
+  await store.transaction(async (tx) => {
+    await tx.collection('notes').delete('n2');
+    await tx.entity('Item').delete('i1'); // cascades nothing; tags row via UoW below
   });
   // same-row multi-op transactions must NET identically in both modes
-  await store.transaction(async () => {
+  await store.transaction(async (tx) => {
+    const notes = tx.collection('notes');
     await notes.insert({ id: 'ghost', body: 'in' });
     await notes.put({ id: 'ghost', body: 'still in' }, 'ghost');
     await notes.delete('ghost'); // insert+update+delete nets to NOTHING
@@ -119,15 +120,15 @@ describe('the journal fallback', () => {
     const seen = [];
     store.observe((record) => seen.push(record));
     await store.transaction(async (tx) => {
-      await store.collection('notes').insert({ id: 'kept', body: 'yes' });
+      await tx.collection('notes').insert({ id: 'kept', body: 'yes' });
       // a SUCCESSFUL nested async transaction keeps its records; nesting
-      // goes through the store the callback received
-      await tx.transaction(async () => {
-        await store.collection('notes').insert({ id: 'nested-async', body: 'in' });
+      // and its writes both go through the store the callback received
+      await tx.transaction(async (inner) => {
+        await inner.collection('notes').insert({ id: 'nested-async', body: 'in' });
       });
       try {
-        await tx.transaction(async () => {
-          await store.collection('notes').insert({ id: 'ghost', body: 'no' });
+        await tx.transaction(async (inner) => {
+          await inner.collection('notes').insert({ id: 'ghost', body: 'no' });
           throw new Error('inner');
         });
       }

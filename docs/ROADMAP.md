@@ -679,13 +679,6 @@ what each does is its own documentation's job
   `$r.<targetKey> = join.<To>_key` — under the oracle. The lowered
   shapes that do exist are residuals (a phrase where the planner wants
   a member path); their promotion belongs to the pushdown entry above.
-- [ ] **Membership on an auto-keyed pending insert.** `link`/`unlink`
-  shipped (MODEL-FORMAT §11.7; surfaced typed on `@jarenjs/linq/db`),
-  and a pending insert with a caller-supplied key links in the same
-  save; an `auto`-keyed one still cannot — the join row needs the key
-  the save allocates, so the attach would have to ride the insert's
-  `RETURNING` inside the same transaction, keyed back to the record.
-  Until then: save, then link (the refusal says so).
 - [ ] **Other SQL dialects.** The dialect seam is real (proven by a
   test double) and the capability slots for statement timeouts and
   row estimates are deliberately empty on SQLite; a second dialect is
@@ -750,30 +743,52 @@ what each does is its own documentation's job
   which "stuck" and "starved" are hardest to tell apart. The e2e
   suite absorbs it with CI retries and by running `data.spec.js`
   serially — neither of which is a fix.
-- [ ] **Strong same-store transaction ownership.** MODEL-FORMAT §5.1
-  states the residual plainly: a bare write issued through the STORE
-  while an async top-level transaction is open joins that transaction
-  and shares its rollback, because the transaction callback's `tx` is
-  a view over the store that shares the store's collection/entity/
-  sync handles — every operation reaches the connection through the
-  one active scope, so the store cannot tell a tx-originated call from
-  an unrelated caller. Today the safe shapes are "own the store" or
-  "one store per concurrent writer". Closing it means scope-BOUND
-  handles: `tx.collection(...)`/`tx.entity(...)`/`tx.sync` return
-  handles pinned to the owning scope, and store-level handles, seeing
-  a foreign scope open, wait on the connection's gate (the same queue
-  an overlapping `store.transaction` already waits on, with the same
-  `queueTimeout`/`JD0012` bound) or reject under an opt-in strict
-  mode. The documented `store.collection().put()`-inside-the-callback
-  join then becomes a self-wait that `JD0012` names — the fix is
-  `tx.collection()`. Cost: one handle set per open scope, cores that
-  take their scope as an argument rather than reading a shared
-  variable, and the capture scope, jobs and live registry re-audited
-  for which handle they hold. The pinning test
-  (`test/db/transaction-ownership.test.js`, "a bare statement issued
-  while a transaction is open JOINS it") flips from "pinned, not
-  endorsed" to the regression for the new behavior. Raised by a
-  consumer wanting one shared Fastify store; not started.
+- [ ] **A streaming cursor is not gated.** Every store-level read and
+  write now holds the connection for its own extent, so it cannot fall
+  inside a transaction it is not part of (MODEL-FORMAT §5.1) — except
+  `collection.query()`, which answers an async iterable whose life is
+  the caller's loop. Holding the connection for that long would block
+  every transaction for as long as a consumer reads slowly, so it was
+  left ungated and a streaming read can still observe another
+  transaction's uncommitted rows. Closing it means gating each `next()`
+  rather than the cursor, which is a different granularity than the one
+  the gate is built at. Found while closing same-store ownership.
+- [ ] **`store.live` is ungated while `collection(name).live` is gated.**
+  The collection handle's `live` takes the store-level gate like every
+  other member; the store-level entity-root `live` does not, so
+  registering one while another transaction is open reads uncommitted
+  rows for its initial result. The registration itself is not a
+  statement, which is why it was passed over; the initial query is.
+- [ ] **No job administration surface.** The queue can enqueue, claim,
+  settle and recover, and the fence makes settlement exactly-once
+  against the store (JOBS-FORMAT §3) — but there is no `page`, no
+  `cancel`, no `requeue`, no retention sweep and no priority class. A
+  cancellation surface in particular has a fence waiting for it: D1's
+  settling calls list a cancellation acknowledgement that has nothing to
+  acknowledge yet.
+- [ ] **A resumed run checks its workflow, not its tasks.** A DAG job's
+  checkpoints carry the workflow document's revision and a hash of the
+  input, and a resume that disagrees with either is `JD2069`
+  (JOBS-FORMAT §7). A task's *implementation* is an injected JavaScript
+  function, so a workflow whose document is unchanged but whose task
+  changed resumes happily from checkpoints computed by the old one.
+  Hashing a closure is not a version; a real task version would have to
+  be declared, which is a format change.
+- [ ] **Four harness-portability defects, repaired but worth naming.**
+  On Windows the suite was 21 assertions red for reasons that had
+  nothing to do with any product: `new URL(…).pathname` yields
+  `/C:/…` (three test files, plus two dynamic imports of a generated
+  module, since a Windows absolute path is not a legal ESM specifier);
+  `readdirSync(dir, { recursive: true })` yields the platform separator
+  against a forward-slash predicate; a CRLF checkout of the CommonMark
+  spec found zero examples; and `rmSync` of a temp directory raced a
+  SQLite handle that had not been closed yet. All five sites are
+  repaired. `scripts/check-packed-consumers.js` needed the same
+  treatment — GNU tar reads a `C:…` argument as a host — without
+  which `npm run test:packed` could not run at all on Windows. Named
+  here because a suite that is red for the platform is a suite nobody
+  trusts, and the next Windows-shaped defect should be recognised
+  quickly rather than rediscovered.
 - [ ] **An as-of join with no tolerance is bounded above and not below.**
   The batched fetch is one statement whatever the probes number, which is the
   bound it was built for — but a backward join with no `tolerance` can only

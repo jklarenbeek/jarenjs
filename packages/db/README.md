@@ -652,7 +652,20 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   proxies, asserted); mutation is replacement; `saveChanges()` diffs
   snapshots into minimal parameterised statements in one transaction,
   with insert batching, `JD0040` cycle refusal, `JD2040` optimistic
-  conflicts, and a report of every statement, fallback and count.
+  conflicts, and a report of every statement, fallback and count. Its
+  fate is its transaction's: an enclosing rollback WITHDRAWS the advance,
+  so a caller's retry plans the same statements again instead of
+  reporting a success it never had.
+- **Transaction ownership** (MODEL-FORMAT §5.1): the store a transaction
+  callback receives IS the transaction — `tx.collection`, `tx.entity`,
+  `tx.sync`, `tx.saveChanges()`, and `tx.transaction()` nesting through
+  its savepoint. A store-level handle is by construction somebody else:
+  it holds the connection for its own extent, so an unrelated writer on a
+  shared store keeps its own fate rather than sharing a rollback it knows
+  nothing about. Contention waits under `queueTimeout` and then names
+  itself `JD0012`, or refuses at once under
+  `openStore(model, { transactions: 'strict' })`. One store is safe for a
+  handler per request.
 - **Generated types**: `entityEmitModel` + `@jarenjs/emit` render the
   model into entity interfaces, input variants and an `EntityMetaMap`;
   `typedStore` (from `@jarenjs/db/typed`) types every read, checks
@@ -699,9 +712,16 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   rather than being folded in as though it had arrived on time.
 - **Durable runs and the job queue** (JOBS-FORMAT, FLOW-FORMAT §7.6):
   a `@jarenjs/flow` DAG run checkpoints declared nodes and RESUMES
-  after a crash; `store.jobs` leases work in one guarded statement
-  (exactly-once completion, no distributed lock), retries with
-  backoff, dead-letters, and reclaims expired leases as recovery.
+  after a crash; `store.jobs` leases work in one guarded statement (no
+  distributed lock), retries with backoff, dead-letters, and reclaims
+  expired leases as recovery. Every settling call carries a FENCE — the
+  opaque token one claim mints, plus a lease that is still valid — so an
+  expired or superseded attempt cannot mark a job done over the live
+  one's result, and is told which of three things happened rather than
+  answered `false`. `jobs.renew()` replaces a lease while a handler runs;
+  the worker does it automatically and aborts an attempt whose lease it
+  loses. Settlement is exactly-once **against the store** — an external
+  effect is still the handler's to make idempotent.
 - **The browser** (`@jarenjs/db/wasm`): the same store, the same
   queries, the same live updates run on the official SQLite wasm build
   over the header-free OPFS SAH-pool VFS — one tab owns the

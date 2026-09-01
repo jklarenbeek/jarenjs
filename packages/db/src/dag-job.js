@@ -8,12 +8,39 @@
  * graph name flow nowhere.
  *
  * Each kind's document compiles ONCE against a delegating checkpoint
- * store; per claimed job, the delegate binds the engine's guarded
- * per-job store (`checkpointsFor`) — `save` refuses once the lease is
- * lost and `complete` records the DAG result, marks the job done and
- * prunes the checkpoint rows in ONE transaction, so a failure leaves
- * neither and a crash resumes instead of restarting.
+ * store; the delegate resolves per ATTEMPT, never per job, because two
+ * attempts of one job are two different runs of the same workflow and
+ * the older one may not write on the younger one's behalf. The engine's
+ * store carries the fence: `save` is refused once the lease is lost, and
+ * `complete` records the DAG result, marks the job done and prunes the
+ * checkpoint rows in ONE transaction, so a failure leaves neither and a
+ * crash resumes instead of restarting.
+ *
+ * A resumed run also has to be the SAME run. The workflow document's
+ * revision and a hash of the input are persisted with the checkpoints,
+ * and a resume that disagrees with either is refused by name — reusing
+ * checkpoints written by a different workflow is not a resume, it is a
+ * silently wrong answer.
  */
+
+import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { hashContent } from '@jarenjs/core/string';
+
+import { DbRuntimeError } from './errors.js';
+
+/** The checkpoint row a run's identity lives in. The leading unit
+ * separator keeps it out of any node-id namespace a document could
+ * declare, and the DAG's seeding skips it because no node is called
+ * that. It is pruned with the run it belongs to. */
+export const RUN_IDENTITY_NODE = '\u001Fidentity';
+
+/** What joins a job id to an attempt's token in the run key the DAG
+ * sees. A unit separator, so no job id can carry one by accident. */
+const RUN_KEY_SEPARATOR = '\u001F';
+
+/** A stable fingerprint of any JSON value: the suite's one content hash
+ * over the suite's one canonical form. */
+const fingerprint = (value) => hashContent(canonicalizeJson(value ?? null));
 
 /**
  * Build a worker whose handlers run checkpointed DAG documents.
@@ -22,8 +49,9 @@
  *   documents: Record<string, any>,
  *   tasks?: Record<string, Function>,
  *   concurrency?: number, pollInterval?: number, leaseMs?: number,
- *   owner?: string, backoffBase?: number, backoffCap?: number }} options
- * @returns {{ start: () => any, stop: () => Promise<void>, stats: () => any }}
+ *   owner?: string, renew?: boolean, onOutcome?: (event: any) => void,
+ *   backoffBase?: number, backoffCap?: number }} options
+ * @returns {{ start: () => any, stop: (options?: any) => Promise<any>, stats: () => any }}
  */
 export function createDagJobRunner(store, options) {
   if (store?.jobs === undefined) {
@@ -42,20 +70,67 @@ export function createDagJobRunner(store, options) {
       'createDagJobRunner: "documents" must map job kinds to dag documents');
   }
 
-  /** The active claim contexts, keyed by run id (= job id): the
-   * delegate resolves the CURRENT lease binding per store call. */
+  /**
+   * The attempts running right now, keyed by the run key the DAG was
+   * given — the job id and this attempt's fence token. Never by owner,
+   * and never by job id alone: a re-claim of the same job is a different
+   * attempt, and a delegate that could not tell them apart would let the
+   * older one write through the younger one's store.
+   * @type {Map<string, any>}
+   */
   const active = new Map();
-  const boundStore = (runId) => {
-    const context = active.get(runId);
+
+  /** The run key the DAG sees, and the job id the STORE sees, are not
+   * the same string: the store keys rows by job, the delegate keys
+   * bindings by attempt. */
+  const runKeyOf = (jobId, token) => `${jobId}${RUN_KEY_SEPARATOR}${token}`;
+  const jobIdOf = (runKey) => runKey.slice(0, runKey.indexOf(RUN_KEY_SEPARATOR));
+
+  const bound = (runKey) => {
+    const context = active.get(runKey);
     if (context === undefined) {
-      throw new Error(`no active job holds run '${runId}'`);
+      throw new DbRuntimeError('JD2069',
+        `no attempt holds run '${jobIdOf(runKey)}' — its lease was lost, or the run `
+        + 'outlived the handler that started it',
+        { docPath: '/jobs' });
     }
-    return context.checkpointsFor(context.job);
+    return context;
   };
   const checkpoint = {
-    load: (runId) => boundStore(runId).load(runId),
-    save: (runId, nodeId, value) => boundStore(runId).save(runId, nodeId, value),
-    complete: (runId, result) => boundStore(runId).complete(runId, result),
+    load: (runKey) => bound(runKey).checkpoints.load(jobIdOf(runKey)),
+    save: (runKey, nodeId, value) =>
+      bound(runKey).checkpoints.save(jobIdOf(runKey), nodeId, value),
+    complete: (runKey, result) =>
+      bound(runKey).checkpoints.complete(jobIdOf(runKey), result),
+  };
+
+  /**
+   * The identity a resumed run must agree with. A workflow edited under
+   * a run's feet, or the same run id handed a different input, both
+   * produce checkpoints that describe a computation nobody asked for.
+   */
+  const requireSameRun = (context, jobId, revision, inputHash) => {
+    const loaded = context.checkpoints.load(jobId);
+    const stored = loaded?.values?.[RUN_IDENTITY_NODE];
+    if (stored === undefined) {
+      context.checkpoints.save(jobId, RUN_IDENTITY_NODE, { revision, inputHash });
+      return;
+    }
+    const differs = [];
+    if (stored.revision !== revision) {
+      differs.push(`the workflow (checkpointed under revision ${stored.revision}, `
+        + `this runner compiles revision ${revision})`);
+    }
+    if (stored.inputHash !== inputHash) {
+      differs.push(`the input (checkpointed under ${stored.inputHash}, `
+        + `this attempt was given ${inputHash})`);
+    }
+    if (differs.length === 0) return;
+    throw new DbRuntimeError('JD2069',
+      `run '${jobId}' cannot resume: ${differs.join(' and ')} changed since its `
+      + 'checkpoints were written. Enqueue it under a new id, or drop the run — '
+      + 'reusing them would answer for a computation nobody asked for',
+      { docPath: '/jobs', collection: jobId });
   };
 
   /** @type {Record<string, Function>} */
@@ -63,13 +138,21 @@ export function createDagJobRunner(store, options) {
   for (const kind of Object.keys(documents)) {
     const compiled = compileDag(documents[kind],
       { tasks: options.tasks ?? {}, checkpoint });
+    // one revision per compiled document, so every attempt of every run
+    // of this kind compares against the same number
+    const revision = fingerprint(documents[kind]);
     handlers[kind] = async (payload, context) => {
-      active.set(context.job.id, context);
+      const input = payload?.input ?? null;
+      const runKey = runKeyOf(context.job.id, context.job.lease.token);
+      active.set(runKey, context);
       try {
-        return await compiled.run(payload?.input ?? null, { runId: context.job.id });
+        requireSameRun(context, context.job.id, revision, fingerprint(input));
+        // the handler's signal reaches every task: a worker winding down
+        // inside its grace period, or a lease this attempt has lost
+        return await compiled.run(input, { runId: runKey, signal: context.signal });
       }
       finally {
-        active.delete(context.job.id);
+        active.delete(runKey);
       }
     };
   }
@@ -80,6 +163,8 @@ export function createDagJobRunner(store, options) {
     pollInterval: options.pollInterval,
     leaseMs: options.leaseMs,
     owner: options.owner,
+    renew: options.renew,
+    onOutcome: options.onOutcome,
     backoffBase: options.backoffBase,
     backoffCap: options.backoffCap,
   });

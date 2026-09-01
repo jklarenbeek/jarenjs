@@ -301,7 +301,7 @@ export interface SyncStore {
    * the consumer's words; the handle's writes take it and reads answer it. */
   collection<T = unknown>(name: string): SyncCollection<T>;
   entity(name: string): SyncEntitySet;
-  transaction<R>(fn: (store: Store) => R): R;
+  transaction<R>(fn: (store: TransactionStore) => R): R;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain?(document: unknown, options?: ExecuteOptions): unknown;
   /** The entity roots this store-level provider serves (present with
@@ -336,7 +336,17 @@ export interface Store {
   readonly relations?: Readonly<Record<string, RelationTable>>;
   /** The unit of work (§11); present only with entities. */
   saveChanges?(): Promise<SaveReport>;
-  transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
+  /**
+   * A top-level transaction. The callback receives a
+   * {@link TransactionStore} whose handles are INSIDE it; this store's
+   * own handles are an unrelated caller and wait for the commit.
+   *
+   * `signal` abandons the call while it is still QUEUED — the callback
+   * then never runs and no statement is issued (`JD2064`). A transaction
+   * that has already taken the connection runs to its own end.
+   */
+  transaction<R>(fn: (store: TransactionStore) => R | Promise<R>,
+    options?: { signal?: AbortSignal }): Promise<Awaited<R>>;
   /** Register a change observer; requires capture. Returns unsubscribe. */
   observe(fn: (record: ChangeRecord) => void): () => void;
   /** Read the persisted log forward (JD2051 without capture.log). */
@@ -354,6 +364,20 @@ export interface Store {
   readonly jobs?: JobsApi;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
+}
+
+/**
+ * The store a transaction callback receives: the same surface, with
+ * every handle bound to THIS transaction's scope.
+ *
+ * `tx.collection(...)`, `tx.entity(...)`, `tx.sync` and `tx.saveChanges()`
+ * run as the transaction's owner, and `tx.transaction(...)` nests through
+ * its savepoint. The outer store's handles are, by construction, an
+ * unrelated caller: they wait for the commit, and one awaited from inside
+ * the callback is a self-wait that `JD0012` names rather than a hang.
+ */
+export interface TransactionStore extends Store {
+  transaction<R>(fn: (store: TransactionStore) => R | Promise<R>): Promise<Awaited<R>>;
 }
 
 /** One committed transaction's change record (LIVE-FORMAT §§1–5). */
@@ -474,6 +498,14 @@ export interface LiveBounds {
 export interface OpenStoreOptions {
   driver: Driver;
   path?: string;
+  /**
+   * What a store-level call does while another caller's transaction owns
+   * the connection. `'wait'` (the default) queues behind it under
+   * `queueTimeout` and then refuses `JD0012`; `'strict'` refuses at once,
+   * for a host that would rather see the contention than pay for it.
+   * Either way the call never joins the transaction.
+   */
+  transactions?: 'wait' | 'strict';
   /** Change capture (LIVE-FORMAT): off unless requested. */
   capture?: boolean | CaptureOptions;
   /** Live-query bounds (LIVE-FORMAT §12). */
@@ -731,10 +763,41 @@ export interface JobRecord {
   readonly maxAttempts: number;
   readonly leaseUntil: number | null;
   readonly leaseOwner: string | null;
+  /** How many times this job has been claimed. It identifies the
+   * ATTEMPT, which the owner cannot: one worker reuses one owner. */
+  readonly leaseGeneration: number;
   readonly lastError: string | null;
   readonly result: unknown;
   readonly createdAt: number;
   readonly updatedAt: number;
+}
+
+/**
+ * The capability one claim mints: the right to settle THIS attempt of
+ * this job, for as long as the lease is valid.
+ *
+ * It is a token rather than an owner, because an owner is reused by
+ * every attempt one worker makes and so cannot say which attempt is
+ * speaking. It is immutable: `renew` answers a NEW lease and retires
+ * this one, so a reference kept across a renewal can never quietly
+ * become valid again.
+ *
+ * Only `claim` and `renew` hand one out. `get` does not — a record
+ * anyone can read must not carry the capability to settle it.
+ */
+export interface JobLease {
+  readonly jobId: string;
+  readonly token: string;
+  readonly generation: number;
+  readonly attempt: number;
+  /** Diagnostics only: never a guard. */
+  readonly owner: string | null;
+  readonly expiresAt: number;
+}
+
+/** What `claim` answers: the record, and the lease to settle it with. */
+export interface ClaimedJob extends JobRecord {
+  readonly lease: JobLease;
 }
 
 export interface JobCounts {
@@ -747,23 +810,67 @@ export interface JobCounts {
   pendingKinds: Record<string, number>;
 }
 
+/** What became of one attempt. A LOST settlement is its own outcome:
+ * counting it as a completion is what let a corpse report success over
+ * work another attempt was still doing, and counting it as a failure
+ * would burn a retry the job never spent. */
+export interface JobOutcome {
+  readonly outcome: 'completed' | 'failed' | 'lost';
+  /** Where the loss was noticed: settling the result, or settling the
+   * failure that came before it. Absent on the other two outcomes. */
+  readonly phase?: 'completion' | 'failure';
+  readonly jobId: string;
+  readonly kind: string;
+  readonly attempt: number;
+  readonly generation: number;
+  /** The refusal code a lost settlement carries (`JD2065`/`JD2066`/
+   * `JD2067`); `null` when the lease was lost some other way. */
+  readonly code?: string | null;
+  readonly reason?: string;
+}
+
 export interface JobWorker {
   start(): JobWorker;
   /** Stop claiming, signal in-flight handlers, and wait up to `graceMs`
    * (JOBS-FORMAT §6): the record says whether every loop drained. */
   stop(options?: { graceMs?: number }): Promise<{ drained: boolean; inFlight: number }>;
   stats(): { claims: number; completions: number; failures: number;
-    polls: number; wakes: number; claimErrors: number; inFlight: number };
+    polls: number; wakes: number; claimErrors: number; inFlight: number;
+    /** Leases replaced while a handler was still running. */
+    renewals: number;
+    /** Attempts whose lease was lost mid-flight — never a completion,
+     * never a failure. */
+    lostSettlements: number };
+  /** The leases this worker holds right now: one per in-flight attempt,
+   * each the newest that attempt has been given. */
+  leases(): readonly JobLease[];
 }
 
 export interface JobWorkerOptions {
+  /**
+   * `checkpoints` is bound to THIS attempt and follows its current
+   * lease, so a renewal does not strand it. `signal` aborts for either
+   * reason a handler must wind up for: the worker is stopping, or the
+   * job is no longer this attempt's to finish — in which case the
+   * signal's `reason` is the coded refusal that says which.
+   */
   handlers: Record<string, (payload: unknown, context: {
-    job: JobRecord; checkpointsFor: Function; signal: AbortSignal }) => unknown>;
+    job: ClaimedJob;
+    checkpoints: { load(runId: string): unknown;
+      save(runId: string, nodeId: string, value: unknown): unknown;
+      complete(runId: string, result: unknown): unknown };
+    signal: AbortSignal }) => unknown>;
   /** A positive integer; the loops claiming concurrently. */
   concurrency?: number;
   pollInterval?: number;
   leaseMs?: number;
   owner?: string;
+  /** Renew each attempt's lease while its handler runs (the default).
+   * `false` for a handler that must not outlive its lease. */
+  renew?: boolean;
+  /** Called once per settled attempt, including the lost ones. An
+   * observer that throws never affects the loop. */
+  onOutcome?: (event: JobOutcome) => void;
   backoffBase?: number;
   backoffCap?: number;
   /** How long `stop()` waits for in-flight handlers by default. */
@@ -775,13 +882,30 @@ export interface JobsApi {
     options?: { id?: string; runAt?: number; maxAttempts?: number }): Promise<string>;
   get(id: string): Promise<JobRecord | undefined>;
   counts(): Promise<JobCounts>;
-  /** The low-level guarded claim the worker itself uses (§3). */
+  /** The low-level guarded claim the worker itself uses (§3). It mints
+   * the fence: a fresh token and the next generation. */
   claim(options: { kinds: string[]; owner: string; leaseMs?: number }):
-    Promise<JobRecord | undefined>;
-  complete(id: string, owner: string, result?: unknown): Promise<boolean>;
-  fail(id: string, owner: string, error: unknown): Promise<boolean>;
-  /** The per-job flow checkpoint store binding (§7). */
-  checkpointsFor(job: JobRecord): {
+    Promise<ClaimedJob | undefined>;
+  /**
+   * Replace a lease with a later one (§3). A handler that runs longer
+   * than its lease renews rather than hoping; the lease it is given
+   * back supersedes the one it passed in, which then settles nothing.
+   *
+   * Refuses `JD2065` (the job is not leased — unknown, or already
+   * settled), `JD2066` (the lease was superseded) or `JD2067` (it
+   * expired), never a silent `false`.
+   */
+  renew(lease: JobLease, options?: { leaseMs?: number }): Promise<JobLease>;
+  /** Settle the attempt this lease holds. `true`, or one of the three
+   * coded refusals above — a caller that cannot tell "already done"
+   * from "you are stale" guesses, and guesses wrong. */
+  complete(lease: JobLease, result?: unknown): Promise<boolean>;
+  fail(lease: JobLease, error: unknown): Promise<boolean>;
+  /** The per-attempt flow checkpoint store binding (§7). Rows are
+   * stamped with the attempt's generation: `load` reads what was
+   * written up to it, and a settlement prunes no further, so a stale
+   * attempt cannot erase a live one's work. */
+  checkpointsFor(job: ClaimedJob): {
     load(runId: string): unknown;
     save(runId: string, nodeId: string, value: unknown): unknown;
     complete(runId: string, result: unknown): unknown;
@@ -809,10 +933,17 @@ export declare function createDagJobRunner(store: Store, options: {
   pollInterval?: number;
   leaseMs?: number;
   owner?: string;
+  renew?: boolean;
+  onOutcome?: (event: JobOutcome) => void;
   backoffBase?: number;
   backoffCap?: number;
   stopGraceMs?: number;
 }): JobWorker;
+
+/** The checkpoint row a run's identity lives in — the workflow revision
+ * and a hash of the input a resume must agree with (`JD2069` when it
+ * does not). Pruned with the run it belongs to. */
+export declare const RUN_IDENTITY_NODE: string;
 
 export declare function createJobEngine(options: {
   connection: unknown; now?: () => number; random?: () => number;

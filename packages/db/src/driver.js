@@ -46,6 +46,19 @@ export const SQLITE_FLOOR = '3.45.0';
  */
 export const DEFAULT_QUEUE_TIMEOUT = 5000;
 
+/**
+ * Why a queued caller gave up. It is always a coded refusal — a caller
+ * has to be able to tell "you were cancelled before you ran" from every
+ * other failure — and the host's own `reason` rides along as the cause,
+ * so a cancellation that meant something specific still says it.
+ * @param {AbortSignal} [signal]
+ */
+function abortReason(signal) {
+  return new DbRuntimeError('JD2064',
+    'the call was aborted while it waited for the open transaction to settle; '
+    + 'it ran no statement', { cause: signal?.reason });
+}
+
 // the sync-capable-async helpers are `@jarenjs/core/function`'s (one
 // implementation in the suite); re-exported here because every store
 // module and the public `@jarenjs/db` surface reach them through this seam
@@ -277,28 +290,44 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
    * instead of the scope it was handed (never — it is waiting for itself).
    * The bound turns the second case from a silent hang into a coded error
    * that names the fix, the same trade SQLite's own busy timeout makes.
+   * A caller that gives up while queued — an aborted signal — is taken
+   * off the queue and rejected with its own reason, and `work` never
+   * runs at all. That is the difference between cancelling a request
+   * and cancelling its effect.
    * @param {() => any} work
    * @param {string} what - what is waiting, for the timeout message
+   * @param {AbortSignal} [signal] - abandons the wait when it aborts
    * @returns {any} value-or-promise
    */
-  const whenFree = (work, what) => {
+  const whenFree = (work, what, signal) => {
+    if (signal?.aborted === true) return Promise.reject(abortReason(signal));
     if (!owned) return work();
     return new Promise((resolve, reject) => {
       let done = false;
-      const timer = setTimeout(() => {
+      /** Leave the queue without running: the turn passes to the next
+       * waiter when the owner releases, exactly as a timeout's does. */
+      const abandon = (error) => {
         done = true;
         const index = waiting.indexOf(run);
         if (index >= 0) waiting.splice(index, 1);
-        reject(new DbCompileError('JD0012',
-          `${what} waited ${queueTimeout}ms for the open transaction to settle. `
-          + 'A transaction owns its connection until it commits; work that belongs '
-          + 'INSIDE it must go through the scope the callback received '
-          + '(scope.transaction / the store passed to your callback), not the '
-          + 'outer connection — that request waits for itself.'));
-      }, queueTimeout);
+        reject(error);
+      };
+      const timer = setTimeout(() => abandon(new DbCompileError('JD0012',
+        `${what} waited ${queueTimeout}ms for the open transaction to settle. `
+        + 'A transaction owns its connection until it commits; work that belongs '
+        + 'INSIDE it must go through the store or client the callback received '
+        + '(tx.collection / tx.entity / tx.entities / tx.transaction), not the '
+        + 'outer one — that request waits for itself.')),
+      queueTimeout);
+      const cancelled = () => {
+        clearTimeout(timer);
+        abandon(abortReason(signal));
+      };
+      signal?.addEventListener('abort', cancelled, { once: true });
       const run = () => {
         if (done) { release(); return; } // already rejected: pass the turn on
         clearTimeout(timer);
+        signal?.removeEventListener('abort', cancelled);
         done = true;
         let out;
         try {
@@ -312,6 +341,50 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
       };
       waiting.push(run);
     });
+  };
+
+  /**
+   * Hold the connection for `fn`'s whole extent without opening a
+   * savepoint: what an UNRELATED caller needs so its statements cannot
+   * fall inside a transaction it is not part of. A store-level read or
+   * write is exactly that caller — it waits for the owner, owns the
+   * connection while it runs, and hands it on.
+   *
+   * `fn` receives a scope for the same reason a transaction callback
+   * does: work that must nest inside this one (a membership attach, a
+   * unit of work's own transaction) says so through the scope rather
+   * than queueing behind the caller it is part of.
+   * @param {(scope: any) => any} fn
+   * @param {string} [what] - what is waiting, for the timeout message
+   * @param {AbortSignal} [signal]
+   */
+  const exclusively = (fn, what, signal) => {
+    requireOpen();
+    // a synchronous extent inside an owning callback cannot interleave
+    // with anything, so there is nothing to wait for
+    if (onStack) return fn(scopeFor());
+    return whenFree(() => {
+      owned = true;
+      const wasOnStack = onStack;
+      onStack = true;
+      let out;
+      try {
+        out = fn(scopeFor());
+      }
+      catch (error) {
+        onStack = wasOnStack;
+        release();
+        throw error;
+      }
+      onStack = wasOnStack;
+      if (!isThenable(out)) {
+        release();
+        return out;
+      }
+      return out.then(
+        (value) => { release(); return value; },
+        (error) => { release(); throw error; });
+    }, what ?? 'a store-level call', signal);
   };
 
   /** Open one savepoint around `fn`, at whatever depth we are. `fn`
@@ -363,16 +436,15 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
     capabilities,
     dialect,
     /** @param {string} sql */
-    // NOT gated. A statement issued while a transaction is open joins it,
-    // because a SQLite connection has no per-statement transaction scope
-    // and every caller inside a transaction reaches the connection this
-    // way. Two consequences, both documented in MODEL-FORMAT §Transactions:
-    // work inside a callback runs immediately as the owner (right), and an
-    // UNRELATED caller's bare write on a shared store joins that
-    // transaction and shares its fate (a single connection cannot tell the
-    // two apart — give each concurrent writer its own store to separate
-    // them). What the gate below does guarantee is that two TRANSACTIONS
-    // never interleave, which is what made commits report failure.
+    // NOT gated, because a SQLite connection has no per-statement
+    // transaction scope: a statement issued here joins whatever is open.
+    // That is right for work INSIDE the transaction, which is why the
+    // scope exposes the same two methods. An unrelated caller must not
+    // reach them — it takes `exclusively` instead, which holds the
+    // connection for its own extent, and the store's handles do exactly
+    // that (MODEL-FORMAT §5.1). What the gate guarantees on top is that
+    // two TRANSACTIONS never interleave, which is what made commits
+    // report failure.
     exec: (sql) => { requireOpen(); return raw.exec(sql); },
     /** @param {string} sql */
     prepare: (sql) => { requireOpen(); return chain(raw.prepare(sql), (s) => wrapStatement(s, requireOpen)); },
@@ -401,8 +473,10 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
      * queues behind the transaction the caller is part of, and
      * {@link DEFAULT_QUEUE_TIMEOUT} turns that into `JD0012`.
      * @param {(scope: any) => any} fn
+     * @param {AbortSignal} [signal] - abandons a QUEUED transaction; a
+     *   transaction that has already taken the connection runs on
      */
-    transaction(fn) {
+    transaction(fn, signal) {
       requireOpen();
       if (onStack) return savepointAround(fn);
       return whenFree(() => {
@@ -422,8 +496,12 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
         return out.then(
           (value) => { release(); return value; },
           (error) => { release(); throw error; });
-      }, 'a transaction');
+      }, 'a transaction', signal);
     },
+    /** Hold the connection for one unrelated caller's whole extent,
+     * without a savepoint: what a store-level read or write takes so it
+     * cannot fall inside a transaction it is not part of. */
+    exclusively,
     // idempotent: the second close is a no-op on every driver, not a
     // raw error on one and a resolved promise on another
     close: () => {

@@ -26,6 +26,9 @@
  * @returns {{ number: number, section: string, markdown: string, html: string }[]}
  */
 export function extractExamples(spec) {
+  // the spec is a submodule checkout, so its line endings are whatever the
+  // platform wrote; every pattern below is anchored on a bare newline
+  spec = spec.replaceAll('\r\n', '\n');
   const headings = [];
   const heading = /^#{1,6} (.+)$/gm;
   let hm;

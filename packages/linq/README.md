@@ -569,6 +569,11 @@ const users = await db.entities.User
 db.entities.User.link(users[0], 'labels', 'admin');          // 'labels' only: the many-to-many members
 await db.saveChanges();                                      // the unit of work: get, mutate, save
 const live = await db.live(db.entities.Post.where((p) => p.stars.ge(3)));   // { result, subscribe, close, mode }
+
+await db.transaction(async (tx) => {                         // a client of its own, inside the transaction
+  tx.entities.Post.add({ title: 'draft', stars: 0, authorId: users[0].id });
+  await tx.saveChanges();                                    // its own unit of work: nobody else sees it
+});
 ```
 
 How to read it: `db.entities.Post` is a chain root typed from the model,
@@ -576,7 +581,17 @@ so `p.stars` is a number in the editor and `p.author.email` is a
 declared hop; `include` is a typed `load` spec and answers a two-level
 graph in ONE statement; a write is the unit of work — get an entity,
 mutate it, `saveChanges()` — and `live` re-answers a chain when the
-store changes. This subpath is the package's one runtime edge: it
+store changes.
+
+`transaction` hands its callback a client of the same shape, over the
+store INSIDE the transaction, with a unit of work of its own — so two
+request handlers on one client hold two records for the same entity key
+and neither sees the other's pending state. The outer `db.entities.X` is
+by construction an unrelated caller: from inside, it waits for the commit
+and then names itself `JD0012` rather than joining a transaction it is
+not part of. One client is safe for a handler per request.
+
+This subpath is the package's one runtime edge: it
 imports `@jarenjs/db`, `@jarenjs/validate` and `@jarenjs/formats` as
 OPTIONAL peer dependencies, so `npm install @jarenjs/linq` alone
 installs nothing new and the `.` entry carries not one byte of them

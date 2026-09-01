@@ -132,15 +132,15 @@ describe('live rows (where + select)', () => {
 
   it('coalescing: a transaction touching many rows emits ONE event', async () => {
     const store = await open();
-    const users = store.collection('users');
     const live = await store.collection('users').live([WHERE_ADULT]);
     const events = [];
     live.subscribe((event) => events.push(event));
-    await store.transaction(async () => {
+    await store.transaction(async (tx) => {
+      const inside = tx.collection('users');
       for (let i = 0; i < 50; i++) {
-        await users.insert({ id: `t${i}`, name: `n${i}`, age: 30 });
+        await inside.insert({ id: `t${i}`, name: `n${i}`, age: 30 });
       }
-      await users.delete('t7');
+      await inside.delete('t7');
     });
     assert.strictEqual(events.length, 1, 'one record, one emission');
     assert.strictEqual(live.result.rows.length, 49);
@@ -458,13 +458,14 @@ describe('the maintenance oracle (seeded)', () => {
         present.delete(id);
       }
       else if (roll < 0.8) {
-        await store.transaction(async () => {
+        await store.transaction(async (tx) => {
+          const inside = tx.collection('users');
           const first = JSON.parse(JSON.stringify(randomDoc('txA')));
           const second = JSON.parse(JSON.stringify(randomDoc('txB')));
-          if (present.has('txA')) await users.put(first, 'txA');
-          else await users.insert(first);
-          if (present.has('txB')) await users.put(second, 'txB');
-          else await users.insert(second);
+          if (present.has('txA')) await inside.put(first, 'txA');
+          else await inside.insert(first);
+          if (present.has('txB')) await inside.put(second, 'txB');
+          else await inside.insert(second);
           present.add('txA').add('txB');
         });
       }

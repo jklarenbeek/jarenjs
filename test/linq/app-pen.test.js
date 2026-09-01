@@ -18,6 +18,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   action, add, append, bind, copy, defineApp, effect, move, remove, replace, sub, test as testOp,
@@ -37,7 +38,7 @@ const APP_README = new URL('../../packages/app/README.md', import.meta.url);
 const CONTRACT_DOC = new URL('../../packages/contract/docs/CONTRACT-FORMAT.md', import.meta.url);
 const APP_SRC = new URL('../../packages/linq/src/app/', import.meta.url);
 const load = (at) => JSON.parse(fs.readFileSync(new URL(at, import.meta.url), 'utf8'));
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CACHE = path.join(ROOT, 'node_modules', '.cache-app-pen');
 let counterRun = 0;
 
@@ -271,7 +272,7 @@ describe('an app the pen writes validates, boots and dispatches', () => {
       "import { action, bind, defineApp, replace, transition } from '@jarenjs/linq/app';\n"
       + "import { rule } from '@jarenjs/linq/jslt';\n"
       + "import * as s from '@jarenjs/linq/schema';\n" + twin);
-    const byCode = (await import(`${file}?${counterRun++}`)).emitted;
+    const byCode = (await import(`${pathToFileURL(file).href}?${counterRun++}`)).emitted;
 
     assert.deepStrictEqual(byCode.state, handWritten.state);
     assert.deepStrictEqual(Object.keys(byCode.actions), Object.keys(handWritten.actions));

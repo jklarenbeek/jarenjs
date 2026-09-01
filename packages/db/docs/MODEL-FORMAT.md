@@ -669,39 +669,75 @@ So a **top-level transaction owns its connection until it settles**, and
 an overlapping one waits its turn. Two concurrent request handlers
 sharing a store both commit, and both report success.
 
+**The store the callback receives is the transaction.** `tx.collection`,
+`tx.entity`, `tx.sync` and `tx.saveChanges()` run as the transaction's
+owner, and `tx.transaction()` nests through its savepoint:
+
+```js
+await store.transaction(async (tx) => {
+  await tx.collection('docs').put(doc, 'a');     // inside this transaction
+  await tx.transaction(async (inner) => {
+    await inner.collection('docs').put(other, 'b');  // nested savepoint
+  });
+});
+```
+
 Nesting is asked for in one of two ways, and the difference is not
 cosmetic:
 
 - **Synchronously** — a `transaction` called while an owning callback is
   still on the stack nests, because nothing can interleave there. This is
-  `store.sync.transaction` inside `store.sync.transaction`.
+  `store.sync.transaction` inside `store.sync.transaction`, and it is why
+  a store-level synchronous call inside a synchronous callback runs as the
+  owner rather than waiting.
 - **Through the scope** — an `async` callback has already awaited, so the
   stack cannot say whether a request is its own nested work or an
-  unrelated caller. Nest through the store the callback RECEIVED:
+  unrelated caller. Nest through the store the callback RECEIVED.
 
-  ```js
-  await store.transaction(async (tx) => {
-    await store.collection('docs').put(doc, 'a');   // joins this transaction
-    await tx.transaction(async () => { … });        // nests inside it
-  });
-  ```
+**A store-level handle is never inside the transaction.** `store.collection`,
+`store.entity`, `store.saveChanges()`, `store.execute`, `store.dataVersion`
+and the whole `store.sync` surface hold the connection for their own
+extent, so their statements cannot fall inside a transaction they are not
+part of and share a rollback they know nothing about. One store is
+therefore safe for a handler per request: an unrelated writer waits for
+the commit and keeps its own fate.
 
-  Reaching back through the outer `store.transaction` from inside a
-  callback queues behind the transaction the caller is part of, so it
-  waits for itself; after `queueTimeout` (default 5 s, the busy-timeout
-  default) that becomes `JD0012` naming the fix rather than hanging.
+What that costs, stated plainly:
 
-**One residual, stated plainly.** A bare statement issued while a
-transaction is open JOINS that transaction and shares its fate, because
-SQLite has no per-statement transaction scope and every operation inside
-a callback reaches the connection the same way an unrelated caller does.
-Work that must be in the transaction is therefore safe; an unrelated
-writer on a SHARED store is not. Give each concurrent writer its own
-store when independent writes must not share a rollback. Closing this
-— scope-bound `tx` handles, with store-level calls waiting on the gate
-while a foreign scope is open — is an open ROADMAP item (`@jarenjs/db`,
-"Strong same-store transaction ownership"); until it lands, one store
-shared by independent request handlers is unsafe for bare writes.
+- A store-level call made while another caller's transaction is open
+  **waits** on the connection's gate, under `queueTimeout` (default 5 s,
+  the busy-timeout default). `openStore(model, { transactions: 'strict' })`
+  refuses at once instead, for a host that would rather see the contention
+  than pay for it.
+- A store-level call **awaited from inside its own transaction** is a
+  self-wait: the store cannot tell it from an unrelated caller, so it
+  queues and, at `queueTimeout`, becomes `JD0012` whose message names
+  `tx.collection` / `tx.entity` / `tx.entities` as the fix. Bounded and
+  named, never a hang.
+- `store.transaction(fn, { signal })` abandons a call that is still
+  **queued** — the callback never runs, and `JD2064` says so. A
+  transaction that has already taken the connection runs to its own end.
+- `collection.query()` is the one store-level read that is not gated: it
+  answers an async iterable whose life is the caller's loop, and holding
+  the connection for that long would block every transaction for as long
+  as a consumer reads slowly. A streaming cursor can therefore still
+  observe another transaction's uncommitted rows.
+
+**A unit of work's fate is its transaction's.** A tracked `saveChanges()`
+inside a transaction writes its statements immediately — inside the
+transaction the database does hold them, and every later read, plan and
+optimistic guard in that unit of work agrees with that. What waits for
+the commit is the right to *keep* the advance: if the enclosing
+transaction rolls back, the tracker's snapshots are withdrawn to what
+they were before the save, so a caller's retry plans the same statements
+again instead of reporting a success it never had. A nested savepoint
+that rolls back withdraws only what was registered inside it.
+
+`@jarenjs/linq/db` projects all of this: `client.transaction(async (tx) =>
+…)` hands the callback a typed client whose `tx.entities.X` and
+`tx.collections.Y` are the transaction's, with a unit of work of its own
+by default so two handlers never see each other's pending state
+(`unitOfWork: 'shared'` opts back into the client's).
 
 ## 6. Identity
 
@@ -763,6 +799,12 @@ error.
 | `JD2061` | another context owns the database |
 | `JD2062` | the store closed with job handlers still in flight |
 | `JD2063` | the store is closed |
+| `JD2064` | the call was aborted while it waited for the open transaction |
+| `JD2065` | the job is not leased — it is unknown, or already settled |
+| `JD2066` | the lease was superseded by a newer claim or renewal |
+| `JD2067` | the lease expired before the call |
+| `JD2068` | a settling call needs the lease the claim returned |
+| `JD2069` | a resumed run does not match the workflow or input it was checkpointed under |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.

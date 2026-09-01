@@ -6,12 +6,20 @@
  * statement; the whole-row fallback is counted; relation members
  * refuse edits; the version member is engine-owned; `asNoTracking()`
  * retains nothing (proven by a forced-GC live set in a subprocess).
+ *
+ * And the half that makes a save a UNIT OF WORK: the tracker's snapshots
+ * are a claim about what the database holds, so they advance when the
+ * outermost transaction commits and are withdrawn when it rolls back.
+ * The savepoint a save opens for itself is not a commit, and a caller
+ * whose retry planned nothing was the silent data loss that proved it.
  */
 
 import { describe, it, before, after } from 'node:test';
 import * as assert from 'node:assert';
 import * as util from 'node:util';
 import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
@@ -262,5 +270,238 @@ describe('asNoTracking retains nothing', () => {
     // ~1 MB a single retained generation would cost
     assert.ok(untracked.delta < 1_500_000,
       `untracked live set grew ${untracked.delta} bytes`);
+  });
+});
+
+// ————— the save's fate is the enclosing transaction's —————
+
+/** A model of one balance, so a rollback has exactly one thing to undo. */
+const LEDGER = {
+  $model: '0.1',
+  entities: {
+    Account: {
+      schema: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string', 'x-entity': { key: true } },
+          balance: { type: 'integer' },
+        },
+      },
+    },
+  },
+};
+
+/** A ledger store seeded with one account at 100. */
+const ledger = async (options = {}) => {
+  const opened = await openStore(LEDGER, { driver: nodeDriver(), ...options });
+  await opened.entity('Account').create({ id: 'a1', balance: 100 });
+  return opened;
+};
+
+describe('a tracked save advances only when the outermost transaction commits', () => {
+  it('save_changes_then_outer_rollback_restores_tracker', async () => {
+    const ledgerStore = await ledger();
+    const accounts = ledgerStore.entity('Account');
+    const seed = await accounts.get('a1');
+
+    await assert.rejects(() => ledgerStore.transaction(async (tx) => {
+      accounts.put({ ...seed, balance: 999 });
+      const inner = await tx.saveChanges();
+      assert.strictEqual(inner.updated, 1, 'the save itself reports its statement');
+      throw new Error('outer boom');
+    }), /outer boom/);
+
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 100,
+      'the database rolled the save back with the transaction');
+    // the retry is the whole point: a tracker that kept the rolled-back
+    // snapshot plans nothing and reports success over a row still at 100
+    const retry = await ledgerStore.saveChanges();
+    assert.strictEqual(retry.updated, 1);
+    assert.strictEqual(retry.statements.length, 1);
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 999);
+    await ledgerStore.close();
+  });
+
+  it('nested_savepoint_rollback_restores_only_nested_tracker_state', async () => {
+    const ledgerStore = await ledger();
+    const accounts = ledgerStore.entity('Account');
+    await accounts.create({ id: 'a2', balance: 50 });
+    const one = await accounts.get('a1');
+    const two = await accounts.get('a2');
+
+    await ledgerStore.transaction(async (tx) => {
+      accounts.put({ ...one, balance: 111 });
+      await tx.saveChanges();
+      await assert.rejects(() => tx.transaction(async (inner) => {
+        accounts.put({ ...two, balance: 222 });
+        await inner.saveChanges();
+        throw new Error('inner boom');
+      }), /inner boom/);
+    });
+
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 111,
+      'the outer save survived the inner savepoint');
+    assert.strictEqual((await accounts.asNoTracking().get('a2')).balance, 50,
+      'exactly one level rolled back');
+    // and the tracker agrees with both: nothing is owed for a1, the
+    // withdrawn change to a2 is owed again
+    const after = await ledgerStore.saveChanges();
+    assert.strictEqual(after.updated, 1);
+    assert.deepStrictEqual(
+      [(await accounts.asNoTracking().get('a1')).balance,
+        (await accounts.asNoTracking().get('a2')).balance],
+      [111, 222]);
+    await ledgerStore.close();
+  });
+
+  it('an outer commit advances the tracker exactly once', async () => {
+    const ledgerStore = await ledger();
+    const accounts = ledgerStore.entity('Account');
+    const seed = await accounts.get('a1');
+
+    await ledgerStore.transaction(async (tx) => {
+      accounts.put({ ...seed, balance: 999 });
+      await tx.saveChanges();
+    });
+
+    // the correct zero, told from the rolled-back one by the row
+    const again = await ledgerStore.saveChanges();
+    assert.strictEqual(again.updated, 0);
+    assert.strictEqual(again.statements.length, 0);
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 999);
+    await ledgerStore.close();
+  });
+
+  // both modes, because only ONE of them routes the unit of work's own
+  // emission: a session reads the rows the database changed, while a
+  // journal is written by the commit phase itself — and a deferred
+  // commit that ran after its scope translated its patch would record
+  // nothing at all
+  for (const mode of ['session', 'journal']) {
+    it(`a rolled-back save emits no change records (${mode} capture)`, async () => {
+      const ledgerStore = await ledger({ capture: { mode, log: true } });
+      const accounts = ledgerStore.entity('Account');
+      const seed = await accounts.get('a1');
+      const before = (await ledgerStore.changesSince(0)).length;
+
+      await assert.rejects(() => ledgerStore.transaction(async (tx) => {
+        accounts.put({ ...seed, balance: 999 });
+        await tx.saveChanges();
+        throw new Error('outer boom');
+      }), /outer boom/);
+      assert.strictEqual((await ledgerStore.changesSince(0)).length, before,
+        'a change record describes a committed row, and no row was committed');
+
+      // the same save, committed, does record — the assertion above is
+      // about the rollback, not about capture being off
+      await ledgerStore.transaction(async (tx) => {
+        accounts.put({ ...seed, balance: 999 });
+        await tx.saveChanges();
+      });
+      const log = await ledgerStore.changesSince(0);
+      assert.strictEqual(log.length, before + 1, 'the committed save is one record');
+      assert.deepStrictEqual(log.at(-1).collections, ['Account']);
+      assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 999);
+      await ledgerStore.close();
+    });
+  }
+
+  it('a save outside any transaction advances at once, as it always did', async () => {
+    const ledgerStore = await ledger();
+    const accounts = ledgerStore.entity('Account');
+    const seed = await accounts.get('a1');
+    accounts.put({ ...seed, balance: 777 });
+    assert.strictEqual((await ledgerStore.saveChanges()).updated, 1);
+    // nothing is owed the moment the save returns: no scope was open,
+    // so there was no commit left to wait for
+    assert.strictEqual((await ledgerStore.saveChanges()).statements.length, 0);
+    assert.strictEqual(ledgerStore.stats().tracker.tracked, 1);
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 777);
+    await ledgerStore.close();
+  });
+
+  it('two saves in one transaction write two things, never the first one twice', async () => {
+    // The tracker advances when its statements RUN, because inside the
+    // transaction the database holds them: a tracker that still called
+    // the first save pending would re-plan its insert against a row that
+    // already exists, and the optimistic guard of a second update would
+    // be checking a version the first one has already moved.
+    const ledgerStore = await ledger();
+    const accounts = ledgerStore.entity('Account');
+    const seed = await accounts.get('a1');
+    await ledgerStore.transaction(async (tx) => {
+      tx.entity('Account').add({ id: 'a2', balance: 20 });
+      assert.strictEqual((await tx.saveChanges()).inserted, 1);
+      tx.entity('Account').add({ id: 'a3', balance: 30 });
+      accounts.put({ ...seed, balance: 111 });
+      const second = await tx.saveChanges();
+      assert.strictEqual(second.inserted, 1);
+      assert.strictEqual(second.updated, 1);
+      // and a third with nothing left to do plans nothing
+      assert.strictEqual((await tx.saveChanges()).statements.length, 0);
+    });
+    const rows = await accounts.asNoTracking().load({ orderBy: '$it.id' });
+    assert.deepStrictEqual(rows.map((row) => [row.id, row.balance]),
+      [['a1', 111], ['a2', 20], ['a3', 30]]);
+    await ledgerStore.close();
+  });
+
+  it('an edit made after the save is still owed once the transaction commits', async () => {
+    const ledgerStore = await ledger();
+    const accounts = ledgerStore.entity('Account');
+    const seed = await accounts.get('a1');
+
+    await ledgerStore.transaction(async (tx) => {
+      accounts.put({ ...seed, balance: 999 });
+      await tx.saveChanges();
+      accounts.put({ ...seed, balance: 1000 });
+    });
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 999);
+    const owed = await ledgerStore.saveChanges();
+    assert.strictEqual(owed.updated, 1, 'the pending edit survived the settlement');
+    assert.strictEqual((await accounts.asNoTracking().get('a1')).balance, 1000);
+    await ledgerStore.close();
+  });
+});
+
+describe('the drift gate the unit of work owes itself', () => {
+  it('a save never advances the tracker without registering the withdrawal', () => {
+    const source = fs.readFileSync(fileURLToPath(
+      new URL('../../packages/db/src/tracker.js', import.meta.url)), 'utf8');
+
+    // The defect: `saveChanges()` advanced the tracker when its own
+    // savepoint released, and nothing took the advance back when the
+    // enclosing transaction rolled it away. Either half alone is the bug
+    // — the advance without the withdrawal is silent data loss, and the
+    // withdrawal without the advance re-plans a save that already ran.
+    const body = source.slice(source.indexOf('const saveChanges = ()'));
+    assert.ok(body.length > 0, 'saveChanges is where the pair lives');
+    const advance = body.indexOf('commit(statements, undo)');
+    const withdrawal = body.indexOf('connection.onSettle({ rollback:');
+    assert.ok(advance >= 0,
+      'saveChanges must advance the tracker with the undo delta beside it — '
+      + 'a commit that cannot tell a post-save edit from the saved value '
+      + 'silently discards the edit');
+    assert.ok(withdrawal >= 0,
+      'saveChanges must register the withdrawal through connection.onSettle — '
+      + 'without it an outer rollback leaves the tracker claiming rows the '
+      + 'database no longer holds, and the retry plans nothing');
+    assert.ok(withdrawal > advance,
+      'the withdrawal is registered after the advance it undoes');
+
+    // and the undo delta is taken while the tracker still holds the state
+    // it describes — after this the statements run
+    const captured = body.indexOf('undoFor(statements, joinOnly)');
+    assert.ok(captured >= 0 && captured < advance,
+      'the undo delta is captured before the statements run');
+
+    // exactly one settlement register exists, and it is the store's
+    const store = fs.readFileSync(fileURLToPath(
+      new URL('../../packages/db/src/store.js', import.meta.url)), 'utf8');
+    assert.strictEqual((source.match(/onSettle/g) ?? []).length, 1,
+      'the unit of work registers once');
+    assert.ok(/onSettle: \(effects\) => \{/.test(store),
+      'and the register itself lives in store.js');
   });
 });

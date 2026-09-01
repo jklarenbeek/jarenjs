@@ -5,7 +5,9 @@
 // loaded rows by what it included, membership is checked against the
 // many-to-many members at compile time, and every negative is pinned.
 import { open } from '@jarenjs/linq/db';
-import type { Client, EntityHandle, CollectionHandle, TypedLiveQuery } from '@jarenjs/linq/db';
+import type {
+  Client, EntityHandle, CollectionHandle, TypedLiveQuery, TransactionClientOf,
+} from '@jarenjs/linq/db';
 import type { InferMeta } from '@jarenjs/linq/model';
 import type { EntityMeta } from '@jarenjs/db/typed';
 import type { Driver, SaveReport } from '@jarenjs/db';
@@ -90,6 +92,29 @@ async function main(): Promise<void> {
   const validated: boolean = client.capabilities.validated;
   const escape: User | undefined = await client.store.entity('User').get('u1');
   void [inTx, validated, escape];
+
+  // the transaction client: the SAME handles, the same inference, over
+  // the store inside the transaction
+  const txTitles: string[] = await client.transaction(async (tx) => {
+    const sameHandle: Equals<typeof tx.entities.User, typeof client.entities.User> = true;
+    void sameHandle;
+    const typedTx: TransactionClientOf<Meta, {}> = tx;
+    void typedTx;
+    tx.entities.Post.add({ title: 'in a transaction', stars: 1, authorId: 'u1' });
+    const saved: SaveReport = await tx.saveChanges();
+    void saved;
+    // it nests, and the nested one is a client too
+    await tx.transaction(async (inner) => {
+      const nestedRows: Post[] = await inner.entities.Post.toArray();
+      void nestedRows;
+    });
+    // @ts-expect-error — a transaction client has no close(); the client owns the store
+    void tx.close;
+    return tx.entities.Post.select((p) => p.title).toArray();
+  }, { unitOfWork: 'own' });
+  void txTitles;
+  // @ts-expect-error — the unit-of-work choice is one of exactly two words
+  await client.transaction(async () => 1, { unitOfWork: 'private' });
   await client.close();
 
   // a JSON model is the wide map unless the caller names one

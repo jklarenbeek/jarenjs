@@ -211,7 +211,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,181 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 46,862 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 36,587 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 814 | 36 | 4 | 2 | 478,172 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 814 | 36 | 4 | 2 | 489,568 B |
 | **eleven documents** | | **11,625** | **285** | **67** | | |
 <!--/fact-->
 
@@ -263,7 +263,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,181 B | 19 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 46,862 B | 47 kB |
 | `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 36,587 B | 37 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 478,172 B | 478 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 489,568 B | 490 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of

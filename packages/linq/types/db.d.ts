@@ -20,7 +20,7 @@ import type {
 } from '@jarenjs/db/typed';
 import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
-  SaveReport, Store, StoreCapabilities,
+  SaveReport, StoreCapabilities, TransactionStore,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 
@@ -175,6 +175,37 @@ export interface EntityClientMembers {
   live<T>(source: AsyncSequence<T, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<T>>;
 }
 
+/** How a transaction relates to the client's unit of work: `'own'` (the
+ * default) gives the callback a tracker of its own, so two handlers on
+ * one client hold two records for the same entity key; `'shared'` opts
+ * back into the client's, for a caller who staged changes outside the
+ * transaction and means to save them inside it. */
+export interface TransactionOptions {
+  readonly unitOfWork?: 'own' | 'shared';
+  /** Abandons the call while it is still QUEUED: the callback never
+   * runs and no statement is issued (`JD2064`). */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * The client a transaction callback receives: the same handles, the
+ * same inference, over the store that is INSIDE the transaction.
+ *
+ * `tx.entities.X` and `tx.collections.Y` run as the transaction's owner
+ * and `tx.transaction(...)` nests, while the outer client's handles are
+ * an unrelated caller — one awaited from in here waits for the commit it
+ * is part of, which `JD0012` names rather than hangs on.
+ */
+export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown>> = {
+  /** The scope-bound store — the escape hatch, still inside. */
+  readonly store: TransactionStore;
+  readonly capabilities: StoreCapabilities;
+  readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
+  readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
+  /** Nest through this transaction's savepoint. */
+  transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>): Promise<Awaited<R>>;
+} & ([keyof E] extends [never] ? {} : EntityClientMembers);
+
 /** The client: one frozen record of handles per declared name, the
  * store beneath it, and the pass-throughs. */
 export type Client<E extends MetaMap<E>, C = Record<string, unknown>> = {
@@ -183,6 +214,8 @@ export type Client<E extends MetaMap<E>, C = Record<string, unknown>> = {
   readonly capabilities: StoreCapabilities;
   readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
-  transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
+  /** A transaction, with a typed client of its own. */
+  transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>,
+    options?: TransactionOptions): Promise<Awaited<R>>;
   close(options?: { graceMs?: number }): Promise<void>;
 } & ([keyof E] extends [never] ? {} : EntityClientMembers);

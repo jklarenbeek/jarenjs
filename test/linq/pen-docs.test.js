@@ -17,6 +17,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { schemaOf } from '@jarenjs/linq/schema';
 
@@ -39,7 +40,7 @@ function bodyOf(text, heading) {
 
 const DOCS_DIR = new URL('../../packages/linq/docs/', import.meta.url);
 const BINDER = new URL('LINQ-FORMAT.md', DOCS_DIR);
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CACHE = path.join(ROOT, 'node_modules', '.cache-pen-docs');
 
 /** A fence's emission: the chain's query document (`toDocument()`), a
@@ -119,7 +120,7 @@ function workedExamples(pen, what, file, heading, atLeast) {
       it(`example ${i + 1} emits its json fence`, async () => {
         const module = path.join(CACHE, `${pen}-example-${i + 1}.mjs`);
         fs.writeFileSync(module, pair.js);
-        const mod = await import(`${module}?${Date.now()}`);
+        const mod = await import(`${pathToFileURL(module).href}?${Date.now()}`);
         const names = Object.keys(mod);
         assert.strictEqual(names.length, 1, `one export per fence, got ${names.join(', ')}`);
         assert.deepStrictEqual(documentOf(mod[names[0]]), JSON.parse(pair.json));

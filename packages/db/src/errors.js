@@ -71,6 +71,12 @@ export const DB_CODES = Object.freeze({
   JD2061: 'another context owns the database',
   JD2062: 'the store closed with job handlers still in flight',
   JD2063: 'the store is closed',
+  JD2064: 'the call was aborted while it waited for the open transaction',
+  JD2065: 'the job is not leased — it is unknown, or already settled',
+  JD2066: 'the lease was superseded by a newer claim or renewal',
+  JD2067: 'the lease expired before the call',
+  JD2068: 'a settling call needs the lease the claim returned',
+  JD2069: 'a resumed run does not match the workflow or input it was checkpointed under',
 });
 
 /**

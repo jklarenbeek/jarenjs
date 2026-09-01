@@ -69,10 +69,11 @@ describe('session capture', () => {
     const notes = store.collection('notes');
     await notes.insert({ id: 'a', body: 'one', meta: { k: 1 } });
     await notes.insert({ id: 'b', body: 'two' });
-    await store.transaction(async () => {
-      await notes.put({ id: 'a', body: 'ONE', meta: { k: 1 } }, 'a');
-      await notes.insert({ id: 'c', body: 'three' });
-      await notes.delete('b');
+    await store.transaction(async (tx) => {
+      const inside = tx.collection('notes');
+      await inside.put({ id: 'a', body: 'ONE', meta: { k: 1 } }, 'a');
+      await inside.insert({ id: 'c', body: 'three' });
+      await inside.delete('b');
     });
     assert.strictEqual(seen.length, 3);
     assert.deepStrictEqual(seen.map((record) => record.seq), [1, 2, 3]);
@@ -90,8 +91,8 @@ describe('session capture', () => {
     const store = await open();
     const seen = [];
     store.observe((record) => seen.push(record));
-    await store.transaction(async () => {
-      const notes = store.collection('notes');
+    await store.transaction(async (tx) => {
+      const notes = tx.collection('notes');
       await notes.insert({ id: 'x', body: 'v1' });
       await notes.put({ id: 'x', body: 'v2' }, 'x');
       await notes.insert({ id: 'gone', body: 'temp' });
@@ -108,8 +109,8 @@ describe('session capture', () => {
     const store = await open();
     const seen = [];
     store.observe((record) => seen.push(record));
-    const notes = store.collection('notes');
-    await store.transaction(async () => {
+    await store.transaction(async (tx) => {
+      const notes = tx.collection('notes');
       for (let i = 0; i < 10_000; i++) {
         await notes.insert({ id: `n${i}`, body: 'x' });
       }
@@ -124,8 +125,8 @@ describe('session capture', () => {
     const store = await open();
     const seen = [];
     store.observe((record) => seen.push(record));
-    await assert.rejects(() => store.transaction(async () => {
-      await store.collection('notes').insert({ id: 'doomed', body: 'x' });
+    await assert.rejects(() => store.transaction(async (tx) => {
+      await tx.collection('notes').insert({ id: 'doomed', body: 'x' });
       throw new Error('abort');
     }), /abort/);
     assert.strictEqual(seen.length, 0);
@@ -138,12 +139,13 @@ describe('session capture', () => {
     const seen = [];
     store.observe((record) => seen.push(record));
     await store.transaction(async (tx) => {
-      await store.collection('notes').insert({ id: 'kept', body: 'yes' });
+      await tx.collection('notes').insert({ id: 'kept', body: 'yes' });
       try {
-        // nesting goes through the store the callback RECEIVED: the outer
-        // store cannot tell an inner transaction from an unrelated caller
-        await tx.transaction(async () => {
-          await store.collection('notes').insert({ id: 'ghost', body: 'no' });
+        // both the nesting and the writes go through the store the callback
+        // RECEIVED: the outer store's handles are an unrelated caller, and
+        // wait for the commit rather than joining it
+        await tx.transaction(async (inner) => {
+          await inner.collection('notes').insert({ id: 'ghost', body: 'no' });
           throw new Error('inner');
         });
       }

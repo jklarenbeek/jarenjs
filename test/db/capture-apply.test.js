@@ -190,30 +190,30 @@ async function runCorpus(mode, seed, steps) {
       }
       else if (roll < 0.85) {
         // a multi-op transaction touching several tables
-        await store.transaction(async () => {
-          await store.collection('docs').put(randomDoc(rand, 'txn'), 'txn');
+        await store.transaction(async (tx) => {
+          await tx.collection('docs').put(randomDoc(rand, 'txn'), 'txn');
           if (mirror.Item.txn === undefined) {
-            await store.entity('Item').create({ id: 'txn', n: step, on: true });
+            await tx.entity('Item').create({ id: 'txn', n: step, on: true });
           }
           else {
-            await store.entity('Item').update('txn', { n: step });
+            await tx.entity('Item').update('txn', { n: step });
           }
         });
       }
       else if (roll < 0.92) {
         // an aborted transaction must contribute NOTHING
-        await store.transaction(async () => {
-          await store.collection('docs').put(randomDoc(rand, 'doomed'), 'doomed');
+        await store.transaction(async (tx) => {
+          await tx.collection('docs').put(randomDoc(rand, 'doomed'), 'doomed');
           throw new Error('abort');
         }).catch(() => {});
       }
       else {
         // a caught inner rollback inside a committed outer
         await store.transaction(async (tx) => {
-          await store.collection('docs').put(randomDoc(rand, 'outer'), 'outer');
+          await tx.collection('docs').put(randomDoc(rand, 'outer'), 'outer');
           try {
-            await tx.transaction(async () => {
-              await store.collection('docs').put(randomDoc(rand, 'inner-ghost'), 'inner-ghost');
+            await tx.transaction(async (inner) => {
+              await inner.collection('docs').put(randomDoc(rand, 'inner-ghost'), 'inner-ghost');
               throw new Error('inner');
             });
           }

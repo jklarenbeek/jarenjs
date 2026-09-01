@@ -2,8 +2,8 @@
 
 This document is normative. The key words MUST, MUST NOT, SHOULD and
 MAY are to be interpreted as described in RFC 2119. Error codes join
-the package's single runtime table (MODEL-FORMAT §7); this order adds
-none — see §9.
+the package's single runtime table (MODEL-FORMAT §7) — the fence's five
+are listed in §9.
 
 ## 1. Scope
 
@@ -41,27 +41,34 @@ restarting.
 | `run_at` | epoch ms eligibility: scheduling and retry backoff are the same mechanism |
 | `attempts` | claims so far; incremented AT claim, so a crashed attempt counts |
 | `max_attempts` | per job, default 5 |
-| `lease_until`, `lease_owner` | the lease (§3); null unless leased |
+| `lease_until`, `lease_owner` | the lease (§3); null unless leased. The owner is DIAGNOSTICS: one worker reuses one owner for every attempt it makes, so it never guards anything |
+| `lease_generation` | the attempt this row is on, incremented by every claim. It identifies the attempt, which the owner cannot |
+| `lease_token` | the opaque fence one claim mints; the guard every settling call carries. Never handed out by `get` |
 | `last_error` | the last failure's `message`, retained through retries and into `dead` |
 | `result` | the completion value, JSON text (§7 records the DAG output here) |
 | `created_at`, `updated_at` | epoch ms |
 
-`_jaren_job_checkpoints` holds `(run_id, node_id, value)` rows — the
-flow checkpoint store of §7, keyed by the JOB id (the run id IS the
-job id). Both tables are created on open when `jobs` is requested;
-neither appears in the model. `enqueue`'s options are validated as
+`_jaren_job_checkpoints` holds `(run_id, node_id, value, generation)`
+rows — the flow checkpoint store of §7, keyed by the JOB id (the run id
+IS the job id) and stamped with the generation that wrote them. Both
+tables are created on open when `jobs` is requested;
+neither appears in the model. A database written before the fence is
+upgraded IN PLACE — the three columns are added behind a presence check,
+because jobs rows are live work and a rebuild would drop a queue.
+`enqueue`'s options are validated as
 they are stored: `runAt` must be a finite epoch in milliseconds and
 `maxAttempts` a positive integer (`TypeError`) — a `NaN` eligibility
 was once stored, and that job was pending forever.
 
-## 3. Leasing and exactly-once execution
+## 3. Leasing, the fence, and exactly-once settlement
 
 Claiming is ONE guarded statement — one statement is one transaction,
 so two workers cannot claim the same job, without any distributed
-lock:
+lock — and it MINTS the fence the attempt will settle with:
 
 ```sql
 UPDATE "_jaren_jobs" SET state='leased', lease_owner=?, lease_until=?,
+  lease_generation=lease_generation+1, lease_token=?,
   attempts=attempts+1, updated_at=?
 WHERE id = (SELECT id FROM "_jaren_jobs"
   WHERE (state='pending' OR state='failed'
@@ -75,15 +82,81 @@ RETURNING *
   whose kind has no registered handler on this worker is simply never
   claimed by it** — it stays `pending` and shows in `counts()`, it is
   NOT dead-lettered by an accident of rollout order.
-- Every later transition is guarded by the lease:
-  `… WHERE id=? AND state='leased' AND lease_owner=?`. A worker whose
-  lease expired mid-run (a stall, a long GC, a laptop lid) finds its
-  completion matching ZERO rows and its result discarded — the job
-  belongs to whoever re-claimed it. Execution is therefore
-  AT-LEAST-ONCE; **completion is exactly-once**. Idempotency of side
-  effects is the handler's responsibility (§7).
 - Eligibility order is `run_at, created_at, id` — oldest first,
   deterministic. There are no priority classes (§8).
+
+### The lease is a capability
+
+`claim` answers the job record with a frozen `lease` beside it:
+
+```jsonc
+{ "jobId": "…", "token": "…", "generation": 3,
+  "attempt": 3, "owner": "worker-a", "expiresAt": 1730000000000 }
+```
+
+It is a **token, never an owner**. One worker mints one owner and reuses
+it for every attempt it ever makes, so an owner cannot say *which*
+attempt is speaking — and the two attempts that matter are exactly the
+ones an owner cannot tell apart: the corpse of an expired attempt and
+the live one that re-claimed the job. The `generation` names the attempt;
+the `token` proves the caller holds it.
+
+It is also **immutable**. `renew` answers a NEW lease and retires the one
+it was given, so a reference someone kept across a renewal can never
+quietly become valid again.
+
+`get()` returns the record with `leaseGeneration` but **no token**: a
+record anyone can read must not carry the capability to settle the job it
+describes.
+
+### Every settling call carries the fence
+
+`renew`, `complete`, `fail` and a checkpoint `save` all guard on:
+
+```sql
+… WHERE id=? AND state='leased' AND lease_token=? AND lease_until > ?
+```
+
+The owner appears nowhere in that clause, and the validity check is not
+optional: without it, a lease thirty seconds dead still completed a job.
+
+A guard that matches nothing is **never `false`**. It is a coded refusal
+naming which of three things happened, because a caller that cannot tell
+"already done" from "you are stale" guesses, and guesses wrong:
+
+| code | what happened |
+|---|---|
+| `JD2065` | the job is not leased — unknown, or already settled by someone else |
+| `JD2066` | the lease was superseded: another claim or renewal holds it now, and the message names both generations |
+| `JD2067` | the lease expired before the call, and the message says by how long |
+
+A fourth, `JD2068`, catches the pre-fence spelling: `complete(id, owner,
+result)` is refused by name and pointed at `job.lease`.
+
+Settling **twice from one attempt** is idempotent, not a refusal — a §7
+handler completes transactionally and the worker's own completion lands
+behind it, and the row's generation says whose settlement it carries.
+
+### What exactly-once means here, and what it does not
+
+Execution is AT-LEAST-ONCE. **Settlement is exactly-once against the
+store**: exactly one attempt's result can ever land on the row, and every
+other attempt is told, by code, that it is not the one.
+
+That is not the same as making an *external* effect exactly-once. If a
+handler sends an email, charges a card or writes to another system, the
+fence cannot un-send it: a reclaimed job runs the handler again, and both
+runs reach the outside world even though only one of them will ever
+settle the row. Idempotency of side effects remains the handler's
+responsibility — the fence guarantees the *record*, not the world.
+
+### Renewal
+
+`jobs.renew(lease, { leaseMs })` moves the expiry out and mints a new
+token, keeping the same generation (a renewal is the same attempt, so its
+checkpoints stay its own). It is what a handler that legitimately
+outlives `leaseMs` uses instead of hoping; the worker does it
+automatically (§6).
 
 ## 4. Retry and dead-lettering
 
@@ -108,16 +181,25 @@ A worker that dies mid-job leaves a `leased` row whose `lease_until`
 passes; the claim statement (§3) treats an expired lease exactly like
 `pending`, so **recovery is not a separate sweeper — it is the next
 claim**. The reclaimed attempt re-runs the handler; a §7 DAG job
-resumes from its checkpoint rows rather than restarting. The lease
-duration (`leaseMs`, default 30 000 ms) is therefore the recovery
-latency ceiling: a handler that legitimately outlives its lease gets
-reclaimed — size `leaseMs` to the slowest honest handler.
+resumes from its checkpoint rows rather than restarting, and the
+reclaimed attempt reads the checkpoints written up to and including its
+own generation, so it resumes from its predecessor's work.
+
+The reclaim also FENCES the attempt it displaced: the older token settles
+nothing from that moment, and its settlement is refused `JD2066` rather
+than silently discarded. A stale attempt therefore cannot mark the job
+done over the live one's result, and cannot prune the live one's
+checkpoints — a settlement deletes only generations at or below its own.
+
+The lease duration (`leaseMs`, default 30 000 ms) is the recovery
+latency ceiling. A handler that legitimately outlives it does not have to
+be reclaimed: the worker renews while it runs (§6).
 
 ## 6. Workers and concurrency
 
 `createWorker({ handlers, concurrency, pollInterval, leaseMs, owner,
-backoffBase, backoffCap, stopGraceMs })` returns `{ start(), stop(),
-stats() }`:
+renew, onOutcome, backoffBase, backoffCap, stopGraceMs })` returns
+`{ start(), stop(), stats(), leases() }`:
 
 - `concurrency` (default 1, a positive integer — `TypeError`
   otherwise, because a worker with zero loops would `start()` and never
@@ -136,11 +218,29 @@ stats() }`:
   answering
   `{ drained, inFlight }`; a loop the grace period could not drain is
   **cancelled**, not left running — see §6.1;
-- `stats()` reports claims, completions, failures, wakes, polls, the
-  in-flight handler count and `claimErrors` — a claim statement the
-  database refused (a read-only file, a closed store), counted rather
-  than swallowed, so a worker that can never claim is visible instead
-  of silently idle.
+- each in-flight attempt's lease is **renewed** while its handler runs,
+  at a third of `leaseMs`, so two renewals may fail before the attempt
+  is actually at risk. Every renewal replaces the lease. `renew: false`
+  turns it off for a handler that must not outlive its lease;
+- an attempt whose lease is **lost** — superseded or expired — has its
+  signal aborted with the refusal as the reason, and is then barred from
+  settling. It is its own outcome: `lostSettlements`, never a completion
+  (which is how a corpse once reported success over work another attempt
+  was still doing) and never a failure (which would burn a retry the job
+  never spent);
+- `onOutcome` is called once per settled attempt —
+  `{ outcome: 'completed' | 'failed' | 'lost', jobId, kind, attempt,
+  generation, code?, reason? }`. An observer that throws never affects
+  the loop;
+- `leases()` lists the leases this worker holds right now, one per
+  in-flight attempt. In-flight state is keyed by the fence TOKEN, never
+  by the owner: one worker reuses one owner, and two attempts of one job
+  must not collide in its own bookkeeping;
+- `stats()` reports claims, completions, failures, wakes, polls,
+  renewals, lost settlements, the in-flight handler count and
+  `claimErrors` — a claim statement the database refused (a read-only
+  file, a closed store), counted rather than swallowed, so a worker that
+  can never claim is visible instead of silently idle.
 
 ### 6.1 A handler cannot break the loop, and cannot hold shutdown
 
@@ -160,12 +260,19 @@ job:
 
 ```js
 handlers: {
-  sync: async (payload, { job, signal, checkpointsFor }) => {
+  sync: async (payload, { job, signal, checkpoints }) => {
     const res = await fetch(url, { signal });   // cancelled on stop()
     …
   },
 }
 ```
+
+The same signal aborts for the other reason a handler must wind up: this
+attempt no longer holds the job. Its `reason` is then the coded refusal
+that says which — so a handler can tell "we are shutting down" from "you
+have been superseded" without asking. `checkpoints` is the §7 store
+already bound to this attempt, and it follows the attempt's current
+lease, so a renewal does not strand it.
 
 `stop({ graceMs })` aborts the signal, waits up to `graceMs`, and then
 returns `{ drained, inFlight }` regardless. `store.close({ graceMs })`
@@ -202,19 +309,34 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   `@jarenjs/db`'s manifest and import graph name `@jarenjs/flow`
   nowhere, asserted by test.
 - The job id is the run id. Node values save into
-  `_jaren_job_checkpoints` as the run progresses; `complete` records
-  the DAG result AND marks the job `done` **in one guarded
-  statement** — one transaction, so a failure leaves neither, and the
-  checkpoint rows of a finished job are pruned in the same breath.
+  `_jaren_job_checkpoints` as the run progresses, each stamped with the
+  writing attempt's generation; `complete` records the DAG result AND
+  marks the job `done` **in one guarded statement** — one transaction, so
+  a failure leaves neither, and the checkpoint rows of a finished job are
+  pruned in the same breath. The prune deletes only generations at or
+  below the settling lease's, so a stale attempt cannot take a live one's
+  work with it.
 - A reclaimed DAG job resumes: recorded nodes seed (FLOW-FORMAT
   §7.6), the rest re-run. A task node with side effects MUST thread
   an idempotency key (the job id is the natural one) into whatever it
   touches; the queue cannot make a non-idempotent effect safe, and
-  does not pretend to.
-- The document belongs WITH the job kind at worker construction —
-  resuming under a different document is undefined (FLOW-FORMAT
-  §7.6), so deploys that change a dag document SHOULD drain old jobs
-  first or version the kind name.
+  does not pretend to (§3, *what exactly-once means here*).
+- Every task's handler receives the run's signal, which is the job
+  handler's: a worker winding down inside its `graceMs`, or an attempt
+  whose lease has been lost, reaches every task rather than only the
+  outermost await.
+- **A resume must be the same run.** The workflow document's revision and
+  a hash of the run's input are persisted beside its checkpoints, under a
+  reserved node id, and pruned with them. A resume that disagrees with
+  either is `JD2069` naming what changed — the workflow, the input, or
+  both — rather than answering from checkpoints written for a different
+  computation. A deploy that edits a dag document therefore no longer has
+  to drain old jobs to be safe: the in-flight ones refuse by name. What
+  is NOT covered is a task whose injected implementation changed while
+  its document did not; a document revision cannot see that.
+- A resume that DOES agree changes nothing: the recorded nodes are
+  restored rather than re-run, no checkpoint row is written, and none is
+  pruned.
 
 ## 8. Non-goals
 
@@ -233,7 +355,18 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 
 ## 9. Errors
 
-This format adds NO codes. API misuse (a malformed handler map, a
+The fence adds five, all in the package's single runtime table
+(MODEL-FORMAT §7), all raised where a silent `false` used to be:
+
+| code | raised when |
+|---|---|
+| `JD2065` | a settling call names a job that is not leased — unknown, or already settled by someone else |
+| `JD2066` | the lease was superseded by a newer claim or renewal |
+| `JD2067` | the lease expired before the call |
+| `JD2068` | a settling call used the pre-fence `(id, owner)` spelling instead of the lease |
+| `JD2069` | a resumed run disagrees with the workflow revision or input hash its checkpoints were written under (§7) |
+
+Otherwise: API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the
 call, matching the capture and live precedents; storage failures ride
 the existing `JD2005` wrap and a coded error passes through it

@@ -9,10 +9,15 @@
  * composition binds (§7) — completion marks the job done and records
  * the result in ONE guarded transaction.
  *
- * Every worker transition is guarded by `state='leased' AND
- * lease_owner=?`: execution is at-least-once, completion is
- * exactly-once. `now` and `random` are injectable — the runtime
- * defaults are the clock and `Math.random`; every test injects.
+ * Every settling transition is guarded by a FENCE — the opaque token
+ * one claim mints, plus a lease that is still valid — never by the
+ * owner, which one worker reuses for every attempt it ever makes and
+ * which therefore cannot say which attempt is speaking. Execution is
+ * at-least-once; settlement is exactly-once AGAINST THE STORE, and a
+ * guard that matches nothing is a coded refusal naming which of the
+ * three reasons applied, never a silent `false`. `now` and `random`
+ * are injectable — the runtime defaults are the clock and
+ * `Math.random`; every test injects.
  *
  * The worker LIFECYCLE holds two invariants that a long-running process
  * depends on, and neither is a detail:
@@ -103,6 +108,8 @@ const CREATE_JOBS = `CREATE TABLE IF NOT EXISTS "${JOBS_TABLE}" (
   max_attempts INTEGER NOT NULL,
   lease_until INTEGER,
   lease_owner TEXT,
+  lease_generation INTEGER NOT NULL DEFAULT 0,
+  lease_token TEXT,
   last_error TEXT,
   result TEXT,
   created_at INTEGER NOT NULL,
@@ -114,10 +121,25 @@ CREATE TABLE IF NOT EXISTS "${JOB_CHECKPOINTS_TABLE}" (
   run_id TEXT NOT NULL,
   node_id TEXT NOT NULL,
   value TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (run_id, node_id)
 );`;
 
-/** Map a raw row to the frozen public record (§2). */
+/**
+ * The columns a database written before the fence does not have, added
+ * in place. Jobs rows are live work, so an existing queue is upgraded,
+ * never rebuilt: every column carries a default that reads as "claimed
+ * before the fence existed", which no token can ever match.
+ */
+const ADDED_COLUMNS = Object.freeze([
+  { table: JOBS_TABLE, name: 'lease_generation', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: JOBS_TABLE, name: 'lease_token', definition: 'TEXT' },
+  { table: JOB_CHECKPOINTS_TABLE, name: 'generation', definition: 'INTEGER NOT NULL DEFAULT 0' },
+]);
+
+/** Map a raw row to the frozen public record (§2). The lease token is
+ * deliberately absent: a record anyone can read must not carry the
+ * capability to settle the job it describes. */
 function publicJob(row) {
   return Object.freeze({
     id: row.id,
@@ -129,11 +151,40 @@ function publicJob(row) {
     maxAttempts: Number(row.max_attempts),
     leaseUntil: row.lease_until === null ? null : Number(row.lease_until),
     leaseOwner: row.lease_owner,
+    leaseGeneration: Number(row.lease_generation ?? 0),
     lastError: row.last_error,
     result: row.result === null ? null : JSON.parse(row.result),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   });
+}
+
+/**
+ * The capability one claim mints: the right to settle THIS attempt of
+ * this job, for as long as the lease is valid.
+ *
+ * It is a token, never an owner (D1). One worker reuses one owner for
+ * its whole life, so an owner cannot tell two attempts of one job apart
+ * — which is how a corpse completed a job another attempt was still
+ * running. And it is immutable (D2): `renew` answers a NEW lease, so a
+ * reference someone kept can never become valid again behind their back.
+ */
+function leaseOf(row) {
+  return Object.freeze({
+    jobId: row.id,
+    token: row.lease_token,
+    generation: Number(row.lease_generation),
+    attempt: Number(row.attempts),
+    owner: row.lease_owner,
+    expiresAt: Number(row.lease_until),
+  });
+}
+
+/** Whether a value is a lease this engine minted, rather than the
+ * `(id, owner)` pair the pre-fence surface took. */
+function isLease(value) {
+  return value !== null && typeof value === 'object'
+    && typeof value.token === 'string' && typeof value.jobId === 'string';
 }
 
 /**
@@ -178,12 +229,36 @@ export function createJobEngine(options) {
     for (const wake of [...wakers]) wake();
   };
 
+  /**
+   * Add whatever this database is missing, in place. `CREATE TABLE IF
+   * NOT EXISTS` leaves a table written before the fence exactly as it
+   * was, so the columns are added one at a time behind a presence
+   * check — jobs rows are live work, and a rebuild would drop a queue.
+   * Forward-only: nothing is ever removed here.
+   */
+  const upgradeColumns = () => {
+    const dialect = connection.dialect;
+    const next = (i) => {
+      if (i >= ADDED_COLUMNS.length) return null;
+      const { table, name, definition } = ADDED_COLUMNS[i];
+      return chain(connection.prepare(dialect.introspect.columns(table)), (statement) =>
+        chain(statement.all([]), (rows) => {
+          if (rows.some((/** @type {any} */ row) => row.name === name)) return next(i + 1);
+          return chain(
+            connection.exec(`ALTER TABLE "${table}" ADD COLUMN ${name} ${definition}`),
+            () => next(i + 1));
+        }));
+    };
+    return next(0);
+  };
+
   // the tables are created here, or refused here: a read-only store
   // leaked the driver's "attempt to write a readonly database"
-  const ready = attempt(() => connection.exec(CREATE_JOBS), (error) => new DbCompileError('JD0002',
-    `the job tables could not be created (${error?.message ?? String(error)}) — `
-    + 'a read-only store creates nothing; open it read-write once, or without jobs',
-    '/jobs', error));
+  const ready = attempt(() => chain(connection.exec(CREATE_JOBS), upgradeColumns),
+    (error) => new DbCompileError('JD0002',
+      `the job tables could not be created (${error?.message ?? String(error)}) — `
+      + 'a read-only store creates nothing; open it read-write once, or without jobs',
+      '/jobs', error));
 
   const enqueue = (kind, payload, enqueueOptions) => {
     if (typeof kind !== 'string' || kind === '') {
@@ -248,8 +323,13 @@ export function createJobEngine(options) {
     }
     const at = now();
     const placeholders = kinds.map(() => '?').join(', ');
+    // the claim MINTS the fence: a fresh token for this attempt, and a
+    // generation one higher than whatever ran before it. Both come back
+    // through the RETURNING the claim already had, so the attempt that
+    // holds them is the only one that can settle the job
     const statement = prepared(`claim:${kinds.length}`,
       `UPDATE "${JOBS_TABLE}" SET state='leased', lease_owner=?, lease_until=?,
+        lease_generation = lease_generation + 1, lease_token=?,
         attempts = attempts + 1, updated_at=?
       WHERE id = (SELECT id FROM "${JOBS_TABLE}"
         WHERE (state='pending' OR state='failed'
@@ -258,8 +338,80 @@ export function createJobEngine(options) {
         ORDER BY run_at, created_at, id LIMIT 1)
       RETURNING *`);
     return chain(statement.get([
-      owner, at + (claimOptions.leaseMs ?? defaults.leaseMs), at, at, at, ...kinds,
-    ]), (row) => (row === undefined ? undefined : publicJob(row)));
+      owner, at + (claimOptions.leaseMs ?? defaults.leaseMs), crypto.randomUUID(),
+      at, at, at, ...kinds,
+    ]), (row) => (row === undefined
+      ? undefined
+      : Object.freeze({ ...publicJob(row), lease: leaseOf(row) })));
+  };
+
+  /**
+   * Why a settling call matched no row. A guard that answers zero is not
+   * `false` — a caller that cannot tell "already done" from "you are
+   * stale" guesses, and guesses wrong (D7). The row itself says which of
+   * the three it was.
+   * @param {any} lease
+   * @param {string} verb
+   */
+  const refuseSettlement = (lease, verb) => chain(
+    prepared('fenceRow', `SELECT state, lease_token, lease_until, lease_generation
+      FROM "${JOBS_TABLE}" WHERE id = ?`).get([lease.jobId]),
+    (row) => {
+      const at = now();
+      // THIS attempt already settled it — a §7 handler that completed
+      // transactionally, then the worker's own completion behind it.
+      // Settling twice from one attempt is idempotent, not a refusal;
+      // the generation says whose settlement the row carries.
+      if (row !== undefined && row.state !== 'leased'
+        && Number(row.lease_generation) === lease.generation) return null;
+      if (row === undefined || row.state !== 'leased') {
+        return new DbRuntimeError('JD2065',
+          `${verb} refused: job '${lease.jobId}' is ${row === undefined
+            ? 'unknown' : `'${row.state}'`}, not leased — it was settled by someone else, `
+          + 'or never existed',
+          { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+      }
+      if (row.lease_token !== lease.token) {
+        return new DbRuntimeError('JD2066',
+          `${verb} refused: the lease on job '${lease.jobId}' was superseded — `
+          + `this one is generation ${lease.generation}, the job is on `
+          + `generation ${Number(row.lease_generation)}. Another attempt holds it now; `
+          + 'stop writing on its behalf',
+          { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+      }
+      if (Number(row.lease_until) <= at) {
+        return new DbRuntimeError('JD2067',
+          `${verb} refused: the lease on job '${lease.jobId}' expired `
+          + `${at - Number(row.lease_until)}ms ago — renew() while a handler runs longer `
+          + 'than its lease, or claim it with a longer leaseMs',
+          { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+      }
+      // the row agrees on every guard, so the update matched nothing for
+      // a reason this engine does not know: report it rather than retry
+      return new DbRuntimeError('JD2065',
+        `${verb} refused: job '${lease.jobId}' did not accept the settlement`,
+        { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+    });
+
+  /** The guard every settling statement carries (D1): the token, and a
+   * lease that is still valid. Never the owner — one worker reuses one
+   * owner for every attempt it ever makes. */
+  const FENCE = "state='leased' AND lease_token=? AND lease_until > ?";
+
+  /**
+   * Check the lease a settling call was given, before it is used. The
+   * pre-fence `(id, owner)` spelling cannot stay a settling call — it is
+   * the defect — so it is refused by name rather than silently accepted.
+   * @param {any} lease
+   * @param {string} verb
+   */
+  const requireLease = (lease, verb) => {
+    if (isLease(lease)) return null;
+    return new DbRuntimeError('JD2068',
+      `${verb} takes the lease the claim returned (job.lease), not an id and an owner. `
+      + 'An owner is reused by every attempt one worker makes, so it cannot say WHICH '
+      + 'attempt is settling; the lease can.',
+      { docPath: '/jobs', collection: JOBS_TABLE });
   };
 
   /** §4: the jittered exponential backoff. */
@@ -270,93 +422,175 @@ export function createJobEngine(options) {
   };
 
   /**
-   * Complete a leased job — guarded, exactly-once (§3). A result JSON
-   * cannot express is refused HERE, before any write, so the caller can
-   * fail the attempt instead of the worker.
+   * Renew a lease (D2): a NEW token, a later expiry, the same attempt
+   * and the same generation — a renewal is not a new attempt. The lease
+   * it answers replaces the one it was given, and that one then fails
+   * every settling call, so a reference kept across a renewal can never
+   * quietly come back to life.
+   * @param {any} lease - the lease the claim (or the last renew) returned
+   * @param {{ leaseMs?: number }} [renewOptions]
+   */
+  const renew = (lease, renewOptions) => {
+    const misuse = requireLease(lease, 'renew()');
+    if (misuse !== null) throw misuse;
+    const at = now();
+    return chain(prepared('renew', `UPDATE "${JOBS_TABLE}"
+      SET lease_until=?, lease_token=?, updated_at=?
+      WHERE id=? AND ${FENCE}
+      RETURNING *`).get([
+      at + (renewOptions?.leaseMs ?? defaults.leaseMs), crypto.randomUUID(),
+      at, lease.jobId, lease.token, at,
+      ]), (row) => (row === undefined
+      ? chain(refuseSettlement(lease, 'renew()'), (error) => {
+        // a settled job cannot be renewed, whoever settled it
+        throw error ?? new DbRuntimeError('JD2065',
+          `renew() refused: job '${lease.jobId}' is already settled`,
+          { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+      })
+      : leaseOf(row)));
+  };
+
+  /**
+   * Complete a leased job — guarded by the fence, exactly-once against
+   * the store (§3). A result JSON cannot express is refused HERE, before
+   * any write, so the caller can fail the attempt instead of the worker.
+   * @param {any} lease
+   * @param {any} result
    * @throws {TypeError} when the result is not representable
    */
-  const complete = (id, owner, result) => {
+  const complete = (lease, result) => {
+    const misuse = requireLease(lease, 'complete()');
+    if (misuse !== null) throw misuse;
     const serialized = serializeResult(result);
     if (!('text' in serialized)) throw new TypeError(serialized.reason);
+    const at = now();
     return chain(
       prepared('complete', `UPDATE "${JOBS_TABLE}"
-        SET state='done', result=?, lease_until=NULL, updated_at=?
-        WHERE id=? AND state='leased' AND lease_owner=?`).run([
-        serialized.text, now(), id, owner,
-      ]), (out) => Number(out.changes ?? 0) > 0);
+        SET state='done', result=?, lease_until=NULL, lease_token=NULL, updated_at=?
+        WHERE id=? AND ${FENCE}`).run([
+        serialized.text, at, lease.jobId, lease.token, at,
+      ]), (out) => (Number(out.changes ?? 0) > 0
+        ? true
+        : chain(refuseSettlement(lease, 'complete()'), (error) => {
+          if (error !== null) throw error;
+          return true; // this attempt's settlement already landed
+        })));
   };
 
   /** Fail a leased job: schedule the retry or dead-letter (§4). */
-  const fail = (id, owner, error, workerDefaults) => chain(get(id), (job) => {
-    if (job === undefined) return false;
-    const terminal = job.attempts >= job.maxAttempts;
-    const at = now();
-    const statement = terminal
-      ? prepared('dead', `UPDATE "${JOBS_TABLE}"
-          SET state='dead', last_error=?, lease_until=NULL, updated_at=?
-          WHERE id=? AND state='leased' AND lease_owner=?`)
-      : prepared('retry', `UPDATE "${JOBS_TABLE}"
-          SET state='failed', last_error=?, lease_until=NULL, run_at=?, updated_at=?
-          WHERE id=? AND state='leased' AND lease_owner=?`);
-    // host code decides what it throws; reading it must not throw back
-    const message = describeValue(error);
-    const params = terminal
-      ? [message, at, id, owner]
-      : [message, at + backoffOf(job.attempts, workerDefaults), at, id, owner];
-    return chain(statement.run(params), (out) => Number(out.changes ?? 0) > 0);
-  });
+  const fail = (lease, error, workerDefaults) => {
+    const misuse = requireLease(lease, 'fail()');
+    if (misuse !== null) throw misuse;
+    return chain(get(lease.jobId), (job) => {
+      if (job === undefined) {
+        return chain(refuseSettlement(lease, 'fail()'), (refusal) => {
+          throw refusal ?? new DbRuntimeError('JD2065',
+            `fail() refused: job '${lease.jobId}' is unknown`,
+            { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+        });
+      }
+      const terminal = job.attempts >= job.maxAttempts;
+      const at = now();
+      const statement = terminal
+        ? prepared('dead', `UPDATE "${JOBS_TABLE}"
+            SET state='dead', last_error=?, lease_until=NULL, lease_token=NULL, updated_at=?
+            WHERE id=? AND ${FENCE}`)
+        : prepared('retry', `UPDATE "${JOBS_TABLE}"
+            SET state='failed', last_error=?, lease_until=NULL, lease_token=NULL,
+              run_at=?, updated_at=?
+            WHERE id=? AND ${FENCE}`);
+      // host code decides what it throws; reading it must not throw back
+      const message = describeValue(error);
+      const params = terminal
+        ? [message, at, lease.jobId, lease.token, at]
+        : [message, at + backoffOf(job.attempts, workerDefaults), at,
+          lease.jobId, lease.token, at];
+      return chain(statement.run(params), (out) => (Number(out.changes ?? 0) > 0
+        ? true
+        : chain(refuseSettlement(lease, 'fail()'), (refusal) => {
+          if (refusal !== null) throw refusal;
+          return true; // this attempt's settlement already landed
+        })));
+    });
+  };
 
   /**
-   * §7: the flow checkpoint store bound to ONE claimed job. `save`
-   * refuses once the lease is lost (the stale run aborts fast);
-   * `complete` records the result, marks the job done and prunes the
-   * checkpoint rows in ONE guarded transaction — a failure leaves
-   * neither.
-   * @param {{ id: string, leaseOwner: string | null }} job
+   * §7: the flow checkpoint store bound to ONE claimed attempt. Every
+   * row it writes is stamped with that attempt's generation, and that
+   * is what keeps a corpse from erasing the living:
+   *
+   *  - `save` carries the same fence as any other settling call, so a
+   *    superseded or expired attempt writes nothing;
+   *  - `load` reads what was written up to and including this
+   *    generation, so a re-claimed attempt resumes from its
+   *    predecessor's work rather than from nothing;
+   *  - `complete`'s prune deletes only generations at or below the
+   *    settling lease's, so a stale settlement cannot take a newer
+   *    attempt's checkpoints with it.
+   *
+   * @param {{ id: string, lease?: any, leaseOwner?: string | null }} job -
+   *   a claim result, which carries its own lease
    */
-  const checkpointsFor = (job) => ({
-    load: (runId) => chain(
-      prepared('cpLoad', `SELECT node_id, value FROM "${JOB_CHECKPOINTS_TABLE}"
-        WHERE run_id = ?`).all([runId]),
-      (rows) => (rows.length === 0
-        ? null
-        : {
-          values: Object.fromEntries(
-            rows.map((row) => [row.node_id, JSON.parse(row.value)])),
-        })),
-    save: (runId, nodeId, value) => connection.transaction(() => chain(
-      prepared('cpOwner', `SELECT lease_owner FROM "${JOBS_TABLE}"
-        WHERE id=? AND state='leased'`).get([runId]),
-      (row) => {
-        if (row === undefined || row.lease_owner !== job.leaseOwner) {
-          throw new Error(
-            `the lease on job '${runId}' was lost; the checkpoint is refused`);
-        }
-        return prepared('cpSave', `INSERT INTO "${JOB_CHECKPOINTS_TABLE}"
-          (run_id, node_id, value) VALUES (?, ?, ?)
-          ON CONFLICT (run_id, node_id) DO UPDATE SET value=excluded.value`)
-          .run([runId, nodeId, JSON.stringify(value)]);
-      })),
-    complete: (runId, result) => connection.transaction(() => chain(
-      complete(runId, /** @type {string} */ (job.leaseOwner), result),
-      (completed) => {
-        if (!completed) {
-          throw new Error(
-            `the lease on job '${runId}' was lost; the completion is refused`);
-        }
-        return prepared('cpPrune',
-          `DELETE FROM "${JOB_CHECKPOINTS_TABLE}" WHERE run_id = ?`).run([runId]);
-      })),
-  });
+  const checkpointsFor = (job) => {
+    const lease = job?.lease;
+    const generation = isLease(lease) ? lease.generation : 0;
+    return {
+      load: (runId) => chain(
+        prepared('cpLoad', `SELECT node_id, value FROM "${JOB_CHECKPOINTS_TABLE}"
+          WHERE run_id = ? AND generation <= ?`).all([runId, generation]),
+        (rows) => (rows.length === 0
+          ? null
+          : {
+            values: Object.fromEntries(
+              rows.map((row) => [row.node_id, JSON.parse(row.value)])),
+          })),
+      save: (runId, nodeId, value) => connection.transaction(() => {
+        const misuse = requireLease(lease, 'checkpoint save()');
+        if (misuse !== null) throw misuse;
+        const at = now();
+        return chain(
+          prepared('cpFence', `SELECT id FROM "${JOBS_TABLE}"
+            WHERE id=? AND ${FENCE}`).get([runId, lease.token, at]),
+          (row) => {
+            if (row === undefined) {
+              return chain(refuseSettlement({ ...lease, jobId: runId }, 'checkpoint save()'),
+                (error) => {
+                  // a checkpoint is not a settlement: writing one after the
+                  // job is settled is still refused, whoever settled it
+                  throw error ?? new DbRuntimeError('JD2065',
+                    `checkpoint save() refused: job '${runId}' is already settled`,
+                    { docPath: '/jobs', collection: JOBS_TABLE, key: runId });
+                });
+            }
+            return prepared('cpSave', `INSERT INTO "${JOB_CHECKPOINTS_TABLE}"
+              (run_id, node_id, value, generation) VALUES (?, ?, ?, ?)
+              ON CONFLICT (run_id, node_id) DO UPDATE
+                SET value=excluded.value, generation=excluded.generation`)
+              .run([runId, nodeId, JSON.stringify(value), generation]);
+          });
+      }),
+      complete: (runId, result) => connection.transaction(() => chain(
+        complete(lease, result),
+        () => prepared('cpPrune', `DELETE FROM "${JOB_CHECKPOINTS_TABLE}"
+          WHERE run_id = ? AND generation <= ?`).run([runId, generation]))),
+    };
+  };
 
   /** @type {Set<any>} */
   const workers = new Set();
+
+  /** A settling refusal, as opposed to a storage failure: the three
+   * the fence raises mean this attempt no longer holds the job, and no
+   * amount of retrying will change that. */
+  const LOST_CODES = new Set(['JD2065', 'JD2066', 'JD2067']);
+  const isLeaseLost = (error) => LOST_CODES.has(/** @type {any} */ (error)?.code);
 
   /**
    * §6: N claim-execute loops over one handler registry.
    * @param {{ handlers: Record<string, Function>, concurrency?: number,
    *   pollInterval?: number, leaseMs?: number, owner?: string,
-   *   backoffBase?: number, backoffCap?: number }} workerOptions
+   *   backoffBase?: number, backoffCap?: number, renew?: boolean,
+   *   onOutcome?: (event: any) => void }} workerOptions
    */
   const createWorker = (workerOptions) => {
     const handlers = workerOptions?.handlers;
@@ -374,7 +608,45 @@ export function createJobEngine(options) {
       throw new TypeError('createWorker: "concurrency" is a positive integer');
     }
     const pollInterval = workerOptions.pollInterval ?? defaults.pollInterval;
-    const stats = { claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0, claimErrors: 0 };
+    const leaseMs = workerOptions.leaseMs ?? defaults.leaseMs;
+    // three renewals fit inside one lease, so two may fail — to a
+    // stalled event loop or a busy database — before the attempt is
+    // actually at risk. A handler that must not outlive its lease says
+    // `renew: false` and gets the old behaviour, deliberately.
+    const renewing = workerOptions.renew !== false;
+    const renewEvery = Math.max(1, Math.floor(leaseMs / 3));
+    const stats = {
+      claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0, claimErrors: 0,
+      /** Leases replaced while a handler was still running. */
+      renewals: 0,
+      /** Attempts whose lease was lost mid-flight: aborted, and NEVER
+       * counted as a completion or a failure, because this attempt no
+       * longer speaks for the job. */
+      lostSettlements: 0,
+    };
+
+    /** Tell the host what became of one attempt. An observer that throws
+     * must never affect the loop (the app.observe discipline). */
+    const notify = (event) => {
+      const observer = workerOptions.onOutcome;
+      if (typeof observer !== 'function') return;
+      try {
+        observer(Object.freeze(event));
+      }
+      catch {
+        // deliberately swallowed; the attempt has already settled
+      }
+    };
+
+    /**
+     * The attempts this worker has in flight, keyed by the FENCE TOKEN.
+     * Never by owner and never by job id: one worker reuses one owner for
+     * every attempt it makes, and a re-claim of the same job is a
+     * different attempt that must not collide with its predecessor's
+     * bookkeeping.
+     * @type {Map<string, any>}
+     */
+    const attempts = new Map();
 
     let running = false;
     /** @type {Promise<void>[]} */
@@ -420,53 +692,170 @@ export function createJobEngine(options) {
     let inFlight = 0;
 
     /**
+     * The lease this attempt LOST, and everything that follows from it:
+     * the renewal timer stops, the handler's signal aborts so it writes
+     * nothing else, and the attempt is barred from settling — because
+     * another attempt holds the job now, and a settlement from here
+     * would discard its work.
+     */
+    const loseLease = (attempt, error) => {
+      if (attempt.lost !== null) return;
+      attempt.lost = error;
+      clearTimeout(attempt.timer);
+      attempt.timer = null;
+      attempt.controller.abort(error);
+    };
+
+    /** Arm the next renewal. Each one REPLACES the lease (D2), so the
+     * attempt's newest lease is the only one that settles anything. */
+    const armRenewal = (attempt) => {
+      if (!renewing || attempt.lost !== null || attempt.settled) return;
+      attempt.timer = setTimeout(() => {
+        if (attempt.lost !== null || attempt.settled) return;
+        Promise.resolve()
+          .then(() => renew(attempt.lease, { leaseMs }))
+          .then((next) => {
+            if (attempt.settled) return;
+            attempts.delete(attempt.lease.token);
+            attempt.lease = next;
+            attempts.set(next.token, attempt);
+            stats.renewals += 1;
+            armRenewal(attempt);
+          })
+          .catch((error) => loseLease(attempt, error));
+      }, renewEvery);
+      attempt.timer.unref?.();
+    };
+
+    /** Everything one in-flight attempt owns, filed under its token. */
+    const beginAttempt = (job) => {
+      const controller = new AbortController();
+      const attempt = {
+        job, lease: job.lease, controller, lost: null, settled: false, timer: null,
+        // the handler winds up for either reason: the worker is stopping,
+        // or the job is no longer this attempt's to finish
+        signal: AbortSignal.any([shutdown.signal, controller.signal]),
+      };
+      // the checkpoint store follows the attempt's CURRENT lease: a
+      // renewal replaced the token, and a store bound to the old one
+      // would be refused by the fence it is supposed to satisfy
+      attempt.checkpoints = {
+        load: (runId) => checkpointsFor({ ...job, lease: attempt.lease }).load(runId),
+        save: (runId, nodeId, value) =>
+          checkpointsFor({ ...job, lease: attempt.lease }).save(runId, nodeId, value),
+        complete: (runId, result) =>
+          checkpointsFor({ ...job, lease: attempt.lease }).complete(runId, result),
+      };
+      attempts.set(job.lease.token, attempt);
+      armRenewal(attempt);
+      return attempt;
+    };
+
+    const endAttempt = (attempt) => {
+      attempt.settled = true;
+      clearTimeout(attempt.timer);
+      attempt.timer = null;
+      attempts.delete(attempt.lease.token);
+    };
+
+    /**
+     * An attempt that no longer holds its job. It is its OWN outcome:
+     * counting it as a completion is what let a corpse report success
+     * over work another attempt was still doing, and counting it as a
+     * failure would burn a retry the job never spent.
+     */
+    const recordLost = (attempt, phase, error) => {
+      stats.lostSettlements += 1;
+      notify({
+        outcome: 'lost', phase,
+        jobId: attempt.job.id, kind: attempt.job.kind,
+        attempt: attempt.lease.attempt, generation: attempt.lease.generation,
+        code: /** @type {any} */ (error)?.code ?? null,
+        reason: describeValue(error),
+      });
+    };
+
+    /**
      * Record one failed attempt. Reporting a failure must never itself
      * fail the loop, so a storage error here is swallowed after the
-     * attempt count has already been incremented by the claim.
+     * attempt count has already been incremented by the claim — but a
+     * FENCE refusal is not a storage error: it says this attempt does
+     * not hold the job, and that is a lost settlement, not a failure.
      */
-    const recordFailure = async (job, error) => {
-      stats.failures += 1;
+    const recordFailure = async (attempt, error) => {
       try {
-        await Promise.resolve(fail(job.id, owner, error, workerOptions));
+        await Promise.resolve(fail(attempt.lease, error, workerOptions));
       }
-      catch {
+      catch (refusal) {
+        if (isLeaseLost(refusal)) {
+          recordLost(attempt, 'failure', refusal);
+          return;
+        }
         // the lease will expire and the job will be re-claimed (§5);
         // a worker must not die because the failure write failed
       }
+      stats.failures += 1;
+      notify({
+        outcome: 'failed',
+        jobId: attempt.job.id, kind: attempt.job.kind,
+        attempt: attempt.lease.attempt, generation: attempt.lease.generation,
+        reason: describeValue(error),
+      });
     };
 
     /** @param {{ cancelled: boolean }} loopSession */
     const runOne = async (job, loopSession) => {
       stats.claims += 1;
       inFlight += 1;
+      const attempt = beginAttempt(job);
       try {
         let result;
         try {
           result = await handlers[job.kind](job.payload,
-            { job, checkpointsFor, signal: shutdown.signal });
+            { job, checkpoints: attempt.checkpoints, signal: attempt.signal });
         }
         catch (error) {
           // past cancellation the store is closing: leave the leased
           // row to expiry-based recovery (§5) instead of racing it
           if (loopSession.cancelled) return;
-          await recordFailure(job, error);
+          if (attempt.lost !== null) {
+            recordLost(attempt, 'failure', attempt.lost);
+            return;
+          }
+          await recordFailure(attempt, error);
           return;
         }
         if (loopSession.cancelled) return;
+        if (attempt.lost !== null) {
+          // it may have produced a perfectly good result; it is simply
+          // not this attempt's to record any more
+          recordLost(attempt, 'completion', attempt.lost);
+          return;
+        }
         try {
-          // a §7 handler may have completed transactionally already; the
-          // guarded update makes this a no-op then
-          await Promise.resolve(complete(job.id, owner, result ?? null));
+          // a §7 handler may have completed transactionally already;
+          // settling twice from ONE attempt is idempotent
+          await Promise.resolve(complete(attempt.lease, result ?? null));
         }
         catch (error) {
+          if (isLeaseLost(error)) {
+            recordLost(attempt, 'completion', error);
+            return;
+          }
           // an unrepresentable result, or a storage failure at the
           // completion write: this attempt failed, the worker did not
-          await recordFailure(job, error);
+          await recordFailure(attempt, error);
           return;
         }
         stats.completions += 1;
+        notify({
+          outcome: 'completed',
+          jobId: job.id, kind: job.kind,
+          attempt: attempt.lease.attempt, generation: attempt.lease.generation,
+        });
       }
       finally {
+        endAttempt(attempt);
         inFlight -= 1;
       }
     };
@@ -476,8 +865,7 @@ export function createJobEngine(options) {
       while (running && !loopSession.cancelled) {
         let job;
         try {
-          job = await Promise.resolve(claim({
-            kinds, owner, leaseMs: workerOptions.leaseMs }));
+          job = await Promise.resolve(claim({ kinds, owner, leaseMs }));
         }
         catch {
           // a storage failure backs off to the poll — COUNTED, so a
@@ -504,6 +892,10 @@ export function createJobEngine(options) {
 
     const worker = {
       stats: () => ({ ...stats, inFlight }),
+      /** The leases this worker holds right now, newest token first. A
+       * diagnostic, and the shape a test reads to prove the bookkeeping
+       * is keyed by token rather than by owner. */
+      leases: () => [...attempts.values()].map((attempt) => attempt.lease),
       start() {
         if (running) throw new TypeError('the worker is already started');
         running = true;
@@ -541,7 +933,19 @@ export function createJobEngine(options) {
         ]);
         clearTimeout(timer);
         if (drained) loops = [];
-        else session.cancelled = true; // cancel what could not be drained
+        else {
+          session.cancelled = true; // cancel what could not be drained
+          // …and stop renewing on its behalf. A renewal is a store WRITE,
+          // and §6.1's whole point is that a cancelled loop touches the
+          // store the caller is about to close no further. The abandoned
+          // lease then expires and the job recovers by re-claim (§5),
+          // which is exactly what the cancellation means.
+          for (const abandoned of attempts.values()) {
+            clearTimeout(abandoned.timer);
+            abandoned.timer = null;
+            abandoned.settled = true;
+          }
+        }
         wakers.delete(onWake);
         workers.delete(worker);
         return { drained: drained === true, inFlight };
@@ -558,6 +962,7 @@ export function createJobEngine(options) {
     get,
     counts,
     claim,
+    renew,
     complete,
     fail,
     checkpointsFor,

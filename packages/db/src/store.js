@@ -858,11 +858,54 @@ export function openStore(model, options) {
       let scope = null;
 
       /**
+       * What the OPEN transaction owes its in-memory callers once the
+       * database has agreed, in registration order, or `null` when no
+       * transaction is open. One list, owned by the outermost scope: a
+       * nested savepoint remembers only where it started, so rolling it
+       * back takes back exactly what it registered and releasing it hands
+       * those effects to the scope that outlives it.
+       *
+       * It exists because an in-memory claim about what the database
+       * holds may not become true before the database does — the unit of
+       * work's snapshots are such a claim, and a savepoint release is not
+       * a commit.
+       * @type {{ commit: () => void, rollback: () => void }[] | null}
+       */
+      let settlements = null;
+
+      /**
+       * The unit of work the OPEN scope writes through, and the store's
+       * own. A nested savepoint inherits whatever is in force — it is the
+       * same unit of work one level down — while a transaction asked for
+       * `unitOfWork: 'own'` gets a fresh one for its callback's lifetime.
+       * Both are set once the model's cores exist.
+       * @type {any}
+       */
+      let work = null;
+      /** @type {any} */
+      let rootWork = null;
+
+      /**
+       * Run what the open transaction owes on its COMMIT, in registration
+       * order, and empty the list. Idempotent, and safe to re-enter: each
+       * effect is taken off the list before it runs.
+       */
+      const flushSettlements = () => {
+        if (settlements === null) return;
+        for (const effect of settlements.splice(0)) effect.commit?.();
+      };
+
+      /**
        * What the cores talk to: the owning transaction's scope while one
-       * is open, the driver connection otherwise. One indirection here
-       * instead of a parallel set of handles per transaction — and it is
-       * why a write inside a transaction callback runs immediately as the
-       * owner rather than waiting for a commit it is part of.
+       * is open, the driver connection otherwise. One indirection, so a
+       * core issues its statements wherever the caller that reached it is
+       * — and it is why work inside a transaction callback runs
+       * immediately as the owner rather than waiting for a commit it is
+       * part of.
+       *
+       * It is NOT what separates a store-level caller from the
+       * transaction: that is the gate below, which the store's own
+       * handles take and a scope-bound handle does not.
        */
       const connection = Object.freeze({
         get synchronous() { return opened.synchronous; },
@@ -875,6 +918,19 @@ export function openStore(model, options) {
         /** Internal transaction users (jobs, checkpoints, migrations)
          * nest when a transaction is open and take the gate when not. */
         transaction: (fn) => withScope((scope ?? opened).transaction, fn),
+        /**
+         * Register what settling the OPEN transaction owes an in-memory
+         * caller: `commit` when it commits, `rollback` when it rolls back,
+         * either half optional. With nothing open the statements are
+         * already durable, so `commit` runs at once and the rollback is
+         * discarded. The effects are bookkeeping — they run after the last
+         * statement of their scope and must issue none.
+         * @param {{ commit?: () => void, rollback?: () => void }} effects
+         */
+        onSettle: (effects) => {
+          if (settlements === null) effects.commit?.();
+          else settlements.push(effects);
+        },
         registerFunction: opened.registerFunction === null ? null
           : (/** @type {string} */ name, /** @type {any} */ o, /** @type {Function} */ fn) =>
             opened.registerFunction(name, o, fn),
@@ -885,31 +941,60 @@ export function openStore(model, options) {
 
       /**
        * Run `fn` as a transaction opened by `open`, with `scope` bound to
-       * it for the callback's whole lifetime and restored afterwards.
+       * it for the callback's whole lifetime and restored afterwards. The
+       * scope also settles what was registered against it: commits in
+       * registration order when it keeps, rollbacks in reverse when it
+       * does not, and only its own when it is an inner savepoint.
        * @param {(inner: (s: any) => any) => any} open - the driver's
        *   `transaction`, gated (top level) or nesting (inner)
        * @param {(store: any) => any} fn
+       * @param {any} [ownWork] - a unit of work for this scope alone;
+       *   without one the scope writes through whatever is already in
+       *   force, which is what makes an inner savepoint part of the same
+       *   unit of work as the transaction around it
        */
-      function withScope(open, fn) {
+      function withScope(open, fn, ownWork) {
         return open((inner) => {
           const outer = scope;
+          const outerWork = work;
+          const outermost = settlements === null;
+          if (outermost) settlements = [];
+          const list = /** @type {any[]} */ (settlements);
+          // where this scope's own effects begin: a rollback takes back
+          // from here, and everything before it belongs to a scope that
+          // is still open
+          const mark = list.length;
           scope = inner;
-          const restore = () => { scope = outer; };
+          if (ownWork !== undefined) work = ownWork;
+          const kept = () => {
+            if (outermost) flushSettlements();
+          };
+          const undone = () => {
+            const mine = list.splice(mark);
+            for (let i = mine.length - 1; i >= 0; i--) mine[i].rollback?.();
+          };
+          const restore = (settled) => {
+            if (settled) kept();
+            else undone();
+            scope = outer;
+            work = outerWork;
+            if (outermost) settlements = null;
+          };
           let out;
           try {
             out = fn(scopedStore());
           }
           catch (error) {
-            restore();
+            restore(false);
             throw error;
           }
           if (!isThenable(out)) {
-            restore();
+            restore(true);
             return out;
           }
           return out.then(
-            (value) => { restore(); return value; },
-            (error) => { restore(); throw error; });
+            (value) => { restore(true); return value; },
+            (error) => { restore(false); throw error; });
         });
       }
 
@@ -924,8 +1009,61 @@ export function openStore(model, options) {
        * — a rollback then undoes the translated patch together with the
        * rows it describes.
        * @param {(store: any) => any} fn
+       * @param {AbortSignal} [signal]
+       * @param {any} [ownWork]
        */
-      let topLevelTransaction = (fn) => withScope(opened.transaction, fn);
+      let topLevelTransaction = (fn, signal, ownWork) =>
+        withScope((inner) => opened.transaction(inner, signal), fn, ownWork);
+
+      /**
+       * How a store-level call behaves when another caller's transaction
+       * owns the connection: `'wait'` queues behind it under the
+       * connection's `queueTimeout`, `'strict'` refuses at once. A host
+       * that would rather see the contention than pay for it asks for
+       * strict; the default keeps a contended call correct instead of
+       * fast.
+       */
+      const strictTransactions = options.transactions === 'strict';
+      if (options.transactions !== undefined && options.transactions !== 'wait'
+        && options.transactions !== 'strict') {
+        return Promise.reject(new TypeError(
+          "openStore: transactions must be 'wait' or 'strict'"));
+      }
+
+      /** The refusal a contended store-level call gets when it cannot
+       * wait. It names the scope-bound spelling, because a caller that
+       * meant to be inside the transaction has one and a caller that did
+       * not has to wait for the commit either way. */
+      const contended = (why) => new DbCompileError('JD0012',
+        `a transaction owns this store's connection and ${why}. Work that belongs `
+        + 'INSIDE the transaction goes through the store the callback received '
+        + '(tx.collection / tx.entity / tx.saveChanges); work that does not belongs '
+        + 'after it commits.');
+
+      /**
+       * Run one STORE-LEVEL call: a caller that is not inside whatever
+       * transaction is open. It holds the connection for its own extent,
+       * so its statements can never fall inside a stranger's transaction
+       * and share a rollback it knows nothing about — the defect that
+       * made "one store per concurrent writer" the only safe advice.
+       * @param {(store: any) => any} fn
+       */
+      const gated = (fn) => {
+        if (strictTransactions && opened.mustQueue)
+          throw contended("{ transactions: 'strict' } refuses to queue behind it");
+        return withScope(opened.exclusively, fn);
+      };
+
+      /** The synchronous surface's gate. It cannot wait — waiting hands
+       * a Promise back under a value's type — so a contended call is a
+       * refusal whatever the mode. */
+      const gatedSync = (fn) => {
+        if (opened.mustQueue) {
+          throw contended('the synchronous surface answers values, so it cannot '
+            + 'wait for the commit');
+        }
+        return withScope(opened.exclusively, fn);
+      };
 
       // ————— the rejection boundary around an ACQUIRED connection —————
       // Initialization continues for a long way past `driver.open`:
@@ -1389,24 +1527,40 @@ export function openStore(model, options) {
             return core;
           };
 
-          const tracker = entities.size > 0
-            ? createTracker({
-              connection, entities, mapping, coreFor: entityCoreFor,
-              captureRecord: capture === null || capture.mode !== 'journal'
-                ? undefined
-                : (table, keyParts, before, after) => capture.record(table, keyParts,
-                  before === undefined ? undefined : stripRelations(table, before),
-                  stripRelations(table, after)),
-              captureJoinDelete: captureJoinDelete ?? undefined,
-            })
-            : null;
-          /** @type {Map<string, any>} */
-          const trackedOps = new Map();
-          // the unit-of-work surface (§11): reads register frozen
-          // snapshots; add/put/remove are LOCAL bookkeeping (no
-          // database round trip, deliberately synchronous on both
-          // surfaces); asNoTracking() reads retain nothing
-          const trackedOpsFor = (name) => {
+          /**
+           * ONE unit of work and the tracked operations that write through
+           * it. The store has one; a transaction may be given its own, so
+           * two concurrent handlers hold two records for the same entity
+           * key and neither can see the other's pending state — which is
+           * what makes one store safe for a handler per request.
+           *
+           * The cores, engines and plans below it are shared: what a
+           * second unit of work costs is its own map of records, not a
+           * second copy of the model.
+           */
+          const createUnitOfWork = () => {
+            const tracker = entities.size > 0
+              ? createTracker({
+                connection, entities, mapping, coreFor: entityCoreFor,
+                captureRecord: capture === null || capture.mode !== 'journal'
+                  ? undefined
+                  : (table, keyParts, before, after) => capture.record(table, keyParts,
+                    before === undefined ? undefined : stripRelations(table, before),
+                    stripRelations(table, after)),
+                captureJoinDelete: captureJoinDelete ?? undefined,
+              })
+              : null;
+            /** @type {Map<string, any>} */
+            const trackedOps = new Map();
+            /** @type {Map<string, any>} */
+            const entityHandles = new Map();
+            /** @type {Map<string, any>} */
+            const syncEntityHandles = new Map();
+            // the unit-of-work surface (§11): reads register frozen
+            // snapshots; add/put/remove are LOCAL bookkeeping (no
+            // database round trip, deliberately synchronous on both
+            // surfaces); asNoTracking() reads retain nothing
+            const trackedOpsFor = (name) => {
             let ops = trackedOps.get(name);
             if (ops !== undefined) return ops;
             const core = entityCoreFor(name);
@@ -1509,32 +1663,16 @@ export function openStore(model, options) {
             };
             trackedOps.set(name, ops);
             return ops;
-          };
+            };
 
-          /** @type {Map<string, any>} */
-          const asyncHandles = new Map();
-          /** @type {Map<string, any>} */
-          const asyncEntityHandles = new Map();
-          const store = {
-            capabilities,
-            stats: () => ({
-              statementCache: { ...queryState.counters },
-              udfRegistrations: queryState.registered.size,
-              tracker: tracker === null ? null : tracker.counts(),
-              liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
-            }),
-            dialect,
-            collection(name) {
-              let handle = asyncHandles.get(name);
-              if (handle === undefined) {
-                handle = asyncCollection(coreFor(name),
-                  liveRegistry === null ? null : registerCollectionLive);
-                asyncHandles.set(name, handle);
-              }
-              return handle;
-            },
-            entity(name) {
-              let handle = asyncEntityHandles.get(name);
+            /**
+             * An entity handle over THIS unit of work, bound to whatever
+             * scope is open when it runs — the tracked surface, its
+             * untracked twin, and the provider members.
+             * @param {string} name
+             */
+            const entityFor = (name) => {
+              let handle = entityHandles.get(name);
               if (handle === undefined) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
@@ -1569,19 +1707,181 @@ export function openStore(model, options) {
                   scope: entityEngine,
                   relations: entityEngine.relations[name],
                 });
-                asyncEntityHandles.set(name, handle);
+                entityHandles.set(name, handle);
               }
               return handle;
-            },
+            };
+
+            /** The same set, answering values. */
+            const syncEntityFor = (name) => {
+              let handle = syncEntityHandles.get(name);
+              if (handle === undefined) {
+                const ops = trackedOpsFor(name);
+                const untracked = Object.freeze({
+                  get: (key) => ops.noTracking.get(key),
+                  load: (spec) => ops.noTracking.load(spec),
+                });
+                handle = Object.freeze({
+                  create: (doc) => ops.create(doc),
+                  get: (key) => ops.get(key),
+                  update: (key, changes) => ops.update(key, changes),
+                  delete: (key) => ops.delete(key),
+                  load: (spec) => ops.load(spec),
+                  explainLoad: ops.explainLoad,
+                  add: ops.add,
+                  put: ops.put,
+                  remove: ops.remove,
+                  discard: ops.discard,
+                  link: ops.link,
+                  unlink: ops.unlink,
+                  asNoTracking: () => untracked,
+                  // the same provider members as the asynchronous handle,
+                  // answering values; one handle per name, so two chains
+                  // over one set share one source identity
+                  execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
+                  explain: (document, queryOptions) => entityEngine.explain(document, queryOptions),
+                  root: entityRoot(name),
+                  scope: entityEngine,
+                  relations: entityEngine.relations[name],
+                });
+                syncEntityHandles.set(name, handle);
+              }
+              return handle;
+            };
+
+            return Object.freeze({ tracker, entityFor, syncEntityFor });
+          };
+
+          // the store's own unit of work: what a store-level handle and a
+          // transaction that did not ask for its own both write through
+          rootWork = createUnitOfWork();
+          work = rootWork;
+
+          /** @type {Map<string, any>} */
+          const asyncHandles = new Map();
+
+          /**
+           * A collection handle BOUND to whatever scope is open when it
+           * runs. It is what a transaction callback gets, and what the
+           * store-level handle wraps in the gate. Collections carry no
+           * unit of work, so one handle per name serves every scope.
+           * @param {string} name
+           */
+          function boundCollection(name) {
+            let handle = asyncHandles.get(name);
+            if (handle === undefined) {
+              handle = asyncCollection(coreFor(name),
+                liveRegistry === null ? null : registerCollectionLive);
+              asyncHandles.set(name, handle);
+            }
+            return handle;
+          }
+
+          /** The entity handle of the unit of work in force right now. */
+          const boundEntity = (name) => work.entityFor(name);
+
+          /**
+           * Every member of a bound handle that issues a statement,
+           * wrapped in the store-level gate. The rest — local unit-of-work
+           * bookkeeping, cached stats, the provider's identity members —
+           * touches no connection and is passed through as it is.
+           *
+           * `valued` names the members that answer value-or-promise
+           * rather than always a promise: the provider contract keeps a
+           * chain over a synchronous driver synchronous, so those must
+           * not be lifted (D2). They still answer a promise while another
+           * caller's transaction holds the connection — which is what
+           * waiting for a commit means.
+           * @param {any} handle
+           * @param {string[]} names - members that answer a promise
+           * @param {string[]} [valued] - members that answer value-or-promise
+           */
+          const gatedMembers = (handle, names, valued = []) => {
+            const out = { ...handle };
+            for (const member of names) {
+              if (typeof handle[member] !== 'function') continue;
+              out[member] = (/** @type {any[]} */ ...args) =>
+                lift(() => gated(() => handle[member](...args)))();
+            }
+            for (const member of valued) {
+              if (typeof handle[member] !== 'function') continue;
+              out[member] = (/** @type {any[]} */ ...args) =>
+                gated(() => handle[member](...args));
+            }
+            return Object.freeze(out);
+          };
+
+          /** @type {Map<string, any>} */
+          const gatedCollections = new Map();
+          /** @type {Map<string, any>} */
+          const gatedEntities = new Map();
+
+          const bound = {
+            collection: boundCollection,
+            entity: boundEntity,
             saveChanges: entities.size === 0 ? undefined
-              : lift(() => guard(() => tracker.saveChanges())),
-            // entity DOCUMENTS query the multi-entity root at the store;
-            // `roots` names the entity arrays this provider serves, so a
-            // chain asked to iterate the store itself can refuse by name
+              : lift(() => guard(() => work.tracker.saveChanges())),
             execute: entityEngine === null ? undefined
               : (document, queryOptions) => entityEngine.execute(document, queryOptions),
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
+            dataVersion: lift(() => chain(
+              connection.prepare(dialect.introspect.dataVersion()),
+              (statement) => chain(statement.get([]), (row) => Number(row.v)))),
+          };
+
+          const store = {
+            capabilities,
+            stats: () => ({
+              statementCache: { ...queryState.counters },
+              udfRegistrations: queryState.registered.size,
+              tracker: work.tracker === null ? null : work.tracker.counts(),
+              liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
+            }),
+            dialect,
+            // A STORE-LEVEL handle. It reaches the driver connection, never
+            // a transaction it is not part of: a caller here is unrelated
+            // to whatever is open, so its statements wait for the commit
+            // instead of joining a rollback it knows nothing about. Inside
+            // a transaction callback, use the store the callback received.
+            collection(name) {
+              let handle = gatedCollections.get(name);
+              if (handle === undefined) {
+                // `query` is deliberately absent: it answers an async
+                // iterable whose life spans the caller's loop, and holding
+                // the connection for that long would block every
+                // transaction for as long as a consumer reads slowly
+                handle = gatedMembers(boundCollection(name),
+                  ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
+                  ['execute']);
+                gatedCollections.set(name, handle);
+              }
+              return handle;
+            },
+            entity(name) {
+              let handle = gatedEntities.get(name);
+              if (handle === undefined) {
+                const inner = boundEntity(name);
+                handle = gatedMembers(inner,
+                  ['create', 'get', 'update', 'delete', 'load', 'explain'],
+                  ['execute']);
+                const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load']);
+                handle = Object.freeze({ ...handle, asNoTracking: () => untracked });
+                gatedEntities.set(name, handle);
+              }
+              return handle;
+            },
+            saveChanges: entities.size === 0 ? undefined
+              : lift(() => gated(() => guard(() => rootWork.tracker.saveChanges()))),
+            // entity DOCUMENTS query the multi-entity root at the store;
+            // `roots` names the entity arrays this provider serves, so a
+            // chain asked to iterate the store itself can refuse by name
+            execute: entityEngine === null ? undefined
+              : (document, queryOptions) =>
+                gated(() => entityEngine.execute(document, queryOptions)),
+            explain: entityEngine === null ? undefined
+              : lift((document, queryOptions) =>
+                gated(() => entityEngine.explain(document, queryOptions))),
             roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             relations: entityEngine === null ? undefined : entityEngine.relations,
             // entity live queries re-run on invalidation — declared,
@@ -1623,8 +1923,23 @@ export function openStore(model, options) {
             // it never shares a savepoint stack with another one. To nest,
             // use the store the callback RECEIVES — the outer store cannot
             // tell an inner transaction from an unrelated caller, and an
-            // unrelated caller must wait for the commit.
-            transaction: lift((fn) => topLevelTransaction(fn)),
+            // unrelated caller must wait for the commit. A `signal` gives
+            // up the QUEUE, never a transaction already running.
+            //
+            // `unitOfWork: 'own'` gives the callback a tracker of its own,
+            // so two concurrent handlers hold two records for one entity
+            // key and neither sees the other's pending state. It is opt-in
+            // because the shared default is what lets a caller add() a
+            // document outside the transaction and save it inside.
+            transaction: lift((fn, transactionOptions) => {
+              const wanted = transactionOptions?.unitOfWork;
+              if (wanted !== undefined && wanted !== 'own' && wanted !== 'shared') {
+                throw new TypeError(
+                  "store.transaction: unitOfWork must be 'shared' or 'own'");
+              }
+              return topLevelTransaction(fn, transactionOptions?.signal,
+                wanted === 'own' ? createUnitOfWork() : undefined);
+            }),
             observe: (fn) => {
               if (capture === null) {
                 throw new TypeError(
@@ -1633,15 +1948,14 @@ export function openStore(model, options) {
               return capture.observe(fn);
             },
             changesSince: capture === null ? undefined
-              : lift((after) => capture.changesSince(after)),
-            dataVersion: lift(() => chain(
-              connection.prepare(dialect.introspect.dataVersion()),
-              (statement) => chain(statement.get([]), (row) => Number(row.v)))),
+              : lift((after) => gated(() => capture.changesSince(after))),
+            dataVersion: lift(() => gated(() => bound.dataVersion())),
             jobs: jobsEngine === null ? undefined : Object.freeze({
               enqueue: lift(jobsEngine.enqueue),
               get: lift(jobsEngine.get),
               counts: lift(jobsEngine.counts),
               claim: lift(jobsEngine.claim),
+              renew: lift(jobsEngine.renew),
               complete: lift(jobsEngine.complete),
               fail: lift(jobsEngine.fail),
               checkpointsFor: jobsEngine.checkpointsFor,
@@ -1675,13 +1989,16 @@ export function openStore(model, options) {
             }),
           };
 
-          // The transaction callback's argument. It is the store, with one
-          // difference that matters: its `transaction` NESTS through the
-          // owning savepoint instead of queueing behind it. Everything
-          // else already reaches the open transaction, because the cores
-          // read the active scope.
+          // The transaction callback's argument, and the ONLY handle that
+          // is inside the transaction. Its `collection`, `entity`, `sync`
+          // and unit of work run as the owner instead of waiting for a
+          // commit they are part of, and its `transaction` NESTS through
+          // the owning savepoint instead of queueing behind it. The
+          // store's own handles are, by construction, somebody else.
           /** @type {any} */
           let txStore = null;
+          /** Set with `store.sync`, when the driver is synchronous. */
+          let boundSyncView;
           /** Nest through the savepoint that owns the connection now. The
            * capture scope goes INSIDE the savepoint, so a rollback undoes
            * the translated patch with the rows it describes. */
@@ -1693,10 +2010,21 @@ export function openStore(model, options) {
             ({ value, writable: false, enumerable: true, configurable: false });
           scopedStore = () => {
             if (txStore === null) {
-              const members = { transaction: override(nested) };
-              if (store.sync !== undefined) {
-                members.sync = override(Object.create(store.sync,
-                  { transaction: override(nested) }));
+              const members = {
+                transaction: override(nested),
+                collection: override(bound.collection),
+                entity: override(bound.entity),
+              };
+              for (const member of ['saveChanges', 'execute', 'explain', 'dataVersion']) {
+                if (bound[member] !== undefined) members[member] = override(bound[member]);
+              }
+              if (capture !== null) {
+                members.changesSince = override(
+                  lift((/** @type {any} */ after) => capture.changesSince(after)));
+              }
+              if (boundSyncView !== undefined) {
+                members.sync = override(Object.freeze(Object.create(boundSyncView,
+                  { transaction: override(nested) })));
               }
               txStore = Object.freeze(Object.create(store, members));
             }
@@ -1706,9 +2034,10 @@ export function openStore(model, options) {
           if (connection.synchronous) {
             /** @type {Map<string, any>} */
             const syncHandles = new Map();
-            /** @type {Map<string, any>} */
-            const syncEntityHandles = new Map();
-            store.sync = Object.freeze({
+            /** The synchronous surface BOUND to whatever scope is open:
+             * the transaction callback's, and what the store-level one
+             * wraps in its gate. */
+            const boundSync = Object.freeze({
               collection(name) {
                 let handle = syncHandles.get(name);
                 if (handle === undefined) {
@@ -1740,48 +2069,68 @@ export function openStore(model, options) {
                 return topLevelTransaction(fn);
               },
               entity(name) {
-                let handle = syncEntityHandles.get(name);
-                if (handle === undefined) {
-                  const ops = trackedOpsFor(name);
-                  const untracked = Object.freeze({
-                    get: (key) => ops.noTracking.get(key),
-                    load: (spec) => ops.noTracking.load(spec),
-                  });
-                  handle = Object.freeze({
-                    create: (doc) => ops.create(doc),
-                    get: (key) => ops.get(key),
-                    update: (key, changes) => ops.update(key, changes),
-                    delete: (key) => ops.delete(key),
-                    load: (spec) => ops.load(spec),
-                    explainLoad: ops.explainLoad,
-                    add: ops.add,
-                    put: ops.put,
-                    remove: ops.remove,
-                    discard: ops.discard,
-                    link: ops.link,
-                    unlink: ops.unlink,
-                    asNoTracking: () => untracked,
-                    // the same provider members as the asynchronous handle,
-                    // answering values; one handle per name, so two chains
-                    // over one set share one source identity
-                    execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
-                    explain: (document, queryOptions) => entityEngine.explain(document, queryOptions),
-                    root: entityRoot(name),
-                    scope: entityEngine,
-                    relations: entityEngine.relations[name],
-                  });
-                  syncEntityHandles.set(name, handle);
-                }
-                return handle;
+                return work.syncEntityFor(name);
               },
               saveChanges: entities.size === 0 ? undefined
-                : () => guard(() => tracker.saveChanges()),
+                : () => guard(() => work.tracker.saveChanges()),
               execute: entityEngine === null ? undefined
                 : (document, queryOptions) => entityEngine.execute(document, queryOptions),
               explain: entityEngine === null ? undefined
                 : (document, queryOptions) => entityEngine.explain(document, queryOptions),
               roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
               relations: entityEngine === null ? undefined : entityEngine.relations,
+            });
+            boundSyncView = boundSync;
+
+            /** The same members, each holding the connection for its own
+             * extent. A contended one refuses rather than queueing: this
+             * surface answers values, and a queue answers a Promise. */
+            const syncGatedMembers = (handle, names) => {
+              const out = { ...handle };
+              for (const member of names) {
+                if (typeof handle[member] !== 'function') continue;
+                out[member] = (/** @type {any[]} */ ...args) =>
+                  gatedSync(() => handle[member](...args));
+              }
+              return Object.freeze(out);
+            };
+            /** @type {Map<string, any>} */
+            const gatedSyncCollections = new Map();
+            /** @type {Map<string, any>} */
+            const gatedSyncEntities = new Map();
+            store.sync = Object.freeze({
+              ...boundSync,
+              collection(name) {
+                let handle = gatedSyncCollections.get(name);
+                if (handle === undefined) {
+                  handle = syncGatedMembers(boundSync.collection(name),
+                    ['get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']);
+                  gatedSyncCollections.set(name, handle);
+                }
+                return handle;
+              },
+              entity(name) {
+                let handle = gatedSyncEntities.get(name);
+                if (handle === undefined) {
+                  const inner = boundSync.entity(name);
+                  const untracked = syncGatedMembers(inner.asNoTracking(), ['get', 'load']);
+                  handle = Object.freeze({
+                    ...syncGatedMembers(inner,
+                      ['create', 'get', 'update', 'delete', 'load', 'execute', 'explain']),
+                    asNoTracking: () => untracked,
+                  });
+                  gatedSyncEntities.set(name, handle);
+                }
+                return handle;
+              },
+              saveChanges: entities.size === 0 ? undefined
+                : () => gatedSync(() => guard(() => rootWork.tracker.saveChanges())),
+              execute: entityEngine === null ? undefined
+                : (document, queryOptions) =>
+                  gatedSync(() => entityEngine.execute(document, queryOptions)),
+              explain: entityEngine === null ? undefined
+                : (document, queryOptions) =>
+                  gatedSync(() => entityEngine.explain(document, queryOptions)),
             });
           }
           return chain(capture === null ? null : capture.ready,

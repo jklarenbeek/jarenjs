@@ -85,10 +85,11 @@ describe('the wasm driver (real sqlite-wasm build)', () => {
       { id: 'a', body: 'one', n: 1, meta: { deep: [1, 9] } });
     const seen = [];
     store.observe((record) => seen.push(record));
-    await store.transaction(async () => {
-      await notes.insert({ id: 'b', body: 'two', n: 2 });
-      await notes.put({ id: 'a', body: 'ONE', n: 1, meta: { deep: [1, 9] } }, 'a');
-      await notes.delete('b');
+    await store.transaction(async (tx) => {
+      const inside = tx.collection('notes');
+      await inside.insert({ id: 'b', body: 'two', n: 2 });
+      await inside.put({ id: 'a', body: 'ONE', n: 1, meta: { deep: [1, 9] } }, 'a');
+      await inside.delete('b');
     });
     assert.strictEqual(seen.length, 1, 'one coalesced journal record per txn');
     assert.deepStrictEqual(seen[0].patch, [

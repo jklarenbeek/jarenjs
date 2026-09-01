@@ -281,7 +281,8 @@ describe('the R*Tree stays in sync — every write path, through the triggers', 
   it('packages/db writes the virtual table through NO JavaScript path (D1/D-c)', async () => {
     const { readFileSync, readdirSync } = await import('node:fs');
     const { join } = await import('node:path');
-    const root = new URL('../../packages/db/src/', import.meta.url).pathname;
+    const { fileURLToPath } = await import('node:url');
+    const root = fileURLToPath(new URL('../../packages/db/src/', import.meta.url));
     const files = readdirSync(root, { recursive: true })
       .filter((name) => String(name).endsWith('.js'));
     const offenders = [];

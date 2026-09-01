@@ -123,8 +123,9 @@ async function storeFor(driver, documents, mapping, path = undefined) {
   const store = await openStore(MAPPINGS[mapping],
     path === undefined ? { driver } : { driver, path });
   const collection = store.collection(SERIES_COLLECTION);
-  await store.transaction(async () => {
-    for (const document of documents) await collection.insert(document);
+  await store.transaction(async (tx) => {
+    const inside = tx.collection(SERIES_COLLECTION);
+    for (const document of documents) await inside.insert(document);
   });
   return { store, collection };
 }
@@ -347,8 +348,9 @@ describe('the grouping spelling: every order and window the plan pushes', () => 
       const store = await openStore(MAPPINGS.indexed, { driver: nodeDriver() });
       const collection = store.collection(SERIES_COLLECTION);
       try {
-        await store.transaction(async () => {
-          for (const row of rows) await collection.insert(row);
+        await store.transaction(async (tx) => {
+          const inside = tx.collection(SERIES_COLLECTION);
+          for (const row of rows) await inside.insert(row);
         });
         const explained = await collection.explain(document);
         assert.strictEqual(explained.mode, 'native');
@@ -373,8 +375,9 @@ describe("a profile's row bound counts what the fetch answered, and refuses", ()
       profile: { collections: [SERIES_COLLECTION], maxRows: 3, refuseFullScan: true } });
     const collection = store.collection(SERIES_COLLECTION);
     try {
-      await store.transaction(async () => {
-        for (const row of rows) await collection.insert(row);
+      await store.transaction(async (tx) => {
+        const inside = tx.collection(SERIES_COLLECTION);
+        for (const row of rows) await inside.insert(row);
       });
       const document = (every) => ({ $resample: [
         { $for: { s: '$[*]' }, $where: { $eq: ['$s.series', 'sensor-a'] }, $return: '$s' },

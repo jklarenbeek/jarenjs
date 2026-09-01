@@ -68,4 +68,4 @@ export {
   createJobEngine, JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_DEFAULTS,
   describeValue, serializeResult,
 } from './jobs.js';
-export { createDagJobRunner } from './dag-job.js';
+export { createDagJobRunner, RUN_IDENTITY_NODE } from './dag-job.js';

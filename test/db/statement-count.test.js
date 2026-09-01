@@ -272,8 +272,9 @@ describe('an as-of join costs one statement, whatever the probes number', () => 
       driver: { open: () => adaptNodeDatabase(countedDatabase(db)) },
     });
     samples = seriesStore.collection('sample');
-    await seriesStore.transaction(async () => {
-      for (const row of RIGHT) await samples.insert(row);
+    await seriesStore.transaction(async (tx) => {
+      const inside = tx.collection('sample');
+      for (const row of RIGHT) await inside.insert(row);
     });
   });
   after(async () => {
