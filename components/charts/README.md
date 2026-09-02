@@ -148,6 +148,51 @@ a single-hue blue ramp, light→dark, sampled continuously by
 kernel and can be host-linked with `theme: 'host'`, so charts follow
 the site's light/dark flip live without a re-render.
 
+### A time axis in a language
+
+A time axis labels its ticks by the granularity of the step they were
+laid on — `HH:mm:ss`, `HH:mm`, `yyyy-MM-dd`, `yyyy-MM`, `yyyy` (the
+`TIME_TICK_FORMATS` constant). Those are numeric, so nothing on a
+default axis is mistranslated and nothing on it needs a language. A
+`line` (with `x: 'time'`) or `candlestick` definition that wants month
+or weekday names carries two flat members beside `x` and `xLabel`:
+`timeFormats`, LDML patterns keyed by step granularity (`second`,
+`minute`, `day`, `month`, `year`; an omitted member keeps its default),
+and `dateNames`, the same `DateNames` record the Mermaid Gantt takes —
+exactly what `@jarenjs/locales`' `compileDateLocale(pack).names`
+produces:
+
+```js
+import { compileChart } from '@jarenjs/charts';
+import { compileDateLocale, nl } from '@jarenjs/locales';
+
+const chart = compileChart({
+  type: 'line', x: 'time',
+  dateNames: compileDateLocale(nl).names,
+  timeFormats: { day: 'EEEE d MMMM' },
+  series: [{ name: 'a', points: [
+    { x: '2026-07-20', y: 1 }, { x: '2026-07-24', y: 3 }, { x: '2026-07-29', y: 2 },
+  ] }],
+});
+chart.toSvgString(); // the ticks read 'maandag 20 juli', 'woensdag 22 juli', 'vrijdag 24 juli', …
+```
+
+Both members are data: they serialise with the definition, validate
+against the schema, and two charts on one page carry two records
+without touching each other. The five patterns are compiled **once per
+build** (`compileTimeTickFormat`, exported for a caller labelling its
+own axis), never per label, so a two-hundred-tick axis costs five
+compilations; a definition with neither member compiles nothing at all
+and labels exactly as `formatTimeTick` does.
+
+**Without a record a name token is a compile error, not a silent English
+fallback.** This engine ships no month or weekday names of its own, so
+`timeFormats: { day: 'EEEE d MMMM' }` with no `dateNames` throws a
+`TypeError` naming the member and the way out — the same rule, in the
+same words, as the Gantt's `axisFormat %B`. A numeric pattern needs no
+record. No ambient locale is ever read: the record is supplied or
+absent, never inferred.
+
 ## Streaming (the adapter)
 
 `@jarenjs/charts/stream-adapter` turns the unified reader events of

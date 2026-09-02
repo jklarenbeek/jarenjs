@@ -6,7 +6,15 @@
  * host-linked (`--ok`/`--fail`) like every semantic color. Data shape:
  *
  *   data   = { candles: [{t, open, high, low, close}] }
- *   config = { type:'candlestick', title?, xLabel?, yLabel?, domain? }
+ *   config = { type:'candlestick', title?, xLabel?, yLabel?, domain?,
+ *              dateNames?, timeFormats? }
+ *
+ * The time axis labels its ticks through a labeller compiled once per
+ * build (`compileTimeTickFormat`) from the definition's optional
+ * `dateNames` record and `timeFormats` patterns; a definition without
+ * them labels exactly as `formatTimeTick` does. The per-candle hover
+ * text keeps the numeric `formatTimeTick` — it is a datum's timestamp,
+ * not an axis label.
  *
  * Candle width comes from the band-width math: an equal share of the
  * axis per candle (klines arrive at a fixed interval, so equal bands
@@ -32,6 +40,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleTime } from '../core/scale.js';
 import {
   axisTicksLinear, axisTicksTime, niceTimeStep, formatTickValue, formatTimeTick,
+  compileTimeTickFormat,
 } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
@@ -173,6 +182,9 @@ export function buildCandlestickAST(data, config = {}) {
   const domains = resolveCandleDomains(ext, policy);
   const xScale = scaleTime(domains.x[0], domains.x[1]);
   const yScale = scaleLinear(domains.y[0], domains.y[1]);
+  const timeLabel = compileTimeTickFormat({
+    dateNames: config.dateNames, timeFormats: config.timeFormats,
+  });
 
   const w = ext.kept.length === 0 ? 0.1 : (1 / ext.kept.length) * 0.7;
   const candles = ext.kept.map((c) => candleUnit(c, xScale, yScale, w));
@@ -182,7 +194,7 @@ export function buildCandlestickAST(data, config = {}) {
     title: config.title ?? null,
     x: {
       ticks: domains.xTickValues.map((v) => ({
-        pos: clamp01(xScale(v)), label: formatTimeTick(v, domains.xTickStep),
+        pos: clamp01(xScale(v)), label: timeLabel(v, domains.xTickStep),
       })),
       label: config.xLabel ?? null,
     },

@@ -914,9 +914,15 @@ const FACTS = {
   },
   'series.asofShape': () => {
     const { figures } = data('series').meta;
+    // the dense shape is published whichever way it fell: a win is
+    // stated as one, and a loss as one, never a floor at parity
+    const dense = figures.kernelAsOfDenseVsStored;
+    const denseClause = dense < 1
+      ? `and beats them by ${ratio(1 / dense)}× once there is one left row per hundred right ones`
+      : `and narrows to ${ratio(dense)}× the same join once there is one left row per hundred `
+        + 'right ones — still the statement\'s win, published as one';
     return `The as-of join costs ${ratio(figures.kernelAsOfVsStored)}× a handful of index reads, `
-      + `and beats them by ${ratio(1 / figures.kernelAsOfDenseVsStored)}× once there is one left `
-      + 'row per hundred right ones. The reason is the shape rather than the engine: a b-tree pays '
+      + `${denseClause}. The reason is the shape rather than the engine: a b-tree pays `
       + 'per probe, and a sorted walk pays for the whole right side whether it was asked one '
       + 'question or a thousand.';
   },
@@ -945,11 +951,11 @@ const FACTS = {
   },
   'series.zoneCost': () => {
     const { figures } = data('series').meta;
-    return `Walking every boundary through an injected zone provider costs `
-      + `${ratio(figures.providerCost)}× the integer ladder over an identical answer — near `
-      + 'parity because it is near nothing, since the benchmark corpus spans 28 hours and holds '
-      + 'two daily boundaries. What the suite gates instead is that the provider is consulted '
-      + 'per boundary rather than per sample.';
+    return `Walking every boundary through the shipped Intl zone provider costs `
+      + `${ratio(figures.providerCost)}× the integer ladder over an identical answer — a handful `
+      + 'of ICU reads against the whole ladder, since the benchmark corpus spans 28 hours and '
+      + 'holds two daily boundaries. What the suite gates is that the provider is consulted per '
+      + 'boundary rather than per sample.';
   },
 
   'geo.pip2000': () => `${ratio(geoRatio('point in polygon (2000-vertex)'))}×`,

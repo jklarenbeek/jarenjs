@@ -79,9 +79,9 @@ const localesResult = await build({
 
 const localeInputs = Object.values(localesResult.metafile.outputs)[0].inputs;
 const intlLeak = Object.entries(localeInputs)
-  .filter(([file, info]) => file.includes('packages/locales/src/intl-dates.js') && info.bytesInOutput > 0);
+  .filter(([file, info]) => /packages\/locales\/src\/intl-(dates|zones)\.js$/.test(file) && info.bytesInOutput > 0);
 if (intlLeak.length > 0)
-  throw new Error('compileDateLocale pulled the opt-in Intl provider into the bundle.');
+  throw new Error(`compileDateLocale pulled an opt-in Intl provider into the bundle: ${intlLeak.map(([file]) => file).join(', ')}`);
 
 const packLeak = Object.entries(localeInputs)
   .filter(([file, info]) => /packages\/locales\/src\/(ar|de|es|fr|ja|ko|nl|pt|ru|tr|zh-tw)\.js$/.test(file)
@@ -89,7 +89,7 @@ const packLeak = Object.entries(localeInputs)
 if (packLeak.length > 0)
   throw new Error(`compileDateLocale pulled locale packs into the bundle: ${packLeak.map(([file]) => file).join(', ')}`);
 
-console.log('Tree-shaking smoke test passed (compileDateLocale carries no Intl provider and no locale pack).');
+console.log('Tree-shaking smoke test passed (compileDateLocale carries neither Intl provider and no locale pack).');
 
 // Every `@jarenjs/linq` subpath's measured size, collected as the probes
 // run and checked against docs/CONSUMING.md's table at the end: a price

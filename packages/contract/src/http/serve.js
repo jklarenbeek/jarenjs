@@ -17,6 +17,7 @@
  */
 
 import { compileMessageCatalog } from '@jarenjs/core/message';
+import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { ContractHostError } from '../errors.js';
 import { dispatch } from './dispatch.js';
@@ -67,6 +68,9 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
  *   - a message catalog (templates or compiled renderers) consulted before the English one
  * @property {() => number} [now] - the clock stamped into ledger claims; default `Date.now`
+ * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
+ *   - the host's runtime record: its `uuid` generates the server trace
+ *   and its `now` is the clock, each only where `trace` / `now` is absent
  */
 
 /**
@@ -287,12 +291,19 @@ export function serveHttp(contract, handlers, options = {}) {
   if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
+  let runtime;
+  try {
+    runtime = resolveRuntime(options.runtime);
+  }
+  catch (error) {
+    throw host('JC1001', `options.runtime: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   /** @type {Server} */
   const server = {
     contract,
     routes,
-    trace: options.trace === undefined ? () => globalThis.crypto.randomUUID() : options.trace,
+    trace: options.trace === undefined ? runtime.uuid : options.trace,
     ledger,
     scope: options.scope === undefined ? () => '' : options.scope,
     head,
@@ -301,7 +312,7 @@ export function serveHttp(contract, handlers, options = {}) {
     errorBody: options.errorBody === undefined ? null : options.errorBody,
     onError: options.onError === undefined ? null : options.onError,
     catalog: options.catalog === undefined ? null : compileMessageCatalog(options.catalog),
-    now: options.now === undefined ? Date.now : options.now,
+    now: options.now === undefined ? runtime.now : options.now,
     described: { text: null },
     streams: new Set(),
   };

@@ -188,6 +188,13 @@ delete it or fix it.
 
 ## @jarenjs/contract
 
+- [ ] **The other bindings keep their own host-fact injections.** The
+  http binding takes the runtime record (`@jarenjs/core/runtime`) for
+  its trace generator and clock; the port and local bindings' `trace`,
+  the http client's `keys` and `now`, the port client's id and the two
+  ledgers' `now` are still separate options with the same platform
+  defaults. Each is correct alone; a deterministic run that spans them
+  configures each, which is the shape the record exists to remove.
 - [ ] **Stream reconnection stays the host's hand** — the `stream`
   binding shipped (CONTRACT-FORMAT.md §17–§19: the `subscribe` kind,
   LIVE-FORMAT `{ patch, seq }` emissions as SSE over http and push
@@ -414,6 +421,14 @@ delete it or fix it.
   currently mark.
 - [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
 
+- [ ] **The name-token scanner exists once, in the Gantt** —
+  `ldmlNeedsNames` in `components/mermaid/src/parser/gantt-grammar.js`
+  decides, before compiling, whether a pattern needs a `dateNames`
+  record; the chart time axis states the same rule by wrapping
+  `compileDateFormat`'s refusal. Two spellings of one rule are one more
+  consumer away from the placement rule's move into `@jarenjs/core/dates`,
+  beside `compileDateFormat`'s own token table.
+
 ## @jarenjs/charts
 
 - [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
@@ -585,6 +600,15 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
+- [ ] **A query deadline is compared against the platform clock, not
+  the runtime record's.** `deadline` (`JD2075`) is an absolute instant
+  the caller computed, and the check in the query engine and the cursor
+  reads `Date.now()`, while the store's capture log, job queue and
+  migration stamps read the record's `now`. Under an injected clock a
+  caller computes deadlines from the platform clock. Threading `now`
+  into the query state and the cursor spec closes it, at nine call
+  sites, and waits for a consumer that runs a deterministic scenario
+  with a deadline in it.
 - [ ] **Pushdown promotions.** Two-binding equijoins shipped in phase
   B; the deliberate-residual table still holds `$groupby` (the
   post-group cardinality rebinding deserves its own order —
@@ -1129,7 +1153,12 @@ axis, the forms date controls, the JOSL dedup, the allocation-free
 language and the Mermaid Gantt timeline are done; what they do is documented in
 `packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.13 and the respective
 package READMEs — the date msgids and their compilation in
-`packages/locales/README.md`. Two entries are left.
+`packages/locales/README.md`; the chart time axis takes the same
+`DateNames` record the Gantt does (`components/charts/README.md`), and a
+zone provider over the host's ICU ships opt-in as
+`@jarenjs/locales/intl-zones` beside the runtime record
+(`@jarenjs/core/runtime`) that hands it, with the clock, to every host
+subsystem at once. One entry is left.
 
 Two constraints shape every entry. **There is no date type**: dates are RFC
 3339 strings (lexical, interchange) and epoch milliseconds (arithmetic), both
@@ -1149,21 +1178,6 @@ delegate to Temporal internally once the baseline moves, without changing a
 public surface. Building a general-purpose date *library* is therefore the one
 thing to avoid.
 
-- [ ] **A chart time axis cannot be asked for a language.** All eleven packs
-  carry month, weekday and meridiem names, signed relative-time phrases and
-  translated date-format display names, and `compileDateLocale` reads them
-  into the provider `compileDateFormat` takes (`packages/locales/README.md`).
-  The Mermaid Gantt half of this is done — a diagram's `dateFormat` and
-  `axisFormat` both take an injected `dateNames` record, which is exactly
-  `compileDateLocale(pack).names`, and a name token with no provider is a
-  refusal rather than a silent English fallback
-  (`components/mermaid/README.md`). What still has no way to receive one is
-  the **chart** time axis: it compiles its own numeric patterns
-  (`yyyy-MM-dd`, `HH:mm`) at module load, so nothing on it is mistranslated
-  and nothing on it can be localized either. The seam a chart spec should
-  reuse is the Gantt's — a plain `DateNames` record threaded to the
-  formatter, compiled once per render rather than per label; the open
-  decision is only where in a chart spec it enters.
 - [ ] **Mermaid gantt: the directives that are still only text.**
   `dateFormat`, `axisFormat`, `tickInterval`, `excludes`, `weekday` and
   `weekend` are interpreted, the tasks resolve to half-open intervals with

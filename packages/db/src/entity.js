@@ -18,6 +18,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import {
   getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
 } from '@jarenjs/core/dates/rfc3339';
+import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { DbRuntimeError, isDuplicateKeyError } from './errors.js';
 import { chain, attempt } from './driver.js';
@@ -28,9 +29,13 @@ import { chain, attempt } from './driver.js';
  * @param {any} entity - the normalized entity (model.js)
  * @param {any} entityMapping - `explainMapping(...).entities[name]`
  * @param {((doc: any) => any) | null} validate
+ * @param {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime] - the
+ *   host's runtime record: the clock a `default: 'now'` stamps and the
+ *   identifier a `default: 'uuid'` allocates; the platform's own when absent
  * @returns {any}
  */
-export function entityCore(connection, entity, entityMapping, validate) {
+export function entityCore(connection, entity, entityMapping, validate, runtime = undefined) {
+  const host = resolveRuntime(runtime);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const table = entityMapping.table;
@@ -164,14 +169,14 @@ export function entityCore(connection, entity, entityMapping, validate) {
       // a `date` property takes the calendar date; a date-time stamp on
       // it was invalid under its own format and refused by an epoch column
       const stamp = property.format === 'date'
-        ? () => new Date().toISOString().slice(0, 10)
-        : () => new Date().toISOString();
+        ? () => new Date(host.now()).toISOString().slice(0, 10)
+        : () => new Date(host.now()).toISOString();
       defaulters.push({ name: property.name, fill: stamp });
       if (declared === 'updated') updateStamps.push({ name: property.name, fill: stamp });
       continue;
     }
     if (declared === 'uuid') {
-      defaulters.push({ name: property.name, fill: () => crypto.randomUUID() });
+      defaulters.push({ name: property.name, fill: () => host.uuid() });
       continue;
     }
     if (declared === 'auto') continue; // the database allocates

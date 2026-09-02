@@ -223,11 +223,16 @@ describe('website boundaries — benchmark suite derivations', function () {
       'the kernel is published as costing more than the one-pass ceiling, because it does');
     assert.ok(data.meta.figures.kernelBucketVsQuery > 1,
       'and as answering faster than the generic route, because it does');
-    // the as-of join loses at one shape and wins at the other, and the
-    // file carries both rather than the flattering one
-    assert.ok(data.meta.figures.kernelAsOfVsStored > 1
-      && data.meta.figures.kernelAsOfDenseVsStored < 1,
-      'both shapes of the as-of join are published, the losing one included');
+    // the as-of join is measured at two shapes and the file carries both
+    // rather than the flattering one: the sparse shape is a loss by an
+    // order of magnitude, and the dense shape is published whichever way
+    // it fell (it has been a 1.3× win and a 1.06× loss on the same
+    // kernel, as the raw SQL side moved with the host)
+    assert.ok(data.meta.figures.kernelAsOfVsStored > 1,
+      'the shape the kernel loses at is published');
+    assert.ok(Number.isFinite(data.meta.figures.kernelAsOfDenseVsStored)
+      && data.meta.figures.kernelAsOfDenseVsStored > 0,
+      'and the dense shape beside it, whichever way it fell');
     for (const leg of data.meta.legs) {
       const routes = data.rows.filter((/** @type {any} */ r) => r.n === leg.n);
       assert.ok(routes.length > 0, `no rows for the ${leg.label} leg`);

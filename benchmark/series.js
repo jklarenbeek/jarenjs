@@ -88,6 +88,7 @@ import {
 
 import { formatNs } from './lib/fmt.js';
 import { quantile } from '@jarenjs/core/stats';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 
 //#region flags
 
@@ -185,55 +186,31 @@ const GAP_RUN = 300;
 const RENDER_TARGET = 2000;
 
 /**
- * The scripted zone the calendar row runs on: a constant zero offset, so
- * the provider ladder must answer EXACTLY what the integer ladder does
- * and the row's whole content is what routing every boundary through an
- * injected provider costs. Correctness across a real transition is a
- * test's job (`test/core/series/zone.test.js`); a benchmark that changed
- * the answer could not compare the two.
+ * The zone the calendar row runs on: `Etc/UTC` is a NAMED zone, so every
+ * boundary goes through the provider, and it is a constant zero offset,
+ * so the provider ladder must answer EXACTLY what the integer ladder
+ * does and the row's whole content is what routing every boundary
+ * through the provider costs. The provider is the shipped one over the
+ * host's ICU (`@jarenjs/locales/intl-zones`) — what a consumer actually
+ * passes — wrapped only to count the calls. Correctness across a real
+ * transition is a test's job (`test/locales/intl-zones.test.js`); a
+ * benchmark that changed the answer could not compare the two.
  */
-const BENCH_ZONE = 'Bench/Fixed';
+const BENCH_ZONE = 'Etc/UTC';
 
 /** How many times the ladder has asked the provider for a boundary. */
 const providerCalls = { toParts: 0, toEpoch: 0 };
 
+const intlProvider = createIntlZoneProvider();
+
 const benchProvider = {
-  toParts: (epoch) => {
+  toParts: (epoch, zone) => {
     providerCalls.toParts++;
-    const z = Math.floor(epoch / 86400000);
-    let rest = epoch - z * 86400000;
-    const hours = Math.floor(rest / 3600000);
-    rest -= hours * 3600000;
-    const minutes = Math.floor(rest / 60000);
-    // the proleptic Gregorian conversion, spelled out rather than
-    // imported, because a provider is the CALLER's code by definition
-    const era = Math.floor((z >= -719468 ? z + 719468 : z + 719468 - 146096) / 146097);
-    const doe = (z + 719468) - era * 146097;
-    const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524)
-      - Math.floor(doe / 146096)) / 365);
-    const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
-    const mp = Math.floor((5 * doy + 2) / 153);
-    return {
-      year: yoe + era * 400 + (mp < 10 ? 0 : 1),
-      month: mp < 10 ? mp + 3 : mp - 9,
-      day: doy - Math.floor((153 * mp + 2) / 5) + 1,
-      hours,
-      minutes,
-      seconds: (rest - minutes * 60000) / 1000,
-      offset: 0,
-    };
+    return intlProvider.toParts(epoch, zone);
   },
-  toEpoch: (parts) => {
+  toEpoch: (parts, zone, disambiguation) => {
     providerCalls.toEpoch++;
-    const y = parts.month <= 2 ? parts.year - 1 : parts.year;
-    const era = Math.floor(y / 400);
-    const yoe = y - era * 400;
-    const mp = parts.month > 2 ? parts.month - 3 : parts.month + 9;
-    const doy = Math.floor((153 * mp + 2) / 5) + parts.day - 1;
-    const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
-    const days = era * 146097 + doe - 719468;
-    return days * 86400000 + parts.hours * 3600000 + parts.minutes * 60000
-      + Math.round(parts.seconds * 1000);
+    return intlProvider.toEpoch(parts, zone, disambiguation);
   },
 };
 
@@ -561,9 +538,12 @@ async function runLeg(n) {
   // composite index, and every question asked as a DOCUMENT
   const store = await openStore(seriesMappings().indexed, { driver: nodeDriver() });
   const samples = store.collection(SERIES_COLLECTION);
-  await store.transaction(async () => {
+  // the load writes through the transaction's OWN handle: a transaction
+  // owns its connection, and the outer handle would wait for it
+  await store.transaction(async (tx) => {
+    const loading = tx.collection(SERIES_COLLECTION);
     for (let i = 0; i < n; i++)
-      await samples.insert({ series: SERIES_KEY, at: series[i].at, value: series[i].value });
+      await loading.insert({ series: SERIES_KEY, at: series[i].at, value: series[i].value });
   });
 
   const rangeStmt = db.prepare(SQL.range);
@@ -996,7 +976,7 @@ const ORDER = [
   ['rolling', `rolling mean, width ${ROLLING_WIDTH} — one-pass ring sum`],
   ['kernelBucket', `fixed ${BUCKET_MS / 1000} s buckets — core resampleSeries`],
   ['kernelDay', 'daily buckets — core resampleSeries, integer ladder'],
-  ['kernelDayZoned', 'daily buckets — core resampleSeries, injected zone provider'],
+  ['kernelDayZoned', 'daily buckets — core resampleSeries, the Intl zone provider'],
   ['kernelSparse', `fixed ${BUCKET_MS / 1000} s buckets, gap corpus — core resampleSeries (fill omit)`],
   ['kernelFill', `the same buckets + linear fill — core resampleSeries (fill linear)`],
   ['kernelRolling', `rolling mean, ${ROLLING_WIDTH} s window — core rollingSeries`],
@@ -1155,11 +1135,11 @@ const notes = [
     + ` ${times(figures.kernelRollingVsQuery)} faster than the labelled window. That is the trade`
     + ' this campaign is making, stated as two numbers rather than one: a loop written for one'
     + ' question stays the ceiling, and the gap the vocabulary was paying is closed.',
-  `Routing every bucket boundary through an injected zone provider costs`
-    + ` ${times(figures.providerCost)} the integer ladder over the identical answer. That number is`
-    + ' near parity because it is near nothing: a 28-hour corpus has two daily boundaries in it, so'
-    + ' the row proves the two ladders agree and that the provider is consulted per BOUNDARY rather'
-    + ' than per sample — which the equivalence checks count outright — and it does not price a'
+  `Routing every bucket boundary through the shipped Intl zone provider costs`
+    + ` ${times(figures.providerCost)} the integer ladder over the identical answer. A 28-hour corpus`
+    + ' has two daily boundaries in it, so the row prices a handful of ICU reads against the whole'
+    + ' ladder, proves the two ladders agree, and proves the provider is consulted per BOUNDARY'
+    + ' rather than per sample — which the equivalence checks count outright; it does not price a'
     + ' provider over a corpus long enough to need one.',
   `Filling the empty buckets of a corpus ${Math.round((GAP_RUN / GAP_PERIOD) * 100)}% missing costs`
     + ` ${times(figures.fillCost)} emitting only the buckets that had rows. That is the fill pass`

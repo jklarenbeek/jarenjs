@@ -20,6 +20,7 @@
  * never a silent one. `@jarenjs/validate` is never imported here.
  */
 
+import { resolveRuntime } from '@jarenjs/core/runtime';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
@@ -513,7 +514,7 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
  * @param {{ profile: any }} storeProfileRef - the store-level profile
  * @returns {any}
  */
-function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef) {
+function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef, runtime) {
   const dialect = connection.dialect;
   // the STORED branch (a driver that cannot index a registered
   // function): the derived columns are ordinary ones, so every write
@@ -585,7 +586,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     }
     if (explicitKey !== undefined)
       return requireKey(explicitKey, collection.name, collection.docPath);
-    if (collection.identity === 'uuid') return crypto.randomUUID();
+    if (collection.identity === 'uuid') return runtime.uuid();
     return null; // integer: the database allocates
   };
 
@@ -800,6 +801,7 @@ function resolveOperators(options) {
  *   busyTimeout?: number, queueTimeout?: number, journalMode?: string,
  *   statementCacheBound?: number, profile?: any, operators?: any,
  *   functions?: any, extensions?: any, zoneProvider?: any,
+ *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime>,
  *   readOnly?: boolean }} options
  *   `zoneProvider` is D7's injected clock: a named zone in a temporal
  *   spec (`{ "every": "P1M", "zone": "Europe/Amsterdam" }`) is host code
@@ -807,6 +809,13 @@ function resolveOperators(options) {
  *   such a document (`JQ0003`) rather than answering it in UTC. It
  *   reaches every residual compilation, which is where the calendar
  *   ladder actually walks.
+ *   `runtime` is the host's runtime record (`@jarenjs/core/runtime`):
+ *   the clock the capture log and the job queue stamp, the identifier
+ *   a `uuid` identity and a `default: 'uuid'` allocate, the job queue's
+ *   backoff jitter, and the zone provider — each read only where the
+ *   store has no explicit option for it (`zoneProvider`, `jobs.now`,
+ *   `jobs.random` win), and handed on to the job engine so a consumer
+ *   configures it once.
  * @returns {Promise<any>}
  */
 export function openStore(model, options) {
@@ -817,6 +826,10 @@ export function openStore(model, options) {
   if (options.compileSchema !== undefined && typeof options.compileSchema !== 'function')
     throw new TypeError('openStore: compileSchema must be a function when present');
   const operators = resolveOperators(options);
+  const runtime = resolveRuntime(options.runtime);
+  // the explicit option wins over the record's member, and an explicit
+  // `null` is a deliberate "none" rather than a fall-through
+  const zoneProvider = options.zoneProvider !== undefined ? options.zoneProvider : runtime.zoneProvider;
 
   // API misuse (above) throws; a defective MODEL rejects, per the
   // asynchronous contract
@@ -1225,7 +1238,7 @@ export function openStore(model, options) {
                 throw new TypeError('openStore: compileSchema must return a validation function');
               core = captureCollection(name, collectionCore(connection, collection,
                 plans.get(name), validate, queryState,
-                { profile: storeProfile }));
+                { profile: storeProfile }, runtime));
               cores.set(name, core);
             }
             return core;
@@ -1308,6 +1321,7 @@ export function openStore(model, options) {
             log: captureRequested.log === true
               || (captureRequested.log !== undefined && captureRequested.log !== false),
             retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
+            now: runtime.now,
           });
           const guard = capture === null ? (fn) => fn() : capture.wrap;
           if (capture !== null) {
@@ -1347,6 +1361,7 @@ export function openStore(model, options) {
             now: typeof options.jobs === 'object' ? options.jobs.now : undefined,
             random: typeof options.jobs === 'object' ? options.jobs.random : undefined,
             defaults: typeof options.jobs === 'object' ? options.jobs : undefined,
+            runtime,
           });
           /** Register a collection live query (LIVE-FORMAT §7). */
           const refuseAsyncLive = () => {
@@ -1522,7 +1537,7 @@ export function openStore(model, options) {
             // ZONE will compile at all here. Without one the document is
             // refused (`JQ0003`) rather than answered in UTC, and a
             // consumer that wants to know before it asks reads this
-            zoneProvider: options.zoneProvider !== undefined && options.zoneProvider !== null,
+            zoneProvider: zoneProvider !== undefined && zoneProvider !== null,
             capture: captureMode,
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true
@@ -1535,7 +1550,7 @@ export function openStore(model, options) {
           });
 
           const queryState = createQueryState(options.statementCacheBound, operators,
-            options.zoneProvider);
+            zoneProvider);
           const entityEngine = entities.size > 0
             ? createEntityQueryEngine({ connection, entities, mapping, state: queryState,
               profile: storeProfile })
@@ -1574,7 +1589,7 @@ export function openStore(model, options) {
               if (validate !== null && typeof validate !== 'function')
                 throw new TypeError('openStore: compileSchema must return a validation function');
               core = captureEntity(name, entityCore(connection, entity,
-                mapping.entities[name], validate));
+                mapping.entities[name], validate, runtime));
               entityCores.set(name, core);
             }
             return core;

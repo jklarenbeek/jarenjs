@@ -139,6 +139,59 @@ object, and a bundler drops the provider from a bundle that never calls
 it. ICU has no date-format display names, so that member carries the
 repository's English ones unless `options.formatNames` overrides them.
 
+### The optional `Intl` zone provider
+
+The same idea one seam over. `@jarenjs/core/series` reads its calendar
+boundaries on a clock, and a clock that is a named zone needs a
+`provider` — a tzdb — that the kernel refuses to bundle, because a
+bundled table is megabytes that go stale on a government's timetable.
+`createIntlZoneProvider(options?)` is that provider, over the host's ICU:
+
+```js
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+import { resolveClock, compileBuckets } from '@jarenjs/core/series';
+
+const provider = createIntlZoneProvider();
+
+const clock = resolveClock({ zone: 'Europe/Amsterdam', provider, disambiguation: 'later' });
+clock.epochOf({ year: 2026, month: 3, day: 29, hours: 2, minutes: 30, seconds: 0 });
+// 2026-03-29T01:30:00Z — 02:30 never happened that morning; 'later' is 03:30 CEST
+
+compileBuckets('P1D', { zone: 'Australia/Adelaide', provider }).floor(Date.UTC(2026, 3, 5, 12));
+// 2026-04-04T13:30:00Z — local midnight on the day the clock went back, 25 hours long
+```
+
+The seam is unchanged: `@jarenjs/core` still bundles no zone data, a
+named zone with no provider is still a refusal, and this module is what
+a host passes to answer it. Three rules hold it honest. **It never reads
+the host's own zone** — every call names its zone, and there is no
+default that asks the process where it is, because that hidden clock is
+exactly what the seam exists to forbid. **An unknown name is a refusal
+naming it**, never a quiet UTC that is right for eight months of the
+year. And **the hard half is answered exactly**: on a spring-forward day
+02:30 never happens and on a fall-back day it happens twice, so
+`toEpoch(parts, zone, disambiguation)` verifies every candidate instant
+by reading its wall clock back. Two that read back are a fold, and
+`'earlier'`/`'later'` are the smaller and the larger; none is a gap, and
+`'earlier'` is the wall clock read with the offset in force after the
+transition (that far *before* the gap), `'later'` the reading with the
+offset before it (that far after) — one transition apart either way.
+`'reject'`, the kernel's default, answers both with `NaN`, which the
+kernel turns into a refusal naming the local time. Offsets are derived
+from the wall clock rather than parsed from a `GMT+02:00` string, so a
+historical `-00:44:30` is exact.
+
+Like `createIntlDateLocale`, it is opt-in for the reason the header of
+that module gives: ICU output moves between Node versions and between a
+browser and a server. Here that means the *tzdata* — a zone whose rules
+changed last year answers differently on a host whose ICU predates the
+change — so a consumer that needs the same instant on every host pins
+the tzdata its hosts run. Nothing runs at module load, and a bundler
+drops the provider from a bundle that never calls it. Formatters are
+built once per zone and kept in a bounded, least-recently-used cache of
+`ZONE_CACHE_LIMIT` zones (`options.zones` resizes it), so a generated
+stream of zone names cannot grow it without limit.
+
 ## Authoring a pack
 
 A catalog is a plain flat object; each entry is either a **template

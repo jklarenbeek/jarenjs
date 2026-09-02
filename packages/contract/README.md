@@ -197,6 +197,11 @@ response.headers['x-jaren-trace'];                           // the server trace
 JSON.parse(response.body);                                   // the catalog
 ```
 
+Every option has a default. The two host facts among them — the trace
+generator and the clock — also come from a `runtime` record
+(`@jarenjs/core/runtime`) when one is given, so a server, a store and a
+job queue can share one; an explicit `trace` or `now` still wins.
+
 The pipeline routes (404/405 with `Allow`), enforces the body limit
 (413) before reading, checks the media (415), parses (400), assembles the
 input from path, query and headers through a prototype-safe setter,

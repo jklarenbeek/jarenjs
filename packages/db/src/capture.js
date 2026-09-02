@@ -317,11 +317,14 @@ export function translateOperations(connection, shapes, operations) {
 /**
  * @param {{ connection: any, shapes: Map<string, TableShape>,
  *   mode: 'session' | 'journal',
- *   log: boolean, retention: number }} options
+ *   log: boolean, retention: number,
+ *   now?: () => number }} options - `now` is the clock a delivery is
+ *   stamped with (the store's runtime record); the platform's when absent
  * @returns {any}
  */
 export function createCaptureEngine(options) {
   const { connection, shapes, mode } = options;
+  const clock = options.now ?? Date.now;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   if (options.log && !(Number.isInteger(options.retention) && options.retention >= 1)) {
@@ -535,7 +538,7 @@ export function createCaptureEngine(options) {
         chain(fn(...scopeArgs), (result) =>
           chain(collect(), (patch) => {
             if (patch.length === 0) return { result, delivery: null };
-            const at = Date.now();
+            const at = clock();
             return chain(persist(patch, at), () => ({
               result,
               delivery: {

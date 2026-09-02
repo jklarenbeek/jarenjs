@@ -66,12 +66,124 @@ export function formatTickValue(v) {
   return trim(v);
 }
 
-// label patterns by how coarse the step is, compiled once
-const LABEL_SECOND = compileDateFormat('HH:mm:ss');
-const LABEL_MINUTE = compileDateFormat('HH:mm');
-const LABEL_DAY = compileDateFormat('yyyy-MM-dd');
-const LABEL_MONTH = compileDateFormat('yyyy-MM');
-const LABEL_YEAR = compileDateFormat('yyyy');
+/**
+ * The label patterns a time axis compiles, keyed by the granularity of
+ * the step the ticks were laid on. Every default is numeric, so an axis
+ * with no `dateNames` record needs none; a caller overrides a member
+ * through `timeFormats` on the chart definition.
+ * @type {Readonly<Record<'second'|'minute'|'day'|'month'|'year', string>>}
+ */
+export const TIME_TICK_FORMATS = Object.freeze({
+  second: 'HH:mm:ss',
+  minute: 'HH:mm',
+  day: 'yyyy-MM-dd',
+  month: 'yyyy-MM',
+  year: 'yyyy',
+});
+
+/**
+ * @typedef {object} TimeTickFormatOptions
+ * @property {import('@jarenjs/core/dates').DateNames} [dateNames] - the
+ *  month, weekday and meridiem names a name token (`MMMM`, `EEE`, `a`)
+ *  reads; exactly the `names` member `compileDateLocale(pack)` returns
+ * @property {Partial<Record<'second'|'minute'|'day'|'month'|'year', string>>} [timeFormats]
+ *  - LDML patterns replacing the defaults in `TIME_TICK_FORMATS`, per
+ *  step granularity
+ */
+
+/**
+ * Compile the five patterns once against a names record — the compile
+ * step of a two-stage labeller, so the per-label work is one walk of a
+ * compiled chain and never a pattern scan. A pattern that asks for a
+ * locale name with no record to answer it is refused here, at compile
+ * time, in the same terms the Mermaid Gantt refuses one: this engine
+ * ships no month or weekday names of its own.
+ * @param {TimeTickFormatOptions} options
+ * @returns {Record<'second'|'minute'|'day'|'month'|'year', (parts: object) => string>}
+ */
+function compileTickSet(options) {
+  const names = options.dateNames ?? undefined;
+  const patterns = options.timeFormats ?? undefined;
+  const set = /** @type {any} */ ({});
+  for (const key of /** @type {const} */ (['second', 'minute', 'day', 'month', 'year'])) {
+    const pattern = patterns?.[key] ?? TIME_TICK_FORMATS[key];
+    try {
+      set[key] = compileDateFormat(pattern, names);
+    }
+    catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (names === undefined && message.includes('names provider')) {
+        throw new TypeError(`timeFormats.${key} '${pattern}' asks for a locale name, so it needs a`
+          + " 'dateNames' record (a 'dateNames' member on the chart definition);"
+          + ' this engine ships no month or weekday names of its own');
+      }
+      throw new TypeError(`timeFormats.${key} '${pattern}' cannot be compiled: ${message}`);
+    }
+  }
+  return set;
+}
+
+/**
+ * The label for one tick out of a compiled set — see `formatTimeTick`
+ * for the step and no-step rules.
+ * @param {Record<string, (parts: object) => string>} set
+ * @param {number|Date} v
+ * @param {[string, number]|undefined} step
+ * @returns {string}
+ */
+function labelTimeTick(set, v, step) {
+  const ms = typeof v === 'number' ? v : v.getTime();
+  const parts = partsFromEpoch(ms);
+  if (step === undefined) {
+    return parts.hours === 0 && parts.minutes === 0 && parts.seconds === 0
+      ? set.day(parts)
+      : set.second(parts);
+  }
+  const unit = step[0];
+  if (unit === 'second')
+    return set.second(parts);
+  if (unit === 'minute' || unit === 'hour')
+    return set.minute(parts);
+  if (unit === 'day' || unit === 'week')
+    return set.day(parts);
+  return unit === 'month' ? set.month(parts) : set.year(parts);
+}
+
+/**
+ * Build a time-axis labeller: the five step patterns compiled once,
+ * against the `dateNames` record the chart definition carries, so a
+ * render compiles per build and never per label. The result has the
+ * signature and rules of `formatTimeTick`. With neither member given it
+ * labels exactly as `formatTimeTick` does.
+ *
+ * A pattern with a name token (`MMMM`, `MMM`, `EEEE`, `EEE`, `a`) and no
+ * `dateNames` is a refusal — a `TypeError` — not a silent English
+ * fallback; the numeric defaults need no record.
+ *
+ * @param {TimeTickFormatOptions} [options]
+ * @returns {(v: number|Date, step?: [string, number]) => string}
+ * @throws {TypeError} on a name token with no `dateNames`, or a pattern
+ *   that does not compile
+ * @example
+ * const label = compileTimeTickFormat({
+ *   dateNames: compileDateLocale(nl).names,
+ *   timeFormats: { day: 'EEEE d MMMM' },
+ * });
+ * label(Date.UTC(2026, 6, 27), ['day', 1]); // 'maandag 27 juli'
+ */
+export function compileTimeTickFormat(options = {}) {
+  // nothing to compile against: the shared record-free labeller, so a
+  // definition with neither member costs no compilation per build
+  if (options.dateNames === undefined && options.timeFormats === undefined)
+    return formatTimeTick;
+  const set = compileTickSet(options);
+  return (v, step = undefined) => labelTimeTick(set, v, step);
+}
+
+// The record-free set behind `formatTimeTick`: compiled on first use and
+// kept, so a render with no `dateNames` compiles nothing at all.
+/** @type {Record<string, (parts: object) => string>|null} */
+let DEFAULT_SET = null;
 
 /**
  * A time-axis tick label in UTC (deterministic across machines).
@@ -82,26 +194,17 @@ const LABEL_YEAR = compileDateFormat('yyyy');
  * it keeps the historical behaviour: `HH:MM:SS`, or the date when the
  * value sits exactly on a day boundary.
  *
+ * The patterns are the numeric defaults in `TIME_TICK_FORMATS`; a
+ * localized axis compiles its own labeller with `compileTimeTickFormat`.
+ *
  * @param {number|Date} v - Epoch milliseconds or a Date
  * @param {[string, number]} [step] - The [unit, amount] the axis stepped by
  * @returns {string}
  */
 export function formatTimeTick(v, step = undefined) {
-  const ms = typeof v === 'number' ? v : v.getTime();
-  const parts = partsFromEpoch(ms);
-  if (step === undefined) {
-    return parts.hours === 0 && parts.minutes === 0 && parts.seconds === 0
-      ? LABEL_DAY(parts)
-      : LABEL_SECOND(parts);
-  }
-  const unit = step[0];
-  if (unit === 'second')
-    return LABEL_SECOND(parts);
-  if (unit === 'minute' || unit === 'hour')
-    return LABEL_MINUTE(parts);
-  if (unit === 'day' || unit === 'week')
-    return LABEL_DAY(parts);
-  return unit === 'month' ? LABEL_MONTH(parts) : LABEL_YEAR(parts);
+  if (DEFAULT_SET === null)
+    DEFAULT_SET = compileTickSet({});
+  return labelTimeTick(DEFAULT_SET, v, step);
 }
 
 function trim(x) {

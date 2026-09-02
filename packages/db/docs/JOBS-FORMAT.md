@@ -194,8 +194,9 @@ A failed attempt (the handler threw or rejected) records
 
 Backoff is exponential with jitter:
 `min(cap, base × 2^(attempts−1)) × (0.5 + random()/2)`, defaults
-`base` 1 000 ms, `cap` 60 000 ms. `Math.random` is the runtime
-default; the `random` option injects a deterministic source and every
+`base` 1 000 ms, `cap` 60 000 ms. `Math.random` is the platform
+default; the `random` option — or the store's runtime record
+(`@jarenjs/core/runtime`), where no explicit option is given — injects a deterministic source and every
 test in this repository does.
 
 ## 5. Recovery

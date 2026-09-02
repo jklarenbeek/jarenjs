@@ -23,6 +23,7 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
+import { resolveRuntime } from '@jarenjs/core/runtime';
 import { setObjectMember } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
@@ -1208,7 +1209,8 @@ function runSteps(connection, migration, options) {
           // before the stylesheet and split out after it, through the
           // entity's own split — a column-mapped member the stylesheet
           // wrote used to land in the document and be shadowed on read
-          const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null);
+          const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null,
+            options.runtime);
           const columns = entityColumnsOf(stepEntity.mapping);
           const assignments = [
             ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
@@ -1556,7 +1558,12 @@ export function migrationStatus(target, migrations, options) {
  * @param {any[]} migrations
  * @param {{ baseline: any, model?: any, compileSchema?: Function,
  *   dryRun?: boolean, batchSize?: number, onProgress?: Function,
- *   shadow?: boolean, shadowPath?: string }} options
+ *   shadow?: boolean, shadowPath?: string,
+ *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
+ *   `runtime` is the host's runtime record: the clock every applied
+ *   migration is stamped with, and the clock and identifiers an entity
+ *   step's `default: 'now'` / `default: 'uuid'` fill; the platform's own
+ *   when absent
  * @returns {Promise<any>}
  */
 export function migrate(target, migrations, options) {
@@ -1571,11 +1578,13 @@ export function migrate(target, migrations, options) {
       'migrate needs { baseline }: the model the store was first created with '
       + '(the chain anchor and the shadow starting shape)');
   const batchSize = options.batchSize ?? 500;
+  const runtime = resolveRuntime(options.runtime);
   const runOptions = {
     batchSize,
     onProgress: options.onProgress,
     registerFunctions: options.registerFunctions,
     model: options.model,
+    runtime,
   };
 
   return toPromise(chain(
@@ -1733,7 +1742,7 @@ export function migrate(target, migrations, options) {
                       })))
                     : null,
                   () => chain(connection.prepare(statements.insert), (insert) =>
-                    insert.run([migration.id, Date.now(), migration.from,
+                    insert.run([migration.id, runtime.now(), migration.from,
                       migration.to, migrationChecksum(migration),
                       migration.steps.length]))));
                 const restore = () => (bracket

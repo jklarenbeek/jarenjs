@@ -225,9 +225,11 @@ if (tree !== null && tree.session !== undefined) {
   '@jarenjs/locales': `
 import { nl, dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from '@jarenjs/locales';
 import { createIntlDateLocale } from '@jarenjs/locales/intl-dates';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import {
   compileDateFormat, compileDateParser, parseRFC3339Parts, timeTicksEvery,
 } from '@jarenjs/core/dates';
+import { resolveClock } from '@jarenjs/core/series';
 const dates = compileDateLocale(nl);
 const long: (parts: object) => string = compileDateFormat('EEEE d MMMM yyyy', dates.names);
 const parts = parseRFC3339Parts('2026-07-05T00:00:00Z');
@@ -242,6 +244,9 @@ void phrase.length;
 const named: string | undefined = dates.formatName('date-time');
 void named;
 void createIntlDateLocale('nl-NL').names.months[0];
+const zoned = resolveClock({ zone: 'Europe/Amsterdam', provider: createIntlZoneProvider(), disambiguation: 'later' });
+const instant: number = zoned.epochOf(zoned.partsAt(0));
+void instant;
 void Object.keys(dateMessagesEn).length;
 void RELATIVE_UNITS.join(',');
 `,

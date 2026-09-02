@@ -63,6 +63,8 @@
           "yLabel": { "type": ["string", "null"] },
           "domain": { "$ref": "#/$defs/domainPolicy" },
           "sampling": { "$ref": "#/$defs/samplingPolicy" },
+          "dateNames": { "$ref": "#/$defs/dateNames" },
+          "timeFormats": { "$ref": "#/$defs/timeFormats" },
           "series": {
             "type": "array",
             "items": { "$ref": "#/$defs/lineSeries" }
@@ -77,6 +79,8 @@
           "xLabel": { "type": ["string", "null"] },
           "yLabel": { "type": ["string", "null"] },
           "domain": { "$ref": "#/$defs/domainPolicy" },
+          "dateNames": { "$ref": "#/$defs/dateNames" },
+          "timeFormats": { "$ref": "#/$defs/timeFormats" },
           "candles": {
             "type": "array",
             "items": { "$ref": "#/$defs/candle" }
@@ -442,6 +446,28 @@
           }
         }
       ]
+    },
+    "dateNames": {
+      "description": "the month, weekday and meridiem names a time-axis pattern with a name token reads (compileDateLocale(pack).names from @jarenjs/locales); a name token with no record is a compile error, never an English fallback",
+      "type": "object",
+      "properties": {
+        "months": { "type": "array", "minItems": 12, "maxItems": 12, "items": { "type": "string" } },
+        "monthsShort": { "type": "array", "minItems": 12, "maxItems": 12, "items": { "type": "string" } },
+        "weekdays": { "type": "array", "minItems": 7, "maxItems": 7, "items": { "type": "string" } },
+        "weekdaysShort": { "type": "array", "minItems": 7, "maxItems": 7, "items": { "type": "string" } },
+        "meridiem": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string" } }
+      }
+    },
+    "timeFormats": {
+      "description": "LDML label patterns for a time axis, keyed by the granularity of the tick step; an omitted member keeps its numeric default (HH:mm:ss, HH:mm, yyyy-MM-dd, yyyy-MM, yyyy)",
+      "type": "object",
+      "properties": {
+        "second": { "type": "string" },
+        "minute": { "type": "string" },
+        "day": { "type": "string" },
+        "month": { "type": "string" },
+        "year": { "type": "string" }
+      }
     },
     "domainPolicy": {
       "description": "domain-stability policy: a quantized sliding x window and/or pinned or step-quantized y bounds, so most streaming ticks keep the scales still",

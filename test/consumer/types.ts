@@ -1010,6 +1010,18 @@ const fed: boolean = queue.feed(1);
 void fed;
 queue.end();
 
+// @jarenjs/locales — the opt-in Intl zone provider is the ZoneProvider
+// the temporal kernel's clock seam declares, so it passes where a named
+// zone's provider goes
+import { createIntlZoneProvider, ZONE_CACHE_LIMIT } from '@jarenjs/locales/intl-zones';
+import { resolveClock, compileBuckets } from '@jarenjs/core/series';
+import type { ZoneProvider } from '@jarenjs/core/series';
+const zoneProvider: ZoneProvider = createIntlZoneProvider({ zones: ZONE_CACHE_LIMIT });
+const amsterdam = resolveClock({ zone: 'Europe/Amsterdam', provider: zoneProvider, disambiguation: 'later' });
+const zonedInstant: number = amsterdam.epochOf(amsterdam.partsAt(0));
+void zonedInstant;
+void compileBuckets('P1M', { zone: 'Australia/Adelaide', provider: zoneProvider }).floor(0);
+
 // @jarenjs/db — the store surface: model normalization, the driver
 // seam (all three bindings importable anywhere; builtins load lazily
 // inside open()), the dialect seam, and the coded errors

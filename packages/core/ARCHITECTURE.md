@@ -168,6 +168,10 @@ flowchart TB
             RandomUtil["random.js<br/>Seeded generator, integer draw, shuffle, distinct draw"]
         end
 
+        subgraph RuntimeModule["Host runtime"]
+            RuntimeRecord["runtime.js<br/>The runtime record: clock, identifiers, randomness, zone provider"]
+        end
+
         subgraph StatsModule["Statistics"]
             StatsUtil["stats.js<br/>Mean, sample variance, median, named quantile"]
         end
@@ -832,6 +836,35 @@ mergeIntervals(shifts);                         // one span — touching IS cont
 mergeIntervals(shifts, { adjacent: false });    // two — a handover is two shifts
 findSlots(shifts, { duration: 'PT30M' }).length; // 16
 createIntervalIndex(shifts).at(4 * 3600_000);   // the second shift only: [start, end)
+```
+
+### 5e. Runtime record (`runtime.js`)
+
+The one record a host hands to every subsystem that needs a host fact:
+`createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting
+member for member to the platform's own (`Date.now`, `crypto.randomUUID`,
+`Math.random`, and no zone provider — a named zone stays a refusal). The
+store, the job engine, the migration runner and the http binding take it as
+`runtime`; a subsystem's own explicit option wins over the record's member,
+which wins over the built-in default, so adopting the record changes nothing
+observable and a deterministic run — a fixed clock, a seeded generator, a
+counting identifier — is configured once. It is a type plus a freeze: this
+module reads no clock and draws no number of its own, and it reaches hosts,
+never query compilation, because a compiled query is cached by document
+identity and there is no `now` in the kernel for it to feed.
+
+```javascript
+import { createRuntime } from '@jarenjs/core/runtime';
+import { mulberry32 } from '@jarenjs/core/random';
+
+let n = 0;
+const runtime = createRuntime({
+  now: () => 1_700_000_000_000,
+  uuid: () => `id-${++n}`,
+  random: mulberry32(2026),
+});
+runtime.zoneProvider;                       // null — the one member left at its default
+createRuntime({ clock: Date.now });          // TypeError: a runtime record has 'now', 'uuid', 'random', 'zoneProvider', not 'clock'
 ```
 
 ### 6. Text Module (`text/`)

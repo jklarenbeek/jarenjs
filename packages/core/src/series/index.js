@@ -75,6 +75,13 @@ export { createIntervalIndex } from './interval-index.js';
 
 export { resolveClock, CLOCK_MEMBERS } from './zone.js';
 
+/**
+ * The wall clock a caller supplies for a named zone - the shape a host
+ * passes as `provider`, named here so it can be spelled where the seam
+ * is crossed.
+ * @typedef {import('./zone.js').ZoneProvider} ZoneProvider
+ */
+
 export { compileBuckets, resampleSeries, RESAMPLE_MEMBERS } from './bucket.js';
 
 export { rollingSeries, ROLLING_MEMBERS } from './rolling.js';

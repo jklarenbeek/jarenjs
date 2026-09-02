@@ -177,6 +177,20 @@ with no provider is a refusal, never a quiet fall back to UTC — which is
 right for Amsterdam for none of the year and *looks* right for eight
 months of it.
 
+The seam is crossed, not closed. `@jarenjs/locales/intl-zones` ships
+`createIntlZoneProvider()`, a provider over the host's own ICU data —
+the one copy of the tzdb that is already installed and already
+maintained — that a caller passes as `provider`. It is opt-in and on
+its own subpath, because ICU output moves between hosts and may not be
+anyone's default; it never reads the host's own zone, because every
+call names its zone and there is no default that asks the process
+where it is; and it answers a gap and a fold exactly, proved by a
+transition corpus rather than by examples. Nothing about the seam
+moves: this kernel still bundles no zone data and reaches for no
+`Intl`, a named zone with no provider is still a refusal, and a host
+with a tzdb of its own still passes that instead. The provider's own
+document is [`@jarenjs/locales`' README](../../locales/README.md).
+
 ## Buckets, resampling and fill — `bucket.js`
 
 Two questions that are always asked together and are not the same
@@ -317,26 +331,27 @@ unless the kernel answered the identical rows the references did.
 
 The kernel is not the ceiling and does not claim to be. A one-pass loop
 written for one question validates nothing, normalizes nothing and
-returns a bare pair. Against those loops the kernel costs <!--fact:series.kernelVsCeiling-->3.4× the one-pass bucket loop and 6.2× the one-pass ring sum<!--/fact-->,
-and against the vocabulary a consumer had instead it is <!--fact:series.kernelVsQuery-->73.6× faster than the generic query bucket and 81.2× faster than the labelled count window<!--/fact-->.
+returns a bare pair. Against those loops the kernel costs <!--fact:series.kernelVsCeiling-->3.0× the one-pass bucket loop and 6.2× the one-pass ring sum<!--/fact-->,
+and against the vocabulary a consumer had instead it is <!--fact:series.kernelVsQuery-->74.0× faster than the generic query bucket and 78.3× faster than the labelled count window<!--/fact-->.
 
 <!--fact:series.kernelTable-->
 | operation | median | rows | against | what that is | ratio |
 |---|---:|---:|---:|---|---:|
-| `resampleSeries`, 60 s buckets | 1.5 ms | 1,667 | 0.45 ms | one-pass loop | 3.4× |
-| `resampleSeries`, + linear fill | 1.1 ms | 1,657 | 1 ms | the same buckets, omitting | 1.0× |
-| `rollingSeries`, 60 s window | 7.2 ms | 100,000 | 1.2 ms | one-pass ring sum | 6.2× |
-| `asOfJoin`, one left row per 100 | 1.7 ms | 1,000 | 2.2 ms | one index read per row | 0.8× |
-| `downsampleSeries`, lttb, gap corpus | 1.6 ms | 2,000 | 1.8 ms | the same line with no holes in it | 0.9× |
+| `resampleSeries`, 60 s buckets | 1.6 ms | 1,667 | 0.53 ms | one-pass loop | 3.0× |
+| `resampleSeries`, + linear fill | 1 ms | 1,657 | 1 ms | the same buckets, omitting | 1.0× |
+| `rollingSeries`, 60 s window | 7.5 ms | 100,000 | 1.2 ms | one-pass ring sum | 6.2× |
+| `asOfJoin`, one left row per 100 | 1.7 ms | 1,000 | 1.6 ms | one index read per row | 1.1× |
+| `downsampleSeries`, lttb, gap corpus | 1.7 ms | 2,000 | 1.8 ms | the same line with no holes in it | 0.9× |
 <!--/fact-->
 
-A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--fact:series.asofShape-->The as-of join costs 14.7× a handful of index reads, and beats them by 1.3× once there is one left row per hundred right ones. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/fact-->
+A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--fact:series.asofShape-->The as-of join costs 19.5× a handful of index reads, and narrows to 1.1× the same join once there is one left row per hundred right ones — still the statement's win, published as one. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/fact-->
 
-And the seam has a price that this corpus cannot charge it. <!--fact:series.zoneCost-->Walking every boundary through an injected zone provider costs 1.0× the integer ladder over an identical answer — near parity because it is near nothing, since the benchmark corpus spans 28 hours and holds two daily boundaries. What the suite gates instead is that the provider is consulted per boundary rather than per sample.<!--/fact-->
+And the seam has a price that this corpus cannot charge it. <!--fact:series.zoneCost-->Walking every boundary through the shipped Intl zone provider costs 1.1× the integer ladder over an identical answer — a handful of ICU reads against the whole ladder, since the benchmark corpus spans 28 hours and holds two daily boundaries. What the suite gates is that the provider is consulted per boundary rather than per sample.<!--/fact-->
 
 ## Not here
 
-Named time zones are injected, never bundled; recurrence grammars
+Named time zones are injected, never bundled — the provider over host
+ICU lives opt-in in `@jarenjs/locales`, not here; recurrence grammars
 (RRULE, iCalendar) and any kind of scheduling solver are somebody else's
 layer. This module supplies the algebra those are built from, and
 nothing that needs a clock, a locale or a zone database to be correct.

@@ -19,7 +19,11 @@
  * formatter and a UI read; importing that subpath directly costs no
  * `Intl` construction at all, which is what keeps server-rendered output
  * byte-stable. `createIntlDateLocale` (`./intl-dates`) is the opt-in
- * provider for hosts that want the platform's locales instead.
+ * provider for hosts that want the platform's locales instead, and
+ * `createIntlZoneProvider` (`./intl-zones`) is its twin one seam over:
+ * the zone provider `@jarenjs/core/series` takes for a named zone, over
+ * the host's ICU. It is reached only by its own subpath and an explicit
+ * call, which is what keeps the default path free of `Intl` work.
  */
 
 export { dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from './dates.js';

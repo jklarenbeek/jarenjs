@@ -785,7 +785,8 @@ resolvers (§7.5); `errorBody(wire, ctx)` and `onError(err, ctx)` are the
 two host hooks (`ctx` is `null` before an operation is matched);
 `catalog` is a message catalog (templates or compiled renderers)
 consulted before the English one; `now` is the clock stamped into ledger
-claims.
+claims; `runtime` is the host's runtime record (`@jarenjs/core/runtime`),
+whose `uuid` and `now` apply where `trace` and `now` are absent.
 
 ## §8 Idempotency and the ledger
 

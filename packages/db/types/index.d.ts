@@ -16,6 +16,8 @@
  * `@jarenjs/db/typed`.
  */
 
+import type { Runtime } from '@jarenjs/core/runtime';
+
 // ————— errors —————
 
 export declare const DB_CODES: Readonly<Record<string, string>>;
@@ -810,6 +812,13 @@ export interface OpenStoreOptions {
    * where one was injected; without it the document is refused rather
    * than answered in UTC. No time-zone database is bundled. */
   zoneProvider?: unknown;
+  /** The host's runtime record (`@jarenjs/core/runtime`): the clock the
+   * capture log and the job queue stamp, the identifier a `uuid`
+   * identity and a `default: 'uuid'` allocate, the job queue's backoff
+   * jitter and the zone provider — each read only where the explicit
+   * option (`zoneProvider`, `jobs.now`, `jobs.random`) is absent, and
+   * handed on to the job engine. */
+  runtime?: Partial<Runtime>;
   busyTimeout?: number;
   /** How long work waits for an open transaction to settle before
    * `JD0012` (MODEL-FORMAT §5.1); reaches every driver. */
@@ -904,6 +913,9 @@ export interface MigrateOptions {
   /** Re-register declared deterministic functions on every connection
    * the migration opens (real, shadow, reference) — §10. */
   registerFunctions?: (connection: unknown) => unknown;
+  /** The host's runtime record: the clock every applied migration is
+   * stamped with; the platform's own when absent. */
+  runtime?: Partial<Runtime>;
 }
 
 export declare function migrate(
@@ -1252,7 +1264,7 @@ export declare const RUN_IDENTITY_NODE: string;
 
 export declare function createJobEngine(options: {
   connection: unknown; now?: () => number; random?: () => number;
-  defaults?: JobsOptions }): unknown;
+  defaults?: JobsOptions; runtime?: Partial<Runtime> }): unknown;
 export declare const JOBS_TABLE: string;
 export declare const JOB_CHECKPOINTS_TABLE: string;
 export declare const JOB_DEFAULTS: Readonly<{

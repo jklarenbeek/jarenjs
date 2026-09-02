@@ -9,7 +9,14 @@
  *
  *   data   = { series: [{ name, points: [{x, y}] }] }
  *   config = { type:'line', title?, x?: 'linear'|'time', log?,
- *              markers?, xLabel?, yLabel?, domain?, sampling? }
+ *              markers?, xLabel?, yLabel?, domain?, sampling?,
+ *              dateNames?, timeFormats? }
+ *
+ * A time axis labels its ticks through a labeller compiled once per
+ * build (`compileTimeTickFormat`) from the definition's optional
+ * `dateNames` record and `timeFormats` patterns, so a localized axis
+ * costs five compilations per render and none per label, and a
+ * definition without them labels exactly as `formatTimeTick` does.
  *
  * `config.sampling` (`core/sampling.js`) decides how many of those
  * points are drawn: above two thousand a time line is reduced through
@@ -39,7 +46,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog, scaleTime } from '../core/scale.js';
 import {
   axisTicksLinear, axisTicksLog, axisTicksTime, niceTimeStep,
-  formatTickValue, formatTimeTick,
+  formatTickValue, compileTimeTickFormat,
 } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { numOf } from '../core/stream-adapter.js';
@@ -213,6 +220,9 @@ export function buildLineAST(data, config = {}) {
   const policy = normalizeDomainPolicy(config.domain);
   const domains = resolveLineDomains(scanLineExtremes(input, policy, log), policy, time, log);
   const { xScale, yScale } = lineScales(domains, time, log);
+  const timeLabel = time
+    ? compileTimeTickFormat({ dateNames: config.dateNames, timeFormats: config.timeFormats })
+    : null;
 
   // Sampling chooses which points are DRAWN; it never moves a domain,
   // which is scanned from every source point above. A series the policy
@@ -239,7 +249,7 @@ export function buildLineAST(data, config = {}) {
     x: {
       ticks: domains.xTickValues.map((v) => ({
         pos: clamp01(xScale(v)),
-        label: time ? formatTimeTick(v, domains.xTickStep) : formatTickValue(v),
+        label: timeLabel !== null ? timeLabel(v, domains.xTickStep) : formatTickValue(v),
       })),
       label: config.xLabel ?? null,
     },

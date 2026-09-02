@@ -16,8 +16,9 @@
  * at-least-once; settlement is exactly-once AGAINST THE STORE, and a
  * guard that matches nothing is a coded refusal naming which of the
  * three reasons applied, never a silent `false`. `now` and `random`
- * are injectable — the runtime defaults are the clock and
- * `Math.random`; every test injects.
+ * are injectable — explicitly, or through the host's runtime record,
+ * which also mints every identifier — and the platform defaults are the
+ * clock and `Math.random`; every test injects.
  *
  * The worker LIFECYCLE holds two invariants that a long-running process
  * depends on, and neither is a detail:
@@ -37,6 +38,7 @@
  *    timer, and its abandoned job recovers by lease expiry (§5).
  */
 
+import { resolveRuntime } from '@jarenjs/core/runtime';
 import { chain, attempt } from './driver.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 
@@ -192,12 +194,18 @@ function isLease(value) {
  * @param {{ connection: any, now?: () => number,
  *   random?: () => number,
  *   gate?: (fn: () => any, what?: string, signal?: AbortSignal) => any,
- *   defaults?: Partial<typeof JOB_DEFAULTS> }} options
+ *   defaults?: Partial<typeof JOB_DEFAULTS>,
+ *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
+ *   `runtime` is the host's runtime record: its `now` and `random` apply
+ *   where the explicit `now` and `random` options are absent, and its
+ *   `uuid` mints every job id, lease token and default worker owner.
  */
 export function createJobEngine(options) {
   const { connection } = options;
-  const now = options.now ?? Date.now;
-  const random = options.random ?? Math.random;
+  const runtime = resolveRuntime(options.runtime);
+  const now = options.now ?? runtime.now;
+  const random = options.random ?? runtime.random;
+  const uuid = runtime.uuid;
   /**
    * The store gate a WORKER's control-plane I/O takes: a worker is a
    * root-owned long-lived component, so its claims, renewals,
@@ -276,7 +284,7 @@ export function createJobEngine(options) {
     if (typeof kind !== 'string' || kind === '') {
       throw new TypeError('enqueue: "kind" must be a non-empty string');
     }
-    const id = enqueueOptions?.id ?? crypto.randomUUID();
+    const id = enqueueOptions?.id ?? uuid();
     // a `runAt` that is not a number stored as NaN and left the job
     // pending forever; a Date could not even be bound
     if (enqueueOptions?.runAt !== undefined && !Number.isFinite(enqueueOptions.runAt)) {
@@ -350,7 +358,7 @@ export function createJobEngine(options) {
         ORDER BY run_at, created_at, id LIMIT 1)
       RETURNING *`);
     return chain(statement.get([
-      owner, at + (claimOptions.leaseMs ?? defaults.leaseMs), crypto.randomUUID(),
+      owner, at + (claimOptions.leaseMs ?? defaults.leaseMs), uuid(),
       at, at, at, ...kinds,
     ]), (row) => (row === undefined
       ? undefined
@@ -450,7 +458,7 @@ export function createJobEngine(options) {
       SET lease_until=?, lease_token=?, updated_at=?
       WHERE id=? AND ${FENCE}
       RETURNING *`).get([
-      at + (renewOptions?.leaseMs ?? defaults.leaseMs), crypto.randomUUID(),
+      at + (renewOptions?.leaseMs ?? defaults.leaseMs), uuid(),
       at, lease.jobId, lease.token, at,
       ]), (row) => (row === undefined
       ? chain(refuseSettlement(lease, 'renew()'), (error) => {
@@ -613,7 +621,7 @@ export function createJobEngine(options) {
         'createWorker: "handlers" must be a non-empty object of functions');
     }
     const kinds = Object.keys(handlers);
-    const owner = workerOptions.owner ?? crypto.randomUUID();
+    const owner = workerOptions.owner ?? uuid();
     const concurrency = workerOptions.concurrency ?? 1;
     if (!(Number.isInteger(concurrency) && concurrency >= 1)) {
       // `Array.from({ length: 0 })` started a worker that never claimed
