@@ -411,7 +411,10 @@ const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
-if (clientBytes > 520000)
+// the ceiling catches an ACCIDENTAL leak (another pen, an unrelated
+// package), not the store's own growth: it is moved deliberately, with
+// the measured size recorded, when the store gains capability
+if (clientBytes > 560000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

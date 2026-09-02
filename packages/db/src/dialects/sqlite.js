@@ -63,8 +63,9 @@ function typeFor(schemaType, hint) {
 }
 
 /**
- * A guarded PRAGMA argument: journal modes and similar keywords are a
- * closed word set, never interpolated user text.
+ * A guarded PRAGMA word: a pragma's name and a keyword value (journal
+ * modes and the like) are closed word sets, never interpolated user
+ * text.
  * @param {string} word
  * @returns {string}
  */
@@ -72,6 +73,21 @@ function pragmaWord(word) {
   if (!/^[a-z_]+$/i.test(String(word)))
     throw new TypeError(`not a PRAGMA keyword: '${word}'`);
   return String(word);
+}
+
+/**
+ * A guarded PRAGMA value: an integer spelled whole, or a keyword from a
+ * closed set. Anything else is refused here, so no unvalidated value
+ * can reach the statement text.
+ * @param {number | string} value
+ * @returns {string}
+ */
+function pragmaValue(value) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError(`not a PRAGMA value: ${value}`);
+    return String(Math.trunc(value));
+  }
+  return pragmaWord(value);
 }
 
 export const sqliteDialect = createDialect({
@@ -196,13 +212,25 @@ export const sqliteDialect = createDialect({
     rollbackTo: (n) => `ROLLBACK TO SAVEPOINT ${quoteIdentifier(n)}`,
   },
   pragma: {
-    busyTimeout: (ms) => `PRAGMA busy_timeout = ${Math.trunc(ms)}`,
-    journalMode: (mode) => `PRAGMA journal_mode = ${pragmaWord(mode)}`,
+    // the one configuration spelling: the name comes from the store's
+    // closed pragma table and the value from its validators, and both
+    // are guarded again here
+    set: (name, value) => `PRAGMA ${pragmaWord(name)} = ${pragmaValue(value)}`,
     foreignKeys: (on) => `PRAGMA foreign_keys = ${on ? 'ON' : 'OFF'}`,
     foreignKeyCheck: () => 'PRAGMA foreign_key_check',
+    // the maintenance operations: a checkpoint mode is a closed word,
+    // an integrity-check limit a whole integer
+    walCheckpoint: (mode) => `PRAGMA wal_checkpoint(${pragmaWord(mode)})`,
+    integrityCheck: (limit) => (limit === undefined
+      ? 'PRAGMA integrity_check'
+      : `PRAGMA integrity_check(${pragmaValue(limit)})`),
+    optimize: () => 'PRAGMA optimize',
   },
   introspect: {
     version: () => 'SELECT sqlite_version() AS version',
+    // the read-back of one configuration pragma: `PRAGMA name` answers
+    // one row whose single column carries the value in effect
+    pragma: (name) => `PRAGMA ${pragmaWord(name)}`,
     compileOptions: () =>
       'SELECT compile_options AS name FROM pragma_compile_options',
     tableExists: () =>

@@ -582,12 +582,96 @@ composition is sync-capable and adds none); the measured difference is
 the price of portability, published with the benchmarks rather than
 waved away.
 
-**Concurrency defaults are decided here.** A file-backed store opens
-with `PRAGMA busy_timeout` set to **5000 ms** and journal mode
-**WAL**, both overridable through `openStore`'s `busyTimeout` and
-`journalMode` options; `:memory:` stores set neither. The values in
-effect are visible on `store.capabilities.busyTimeoutMs` and
-`store.capabilities.journalMode` (`null` for in-memory stores).
+**Connection configuration is a closed, validated set, read back
+after it is applied.** `openStore` configures exactly eight
+connection pragmas, each by its own option: `busyTimeout` (ms,
+default **5000**), `journalMode` (`delete` | `truncate` | `persist` |
+`memory` | `wal` | `off`, default **`wal`** on a writable file),
+`synchronous` (`off` | `normal` | `full` | `extra`), `walAutocheckpoint`
+(pages, `0` disables), `journalSizeLimit` (bytes, `-1` for none),
+`cacheSize` (pages, or negative KiB), `mmapSize` (bytes) and
+`tempStore` (`default` | `file` | `memory`). An option naming any
+other pragma is refused `JD0006` — `foreign_keys` among them, which the
+model requires ON and verifies per connection — and a value outside a
+pragma's set is API misuse. A driver's capability table declares the
+pragmas its binding applies (`configurablePragmas`); a request outside
+that declaration is `JD0007`, as is an explicit `journalMode` on a
+read-only store, whose journal-mode write the engine refuses. After the
+open sequence every declared pragma is read back and the read values
+are what `store.capabilities.pragmas` carries; a requested value the
+engine did not take is `JD0008` and the store does not open. A
+`:memory:` database keeps journal mode `memory` whatever is asked and
+answers nothing for `mmap_size`, so those two are not written there and
+the report says what the engine answers (`'memory'`, `null`).
+`store.capabilities.busyTimeoutMs` and `store.capabilities.journalMode`
+are the same two read-back values under their long-published names.
+
+**Maintenance is a typed operation, never raw SQL.** Four store members
+run what an operator runs on a production database, each under the
+store gate (so none interleaves an in-flight write) and each answering
+the engine's own row as typed data: `checkpoint({ mode })` runs
+`PRAGMA wal_checkpoint` (`passive` | `full` | `restart` | `truncate`,
+default `passive`) and answers `{ busy, logFrames, checkpointedFrames }`
+— the engine's numbers, `-1` on a database that is not in WAL mode; a
+second passive checkpoint reports the same counts as the first (the
+frames stay in the log until a writer restarts it) and a second
+`truncate` reports zeros. `integrityCheck({ limit })` answers
+`{ ok, problems }`, the engine's rows verbatim — corruption is the
+result, never a throw. `foreignKeyCheck()` answers
+`{ ok, violations: [{ table, rowId, parent, fkid }] }`. `optimize()`
+answers `{ ran: true }`, because `PRAGMA optimize` reports nothing and
+this store invents no statistics. `store.capabilities.maintenance`
+carries one boolean per operation: `false` where the driver's binding
+does not declare it and, for `checkpoint` and `optimize`, on a
+read-only store (the engine would answer a checkpoint there with a
+silent no-op) — and a call is refused `JD2077` exactly where the report
+says `false`. A driver failure inside an operation is `JD2078` with
+the original as `cause`. None of them touches the change log's durable
+watermark (LIVE-FORMAT §5).
+
+**A backup is published whole or not at all.** `backupTo(targetPath,
+{ rate, onProgress, signal, checkpoint })` copies a live store through
+the platform's online-backup API — writers proceed meanwhile — and
+answers `{ path, pages, checkpoint }`. The copy is written to a
+temporary sibling of the target (`<target>.jaren-tmp-<suffix>`, in the
+same directory so the rename is one file system's) and renamed onto the
+target only once the platform reported the copy complete; a
+cancellation (`JD2079`, honoured between pages at the `rate` the
+platform reports progress — the API takes no signal, so the check runs
+in its progress callback), a copy failure or a rename failure removes
+the temporary file and leaves the target untouched. A `checkpoint`
+mode (default `passive`; `false` skips it, and a read-only store skips
+it by default) fixes the snapshot boundary first, under the store gate.
+Progress events are the platform's `{ totalPages, remainingPages }`
+verbatim, and the last one may still carry a remainder: the platform
+emits no zero event, completion is the resolved copy. The capability is
+`store.capabilities.maintenance.backup` — the Node binding's; every
+other binding reports `false` and refuses `JD2077`. What is NOT
+decided here: where backups go, how they are named, encrypted, rotated
+or retained — the host's policy.
+
+**Cancellation is honoured where the driver can honour it, and the
+report says where.** Every operation that runs more than one unit of
+work takes `{ signal, deadline }` and checks them BETWEEN units, on the
+clock the store's runtime record supplies — never inside a statement,
+because no shipped SQLite binding exposes an interrupt.
+`store.capabilities.cancellation` states the granularity per
+lifecycle: `query: 'row'` (a call before it runs, a cursor or page at
+every row boundary — `JD2072`), `queue: true` (a call still waiting for
+the open transaction leaves the queue — `JD2064`), `migration: 'step'`
+(between migrations, between steps and between the batches of a data
+step — `JD2080`; the migration in flight rolls back whole), `maintenance:
+'statement'` (before the one statement each operation issues —
+`JD2081`), `backup: 'page'` (between the pages the platform reports —
+`JD2079`), and `midStatement: false` — a filled slot, not an absent
+one; a driver that grows an interrupt flips exactly that member. A
+passed deadline is `JD2075` in every lifecycle. A cursor's own report
+is part of the same honesty: `capabilities.lazyIteration` is probed at
+open, and on a binding whose statements carry no lazy iterator (the
+driver composes `iterate` over `all()`) every cursor reports
+`streaming: 'buffered'` with a `{ construct: 'driver' }` barrier,
+`explain()` says the same, and `strictStreaming` refuses (`JD0037`) —
+never a row stream the driver cannot deliver.
 
 The runtime builtin behind a binding is imported lazily inside
 `open()` — never at module scope — so every driver subpath loads under
@@ -888,10 +972,13 @@ error.
 | code | raised when |
 |---|---|
 | `JD0001` | the SQLite library is below the supported floor |
-| `JD0002` | the declared model disagrees with the existing database |
+| `JD0002` | the existing database disagrees with the declared model, or the open failed in the driver |
 | `JD0003` | the driver binding is unavailable on this runtime |
 | `JD0004` | a declared index cannot be mapped to a column |
 | `JD0005` | the model document is invalid |
+| `JD0006` | an open option named a pragma this store does not configure |
+| `JD0007` | the pragma cannot be applied on this driver or store |
+| `JD0008` | a pragma did not take: the read-back disagrees with the request |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |
 | `JD0012` | work waited too long for the open transaction to settle |
@@ -933,11 +1020,39 @@ error.
 | `JD2072` | the call was aborted before its next row |
 | `JD2073` | an include exceeded its per-root bound |
 | `JD2074` | an item exceeds the page byte bound |
-| `JD2075` | the deadline passed before the next row |
+| `JD2075` | the deadline passed before the next unit of work |
 | `JD2076` | an item exceeds the profile byte bound |
+| `JD2077` | the maintenance operation is unavailable on this store |
+| `JD2078` | the maintenance operation failed |
+| `JD2079` | the backup was cancelled |
+| `JD2080` | the migration was cancelled between steps |
+| `JD2081` | the maintenance operation was cancelled |
+| `JD2082` | the database or its disk is full |
+| `JD2083` | the database is read-only |
+| `JD2084` | a disk I/O error |
+| `JD2085` | the database file is corrupt or not a database |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
+
+**One classification of driver failures.** Every path that meets a
+SQLite driver error — a collection or entity write, the job queue, the
+query path, a maintenance operation, the backup, the open sequence —
+consults one table (`classifyDriverError`), so the same failure arrives
+under the same code with the same `class` and `retryable` verdict
+whichever path met it: `busy` (SQLITE_BUSY/LOCKED → `JD2005`,
+retryable), `full` (`JD2082`), `readonly` (`JD2083`), `io` (`JD2084`),
+`corrupt` (`JD2085`), `cantopen` and `constraint` (`JD2005`), `duplicate`
+(a UNIQUE collision on the key column → `JD2001`), `overflow` (a pushed
+integer aggregate past int64 — never raised: the query path re-runs the
+document in the engine and answers the double, and `explain().fallback`
+records it), and the fallback `error` (`JD2005`). A classified error
+carries `class`, `retryable` and the driver's error as `cause`; a
+lifecycle that owns its failure code (`JD2078` for maintenance and
+backup, `JD0002` at open) keeps the code and still carries the class.
+An engine error thrown inside a pushed user function (`JQ…`) is not a
+driver error: it passes through untouched, relocated onto the caller's
+document path (`/$where/…`, never the hatch's `/$return/…`).
 
 ## 8. The safe execution profile
 

@@ -40,7 +40,9 @@
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { chain, attempt } from './driver.js';
-import { DbCompileError, DbRuntimeError } from './errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
+import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
+import { refuseCancelled } from './cancellation.js';
 
 export const JOBS_TABLE = '_jaren_jobs';
 export const JOB_CHECKPOINTS_TABLE = '_jaren_job_checkpoints';
@@ -222,11 +224,7 @@ export function createJobEngine(options) {
   /** Every queue statement failure rides the store's own wrap (§9):
    * a read-only file, a locked database, a constraint — never the
    * driver's raw error. */
-  const wrapJobs = (error) => (typeof error?.code === 'string' && error.code.startsWith('JD')
-    ? error
-    : new DbRuntimeError('JD2005',
-      `the database rejected the operation: ${error?.message ?? String(error)}`,
-      { docPath: '/jobs', collection: JOBS_TABLE, cause: error }));
+  const wrapJobs = (error) => wrapDriverError(error, { docPath: '/jobs', collection: JOBS_TABLE });
   /** @type {Map<string, any>} */
   const statements = new Map();
   const prepared = (key, sql) => {
@@ -321,7 +319,7 @@ export function createJobEngine(options) {
         WHERE state IN ('pending', 'failed') GROUP BY kind`).all([]),
       (kinds) => {
         const out = {
-          pending: 0, leased: 0, done: 0, failed: 0, dead: 0,
+          pending: 0, leased: 0, done: 0, failed: 0, dead: 0, cancelled: 0,
           /** @type {Record<string, number>} */
           pendingKinds: {},
         };
@@ -599,6 +597,204 @@ export function createJobEngine(options) {
   /** @type {Set<any>} */
   const workers = new Set();
 
+  /**
+   * The attempts in flight in THIS process, by job id: what `cancel`
+   * aborts and waits on. One attempt per job at a time — the fence
+   * guarantees it — so the job id is the key, and it follows renewals
+   * where a token would not.
+   * @type {Map<string, { controller: AbortController, cancelled: boolean, done: Promise<void> }>}
+   */
+  const attemptsByJob = new Map();
+
+  // ————— administration (§10): mechanism, never schedule —————
+
+  const JOB_STATES = Object.freeze(['pending', 'leased', 'done', 'failed', 'dead', 'cancelled']);
+  /** The states a job has when nothing more will happen to it on its own. */
+  const SETTLED = "('done', 'dead', 'cancelled')";
+
+  /**
+   * A keyset cursor over the queue, by job id: one record per pull, the
+   * record `get` answers. Filters are a closed state and a kind;
+   * `after` continues past an id; `limit` bounds the items. The cursor
+   * is the store's own — cancellation at row boundaries (`JD2072` /
+   * `JD2075`), the driver's streaming class, every driver failure
+   * classified — and the store admits it per pull.
+   * @param {{ state?: string, kind?: string, after?: string, limit?: number,
+   *   signal?: AbortSignal, deadline?: number }} [pageOptions]
+   */
+  const page = (pageOptions = undefined) => {
+    const state = pageOptions?.state;
+    if (state !== undefined && !JOB_STATES.includes(state)) {
+      throw new TypeError(`page: state is one of ${JOB_STATES.map((s) => `'${s}'`).join(', ')}, got ${
+        JSON.stringify(state)}`);
+    }
+    const kind = pageOptions?.kind;
+    if (kind !== undefined && (typeof kind !== 'string' || kind === ''))
+      throw new TypeError('page: kind is a non-empty string');
+    const after = pageOptions?.after;
+    if (after !== undefined && typeof after !== 'string')
+      throw new TypeError('page: after is the id to continue past');
+    const limit = pageOptions?.limit ?? PAGE_LIMIT_DEFAULT;
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new TypeError('page: limit is a positive integer');
+    const conditions = ['id > ?'];
+    const params = [after ?? ''];
+    if (state !== undefined) { conditions.push('state = ?'); params.push(state); }
+    if (kind !== undefined) { conditions.push('kind = ?'); params.push(kind); }
+    params.push(limit);
+    const sql = `SELECT * FROM "${JOBS_TABLE}" WHERE ${conditions.join(' AND ')} ORDER BY id LIMIT ?`;
+    // a statement of its own per cursor: two live iterators over one
+    // cached statement invalidate each other at the driver
+    return createCursor({
+      ...rowClassOf(connection),
+      signal: pageOptions?.signal, deadline: pageOptions?.deadline, now,
+      wrap: wrapJobs,
+      open: () => chain(connection.prepare(sql), (statement) => statement.iterate(params)),
+      items: (row) => [publicJob(row)],
+    });
+  };
+
+  /**
+   * Cancel a job. Queued (pending or failed): the enqueue-time identity
+   * authorises, and the row settles as `cancelled` in one write. Claimed:
+   * the CURRENT lease authorises, exactly as every settling call (§3) —
+   * the fenced write settles the row, and an attempt of this process is
+   * aborted through its signal. Answers `true` when this call cancelled
+   * it, `false` when it already was; refuses `JD2065` (unknown or
+   * settled), `JD2068` (claimed, no lease given), or the lease's own
+   * `JD2066`/`JD2067`. The wind-up of a local attempt is awaited by the
+   * store, outside the gate the handler's own settlement needs.
+   * @param {string} id
+   * @param {{ lease?: any, signal?: AbortSignal, deadline?: number }} [cancelOptions]
+   */
+  const cancel = (id, cancelOptions = undefined) => {
+    if (typeof id !== 'string' || id === '') throw new TypeError('cancel: id is a non-empty string');
+    refuseCancelled(cancelOptions, now, { abortCode: 'JD2081', aborted: 'cancel() ran', passed: 'cancel() ran' });
+    const lease = cancelOptions?.lease;
+    const at = now();
+    /** Abort a local attempt, so its handler winds up with a coded reason. */
+    const abortLocal = () => {
+      const attempt = attemptsByJob.get(id);
+      if (attempt === undefined) return;
+      attempt.cancelled = true;
+      attempt.controller.abort(new DbRuntimeError('JD2065',
+        `job '${id}' was cancelled; this attempt no longer speaks for it`,
+        { docPath: '/jobs', collection: JOBS_TABLE, key: id }));
+    };
+    if (lease === undefined) {
+      return chain(prepared('cancelQueued', `UPDATE "${JOBS_TABLE}"
+        SET state='cancelled', last_error='cancelled', lease_until=NULL, lease_token=NULL, updated_at=?
+        WHERE id=? AND state IN ('pending', 'failed')`).run([at, id]), (out) => {
+        if (Number(out.changes ?? 0) > 0) return true;
+        return chain(get(id), (job) => {
+          if (job === undefined) {
+            throw new DbRuntimeError('JD2065', `cancel() refused: job '${id}' is unknown`,
+              { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+          }
+          if (job.state === 'cancelled') return false;
+          if (job.state === 'leased') {
+            throw new DbRuntimeError('JD2068',
+              `cancel() refused: job '${id}' is claimed — cancelling a claimed job takes the lease `
+              + 'its attempt holds (cancel(id, { lease })), so no stranger settles another\'s work',
+              { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+          }
+          throw new DbRuntimeError('JD2065',
+            `cancel() refused: job '${id}' is '${job.state}', already settled`,
+            { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+        });
+      });
+    }
+    const misuse = requireLease(lease, 'cancel()');
+    if (misuse !== null) throw misuse;
+    if (lease.jobId !== id) throw new TypeError('cancel: the lease belongs to another job');
+    return chain(prepared('cancelLeased', `UPDATE "${JOBS_TABLE}"
+      SET state='cancelled', last_error='cancelled', lease_until=NULL, lease_token=NULL, updated_at=?
+      WHERE id=? AND ${FENCE}`).run([at, id, lease.token, at]), (out) => {
+      if (Number(out.changes ?? 0) > 0) {
+        abortLocal();
+        return true;
+      }
+      return chain(refuseSettlement(lease, 'cancel()'), (error) => {
+        if (error !== null) throw error;
+        // this attempt already settled it as cancelled: idempotent
+        abortLocal();
+        return false;
+      });
+    });
+  };
+
+  /** The wind-up of a local in-flight attempt of `id`, or nothing. */
+  const settledLocally = (id) => attemptsByJob.get(id)?.done ?? null;
+
+  /**
+   * Return a failed, dead, cancelled or lease-expired job to the queue
+   * at the clock's instant — the queue's own ordering. The attempt
+   * history is kept: a requeued job's `attempts` counts every claim it
+   * ever had, and the next claim increments it, so `maxAttempts` still
+   * bounds what follows. Answers `true` when the row moved, `false` when
+   * it already was pending; a live lease refuses `JD2068` (requeue is
+   * not a steal), unknown or done `JD2065`.
+   * @param {string} id
+   * @param {{ signal?: AbortSignal, deadline?: number }} [requeueOptions]
+   */
+  const requeue = (id, requeueOptions = undefined) => {
+    if (typeof id !== 'string' || id === '') throw new TypeError('requeue: id is a non-empty string');
+    refuseCancelled(requeueOptions, now, { abortCode: 'JD2081', aborted: 'requeue() ran', passed: 'requeue() ran' });
+    const at = now();
+    return chain(prepared('requeue', `UPDATE "${JOBS_TABLE}"
+      SET state='pending', run_at=?, lease_until=NULL, lease_token=NULL, lease_owner=NULL, updated_at=?
+      WHERE id=? AND (state IN ('failed', 'dead', 'cancelled')
+        OR (state='leased' AND lease_until < ?))`).run([at, at, id, at]), (out) => {
+      if (Number(out.changes ?? 0) > 0) {
+        wakeAll();
+        return true;
+      }
+      return chain(get(id), (job) => {
+        if (job === undefined) {
+          throw new DbRuntimeError('JD2065', `requeue() refused: job '${id}' is unknown`,
+            { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+        }
+        if (job.state === 'pending') return false;
+        if (job.state === 'leased') {
+          throw new DbRuntimeError('JD2068',
+            `requeue() refused: job '${id}' holds a live lease — requeue is not a steal; cancel the `
+            + 'attempt with its lease, or wait for the lease to expire',
+            { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+        }
+        throw new DbRuntimeError('JD2065',
+          `requeue() refused: job '${id}' is '${job.state}' — a completed job is not re-run`,
+          { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+      });
+    });
+  };
+
+  /**
+   * Delete settled jobs (done, dead, cancelled) whose last change is
+   * older than `settledBefore`, oldest first, at most `limit` of them,
+   * with their checkpoints — one transaction. The horizon is required:
+   * a sweep with none is retention policy, which is the host's. A
+   * second identical sweep answers `{ removed: 0 }`.
+   * @param {{ settledBefore: number, limit?: number, signal?: AbortSignal, deadline?: number }} sweepOptions
+   */
+  const sweep = (sweepOptions) => {
+    const horizon = sweepOptions?.settledBefore;
+    if (typeof horizon !== 'number' || !Number.isFinite(horizon))
+      throw new TypeError('sweep: settledBefore is required — an epoch in milliseconds before which a settled job is swept');
+    const limit = sweepOptions?.limit;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1))
+      throw new TypeError('sweep: limit is a positive integer');
+    refuseCancelled(sweepOptions, now, { abortCode: 'JD2081', aborted: 'sweep() ran', passed: 'sweep() ran' });
+    const selection = `SELECT id FROM "${JOBS_TABLE}" WHERE state IN ${SETTLED} AND updated_at < ? `
+      + `ORDER BY updated_at, id${limit === undefined ? '' : ' LIMIT ?'}`;
+    const params = limit === undefined ? [horizon] : [horizon, limit];
+    return connection.transaction(() => chain(
+      prepared(`sweepCheckpoints:${limit === undefined ? 'all' : 'bounded'}`,
+        `DELETE FROM "${JOB_CHECKPOINTS_TABLE}" WHERE run_id IN (${selection})`).run(params),
+      () => chain(prepared(`sweepJobs:${limit === undefined ? 'all' : 'bounded'}`,
+        `DELETE FROM "${JOBS_TABLE}" WHERE id IN (${selection})`).run(params),
+      (out) => ({ removed: Number(out.changes ?? 0) }))));
+  };
+
   /** A settling refusal, as opposed to a storage failure: the three
    * the fence raises mean this attempt no longer holds the job, and no
    * amount of retrying will change that. */
@@ -637,6 +833,8 @@ export function createJobEngine(options) {
     const renewEvery = Math.max(1, Math.floor(leaseMs / 3));
     const stats = {
       claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0, claimErrors: 0,
+      /** Attempts cancelled through `cancel()` while their handler ran. */
+      cancellations: 0,
       /** Leases replaced while a handler was still running. */
       renewals: 0,
       /** Attempts whose lease was lost mid-flight: aborted, and NEVER
@@ -792,12 +990,19 @@ export function createJobEngine(options) {
     /** Everything one in-flight attempt owns, filed under its token. */
     const beginAttempt = (job) => {
       const controller = new AbortController();
+      // what a cancelling caller waits on, resolved by `endAttempt`
+      const { promise: done, resolve: finish } = Promise.withResolvers();
       const attempt = {
         job, lease: job.lease, controller, lost: null, settled: false, timer: null,
         // the handler winds up for either reason: the worker is stopping,
         // or the job is no longer this attempt's to finish
         signal: AbortSignal.any([shutdown.signal, controller.signal]),
+        /** Set by `cancel()`: the attempt's outcome is a cancellation. */
+        cancelled: false,
+        finish,
+        done,
       };
+      attemptsByJob.set(job.id, attempt);
       // the checkpoint store follows the attempt's CURRENT lease: a
       // renewal replaced the token, and a store bound to the old one
       // would be refused by the fence it is supposed to satisfy. Its
@@ -824,6 +1029,20 @@ export function createJobEngine(options) {
       clearTimeout(attempt.timer);
       attempt.timer = null;
       attempts.delete(attempt.lease.token);
+      if (attemptsByJob.get(attempt.job.id) === attempt) attemptsByJob.delete(attempt.job.id);
+      attempt.finish();
+    };
+
+    /** The outcome of an attempt `cancel()` settled: neither a
+     * completion nor a failure, and not a loss — the job was taken
+     * from this attempt on purpose, by name. */
+    const recordCancelled = (attempt) => {
+      stats.cancellations += 1;
+      notify({
+        outcome: 'cancelled',
+        jobId: attempt.job.id, kind: attempt.job.kind,
+        attempt: attempt.lease.attempt, generation: attempt.lease.generation,
+      });
     };
 
     /**
@@ -886,6 +1105,10 @@ export function createJobEngine(options) {
           // past cancellation the store is closing: leave the leased
           // row to expiry-based recovery (§5) instead of racing it
           if (loopSession.cancelled) return;
+          if (attempt.cancelled) {
+            recordCancelled(attempt);
+            return;
+          }
           if (attempt.lost !== null) {
             recordLost(attempt, 'failure', attempt.lost);
             return;
@@ -894,6 +1117,11 @@ export function createJobEngine(options) {
           return;
         }
         if (loopSession.cancelled) return;
+        if (attempt.cancelled) {
+          // it may have produced a result; the job was cancelled under it
+          recordCancelled(attempt);
+          return;
+        }
         if (attempt.lost !== null) {
           // it may have produced a perfectly good result; it is simply
           // not this attempt's to record any more
@@ -1061,6 +1289,11 @@ export function createJobEngine(options) {
     fail,
     checkpointsFor,
     createWorker,
+    page,
+    cancel,
+    settledLocally,
+    requeue,
+    sweep,
     /** Stop every worker, bounded. Resolves to the per-worker outcome so
      * `close()` can report a handler it could not wait out rather than
      * hanging on it. */

@@ -1753,8 +1753,12 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
           ? udfHook(rawConjuncts[i], itName)
           : null;
         if (promoted !== null) {
+          // the conjunct's own place in the caller's document rides the
+          // call as a literal, so the shared function can report an
+          // engine error where the caller wrote the fragment
           plan.filter = conjoin(plan.filter,
-            { p: 'udf', name: promoted.name, key: promoted.key });
+            { p: 'udf', name: promoted.name, key: promoted.key,
+              mount: split ? `/$where/$and/${i}` : '/$where' });
           udfs.push(promoted.name);
         }
         else {

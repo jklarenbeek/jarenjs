@@ -102,7 +102,7 @@ describe('a queue written before the fence', () => {
       assert.strictEqual((await store.jobs.get('abandoned')).leaseOwner,
         'a-worker-that-is-gone');
       assert.deepStrictEqual(await store.jobs.counts(), {
-        pending: 1, leased: 1, done: 0, failed: 1, dead: 0,
+        pending: 1, leased: 1, done: 0, failed: 1, dead: 0, cancelled: 0,
         pendingKinds: { mail: 2 },
       });
 

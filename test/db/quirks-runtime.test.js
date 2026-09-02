@@ -220,7 +220,9 @@ describe('a closed store, the sync twin, and the queue', () => {
     const prepared = await openStore(MODEL, { driver: nodeDriver(), path: dbPath, jobs: true, capture: { log: true } });
     await prepared.close();
     const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath, readOnly: true, jobs: true, capture: { log: true } });
-    await assert.rejects(store.jobs.enqueue('k', {}), (e) => e.code === 'JD2005');
+    // a write the engine refuses on a read-only file is classed: JD2083,
+    // class readonly, not the generic JD2005
+    await assert.rejects(store.jobs.enqueue('k', {}), (e) => e.code === 'JD2083' && e.class === 'readonly');
     const worker = store.jobs.createWorker({ handlers: { k: async () => 1 }, pollInterval: 5 }).start();
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.ok(worker.stats().claimErrors > 0, 'a claim that failed is counted, not swallowed');

@@ -230,10 +230,12 @@ describe('identity strategies (D11)', () => {
 });
 
 describe('file-backed stores: decided defaults and verify-never-alter', () => {
-  it('busy/journal defaults are set, visible, and absent on :memory:', async () => {
+  it('busy/journal defaults are set and read back; a :memory: store reports what its engine answers', async () => {
     const memoryStore = await openStore(USERS_MODEL, { driver: nodeDriver() });
-    assert.strictEqual(memoryStore.capabilities.busyTimeoutMs, null);
-    assert.strictEqual(memoryStore.capabilities.journalMode, null);
+    // the busy timeout is applied on every connection, memory included;
+    // a memory database's journal mode is `memory` whatever is asked
+    assert.strictEqual(memoryStore.capabilities.busyTimeoutMs, 5000);
+    assert.strictEqual(memoryStore.capabilities.journalMode, 'memory');
     await memoryStore.close();
 
     const { dbPath, cleanup } = tempDbPath();

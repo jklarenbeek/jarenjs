@@ -8,17 +8,23 @@
 
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
+import { PRAGMA_NAMES } from '../pragmas.js';
 
 /**
  * Adapt an already-constructed `node:sqlite` `DatabaseSync` (or any
  * object with its shape) into a probed connection. Exported so the
  * adapter is exercisable without the builtin.
  * @param {any} db - A `DatabaseSync`-shaped database
- * @param {{ queueTimeout?: number }} [options]
+ * @param {{ queueTimeout?: number,
+ *   backup?: { copy: Function, rename: Function, remove: Function } }} [options]
+ *   - `backup` is the online-backup primitive triple (the module-level
+ *   `backup()` over this database, plus a rename and a removal); the
+ *   connection declares the capability exactly when it is given
  * @returns {any} a Connection, or a promise of one
  */
 export function adaptNodeDatabase(db, options) {
   const raw = {
+    ...(options?.backup !== undefined ? { backup: options.backup } : undefined),
     /** @param {string} sql */
     exec: (sql) => db.exec(sql),
     /** @param {string} sql */
@@ -47,6 +53,11 @@ export function adaptNodeDatabase(db, options) {
       userFunctions: true,
       deterministicIndexableFunctions: true,
       aggregateFunctions: true,
+      // every configuration pragma of the closed set: a core SQLite
+      // library applies them all, and the read-back catches a build
+      // that compiled one out
+      pragmas: PRAGMA_NAMES,
+      backup: options?.backup !== undefined,
     },
   });
 }
@@ -69,7 +80,18 @@ export function fromNodeModule(mod, path, options) {
   const db = Object.keys(open).length > 0
     ? new mod.DatabaseSync(path, open)
     : new mod.DatabaseSync(path);
-  return adaptNodeDatabase(db, options);
+  // the online-backup primitives: the module's own `backup()` over this
+  // database, and the file system's rename and removal — imported
+  // lazily on first use, never at module scope, for the same reason the
+  // builtin itself is
+  const backup = typeof mod.backup === 'function'
+    ? {
+      copy: (target, backupOptions) => mod.backup(db, target, backupOptions),
+      rename: (from, to) => import('node:fs/promises').then((fs) => fs.rename(from, to)),
+      remove: (target) => import('node:fs/promises').then((fs) => fs.rm(target, { force: true })),
+    }
+    : undefined;
+  return adaptNodeDatabase(db, backup === undefined ? options : { ...options, backup });
 }
 
 /**

@@ -1027,7 +1027,11 @@ void compileBuckets('P1M', { zone: 'Australia/Adelaide', provider: zoneProvider 
 // inside open()), the dialect seam, and the coded errors
 import {
   openStore, normalizeModel, sqliteDialect, createDialect, type SequenceResult, type QueryCursor,
-  DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR,
+  DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR, PRAGMA_NAMES,
+  CHECKPOINT_MODES, MAINTENANCE_OPERATIONS, migrate, migrationStatus, type MigrationStatusReport,
+  isPerDocumentAssertion, type MigrationTarget, type MigrationProgress,
+  classifyDriverError, wrapDriverError, isDriverError, type DriverErrorClass,
+  type JobRecord, type JobState,
 } from '@jarenjs/db';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { bunDriver } from '@jarenjs/db/bun';
@@ -1054,6 +1058,57 @@ void adaptNodeDatabase;
 
 async function dbBlock(): Promise<void> {
   const store = await openStore(dbModel, { driver: dbDriver, busyTimeout: 2500 });
+  // the connection pragmas are a closed set: every member is declared,
+  // its words are exact, and the read-back report is typed by name
+  const configured = await openStore(dbModel, { driver: dbDriver, journalMode: 'wal',
+    synchronous: 'normal', walAutocheckpoint: 250, journalSizeLimit: -1, cacheSize: -8000,
+    mmapSize: 0, tempStore: 'memory' });
+  const effectiveSync: 'off' | 'normal' | 'full' | 'extra' | null = configured.capabilities.pragmas.synchronous;
+  const effectiveTimeout: number | null = configured.capabilities.pragmas.busyTimeout;
+  const declaredPragmas: readonly string[] = configured.capabilities.configurablePragmas;
+  void [effectiveSync, effectiveTimeout, declaredPragmas, PRAGMA_NAMES.length];
+  // @ts-expect-error — a word outside the closed set is a compile error
+  await openStore(dbModel, { driver: dbDriver, synchronous: 'sometimes' });
+  // the maintenance surface: typed results, per-operation capability
+  const checkpointed: { busy: boolean; logFrames: number; checkpointedFrames: number } =
+    await configured.checkpoint({ mode: 'truncate' });
+  const integrity: { ok: boolean; problems: readonly string[] } = await configured.integrityCheck({ limit: 5 });
+  const fks = await configured.foreignKeyCheck();
+  const fkRow: number | null = fks.violations[0]?.rowId ?? null;
+  const optimized: { ran: true } = await configured.optimize();
+  const canCheckpoint: boolean = configured.capabilities.maintenance.checkpoint;
+  void [checkpointed, integrity, fkRow, optimized, canCheckpoint, CHECKPOINT_MODES.length, MAINTENANCE_OPERATIONS.length];
+  // @ts-expect-error — a checkpoint mode outside the closed set is a compile error
+  await configured.checkpoint({ mode: 'sometimes' });
+  // the online backup: typed progress, the D4 result, the capability
+  const backedUp: { path: string; pages: number; checkpoint: { busy: boolean } | null } =
+    await configured.backupTo('/tmp/never.db', {
+      rate: 16, signal: new AbortController().signal, checkpoint: 'truncate',
+      onProgress: (progress) => { const remaining: number = progress.remainingPages; void remaining; },
+    });
+  const canBackup: boolean = configured.capabilities.maintenance.backup;
+  void [backedUp, canBackup];
+  // @ts-expect-error — a backup checkpoint mode outside the closed set is a compile error
+  await configured.backupTo('/tmp/never.db', { checkpoint: 'sometimes' });
+  // cancellation everywhere: the maintenance options, the backup deadline,
+  // and the capability report's stated granularities
+  const cancelled = new AbortController().signal;
+  await configured.foreignKeyCheck({ signal: cancelled, deadline: Date.now() + 1 });
+  await configured.optimize({ signal: cancelled });
+  await configured.integrityCheck({ limit: 1, deadline: Date.now() + 1 });
+  await configured.backupTo('/tmp/never.db', { deadline: Date.now() + 1 });
+  const granularity: 'step' = configured.capabilities.cancellation.migration;
+  const midStatement: boolean = configured.capabilities.cancellation.midStatement;
+  const lazy: boolean = configured.capabilities.lazyIteration;
+  void [granularity, midStatement, lazy];
+  await configured.transaction(async (tx) => {
+    // @ts-expect-error — a transaction view runs no maintenance
+    void tx.checkpoint;
+    // @ts-expect-error — nor a backup
+    void tx.backupTo;
+    return null;
+  });
+  await configured.close();
   const users = store.collection('users');
   const key = await users.insert({ id: 'u1' });
   void key;
@@ -1076,7 +1131,24 @@ async function dbBlock(): Promise<void> {
 
   // the transaction view: exact-scope handles, the named-savepoint
   // group (async and sync twins), the outbox jobs — and NO close
+  // job administration is a root-only surface: typed cursor, fenced
+  // cancel, requeue and a sweep that must name its horizon
+  if (store.jobs !== undefined) {
+    const paged: QueryCursor<JobRecord> = store.jobs.page({ state: 'cancelled', kind: 'mail', after: 'j1', limit: 10 });
+    for await (const job of paged) { const state: JobState = job.state; void state; }
+    const cancelled: boolean = await store.jobs.cancel('j1');
+    const requeued: boolean = await store.jobs.requeue('j1');
+    const swept: { removed: number } = await store.jobs.sweep({ settledBefore: Date.now() - 1000, limit: 100 });
+    const cancelledCount: number = (await store.jobs.counts()).cancelled;
+    void [cancelled, requeued, swept, cancelledCount];
+    // @ts-expect-error — the horizon is required
+    await store.jobs.sweep({ limit: 1 });
+    // @ts-expect-error — a state outside the closed set is a compile error
+    store.jobs.page({ state: 'queued' });
+  }
   await store.transaction(async (tx) => {
+    // @ts-expect-error — the outbox carries no administration
+    void tx.jobs?.sweep;
     await tx.savepoints.create('checkpoint');
     await tx.savepoints.rollbackTo('checkpoint');
     await tx.savepoints.release('checkpoint');
@@ -1140,6 +1212,28 @@ void dbBlock;
 const quoted: string = sqliteDialect.quoteIdentifier('users');
 void quoted;
 void createDialect;
+// a migration run takes a signal and a deadline beside its runtime record
+void ((): Promise<unknown> => migrate({ driver: dbDriver }, [], {
+  baseline: dbModel, signal: new AbortController().signal, deadline: Date.now() + 1000,
+  runtime: { now: () => Date.now() } }));
+void ((): Promise<MigrationStatusReport> => migrationStatus({ driver: dbDriver }, [], {
+  deadline: Date.now() + 1000 }));
+// the progress record and the shadow path are declared where the runtime reads them
+void ((): Promise<unknown> => migrate({ driver: dbDriver, busyTimeout: 250 }, [], {
+  baseline: dbModel, shadowPath: ':memory:',
+  onProgress: (progress) => { const n: number | undefined = progress.asserted; void n; } }));
+// one classification of driver failures, reachable from a typed caller
+const classified: { class: DriverErrorClass; code: string | null; retryable: boolean; reason: string } =
+  classifyDriverError({ errcode: 5, message: 'database is locked' });
+const wrappedDriver: Error = wrapDriverError(new Error('x'), { code: 'JD2078', always: true });
+const isDriver: boolean = isDriverError(new Error('x'));
+const classOf: DriverErrorClass | undefined = new DbRuntimeError('JD2005', 'r').class;
+const retryable: boolean | undefined = new DbCompileError('JD0002', 'r').retryable;
+void [classified, wrappedDriver, isDriver, classOf, retryable];
+const migrationTarget: MigrationTarget = { driver: dbDriver, path: ':memory:', busyTimeout: 100 };
+const perDocument: boolean = isPerDocumentAssertion({ $for: { it: '$[*]' }, $return: '$it.id' });
+const progressShape: MigrationProgress = { migration: 'm', collection: 'c', asserted: 1 };
+void [migrationTarget, perDocument, progressShape];
 const dbCodes: Readonly<Record<string, string>> = DB_CODES;
 void dbCodes.JD0005;
 const dbCompileErr = new DbCompileError('JD0005', 'reason', '/collections');

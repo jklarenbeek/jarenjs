@@ -204,23 +204,39 @@ hash of the `baseline` model when no migration has run.
   an empty history, so a dry run may be pointed at a production
   database and leave its file byte-identical. The API default is to
   run; a CLI SHOULD default to the dry run.
-- `migrationStatus` (and the CLI's `status`/`check`) create the empty
-  history table on a database that has none — the one write a reading
-  command makes, so a fresh file answers `applied: (none)` rather than
-  a missing-table error. This is the one place the two differ: a dry
-  run reports the same state and writes nothing at all.
+- `migrationStatus` (and the CLI's `status`/`check`) write nothing
+  either: the history table is probed, never created, and an absent one
+  reads as an empty history, so a fresh file answers `applied: (none)`
+  and stays byte for byte what it was. The history table is created by
+  the real run alone, before its first migration is recorded.
 - Each pending migration runs in ONE exclusive transaction
   (`BEGIN IMMEDIATE` on SQLite — concurrent writers wait or time out
   under the busy timeout) with a savepoint per step; any failure rolls
   back the whole migration including its earlier steps. Where a driver
   cannot open exclusively, the transaction still isolates; the busy
   policy of MODEL-FORMAT §4 governs contention.
+- A run is cancellable: `migrate(target, migrations, { signal,
+  deadline })` checks both BETWEEN migrations, between steps and
+  between the batches of a data step — never inside a statement, which
+  runs to its end — with the deadline read against `options.runtime`'s
+  clock. An abort is `JD2080` and a passed deadline `JD2075`; the
+  migration in flight rolls back whole (its savepoints, its history
+  row), the migrations already committed stand, and a rerun resumes
+  from the recorded position. The shadow replay is cancellable at the
+  same boundaries. `migrationStatus` refuses a call already cancelled
+  or past its deadline before it opens anything.
 - JSLT steps walk the collection in bounded batches
   (`options.batchSize`, default 500) ordered by row identity, report
-  progress through `options.onProgress`, and never hold the whole
-  collection in memory. Assertion steps read the whole collection into
-  one array — a documented cost; keep assertions early, before the
-  data grows.
+  progress through `options.onProgress` (`{ migration, collection,
+  transformed | derived | asserted }`, one event per batch), and never
+  hold the whole collection in memory. A PER-DOCUMENT assertion — a
+  FLWOR over `$[*]` whose `$where` and `$return` read only the binding
+  — walks the same batches and fails fast at the first batch that
+  violates, because its answer over each batch is its answer over the
+  whole. A cross-document assertion (one that reads the root: `$count:
+  '$[*]'`, a `$let`, a `$distinct`, a nested `$for`) reads the whole
+  collection into one array — a stated cost; keep such assertions
+  early, before the data grows.
 - A transform MUST NOT change a caller-keyed document's key member —
   the key column would go stale; the run refuses (`JD0023`).
 
@@ -400,12 +416,11 @@ jaren-db shape    --model <model>
   `apply` without `--yes` exits 1 after the printout with nothing
   applied — a CI job passes `--yes` deliberately, never by default.
   `apply --dry-run` is the CLI's printout, not §6's `dryRun: true`: it
-  reads the history the way `status` does — creating the empty table on
-  a database that has none — and does NOT replay the chain on the
-  shadow, so a draft step still prints instead of refusing. The
-  shadow's verdict comes with the real `apply`.
+  reads the history the way `status` does — probed, never created — and
+  does NOT replay the chain on the shadow, so a draft step still prints
+  instead of refusing. The shadow's verdict comes with the real `apply`.
 - `status` lists applied/pending and reports drift (§12); on a
-  database without a history table it creates the empty one (§6).
+  database without a history table it creates nothing (§6).
 - `shape` prints the physical mapping a model produces.
 
 ## 12. Drift

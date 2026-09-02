@@ -18,29 +18,15 @@ import { CodedError } from '@jarenjs/core/errors';
  * this package can raise, proven in sync with MODEL-FORMAT.md §7's
  * normative table by a test.
  */
-/**
- * Whether a database error is the unique-key collision of `table.column`
- * — the one failure every insert path reports as `JD2001` rather than
- * the generic `JD2005`. One detector for the collection cores, the
- * entity cores and the unit of work, so no path wraps it differently.
- * @param {any} error
- * @param {string} table
- * @param {string} column
- * @returns {boolean}
- */
-export function isDuplicateKeyError(error, table, column) {
-  if (error?.errcode === 1555) return true;
-  return typeof error?.message === 'string'
-    && error.message.includes('UNIQUE constraint failed')
-    && error.message.includes(`${table}.${column}`);
-}
-
 export const DB_CODES = Object.freeze({
   JD0001: 'the SQLite library is below the supported floor',
-  JD0002: 'the declared model disagrees with the existing database',
+  JD0002: 'the existing database disagrees with the declared model, or the open failed in the driver',
   JD0003: 'the driver binding is unavailable on this runtime',
   JD0004: 'a declared index cannot be mapped to a column',
   JD0005: 'the model document is invalid',
+  JD0006: 'an open option named a pragma this store does not configure',
+  JD0007: 'the pragma cannot be applied on this driver or store',
+  JD0008: 'a pragma did not take: the read-back disagrees with the request',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
   JD0012: 'work waited too long for the open transaction to settle',
@@ -86,8 +72,17 @@ export const DB_CODES = Object.freeze({
   JD2072: 'the call was aborted before its next row',
   JD2073: 'an include exceeded its per-root bound',
   JD2074: 'an item exceeds the page byte bound',
-  JD2075: 'the deadline passed before the next row',
+  JD2075: 'the deadline passed before the next unit of work',
   JD2076: 'an item exceeds the profile byte bound',
+  JD2077: 'the maintenance operation is unavailable on this store',
+  JD2078: 'the maintenance operation failed',
+  JD2079: 'the backup was cancelled',
+  JD2080: 'the migration was cancelled between steps',
+  JD2081: 'the maintenance operation was cancelled',
+  JD2082: 'the database or its disk is full',
+  JD2083: 'the database is read-only',
+  JD2084: 'a disk I/O error',
+  JD2085: 'the database file is corrupt or not a database',
 });
 
 /**
@@ -99,7 +94,10 @@ export const DB_CODES = Object.freeze({
  *    supported floor; the reason names the version found
  *  - `JD0002` — a declared collection already exists in the database
  *    with a different shape; nothing was altered — changing shape is
- *    the migration story, a later capability
+ *    the migration story, a later capability. Also a driver failure
+ *    anywhere in the open sequence (an unopenable path, a corrupt or
+ *    locked file): the error carries `class`/`retryable` from the
+ *    classifier and the driver's error as `cause`
  *  - `JD0003` — the runtime builtin behind a driver could not be
  *    loaded here (Node cannot resolve `bun:`; Bun ships no
  *    `node:sqlite`), or an injected handle is missing
@@ -110,6 +108,15 @@ export const DB_CODES = Object.freeze({
  *    names the expression or the member and `docPath` points at it
  *  - `JD0005` — the model document is invalid; `docPath` points at
  *    the offending member
+ *  - `JD0006` — an `openStore` option named a pragma outside the closed
+ *    configurable set (`foreign_keys`, `page_size`, a snake-case
+ *    spelling of a member); the reason names the option and the set
+ *  - `JD0007` — a requested pragma cannot be applied here: the driver's
+ *    binding does not declare it, or the store kind refuses it (a
+ *    journal-mode write on a read-only store)
+ *  - `JD0008` — a requested pragma did not take: the value read back
+ *    from the connection after the open sequence disagrees with the
+ *    request; the reason carries both, and the store did not open
  *  - `JD0010` — `strict: true` and part of the query would have run
  *    outside the database; the reason names the forcing construct
  *  - `JD0011` — the active profile refused the document before any
@@ -194,7 +201,189 @@ export class DbCompileError extends CodedError {
  *  - `JD2063` — a call after `close()`: every entry point of a closed
  *    store refuses by name rather than leaking the driver's own error,
  *    and a second `close()` is a no-op on every driver
+ *  - `JD2077` — a maintenance operation (`checkpoint`, `integrityCheck`,
+ *    `foreignKeyCheck`, `optimize`, `backupTo`) is unavailable here:
+ *    the driver's binding does not declare it, or the store is read-only
+ *    and the operation writes; `capabilities.maintenance` says which
+ *  - `JD2078` — a maintenance operation failed in the driver; the
+ *    original error is the `cause`. Corruption an integrity check finds
+ *    is its RESULT, never this error
+ *  - `JD2079` — a backup was cancelled through its signal between
+ *    pages: the temporary file was removed and the target path was not
+ *    written; the signal's reason is the `cause`
+ *  - `JD2080` — a migration was cancelled through its signal between
+ *    migrations, steps or batches: the migration in flight rolled back
+ *    whole, the completed ones stand, a rerun resumes from the recorded
+ *    position
+ *  - `JD2081` — a maintenance operation was cancelled through its signal
+ *    before its statement ran
+ *  - `JD2082`/`JD2083`/`JD2084`/`JD2085` — the driver reported a full
+ *    disk, a read-only database, an I/O error, a corrupt file: one
+ *    classifier (`classifyDriverError`) assigns them, whichever path met
+ *    the failure, and every classified error carries `class`,
+ *    `retryable` and the driver's error as `cause`; a busy or locked
+ *    database stays `JD2005` with `class: 'busy'` and `retryable: true`
  */
+
+/**
+ * The ONE classification of a SQLite driver failure. Every path that
+ * wraps a driver error — the collection and entity writes, the job
+ * queue, the query path, the maintenance operations, the backup, the
+ * open sequence — consults this table and nothing else, so a locked
+ * database, a full disk, a read-only file, an I/O error and a corrupt
+ * file each arrive under one code with one stable `class` and one
+ * `retryable` verdict, whichever path met them.
+ *
+ * The engine's primary result code is the low byte of the extended
+ * one the bindings expose (`errcode` on node:sqlite, `errno` on
+ * bun:sqlite, `resultCode` on the wasm build's `SQLite3Error`); the
+ * message is consulted for the two facts a code alone does not carry —
+ * an int64 overflow is a generic `SQLITE_ERROR` (1) with the words
+ * `integer overflow`, and a duplicate key is a UNIQUE constraint whose
+ * message names the table and column.
+ */
+
+/** SQLite primary result codes, by name, as the table reads them. */
+const RESULT = Object.freeze({
+  ERROR: 1, BUSY: 5, LOCKED: 6, READONLY: 8, IOERR: 10, CORRUPT: 11, FULL: 13,
+  CANTOPEN: 14, CONSTRAINT: 19, NOTADB: 26,
+});
+
+/**
+ * The classes, in the order they are tried; `code` is the runtime code
+ * a wrapped error carries (`null` for the overflow row, which the query
+ * path answers by re-running the document in the engine rather than by
+ * raising) and `reason` the sentence the wrapped error leads with.
+ */
+const CLASSES = Object.freeze([
+  Object.freeze({ class: 'busy', primaries: [RESULT.BUSY, RESULT.LOCKED], code: 'JD2005',
+    retryable: true, reason: 'the database is busy or locked' }),
+  Object.freeze({ class: 'full', primaries: [RESULT.FULL], code: 'JD2082',
+    retryable: false, reason: 'the database or its disk is full' }),
+  Object.freeze({ class: 'readonly', primaries: [RESULT.READONLY], code: 'JD2083',
+    retryable: false, reason: 'the database is read-only' }),
+  Object.freeze({ class: 'io', primaries: [RESULT.IOERR], code: 'JD2084',
+    retryable: false, reason: 'a disk I/O error' }),
+  Object.freeze({ class: 'corrupt', primaries: [RESULT.CORRUPT, RESULT.NOTADB], code: 'JD2085',
+    retryable: false, reason: 'the database file is corrupt or not a database' }),
+  Object.freeze({ class: 'cantopen', primaries: [RESULT.CANTOPEN], code: 'JD2005',
+    retryable: false, reason: 'the database file could not be opened' }),
+  Object.freeze({ class: 'constraint', primaries: [RESULT.CONSTRAINT], code: 'JD2005',
+    retryable: false, reason: 'the database rejected the operation' }),
+]);
+
+const FALLBACK = Object.freeze({ class: 'error', code: 'JD2005', retryable: false,
+  reason: 'the database rejected the operation' });
+
+/**
+ * The numeric result code a binding attached, or `null` for an error
+ * that is not a driver's.
+ * @param {any} error
+ * @returns {number | null}
+ */
+function resultCodeOf(error) {
+  if (error === null || typeof error !== 'object') return null;
+  for (const member of ['errcode', 'errno', 'resultCode']) {
+    const value = error[member];
+    if (typeof value === 'number' && Number.isInteger(value)) return value;
+  }
+  return null;
+}
+
+/**
+ * Whether an error is a SQLite driver's own: it carries a numeric
+ * result code, or the shape node:sqlite gives its errors.
+ * @param {any} error
+ * @returns {boolean}
+ */
+export function isDriverError(error) {
+  return resultCodeOf(error) !== null
+    || error?.code === 'ERR_SQLITE_ERROR'
+    || error?.name === 'SQLiteError' || error?.name === 'SQLite3Error';
+}
+
+/**
+ * Classify a driver failure.
+ * @param {any} error - the driver's error
+ * @param {{ table: string, column: string }} [unique] - the unique key
+ *   a write was inserting under, so its collision classifies as
+ *   `duplicate` (the `JD2001` every insert path reports)
+ * @returns {{ class: string, code: string | null, retryable: boolean, reason: string }}
+ */
+export function classifyDriverError(error, unique = undefined) {
+  const extended = resultCodeOf(error);
+  const primary = extended === null ? null : extended & 0xff;
+  const message = typeof error?.message === 'string' ? error.message : '';
+  // the key's own collision: a PRIMARY KEY conflict (1555), or a UNIQUE
+  // conflict whose message names the key column — a unique INDEX over
+  // another column is a constraint failure, not a duplicate key
+  if (unique !== undefined && (extended === 1555
+    || (message.includes('UNIQUE constraint failed') && message.includes(`${unique.table}.${unique.column}`)))) {
+    return { class: 'duplicate', code: 'JD2001', retryable: false, reason: 'the key is already present' };
+  }
+  if (primary === RESULT.ERROR && message.includes('integer overflow')) {
+    return { class: 'overflow', code: null, retryable: false,
+      reason: 'an integer aggregate overflowed int64' };
+  }
+  // a locked database reported by a binding that attaches no code
+  if (primary === null && /database is locked|database table is locked/.test(message)) {
+    return { ...CLASSES[0] };
+  }
+  for (const row of CLASSES) {
+    if (primary !== null && row.primaries.includes(primary))
+      return { class: row.class, code: row.code, retryable: row.retryable, reason: row.reason };
+  }
+  return { ...FALLBACK };
+}
+
+/**
+ * Wrap a driver failure as the coded runtime error its class calls
+ * for, with `class` and `retryable` as own members and the original as
+ * `cause`. Anything that is not a driver's own error — a coded refusal
+ * of this package or of the query engine (a `JQ` error thrown inside a
+ * pushed user function), an API-misuse `TypeError` — is the error, and
+ * passes through untouched.
+ * @param {any} error
+ * @param {{ docPath?: string, collection?: string, key?: string | number,
+ *   unique?: { table: string, column: string },
+ *   duplicateReason?: string, code?: string, reason?: string,
+ *   always?: boolean }} details - `duplicateReason` is the `JD2001`
+ *   sentence the calling path composes (it names the key); `code` and
+ *   `reason` let a lifecycle that owns its failure code (a maintenance
+ *   operation's `JD2078`) keep its code and leading sentence while the
+ *   class and the verdict still come from the one table; `always`
+ *   wraps even a failure that is not a driver's (a closed handle's
+ *   state error, a file-system refusal) under that lifecycle code, with
+ *   `class: 'error'` — a lifecycle that promises a coded failure keeps
+ *   the promise for every uncoded error it meets
+ * @returns {Error}
+ */
+export function wrapDriverError(error, details = {}) {
+  if (typeof error?.code === 'string' && /^J[A-Z]\d{4}$/.test(error.code)) return error;
+  if (!isDriverError(error)) {
+    if (details.always !== true) return error;
+    const generic = new DbRuntimeError(details.code ?? 'JD2005',
+      `${details.reason ?? FALLBACK.reason}: ${error?.message ?? String(error)}`, { cause: error });
+    generic.class = 'error';
+    generic.retryable = false;
+    return generic;
+  }
+  const classified = classifyDriverError(error, details.unique);
+  const message = error?.message ?? String(error);
+  /** @type {any} */
+  const own = { cause: error };
+  if (details.docPath !== undefined) own.docPath = details.docPath;
+  if (details.collection !== undefined) own.collection = details.collection;
+  if (details.key !== undefined) own.key = details.key;
+  const wrapped = classified.class === 'duplicate'
+    ? new DbRuntimeError('JD2001', details.duplicateReason ?? classified.reason, own)
+    : new DbRuntimeError(details.code ?? classified.code ?? 'JD2005',
+      `${details.reason ?? classified.reason}: ${message}`, own);
+  wrapped.class = classified.class;
+  wrapped.retryable = classified.retryable;
+  return wrapped;
+}
+
 export class DbRuntimeError extends CodedError {
   /**
    * @param {string} code

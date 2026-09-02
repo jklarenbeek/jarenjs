@@ -37,7 +37,7 @@ restarting.
 | `id` | TEXT primary key; caller-supplied or a UUID. **A caller-supplied id makes `enqueue` idempotent**: re-enqueueing an existing id changes nothing and answers the id — this is the idempotency key of §7 |
 | `kind` | the registered handler name (the suite's named-registry discipline) |
 | `payload` | the enqueue payload, JSON text; `null` stays null |
-| `state` | `pending` → `leased` → `done`, or `failed` (awaiting retry) → `dead` (attempts exhausted) |
+| `state` | `pending` → `leased` → `done`, or `failed` (awaiting retry) → `dead` (attempts exhausted); `cancelled` (terminal, set only by `cancel()`, §10) |
 | `run_at` | epoch ms eligibility: scheduling and retry backoff are the same mechanism |
 | `attempts` | claims so far; incremented AT claim, so a crashed attempt counts |
 | `max_attempts` | per job, default 5 |
@@ -395,9 +395,11 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   processes over WAL are the supported topology.
 - No priority classes in 0.1 (`run_at` ordering only), no cron or
   recurring schedules (re-enqueue from a completed handler if
-  needed), no workflow-level compensation or sagas, no per-job abort
-  signal (the lease is the timeout story), no cross-process push —
-  wake-on-write is same-process; everything else polls.
+  needed), no workflow-level compensation or sagas, no cross-process
+  push — wake-on-write is same-process; everything else polls. A
+  per-job cancellation exists (§10) and aborts a handler's signal in the
+  process that holds the attempt; across processes the lease is still
+  the timeout story.
 - Throughput is SQLite's single-writer throughput; the measured
   numbers live in the execution notes, not in marketing.
 
@@ -417,10 +419,62 @@ The fence adds five, all in the package's single runtime table
 Otherwise: API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the
 call, matching the capture and live precedents; storage failures ride
-the existing `JD2005` wrap and a coded error passes through it
+the store's one driver-failure classification (MODEL-FORMAT §7 — a
+locked or read-only file arrives classed) and a coded error passes
+through it
 unchanged (`JD2063` after `close()`); `store.jobs` on a read-only
 store is `JD0002` at first use, because the queue tables cannot be
 created — named there, not a raw `SQLITE_READONLY` at the first
 enqueue; a job's own failure is DATA — recorded in
 `last_error` and the state machine of §4 — because a queue that
 throws away its failure story has failed twice.
+
+## 10. Administration
+
+Four root operations let an operator inspect and steer the queue
+without raw SQL. Each is a mechanism with a coded failure surface and
+an honest second run; none of them decides WHEN — a retention horizon,
+a cancellation policy, a retry policy are the host's.
+
+- **`page({ state, kind, after, limit, signal, deadline })`** — a
+  keyset cursor over the queue by job id (the id to continue past in
+  `after`, at most `limit` items, default 100), filtered by a closed
+  state and a kind; each item is the record `get` answers. It is the
+  store's own cursor: admitted per pull under the store gate, cancelled
+  at row boundaries (`JD2072` / `JD2075`), classified by the driver's
+  streaming capability, every driver failure classified.
+- **`cancel(id, { lease })`** — two cases, both fenced. A QUEUED job
+  (pending or failed) is settled as `cancelled` in one write; the
+  enqueue-time identity authorises. A CLAIMED job needs the CURRENT
+  lease its attempt holds (§3's rule, so no stranger settles another's
+  work): the fenced write settles the row, and an attempt of this
+  process is aborted through the handler's `signal` (its reason is the
+  coded `JD2065` naming the cancellation); the call resolves once that
+  attempt has wound up — the acknowledgement §3's settling calls named.
+  `true` when this call cancelled the job, `false` when it already was;
+  unknown or settled `JD2065`, claimed-without-lease `JD2068`, a stale
+  or expired lease `JD2066`/`JD2067`. A worker reports such an attempt
+  as `outcome: 'cancelled'` (neither a completion, a failure nor a loss)
+  and counts it under `stats().cancellations`; an attempt held by
+  another process meets the fence at its next settling call and records
+  a loss, as any superseded attempt does.
+- **`requeue(id)`** — returns a failed, dead, cancelled or lease-expired
+  job to `pending` at the clock's instant (the queue's own order). The
+  attempt history is KEPT: `attempts` counts every claim the job ever
+  had and the next claim increments it, so `maxAttempts` still bounds
+  what follows (a dead job requeued gets exactly one more attempt before
+  it is dead again). `false` when the job already was pending; a live
+  lease refuses `JD2068` (requeue is not a steal); unknown or done
+  `JD2065`.
+- **`sweep({ settledBefore, limit })`** — deletes settled jobs (`done`,
+  `dead`, `cancelled`) whose last change is older than the horizon,
+  oldest first, at most `limit` of them, together with their
+  checkpoints, in one transaction; answers `{ removed }`, and a second
+  identical sweep answers `{ removed: 0 }`. The horizon is REQUIRED: a
+  sweep with none is a retention policy. Live jobs' checkpoints and the
+  change log's watermark are untouched.
+
+`cancelled` is a sixth job state, terminal like `done` and `dead`, set
+only by `cancel()`; `counts()` reports it. A transaction view's `jobs`
+(the outbox, §3) carries none of the four: an administration call is a
+root call.

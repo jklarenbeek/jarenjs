@@ -27,7 +27,36 @@ export declare class DbCompileError extends Error {
   readonly code: string;
   readonly reason: string;
   readonly docPath?: string;
+  /** Present on a `JD0002` raised by a driver failure at open: the
+   * classifier's class and verdict (MODEL-FORMAT §7). */
+  readonly class?: DriverErrorClass;
+  readonly retryable?: boolean;
 }
+
+/** The stable classes `classifyDriverError` assigns (MODEL-FORMAT §7). */
+export type DriverErrorClass = 'busy' | 'full' | 'readonly' | 'io' | 'corrupt' | 'cantopen'
+  | 'constraint' | 'duplicate' | 'overflow' | 'error';
+
+/** Classify a SQLite driver failure: the class, the runtime code it is
+ * raised under (`null` for `overflow`, which the query path answers by
+ * re-running in the engine), whether a retry can succeed, and the
+ * sentence the wrapped error leads with. */
+export declare function classifyDriverError(error: unknown,
+  unique?: { table: string; column: string }):
+  { class: DriverErrorClass; code: string | null; retryable: boolean; reason: string };
+/** Wrap a driver failure as the coded runtime error its class calls
+ * for, `class`/`retryable`/`cause` attached; anything that is not a
+ * driver's own error is returned as it is. */
+export declare function wrapDriverError(error: unknown, details?: {
+  docPath?: string; collection?: string; key?: string | number;
+  unique?: { table: string; column: string }; duplicateReason?: string;
+  code?: string; reason?: string;
+  /** Wrap even a failure that is not a driver's under `code`, with
+   * `class: 'error'` — for a lifecycle that promises a coded failure. */
+  always?: boolean }): Error;
+/** Whether an error is a SQLite driver's own (a numeric result code, or
+ * node:sqlite's error shape). */
+export declare function isDriverError(error: unknown): boolean;
 
 export declare class DbRuntimeError extends Error {
   constructor(code: string, reason: string, options?: {
@@ -43,6 +72,10 @@ export declare class DbRuntimeError extends Error {
   readonly collection?: string;
   readonly key?: unknown;
   readonly errors?: unknown[];
+  /** Present on an error the driver-failure classifier wrapped
+   * (MODEL-FORMAT §7): the stable class and whether a retry can succeed. */
+  readonly class?: DriverErrorClass;
+  readonly retryable?: boolean;
 }
 
 // ————— shared shapes —————
@@ -292,13 +325,153 @@ export interface StoreStats {
   liveQueries: number;
 }
 
+/**
+ * The connection pragmas in effect, read back from the connection after
+ * the open sequence applied them — never the requested values. `null`
+ * where the driver's binding declares the pragma absent or the engine
+ * answers nothing (a `:memory:` database's `mmapSize`).
+ */
+export interface StorePragmas {
+  readonly busyTimeout: number | null;
+  readonly journalMode: 'delete' | 'truncate' | 'persist' | 'memory' | 'wal' | 'off' | null;
+  readonly synchronous: 'off' | 'normal' | 'full' | 'extra' | null;
+  readonly walAutocheckpoint: number | null;
+  readonly journalSizeLimit: number | null;
+  readonly cacheSize: number | null;
+  readonly mmapSize: number | null;
+  readonly tempStore: 'default' | 'file' | 'memory' | null;
+}
+
+export interface MaintenanceCapabilities {
+  readonly checkpoint: boolean;
+  readonly integrityCheck: boolean;
+  readonly foreignKeyCheck: boolean;
+  readonly optimize: boolean;
+  /** The online backup (`backupTo`): the Node binding's; `false`
+   * elsewhere, where the call is refused `JD2077`. */
+  readonly backup: boolean;
+}
+
+/** The platform's progress report, verbatim: the last event may still
+ * carry a remainder — completion is the resolved call. */
+export interface BackupProgress {
+  readonly totalPages: number;
+  readonly remainingPages: number;
+}
+
+export interface BackupOptions {
+  /** Pages copied per step (the platform's `rate`); progress and the
+   * cancellation check happen between steps. */
+  rate?: number;
+  onProgress?: (progress: BackupProgress) => void;
+  /** Cancels between pages: `JD2079`, the temporary file removed, the
+   * target untouched. */
+  signal?: AbortSignal;
+  /** An epoch-millisecond deadline on the store's clock, honoured before
+   * the copy and between its pages (`JD2075`, same cleanup). */
+  deadline?: number;
+  /** The checkpoint that fixes the snapshot boundary (default
+   * `'passive'`; `false` skips it; a read-only store skips it by
+   * default and refuses an explicit one `JD2077`). */
+  checkpoint?: 'passive' | 'full' | 'restart' | 'truncate' | false;
+}
+
+export interface BackupResult {
+  readonly path: string;
+  /** The page total the platform answered. */
+  readonly pages: number;
+  readonly checkpoint: CheckpointResult | null;
+}
+
+/** Cancellation of a maintenance operation: checked once, before the
+ * one statement it issues (`JD2081` / `JD2075`, on the store's clock). */
+export interface MaintenanceCallOptions {
+  signal?: AbortSignal;
+  /** An epoch-millisecond deadline on the runtime record's clock. */
+  deadline?: number;
+}
+
+export interface CheckpointOptions extends MaintenanceCallOptions {
+  /** `PRAGMA wal_checkpoint` mode (default `'passive'`). */
+  mode?: 'passive' | 'full' | 'restart' | 'truncate';
+}
+
+/** The engine's own checkpoint row: `-1` frames on a database that is
+ * not in WAL mode. A second passive checkpoint reports the same counts
+ * as the first; a second `truncate` reports zeros. */
+export interface CheckpointResult {
+  readonly busy: boolean;
+  readonly logFrames: number;
+  readonly checkpointedFrames: number;
+}
+
+export interface IntegrityCheckOptions extends MaintenanceCallOptions {
+  /** At most this many problem rows (`PRAGMA integrity_check(N)`). */
+  limit?: number;
+}
+
+/** `ok` for the engine's single `ok` row; otherwise its problem rows
+ * verbatim. Corruption is the result, never a throw. */
+export interface IntegrityCheckResult {
+  readonly ok: boolean;
+  readonly problems: readonly string[];
+}
+
+export interface ForeignKeyViolation {
+  readonly table: string;
+  readonly rowId: number | null;
+  readonly parent: string;
+  readonly fkid: number;
+}
+
+export interface ForeignKeyCheckResult {
+  readonly ok: boolean;
+  readonly violations: readonly ForeignKeyViolation[];
+}
+
+/** `PRAGMA optimize` reports nothing; the honest result is that it ran. */
+export interface OptimizeResult {
+  readonly ran: true;
+}
+
+/** The granularity at which each lifecycle honours `signal`/`deadline`:
+ * the boundaries the driver actually has. `midStatement` is a filled
+ * slot — `false` on every shipped SQLite binding, which exposes no
+ * interrupt. */
+export interface CancellationCapabilities {
+  readonly query: 'row';
+  readonly queue: true;
+  readonly migration: 'step';
+  readonly maintenance: 'statement';
+  readonly backup: 'page';
+  readonly midStatement: boolean;
+}
+
 export interface StoreCapabilities {
   readonly version: string;
   readonly readOnly: boolean;
   readonly validated: boolean;
   readonly profiled: boolean;
+  /** The read-back connection configuration (MODEL-FORMAT §4). */
+  readonly pragmas: StorePragmas;
+  /** `pragmas.busyTimeout` under its long-published name. */
   readonly busyTimeoutMs: number | null;
+  /** `pragmas.journalMode` under its long-published name. */
   readonly journalMode: string | null;
+  /** The configuration pragmas the driver's binding declares it can
+   * apply, by option name; a request outside them is `JD0007`. */
+  readonly configurablePragmas: readonly string[];
+  /** Per-operation availability of the maintenance surface: `false`
+   * where the driver's binding does not declare an operation and, for
+   * the two that write, on a read-only store; a call is refused
+   * `JD2077` exactly where this says `false`. */
+  readonly maintenance: MaintenanceCapabilities;
+  /** Where a cancellation takes effect, per lifecycle (MODEL-FORMAT §4). */
+  readonly cancellation: CancellationCapabilities;
+  /** Whether the binding's statements carry a lazy row iterator; when
+   * `false` every cursor reports `streaming: 'buffered'` with a
+   * `{ construct: 'driver' }` barrier. Probed at open. */
+  readonly lazyIteration: boolean;
   readonly capture: 'session' | 'journal' | 'none';
   readonly captureLog: boolean;
   readonly live: boolean;
@@ -538,6 +711,23 @@ export interface Store {
   readonly changes?: ChangesReader;
   /** PRAGMA data_version — the coarse cross-connection signal. */
   dataVersion(): Promise<number>;
+  /** `PRAGMA wal_checkpoint(<mode>)` under the store gate (MODEL-FORMAT
+   * §4). Refused `JD2077` on a read-only store or a binding that does
+   * not declare it; a driver failure is `JD2078`. */
+  checkpoint(options?: CheckpointOptions): Promise<CheckpointResult>;
+  /** `PRAGMA integrity_check` under the store gate; corruption is the
+   * RESULT (`ok: false`), never a throw. */
+  integrityCheck(options?: IntegrityCheckOptions): Promise<IntegrityCheckResult>;
+  /** `PRAGMA foreign_key_check` under the store gate. */
+  foreignKeyCheck(options?: MaintenanceCallOptions): Promise<ForeignKeyCheckResult>;
+  /** `PRAGMA optimize` under the store gate; refused `JD2077` on a
+   * read-only store. */
+  optimize(options?: MaintenanceCallOptions): Promise<OptimizeResult>;
+  /** An online backup published whole or not at all (MODEL-FORMAT §4):
+   * copied to a temporary sibling, renamed onto `targetPath` only at
+   * verified completion; a cancelled (`JD2079`) or failed (`JD2078`)
+   * copy leaves neither file. Writers proceed during the copy. */
+  backupTo(targetPath: string, options?: BackupOptions): Promise<BackupResult>;
   /** Register a live query over an entity-root document (re-run
    * strategy in this version); present only with entities. */
   live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
@@ -551,7 +741,7 @@ export interface Store {
    * transaction's fate. The transactional-outbox spelling is the
    * `tx.jobs` a transaction callback receives, which runs as the exact
    * scope and co-commits with the domain transaction. */
-  readonly jobs?: JobsApi;
+  readonly jobs?: JobsApi & JobsAdminApi;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
 }
@@ -616,7 +806,12 @@ export interface TransactionSyncStore extends SyncStore {
  * not own the store lifetime; the root store remains the only owner of
  * the connection.
  */
-export interface TransactionStore extends Omit<Store, 'close' | 'transaction' | 'sync'> {
+export interface TransactionStore extends Omit<Store,
+  'close' | 'transaction' | 'sync' | 'checkpoint' | 'integrityCheck' | 'foreignKeyCheck' | 'optimize' | 'backupTo'
+  | 'jobs'> {
+  /** The transactional outbox (JOBS-FORMAT §3): no administration here —
+   * an admin operation is a root call. */
+  readonly jobs?: JobsApi;
   transaction<R>(fn: (store: TransactionStore) => R | Promise<R>): Promise<Awaited<R>>;
   /** Named partial rollback over the transaction's one savepoint stack
    * (MODEL-FORMAT §5.2). Root stores, clients, workers and checkpoint
@@ -823,11 +1018,33 @@ export interface OpenStoreOptions {
    * option (`zoneProvider`, `jobs.now`, `jobs.random`) is absent, and
    * handed on to the job engine. */
   runtime?: Partial<Runtime>;
-  busyTimeout?: number;
   /** How long work waits for an open transaction to settle before
    * `JD0012` (MODEL-FORMAT §5.1); reaches every driver. */
   queueTimeout?: number;
-  journalMode?: string;
+  /**
+   * The connection pragmas — a closed, validated set (MODEL-FORMAT §4).
+   * An option naming any other pragma is `JD0006`; a pragma the driver
+   * or the store kind cannot apply is `JD0007`; every value is read back
+   * after the open sequence and reported on `capabilities.pragmas`, and
+   * one the engine did not take is `JD0008`.
+   */
+  /** `PRAGMA busy_timeout`, in milliseconds (default 5000). */
+  busyTimeout?: number;
+  /** `PRAGMA journal_mode` (default `'wal'` on a writable file; a
+   * read-only store keeps the file's mode and refuses an explicit one). */
+  journalMode?: 'delete' | 'truncate' | 'persist' | 'memory' | 'wal' | 'off';
+  /** `PRAGMA synchronous`. */
+  synchronous?: 'off' | 'normal' | 'full' | 'extra';
+  /** `PRAGMA wal_autocheckpoint`, in pages; `0` disables. */
+  walAutocheckpoint?: number;
+  /** `PRAGMA journal_size_limit`, in bytes; `-1` for none. */
+  journalSizeLimit?: number;
+  /** `PRAGMA cache_size`: pages, or negative KiB. */
+  cacheSize?: number;
+  /** `PRAGMA mmap_size`, in bytes. */
+  mmapSize?: number;
+  /** `PRAGMA temp_store`. */
+  tempStore?: 'default' | 'file' | 'memory';
   statementCacheBound?: number;
   /** The store-level safety profile (MODEL-FORMAT §8). */
   profile?: 'safe' | ProfileSpec;
@@ -866,6 +1083,14 @@ export interface Driver {
 export declare const sqliteDialect: Dialect;
 export declare function createDialect(spec: unknown): Dialect;
 export declare const SQLITE_FLOOR: string;
+/** The option names of the closed configurable-pragma set, in the
+ * order the open sequence applies them (MODEL-FORMAT §4). */
+export declare const PRAGMA_NAMES: readonly string[];
+/** The `PRAGMA wal_checkpoint` modes, closed. */
+export declare const CHECKPOINT_MODES: readonly string[];
+/** The maintenance operations, in the order `capabilities.maintenance`
+ * lists them. */
+export declare const MAINTENANCE_OPERATIONS: readonly string[];
 
 // ————— entities: models, mapping, generated types —————
 
@@ -909,6 +1134,26 @@ export declare const BATCH_ROW_BOUND: number;
 
 // ————— migrations —————
 
+/** Where a migration runs: the driver, the file (`':memory:'` when
+ * absent) and the busy timeout the run opens with. */
+export interface MigrationTarget {
+  driver: Driver;
+  path?: string;
+  /** `PRAGMA busy_timeout` for the run's connection, ms (default 5000). */
+  busyTimeout?: number;
+}
+
+/** One progress event: the migration and collection a data step is
+ * walking, and the running count of the rows it has transformed,
+ * derived or asserted so far (one of the three counters per event). */
+export interface MigrationProgress {
+  readonly migration: string;
+  readonly collection: string;
+  readonly transformed?: number;
+  readonly derived?: number;
+  readonly asserted?: number;
+}
+
 export interface MigrateOptions {
   baseline: unknown;
   model?: unknown;
@@ -916,17 +1161,32 @@ export interface MigrateOptions {
   dryRun?: boolean;
   batchSize?: number;
   shadow?: boolean;
+  /** Where the shadow replay runs (default `':memory:'`). */
+  shadowPath?: string;
+  /** Called once per batch a data step walks (transform, derive, or a
+   * per-document assertion). */
+  onProgress?: (progress: MigrationProgress) => void;
   /** Re-register declared deterministic functions on every connection
    * the migration opens (real, shadow, reference) — §10. */
   registerFunctions?: (connection: unknown) => unknown;
   /** The host's runtime record: the clock every applied migration is
-   * stamped with; the platform's own when absent. */
+   * stamped with and the deadline is read against; the platform's own
+   * when absent. */
   runtime?: Partial<Runtime>;
+  /** Cancels between migrations, steps and batches (`JD2080`); the
+   * migration in flight rolls back whole. */
+  signal?: AbortSignal;
+  /** An epoch-millisecond deadline on `runtime`'s clock (`JD2075`). */
+  deadline?: number;
 }
 
 export declare function migrate(
-  target: unknown, migrations: readonly unknown[], options: MigrateOptions,
+  target: MigrationTarget, migrations: readonly unknown[], options: MigrateOptions,
 ): Promise<unknown>;
+/** Whether an assertion step is a per-document predicate (a FLWOR over
+ * `$[*]` whose body reads only its binding), which the runner evaluates
+ * per batch; anything else reads the collection whole. */
+export declare function isPerDocumentAssertion(query: unknown): boolean;
 export declare function planMigration(from: unknown, to: unknown, options?: unknown): unknown;
 /** The whole-model diff — collections AND entities (MIGRATION-FORMAT §9). */
 export declare function planModelMigration(from: unknown, to: unknown, options?: unknown): unknown;
@@ -937,11 +1197,15 @@ export interface MigrationStatusReport {
   drift: string | null;
   upToDate: boolean;
 }
+/** Report a database's migration state without touching it: the
+ * history table is probed, never created. `model` enables the drift
+ * comparison once the chain is fully applied. */
 export declare function migrationStatus(
-  target: { driver: Driver; path?: string },
+  target: MigrationTarget,
   migrations: readonly unknown[],
-  options: { baseline: unknown; model?: unknown;
-    registerFunctions?: (connection: unknown) => unknown },
+  options?: { model?: unknown;
+    registerFunctions?: (connection: unknown) => unknown;
+    signal?: AbortSignal; deadline?: number; runtime?: Partial<Runtime> },
 ): Promise<MigrationStatusReport>;
 /** Create a model's whole physical shape on a connection. */
 export declare function createModelShape(connection: unknown, model: unknown): unknown;
@@ -1076,11 +1340,15 @@ export declare function identityBatches(identities: unknown[]): unknown;
 
 // ————— the job queue (JOBS-FORMAT) —————
 
+/** A job's state: `cancelled` is terminal like `done` and `dead` and
+ * is set only by `cancel()` (JOBS-FORMAT §10). */
+export type JobState = 'pending' | 'leased' | 'done' | 'failed' | 'dead' | 'cancelled';
+
 export interface JobRecord {
   readonly id: string;
   readonly kind: string;
   readonly payload: unknown;
-  readonly state: 'pending' | 'leased' | 'done' | 'failed' | 'dead';
+  readonly state: JobState;
   readonly runAt: number;
   readonly attempts: number;
   readonly maxAttempts: number;
@@ -1129,6 +1397,7 @@ export interface JobCounts {
   done: number;
   failed: number;
   dead: number;
+  cancelled: number;
   /** Pending/failed totals per kind — how a handler-less kind REPORTS. */
   pendingKinds: Record<string, number>;
 }
@@ -1138,7 +1407,9 @@ export interface JobCounts {
  * work another attempt was still doing, and counting it as a failure
  * would burn a retry the job never spent. */
 export interface JobOutcome {
-  readonly outcome: 'completed' | 'failed' | 'lost';
+  /** `cancelled`: the attempt was taken from this worker by `cancel()`
+   * with its lease — neither a completion, a failure nor a loss. */
+  readonly outcome: 'completed' | 'failed' | 'lost' | 'cancelled';
   /** Where the loss was noticed: settling the result, or settling the
    * failure that came before it. Absent on the other two outcomes. */
   readonly phase?: 'completion' | 'failure';
@@ -1163,7 +1434,9 @@ export interface JobWorker {
     renewals: number;
     /** Attempts whose lease was lost mid-flight — never a completion,
      * never a failure. */
-    lostSettlements: number };
+    lostSettlements: number;
+    /** Attempts cancelled through `cancel()` while their handler ran. */
+    cancellations: number };
   /** The leases this worker holds right now: one per in-flight attempt,
    * each the newest that attempt has been given. */
   leases(): readonly JobLease[];
@@ -1234,6 +1507,45 @@ export interface JobsApi {
     complete(runId: string, result: unknown): unknown;
   };
   createWorker(options: JobWorkerOptions): JobWorker;
+}
+
+export interface JobPageOptions {
+  /** A closed state; every job when absent. */
+  state?: JobState;
+  kind?: string;
+  /** The id to continue past (keyset by id). */
+  after?: string;
+  /** At most this many items (default 100). */
+  limit?: number;
+  /** Row-boundary cancellation, as every cursor (`JD2072` / `JD2075`). */
+  signal?: AbortSignal;
+  deadline?: number;
+}
+
+/**
+ * Job administration (JOBS-FORMAT §10) — root-only mechanism, never a
+ * schedule: WHEN to sweep or cancel is the host's call.
+ */
+export interface JobsAdminApi {
+  /** A keyset cursor over the queue by id, admitted per pull under the
+   * store gate; each item is the record `get` answers. */
+  page(options?: JobPageOptions): QueryCursor<JobRecord>;
+  /** Cancel a queued job by its identity, or a claimed one through its
+   * CURRENT lease (the fence's rule): the row settles as `cancelled`,
+   * a local attempt's handler signal aborts, and the call resolves once
+   * that attempt wound up. `true` when this call cancelled it, `false`
+   * when it already was; `JD2065`/`JD2066`/`JD2067`/`JD2068` as a
+   * settling call refuses. */
+  cancel(id: string, options?: { lease?: JobLease; signal?: AbortSignal; deadline?: number }): Promise<boolean>;
+  /** Return a failed, dead, cancelled or lease-expired job to the queue
+   * with its attempt history intact; `false` when it already was
+   * pending; a live lease refuses `JD2068`, unknown or done `JD2065`. */
+  requeue(id: string, options?: { signal?: AbortSignal; deadline?: number }): Promise<boolean>;
+  /** Delete settled jobs (done, dead, cancelled) last changed before
+   * `settledBefore`, oldest first, at most `limit`, with their
+   * checkpoints; a second identical sweep answers `{ removed: 0 }`. */
+  sweep(options: { settledBefore: number; limit?: number; signal?: AbortSignal; deadline?: number }):
+    Promise<{ removed: number }>;
 }
 
 export interface JobsOptions {

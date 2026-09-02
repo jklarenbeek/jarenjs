@@ -127,7 +127,7 @@ the table and stale in the paragraph that cites it:
 | `./flow` | <!--fact:bundle.flow.kb-->19<!--/fact--> kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--fact:bundle.app.kb-->47<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
 | `./forms` | <!--fact:bundle.forms.kb-->37<!--/fact--> kB | the schema pen it subclasses |
-| `./db` | <!--fact:bundle.db.kb-->520<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->542<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both

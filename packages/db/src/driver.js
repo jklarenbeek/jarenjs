@@ -27,7 +27,11 @@
  * exists to build one on) and `rowEstimates` (the query plan is prose,
  * not numbers). They exist so a driver that has the facts can fill
  * them without a contract change; pretending SQLite has them is the
- * silent degradation this suite refuses.
+ * silent degradation this suite refuses. A third, `lazyIteration`, is
+ * probed rather than declared: whether the binding's statements carry
+ * a native row iterator, which is what lets a cursor classify itself
+ * honestly — a binding without one gets `iterate` composed over `all()`
+ * here, and the cursor over it says it buffers.
  */
 
 import { isThenable, chain, toPromise } from '@jarenjs/core/function';
@@ -153,14 +157,27 @@ export function attempt(call, wrap) {
  *
  * The raw shape a binding supplies:
  * `{ exec(sql), prepare(sql) -> { run, get, all, iterate? }, close(),
- *   registerFunction?, registerAggregate?, session? }` — every method
- * value-or-promise.
+ *   registerFunction?, registerAggregate?, session?, backup? }` — every
+ * method value-or-promise. `backup` is the online-backup primitive
+ * triple `{ copy(path, { rate, progress }), rename(from, to),
+ * remove(path) }` a binding with a platform backup API and a file
+ * system supplies; the store's `backupTo` is built on it and never
+ * touches a builtin itself.
  *
  * @param {any} raw
  * @param {{ dialect: any, synchronous?: boolean, queueTimeout?: number,
  *   declared?: { sessions?: boolean, userFunctions?: boolean,
  *     deterministicIndexableFunctions?: boolean,
- *     aggregateFunctions?: boolean } }} options
+ *     aggregateFunctions?: boolean,
+ *     pragmas?: readonly string[],
+ *     maintenance?: Record<string, boolean>,
+ *     backup?: boolean } }} options - `declared.pragmas`
+ *   names the configuration pragmas the binding can apply (the store's
+ *   closed set, by option name); the store refuses a request outside it
+ *   and reads every declared one back after open. `declared.maintenance`
+ *   narrows the maintenance operations (`checkpoint`, `integrityCheck`,
+ *   `foreignKeyCheck`, `optimize`): every SQLite library runs them, so
+ *   an operation is available unless the binding declares it `false`
  * @returns {any} a Connection, or a promise of one
  */
 export function openConnection(raw, options) {
@@ -170,6 +187,9 @@ export function openConnection(raw, options) {
   return chain(raw.prepare(dialect.introspect.version()), (versionStatement) =>
     chain(versionStatement.get([]), (versionRow) => {
       const version = String(versionRow.version);
+      // the binding's statements either carry a lazy iterator or they
+      // do not; the probe statement is one of them
+      const lazyIteration = typeof versionStatement.iterate === 'function';
       if (compareVersions(version, SQLITE_FLOOR) < 0) {
         throw new DbCompileError('JD0001',
           `the SQLite library is ${version}, below the supported floor ${SQLITE_FLOOR}`);
@@ -204,12 +224,35 @@ export function openConnection(raw, options) {
             // method AND declare it.
             aggregateFunctions: declared.aggregateFunctions === true
               && typeof raw.registerAggregate === 'function',
+            // the configuration pragmas the binding applies, by the
+            // store's option name — a request outside this list is a
+            // coded refusal at open, never a silently skipped member
+            configurablePragmas: Object.freeze([...(declared.pragmas ?? [])]),
+            // the online backup: the binding must supply the primitive
+            // triple AND declare it — the platform API and the file
+            // system it needs are the binding's, not the library's
+            backup: declared.backup === true && raw.backup !== null && typeof raw.backup === 'object'
+              && typeof raw.backup.copy === 'function' && typeof raw.backup.rename === 'function'
+              && typeof raw.backup.remove === 'function',
+            // the maintenance pragmas are the library's, not the
+            // binding's: available unless declared absent, and the
+            // store's report says so per operation
+            maintenance: Object.freeze({
+              checkpoint: declared.maintenance?.checkpoint !== false,
+              integrityCheck: declared.maintenance?.integrityCheck !== false,
+              foreignKeyCheck: declared.maintenance?.foreignKeyCheck !== false,
+              optimize: declared.maintenance?.optimize !== false,
+            }),
             // structural SQLite limits — stated, not worked around
             alterTableFull: false,
             // the slots every SQLite driver leaves EMPTY (no
             // interrupt, no progress handler, no estimate API)
             statementTimeout: false,
             rowEstimates: false,
+            // whether a cursor can pull one row at a time, or the driver
+            // materialises the result on the first pull (declared, so
+            // the cursor's own report is honest about it)
+            lazyIteration,
           });
           return finishConnection(raw, dialect, synchronous, capabilities,
             options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT);
@@ -561,6 +604,15 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
       : null,
     session: typeof raw.session === 'function'
       ? (table) => { requireOpen(); return raw.session(table); }
+      : null,
+    // the backup primitives, each refused by name once the store is
+    // closed exactly as a statement is
+    backup: capabilities.backup === true
+      ? Object.freeze({
+        copy: (path, options) => { requireOpen(); return raw.backup.copy(path, options); },
+        rename: (from, to) => { requireOpen(); return raw.backup.rename(from, to); },
+        remove: (path) => { requireOpen(); return raw.backup.remove(path); },
+      })
       : null,
   });
 }

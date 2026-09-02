@@ -799,7 +799,9 @@ describe('root cursors borrow admission per pull (MODEL-FORMAT §5.1)', () => {
     const cursor = fs.readFileSync(new URL('../../packages/db/src/cursor.js', import.meta.url), 'utf8');
     const store = fs.readFileSync(new URL('../../packages/db/src/store.js', import.meta.url), 'utf8');
     assert.strictEqual((cursor.match(/export function admitCursor\(/g) ?? []).length, 1);
-    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 3, 'the three root cursor surfaces route through it');
+    // the collection query, the entity cursor, the graph cursor and the
+    // job page: every root cursor surface routes through it
+    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 4, 'the four root cursor surfaces route through it');
     assert.ok(!/query is deliberately NOT gated/.test(store), 'the ungated exception is gone');
     const body = cursor.slice(cursor.indexOf('export function admitCursor('));
     const fn = body.slice(0, body.indexOf('\n}\n') + 3);

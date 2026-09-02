@@ -28,9 +28,9 @@ Usage:
   jaren-db plan     --from <model> --to <model> [--store <db>] [--id <name>] [--out <file>]
   jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id <name>] --out <file>
   jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
-  jaren-db status   --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+  jaren-db status   --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
-  jaren-db check    --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+  jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db shape    --model <model>
 
 A <model> or a migration is a .json file, or a MODULE (.js, .mjs, .cjs —
@@ -267,12 +267,14 @@ async function commandPlan(options) {
 }
 
 async function commandStatus(options, { asCheck }) {
-  if (options.store === null || options.baseline === null)
-    fail(`${asCheck ? 'check' : 'status'} needs --store and --baseline`);
+  // the history and the model are what a status read needs; the
+  // baseline anchors an APPLY (the chain's first shape), not a read —
+  // `--baseline` is still accepted so an existing invocation keeps working
+  if (options.store === null)
+    fail(`${asCheck ? 'check' : 'status'} needs --store`);
   // `check` without the model verified nothing and printed "in sync"
   if (asCheck && options.model === null)
     fail('check needs --model — drift is measured against the model the code carries');
-  const baseline = await loadDocument(options.baseline, 'baseline model', 'model');
   const model = options.model !== null ? await loadDocument(options.model, 'model', 'model') : undefined;
   const migrations = await loadMigrationsDir(options.migrations);
   // the snapshot discipline, when it is in use: a model that moved
@@ -291,7 +293,7 @@ async function commandStatus(options, { asCheck }) {
   let status;
   try {
     status = await migrationStatus({ driver: nodeDriver(), path: options.store },
-      migrations, { baseline, model });
+      migrations, { model });
   }
   catch (error) {
     return fail(error.message);
@@ -331,7 +333,7 @@ async function commandApply(options) {
   const migrations = await loadMigrationsDir(options.migrations);
   const target = { driver: nodeDriver(), path: options.store };
 
-  const status = await migrationStatus(target, migrations, { baseline })
+  const status = await migrationStatus(target, migrations)
     .catch((error) => fail(error.message));
   if (status.pending.length === 0) {
     console.log('nothing to apply — up to date');

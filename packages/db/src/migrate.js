@@ -24,6 +24,7 @@
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { refuseCancelled } from './cancellation.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
@@ -1039,9 +1040,14 @@ function checkMigrationDocument(migration) {
  * @param {number} batchSize
  * @param {(rows: { rid: any, doc: string, key: any }[]) => any} handle
  *   value-or-promise per batch
+ * @param {boolean} [keyed]
+ * @param {any} [entityMapping]
+ * @param {() => void} [check] - run before every batch: the
+ *   cancellation boundary a data step has between its batches
  * @returns {any}
  */
-function walkRows(connection, table, batchSize, handle, keyed = true, entityMapping = null) {
+function walkRows(connection, table, batchSize, handle, keyed = true, entityMapping = null,
+  check = undefined) {
   // entity tables carry no 'key' column — the transform walk goes by
   // row identity alone; only the collection walks select the key. An
   // entity's mapped columns ride beside the document so the row can be
@@ -1057,12 +1063,14 @@ function walkRows(connection, table, batchSize, handle, keyed = true, entityMapp
     + `${keySelect}${columnSelect} FROM ${q(table)} WHERE ${rid} > ${dialect.parameterRef(1, 'after')} `
     + `ORDER BY ${rid} ${dialect.limitClause(batchSize, undefined)}`;
   return chain(connection.prepare(sql), (statement) => {
-    const nextBatch = (after) =>
-      chain(statement.all([after]), (rows) => {
+    const nextBatch = (after) => {
+      if (check !== undefined) check();
+      return chain(statement.all([after]), (rows) => {
         if (rows.length === 0) return null;
         return chain(handle(rows), () =>
           nextBatch(rows[rows.length - 1].rid));
       });
+    };
     return nextBatch(-1);
   });
 }
@@ -1092,8 +1100,34 @@ function entityStepMapping(options, table) {
   return { entity, mapping: explainMapping(options.model).entities[table] };
 }
 
-/** All documents of a collection or entity (the assertion steps' working
- * set — a documented whole-collection read), entities read WHOLE. */
+/**
+ * Whether an assertion is a PER-DOCUMENT predicate — a FLWOR over the
+ * collection's documents whose `$where` and `$return` read only the
+ * binding — so evaluating it over each batch of documents answers
+ * exactly what evaluating it over the whole collection would. Anything
+ * that reads the root (`$count: '$[*]'`, a `$let`, a `$distinct`, a
+ * nested `$for`) is cross-document and keeps its whole-collection read.
+ * @param {any} query
+ * @returns {boolean}
+ */
+export function isPerDocumentAssertion(query) {
+  if (query === null || typeof query !== 'object' || Array.isArray(query)) return false;
+  const keys = Object.keys(query);
+  if (!keys.includes('$for') || !keys.includes('$return')
+    || keys.some((key) => !['$for', '$where', '$return'].includes(key))) return false;
+  const bindings = query.$for;
+  if (bindings === null || typeof bindings !== 'object' || Array.isArray(bindings)) return false;
+  const names = Object.keys(bindings);
+  if (names.length !== 1 || bindings[names[0]] !== '$[*]') return false;
+  // a root reference anywhere in the body is a cross-document read
+  const body = JSON.stringify({ $where: query.$where ?? null, $return: query.$return });
+  return !/"\$(?:[[.]|")/.test(body.replace(/"\$[A-Za-z_][A-Za-z0-9_]*/g, '"'));
+}
+
+/** All documents of a collection or entity — the working set of a
+ * CROSS-DOCUMENT assertion, whose answer needs every document at once;
+ * a stated cost, and the reason a per-document assertion walks in
+ * batches instead. Entities read WHOLE. */
 function allDocs(connection, table, entityMapping = null) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -1119,6 +1153,9 @@ function runSteps(connection, migration, options) {
   const q = dialect.quoteIdentifier;
   const step = (i) => {
     if (i >= migration.steps.length) return null;
+    // the cancellation boundary between steps: a refusal here rolls the
+    // migration in flight back whole, as any step failure does
+    if (options.check !== undefined) options.check();
     const current = migration.steps[i];
     const fail = (reason, cause) => {
       throw refuse('JD0023',
@@ -1198,7 +1235,7 @@ function runSteps(connection, migration, options) {
               collection: current.collection,
               derived: derivedRows,
             });
-          }, false), () => derivedRows));
+          }, false, null, options.check), () => derivedRows));
       }
       if (current.kind === 'jslt') {
         let transform;
@@ -1253,7 +1290,7 @@ function runSteps(connection, migration, options) {
                 collection: current.collection,
                 transformed,
               });
-            }, false, stepEntity.mapping), () => transformed));
+            }, false, stepEntity.mapping, options.check), () => transformed));
         }
         const updateSql = `UPDATE ${q(current.collection)} SET ${q('doc')} = `
           + `${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))} `
@@ -1274,7 +1311,7 @@ function runSteps(connection, migration, options) {
               collection: current.collection,
               transformed,
             });
-          }, keyed), () => transformed));
+          }, keyed, null, options.check), () => transformed));
       }
       // kind === 'query': the assertion step
       let compiled;
@@ -1285,8 +1322,8 @@ function runSteps(connection, migration, options) {
         return fail(`the assertion does not compile: ${/** @type {Error} */ (cause).message}`,
           /** @type {Error} */ (cause));
       }
-      return chain(allDocs(connection, current.collection,
-        entityStepMapping(options, current.collection)?.mapping ?? null), (docs) => {
+      const assertionMapping = entityStepMapping(options, current.collection)?.mapping ?? null;
+      const assertOver = (docs) => {
         if (current.expect === 'ebv') {
           if (!compiled.ebv(docs)) fail('the EBV assertion answered false');
           return null;
@@ -1297,7 +1334,26 @@ function runSteps(connection, migration, options) {
           fail(`the assertion expected an empty sequence, got ${count} item(s)`);
         }
         return null;
-      });
+      };
+      if (!isPerDocumentAssertion(current.assert)) {
+        // cross-document: the answer needs every document at once
+        return chain(allDocs(connection, current.collection, assertionMapping), assertOver);
+      }
+      // per-document: walk in keyset batches like every other step,
+      // failing fast at the first batch that violates
+      let asserted = 0;
+      return walkRows(connection, current.collection, options.batchSize, (rows) => {
+        const docs = rows.map((row) => (assertionMapping === null
+          ? JSON.parse(row.doc)
+          : mergeEntityRow(assertionMapping, row, 'doc')));
+        assertOver(docs);
+        asserted += docs.length;
+        options.onProgress?.({
+          migration: migration.id,
+          collection: current.collection,
+          asserted,
+        });
+      }, false, assertionMapping, options.check);
     }), () => step(i + 1));
   };
   return step(0);
@@ -1493,18 +1549,33 @@ function historyStatements(dialect) {
 }
 
 /**
- * Report a database's migration state without touching it: what is
- * applied, what is pending, whether an applied migration was edited,
- * and — once the chain is fully applied — whether the physical shape
- * DRIFTED from the model (someone changed the database by hand, §12).
+ * Report a database's migration state without touching it — the
+ * history table is probed, never created, so a fresh file stays byte
+ * for byte what it was: what is applied, what is pending, whether an
+ * applied migration was edited, and — once the chain is fully applied —
+ * whether the physical shape DRIFTED from the model (someone changed
+ * the database by hand, §12).
  * @param {{ driver: any, path?: string }} target
  * @param {any[]} migrations - the full ordered list
- * @param {{ baseline: any, model?: any,
- *   registerFunctions?: (connection: any) => any }} options
+ * @param {{ model?: any, registerFunctions?: (connection: any) => any,
+ *   signal?: AbortSignal, deadline?: number,
+ *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
+ *   - `signal`/`deadline` refuse a call already cancelled (`JD2080`) or
+ *   past its deadline (`JD2075`) on the runtime record's clock
  * @returns {Promise<{ applied: string[], pending: string[],
  *   drift: string | null, upToDate: boolean }>}
  */
-export function migrationStatus(target, migrations, options) {
+export function migrationStatus(target, migrations, options = {}) {
+  // a call already cancelled, or past its deadline on the caller's
+  // clock, opens nothing
+  try {
+    refuseCancelled({ signal: options.signal, deadline: options.deadline },
+      resolveRuntime(options.runtime).now,
+      { abortCode: 'JD2080', aborted: 'it ran', passed: 'the status read ran', ran: 'no step ran' });
+  }
+  catch (error) {
+    return Promise.reject(error);
+  }
   return toPromise(chain(
     target.driver.open(target.path ?? ':memory:', {}),
     (connection) => {
@@ -1514,10 +1585,15 @@ export function migrationStatus(target, migrations, options) {
       const failClosed = (error) => chain(connection.close(), () => { throw error; });
       let work;
       try {
+        // §6's "writes NOTHING" holds for a status read too: the history
+        // table is probed, never created, and an absent one reads as an
+        // empty history — the same promise the dry run makes
         work = chain(registerDeriveFunctions(connection), () =>
-          chain(connection.exec(statements.create), () =>
-          chain(connection.prepare(statements.select), (select) =>
-            chain(select.all([]), (rows) => {
+          chain(chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
+            chain(probe.get([HISTORY_TABLE]), (present) => (present === undefined
+              ? []
+              : chain(connection.prepare(statements.select), (select) => select.all([]))))),
+          (rows) => chain(rows, () => {
               for (let i = 0; i < rows.length; i++) {
                 const doc = migrations[i];
                 if (doc === undefined || doc.id !== rows[i].id
@@ -1539,7 +1615,7 @@ export function migrationStatus(target, migrations, options) {
                 (difference) => ({
                   applied, pending, drift: difference, upToDate: difference === null,
                 }));
-            }))));
+            })));
       }
       catch (error) {
         return failClosed(error);
@@ -1565,7 +1641,12 @@ export function migrationStatus(target, migrations, options) {
  * @param {{ baseline: any, model?: any, compileSchema?: Function,
  *   dryRun?: boolean, batchSize?: number, onProgress?: Function,
  *   shadow?: boolean, shadowPath?: string,
+ *   signal?: AbortSignal, deadline?: number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
+ *   `signal` and `deadline` cancel between migrations, steps and
+ *   batches (`JD2080` / `JD2075`, the deadline read against `runtime`'s
+ *   clock); a cancelled migration rolls back whole and the completed
+ *   ones stand.
  *   `runtime` is the host's runtime record: the clock every applied
  *   migration is stamped with, and the clock and identifiers an entity
  *   step's `default: 'now'` / `default: 'uuid'` fill; the platform's own
@@ -1585,13 +1666,32 @@ export function migrate(target, migrations, options) {
       + '(the chain anchor and the shadow starting shape)');
   const batchSize = options.batchSize ?? 500;
   const runtime = resolveRuntime(options.runtime);
+  /**
+   * The cancellation boundary: between migrations, between steps and
+   * between the batches of a data step, on the runtime record's clock.
+   * Nothing interrupts a statement that has started; a refusal inside a
+   * migration rolls that migration back whole and the completed ones
+   * stand, so a rerun resumes from the recorded position.
+   */
+  const check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now, {
+    abortCode: 'JD2080', aborted: 'its next step', passed: 'its next step',
+    ran: 'no further step ran; a migration in flight rolled back whole and a rerun resumes '
+      + 'from the recorded position',
+  });
   const runOptions = {
     batchSize,
     onProgress: options.onProgress,
     registerFunctions: options.registerFunctions,
     model: options.model,
     runtime,
+    check,
   };
+  try {
+    check();
+  }
+  catch (error) {
+    return Promise.reject(error);
+  }
 
   return toPromise(chain(
     target.driver.open(target.path ?? ':memory:', { timeout: target.busyTimeout ?? 5000 }),
@@ -1722,6 +1822,8 @@ export function migrate(target, migrations, options) {
             const applied = [];
             const applyNext = (i) => {
               if (i >= pending.length) return null;
+              // the boundary between migrations
+              check();
               const migration = pending[i];
               const last = i === pending.length - 1;
               // the §10 procedure's pragma bracket, literally: the

@@ -13,7 +13,9 @@
  *     open(path, options) -> raw | Promise<raw>,
  *     synchronous?: boolean,           // default false
  *     declares?: { userFunctions?, deterministicIndexableFunctions?,
- *                  sessions? }         // default all false
+ *                  sessions?,          // default all false
+ *                  pragmas?,           // default: the whole closed set
+ *                  maintenance? }      // default: all four operations
  *   }
  *   raw = { exec(sql), prepare(sql) -> { run, get, all, iterate? },
  *           close(), registerFunction?, registerAggregate?, session? }
@@ -26,6 +28,7 @@
 import { chain, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { DbCompileError } from '../errors.js';
+import { PRAGMA_NAMES } from '../pragmas.js';
 
 /**
  * Adapt an already-constructed `sqlite3.oo1` database (the official
@@ -173,6 +176,11 @@ export function wasmDriver(handle) {
           deterministicIndexableFunctions:
             handle.declares?.deterministicIndexableFunctions === true,
           aggregateFunctions: handle.declares?.aggregateFunctions === true,
+          // a handle that knows its build narrows the set; the default
+          // is the whole closed set, because the pragmas are the
+          // library's and the read-back refuses one a build lacks
+          pragmas: handle.declares?.pragmas ?? PRAGMA_NAMES,
+          maintenance: handle.declares?.maintenance,
         },
       })),
   });

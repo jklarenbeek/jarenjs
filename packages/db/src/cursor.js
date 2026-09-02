@@ -59,6 +59,25 @@ export function utf8Length(text) {
  */
 
 /**
+ * How a cursor over a source the driver iterates actually behaves on
+ * THIS connection: one row per pull where the binding has a lazy
+ * iterator, and a buffer — declared as such, with the driver named as
+ * the barrier — where the driver composed `iterate` over `all()`. The
+ * capability is probed once at open; a cursor is classified at
+ * construction, before any statement exists, so the fact has to be the
+ * connection's. The one classification every engine and the job queue
+ * read.
+ * @param {any} connection
+ * @returns {{ streaming: 'row' | 'buffered', barrier: CursorBarrier | null }}
+ */
+export function rowClassOf(connection) {
+  return connection.capabilities.lazyIteration === false
+    ? { streaming: 'buffered', barrier: { construct: 'driver',
+      reason: 'the driver binding has no lazy iterator; the first pull materialises the whole result' } }
+    : { streaming: 'row', barrier: null };
+}
+
+/**
  * @typedef {object} CursorSpec
  * @property {'row' | 'buffered'} streaming - whether items arrive one
  *   database row per pull or from a buffer the first pull filled
@@ -77,6 +96,10 @@ export function utf8Length(text) {
  * @property {() => number} [now] - the clock the deadline is read
  *   against — the store's runtime record's; required beside a deadline,
  *   so no cursor reads the platform clock on its own
+ * @property {(error: any) => Error} [wrap] - classifies a failure raised
+ *   while the source is opened, pulled or mapped — the engine's driver
+ *   wrap, so no raw driver error leaves a cursor; a coded error passes
+ *   through it unchanged
  * @property {(opened: boolean) => void} [onSettle] - called exactly once
  *   when the cursor settles — exhausted, released, or aborted — with
  *   whether a pull ever reached the source; what an engine finalises its
@@ -147,7 +170,7 @@ export function createCursor(spec) {
   /** @param {() => any} call */
   const guarded = (call) => attempt(call, (error) => {
     release();
-    return error;
+    return spec.wrap === undefined ? error : spec.wrap(error);
   });
 
   const pull = () => {

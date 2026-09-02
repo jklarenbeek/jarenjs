@@ -11,7 +11,12 @@ export interface NodeOpenOptions {
 
 /** The `node:sqlite` binding; the builtin loads lazily inside open(). */
 export declare function nodeDriver(): Driver;
-/** Adapt an already-constructed DatabaseSync-shaped database. */
-export declare function adaptNodeDatabase(db: unknown): unknown;
+/** Adapt an already-constructed DatabaseSync-shaped database. `backup`
+ * is the online-backup primitive triple (`copy`, `rename`, `remove`);
+ * the connection declares the capability exactly when it is given. */
+export declare function adaptNodeDatabase(db: unknown, options?: {
+  queueTimeout?: number;
+  backup?: { copy: Function; rename: Function; remove: Function };
+}): unknown;
 /** Construct and adapt from a loaded `node:sqlite`-shaped module. */
 export declare function fromNodeModule(mod: unknown, path: string, options?: NodeOpenOptions): unknown;

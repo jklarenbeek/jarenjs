@@ -137,9 +137,16 @@ describe('SQLite dialect goldens', () => {
     assert.strictEqual(sqliteDialect.tx.begin, 'BEGIN');
     assert.strictEqual(sqliteDialect.tx.commit, 'COMMIT');
     assert.strictEqual(sqliteDialect.tx.rollback, 'ROLLBACK');
-    assert.strictEqual(sqliteDialect.pragma.busyTimeout(5000), 'PRAGMA busy_timeout = 5000');
-    assert.strictEqual(sqliteDialect.pragma.journalMode('wal'), 'PRAGMA journal_mode = wal');
-    assert.throws(() => sqliteDialect.pragma.journalMode('wal; DROP TABLE x'), TypeError);
+    assert.strictEqual(sqliteDialect.pragma.set('busy_timeout', 5000), 'PRAGMA busy_timeout = 5000');
+    assert.strictEqual(sqliteDialect.pragma.set('journal_mode', 'wal'), 'PRAGMA journal_mode = wal');
+    assert.strictEqual(sqliteDialect.pragma.set('cache_size', -8000.7), 'PRAGMA cache_size = -8000');
+    assert.strictEqual(sqliteDialect.introspect.pragma('synchronous'), 'PRAGMA synchronous');
+    // neither a name nor a value outside the guarded word/integer forms
+    // reaches the statement text
+    assert.throws(() => sqliteDialect.pragma.set('journal_mode', 'wal; DROP TABLE x'), TypeError);
+    assert.throws(() => sqliteDialect.pragma.set('journal_mode; DROP TABLE x', 'wal'), TypeError);
+    assert.throws(() => sqliteDialect.pragma.set('cache_size', Number.NaN), TypeError);
+    assert.throws(() => sqliteDialect.introspect.pragma('x; DROP TABLE y'), TypeError);
     assert.match(sqliteDialect.introspect.version(), /sqlite_version/);
     assert.match(sqliteDialect.introspect.compileOptions(), /pragma_compile_options/);
     assert.match(sqliteDialect.introspect.tableExists(), /sqlite_schema/);

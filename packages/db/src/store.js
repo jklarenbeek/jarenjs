@@ -24,12 +24,15 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
-import { DbCompileError, DbRuntimeError, isDuplicateKeyError } from './errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
 import { admitCursor } from './cursor.js';
+import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas } from './pragmas.js';
+import { createMaintenance } from './maintenance.js';
+import { createBackup } from './backup.js';
 import { normalizeProfile } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
@@ -381,24 +384,48 @@ function requireKey(key, collection, docPath) {
  * @returns {DbRuntimeError}
  */
 function wrapWriteError(error, plan, collection, docPath, key) {
-  // an error that already carries a code (a closed store, a refused
-  // document) is the error; only the driver's own failures are wrapped
-  if (typeof error?.code === 'string' && error.code.startsWith('JD')) return error;
-  if (isDuplicateKeyError(error, plan.table, plan.keyColumn)) {
-    return new DbRuntimeError('JD2001',
-      `a document already exists under key '${String(key)}'`,
-      { docPath, collection, key, cause: error });
-  }
-  return new DbRuntimeError('JD2005',
-    `the database rejected the operation: ${error?.message ?? String(error)}`,
-    key === undefined
-      ? { docPath, collection, cause: error }
-      : { docPath, collection, key, cause: error });
+  // one classifier for every path: a coded error (a closed store, a
+  // refused document) passes through it untouched
+  return wrapDriverError(error, {
+    docPath, collection, ...(key === undefined ? undefined : { key }),
+    unique: { table: plan.table, column: plan.keyColumn },
+    duplicateReason: `a document already exists under key '${String(key)}'`,
+  });
+}
+
+/**
+ * Run `fn` inside an IMMEDIATE transaction on an otherwise idle
+ * connection — the open path's shape work. A deferred transaction (a
+ * bare savepoint) takes its write lock only when the first write
+ * arrives, and a concurrent commit between the probe and the CREATE
+ * turns that upgrade into the one SQLITE_BUSY the busy handler cannot
+ * retry; taking the write lock first makes the wait an ordinary busy
+ * wait the timeout covers. Exactly the bracket the migration runner
+ * uses; the driver's savepoint machinery is not involved, because at
+ * open nothing else holds the connection.
+ * @param {any} connection
+ * @param {() => any} fn - value-or-promise
+ * @returns {any} value-or-promise
+ */
+function immediately(connection, fn) {
+  const dialect = connection.dialect;
+  const commit = (value) => chain(connection.exec(dialect.tx.commit), () => value);
+  const rollback = (error) => chain(connection.exec(dialect.tx.rollback), () => { throw error; });
+  return chain(connection.exec(dialect.tx.beginImmediate), () => {
+    let out;
+    try {
+      out = fn();
+    }
+    catch (error) {
+      return rollback(error);
+    }
+    return isThenable(out) ? out.then(commit, rollback) : commit(out);
+  });
 }
 
 /**
  * Create or verify every collection's physical shape, inside one
- * transaction.
+ * immediate transaction.
  * @param {any} connection
  * @param {Map<string, any>} collections
  * @param {Map<string, any>} plans
@@ -407,7 +434,9 @@ function wrapWriteError(error, plan, collection, docPath, key) {
 function ensureShape(connection, collections, plans, readOnly) {
   const dialect = connection.dialect;
   const names = [...collections.keys()];
-  return connection.transaction(() => {
+  // a read-only store creates nothing, and cannot take a write lock
+  const bracket = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
+  return bracket(() => {
     const step = (i) => {
       if (i >= names.length) return null;
       const name = names[i];
@@ -423,7 +452,7 @@ function ensureShape(connection, collections, plans, readOnly) {
             }
             const run = (j) => (j >= plan.createSql.length
               ? null
-              : chain(connection.exec(plan.createSql[j]), () => run(j + 1)));
+              : chain(connection.exec(dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
             return chain(run(0), () => step(i + 1));
           }
           return chain(verifyShape(connection, plan, name, collection.docPath),
@@ -449,7 +478,8 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
   if (entityPlans.size === 0) return null;
   const dialect = connection.dialect;
   const names = [...entityPlans.keys()];
-  return connection.transaction(() => {
+  const bracket = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
+  return bracket(() => {
     const step = (i) => {
       if (i >= names.length) return null;
       const name = names[i];
@@ -465,7 +495,7 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
             }
             const run = (j) => (j >= plan.createSql.length
               ? null
-              : chain(connection.exec(plan.createSql[j]), () => run(j + 1)));
+              : chain(connection.exec(dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
             return chain(run(0), () => step(i + 1));
           }
           return chain(verifyShape(connection, plan, name, docPath), () =>
@@ -608,9 +638,12 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     explain: (document, options) => engine.explain(document, options),
     get(key) {
       requireKey(key, collection.name, collection.docPath);
-      return chain(prepared('get', dialect.dml.get(shape)), (statement) =>
+      // a point read meets the same failures a statement of the query
+      // engine does (a corrupt page, a locked file): classified, never raw
+      return attempt(() => chain(prepared('get', dialect.dml.get(shape)), (statement) =>
         chain(statement.get([key]),
-          (row) => (row === undefined ? undefined : JSON.parse(row.doc))));
+          (row) => (row === undefined ? undefined : JSON.parse(row.doc)))),
+      (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
     },
     insert(doc) {
       checkValid(doc);
@@ -800,6 +833,9 @@ function resolveOperators(options) {
  * @param {any} model - A `jaren-model` document (the 0.1 subset)
  * @param {{ driver: any, path?: string, compileSchema?: Function,
  *   busyTimeout?: number, queueTimeout?: number, journalMode?: string,
+ *   synchronous?: string, walAutocheckpoint?: number,
+ *   journalSizeLimit?: number, cacheSize?: number, mmapSize?: number,
+ *   tempStore?: string,
  *   statementCacheBound?: number, profile?: any, operators?: any,
  *   functions?: any, extensions?: any, zoneProvider?: any,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime>,
@@ -810,6 +846,13 @@ function resolveOperators(options) {
  *   such a document (`JQ0003`) rather than answering it in UTC. It
  *   reaches every residual compilation, which is where the calendar
  *   ladder actually walks.
+ *   The connection pragmas — `busyTimeout`, `journalMode`, `synchronous`,
+ *   `walAutocheckpoint`, `journalSizeLimit`, `cacheSize`, `mmapSize`,
+ *   `tempStore` — are a closed, validated set (`pragmas.js`): an option
+ *   naming any other pragma is refused `JD0006`, one the driver or the
+ *   store kind cannot apply `JD0007`, and every value is read back after
+ *   the open sequence and reported on `capabilities.pragmas` — a value
+ *   the engine did not take is `JD0008`, never a silent divergence.
  *   `runtime` is the host's runtime record (`@jarenjs/core/runtime`):
  *   the clock the capture log and the job queue stamp, the identifier
  *   a `uuid` identity and a `default: 'uuid'` allocate, the job queue's
@@ -850,17 +893,43 @@ export function openStore(model, options) {
     return Promise.reject(error);
   }
   const path = options.path ?? ':memory:';
-  const busyTimeout = options.busyTimeout ?? 5000;
-  const journalMode = options.journalMode ?? 'wal';
   const memory = path === ':memory:' || path === '';
   const readOnly = options.readOnly === true;
+  // the connection pragmas are a closed, validated set: a pragma outside
+  // it is JD0006, one this store kind cannot take is JD0007, and a bad
+  // value is API misuse — all settled before the driver opens, so a
+  // refused configuration never acquires a handle
+  let pragmaRequests;
+  try {
+    refuseUnsupportedPragmaKeys(options);
+    pragmaRequests = resolvePragmaRequests(options, { memory, readOnly });
+  }
+  catch (error) {
+    return Promise.reject(error);
+  }
+  const busyTimeout = /** @type {number} */ (pragmaRequests.get('busyTimeout')?.value);
   const storeProfile = options.profile === undefined
     ? null
     : normalizeProfile(options.profile);
 
+  /** A driver failure at or after `driver.open` as the open's own
+   * refusal: `JD0002`, with the classifier's `class`/`retryable` and the
+   * driver's error as `cause`.
+   * @param {any} failure */
+  const openFailure = (failure) => {
+    const classified = classifyDriverError(failure);
+    const wrapped = new DbCompileError('JD0002',
+      `the store could not be opened (${classified.reason}): ${failure?.message ?? String(failure)}`,
+      undefined, failure);
+    wrapped.class = classified.class;
+    wrapped.retryable = classified.retryable;
+    return wrapped;
+  };
+
   return toPromise(chain(
-    options.driver.open(path,
+    attempt(() => options.driver.open(path,
       { timeout: busyTimeout, readOnly, queueTimeout: options.queueTimeout }),
+    (failure) => (isDriverError(failure) ? openFailure(failure) : failure)),
     (opened) => {
       /**
        * The transaction SCOPE that currently owns the driver connection,
@@ -963,6 +1032,8 @@ export function openStore(model, options) {
             opened.registerFunction(name, o, fn),
         session: opened.session === null ? null
           : (/** @type {any} */ table) => opened.session(table),
+        // the online-backup primitives, when the binding has them
+        backup: opened.backup ?? null,
         close: () => opened.close(),
       });
 
@@ -1131,7 +1202,11 @@ export function openStore(model, options) {
        * @param {any} error
        * @returns {Promise<never>}
        */
-      const failClosed = (error) => {
+      const failClosed = (failure) => {
+        // a driver failure inside the open sequence (a locked or corrupt
+        // file, an unopenable path) is the open's refusal, classed; a
+        // coded refusal or API misuse is itself
+        const error = isDriverError(failure) ? openFailure(failure) : failure;
         if (closed) return Promise.reject(error);
         closed = true;
         /** @param {any} closeError */
@@ -1198,16 +1273,19 @@ export function openStore(model, options) {
         && [...plans.values()].some((plan) => plan.generated.some(
           (column) => column.derive !== undefined && column.stored !== true));
 
-      const pragmas = chain(
-        memory
-          ? null
-          : chain(connection.exec(dialect.pragma.busyTimeout(busyTimeout)),
-            // a journal-mode change writes; a read-only store keeps
-            // whatever mode the file already has
-            () => (readOnly ? null : connection.exec(dialect.pragma.journalMode(journalMode)))),
-        // referential integrity is real only when the pragma is ON —
-        // it defaults off, so set it AND verify it per connection
-        () => chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
+      /** The effective connection pragmas, read back after the open
+       * sequence applied them — what the capability report carries.
+       * @type {any} */
+      let effectivePragmas = null;
+      // the closed configuration set, applied in table order and then
+      // read back in full (JD0007 for a pragma this binding cannot
+      // apply, JD0008 for one the engine did not take); then referential
+      // integrity, which is real only when the pragma is ON — it
+      // defaults off, so it is set AND verified per connection. Built
+      // inside `opening` so a synchronous refusal reaches `failClosed`
+      const pragmas = () => chain(configurePragmas(connection, pragmaRequests), (effective) => {
+        effectivePragmas = effective;
+        return chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
           chain(connection.prepare(dialect.introspect.foreignKeysOn()), (statement) =>
             chain(statement.get([]), (row) => {
               if (Number(row?.enabled) !== 1) {
@@ -1215,9 +1293,10 @@ export function openStore(model, options) {
                   'this connection cannot enforce foreign keys (PRAGMA foreign_keys stayed off)');
               }
               return null;
-            }))));
+            })));
+      });
 
-      const opening = () => chain(pragmas, () =>
+      const opening = () => chain(pragmas(), () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, readOnly), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, readOnly), () => {
@@ -1324,7 +1403,14 @@ export function openStore(model, options) {
             retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
             now: runtime.now,
           });
-          const guard = capture === null ? (fn) => fn() : capture.wrap;
+          // the capture scope around a write runs statements of its own
+          // (a session's changeset read, the journal's old-row read, the
+          // log's allocation); a driver failure there is classified as
+          // the write's would be
+          const guard = capture === null
+            ? (fn) => fn()
+            : (fn) => attempt(() => capture.wrap(fn),
+              (error) => wrapDriverError(error, { docPath: '/capture' }));
           if (capture !== null) {
             // capture changes how records are TRANSLATED, never queue
             // cancellation or tracker ownership: the replacement has the
@@ -1524,11 +1610,42 @@ export function openStore(model, options) {
             };
           };
 
+          // the maintenance operations over this connection; the store
+          // gates each call below, exactly as a root write is gated
+          const maintenance = createMaintenance({ connection, readOnly, now: runtime.now });
+          // the online backup over the same connection: its checkpoint
+          // boundary takes the gate, its copy runs off it
+          const backup = createBackup({
+            connection, readOnly, gated, checkpoint: maintenance.checkpoint, random: runtime.random,
+            now: runtime.now,
+          });
+
           const capabilities = Object.freeze({
             ...connection.capabilities,
+            // per-operation availability: the binding's declaration, and
+            // for the two that write the store's read-only flag — `false`
+            // exactly where a call is refused (`JD2077`)
+            maintenance: Object.freeze({ ...maintenance.capabilities, backup: backup.capability }),
+            // where a cancellation takes effect, per lifecycle — the
+            // granularity the driver actually has. `midStatement` is a
+            // filled slot, not an absent one: no shipped SQLite binding
+            // exposes an interrupt, and a driver that grows one flips
+            // exactly this member
+            cancellation: Object.freeze({
+              query: 'row', queue: true, migration: 'step', maintenance: 'statement',
+              backup: 'page', midStatement: false,
+            }),
             validated: options.compileSchema !== undefined,
-            busyTimeoutMs: memory ? null : busyTimeout,
-            journalMode: memory || readOnly ? null : journalMode,
+            // the effective connection configuration, read back after the
+            // open sequence applied it: every pragma of the closed set by
+            // option name, `null` where the binding declares the pragma
+            // absent or the engine answers nothing (a memory database's
+            // `mmapSize`)
+            pragmas: effectivePragmas,
+            // the two long-published members, sourced from that same
+            // read-back — never from the request
+            busyTimeoutMs: effectivePragmas.busyTimeout,
+            journalMode: effectivePragmas.journalMode,
             readOnly,
             profiled: storeProfile !== null,
             // the registered operator vocabulary (Ring 2): the names a
@@ -2075,6 +2192,21 @@ export function openStore(model, options) {
               page: lift((pageOptions) => gated(() => capture.page(pageOptions))),
             }),
             dataVersion: lift(() => gated(() => readDataVersion())),
+            // the maintenance surface: each operation holds the store
+            // gate for its own extent, so a checkpoint can never
+            // interleave an in-flight write; none takes a transaction
+            checkpoint: lift((maintenanceOptions) =>
+              gated(() => maintenance.checkpoint(maintenanceOptions), 'a checkpoint')),
+            integrityCheck: lift((maintenanceOptions) =>
+              gated(() => maintenance.integrityCheck(maintenanceOptions), 'an integrity check')),
+            foreignKeyCheck: lift((maintenanceOptions) =>
+              gated(() => maintenance.foreignKeyCheck(maintenanceOptions), 'a foreign-key check')),
+            optimize: lift((maintenanceOptions) =>
+              gated(() => maintenance.optimize(maintenanceOptions), 'an optimize')),
+            // the online backup: NOT held under the gate for its whole
+            // extent — writers proceed while the copy runs — only its
+            // checkpoint boundary is
+            backupTo: lift((targetPath, backupOptions) => backup.backupTo(targetPath, backupOptions)),
             // The ROOT jobs surface: every finite call takes the store
             // gate, exactly as a root collection write does, so an
             // unrelated enqueue, claim, checkpoint or settlement can
@@ -2104,6 +2236,19 @@ export function openStore(model, options) {
                 });
               },
               createWorker: jobsEngine.createWorker,
+              // administration (JOBS-FORMAT §10): mechanism, never schedule.
+              // `page` borrows the gate per pull like every root cursor;
+              // `cancel` settles under the gate and then waits OUTSIDE it
+              // for a local attempt to wind up — the handler's own
+              // settlement calls take the gate, so waiting inside it
+              // would wait for itself
+              page: (pageOptions) => admitCursor(jobsEngine.page(pageOptions),
+                gated, pageOptions?.signal, 'a root job page pull'),
+              cancel: lift((id, cancelOptions) => chain(
+                gated(() => jobsEngine.cancel(id, cancelOptions), 'a root job cancellation'),
+                (outcome) => chain(jobsEngine.settledLocally(id), () => outcome))),
+              requeue: lift((...args) => gated(() => jobsEngine.requeue(...args), 'a root job requeue')),
+              sweep: lift((...args) => gated(() => jobsEngine.sweep(...args), 'a root job sweep')),
             }),
             /**
              * Close the store. Job workers are asked to stop and given a
@@ -2424,6 +2569,14 @@ export function openStore(model, options) {
               // member is ABSENT rather than a second way to close the
               // raw connection under its own savepoint
               close: override(undefined),
+              // nor does it run maintenance: a checkpoint inside an open
+              // transaction is a no-op the engine answers quietly, and
+              // the other three are store-level operations — ABSENT here
+              checkpoint: override(undefined),
+              integrityCheck: override(undefined),
+              foreignKeyCheck: override(undefined),
+              optimize: override(undefined),
+              backupTo: override(undefined),
             };
             if (entities.size > 0) {
               members.saveChanges = override(lift(() => {
@@ -2672,13 +2825,29 @@ export function openStore(model, options) {
               () => Object.freeze(store)));
         }))));
 
-      let opened_;
-      try {
-        opened_ = opening();
-      }
-      catch (error) {
-        return failClosed(error);
-      }
-      return isThenable(opened_) ? opened_.then((value) => value, failClosed) : opened_;
+      /**
+       * The open sequence, with ONE retry when it fails classed busy: the
+       * race window is another process's shape transaction on a fresh
+       * file, and one retry after it commits is the straggler case the
+       * immediate transaction cannot cover (the journal-mode write itself).
+       * Every step is idempotent, so a second pass re-applies nothing that
+       * matters; a second busy failure propagates classed.
+       * @param {boolean} retry
+       */
+      const attemptOpen = (retry) => {
+        const again = (error) => (retry && isDriverError(error)
+          && classifyDriverError(error).class === 'busy'
+          ? attemptOpen(false)
+          : failClosed(error));
+        let opened_;
+        try {
+          opened_ = opening();
+        }
+        catch (error) {
+          return again(error);
+        }
+        return isThenable(opened_) ? opened_.then((value) => value, again) : opened_;
+      };
+      return attemptOpen(true);
     }));
 }

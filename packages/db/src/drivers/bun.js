@@ -20,6 +20,7 @@
 
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
+import { PRAGMA_NAMES } from '../pragmas.js';
 
 /**
  * Adapt an already-constructed `bun:sqlite` `Database` (or any object
@@ -62,6 +63,9 @@ export function adaptBunDatabase(db, options) {
       userFunctions: false,
       deterministicIndexableFunctions: false,
       aggregateFunctions: false,
+      // the configuration pragmas are the library's, not the binding's:
+      // bun:sqlite applies every one of the closed set
+      pragmas: PRAGMA_NAMES,
     },
   });
 }

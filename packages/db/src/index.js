@@ -11,6 +11,8 @@
 export { openStore, normalizeModel, MODEL_VERSION } from './store.js';
 export { createDialect } from './dialect.js';
 export { sqliteDialect } from './dialects/sqlite.js';
+export { PRAGMA_NAMES } from './pragmas.js';
+export { CHECKPOINT_MODES, MAINTENANCE_OPERATIONS } from './maintenance.js';
 export {
   SQLITE_FLOOR, chain, toPromise, isThenable, compareVersions,
   openConnection, wrapStatement, lazyOpen,
@@ -60,11 +62,13 @@ export {
   createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,
 } from './tracker.js';
 export {
-  planMigration, planModelMigration, migrate, migrationStatus, shapeHash,
+  planMigration, planModelMigration, migrate, migrationStatus, shapeHash, isPerDocumentAssertion,
   migrationChecksum, createModelShape, schemaShapeOf, compareShapeToModel,
   MIGRATION_VERSION, HISTORY_TABLE,
 } from './migrate.js';
-export { DbCompileError, DbRuntimeError, DB_CODES } from './errors.js';
+export {
+  DbCompileError, DbRuntimeError, DB_CODES, classifyDriverError, wrapDriverError, isDriverError,
+} from './errors.js';
 export { classifyLiveQuery, createLiveRegistry, diffRows, LIVE_DEFAULTS } from './live.js';
 export { createSortedWindow, compareCodepoint } from './window.js';
 export {

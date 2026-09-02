@@ -34,7 +34,7 @@
 
 import { semanticKey } from '@jarenjs/core/object';
 import { hashContent } from '@jarenjs/core/string';
-import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
+import { compileJsonQuery, analyzeQuery, JsonQueryRuntimeError } from '@jarenjs/json/query';
 
 /**
  * The SQL identifier for one fragment identity: a short fingerprint of
@@ -61,7 +61,14 @@ const functionNameFor = (identity) => `jaren_p_${hashContent(identity)}`;
  *   external, the determinism check below rejects the fragment, and the
  *   hatch silently never engages.
  * @returns {{ key: string, name: string,
- *   compile: () => (docText: string) => number } | null}
+ *   compile: () => (docText: string, mount?: string) => number } | null}
+ *   - the compiled function takes the row's document text and the
+ *   conjunct's JSON Pointer in the CALLER's document (`/$where`, or
+ *   `/$where/$and/<i>`), which the emitter passes as a literal: an
+ *   engine error raised inside names the wrapper's path (`/$return/…`)
+ *   and is rebased onto that mount, so the native mode and the residual
+ *   report the same location while one registration still serves every
+ *   document that carries the fragment
  */
 export function deterministicFragment(fragment, operators = null, binding = 'it') {
   const analyzeOpts = operators === null
@@ -103,6 +110,7 @@ export function deterministicFragment(fragment, operators = null, binding = 'it'
     // correct, so it does not qualify for the hatch
     return null;
   }
+  const WRAPPER = '/$return';
   return {
     key,
     name: functionNameFor(key),
@@ -111,7 +119,25 @@ export function deterministicFragment(fragment, operators = null, binding = 'it'
       // different name than the analysis would judge one document and
       // run another
       const compiled = compileJsonQuery(wrap(fragment), analyzeOpts);
-      return (docText) => (compiled.ebv(JSON.parse(docText)) ? 1 : 0);
+      // two declared parameters on purpose: node:sqlite registers the
+      // function with the arity `fn.length` reports, and the emitter
+      // always passes the mount beside the document
+      return (docText, mount) => {
+        try {
+          return compiled.ebv(JSON.parse(docText)) ? 1 : 0;
+        }
+        catch (error) {
+          // the engine's own refusal, relocated from the wrapper onto
+          // the caller's document; anything else propagates as it is
+          if (error instanceof JsonQueryRuntimeError && typeof error.docPath === 'string'
+            && error.docPath.startsWith(WRAPPER)) {
+            throw new JsonQueryRuntimeError(error.code, error.reason,
+              (typeof mount === 'string' ? mount : '/$where') + error.docPath.slice(WRAPPER.length),
+              Object.hasOwn(error, 'cause') ? { cause: error.cause } : undefined);
+          }
+          throw error;
+        }
+      };
     },
   };
 }

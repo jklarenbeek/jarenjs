@@ -381,10 +381,11 @@ describe('a dry run writes nothing', () => {
     assert.deepStrictEqual(tablesOf(), ['Thing'], 'no history table on a database that had none');
     assert.strictEqual(Buffer.compare(before, fs.readFileSync(file)), 0);
 
-    // the ONE write a reading command makes is migrationStatus's, and it is the documented one
-    const status = await migrationStatus({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: V1 });
+    // a status read writes nothing either: the history table is probed,
+    // never created, so a database that had none still has none
+    const status = await migrationStatus({ driver: nodeDriver(), path: file }, [applied(migration)]);
     assert.deepStrictEqual(status.pending, ['d1']);
-    assert.deepStrictEqual(tablesOf(), ['Thing', '_jaren_migrations']);
+    assert.deepStrictEqual(tablesOf(), ['Thing'], 'no history table on a database that had none');
 
     // and a dry run over an APPLIED chain reads the history it finds
     await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: V1, model: V2 });

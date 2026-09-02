@@ -32,7 +32,7 @@
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
-import { DbCompileError, DbRuntimeError } from './errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt } from './driver.js';
 import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './cursor.js';
 
@@ -45,6 +45,9 @@ export const CHANGES_TABLE = '_jaren_changes';
  */
 export const CHANGES_STATE_TABLE = '_jaren_changes_state';
 export const DEFAULT_RETENTION = 1000;
+
+/** A driver failure met by the change reader, classified — never raw. */
+const captureFailure = (error) => wrapDriverError(error, { docPath: '/capture' });
 
 //#region the binary changeset parser
 
@@ -681,7 +684,7 @@ export function createCaptureEngine(options) {
       requireLog('changesSince');
       requireCursor(after, 'changesSince');
       return chain(connection.prepare(logStatements.read), (statement) =>
-        chain(statement.all([after]), (rows) => rows.map(recordOf)));
+        chain(attempt(() => statement.all([after]), captureFailure), (rows) => rows.map(recordOf)));
     },
     /** Whether the persisted log exists — what decides whether the
      * bounded reader is offered at all. */
@@ -724,7 +727,7 @@ export function createCaptureEngine(options) {
   function readBounds() {
     requireLog('changes.bounds');
     return chain(connection.prepare(logStatements.bounds), (statement) =>
-      chain(statement.get([]), (row) => ({
+      chain(attempt(() => statement.get([]), captureFailure), (row) => ({
         earliestAvailable: row?.lo === null || row?.lo === undefined ? null : Number(row.lo),
         highWatermark: Number(row?.hi ?? 0),
       })));
@@ -763,6 +766,7 @@ export function createCaptureEngine(options) {
     const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal, deadline, now: clock,
       open: () => chain(connection.prepare(logStatements.readPage),
         (statement) => statement.iterate([after, limit + 1])),
+      wrap: captureFailure,
       items: (row) => [{ record: recordOf(row), bytes: utf8Length(String(row.patch)) }] });
     return drainPage(cursor, {
       limit, maxBytes, after,

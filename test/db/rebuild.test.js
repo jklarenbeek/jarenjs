@@ -257,8 +257,7 @@ describe('migrationStatus closes its connection on failure', () => {
       const edited = structuredClone(migration);
       edited.steps.push({ kind: 'sql', sql: 'SELECT 1', note: 'sneaky edit' });
       await assert.rejects(
-        () => migrationStatus({ driver: nodeDriver(), path: dbPath }, [edited],
-          { baseline: FROM }),
+        () => migrationStatus({ driver: nodeDriver(), path: dbPath }, [edited]),
         (error) => /** @type {any} */ (error).code === 'JD0022');
     }
     finally {

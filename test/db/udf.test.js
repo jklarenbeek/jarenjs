@@ -63,7 +63,10 @@ describe('the hatch on a capable driver', () => {
       'the hatch made the whole plan native');
     assert.strictEqual(explanation.udfs.length, 1);
     assert.match(explanation.udfs[0], /^jaren_p_/);
-    assert.match(explanation.sql, new RegExp(`${explanation.udfs[0]}\\(json\\("doc"\\)\\)`));
+    // the call carries the conjunct's place in the document as a literal,
+    // the mount an engine error inside the function is reported at
+    assert.match(explanation.sql,
+      new RegExp(`${explanation.udfs[0]}\\(json\\("doc"\\), '/\\$where/\\$and/1'\\)`));
     // and strict mode ACCEPTS it — nothing runs outside the database
     const strict = await Promise.resolve(users.execute(MATCH_DOC, { strict: true }));
     assert.deepStrictEqual(strict, expected);

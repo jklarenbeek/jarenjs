@@ -34,8 +34,8 @@
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery } from '@jarenjs/json/query';
 
-import { DbCompileError, DbRuntimeError } from './errors.js';
-import { chain } from './driver.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } from './errors.js';
+import { chain, attempt, isThenable } from './driver.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
 } from './plan.js';
@@ -44,11 +44,12 @@ import { selectPlan, conjoin } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
 } from './residual.js';
-import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './cursor.js';
+import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
 import { deepFreeze } from '@jarenjs/core/object';
 import { derivedSlotValue, probeBox, probeVector, columnScore } from './derive.js';
 import { cutCandidates, identityBatches } from './knn.js';
 import { deterministicFragment, registerFragment } from './udf.js';
+import { refuseCancelled } from './cancellation.js';
 import {
   normalizeProfile, translateProfilePredicate,
   applyMandatoryPredicate, applyRowBound, SAFE_PROFILE,
@@ -174,20 +175,38 @@ function externalSlotKinds(slots, rank) {
  * @param {() => number} now - the store's clock
  */
 function requireCallable(options, now) {
-  const signal = options?.signal;
-  if (signal?.aborted) {
-    throw new DbRuntimeError('JD2072',
-      'the call was aborted before it ran: no statement was issued', { cause: signal.reason });
-  }
-  const deadline = options?.deadline;
-  if (deadline === undefined) return;
-  if (typeof deadline !== 'number' || !Number.isFinite(deadline))
-    throw new TypeError('deadline is an epoch-millisecond number');
-  if (now() > deadline) {
-    throw new DbRuntimeError('JD2075',
-      `the deadline passed before the call ran (${new Date(deadline).toISOString()}); no statement was issued`);
-  }
+  refuseCancelled(options, now, { abortCode: 'JD2072', aborted: 'it ran', passed: 'the call ran' });
 }
+
+/**
+ * Run a call whose driver failure classes as an int64 overflow through
+ * `fallback` instead — the pushed aggregate's coded residual — and let
+ * every other failure propagate. Value-or-promise aware.
+ * @param {() => any} call
+ * @param {() => any} fallback
+ * @returns {any}
+ */
+function recoverOverflow(call, fallback) {
+  let out;
+  try {
+    out = call();
+  }
+  catch (error) {
+    if (classifyDriverError(error).class === 'overflow') return fallback();
+    throw error;
+  }
+  return isThenable(out)
+    ? out.then(undefined, (error) => (classifyDriverError(error).class === 'overflow'
+      ? fallback()
+      : Promise.reject(error)))
+    : out;
+}
+
+/** The boundary every engine member answers through: a driver failure
+ * arrives classified, anything else as it is.
+ * @param {(...args: any[]) => any} fn
+ * @param {(error: any) => Error} wrap */
+const bounded = (fn, wrap) => (...args) => attempt(() => fn(...args), wrap);
 
 /**
  * The budget provenance `explain()` carries (D7): which profile applied
@@ -300,6 +319,29 @@ export function createQueryEngine(context) {
   const bindStats = { diverted: 0 };
   /** The by-identities fetch statements, one per batch size. */
   const identityFetch = new Map();
+
+  /** Every driver failure this engine meets, classified under the
+   * collection it belongs to. */
+  const driverWrap = (/** @type {any} */ error) =>
+    wrapDriverError(error, { docPath: collection.docPath, collection: collection.name });
+  /**
+   * The coded residual for a pushed aggregate that overflowed int64:
+   * the engine answers the caller's document over the fetched rows —
+   * exactly what an unpushed run always answered — and the entry
+   * remembers that it did, for `explain()`. The fetch is a full scan,
+   * so a profile that refuses one refuses here too.
+   * @param {any} entry @param {any} externals @param {any} document
+   */
+  const overflowResidual = (entry, externals, document) => {
+    if (entry.needsScanCheck) {
+      throw profileRefusal(`the profile refuses a full-table scan of '${collection.name}' `
+        + '(the pushed aggregate overflowed int64 and the engine would read the whole collection)');
+    }
+    entry.overflowRuns = (entry.overflowRuns ?? 0) + 1;
+    return chain(fullScanOf(entry), (statement) =>
+      chain(statement.all(fullScanParams(entry)), (rows) =>
+        setResidualOf(entry, document)(rowsToDocs(checkRowBound(entry, rows)), externals)));
+  };
 
   const udfHook = connection.capabilities.userFunctions
     ? (/** @type {any} */ fragment, /** @type {string} */ binding) => {
@@ -792,11 +834,11 @@ export function createQueryEngine(context) {
       }
       return chain(statementOf(entry), (statement) => {
         if (entry.plan.aggregate !== null) {
-          return chain(statement.get(bindParams(entry, externals)), (row) => {
+          return recoverOverflow(() => chain(statement.get(bindParams(entry, externals)), (row) => {
             const value = aggregateResult(entry, row);
             countSeries(entry, 1, null, value === undefined ? 0 : 1);
             return wrapValue(entry, value);
-          });
+          }), () => overflowResidual(entry, externals, document));
         }
         if (entry.plan.bucket !== null) {
           return chain(statement.all(bindParams(entry, externals)), (rows) => {
@@ -852,7 +894,7 @@ export function createQueryEngine(context) {
     if (entry.plan.bucket !== null) {
       return buffered('$groupby', 'a native bucket answers its groups whole: the groups are the result');
     }
-    return { streaming: 'row', barrier: null };
+    return rowClassOf(connection);
   };
 
   /**
@@ -879,13 +921,13 @@ export function createQueryEngine(context) {
     if (entry.planned.wrapped === true) {
       // a chain's element window is ONE item — the array — whatever
       // the plan mode; the cursor hands it over as `execute` answers it
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(execute(document, options), (value) => [value]) });
     }
     const diverted = mustDivert(entry, externals);
     if (diverted || entry.planned.mode === 'set' || entry.planned.mode === 'knn') {
       // the barrier: materialize candidates, pack the result items
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () =>
           chain(candidatesOf(entry, externals, diverted), (docs) => {
             const items = packedResidualOf(entry, document)(docs, externals);
@@ -895,7 +937,7 @@ export function createQueryEngine(context) {
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           chain(statement.all(bindParams(entry, externals)), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
@@ -908,20 +950,22 @@ export function createQueryEngine(context) {
           }))) });
     }
     if (entry.plan.aggregate !== null) {
-      // a native aggregate yields exactly one item
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      // a native aggregate yields exactly one item; an int64 overflow
+      // answers the engine's item instead
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
-          chain(statement.get(bindParams(entry, externals)), (row) => {
+          recoverOverflow(() => chain(statement.get(bindParams(entry, externals)), (row) => {
             const value = aggregateResult(entry, row);
             countSeries(entry, 1, null, value === undefined ? 0 : 1);
             return value === undefined ? [] : [value];
-          }))) });
+          }), () => chain(overflowResidual(entry, externals, document), (answer) =>
+            (answer === undefined ? [] : Array.isArray(answer) ? answer : [answer]))))) });
     }
     let pulledRows = 0;
     const tally = seriesTally(entry);
     // a cursor iterates a statement of its OWN: two cursors over one
     // cached statement invalidate each other's iterator at the driver
-    return createCursor({ ...classified, signal, deadline, now: state.now,
+    return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
       open: () => chain(guardScan(entry), () => chain(connection.prepare(entry.sql),
         (statement) => statement.iterate(bindParams(entry, externals)))),
       items: (row) => {
@@ -1068,6 +1112,13 @@ export function createQueryEngine(context) {
           ? reasons.map((r) => ({ operator: r.construct, reason: r.reason }))
           : [],
         udfs: [...entry.planned.udfs],
+        // a pushed aggregate that overflowed int64 at run time: the
+        // engine answered the document instead, and says so here
+        fallback: entry.overflowRuns === undefined ? null : {
+          construct: 'overflow',
+          runs: entry.overflowRuns,
+          reason: 'the pushed aggregate overflowed int64; the engine answered the document over the fetched rows',
+        },
         // the temporal record: what the document asked, which declared
         // index the fetch seeks through, and which kernel finished it.
         // The counts are the LAST ACTUAL execution's — `null` before
@@ -1081,7 +1132,7 @@ export function createQueryEngine(context) {
       })));
   };
 
-  return { execute, query, explain, shape,
+  return { execute: bounded(execute, driverWrap), query, explain: bounded(explain, driverWrap), shape,
     stats: () => ({ knn: { ...knnStats }, series: { ...seriesStats }, bind: { ...bindStats } }) };
 }
 
@@ -1195,6 +1246,9 @@ export function createEntityQueryEngine(context) {
   const operators = state.operators ?? null;
   const analyzeOpts = operators ?? undefined;
   const zoneProvider = state.zoneProvider ?? null;
+  /** Every driver failure this engine meets, classified under the
+   * entity root. */
+  const driverWrap = (/** @type {any} */ error) => wrapDriverError(error, { docPath: '/entities' });
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const physicalOf = (name) => ({ table: mapping.entities[name].table });
@@ -1495,7 +1549,7 @@ export function createEntityQueryEngine(context) {
     }
     // `null` externals is the abstract question: the plan as planned
     const diverted = externals === null ? null : divertReason(entry, externals);
-    return diverted === null ? { streaming: 'row', barrier: null } : buffered(diverted);
+    return diverted === null ? rowClassOf(connection) : buffered(diverted);
   };
 
   /**
@@ -1536,11 +1590,11 @@ export function createEntityQueryEngine(context) {
     const signal = options?.signal;
     const deadline = options?.deadline;
     if (entry.planned.wrapped === true) {
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(execute(document, options), (value) => [value]) });
     }
     if (classified.barrier !== null) {
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(fetchRoot(entry), (root) =>
           packedResidualOf(entry, document)(root, externals).map(each)) });
     }
@@ -1553,7 +1607,7 @@ export function createEntityQueryEngine(context) {
       return entry.statement;
     };
     if (entry.planned.plan.aggregate === 'count') {
-      return createCursor({ ...classified, signal, deadline, now: state.now,
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
           chain(statement.get(params), (row) => [row?.value ?? 0]))) });
     }
@@ -1562,7 +1616,7 @@ export function createEntityQueryEngine(context) {
     let pulledRows = 0;
     // a statement of its own per cursor: two live iterators over one
     // cached statement invalidate each other at the driver
-    return createCursor({ ...classified, signal, deadline, now: state.now,
+    return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
       open: () => chain(guardEntityScan(entry), () => chain(connection.prepare(entry.sql),
         (statement) => statement.iterate(params))),
       items: (row) => {
@@ -1612,7 +1666,7 @@ export function createEntityQueryEngine(context) {
       })));
   };
 
-  return { execute, query, explain, relations };
+  return { execute: bounded(execute, driverWrap), query, explain: bounded(explain, driverWrap), relations };
 }
 
 /**
@@ -1633,6 +1687,9 @@ export function createEntityQueryEngine(context) {
 export function createLoadEngine(context, entityName) {
   const { connection, entities, mapping, state } = context;
   const storeProfile = context.profile ?? null;
+  /** Every driver failure this loader meets, classified under its entity. */
+  const driverWrap = (/** @type {any} */ error) =>
+    wrapDriverError(error, { docPath: '/entities', collection: entityName });
   // the entity core's column encoding (booleans to integers, an epoch
   // column's string to its epoch): what a continuation's DOCUMENT values
   // bind as when the keyset compares them with the stored columns
@@ -2184,7 +2241,7 @@ export function createLoadEngine(context, entityName) {
     // prepared by the first pull, never at construction (MODEL-FORMAT
     // §5.1), and a statement of this cursor's own: two live iterators
     // over one cached statement invalidate each other at the driver
-    return createCursor({ streaming: 'row', barrier: null, signal, deadline, now: state.now,
+    return createCursor({ ...rowClassOf(connection), signal, deadline, now: state.now, wrap: driverWrap,
       open: () => chain(connection.prepare(entry.sql), (statement) => statement.iterate(params)),
       items: (row) => [each(checkRoot(entry, parseGraphRow(entry.tree, row, '__doc'), ++pulled))] });
   };
@@ -2205,7 +2262,7 @@ export function createLoadEngine(context, entityName) {
       : Object.fromEntries(entry.keyColumns.map((column) => [column, doc[column]])),
   });
 
-  return {
+  const surface = {
     treeFor(spec) {
       return buildLoad(spec).tree;
     },
@@ -2314,14 +2371,21 @@ export function createLoadEngine(context, entityName) {
         // tie-breaker is the row identity
         order: entry.identity,
         snapshot: entry.snapshot,
-        // a graph load pulls one root row per statement row, always
-        streaming: 'row',
-        barrier: null,
+        // a graph load pulls one root row per statement row — where the
+        // binding can hand rows over one at a time
+        ...rowClassOf(connection),
         // the profile that applied and every bound it imposed (D7)
         budget: budgetOf(entry.profile, profileSourceOf(options), connection.capabilities),
       };
     },
   };
+  // the loader's members answer through the boundary: a driver failure
+  // arrives classified, a coded refusal as it is; the cursors carry the
+  // same wrap
+  return { ...surface,
+    load: bounded(surface.load, driverWrap),
+    page: bounded(surface.page, driverWrap),
+    explainLoad: bounded(surface.explainLoad, driverWrap) };
 }
 
 /**

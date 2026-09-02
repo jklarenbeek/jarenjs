@@ -142,6 +142,7 @@ function corpusOf(dialect) {
   out['plan.virtualFill'] = virtual.fillSql;
   virtual.triggers.forEach((trigger, i) => { out[`plan.trigger[${i}]`] = trigger.sql; });
 
+  out['ddl.idempotent'] = dialect.ddl.idempotent(planned.createSql[0]);
   out['ddl.addGeneratedColumn'] = dialect.ddl
     .addGeneratedColumn({ table: 'rows', docColumn: 'doc', column });
   out['ddl.addColumn'] = dialect.ddl
@@ -208,10 +209,11 @@ function corpusOf(dialect) {
   out['explainQuery'] = dialect.explainQuery('SELECT 1');
   for (const [key, value] of Object.entries(dialect.tx))
     out[`tx.${key}`] = typeof value === 'function' ? value('sp') : value;
-  /** Each pragma with an argument it accepts; `journalMode` validates its word. */
-  const pragmaArg = { busyTimeout: 5000, journalMode: 'wal', foreignKeys: true };
+  /** Each pragma with the arguments it accepts; `set` validates its word. */
+  const pragmaArgs = { set: ['journal_mode', 'wal'], foreignKeys: [true], foreignKeyCheck: [],
+    walCheckpoint: ['passive'], integrityCheck: [5], optimize: [] };
   for (const [key, value] of Object.entries(dialect.pragma))
-    out[`pragma.${key}`] = String(value(/** @type {any} */ (pragmaArg)[key]));
+    out[`pragma.${key}`] = String(value(.../** @type {any} */ (pragmaArgs)[key]));
   for (const [key, value] of Object.entries(dialect.introspect))
     out[`introspect.${key}`] = value('rows');
 

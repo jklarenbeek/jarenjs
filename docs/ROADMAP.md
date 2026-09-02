@@ -580,28 +580,6 @@ what each does is its own documentation's job
   and the diversion reason would have to name which widths were on
   offer. A single-width collection, which is what an embedding model
   gives you, never meets it.
-- [ ] **Two processes opening one fresh file race on `openStore`.**
-  Reproduction: two child processes released simultaneously on a path
-  that does not exist yet. `PRAGMA journal_mode = wal` runs right after
-  open, then the shape is created as `tableExists` + `CREATE` inside a
-  DEFERRED savepoint, so the read→write upgrade gets `SQLITE_BUSY`
-  without the busy handler: 3 of 12 rounds failed with a raw
-  `database is locked` (at the pragma or at the CREATE) despite the 5 s
-  busy timeout, the other process succeeding. The fix is known and
-  unbuilt: shape creation under `BEGIN IMMEDIATE` (the dialect already
-  spells it), `CREATE … IF NOT EXISTS`, and open-time driver errors
-  wrapped as `JD0002`.
-- [ ] **A UDF-hatch error names the wrapper's path.** The hatch compiles
-  a fragment as `{ $let: { it: '$' }, $return: body }`, so `$match` over
-  a number raises `JQ2001 … at /$return/$match/0` natively and
-  `/$where/$match/0` in the residual — the same error with two
-  `path`s. Rebase the path onto the document's.
-- [ ] **`$sum` over an INTEGER column past int64.** Two documents with
-  `n: 2**62` make the pushed `SUM` a raw `integer overflow` from SQLite
-  where the engine answers `9223372036854776000` (a double). Either the
-  planner refuses `$sum` over integer paths it cannot bound, or the
-  overflow becomes a coded residual — today it is the one raw driver
-  error left on the query path.
 - [ ] **A profile member allow-list.** The safe execution profile
   applies one allow-list of names (`collections`, over collections and
   entity roots alike), operators, externals and collations to every
@@ -611,16 +589,6 @@ what each does is its own documentation's job
   analysis walk on every engine that also accounts for what a residual
   may read over a whole fetched document, and that walk is its own
   order.
-- [ ] **A `bun:sqlite` cursor reports `streaming: 'row'` while it
-  buffers.** The Bun adapter deliberately leaves `statement.iterate`
-  absent, so the driver layer composes an iterator over `statement.all()`
-  — correct, and the cursor still classifies itself `streaming: 'row',
-  barrier: null` and `explain()` says the same, while the first pull
-  materialises the whole result and holds the store gate for it. The
-  honest report is a driver capability the classification reads: a
-  binding without a lazy iterator yields `streaming: 'buffered'` with a
-  `{ construct: 'driver', reason }` barrier. Found by reading the code;
-  not run, no Bun build on the authoring host.
 - [ ] **The synchronous entity set has no cursor.** A cursor is
   asynchronous by contract (`next()` answers a promise); `from(
   store.sync.entity('X'))` pushes one whole window as it always did.
@@ -686,13 +654,39 @@ what each does is its own documentation's job
   Pages cannot set COOP/COEP; a host that can set them may use the
   faster SharedArrayBuffer VFS family. Wiring that path (and an
   IndexedDB-backed fallback for hosts with neither) is unwritten.
-- [ ] **No job administration surface.** The queue can enqueue, claim,
-  settle and recover, and the fence makes settlement exactly-once
-  against the store (JOBS-FORMAT §3) — but there is no `page`, no
-  `cancel`, no `requeue`, no retention sweep and no priority class. A
-  cancellation surface in particular has a fence waiting for it: D1's
-  settling calls list a cancellation acknowledgement that has nothing to
-  acknowledge yet.
+- [ ] **A worker-hosted Node driver and its pool.** Every shipped
+  driver runs SQLite on the caller's thread: one synchronous
+  `DatabaseSync` per open, so a slow statement holds the event loop of
+  the process that issued it. The website already hosts the wasm build
+  in a dedicated worker with a five-stage named-failure boot; Node has
+  no equivalent. What is wanted is a `nodeWorkerDriver()` that is a
+  DRIVER — `{ name, dialect, open }` returning the same Connection
+  contract, never a second store API — over a worker thread: a
+  transport that keeps transaction affinity (one worker connection per
+  open transaction), prepared-statement identity across the boundary,
+  row cursors with credits rather than whole results, and driver-
+  generation errors (a restarted worker refuses the statements of the
+  generation before it, classed and retryable). Before it, a faulting
+  and pausing test Driver, so generation-specific failure across the
+  boundary is tested rather than hoped for. Then the pool: read-only
+  WAL workers beside one writer, bounded queues, a graceful close, and
+  queue-depth/latency metrics. Definition of done: a store over
+  `nodeWorkerDriver()` passes the SAME store test suite as the
+  in-process driver; a slow statement on a worker-backed store does
+  not raise event-loop latency on the calling thread beyond a stated,
+  measured, published bound; and `npm run test:deps` proves no
+  `db → contract` edge (the transport lives in `@jarenjs/db`). It
+  builds on the cancellation surface (`capabilities.cancellation`) and
+  the driver-failure classes the store now has.
+- [ ] **A cross-document migration assertion still reads the whole
+  collection.** A per-document assertion (a FLWOR over `$[*]` whose
+  body reads only its binding) walks the collection in batches and
+  fails fast; an assertion that reads the root — `$count: '$[*]'`, a
+  `$let`, a `$distinct`, a nested `$for` — must see every document at
+  once and is read into one array, stated as the cost it is
+  (MIGRATION-FORMAT §6). Removing that cost means evaluating such an
+  assertion in SQL (an aggregate the planner pushes) or as a streaming
+  fold; either is a promotion with its own oracle proof.
 - [ ] **A resumed run checks its workflow, not its tasks.** A DAG job's
   checkpoints carry the workflow document's revision and a hash of the
   input, and a resume that disagrees with either is `JD2069`

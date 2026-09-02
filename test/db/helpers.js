@@ -83,7 +83,12 @@ export function asyncWasmHandle() {
  * here. The binding still EXPOSES `registerFunction`, so the branch
  * under test is the declaration and nothing else.
  * @param {{ userFunctions?: boolean,
- *   deterministicIndexableFunctions?: boolean, sessions?: boolean }} declares
+ *   deterministicIndexableFunctions?: boolean, sessions?: boolean,
+ *   pragmas?: readonly string[],
+ *   maintenance?: Record<string, boolean> }} declares - `pragmas` narrows
+ *   the configurable-pragma declaration (the whole closed set when
+ *   absent); `maintenance` narrows the maintenance operations (all four
+ *   when absent)
  * @returns {any}
  */
 export function declaringWasmHandle(declares) {
@@ -250,14 +255,17 @@ export function fullDoubleDialect(createDialect) {
       rollbackTo: (n) => `BACKTO ${n}`,
     },
     pragma: {
-      busyTimeout: (ms) => `SET busy ${ms}`,
-      journalMode: (mode) => `SET journal ${mode}`,
+      set: (name, value) => `SET ${name} ${value}`,
       foreignKeys: (on) => `SET fk ${on ? 'on' : 'off'}`,
       foreignKeyCheck: () => 'CHECK fk',
+      walCheckpoint: (mode) => `FLUSH ${mode}`,
+      integrityCheck: (limit) => `CHECK integrity ${limit ?? 'all'}`,
+      optimize: () => 'TUNE',
     },
     introspect: {
       version: () => 'GET version',
       compileOptions: () => 'GET options',
+      pragma: (name) => `GET pragma ${name}`,
       tableExists: () => 'GET table @p1',
       columns: (t) => `GET columns ${t}`,
       indexes: (t) => `GET indexes ${t}`,

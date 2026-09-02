@@ -20,7 +20,7 @@ import {
 } from '@jarenjs/core/dates/rfc3339';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 
-import { DbRuntimeError, isDuplicateKeyError } from './errors.js';
+import { DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt } from './driver.js';
 
 /**
@@ -293,20 +293,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       { docPath, collection: entity.name });
   };
 
-  const wrapWrite = (error, key) => {
-    const code = /** @type {any} */ (error)?.code;
-    if (typeof code === 'string' && code.startsWith('JD')) return error;
-    if (keys.length === 1 && isDuplicateKeyError(error, table, keys[0])) {
-      return new DbRuntimeError('JD2001',
-        `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
-        { docPath, collection: entity.name, key, cause: error });
-    }
-    return new DbRuntimeError('JD2005',
-      `the database rejected the operation: ${/** @type {any} */ (error)?.message ?? String(error)}`,
-      key === undefined
-        ? { docPath, collection: entity.name, cause: error }
-        : { docPath, collection: entity.name, key, cause: error });
-  };
+  const wrapWrite = (error, key) => wrapDriverError(error, {
+    docPath, collection: entity.name, ...(key === undefined ? undefined : { key }),
+    ...(keys.length === 1 ? { unique: { table, column: keys[0] } } : undefined),
+    duplicateReason: `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
+  });
 
   const columnByName = new Map(scalarColumns.map((column) => [column.name, column]));
   /** Encode ONE column assignment the way {@link split} would. */
@@ -365,8 +356,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     get(key) {
       const parts = normalizeKeyArg(key);
       const sql = `SELECT ${selectColumns} FROM ${q(table)} WHERE ${keyWhere(0)}`;
-      return chain(prepared('get', sql), (statement) =>
-        chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row))));
+      // classified like every read of the query engines, never raw
+      return attempt(() => chain(prepared('get', sql), (statement) =>
+        chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
+      (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
     },
     update(key, changes) {
       const parts = normalizeKeyArg(key);

@@ -780,3 +780,45 @@ studio's throwaway-store operation, holds the wasm build to the
 JavaScript engine's recorded answers in every one of those engines,
 OPFS or not, because an entry seeds its own store and needs execution,
 not persistence.
+
+## Operating the store (`src/pragmas.js`, `src/maintenance.js`, `src/backup.js`, `src/cancellation.js`, `src/errors.js`)
+
+The operability surface is five small modules and one rule each,
+consumed by `src/store.js` and never reached by a query:
+
+- `src/pragmas.js` — the closed table of configurable connection
+  pragmas (option name, SQL spelling, validator, read-back mapping,
+  default, the two store-kind flags). The open sequence applies the
+  requests in table order and reads every declared pragma back; an
+  explicit request the engine did not take refuses the open, a default
+  it could not take is reported as read. The dialect spells exactly one
+  set statement and one read statement for it.
+- `src/maintenance.js` — `checkpoint`, `integrityCheck`,
+  `foreignKeyCheck`, `optimize` over a connection, answering the engine's
+  own row as typed data; availability per operation is the binding's
+  declaration and, for the two that write, the store's read-only flag —
+  refused by code exactly where the report says `false`.
+- `src/backup.js` — the online backup over the driver's primitive triple
+  (`copy`, `rename`, `remove`; the Node binding's), written to a
+  temporary sibling and renamed only at verified completion, cleaned up
+  on every other branch. The root closure imports no builtin: the
+  primitives are the driver's.
+- `src/cancellation.js` — the one check every lifecycle runs between its
+  units of work (a statement, a row, a step, a batch, a page), on the
+  clock the caller was given; each lifecycle owns its abort code, the
+  deadline code is one. `capabilities.cancellation` states the
+  granularity per lifecycle and that nothing interrupts mid-statement.
+- `src/errors.js` — `classifyDriverError`, the one table every path
+  consults (writes, the query engines through their boundary and the
+  cursor's `wrap`, maintenance and backup under their own code, the open
+  sequence): class, retryability, code. The query path's only special
+  case is the int64 overflow of a pushed aggregate, answered by the
+  engine as a coded residual.
+
+The open path itself creates or verifies the shape inside an IMMEDIATE
+transaction with idempotent DDL (one dialect spelling, applied on the
+open path only) and retries once on a classed busy failure, so two
+processes creating one fresh file never meet the deferred-upgrade
+`SQLITE_BUSY` the busy handler cannot retry. The job queue's
+administration (`page`, `cancel`, `requeue`, `sweep`) lives in
+`src/jobs.js` beside the fence it authorises through (JOBS-FORMAT §10).

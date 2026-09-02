@@ -70,10 +70,14 @@
  *     rollback: string,
  *     savepoint: (n: string) => string, release: (n: string) => string,
  *     rollbackTo: (n: string) => string },
- *   pragma: { busyTimeout: (ms: number) => string,
- *     journalMode: (mode: string) => string,
- *     foreignKeys: (on: boolean) => string },
+ *   pragma: { set: (name: string, value: number | string) => string,
+ *     foreignKeys: (on: boolean) => string,
+ *     foreignKeyCheck: () => string,
+ *     walCheckpoint: (mode: string) => string,
+ *     integrityCheck: (limit?: number) => string,
+ *     optimize: () => string },
  *   introspect: { version: () => string, compileOptions: () => string,
+ *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
  *     indexes: (table: string) => string,
  *     indexColumns: (index: string) => string,
@@ -107,6 +111,21 @@ export function createDialect(spec) {
   };
 
   const ddl = Object.freeze({
+    /**
+     * The idempotent form of a CREATE statement this dialect emitted —
+     * what the open path runs: two processes racing to create one fresh
+     * file both probe "absent", and the loser's CREATE must be a no-op
+     * rather than a failure. Only the open path takes it; a migration's
+     * planned DDL keeps its exact text. Shape verification still runs on
+     * the row the probe found, so an existing table is never silently
+     * accepted.
+     * @param {string} sql - a statement one of the builders below emitted
+     * @returns {string}
+     */
+    idempotent(sql) {
+      return sql.replace(/^CREATE (TABLE|UNIQUE INDEX|INDEX|VIRTUAL TABLE|TRIGGER) /,
+        'CREATE $1 IF NOT EXISTS ');
+    },
     /**
      * One collection's physical table: a key column, the JSON document
      * column, and a virtual generated column per indexed path.

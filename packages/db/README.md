@@ -862,6 +862,93 @@ writes made by another connection (the coarse `dataVersion()` signal
 is the honest mitigation, not a pretend fine-grained one). Building
 replication on these primitives is a roadmap item, not a hint.
 
+## Operating a store — configuration, maintenance, backup, cancellation, the queue
+
+Everything an operator does to a production SQLite database is a typed
+operation with a capability, a cancellation and an error class; none of
+it needs raw SQL or the raw handle. The rules, in one place:
+
+- **Configuration is a closed, validated set, read back.** Eight
+  connection pragmas are `openStore` options — `busyTimeout`,
+  `journalMode`, `synchronous`, `walAutocheckpoint`, `journalSizeLimit`,
+  `cacheSize`, `mmapSize`, `tempStore` — validated before anything
+  reaches SQL. An option naming any other pragma is refused (`JD0006`),
+  one the driver or the store kind cannot apply is refused (`JD0007`),
+  and after the open every declared pragma is read back:
+  `store.capabilities.pragmas` carries the values the connection
+  actually has, and an explicitly requested value the engine did not
+  take refuses the open (`JD0008`) rather than leaving a store that
+  believes a configuration it does not have.
+- **Maintenance is four typed operations under the store gate** —
+  `checkpoint({ mode })`, `integrityCheck({ limit })`, `foreignKeyCheck()`,
+  `optimize()` — each answering SQLite's own row as typed data, refused
+  by code (`JD2077`) exactly where `capabilities.maintenance` says
+  `false` (a read-only store for the two that write; a binding that
+  declares one absent). Corruption an integrity check finds is its
+  RESULT, never a throw.
+- **A backup is published whole or not at all.** `backupTo(path)` copies
+  a live store while writers proceed, into a temporary sibling in the
+  same directory, and renames it onto the target only once the platform
+  reported the copy complete; a cancelled (`JD2079`) or failed copy
+  leaves neither the target nor the temporary file. Where it goes, how
+  it is named, rotated or encrypted is the host's.
+- **Cancellation is honoured where the driver can honour it, and the
+  report says where.** `capabilities.cancellation` states the
+  granularity per lifecycle — `query: 'row'`, `queue: true`, `migration:
+  'step'`, `maintenance: 'statement'`, `backup: 'page'`, `midStatement:
+  false` — and every operation with more than one unit of work takes
+  `{ signal, deadline }` on the store's injected clock. A cursor over a
+  binding with no lazy iterator says `streaming: 'buffered'` with a
+  driver barrier instead of a row stream it cannot deliver.
+- **One classification of driver failures.** A locked, full, read-only,
+  corrupt or unopenable database arrives under one code with a stable
+  `class` and a `retryable` verdict from every path alike (`JD2005`
+  busy, `JD2082`–`JD2085`; `JD0002` at open), the driver's error as
+  `cause`; a pushed integer aggregate past int64 is answered by the
+  engine as the coded residual it always was elsewhere.
+- **The queue is administrable, never scheduled.** `store.jobs.page`,
+  `cancel` (through the lease fence), `requeue` and `sweep` (with a
+  required horizon) are mechanisms; WHEN to sweep or cancel is the
+  host's call, and priority classes stay a documented non-goal.
+
+```js
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const store = await openStore(model, {
+  driver: nodeDriver(), path: 'app.db', jobs: true,
+  synchronous: 'normal', cacheSize: -8000, walAutocheckpoint: 250,
+});
+// the values the CONNECTION has, read back — not the request
+const { journalMode, synchronous } = store.capabilities.pragmas;
+
+const checkpoint = await store.checkpoint({ mode: 'truncate' });   // { busy, logFrames, checkpointedFrames }
+const health = await store.integrityCheck();                        // { ok, problems }
+const copy = await store.backupTo('backups/app.db', {
+  rate: 64,
+  onProgress: ({ totalPages, remainingPages }) => report(totalPages - remainingPages, totalPages),
+  signal: controller.signal,                                        // JD2079 between pages, nothing left behind
+});
+
+for await (const job of store.jobs.page({ state: 'failed', kind: 'mail' })) await store.jobs.requeue(job.id);
+await store.jobs.sweep({ settledBefore: Date.now() - 7 * 24 * 3600 * 1000 });
+
+try {
+  await store.collection('users').insert(user);
+}
+catch (error) {
+  if (error.class === 'busy' && error.retryable) scheduleRetry(); // one class, whichever path met it
+  else throw error;
+}
+```
+
+The normative contract is [MODEL-FORMAT](docs/MODEL-FORMAT.md) §4 (the
+pragma set, the maintenance and backup rules, the cancellation report)
+and §7 (the codes and the classifier); the queue's administration is
+[JOBS-FORMAT](docs/JOBS-FORMAT.md) §10; a migration's cancellation and
+its side-effect-free status read are in
+[MIGRATION-FORMAT](docs/MIGRATION-FORMAT.md) §6.
+
 ## What this is not — every non-claim in one place
 
 - **SQLite only.** One backend (3.45+); the dialect seam is tested

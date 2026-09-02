@@ -209,8 +209,10 @@ export function emitPlan(plan, dialect, physical) {
       }
       case 'udf':
         // the registered deterministic predicate: reads the row's
-        // document as JSON text, answers 1 or 0 (always total)
-        return `${pred.name}(${dialect.jsonText(docColumn)})`;
+        // document as JSON text, answers 1 or 0 (always total); the
+        // second argument is the conjunct's place in the caller's
+        // document, a literal the function reports an engine error at
+        return `${pred.name}(${dialect.jsonText(docColumn)}, ${sl(pred.mount ?? '/$where')})`;
       case 'strop': {
         const jt = typeOf(pred.ref);
         const form = stropForm(dialect, param, valueOf(pred.ref), pred);
