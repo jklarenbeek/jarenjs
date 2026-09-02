@@ -340,3 +340,27 @@ Node is a capability it lacks.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) and
 [docs/MERMAID-FORMAT.md](docs/MERMAID-FORMAT.md).
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.mermaid-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/mermaid` | JavaScript | declared |
+| `@jarenjs/mermaid/component` | JavaScript | declared |
+| `@jarenjs/mermaid/styles` | JavaScript | declared |
+| `@jarenjs/mermaid/interactive` | JavaScript | declared |
+| `@jarenjs/mermaid/plugin` | JavaScript | declared |
+| `@jarenjs/mermaid/theme` | JavaScript | declared |
+| `@jarenjs/mermaid/styles/mermaid.css` | asset | — |
+| `@jarenjs/mermaid/schemas/jaren-mermaid-ast.schema.json` | schema | — |
+| `@jarenjs/mermaid/schemas/jaren-workflow.schema.json` | schema | — |
+| `@jarenjs/mermaid/stylesheets/dag-to-flowchart.jslt.json` | asset | — |
+| `@jarenjs/mermaid/stylesheets/flowchart-to-dag.jslt.json` | asset | — |
+| `@jarenjs/mermaid/stylesheets/state-to-workflow.jslt.json` | asset | — |
+| `@jarenjs/mermaid/stylesheets/workflow-to-state.jslt.json` | asset | — |
+| `@jarenjs/mermaid/package.json` | metadata | — |
+<!--/fact-->

@@ -63,6 +63,22 @@ error with a JSON Pointer. There is deliberately no single composed
 mega-schema; that is what lets a project mix an app, a store and a data
 query at once. See [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md).
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.studio-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/studio` | JavaScript | declared |
+| `@jarenjs/studio/component` | JavaScript | declared |
+| `@jarenjs/studio/schemas/jaren-project.draft-07.schema.json` | schema | — |
+| `@jarenjs/studio/schemas/jaren-project.schema.json` | schema | — |
+| `@jarenjs/studio/styles/studio.css` | asset | — |
+| `@jarenjs/studio/package.json` | metadata | — |
+<!--/fact-->
+
 ## Install
 
 ```

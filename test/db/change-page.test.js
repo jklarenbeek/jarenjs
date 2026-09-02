@@ -15,10 +15,13 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 
-import { openStore, PAGE_LIMIT_DEFAULT } from '@jarenjs/db';
-import { nodeDriver } from '@jarenjs/db/node';
+import { DatabaseSync } from 'node:sqlite';
 
-import { statementCountingDriver } from './helpers.js';
+import { openStore, PAGE_LIMIT_DEFAULT, CHANGES_TABLE, CHANGES_STATE_TABLE } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { wasmDriver } from '@jarenjs/db/wasm';
+
+import { statementCountingDriver, tempDbPath, asyncWasmHandle } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -204,5 +207,173 @@ describe('cancellation and the wrong arguments', () => {
     await assert.rejects(() => reader.page({ after: 0 }), codeIs('JD2070'));
     assert.deepStrictEqual(await store.changes.bounds(), { earliestAvailable: 1, highWatermark: 4 });
     await store.close();
+  });
+});
+
+describe('the high watermark is file truth (LIVE-FORMAT §5)', () => {
+  const openLogged = (dbPath, options = {}) => openStore(MODEL, {
+    driver: nodeDriver(), path: dbPath, capture: { log: { retention: 1000 } }, ...options,
+  });
+  /** The raw state row and the raw schema text of the two log tables. */
+  const rawState = (dbPath) => {
+    const db = new DatabaseSync(dbPath);
+    try {
+      const hasState = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?").get(CHANGES_STATE_TABLE) !== undefined;
+      const state = !hasState ? [] : db.prepare(`SELECT id, high FROM "${CHANGES_STATE_TABLE}"`).all()
+        .map((row) => ({ id: Number(row.id), high: Number(row.high) }));
+      const schema = db.prepare(
+        "SELECT name, sql FROM sqlite_schema WHERE name LIKE '\\_jaren\\_changes%' ESCAPE '\\' ORDER BY name").all()
+        .map((row) => `${row.name}: ${row.sql}`);
+      const rows = db.prepare(`SELECT seq FROM "${CHANGES_TABLE}" ORDER BY seq`).all().map((row) => Number(row.seq));
+      return { state, schema, rows };
+    }
+    finally {
+      db.close();
+    }
+  };
+
+  it('high 1 → emptied log → close → reopen still reports { earliestAvailable: null, highWatermark: 1 }, and a page after 0 is a total reset', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const store = await openLogged(dbPath);
+      await store.collection('notes').insert({ id: 'n1', body: 'x' });
+      assert.deepStrictEqual(await store.changes.bounds(), { earliestAvailable: 1, highWatermark: 1 });
+      await store.close();
+      // maintenance empties the log outright (retention would do the same over time)
+      const raw = new DatabaseSync(dbPath);
+      raw.exec(`DELETE FROM "${CHANGES_TABLE}"`);
+      raw.close();
+      const reopened = await openLogged(dbPath);
+      assert.deepStrictEqual(await reopened.changes.bounds(), { earliestAvailable: null, highWatermark: 1 });
+      const stale = await reopened.changes.page({ after: 0 });
+      assert.deepStrictEqual([stale.resetRequired, stale.items, 'next' in stale, stale.highWatermark], [true, [], false, 1]);
+      const current = await reopened.changes.page({ after: 1 });
+      assert.deepStrictEqual([current.resetRequired, current.items, current.next, current.hasMore], [false, [], 1, false],
+        'a cursor at the high watermark is an ordinary empty tail');
+      // the next allocation continues from the durable high, not from the empty table
+      await reopened.collection('notes').insert({ id: 'n2', body: 'x' });
+      assert.deepStrictEqual(await reopened.changes.bounds(), { earliestAvailable: 2, highWatermark: 2 });
+      await reopened.close();
+    }
+    finally {
+      cleanup();
+    }
+  });
+
+  it('an existing file with a surviving maximum N is upgraded to high N exactly once; later opens change neither schema nor value', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      // a file written by a store that kept the log but had no state row
+      const first = await openLogged(dbPath);
+      for (let i = 1; i <= 4; i++) await first.collection('notes').insert({ id: `n${i}`, body: 'x' });
+      await first.close();
+      const raw = new DatabaseSync(dbPath);
+      raw.exec(`DROP TABLE "${CHANGES_STATE_TABLE}"`);
+      raw.exec(`DELETE FROM "${CHANGES_TABLE}" WHERE seq <= 2`);
+      raw.close();
+      assert.deepStrictEqual(rawState(dbPath).state, [], 'no state row: the legacy shape');
+
+      const upgraded = await openLogged(dbPath);
+      assert.deepStrictEqual(await upgraded.changes.bounds(), { earliestAvailable: 3, highWatermark: 4 });
+      await upgraded.close();
+      const once = rawState(dbPath);
+      assert.deepStrictEqual(once.state, [{ id: 1, high: 4 }], 'seeded from the surviving maximum');
+
+      const again = await openLogged(dbPath);
+      assert.deepStrictEqual(await again.changes.bounds(), { earliestAvailable: 3, highWatermark: 4 });
+      await again.close();
+      const third = await openLogged(dbPath);
+      await third.close();
+      assert.deepStrictEqual(rawState(dbPath), once, 'a second and third open are byte-idempotent on schema, state and rows');
+    }
+    finally {
+      cleanup();
+    }
+  });
+
+  it('a file that never held a row seeds 0, and a lowered state row can never lower an allocation below the surviving log', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const fresh = await openLogged(dbPath);
+      assert.deepStrictEqual(await fresh.changes.bounds(), { earliestAvailable: null, highWatermark: 0 });
+      assert.deepStrictEqual(rawState(dbPath).state, [{ id: 1, high: 0 }]);
+      for (let i = 1; i <= 3; i++) await fresh.collection('notes').insert({ id: `n${i}`, body: 'x' });
+      await fresh.close();
+      // a tampered state row behind the log: the next allocation still moves past the surviving rows
+      const raw = new DatabaseSync(dbPath);
+      raw.exec(`UPDATE "${CHANGES_STATE_TABLE}" SET high = 1`);
+      raw.close();
+      const reopened = await openLogged(dbPath);
+      await reopened.collection('notes').insert({ id: 'n4', body: 'x' });
+      assert.deepStrictEqual(await reopened.changes.bounds(), { earliestAvailable: 1, highWatermark: 4 });
+      assert.deepStrictEqual(rawState(dbPath).rows, [1, 2, 3, 4]);
+      await reopened.close();
+    }
+    finally {
+      cleanup();
+    }
+  });
+
+  it('two stores over one file allocate distinct increasing sequences, and a rolled-back write consumes none', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const a = await openLogged(dbPath);
+      const b = await openLogged(dbPath);
+      const seen = [];
+      a.observe((record) => seen.push(['a', record.seq]));
+      b.observe((record) => seen.push(['b', record.seq]));
+      for (let i = 1; i <= 3; i++) {
+        await a.collection('notes').insert({ id: `a${i}`, body: 'x' });
+        await b.collection('notes').insert({ id: `b${i}`, body: 'x' });
+      }
+      assert.deepStrictEqual(seen.map(([, seq]) => seq), [1, 2, 3, 4, 5, 6], 'one file, one sequence');
+      // a rolled-back write: the allocation rolls back with the row, so the next write reuses it
+      await assert.rejects(a.transaction(async (tx) => {
+        await tx.collection('notes').insert({ id: 'undone', body: 'x' });
+        throw new Error('undo');
+      }), /undo/);
+      assert.deepStrictEqual(await a.changes.bounds(), { earliestAvailable: 1, highWatermark: 6 }, 'neither the log nor the state moved');
+      assert.deepStrictEqual(rawState(dbPath).state, [{ id: 1, high: 6 }]);
+      await b.collection('notes').insert({ id: 'b4', body: 'x' });
+      assert.deepStrictEqual(await b.changes.bounds(), { earliestAvailable: 1, highWatermark: 7 });
+      assert.deepStrictEqual(await a.changes.bounds(), { earliestAvailable: 1, highWatermark: 7 }, 'the other store reads the same file truth');
+      await a.close();
+      await b.close();
+    }
+    finally {
+      cleanup();
+    }
+  });
+
+  it('the state table is engine metadata: it never appears in patches, live results, model roots or the capture shapes, in session and journal mode alike', async () => {
+    for (const capture of [{ log: { retention: 1000 } }, { mode: 'journal', log: { retention: 1000 } }]) {
+      const store = await openStore(MODEL, { driver: nodeDriver(), capture });
+      const patches = [];
+      store.observe((record) => patches.push(record));
+      await store.collection('notes').insert({ id: 'n1', body: 'x' });
+      await store.collection('notes').insert({ id: 'n2', body: 'x' });
+      const paths = patches.flatMap((record) => record.patch.map((op) => op.path));
+      assert.ok(paths.every((path) => path.startsWith('/notes/')), `${capture.mode ?? 'session'}: ${JSON.stringify(paths)}`);
+      assert.ok(patches.every((record) => record.collections.every((name) => name === 'notes')));
+      assert.deepStrictEqual(store.roots, undefined, 'a collection-only model has no entity roots');
+      const bounds = await store.changes.bounds();
+      assert.deepStrictEqual(bounds, { earliestAvailable: 1, highWatermark: 2 });
+      await store.close();
+    }
+  });
+
+  it('the durable watermark holds over the asynchronous wasm handle too, and the source names no process fallback', async () => {
+    const store = await openStore(MODEL, { driver: wasmDriver(asyncWasmHandle()), capture: { log: { retention: 1000 } } });
+    await store.collection('notes').insert({ id: 'n1', body: 'x' });
+    await store.collection('notes').insert({ id: 'n2', body: 'x' });
+    assert.deepStrictEqual(await store.changes.bounds(), { earliestAvailable: 1, highWatermark: 2 });
+    await store.close();
+    const capture = fs.readFileSync(new URL('../../packages/db/src/capture.js', import.meta.url), 'utf8');
+    const readBounds = capture.slice(capture.indexOf('function readBounds()'));
+    const body = readBounds.slice(0, readBounds.indexOf('\n  }\n') + 4);
+    assert.ok(!/\bseq\b/.test(body), 'readBounds reads the table, never the process counter');
+    assert.ok(!/Date\.now|clock\(\)/.test(body), 'and never a clock');
+    assert.strictEqual((capture.match(/CHANGES_STATE_TABLE = /g) ?? []).length, 1, 'one durable watermark table');
+    assert.strictEqual((capture.match(/allocate:/g) ?? []).length, 1, 'one allocation statement');
   });
 });

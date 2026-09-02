@@ -30,6 +30,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { createSseEventDecoder } from '@jarenjs/core/text/sse';
 
 import { ContractHostError } from '../errors.js';
+import { resolveHostRuntime } from '../runtime.js';
 import { compatReason } from '../compat.js';
 import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage } from '../http/wire.js';
 import { createStreamConsumer, STREAM_ERRORS } from '../stream/client.js';
@@ -65,14 +66,20 @@ export { CLIENT_ERRORS };
  * @property {(url: string, init: RequestInit) => Promise<any>} [fetch] - default `globalThis.fetch`
  * @property {string} [baseUrl] - prefixed to every path; default `''` (relative URLs)
  * @property {Record<string, string>} [headers] - static headers, merged under per-call ones
- * @property {() => string} [keys] - the idempotency key generator; default `crypto.randomUUID`
+ * @property {() => string} [keys] - the idempotency key generator; default
+ *   the runtime record's `uuid`, itself `crypto.randomUUID` by default
  * @property {KeyStorage | null} [storage] - durable key records; default `null`
  * @property {number} [timeoutMs] - per request; `0` (default) means none; composed with `ctx.signal`
  * @property {(ms: number, signal?: AbortSignal) => Promise<void>} [sleep] - the retry backoff sleeper (injectable for tests)
  * @property {Record<string, string | ((params: object) => string)>} [catalog] - a message catalog consulted before the English one
  * @property {string} [wellKnown] - the server's description path; default `/.well-known/jaren-contract`
- * @property {() => number} [now] - the clock stamped into key records; default `Date.now`
+ * @property {() => number} [now] - the clock stamped into key records; default
+ *   the runtime record's `now`, itself `Date.now` by default
  * @property {JarenValidator<any>} [validator] - the validator `url()` compiles its path/query check with
+ * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
+ *   - the host's runtime record: its `uuid` generates idempotency keys
+ *   and its `now` stamps key records, each only where `keys` / `now` is
+ *   absent, and its `random` draws the retry backoff jitter
  */
 
 /**
@@ -358,9 +365,28 @@ export function openHttpClient(contract, options = {}) {
     }
   }
   Object.freeze(staticHeaders);
-  const keys = options.keys === undefined ? () => globalThis.crypto.randomUUID() : options.keys;
+  const runtime = resolveHostRuntime(options.runtime, host, 'JC1008');
+  /**
+   * A host fact drawn from an injected generator (`keys`, `now`, the
+   * record's `random`). `invoke` is total over everything a server or a
+   * network can do; a generator the HOST supplied that throws is the
+   * host's own mistake, and rejects as one (`JC1008`) rather than being
+   * dressed as a storage or network outcome.
+   * @template T
+   * @param {string} name @param {() => T} draw @returns {T}
+   */
+  const hostFact = (name, draw) => {
+    try {
+      return draw();
+    }
+    catch (error) {
+      throw host('JC1008', `options.${name}${name === 'random' ? ' (the runtime record)' : ''} threw (${
+        error instanceof Error ? error.message : String(error)})`);
+    }
+  };
+  const keys = options.keys === undefined ? runtime.uuid : options.keys;
   const sleep = options.sleep === undefined ? defaultSleep : options.sleep;
-  const now = options.now === undefined ? Date.now : options.now;
+  const now = options.now === undefined ? runtime.now : options.now;
   /** @type {Catalog | null} */
   const catalog = options.catalog === undefined ? null : compileMessageCatalog(options.catalog);
   const contractId = contract.id === null ? '' : contract.id;
@@ -653,10 +679,10 @@ export function openHttpClient(contract, options = {}) {
    * @param {string} key
    * @param {string} hash
    */
-  function recordKey(op, key, hash) {
+  function recordKey(op, key, hash, at) {
     return updateTable((table) => {
       const records = isJsonObject(table[op]) ? { ...table[op] } : {};
-      setObjectMember(records, key, { op, key, hash, at: now() });
+      setObjectMember(records, key, { op, key, hash, at });
       setObjectMember(table, op, records);
       return true;
     });
@@ -736,7 +762,7 @@ export function openHttpClient(contract, options = {}) {
     // 3. the idempotency key — generated here, never by the server
     let key = null;
     if (route.idempotency !== 'none') {
-      key = typeof ctx.idempotencyKey === 'string' && ctx.idempotencyKey.length > 0 ? ctx.idempotencyKey : String(keys());
+      key = typeof ctx.idempotencyKey === 'string' && ctx.idempotencyKey.length > 0 ? ctx.idempotencyKey : String(hostFact('keys', keys));
       headers['idempotency-key'] = key;
       if (storage !== null) {
         let hash;
@@ -746,8 +772,11 @@ export function openHttpClient(contract, options = {}) {
         catch (err) {
           return invalidInput(route, meta, [{ path: /** @type {any} */ (err)?.dataPath ?? '', keyword: 'canonical' }]);
         }
+        // the clock is the host's, read before the store is asked: a
+        // clock that throws is the host's mistake, not a storage failure
+        const at = hostFact('now', now);
         try {
-          await recordKey(route.id, key, hash);
+          await recordKey(route.id, key, hash, at);
         }
         catch {
           return failedOutcome('contract', clientError(catalog, 'JC2054', { op: route.id }, null, undefined), meta);
@@ -761,7 +790,7 @@ export function openHttpClient(contract, options = {}) {
     for (;;) {
       outcome = await send(route, url, headers, body, ctx, signal);
       if (route.retry === null || n >= route.retry.max || !retryable(route, outcome)) break;
-      const delay = Math.min(1000 * 2 ** n, BACKOFF_MAX) + Math.floor(Math.random() * BACKOFF_JITTER);
+      const delay = Math.min(1000 * 2 ** n, BACKOFF_MAX) + Math.floor(hostFact('random', runtime.random) * BACKOFF_JITTER);
       n++;
       try {
         await sleep(delay, signal === null ? undefined : signal);

@@ -24,7 +24,7 @@ import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { compileContract } from '@jarenjs/contract';
 import { serveHttp } from '@jarenjs/contract/http';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
-import { tempDbPath } from './helpers.js';
+import { tempDbPath, statementCountingDriver } from './helpers.js';
 import { load, shopHandlers, jsonReq } from '../contract/helpers.js';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -335,5 +335,83 @@ describe('deterministic_run_is_byte_identical', () => {
     const a = await run(clockOnly);
     const b = await run(clockOnly);
     assert.notStrictEqual(a, b);
+  });
+});
+
+describe('a query deadline over the runtime record', () => {
+  const MODEL_D = {
+    $model: '0.1',
+    collections: { docs: { schema: { type: 'object', properties: { id: { type: 'string' } } }, key: '/id' } },
+    entities: {
+      Item: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'integer', 'x-entity': { key: true } }, n: { type: 'integer' } } } },
+    },
+  };
+  const codeIs = (code, pattern = undefined) => (error) =>
+    error.code === code && (pattern === undefined || pattern.test(error.message));
+
+  it('compares a deadline against the record\'s clock: eligible at 0, refused before a statement or a row once the clock passes it', async () => {
+    const counters = { iterate: 0, next: 0, return: 0, all: 0 };
+    const now = clockAt(0);
+    const store = await openStore(MODEL_D, {
+      driver: statementCountingDriver(counters), runtime: createRuntime({ now }),
+    });
+    store.sync.transaction(() => {
+      for (let i = 1; i <= 3; i++) {
+        store.sync.collection('docs').insert({ id: `d${i}` });
+        store.sync.entity('Item').create({ id: i, n: i });
+      }
+    });
+    for (const key of Object.keys(counters)) counters[key] = 0;
+    const items = { $for: { it: '$.Item[*]' }, $return: '$it' };
+    const docs = { $for: { it: '$[*]' }, $return: '$it' };
+
+    // the platform clock is far past 10; the record's clock says 0 — the call is eligible
+    assert.ok(Date.now() > 10);
+    assert.strictEqual((await store.entity('Item').execute(items, { deadline: 10 })).length, 3);
+    assert.strictEqual((await store.collection('docs').execute(docs, { deadline: 10 })).length, 3);
+    const entityCursor = store.entity('Item').cursor(items, { deadline: 10 });
+    const collectionCursor = store.collection('docs').query(docs, { deadline: 10 });
+    const loadCursor = store.entity('Item').loadCursor({}, { deadline: 10 });
+    assert.strictEqual((await entityCursor.next()).done, false);
+    assert.strictEqual((await collectionCursor.next()).done, false);
+    assert.strictEqual((await loadCursor.next()).done, false);
+    const page = await store.entity('Item').page({}, { deadline: 10 });
+    assert.strictEqual(page.items.length, 3);
+
+    // the record's clock advances past the deadline: refused before a statement…
+    now.advance(11);
+    const statementsBefore = counters.iterate + counters.all;
+    assert.throws(() => store.entity('Item').execute(items, { deadline: 10 }), codeIs('JD2075', /passed before the call ran/));
+    assert.throws(() => store.collection('docs').execute(docs, { deadline: 10 }), codeIs('JD2075', /passed before the call ran/));
+    assert.throws(() => store.entity('Item').cursor(items, { deadline: 10 }), codeIs('JD2075'));
+    assert.throws(() => store.collection('docs').query(docs, { deadline: 10 }), codeIs('JD2075'));
+    assert.throws(() => store.entity('Item').loadCursor({}, { deadline: 10 }), codeIs('JD2075'));
+    await assert.rejects(async () => store.entity('Item').page({}, { deadline: 10 }), codeIs('JD2075'));
+    assert.strictEqual(counters.iterate + counters.all, statementsBefore, 'no statement was issued for a passed deadline');
+    // …and before another row on the cursors already open, each released at its row boundary
+    const returnsBefore = counters.return;
+    await assert.rejects(() => entityCursor.next(), codeIs('JD2075', /passed before the next row/));
+    await assert.rejects(() => collectionCursor.next(), codeIs('JD2075', /passed before the next row/));
+    await assert.rejects(() => loadCursor.next(), codeIs('JD2075', /passed before the next row/));
+    assert.strictEqual(counters.return, returnsBefore + 3, 'each open statement released once');
+    await store.close();
+  });
+
+  it('reads the platform clock with no record, as it always did', async () => {
+    const store = await openStore(MODEL_D, { driver: nodeDriver() });
+    assert.throws(() => store.entity('Item').cursor({ $for: { it: '$.Item[*]' }, $return: '$it' }, { deadline: Date.now() - 1 }),
+      codeIs('JD2075'));
+    // an empty set answers `undefined` (the engine's result shape); the point is that a live deadline is not refused
+    assert.strictEqual(await store.entity('Item').execute({ $for: { it: '$.Item[*]' }, $return: '$it' }, { deadline: Date.now() + 60_000 }), undefined);
+    await store.close();
+  });
+
+  it('reads the clock from the store state only: no platform clock in the query engine or the cursor', () => {
+    for (const file of ['packages/db/src/query.js', 'packages/db/src/cursor.js']) {
+      const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+      assert.ok(!/\bDate\.now\(\)/.test(source), `${file} calls the platform clock`);
+    }
+    const cursor = readFileSync(new URL('../../packages/db/src/cursor.js', import.meta.url), 'utf8');
+    assert.ok(!cursor.includes('Date.now'), 'the cursor names no platform clock at all: the clock arrives in its spec');
   });
 });

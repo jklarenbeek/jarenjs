@@ -200,9 +200,19 @@ export const DATA_RULES = [
       ['h1', {}, 'Data'],
       ['p', { class: 'lead' },
         'The same store, the same queries, the same live updates as Node and Bun — running here, in your browser, on the official SQLite wasm build. One tab owns the connection; more tabs become clients.'],
-      { $if: ['$.error', errorLine('$.error')] },
       { $if: [{ $eq: ['$.status', 'boot'] },
         ['p', { class: 'muted data-booting' }, 'Loading the SQLite wasm build…']] },
+      // the boot's terminal failure: the stage that failed is what a
+      // reader can report, and the retry starts the protocol over
+      { $if: [{ $eq: ['$.status', 'error'] },
+        ['div', { class: 'card pg-card data-boot-error', role: 'alert' },
+          ['p', {},
+            ['strong', {}, 'The store did not boot.'], ' Stage ',
+            ['code', { class: 'data-boot-stage' }, '$.boot.stage'], ' failed: ',
+            ['span', { class: 'data-boot-message' }, '$.boot.message']],
+          ['button', { class: 'btn small data-boot-retry', type: 'button', on: { click: 'data/retry' } },
+            'Retry the boot']]] },
+      { $if: ['$.plainError', errorLine('$.plainError')] },
       ['div', { class: 'data-grid', 'data-pane': '$.mobilePane' },
         paneSwitcher({
           class: 'data-panebar', pane: '$.mobilePane', action: 'data/pane',

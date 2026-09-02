@@ -37,6 +37,7 @@ import { from } from '@jarenjs/linq';
 import * as s from '@jarenjs/linq/schema';
 import { JarenValidator } from '@jarenjs/validate';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
+import { importSubpaths } from '../../scripts/lib/exports.js';
 
 const USERS = [
   { id: 1, name: 'ada', age: 36, active: true, created: '2020-05-01T00:00:00Z', tags: ['dev'] },
@@ -176,9 +177,10 @@ describe('the declared export set and the runtime export set are one set', () =>
     // suite below iterates, and this holds it to the package's own map.
     const manifest = JSON.parse(
       fs.readFileSync(new URL('../../packages/linq/package.json', import.meta.url), 'utf8'));
-    const published = Object.keys(manifest.exports)
-      .filter((key) => key !== '.' && key !== './package.json')
-      .map((key) => key.slice(2)).sort();
+    // the one manifest census (scripts/lib/exports.js), not a second reading of `exports`
+    const published = importSubpaths(manifest)
+      .filter((subpath) => subpath !== '@jarenjs/linq')
+      .map((subpath) => subpath.slice('@jarenjs/linq/'.length)).sort();
     assert.deepStrictEqual(published, [...PENS].sort());
   });
 

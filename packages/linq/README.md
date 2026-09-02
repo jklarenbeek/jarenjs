@@ -684,3 +684,24 @@ you don't want this package.
 The normative mapping — every operator, its emitted phrase, and the
 deliberate deviations — is [docs/QUERY-PEN.md](docs/QUERY-PEN.md);
 internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.linq-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/linq` | JavaScript | declared |
+| `@jarenjs/linq/schema` | JavaScript | declared |
+| `@jarenjs/linq/model` | JavaScript | declared |
+| `@jarenjs/linq/jslt` | JavaScript | declared |
+| `@jarenjs/linq/migration` | JavaScript | declared |
+| `@jarenjs/linq/contract` | JavaScript | declared |
+| `@jarenjs/linq/flow` | JavaScript | declared |
+| `@jarenjs/linq/app` | JavaScript | declared |
+| `@jarenjs/linq/forms` | JavaScript | declared |
+| `@jarenjs/linq/db` | JavaScript | declared |
+| `@jarenjs/linq/package.json` | metadata | — |
+<!--/fact-->

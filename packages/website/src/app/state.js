@@ -191,6 +191,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // set. Booted on first navigation to #/data.
     data: {
       status: 'boot',          // 'boot' | 'ready' | 'error'
+      boot: null,              // the terminal boot failure { code: 'DATA_BOOT', stage, message }, or null
       topology: '—',           // 'owner' | 'client'
       vfs: '—',                // 'opfs-sahpool' | 'memory'
       version: '',
@@ -224,7 +225,6 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       // explain() → a map), run from the fourth card: the editable CSV,
       // and the last report (null until asked, then { status, … })
       trip: { csv: '', report: null },
-      booted: false,           // the boot effect fires exactly once
       error: null,
       // the phone layout: which single card shows (store | query | live |
       // trip). Query is the default — it is what a reader of this page

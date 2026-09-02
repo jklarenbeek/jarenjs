@@ -1415,3 +1415,35 @@ Like every jarenjs package: ESM, zero runtime dependencies outside `@jarenjs/*`,
 `eval`/`new Function` (CSP-safe), environment injected at the edges. The jarenjs website's
 assistant and its WebMCP tools run on exactly this package — the playground engines are
 the toolbox, and Jaren validates the model's own tool calls.
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.ai-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/ai` | JavaScript | declared |
+| `@jarenjs/ai/providers` | JavaScript | declared |
+| `@jarenjs/ai/sse` | JavaScript | declared |
+| `@jarenjs/ai/client` | JavaScript | declared |
+| `@jarenjs/ai/embed` | JavaScript | declared |
+| `@jarenjs/ai/structured` | JavaScript | declared |
+| `@jarenjs/ai/toolbox` | JavaScript | declared |
+| `@jarenjs/ai/agent` | JavaScript | declared |
+| `@jarenjs/ai/recall` | JavaScript | declared |
+| `@jarenjs/ai/ledger` | JavaScript | declared |
+| `@jarenjs/ai/environment` | JavaScript | declared |
+| `@jarenjs/ai/program` | JavaScript | declared |
+| `@jarenjs/ai/recursive` | JavaScript | declared |
+| `@jarenjs/ai/stylesheet` | JavaScript | declared |
+| `@jarenjs/ai/spatial` | JavaScript | declared |
+| `@jarenjs/ai/geo-tools` | JavaScript | declared |
+| `@jarenjs/ai/refine` | JavaScript | declared |
+| `@jarenjs/ai/storage/memory` | JavaScript | declared |
+| `@jarenjs/ai/schemas/ledger` | JavaScript | declared |
+| `@jarenjs/ai/schemas/patch` | JavaScript | declared |
+| `@jarenjs/ai/schemas/program` | JavaScript | declared |
+| `@jarenjs/ai/package.json` | metadata | — |
+<!--/fact-->

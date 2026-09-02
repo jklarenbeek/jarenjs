@@ -31,6 +31,8 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { DbCompileError } from './errors.js';
 import { chain, toPromise } from './driver.js';
 import { normalizeModel } from './store.js';
+import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './capture.js';
+import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './jobs.js';
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
@@ -61,6 +63,8 @@ export const MIGRATION_VERSION = '0.1';
 /** The history table name (outside the model's identifier namespace
  * conventions on purpose — a collection cannot collide with it). */
 export const HISTORY_TABLE = '_jaren_migrations';
+/** The tables the engine owns beside a model's: never a shape-drift finding. */
+const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE, JOBS_TABLE, JOB_CHECKPOINTS_TABLE]);
 
 /**
  * The signature-grade identity of a model SHAPE.
@@ -871,7 +875,9 @@ export function schemaShapeOf(connection) {
   const dialect = connection.dialect;
   return chain(connection.prepare(dialect.introspect.schemaDump()), (statement) =>
     chain(statement.all([]), (rows) => rows
-      .filter((row) => row.name !== HISTORY_TABLE && row.owner !== HISTORY_TABLE)
+      // the engine's own tables — history, the change log and its state
+      // row, the job queue — are never a model's drift
+      .filter((row) => !ENGINE_TABLES.has(String(row.name)) && !ENGINE_TABLES.has(String(row.owner)))
       .map((row) => ({
         type: String(row.type),
         name: String(row.name),

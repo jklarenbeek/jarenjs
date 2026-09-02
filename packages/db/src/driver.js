@@ -310,6 +310,8 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
         done = true;
         const index = waiting.indexOf(run);
         if (index >= 0) waiting.splice(index, 1);
+        // a wait that ends by timeout owes the signal its listener back
+        signal?.removeEventListener('abort', cancelled);
         reject(error);
       };
       const timer = setTimeout(() => abandon(new DbCompileError('JD0012',

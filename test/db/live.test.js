@@ -394,6 +394,51 @@ describe('entity live queries re-run (declared, not attempted)', () => {
     await assert.rejects(() => store.live([WHERE_ADULT]), TypeError);
     await store.close();
   });
+
+  it('registration is admitted at the store gate: no initial result before an open transaction settles, a rolled-back row never appears, a committed one appears once', async () => {
+    const store = await openStore(ENTITY_MODEL, { driver: nodeDriver(), capture: true });
+    await store.entity('User').create({ id: 'u1', name: 'ada' });
+    const NAMES = { User: [{ $for: { u: '$.User[*]' }, $orderby: ['$u.name'], $return: '$u.name' }] };
+    const settledWithin = (promise, ms = 25) => Promise.race([
+      Promise.resolve(promise).then(() => true, () => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), ms)),
+    ]);
+    let release = () => {};
+    // rollback: the staged row is never the initial result
+    const undone = store.transaction(async (tx) => {
+      await tx.entity('User').create({ id: 'u2', name: 'bob' });
+      await new Promise((resolve) => { release = resolve; });
+      throw new Error('undo');
+    }).catch(() => 'rolled back');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const registering = store.live(NAMES);
+    assert.strictEqual(await settledWithin(registering), false, 'the initial query waits for the open transaction');
+    release();
+    assert.strictEqual(await undone, 'rolled back');
+    const live = await registering;
+    assert.deepStrictEqual(live.result.rows, [{ User: ['ada'] }], 'the rolled-back row never appears');
+    // commit: the row appears exactly once, through the registration's own initial query
+    const kept = store.transaction(async (tx) => {
+      await tx.entity('User').create({ id: 'u3', name: 'cyd' });
+      await new Promise((resolve) => { release = resolve; });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = store.live(NAMES);
+    assert.strictEqual(await settledWithin(second), false);
+    release();
+    await kept;
+    const committed = await second;
+    assert.deepStrictEqual(committed.result.rows, [{ User: ['ada', 'cyd'] }]);
+    assert.deepStrictEqual(live.result.rows, [{ User: ['ada', 'cyd'] }], 'the earlier registration was maintained by the commit');
+    assert.strictEqual(store.stats().liveQueries, 2);
+    // a refused registration leaves the registry unchanged
+    await assert.rejects(() => store.live([WHERE_ADULT]), TypeError);
+    await assert.rejects(() => store.live({ Nope: [{ $for: { n: '$.Nope[*]' }, $return: '$n' }] }));
+    assert.strictEqual(store.stats().liveQueries, 2);
+    live.close();
+    committed.close();
+    await store.close();
+  });
 });
 
 describe('the maintenance oracle (seeded)', () => {

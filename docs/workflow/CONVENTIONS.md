@@ -57,7 +57,8 @@ Concurrent first phase:
    covered, or a justified, ideally excluded, keep);
 4. `npm run docs:check` — every derived span in every committed document still
    agrees with its source: measured figures with the committed measurements, the
-   `@jarenjs/linq` binder's combined tables with the pen documents beside it
+   `@jarenjs/linq` binder's combined tables with the pen documents beside it,
+   every public README's export inventory with its manifest's `exports`
    (`npm run docs:derive` rewrites them; §4.6);
 5. `npm run test:documents` — every ```` ```mermaid ```` fence in the committed
    Markdown parses through `@jarenjs/mermaid` and every ```` ```json ```` fence
@@ -159,8 +160,8 @@ without counts is not a record.
 6. **Published figures are derived, never hand-written.** Numbers and tables in
    committed Markdown sit between `<!--fact:key-->` … `<!--/fact-->` markers and
    are written by `npm run docs:derive` from their source — a committed
-   measurement, or another committed document; `npm run docs:check` fails on
-   drift. A pass that re-measures refreshes them, it does not retype them. **One
+   measurement, another committed document, or a workspace manifest;
+   `npm run docs:check` fails on drift. A pass that re-measures refreshes them, it does not retype them. **One
    namespace, one runner** (`scripts/lib/derive.js`), several registries: pairing
    and the orphan report are per-namespace, so a second spelling of the same idea
    is a second blind spot.
@@ -193,18 +194,13 @@ failure. Every step but the *decision* to release is one command with an exit
 code — a step that exists only as prose is a step that gets skipped:
 
 1. **Prove it green:** `npm run site:gate` (§2), plus `npm run test:packed` and
-   `npm run test:tree-shaking` if exports moved.
-
-   **The one expected red, and only for a close-out that re-measured.** A tracked
-   `packages/website/public/benchmarks/*.json` that is new or regenerated is an
-   *unreviewed* measurement until a commit carries it, and the repo says so in
-   three places at once: `test/scripts/release-tooling.test.js` fails
-   (`checkBenchmarkDrift()` is not clean), `npm run benchmark:coverage` then exits
-   non-zero downstream of that single failing test — with zero dead-code findings
-   of its own — and `website:deploy` would refuse for the same reason. So this run
-   has **exactly one** failing assertion and it is that one; everything else must
-   be green, a second failure stops the close-out, and the gate is re-run at
-   step 4 where it can pass.
+   `npm run test:tree-shaking` if exports moved. A close-out that re-measured or
+   registered a benchmark suite is green here too: the unit gate proves the
+   manifest and the drift-checker logic on disposable repositories, and the
+   clean-checkout refusal lives where the checkout state is meaningful — the
+   website's `predeploy` (step 5) and the standalone `check-benchmark-drift.js`,
+   which refuse an uncommitted measurement, new or regenerated, until a commit
+   carries it.
 2. **Bump the version:** `npm run release:bump` — `patch` by default,
    `npm run release:bump -- minor` for a phase-opening campaign order or a new
    capability line. It refuses under an npm that is not the `packageManager` pin
@@ -216,11 +212,11 @@ code — a step that exists only as prose is a step that gets skipped:
    line: no body, no `Co-authored-by`, no "Generated with", no AI attribution, no
    person's name, no version. `git add -A` stages the work; confirm gitignored
    scratch is excluded and never force-add it.
-4. **Re-run `npm run site:gate` when step 1 had its expected red.** It must now be
-   green with nothing expected to fail — the measurement is committed, so the
-   interlock is satisfied and every stage answers for the tree that is about to be
-   published. This is the run the release lands on. A close-out that did not
-   re-measure had that run at step 1 and skips this one.
+4. **Re-run `npm run site:gate` when step 1 ran on a tree the bump then changed
+   in a way a stage reads** (a version the site's build provenance prints, a
+   re-measured figure a document derives). It must be green with nothing
+   expected to fail; this is the run the release lands on. A close-out whose
+   step-1 run already answered for the tree being published skips this one.
 5. **Deploy the website — when this close-out deploys.** A close-out deploys
    when the work is visible on the published site (site content, published
    figures, a registered benchmark suite) and always at a phase close and at

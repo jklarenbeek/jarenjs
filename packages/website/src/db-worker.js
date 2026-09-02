@@ -74,13 +74,11 @@ const context = {
 
 const channel = new BroadcastChannel(CHANNEL);
 
-/** Race a promise against a timeout so a hung OPFS install (some
- * engines never settle `installOpfsSAHPoolVfs`) cannot wedge boot. */
-const withTimeout = (promise, ms, label) => Promise.race([
-  promise,
-  new Promise((_resolve, reject) =>
-    setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
-]);
+/** Announce the boot stage this worker is entering (`lib/boot-stages.js`):
+ * the page bounds each stage from its side and names it on a timeout, so
+ * an install some engines never settle fails as `vfs-acquire` — never as
+ * an OPFS absence, which is a different answer with a different remedy. */
+const enter = (stage) => globalThis.postMessage({ boot: stage });
 
 /** Ask the channel whether an OPFS owner already exists — the fallback
  * for a host with no `LockManager`. A running owner answers its pong;
@@ -139,10 +137,14 @@ function holdOwnerLock() {
 }
 
 async function init() {
+  enter('sqlite-init');
   context.sqlite3 = await sqlite3InitModule({ print: () => {}, printErr: () => {} });
+  enter('vfs-acquire');
   try {
-    context.poolUtil = await withTimeout(
-      context.sqlite3.installOpfsSAHPoolVfs({ name: POOL }), 8_000, 'OPFS pool install');
+    context.poolUtil = await context.sqlite3.installOpfsSAHPoolVfs({ name: POOL });
+    // the pool is held: deciding to own it (the lock, the shared channel)
+    // is the topology stage on this path too
+    enter('topology');
     context.vfs = 'opfs-sahpool';
     context.isOwner = true;
     holdOwnerLock();
@@ -159,6 +161,7 @@ async function init() {
     // neither case hangs.
     context.poolUtil = null;
     context.vfs = 'memory';
+    enter('topology');
     if (await ownerExists()) {
       return {
         topology: 'client', vfs: 'opfs-sahpool',

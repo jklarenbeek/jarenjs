@@ -31,6 +31,7 @@ import { compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileContract } from '@jarenjs/contract';
 import { openPortClient } from '@jarenjs/contract/port';
+import { createStageRunner, resolveBootBudgets, bootFailure, BOOT_STAGES } from '../lib/boot-stages.js';
 import { parseCsv } from '@jarenjs/josl';
 import { JarenValidator } from '@jarenjs/validate';
 import { from } from '@jarenjs/linq';
@@ -282,17 +283,78 @@ export function tripSummary(report) {
 //#endregion
 
 /**
+ * The browser-shaped dependencies of a transport: how a worker is
+ * spawned, how a port client is opened over a channel, how the shared
+ * channel is opened, and the stage budgets. The page supplies the
+ * platform's; a Node test supplies fakes and millisecond budgets.
+ * @typedef {Object} TransportDeps
+ * @property {() => any} spawnWorker - a fresh owner worker
+ * @property {(channel: any) => any} openClient - a port client over a channel
+ * @property {() => any} openChannel - the shared tab channel
+ * @property {Readonly<Record<string, number>>} [budgets] - per-stage budgets
+ * @property {(fn: () => void, ms: number) => any} [setTimer]
+ * @property {(handle: any) => void} [clearTimer]
+ */
+
+/** The key a page may set to shorten the boot budgets (a JSON record of
+ * stage → milliseconds) — how the browser proof makes a hung stage fail
+ * in seconds rather than the production half-minute. */
+export const BOOT_BUDGETS_KEY = 'jaren-data-boot-budgets';
+
+/** The platform deps: the real worker, the real port client, the real
+ * channel, and budgets the page's session may shorten. */
+function platformDeps() {
+  /** @type {unknown} */
+  let overrides = null;
+  try {
+    const stored = globalThis.sessionStorage?.getItem(BOOT_BUDGETS_KEY);
+    overrides = stored === null || stored === undefined ? null : JSON.parse(stored);
+  }
+  catch {
+    overrides = null;
+  }
+  return {
+    spawnWorker: () => new Worker(new URL('../db-worker.js', import.meta.url), { type: 'module' }),
+    // the wasm build + first store open is real work and is bounded by
+    // the boot stages; the per-request window stays for everything after
+    openClient: (/** @type {any} */ channel) => openPortClient(contract, { channel, timeoutMs: 30_000 }),
+    openChannel: () => new BroadcastChannel(CHANNEL),
+    budgets: resolveBootBudgets(overrides),
+  };
+}
+
+/**
  * The transport: a contract PORT client over the own worker (owner) or
  * the shared channel (client). `request` unwraps the binding's D6
  * outcome into the value-or-throw shape the effects consume — a
  * declared `db` failure surfaces the store's own code and message from
  * its details; `subscribe` is the client's stream half, passed through.
+ *
+ * `boot()` is the closed protocol of `lib/boot-stages.js`: the worker
+ * starting (its `ready` frame, or its `error` event), then the worker's
+ * own `data.init` under the three stages it announces as it passes them
+ * (`sqlite-init`, `vfs-acquire`, `topology`) — each bounded from here,
+ * so a stage the worker never finishes fails under its own name and
+ * never masquerades as an OPFS absence. `bounded('store-open', …)` is
+ * the fifth stage, run by the boot effect around the first open.
+ * `close()` releases everything this transport created — the client,
+ * the worker, the shared channel, the listeners — exactly once, so a
+ * failed boot leaves nothing behind and a retry starts clean.
+ * @param {TransportDeps} [deps]
  */
-function createTransport() {
-  /** @type {ReturnType<typeof openPortClient> | null} */
+export function createTransport(deps = platformDeps()) {
+  const runner = createStageRunner({ budgets: deps.budgets, setTimer: deps.setTimer, clearTimer: deps.clearTimer });
+  /** @type {any} */
   let client = null;
-  /** @type {Worker | null} */
+  /** @type {any} */
   let worker = null;
+  /** @type {any} */
+  let shared = null;
+  /** @type {{ target: any, type: string, fn: any }[]} */
+  const listeners = [];
+  let closed = false;
+  /** The stage a boot is in, for a failure that arrives outside a run. */
+  let stage = BOOT_STAGES[0];
 
   /** @param {any} outcome */
   const unwrap = (outcome) => {
@@ -304,31 +366,121 @@ function createTransport() {
     throw error;
   };
 
-  const request = async (op, args) => unwrap(await /** @type {NonNullable<typeof client>} */ (client).invoke(op, args));
+  const request = async (op, args) => {
+    if (client === null) throw new Error('the data transport is closed');
+    return unwrap(await client.invoke(op, args));
+  };
 
   /** @param {any} input @param {any} callbacks */
-  const subscribe = (input, callbacks) => /** @type {NonNullable<typeof client>} */ (client).subscribe('data.live', input, callbacks);
+  const subscribe = (input, callbacks) => client.subscribe('data.live', input, callbacks);
 
   /** @type {((notice: any) => void) | null} */
   let onNotice = null;
-  /** The owner's store-changed notices travel beside the contract frames
-   * on whichever transport this tab ended up on, and are told apart by
-   * shape — the same arrangement the owner-discovery frames use. */
+  /** @type {((stage: string) => void) | null} */
+  let onStage = null;
+  /** @type {((fault: { message: string }) => void) | null} */
+  let onFault = null;
+  /** Whether the boot has settled: a worker `error` after that is a fault
+   * of a running store, not of a boot stage, and is reported as one. */
+  let booted = false;
+  /** Attach a listener this transport will detach on close. */
+  const on = (/** @type {any} */ target, /** @type {string} */ type, /** @type {any} */ fn) => {
+    target.addEventListener(type, fn);
+    listeners.push({ target, type, fn });
+  };
+  /** The owner's store-changed notices and the worker's boot-stage
+   * announcements travel beside the contract frames on whichever
+   * transport this tab ended up on, and are told apart by shape — the
+   * same arrangement the owner-discovery frames use. */
   const listen = (/** @type {any} */ target) => {
-    target.addEventListener('message', (/** @type {any} */ event) => {
+    on(target, 'message', (/** @type {any} */ event) => {
       const message = event.data;
-      if (message === null || typeof message !== 'object' || message.store === undefined) return;
-      onNotice?.(message);
+      if (message === null || typeof message !== 'object') return;
+      if (typeof message.boot === 'string') {
+        // only the five stages are stages: a foreign frame on the shared
+        // channel cannot rename the failure this tab reports
+        if (BOOT_STAGES.includes(message.boot)) {
+          stage = message.boot;
+          onStage?.(message.boot);
+        }
+        return;
+      }
+      if (message.store !== undefined) onNotice?.(message);
     });
   };
 
+  /** Release everything created here, once; a second close is a no-op. */
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    for (const { target, type, fn } of listeners) {
+      try {
+        target.removeEventListener(type, fn);
+      }
+      catch { /* a terminated worker may refuse; nothing to release then */ }
+    }
+    listeners.length = 0;
+    try {
+      client?.close();
+    }
+    catch { /* already closed */ }
+    client = null;
+    try {
+      worker?.terminate();
+    }
+    catch { /* already gone */ }
+    worker = null;
+    try {
+      shared?.close();
+    }
+    catch { /* already closed */ }
+    shared = null;
+    onNotice = null;
+    onStage = null;
+    onFault = null;
+  };
+
+  /**
+   * One bounded stage. A failure inside it — the work's, or its budget
+   * running out — is the named boot failure, and never something else.
+   * @param {string} name @param {(advance: (next: string) => void) => any} work
+   */
+  const bounded = (name, work) => {
+    stage = name;
+    return runner.run(name, work);
+  };
+
+  /** The worker has started when its module posts `{ ready: true }`; a
+   * module that fails to load fires `error` instead. */
+  const workerStart = () => new Promise((resolve, reject) => {
+    on(worker, 'message', (/** @type {any} */ event) => {
+      if (event.data !== null && typeof event.data === 'object' && event.data.ready === true) resolve(true);
+    });
+    on(worker, 'error', (/** @type {any} */ event) => {
+      const message = typeof event?.message === 'string' && event.message.length > 0
+        ? event.message : 'the data worker failed';
+      if (booted) {
+        // the store was up: the page must not go on reading `ready`
+        onFault?.({ message: `the data worker stopped: ${message}` });
+        return;
+      }
+      reject(bootFailure('worker-start', new Error(message)));
+    });
+  });
+
   const boot = async () => {
-    worker = new Worker(new URL('../db-worker.js', import.meta.url),
-      { type: 'module' });
-    // the wasm build + first store open is real work: give init room
-    client = openPortClient(contract, { channel: worker, timeoutMs: 30_000 });
+    if (closed) throw bootFailure('worker-start', new Error('the data transport is closed'));
+    worker = deps.spawnWorker();
+    client = deps.openClient(worker);
     listen(worker);
-    const status = await request('data.init', null);
+    await bounded('worker-start', () => workerStart());
+    // the worker's init announces its own stages as it passes them; each
+    // announcement moves the budget to the next stage
+    const status = await bounded('sqlite-init', (advance) => {
+      onStage = advance;
+      return request('data.init', null);
+    });
+    onStage = null;
     if (status.topology !== 'client') {
       // 'owner' (holds the OPFS pool) or 'memory' (OPFS absent — a
       // standalone in-memory store): either way this worker IS the
@@ -339,19 +491,30 @@ function createTransport() {
     // channel; this direct worker has nothing to hold, so it dies.
     client.close();
     worker.terminate();
+    client = null;
     worker = null;
-    const shared = new BroadcastChannel(CHANNEL);
+    shared = deps.openChannel();
     listen(shared);
-    client = openPortClient(contract, { channel: shared, timeoutMs: 30_000 });
+    client = deps.openClient(shared);
     return status;
   };
+  /** The boot settled: later worker faults are the running store's. */
+  const settled = () => { booted = true; };
 
   return {
     boot,
+    bounded,
     request,
     subscribe,
+    close,
+    /** The stage the last boot reached (for a failure outside a run). */
+    stage: () => stage,
     /** @param {(notice: any) => void} cb */
     notices: (cb) => { onNotice = cb; },
+    /** @param {(fault: { message: string }) => void} cb - a worker that
+     * fails after the boot settled */
+    faults: (cb) => { onFault = cb; },
+    settled,
   };
 }
 
@@ -394,11 +557,14 @@ const recorded = (/** @type {any} */ entry) => (entry.empty === true
 
 /**
  * The runtime: effects plus the exported view model.
- * @param {{ site?: { request: (op: string, input?: any) => Promise<any> } }} [env] -
+ * @param {{ site?: { request: (op: string, input?: any) => Promise<any> },
+ *   transport?: () => ReturnType<typeof createTransport> }} [env] -
  *   `site` is the site's data plane, through which the spatial-corpus
- *   artifact is read (`site.corpus`).
+ *   artifact is read (`site.corpus`); `transport` builds the transport
+ *   (the platform's by default; a test injects one over fakes).
  */
 export function createDataRuntime(env = {}) {
+  const buildTransport = env.transport ?? (() => createTransport());
   /** @type {ReturnType<typeof createTransport> | null} */
   let transport = null;
   /** @type {{ stop: () => void } | null} */
@@ -455,6 +621,15 @@ export function createDataRuntime(env = {}) {
       });
   };
 
+  /** Whether a store is there to talk to; an effect that needs one says
+   * so instead of doing nothing (or throwing on an undefined answer).
+   * @param {(name: string, payload?: any) => void} dispatch */
+  const withStore = (dispatch) => {
+    if (transport !== null) return true;
+    dispatch('data/error', { message: 'the store is not booted — retry the boot first' });
+    return false;
+  };
+
   /** Re-read the collection into the store pane.
    * @param {(name: string, payload?: any) => void} dispatch */
   const refreshRows = (dispatch) => transport?.request('data.rows', { collection })
@@ -478,44 +653,88 @@ export function createDataRuntime(env = {}) {
     addEventListener('beforeunload', release);
   }
 
+  /**
+   * The boot, as the closed protocol: every attempt ends in `ready` or in
+   * the named `error` state, and a failed attempt tears its transport down
+   * before the page hears of it, so a retry (or a reload) starts clean and
+   * no worker, client, channel, listener or subscription outlives the
+   * failure. A previous transport — a retry after an error — is closed
+   * first, so exactly one transport ever exists.
+   * @param {(name: string, payload?: any) => void} dispatch
+   */
+  const bootStore = async (dispatch) => {
+    liveSub?.stop();
+    liveSub = null;
+    transport?.close();
+    // the boot opens the SEED model: whatever a reopen moved the studio
+    // onto, this attempt works on the seed model's first collection
+    collection = firstCollection(DATA_MODEL);
+    const booting = buildTransport();
+    transport = booting;
+    /** A later boot took over: this attempt is over and says nothing. */
+    const superseded = () => transport !== booting;
+    try {
+      const status = await booting.boot();
+      if (superseded()) return;
+      dispatch('data/status', status);
+      // an owner (OPFS) and a standalone memory tab each hold their
+      // OWN connection, so both open and seed; only a CLIENT attaches
+      // to the connection the owner already holds (LIVE-FORMAT §11)
+      if (status.topology !== 'client') {
+        const opened = await booting.bounded('store-open',
+          () => booting.request('data.open', { model: DATA_MODEL }));
+        if (superseded()) return;
+        dispatch('data/opened', { ...opened, collection, keyPointer: keyPointerOf(DATA_MODEL, collection) });
+        for (const seedDoc of SEEDS) {
+          await booting.request('data.insert',
+            { collection, doc: seedDoc }).catch(() => {});
+        }
+      }
+      else {
+        // the owner's store is the one already open; attaching is this
+        // tab's whole boot
+        dispatch('data/ready');
+      }
+    }
+    catch (error) {
+      if (superseded()) return;
+      const failure = bootFailure(booting.stage(), error);
+      booting.close();
+      transport = null;
+      dispatch('data/boot-error', failure.toJSON());
+      return;
+    }
+    if (superseded()) return;
+    booting.settled();
+    booting.faults((fault) => dispatch('data/error', { message: fault.message }));
+    // any reopen — a recreate here, a migration anywhere — ends
+    // every live registration on the store, so the owner announces
+    // it and the pane takes its subscription out again. Without
+    // this, a live pane keeps its last rows and goes on looking
+    // live while nothing reaches it.
+    booting.notices(() => {
+      subscribeLive(dispatch);
+      refreshRows(dispatch);
+    });
+    subscribeLive(dispatch);
+    await refreshRows(dispatch);
+  };
+
   const effects = {
     'data-boot': (_props, dispatch) => {
-      transport = createTransport();
       // seed the editor panes with the starting documents
       dispatch('data/seed', {
         modelText: JSON.stringify(DATA_MODEL, null, 2),
         queryText: JSON.stringify(DATA_QUERY, null, 2),
         tripCsv: TRIP_CSV,
       });
-      transport.boot()
-        .then(async (status) => {
-          dispatch('data/status', status);
-          // an owner (OPFS) and a standalone memory tab each hold their
-          // OWN connection, so both open and seed; only a CLIENT attaches
-          // to the connection the owner already holds (LIVE-FORMAT §11)
-          if (status.topology !== 'client') {
-            const opened = await transport.request('data.open', { model: DATA_MODEL });
-            dispatch('data/opened', opened);
-            for (const seedDoc of SEEDS) {
-              await transport.request('data.insert',
-                { collection, doc: seedDoc }).catch(() => {});
-            }
-          }
-          // any reopen — a recreate here, a migration anywhere — ends
-          // every live registration on the store, so the owner announces
-          // it and the pane takes its subscription out again. Without
-          // this, a live pane keeps its last rows and goes on looking
-          // live while nothing reaches it.
-          transport.notices(() => {
-            subscribeLive(dispatch);
-            refreshRows(dispatch);
-          });
-          subscribeLive(dispatch);
-          await refreshRows(dispatch);
-        })
-        .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
+      return bootStore(dispatch);
     },
+    // a retry after a terminal boot error: the same protocol, from a
+    // clean start — the failed transport was already released
+    'data-retry': (_props, dispatch) => bootStore(dispatch),
     'data-open': (props, dispatch) => {
+      if (!withStore(dispatch)) return;
       const model = parse(props.text, 'model');
       if (!model.ok) {
         dispatch('data/error', { message: model.message });
@@ -533,6 +752,7 @@ export function createDataRuntime(env = {}) {
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
     'data-insert': (props, dispatch) => {
+      if (!withStore(dispatch)) return;
       const title = String(props?.title ?? '').trim();
       if (title === '') return;
       const doc = {
@@ -547,11 +767,13 @@ export function createDataRuntime(env = {}) {
     // the write half the live pane makes visible: a removal arrives there
     // as an RFC 6902 remove, the same feed an insert arrives on
     'data-delete': (props, dispatch) => {
+      if (!withStore(dispatch)) return;
       transport?.request('data.delete', { collection, key: props.key })
         .then(() => refreshRows(dispatch))
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
     'data-run': (props, dispatch) => {
+      if (!withStore(dispatch)) return;
       const query = parse(props.text, 'query');
       if (!query.ok) {
         dispatch('data/error', { message: query.message });
@@ -685,6 +907,7 @@ export function createDataRuntime(env = {}) {
           { status: 'error', ...counts, message: String(error.message ?? error) }));
     },
     'data-migrate': (_props, dispatch) => {
+      if (!withStore(dispatch)) return;
       // the worked migration: index the title member, shadow-verified.
       // The reopen it ends with drops every live registration, and the
       // owner's notice is what puts the pane's subscription back.
@@ -774,15 +997,22 @@ export function dataViewModel(state) {
     collection: data.collection,
     insertPlaceholder: `new ${data.collection} title… (enter inserts)`,
     status: data.status,
+    boot: data.boot,
+    // an operational error line shows beside a booted studio; a boot
+    // failure is rendered by its own card instead
+    plainError: data.status === 'error' ? null : data.error,
     topology: data.topology,
     vfs: data.vfs,
     version: data.version,
     capture: data.capture,
     operators: data.operators,
     pushableOperators: data.pushableOperators,
-    operatorSummary: data.operators.length === 0
-      ? 'none registered'
-      : `${data.operators.length} registered · ${data.pushableOperators.length} pushed to SQLite as UDFs`,
+    // a client tab attaches to the owner's store and is told nothing about
+    // its operators: say so, rather than "none" about a store that has them
+    operatorSummary: data.operators.length > 0
+      ? `${data.operators.length} registered · ${data.pushableOperators.length} pushed to SQLite as UDFs`
+      : data.topology === 'client' ? 'the owner\'s (not reported to a client tab)'
+        : data.status === 'ready' ? 'none registered' : '—',
     operatorList: data.operators.join(' ') || '—',
     // a copyable query that exercises both paths: $sqrt is a pushable
     // scalar (a wasm UDF — watch explain() show jaren_p_ in the SQL),
@@ -793,9 +1023,12 @@ export function dataViewModel(state) {
       $return: '$it',
     }, null, 2),
     refusal: data.refusal,
+    // a verdict only once the topology is known: during the boot, and
+    // after a boot failure, nothing about OPFS has been learned
     durability: data.vfs === 'opfs-sahpool'
       ? 'persistent (OPFS access-handle pool, no special headers)'
-      : 'in-memory (OPFS unavailable here — data lives until reload)',
+      : data.vfs === 'memory' ? 'in-memory (OPFS unavailable here — data lives until reload)'
+        : 'not decided yet — the store has not booted',
     modelText: data.modelText,
     queryText: data.queryText,
     rows: data.rows,

@@ -58,3 +58,21 @@ SSR and offline tests working with no network; failures route to an error
 action.
 
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.calc-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/calc` | JavaScript | declared |
+| `@jarenjs/calc/component` | JavaScript | declared |
+| `@jarenjs/calc/theme` | JavaScript | declared |
+| `@jarenjs/calc/styles/calc.css` | asset | — |
+| `@jarenjs/calc/schemas/financial-inputs.schema.json` | schema | — |
+| `@jarenjs/calc/schemas/jaren-calc-ast.schema.json` | schema | — |
+| `@jarenjs/calc/schemas/jaren-calc-state.schema.json` | schema | — |
+| `@jarenjs/calc/package.json` | metadata | — |
+<!--/fact-->

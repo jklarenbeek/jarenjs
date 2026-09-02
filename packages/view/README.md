@@ -176,6 +176,27 @@ When a producer cannot preserve the reference — it rebuilds its tree but knows
 
 Children reconcile with a head/tail sweep plus a key map for the middle: keyed siblings move their real DOM nodes instead of recreating them; unkeyed siblings patch positionally. Event bindings are data stored on the node behind one shared proxy listener per event type — re-rendering rebinds by assignment, never through `addEventListener`.
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.view-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/view` | JavaScript | declared |
+| `@jarenjs/view/helpers` | JavaScript | declared |
+| `@jarenjs/view/helpers/index` | JavaScript | declared |
+| `@jarenjs/view/helpers/memo` | JavaScript | declared |
+| `@jarenjs/view/helpers/metrics` | JavaScript | declared |
+| `@jarenjs/view/helpers/svg` | JavaScript | declared |
+| `@jarenjs/view/helpers/theme` | JavaScript | declared |
+| `@jarenjs/view/helpers/url` | JavaScript | declared |
+| `@jarenjs/view/schemas/jaren-vnode-safe.schema.json` | schema | — |
+| `@jarenjs/view/schemas/jaren-vnode.schema.json` | schema | — |
+| `@jarenjs/view/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/view/` at the repository root (`npm run test:view`), including the minimal DOM stub they run against. See the repository [README](../../README.md) for the full suite documentation and [ROADMAP](../../docs/ROADMAP.md) for planned work: fragment roots, DOM-adopting hydration, and the memoized rule-output layer that turns JSLT sharing into cross-frame skipping.

@@ -58,6 +58,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { runNpm } from './lib/portable.js';
+import { importSubpaths } from './lib/exports.js';
 import { tarExtractArgs } from './lib/tar-extract-args.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -88,22 +89,6 @@ function publishableWorkspaces() {
     packages.push({ dir, name: pkg.name, pkg });
   }
   return packages;
-}
-
-/** The importable export subpaths of a package (no wildcards/assets). */
-function importSubpaths(pkg) {
-  const subpaths = [];
-  const exports = pkg.exports ?? { '.': pkg.main ?? './src/index.js' };
-  for (const key of Object.keys(exports)) {
-    if (key.includes('*')) continue;
-    if (key === './package.json') continue;
-    const target = typeof exports[key] === 'string'
-      ? exports[key]
-      : exports[key]?.default ?? exports[key]?.import;
-    if (typeof target !== 'string' || !target.endsWith('.js')) continue;
-    subpaths.push(key === '.' ? pkg.name : pkg.name + key.slice(1));
-  }
-  return subpaths;
 }
 
 /** The declared peers of a package (`peerDependencies`), each with its
@@ -512,7 +497,7 @@ try {
     tarballs.set(name, join(tarballDir, /** @type {string} */ (out)));
   }
 
-  for (const { name, pkg } of packages) {
+  for (const { name, pkg, dir } of packages) {
     const consumerDir = join(work, name.replace('/', '__'));
     const modulesDir = join(consumerDir, 'node_modules');
     mkdirSync(modulesDir, { recursive: true });
@@ -539,7 +524,7 @@ try {
     };
     for (const dep of declaredClosure(byName, name)) install(dep);
 
-    const subpaths = importSubpaths(pkg);
+    const subpaths = importSubpaths(pkg, join(root, dir));
     const peers = declaredPeers(pkg);
     /** @type {{ subpath: string, peer: string }[]} */
     const needing = [];

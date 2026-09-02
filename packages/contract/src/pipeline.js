@@ -89,7 +89,12 @@ function contractResult(code, details, cause) {
 
 /**
  * A server trace id from a host generator. TOTAL: a generator that
- * throws or answers a non-string is replaced by the platform's UUID.
+ * throws or answers a non-string is replaced by the platform's UUID —
+ * the one last-resort platform read in this package, reached only when
+ * the injected generator (a `trace` option or the runtime record's
+ * `uuid`) has itself failed, so a request still carries a trace; a run
+ * whose generator fails was not the deterministic run the record
+ * configures, and the fallback says nothing about it.
  * @param {() => string} trace
  * @returns {string}
  */

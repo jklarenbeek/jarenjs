@@ -292,6 +292,55 @@ theirs. If your schemas are documents — published, shared with other
 languages, or fed to an LLM's structured-output mode — this is the one that
 fits.
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.emit-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/emit` | JavaScript | declared |
+| `@jarenjs/emit/model` | JavaScript | declared |
+| `@jarenjs/emit/typescript` | JavaScript | declared |
+| `@jarenjs/emit/markdown` | JavaScript | declared |
+| `@jarenjs/emit/schemas/jaren-emit-model.schema.json` | schema | — |
+| `@jarenjs/emit/package.json` | metadata | — |
+<!--/fact-->
+
+What each family is for, and what it costs:
+
+- **The root** re-exports the three routes below, so `import { emitTypeScript }
+  from '@jarenjs/emit'` is the whole package. Reach for a subpath when a
+  bundle should carry one target only.
+- **`./model`** is the published intermediate stage
+  ([EMIT-FORMAT](docs/EMIT-FORMAT.md)): `compileEmitModel(schema, options)`
+  turns a JSON Schema into a `jaren-emit` model document — every type
+  resolved, every union normalized, every constraint the target cannot
+  express listed — and `EMIT_MODEL_VERSION` names the document version it
+  writes. It is the route a *new* target starts from: a stylesheet over
+  the model is a generator, and the model is what the TypeScript and
+  Markdown routes both read. It imports the validator's schema
+  normalizer, so it is the heaviest of the three by itself.
+- **`./typescript`**: `emitTypeScript(schema, options)` is schema → model →
+  declaration text in one call; `renderTypeScript(model, options)` renders a
+  model you already compiled (the CLI compiles once and renders per target
+  this way); `TYPESCRIPT_STYLESHEET` is the JTLT document doing the
+  rendering, exported so a host can extend it rather than fork it.
+- **`./markdown`**: `emitMarkdown`, `renderMarkdown` and
+  `MARKDOWN_STYLESHEET` — the same three shapes, emitting a reference
+  document instead of a declaration file.
+- **`./schemas/*`** is the JSON Schema of the model document itself
+  (`jaren-emit-model.schema.json`): validate a model you stored or wrote
+  by hand against it before rendering, or hand it to an editor for
+  completion. It is JSON, not code — no declaration rides with it.
+- **`./package.json`** is metadata: the version a tool may read, nothing
+  a program imports.
+
+The `jaren-emit` CLI (`bin`) is not an export — it is the command the
+package installs, and it uses `./typescript` and `./markdown` exactly as a
+program would.
+
 ## Development
 
 Tests live in `test/emit/` at the repository root (`npm run test:emit`).

@@ -718,7 +718,13 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   handle retained past its callback, or an outer handle used while an
   async inner savepoint is open, refuses `JD2070` instead of joining a
   transaction it does not own — and a transaction view carries no
-  `close`, because it never owns the connection's lifetime.
+  `close`, because it never owns the connection's lifetime. A root
+  cursor (`collection.query()`, `entity.cursor()`, `entity.loadCursor()`)
+  is admitted **per pull**: construction holds nothing, each `next()` and
+  `return()` borrows the gate for one item's work and releases before it
+  settles, so a paused consumer blocks no transaction and no pull ever
+  reads another transaction's uncommitted row; `store.live()` registers
+  under the same gate through its initial query.
 - **Named savepoints** (MODEL-FORMAT §5.2): `tx.savepoints.create /
   rollbackTo / release` give a live transaction checkpoint-and-continue
   without a sentinel exception — the target stays active after a
@@ -793,7 +799,9 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   queries, the same live updates run on the official SQLite wasm build
   over the header-free OPFS SAH-pool VFS — one tab owns the
   connection, others are clients. Proven in the `#/data` studio across
-  Chromium, Firefox and WebKit. The subpath exports the two helpers
+  Chromium, Firefox and WebKit, whose boot is a closed five-stage protocol
+  (LIVE-FORMAT §11): every attempt ends ready or in a named, retryable
+  `DATA_BOOT` failure, never a status line stuck at boot. The subpath exports the two helpers
   that studio is built on: `sqlite3Handle(sqlite3, { DbClass })` builds
   the injected handle from a loaded wasm module and the database class
   the host picks (`sqlite3.oo1.DB` in memory, the SAH-pool
@@ -810,7 +818,9 @@ SQLite's own story (WAL plus a busy timeout, both set and visible on
   subsystem's own explicit option (`zoneProvider`, `jobs.now`,
   `jobs.random`) wins over the record's member. A query `deadline` is an
   absolute instant the caller computed and is compared against the
-  platform clock, not the record's.
+  record's `now` — before a statement runs and at every row boundary of
+  a cursor or page — so a deterministic run computes its deadlines from
+  the same clock the store reads.
 
 ### What an event-time view costs
 
@@ -891,3 +901,24 @@ profile §8, entities §9, relational translation §10, the unit of work
 queue §§1–9); the seams, the pushdown contract and every engine are in
 [ARCHITECTURE.md](ARCHITECTURE.md); the benchmark methodology is in
 [benchmark/README.md](../../benchmark/README.md).
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.db-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/db` | JavaScript | declared |
+| `@jarenjs/db/node` | JavaScript | declared |
+| `@jarenjs/db/bun` | JavaScript | declared |
+| `@jarenjs/db/wasm` | JavaScript | declared |
+| `@jarenjs/db/typed` | JavaScript | declared |
+| `@jarenjs/db/app` | JavaScript | declared |
+| `@jarenjs/db/schemas/jaren-migration.draft-07.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-migration.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-model.draft-07.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-model.schema.json` | schema | — |
+| `@jarenjs/db/package.json` | metadata | — |
+<!--/fact-->

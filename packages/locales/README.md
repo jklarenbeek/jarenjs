@@ -265,3 +265,29 @@ Rules of the road:
 
 The named export is the locale tag camel-cased (`zhTW`), the subpath keeps
 the tag itself (`@jarenjs/locales/zh-tw`).
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.locales-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/locales` | JavaScript | declared |
+| `@jarenjs/locales/dates` | JavaScript | declared |
+| `@jarenjs/locales/intl-dates` | JavaScript | declared |
+| `@jarenjs/locales/intl-zones` | JavaScript | declared |
+| `@jarenjs/locales/ar` | JavaScript | declared |
+| `@jarenjs/locales/de` | JavaScript | declared |
+| `@jarenjs/locales/es` | JavaScript | declared |
+| `@jarenjs/locales/fr` | JavaScript | declared |
+| `@jarenjs/locales/ja` | JavaScript | declared |
+| `@jarenjs/locales/ko` | JavaScript | declared |
+| `@jarenjs/locales/nl` | JavaScript | declared |
+| `@jarenjs/locales/pt` | JavaScript | declared |
+| `@jarenjs/locales/ru` | JavaScript | declared |
+| `@jarenjs/locales/tr` | JavaScript | declared |
+| `@jarenjs/locales/zh-tw` | JavaScript | declared |
+| `@jarenjs/locales/package.json` | metadata | — |
+<!--/fact-->

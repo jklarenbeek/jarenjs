@@ -34,6 +34,7 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS } from '../pipeline.js';
+import { resolveHostRuntime } from '../runtime.js';
 import { renderMessage, declaredMessage } from '../http/wire.js';
 import {
   prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, outcomeError, clientError,
@@ -53,7 +54,11 @@ export { PORT_LOCAL_ERRORS };
 
 /**
  * @typedef {Object} LocalOptions
- * @property {() => string} [trace] - the trace generator; default `crypto.randomUUID`
+ * @property {() => string} [trace] - the trace generator; default the
+ *   runtime record's `uuid`, itself `crypto.randomUUID` by default
+ * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
+ *   - the host's runtime record: its `uuid` generates the trace where
+ *   `trace` is absent
  * @property {'always' | 'never'} [validateOutput] - `'never'` is a declared
  *   downgrade, reported in `capabilities.validatedOutput`
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
@@ -210,7 +215,8 @@ export function openLocalClient(contract, handlers, options = {}) {
   if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
-  const trace = options.trace === undefined ? () => globalThis.crypto.randomUUID() : options.trace;
+  const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
+  const trace = options.trace === undefined ? runtime.uuid : options.trace;
   const onError = options.onError === undefined ? null : options.onError;
   /** @type {Catalog | null} */
   const catalog = options.catalog === undefined ? null : compileMessageCatalog(options.catalog);

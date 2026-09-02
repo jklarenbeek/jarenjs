@@ -282,7 +282,8 @@ export function fullDoubleDialect(createDialect) {
 export function statementCountingDriver(counters) {
   const db = new DatabaseSync(':memory:');
   return {
-    open: () => adaptNodeDatabase({
+    /** @param {{ queueTimeout?: number }} [options] - the store's open options; `queueTimeout` is honoured */
+    open: (options) => adaptNodeDatabase({
       exec: (sql) => db.exec(sql),
       prepare: (sql) => {
         const statement = db.prepare(sql);
@@ -312,8 +313,8 @@ export function statementCountingDriver(counters) {
       },
       function: (name, options, fn) => db.function(name, options, fn),
       aggregate: (name, spec) => db.aggregate(name, spec),
-      createSession: (options) => (options === undefined ? db.createSession() : db.createSession(options)),
+      createSession: (sessionOptions) => (sessionOptions === undefined ? db.createSession() : db.createSession(sessionOptions)),
       close: () => db.close(),
-    }),
+    }, { queueTimeout: options?.queueTimeout }),
   };
 }

@@ -24,6 +24,7 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS } from '../pipeline.js';
+import { resolveHostRuntime } from '../runtime.js';
 import { isSubscriptionLike, runSubscription, STREAM_ERRORS } from '../stream/server.js';
 import { HTTP_ERRORS, renderMessage, declaredMessage } from '../http/wire.js';
 import { isContractFrame, valueFrame, errorFrame, pushFrame, attach, isChannel } from './frame.js';
@@ -44,7 +45,8 @@ export { PORT_LOCAL_ERRORS };
 /**
  * @typedef {Object} ServePortOptions
  * @property {ChannelLike} channel - the channel to serve (required)
- * @property {() => string} [trace] - the server trace generator; default `crypto.randomUUID`
+ * @property {() => string} [trace] - the server trace generator; default
+ *   the runtime record's `uuid`, itself `crypto.randomUUID` by default
  * @property {'always' | 'never'} [validateOutput] - `'never'` is a declared
  *   downgrade, reported in `capabilities.validatedOutput`
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
@@ -52,6 +54,9 @@ export { PORT_LOCAL_ERRORS };
  * @property {(error: unknown, ctx: { op: string, trace: string } | null) => void} [onError]
  *   - observes the cause behind every `JC2070` frame, validator throws
  *   and a channel whose `postMessage` throws
+ * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
+ *   - the host's runtime record: its `uuid` generates the server trace
+ *   where `trace` is absent
  */
 
 /**
@@ -169,7 +174,8 @@ export function servePort(contract, handlers, options) {
   if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
-  const traceGen = options.trace === undefined ? () => globalThis.crypto.randomUUID() : options.trace;
+  const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
+  const traceGen = options.trace === undefined ? runtime.uuid : options.trace;
   const onError = options.onError === undefined ? null : options.onError;
   /** @type {Catalog | null} */
   const catalog = options.catalog === undefined ? null : compileMessageCatalog(options.catalog);

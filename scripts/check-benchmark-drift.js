@@ -35,8 +35,11 @@ const TRACKED = 'packages/website/public/benchmarks';
  */
 
 /**
- * Which tracked measurements differ from HEAD (modified, staged, deleted
- * or newly added — an untracked artifact is as unreviewed as a changed one).
+ * Which measurements in the tracked directory differ from HEAD: modified,
+ * staged, deleted, newly added, untracked — and IGNORED, because a file an
+ * ignore rule hides is copied into the site build all the same and is as
+ * unreviewed as any other. Read NUL-separated, so a path with a space or
+ * a quote is one path and a rename is two.
  * @param {{ root?: string }} [options]
  * @returns {DriftReport}
  */
@@ -44,18 +47,23 @@ export function checkBenchmarkDrift(options = {}) {
   const cwd = options.root ?? ROOT;
   let out;
   try {
-    out = execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '--', TRACKED],
+    out = execFileSync('git', ['status', '--porcelain', '-z', '--untracked-files=all', '--ignored=matching', '--', TRACKED],
       { cwd, encoding: 'utf8' });
   }
   catch (err) {
     return { code: 2, changed: [], reason: String(/** @type {any} */ (err)?.message ?? err) };
   }
-  const changed = out.split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-    // `XY path` — and a rename carries ` -> `, whose destination is the one
-    // that would ship
-    .map((line) => line.slice(2).trim().split(' -> ').pop() ?? '');
+  const fields = out.split('\0').filter((field) => field !== '');
+  /** @type {string[]} */
+  const changed = [];
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i];
+    const status = entry.slice(0, 2);
+    // `XY path` — a rename or copy carries the ORIGINAL path in the next
+    // field; the destination is the one that would ship
+    changed.push(entry.slice(3));
+    if (status.includes('R') || status.includes('C')) i++;
+  }
   return { code: changed.length > 0 ? 1 : 0, changed };
 }
 

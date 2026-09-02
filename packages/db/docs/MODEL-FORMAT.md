@@ -754,11 +754,33 @@ What that costs, stated plainly:
 - `store.transaction(fn, { signal })` abandons a call that is still
   **queued** — the callback never runs, and `JD2064` says so. A
   transaction that has already taken the connection runs to its own end.
-- `collection.query()` is the one store-level read that is not gated: it
-  answers an async iterable whose life is the caller's loop, and holding
-  the connection for that long would block every transaction for as long
-  as a consumer reads slowly. A streaming cursor can therefore still
-  observe another transaction's uncommitted rows.
+- A store-level **cursor** — `collection.query()`, `entity.cursor()`,
+  `entity.loadCursor()` — takes the gate **per pull**, not for its life:
+  constructing it touches no connection, each `next()` holds the
+  connection for exactly the source work one item needs (the first pull
+  prepares and opens the statement) and releases before it settles, and
+  `return()` is admitted the same way — a release the gate refuses (a
+  contended `'strict'` store, a queue timeout) still resets the statement
+  off-gate and answers `{ done: true }`, and an abort resets it at once,
+  because a statement left open until a stranger commits is the worse
+  outcome. So a consumer paused between pulls blocks no transaction, and
+  a pull made while one is open waits for its commit and observes
+  committed state only — never a row a stranger's transaction later rolls
+  back. Every cursor iterates a statement of its own, so two cursors over
+  one document never invalidate each other. A pull abandoned while queued
+  is `JD2064`; an aborted cursor is `JD2072` at its row boundary; a
+  passed deadline is `JD2075`; a settled cursor answers `{ done: true }`
+  whatever the clock or the gate say. A transaction view's cursors are
+  pinned to their exact scope instead (`JD2070`), as above.
+- `store.live()` and `collection.live()` register **under the gate through
+  their initial query**: the registration is local but the first result is
+  a statement, so it waits for an open transaction like every other
+  store-level read and never publishes rows that transaction rolls back
+  (LIVE-FORMAT §7). A registration that is refused leaves no live query
+  behind. A live query registered from INSIDE a transaction (`tx.live`,
+  `tx.collection(name).live`) initializes from that transaction's rows and
+  shares its fate: committed, it stays and is maintained; rolled back, it
+  is closed with the rows that never existed.
 
 **A unit of work's fate is its transaction's.** A tracked `saveChanges()`
 inside a transaction writes its statements immediately — inside the
@@ -982,7 +1004,10 @@ already aborted issues no statement (`JD2072`), and a cursor or page
 releases its statement at the next row boundary. `deadline` is an
 epoch-millisecond instant checked before a statement runs and at
 every row boundary of a cursor or page (`JD2075`) — a row-boundary
-check, never a statement interrupt, for the reason above.
+check, never a statement interrupt, for the reason above. The clock it
+is checked against is the store's runtime record's `now`
+(`@jarenjs/core/runtime`; the platform clock with no record), so a
+caller under an injected clock computes deadlines from that clock.
 
 **Provenance.** Every `explain()` — collection, entity, graph —
 carries `budget`: the profile that applied and from where (`{ source:

@@ -23,6 +23,21 @@ import { execFileSync } from 'node:child_process';
 import nodePath from 'node:path';
 
 /**
+ * The npm CLI that launched the current process, or null. `npm run`
+ * publishes its own JavaScript entry point as `npm_execpath`; the `.js`
+ * guard keeps a pnpm/yarn-launched script (whose `npm_execpath` points at
+ * their own CLI) from being taken for npm. The ONE place this question is
+ * answered: {@link runNpm} takes the route when it can, and the release
+ * bump refuses when it cannot.
+ * @param {NodeJS.ProcessEnv} [env] - `process.env` by default
+ * @returns {string | null}
+ */
+export function npmCliPath(env = process.env) {
+  const npmCli = env.npm_execpath;
+  return typeof npmCli === 'string' && npmCli.endsWith('.js') ? npmCli : null;
+}
+
+/**
  * Run the npm CLI portably and return its stdout.
  *
  * The primary route invokes npm's own JavaScript entry point under the
@@ -41,8 +56,8 @@ import nodePath from 'node:path';
  * @returns {string} stdout
  */
 export function runNpm(args, options = {}) {
-  const npmCli = process.env.npm_execpath;
-  if (typeof npmCli === 'string' && npmCli.endsWith('.js')) {
+  const npmCli = npmCliPath();
+  if (npmCli !== null) {
     return String(execFileSync(process.execPath, [npmCli, ...args],
       { encoding: 'utf8', ...options }));
   }

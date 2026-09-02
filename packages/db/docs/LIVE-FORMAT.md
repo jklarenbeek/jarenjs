@@ -118,10 +118,17 @@ const records = await store.changesSince(lastSeq);  // JD2051 when no log
 ```
 
 `seq` is monotonic; with the log enabled the DATABASE allocates it —
-each record's `seq` is `MAX(seq) + 1` computed inside the insert
-statement and read back through `RETURNING` — so two stores over one
-file never collide on the log's key and each sees the other's
-sequence continue; without the log it is per-process. `changesSince`
+one statement, inside the write's own transaction, advances a durable
+singleton row (`_jaren_changes_state`, the highest sequence this file
+ever allocated) and reads the new value back through `RETURNING`, and
+the record is then inserted under it — so two stores over one file
+never collide on the log's key, each sees the other's sequence continue,
+and a write that rolls back takes its allocation back with its row. The
+state row is engine metadata: it is created beside the log, seeded once
+from an existing file's surviving `MAX(seq)` (0 for a file that never
+held a row; a later open changes nothing), never lowered, never pruned,
+and never a capture, live, model or migration subject. Without the log,
+`seq` is per-process. `changesSince`
 answers records in the shape observers receive, `collections`
 included; a cursor that is not a number is a `TypeError`, as is a
 `retention` that is not a positive integer. Retention is
@@ -144,10 +151,14 @@ supported path for a consumer that reconnects.
 is enabled (`JD2051` otherwise, as `changesSince`).
 
 - `changes.bounds()` answers the two watermarks: `earliestAvailable`,
-  the earliest surviving sequence (`null` when nothing survives), and
-  `highWatermark`, the highest allocated — `MIN(seq)`/`MAX(seq)` over
-  the log, cheap, and what a consumer needs before it decides whether
-  its cursor is usable.
+  the earliest surviving sequence (`MIN(seq)` over the log; `null` when
+  nothing survives), and `highWatermark`, the highest sequence the FILE
+  ever allocated, read from the durable state row — so a log that
+  retention emptied, reopened in a new process, still answers
+  `{ earliestAvailable: null, highWatermark: N }` and a cursor below `N`
+  meets `resetRequired` rather than a plausible empty history. Both are
+  the file's facts, never a process counter or a clock; cheap, and what a
+  consumer needs before it decides whether its cursor is usable.
 - `changes.page({ after, limit, maxBytes, signal })` answers
   `{ items, next, earliestAvailable, highWatermark, hasMore,
   resetRequired }`. `after` is the last sequence seen and is required:
@@ -223,7 +234,17 @@ live.close();
 `store.live(document, options)` registers an entity-root document (the
 multi-entity shape of MODEL-FORMAT §10) the same way. Live queries
 REQUIRE change capture — the patch stream is the invalidation source —
-and registering on a store opened without `capture` is `JD0050`.
+and registering on a store opened without `capture` is `JD0050`. Both
+registrations run under the store gate through their **initial query**
+(MODEL-FORMAT §5.1): a registration made while another transaction is
+open waits for it to settle and initializes from committed rows only, a
+rolled-back row never reaches `result`, and a refused registration
+leaves `stats().liveQueries` unchanged. A registration made from INSIDE
+a transaction view initializes from that transaction's rows and shares
+its fate — kept and maintained on commit, closed on rollback. Once
+registered, the handle is maintained by committed writes alone and takes
+no gate of its own. `changes.page()` takes the same `deadline` every
+other page does (`JD2075` at a record boundary).
 
 A producer may hand a registration a CHAIN instead of a document: the
 `@jarenjs/linq/db` client's `live(chain, options)` passes the chain's
@@ -408,8 +429,11 @@ Decided by a platform fact: OPFS synchronous access handles are
 all, so "one connection per tab" is not available and never will be.
 Therefore:
 
-- ONE owning context holds the sole connection — a `SharedWorker`
-  where available, else a leader tab elected via `navigator.locks` —
+- ONE owning context holds the sole connection — the first tab's
+  dedicated worker to install the OPFS access-handle pool owns it (the
+  pool is exclusive by construction) and holds a `navigator.locks` lock
+  for its lifetime so a later tab can tell a busy owner from no owner
+  (a `BroadcastChannel` ping is the fallback where locks are absent) —
   and every other tab is a client;
 - queries, writes and the patch stream travel between clients and the
   owner over `BroadcastChannel` / `MessagePort`; a client's live query
@@ -422,8 +446,25 @@ Therefore:
 Node and Bun present the same API with no channel at all — the store
 is its own owner, and application code is identical everywhere. The
 in-browser proof of this topology (delivery across real tabs, the
-refusal, reload survival) belongs to the browser-driver order and its
-Playwright suite; this section is the decided contract it implements.
+refusal, reload survival) is the website's Playwright suite over the
+`#/data` studio; this section is the decided contract it implements.
+
+**The browser boot is a closed protocol.** Reaching an owner, a client
+or a standalone memory store passes through five named stages —
+`worker-start`, `sqlite-init`, `vfs-acquire`, `topology`,
+`store-open` — and every attempt ends in exactly one of two states:
+ready, or a stable failure record `{ code: 'DATA_BOOT', stage, message }`
+naming the stage that failed. Each stage carries its own budget, so a
+stage that never settles fails under its own name rather than under an
+outer deadline that cannot say which resource to release; an OPFS pool
+that is genuinely absent or held still produces the `memory` or `client`
+answer above, while a pool install that hangs is a `vfs-acquire` failure
+and never masquerades as absence. A failed attempt releases everything it
+created — worker, port client, channel, listeners, timers — before the
+page hears of it, so a retry (or a reload) starts clean, and the page
+shows the stage and offers the retry. The stage runner is
+`packages/website/src/lib/boot-stages.js`; the site's transport and its
+owner worker are the two halves that run it.
 
 ## 12. Lifecycle, bounds, and non-goals
 

@@ -459,6 +459,18 @@ tree.session;
 
 `session.dirty`/`session.dirtyPaths` are the **navigation-guard authority**: they come from a full JSON diff of `initial` against the current data — independent of what is rendered — so removed array tails, members removed or added (including explicit `null`), and values retained under rule-hidden fields all count, each contributing its pointer. The diff walks **own** keys only (`Object.hasOwn`), so hostile-but-legal member names like `constructor` or a JSON-parsed `__proto__` diff as data, never through the prototype chain, and it RFC 6901-encodes every member name as it builds the pointer (`~` → `~0`, `/` → `~1`, the same `encodeJSONPointerSegment` the model, rule and validation walks use) — so a key containing a slash or a tilde cannot collide with a nested path, and the entries of `dirtyPaths` feed straight back into `getValueAtPointer`. To keep the authority unconditional, a root-level `x-form` `visible` rule is rejected by `compileFormRules` with a `TypeError` — hiding the whole form would null the render tree *and* its summary; gate whole-form visibility at the mount boundary instead. The per-node `dirty`/`errors` members remain the render-layer, visible-only summary. Without `session`, the tree is byte-identical to the sessionless shape.
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.forms-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/forms` | JavaScript | declared |
+| `@jarenjs/forms/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/forms/` at the repository root. See the repository [README](../../README.md) for the full Jaren documentation, and the [ROADMAP](../../docs/ROADMAP.md) for planned forms work (rule dependency memoization, hidden-field pruning on submit, computed views through JSLT).

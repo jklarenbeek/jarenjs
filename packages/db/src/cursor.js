@@ -74,6 +74,9 @@ export function utf8Length(text) {
  * @property {number} [deadline] - an epoch-millisecond deadline checked at
  *   every pull: past it, the cursor releases its source and refuses
  *   `JD2075` — a row-boundary check, never a statement interrupt
+ * @property {() => number} [now] - the clock the deadline is read
+ *   against — the store's runtime record's; required beside a deadline,
+ *   so no cursor reads the platform clock on its own
  * @property {(opened: boolean) => void} [onSettle] - called exactly once
  *   when the cursor settles — exhausted, released, or aborted — with
  *   whether a pull ever reached the source; what an engine finalises its
@@ -88,6 +91,9 @@ export function utf8Length(text) {
 export function createCursor(spec) {
   const { streaming, signal } = spec;
   const barrier = spec.barrier ?? null;
+  const now = spec.now ?? null;
+  if (spec.deadline !== undefined && now === null)
+    throw new TypeError('a cursor with a deadline is built with the clock it is read against (now)');
   /** @type {any[]} */
   let buffered = [];
   let bufferedAt = 0;
@@ -149,7 +155,9 @@ export function createCursor(spec) {
       release();
       return Promise.reject(abortRefusal());
     }
-    if (spec.deadline !== undefined && Date.now() > spec.deadline) {
+    // a settled cursor holds nothing: `{ done: true }`, whatever the clock says
+    if (done) return Promise.resolve({ done: true, value: undefined });
+    if (spec.deadline !== undefined && /** @type {() => number} */ (now)() > spec.deadline) {
       release();
       return Promise.reject(new DbRuntimeError('JD2075',
         `the deadline passed before the next row (${new Date(spec.deadline).toISOString()}); `
@@ -193,6 +201,10 @@ export function createCursor(spec) {
   const cursor = {
     streaming,
     barrier,
+    /** Whether the cursor has settled — exhausted, released or aborted —
+     * and so holds no source: what an admission layer reads to answer
+     * without borrowing anything. */
+    get settled() { return done; },
     next: () => pull(),
     return: () => {
       release();
@@ -201,6 +213,79 @@ export function createCursor(spec) {
     [Symbol.asyncIterator]: () => cursor,
   };
   return Object.freeze(cursor);
+}
+
+/**
+ * A ROOT cursor's admission: the one decorator every store-level cursor
+ * — a collection's `query()`, an entity set's `cursor()` and
+ * `loadCursor()` — is handed back through, so the rule that a root read
+ * cannot fall inside a transaction it is not part of (MODEL-FORMAT §5.1)
+ * holds for a streaming read exactly as it holds for a finite one, at the
+ * granularity a stream can afford: **per pull**. Construction holds
+ * nothing. Each `next()` borrows the store gate for all the source work
+ * one public item needs (opening the statement on the first pull, the
+ * row steps, a row that yields no item), then releases before the
+ * promise settles, so a consumer paused between pulls blocks no
+ * transaction and a pull made while one is open waits for its commit
+ * and reads committed state only. `return()` is admitted the same way;
+ * a release the gate REFUSES (a contended `transactions: 'strict'`
+ * store, a queue timeout) still runs, off-gate — a statement reset reads
+ * and writes nothing, and a statement left open until the store closes
+ * is the worse outcome — and answers `{ done: true }`. An abort likewise
+ * resets the source at once, off-gate, through the inner cursor's own
+ * listener: an abort asks for the statement to be let go, not for it to
+ * be held until a stranger's transaction commits.
+ *
+ * Refusals keep their granularity: a pull abandoned while QUEUED is the
+ * gate's `JD2064` (the source, never opened for that pull, needs no
+ * release); a pull whose signal is already aborted, or aborts at a row
+ * boundary, is the cursor's own `JD2072` and releases the source once; a
+ * passed deadline is `JD2075`. A cursor that has settled — exhausted,
+ * released, aborted — answers `{ done: true }` without borrowing the
+ * gate at all. The decorator buffers no item and holds no gate between
+ * two public pulls: `streaming`, `barrier` and the asynchronous-iterator
+ * identity are the inner cursor's own.
+ * @param {any} cursor - the engine's `QueryCursor`
+ * @param {(fn: () => any, what?: string, signal?: AbortSignal) => any} admit
+ *   - the store gate: runs `fn` holding the connection, value-or-promise
+ * @param {AbortSignal | undefined} signal - the cursor's own signal, so an
+ *   abort abandons a queued pull
+ * @param {string} what - what is waiting, for the gate's timeout message
+ * @returns {any} the admitted `QueryCursor`
+ */
+export function admitCursor(cursor, admit, signal, what) {
+  /**
+   * @param {'next' | 'return'} member
+   * @param {string} label
+   * @param {boolean} abandonable - whether an abort leaves the queue
+   */
+  const through = (member, label, abandonable) => () => {
+    // an already-aborted cursor refuses on its own (`JD2072`, every later
+    // pull) and releases its source; the gate has nothing to admit
+    if (abandonable && signal?.aborted === true) return cursor[member]();
+    // a settled cursor holds no source: nothing to admit, nothing to wait for
+    if (cursor.settled === true) return Promise.resolve({ done: true, value: undefined });
+    let admitted;
+    try {
+      admitted = Promise.resolve(admit(() => cursor[member](), label, abandonable ? signal : undefined));
+    }
+    catch (error) {
+      admitted = Promise.reject(error);
+    }
+    if (member !== 'return') return admitted;
+    // a refused release still releases: the reset lands off-gate rather
+    // than leaving the statement open
+    return admitted.catch(() => cursor.return());
+  };
+  /** @type {any} */
+  const admitted = {
+    streaming: cursor.streaming,
+    barrier: cursor.barrier,
+    next: through('next', what, true),
+    return: through('return', `${what} (release)`, false),
+    [Symbol.asyncIterator]: () => admitted,
+  };
+  return Object.freeze(admitted);
 }
 
 /** The page size a page takes when none is given. */

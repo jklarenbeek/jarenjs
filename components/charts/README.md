@@ -406,3 +406,21 @@ pie AST onto `compileChart` inputs.
 `schemas/chart-definition.schema.json` describes the definition
 document; validate untrusted definitions with `@jarenjs/validate`
 before compiling.
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.charts-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/charts` | JavaScript | declared |
+| `@jarenjs/charts/component` | JavaScript | declared |
+| `@jarenjs/charts/stream-adapter` | JavaScript | declared |
+| `@jarenjs/charts/transforms/mermaid-adapter` | JavaScript | declared |
+| `@jarenjs/charts/transforms/benchmark-adapter` | JavaScript | declared |
+| `@jarenjs/charts/styles/charts.css` | asset | — |
+| `@jarenjs/charts/schemas/chart-definition.schema.json` | schema | — |
+| `@jarenjs/charts/package.json` | metadata | — |
+<!--/fact-->

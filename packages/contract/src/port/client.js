@@ -24,6 +24,7 @@
  */
 
 import { compileMessageCatalog } from '@jarenjs/core/message';
+import { resolveHostRuntime } from '../runtime.js';
 
 import { ContractHostError } from '../errors.js';
 import { validateOperationInput, PORT_LOCAL_ERRORS } from '../pipeline.js';
@@ -52,6 +53,10 @@ export { PORT_LOCAL_ERRORS };
  * @property {number} [timeoutMs] - per request; default 15000; `0` disables
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
  *   - a message catalog consulted before the English one
+ * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
+ *   - the host's runtime record: its `uuid` mints the client id every
+ *   request id of this client is prefixed with; `crypto.randomUUID` by
+ *   default
  */
 
 /**
@@ -186,7 +191,19 @@ export function openPortClient(contract, options) {
     routes.set(id, prepare(contract.operations[id]));
   }
 
-  const clientId = globalThis.crypto.randomUUID();
+  const runtime = resolveHostRuntime(options.runtime, host, 'JC1008');
+  // the record's generator is the host's; one that throws or answers no
+  // string is the host's own mistake, refused where it was passed
+  let clientId;
+  try {
+    clientId = runtime.uuid();
+  }
+  catch (error) {
+    throw host('JC1008', `options.runtime: uuid() threw (${error instanceof Error ? error.message : String(error)})`);
+  }
+  if (typeof clientId !== 'string' || clientId.length === 0) {
+    throw host('JC1008', 'options.runtime: uuid() must answer a non-empty string, the client id every request is prefixed with');
+  }
   const prefix = clientId + ':';
   let seq = 0;
   /** @type {Map<string, Pending>} */

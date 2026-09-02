@@ -197,10 +197,19 @@ response.headers['x-jaren-trace'];                           // the server trace
 JSON.parse(response.body);                                   // the catalog
 ```
 
-Every option has a default. The two host facts among them — the trace
-generator and the clock — also come from a `runtime` record
-(`@jarenjs/core/runtime`) when one is given, so a server, a store and a
-job queue can share one; an explicit `trace` or `now` still wins.
+Every option has a default. The host facts among them come from a
+`runtime` record (`@jarenjs/core/runtime`) when one is given — and every
+binding takes one: `serveHttp`, `servePort` and `openLocalClient` mint
+their trace from its `uuid`, `openPortClient` its client id, `openHttpClient`
+its idempotency keys (its `now` stamps the key records and its `random`
+draws the retry jitter), and `createMemoryLedger` stamps claims with its
+`now`. So a server, its ledger, a client, a store and a job queue share
+one record and a deterministic run is configured once; an explicit `trace`,
+`keys` or `now` still wins over the record's member, and with no record
+every binding reads the platform as it always did. Give the server and its
+ledger the SAME record: a ledger built without a clock follows the
+binding's instants, and one built with its own clock must not disagree
+with the server that stamps its claims.
 
 The pipeline routes (404/405 with `Allow`), enforces the body limit
 (413) before reading, checks the media (415), parses (400), assembles the
@@ -565,6 +574,14 @@ benchmark-figure gate so no number here is typed by hand:
   hostile input settles into a coded response) that also proves the
   server kept its own contract before a byte leaves. Over a real
   loopback socket the two stacks are level: the socket dominates both.
+- **The optimization trigger**: on the heaviest in-process row (the
+  5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.6%<!--/fact-->
+  of the request and output validation is <!--fact:contract.validateOutput.share-->29%<!--/fact-->.
+  A schema-driven serializer stays unscheduled while serialization is below
+  25%: even making that stage free would move the whole request by only about a
+  tenth. The suite republishes both shares on every measured run; for a large
+  cached representation, validate on rebuild and serve by revision instead of
+  paying validation on every request.
 - **Revision**: computing it
   costs <!--fact:contract.revision.ms-->1.4 ms<!--/fact--> for the 123-operation
   contract, once per process.
@@ -626,3 +643,30 @@ patches, `JC2090–JC2095`, the generated app subscription with
 `createContractSubscription`, and the one SSE codec of the suite in
 `@jarenjs/core/text/sse`); and the `contract/*` locale packs in all
 eleven `@jarenjs/locales` languages, key parity enforced by test.
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.contract-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/contract` | JavaScript | declared |
+| `@jarenjs/contract/http` | JavaScript | declared |
+| `@jarenjs/contract/fetch` | JavaScript | declared |
+| `@jarenjs/contract/node` | JavaScript | declared |
+| `@jarenjs/contract/ledger` | JavaScript | declared |
+| `@jarenjs/contract/diff` | JavaScript | declared |
+| `@jarenjs/contract/client` | JavaScript | declared |
+| `@jarenjs/contract/local` | JavaScript | declared |
+| `@jarenjs/contract/port` | JavaScript | declared |
+| `@jarenjs/contract/stream` | JavaScript | declared |
+| `@jarenjs/contract/app` | JavaScript | declared |
+| `@jarenjs/contract/project` | JavaScript | declared |
+| `@jarenjs/contract/schemas/jaren-contract-port.draft-07.schema.json` | schema | — |
+| `@jarenjs/contract/schemas/jaren-contract-port.schema.json` | schema | — |
+| `@jarenjs/contract/schemas/jaren-contract.draft-07.schema.json` | schema | — |
+| `@jarenjs/contract/schemas/jaren-contract.schema.json` | schema | — |
+| `@jarenjs/contract/package.json` | metadata | — |
+<!--/fact-->

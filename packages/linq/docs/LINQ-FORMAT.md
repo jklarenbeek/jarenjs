@@ -53,7 +53,7 @@ sentence is the document's own opening line, the length is the file's,
 and `npm run docs:derive` writes the table out of the eleven documents
 beside this one. The line counts are not decoration — they are what tells
 a reader whether the document they are about to open is a ten-minute read
-or an afternoon — and `test/docs/linq-citations.test.js` holds each one
+or an afternoon — and `test/docs/format-citations.test.js` holds each one
 equal to the file it names, independently of the derivation.
 
 A document missing from that table is a document a reader cannot reach:

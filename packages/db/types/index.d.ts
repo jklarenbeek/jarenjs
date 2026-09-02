@@ -627,7 +627,9 @@ export interface TransactionStore extends Omit<Store, 'close' | 'transaction' | 
 }
 
 /** The log's two watermarks (LIVE-FORMAT §5): the earliest surviving
- * sequence (`null` when nothing survives) and the highest allocated. */
+ * sequence (`null` when nothing survives) and the highest sequence the
+ * FILE ever allocated — durable across an emptied log, a reopen and a
+ * second store over the same file, never a process counter. */
 export interface ChangeBounds {
   readonly earliestAvailable: number | null;
   readonly highWatermark: number;
@@ -643,6 +645,8 @@ export interface ChangePageOptions {
   limit?: number;
   maxBytes?: number | null;
   signal?: AbortSignal;
+  /** An epoch-millisecond deadline, read against the store's clock at every record boundary (`JD2075`). */
+  deadline?: number;
 }
 
 /**
@@ -895,6 +899,8 @@ export declare function translateOperations(
 export declare function keyToken(parts: readonly unknown[]): string;
 export declare function createCaptureEngine(options: unknown): unknown;
 export declare const CHANGES_TABLE: string;
+/** The change log's durable state table: the highest sequence the file ever allocated (LIVE-FORMAT §5). */
+export declare const CHANGES_STATE_TABLE: string;
 export declare const DEFAULT_RETENTION: number;
 /** Deep-freeze a JSON value in place and return it (idempotent). */
 export declare function deepFreeze<T>(value: T): T;

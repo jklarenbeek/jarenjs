@@ -16,6 +16,8 @@
  * fresh one.
  */
 
+import { resolveRuntime } from '@jarenjs/core/runtime';
+
 /**
  * The record a ledger keeps per `(op, scope, key)`; the schema of
  * `idempotencyLedgerModel`'s collection.
@@ -51,13 +53,16 @@
  * different hash → `mismatch`; `started` and unexpired → `in-progress`;
  * `failed` with `retryable: true` → `new` (the key may be retried);
  * `failed` and not retryable → `replay` of the stored failure. `now` on
- * a claim is the binding's clock (epoch ms) a ledger may prefer to its
- * own.
+ * a claim, a commit, a failure and a lookup is the binding's clock
+ * (epoch ms): ONE clock must judge a record from claim to expiry, so a
+ * ledger that has no clock of its own follows the binding's, and a
+ * ledger with its own clock is given the same record as the binding
+ * (`runtime`) rather than a second one.
  * @typedef {Object} Ledger
  * @property {(claim: { op: string, scope: string, key: string, hash: string, now?: number }) => ClaimResult | Promise<ClaimResult>} claim
- * @property {(ref: unknown, response: any) => void | Promise<void>} commit
- * @property {(ref: unknown, retryable: boolean, response?: any) => void | Promise<void>} fail
- * @property {(key: { op: string, scope: string, key: string }) => LedgerRecord | null | Promise<LedgerRecord | null>} lookup
+ * @property {(ref: unknown, response: any, now?: number) => void | Promise<void>} commit
+ * @property {(ref: unknown, retryable: boolean, response?: any, now?: number) => void | Promise<void>} fail
+ * @property {(key: { op: string, scope: string, key: string, now?: number }) => LedgerRecord | null | Promise<LedgerRecord | null>} lookup
  */
 
 /** One day, the default retention of a key. */
@@ -78,20 +83,49 @@ function idOf(op, scope, key) {
  * expiring on `claim` (a record past `expiresAt` is dropped and the key
  * is `new` again). `sweep()` drops every expired record — a host may
  * call it on a timer.
- * @param {{ ttlMs?: number, now?: () => number }} [options]
- * @returns {Ledger & { sweep(): number, size: number }}
+ * ONE clock judges a record from claim to expiry. The ledger's own clock
+ * is `now`, else the runtime record's `now` (`@jarenjs/core/runtime`);
+ * given neither, the ledger has no clock of its own and FOLLOWS the
+ * binding: every stamp and every expiry decision uses the instant the
+ * binding passed with the call, and a host-side `lookup`/`sweep` that
+ * passes none uses the latest instant a binding reported. (A record
+ * stamped by an injected server clock and judged by the platform's was
+ * dropped as expired the moment `sweep()` ran, and the command ran
+ * twice.) A ledger WITH its own clock uses it for everything and is
+ * given the same record as the binding, never a second one.
+ * @param {{ ttlMs?: number, now?: () => number,
+ *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} [options]
+ * @returns {Ledger & { sweep(now?: number): number, size: number }}
  */
 export function createMemoryLedger(options = {}) {
   const ttlMs = options.ttlMs === undefined ? DEFAULT_TTL_MS : options.ttlMs;
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new TypeError('createMemoryLedger: ttlMs must be a positive number');
-  const clock = options.now === undefined ? Date.now : options.now;
+  let runtime;
+  try {
+    runtime = resolveRuntime(options.runtime);
+  }
+  catch (error) {
+    throw new TypeError(`createMemoryLedger: runtime: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const clock = options.now === undefined ? runtime.now : options.now;
   if (typeof clock !== 'function') throw new TypeError('createMemoryLedger: now must be a function');
+  const ownClock = options.now !== undefined || options.runtime !== undefined;
+  /** The latest instant a binding reported, for a ledger without a clock. */
+  let latest = null;
+  /** The instant a call is judged and stamped at. */
+  const instant = (/** @type {number | undefined} */ given) => {
+    if (typeof given === 'number') {
+      if (!ownClock) latest = latest === null ? given : Math.max(latest, given);
+      return given;
+    }
+    return ownClock || latest === null ? clock() : latest;
+  };
   /** @type {Map<string, LedgerRecord>} */
   const records = new Map();
 
   return {
     claim({ op, scope, key, hash, now }) {
-      const at = typeof now === 'number' ? now : clock();
+      const at = instant(now);
       const id = idOf(op, scope, key);
       const existing = records.get(id);
       if (existing !== undefined) {
@@ -110,33 +144,33 @@ export function createMemoryLedger(options = {}) {
       records.set(id, record);
       return { state: 'new', ref: record };
     },
-    commit(ref, response) {
+    commit(ref, response, now = undefined) {
       const record = /** @type {LedgerRecord} */ (ref);
       if (records.get(record.id) !== record) return;
       record.status = 'committed';
       record.response = response;
       record.retryable = null;
-      record.updatedAt = clock();
+      record.updatedAt = instant(now);
     },
-    fail(ref, retryable, response) {
+    fail(ref, retryable, response, now = undefined) {
       const record = /** @type {LedgerRecord} */ (ref);
       if (records.get(record.id) !== record) return;
       record.status = 'failed';
       record.retryable = retryable === true;
       record.response = response === undefined ? null : response;
-      record.updatedAt = clock();
+      record.updatedAt = instant(now);
     },
-    lookup({ op, scope, key }) {
+    lookup({ op, scope, key, now = undefined }) {
       const record = records.get(idOf(op, scope, key));
       if (record === undefined) return null;
-      if (record.expiresAt <= clock()) {
+      if (record.expiresAt <= instant(now)) {
         records.delete(record.id);
         return null;
       }
       return record;
     },
-    sweep() {
-      const at = clock();
+    sweep(now = undefined) {
+      const at = instant(now);
       let dropped = 0;
       for (const [id, record] of records) {
         if (record.expiresAt <= at) {

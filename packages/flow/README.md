@@ -261,6 +261,22 @@ gate — `compileFsm`/`compileDag`. The mapping table, and where the pen's
 refusals end and the compiler's begin, are
 [FLOW-PEN.md](../linq/docs/FLOW-PEN.md).
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.flow-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/flow` | JavaScript | declared |
+| `@jarenjs/flow/schemas/jaren-dag.draft-07.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-dag.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-fsm.draft-07.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-fsm.schema.json` | schema | — |
+| `@jarenjs/flow/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/flow/` at the repository root

@@ -609,6 +609,32 @@ export const ACTIONS = {
   'data/lives': { patch: [{ op: 'replace', path: '/data/live/regs', value: '$payload.count' }] },
   'data/migrated': { patch: [{ op: 'replace', path: '/data/migration', value: '$payload.report' }] },
   'data/error': { patch: [{ op: 'replace', path: '/data/error', value: '$payload.message' }] },
+  // the boot protocol's two terminal states beside `data/opened` (an
+  // owner's or a memory tab's first open): a CLIENT tab is ready once it
+  // is attached, and a failed stage is the named, stable error record
+  'data/ready': { patch: [{ op: 'replace', path: '/data/status', value: 'ready' }] },
+  'data/boot-error': {
+    patch: [
+      { op: 'replace', path: '/data/status', value: 'error' },
+      { op: 'replace', path: '/data/boot', value: '$payload' },
+      { op: 'replace', path: '/data/error', value: '$payload.message' },
+      // nothing about the store is known after a failed boot
+      { op: 'replace', path: '/data/topology', value: '—' },
+      { op: 'replace', path: '/data/vfs', value: '—' },
+      { op: 'replace', path: '/data/refusal', value: null },
+    ],
+  },
+  'data/retry': {
+    patch: [
+      { op: 'replace', path: '/data/status', value: 'boot' },
+      { op: 'replace', path: '/data/boot', value: null },
+      { op: 'replace', path: '/data/error', value: null },
+      { op: 'replace', path: '/data/topology', value: '—' },
+      { op: 'replace', path: '/data/vfs', value: '—' },
+      { op: 'replace', path: '/data/refusal', value: null },
+    ],
+    effects: [{ run: 'data-retry' }],
+  },
 
   // the package-README dialog: open (fetch), receive, fail, close.
   // Opening from the docs page starts a fresh navigation trail; a
@@ -1159,7 +1185,8 @@ export const ACTIONS = {
 export const SUBS = [
   { run: 'hash' },
   // the data studio boots its owner worker the first time the route
-  // reaches #/data — a dynamic subscription whose `when` is the page,
-  // so it fires once and the effect's own `booted` guard keeps it idempotent
+  // reaches #/data — a dynamic subscription whose `when` is the page; the
+  // subscription (`ownerSub` in boundaries/data.js) fires the boot once
+  // per runtime, and `data/retry` is the only other way to boot
   { run: 'data-owner', when: { $eq: ['$.route.page', 'data'] } },
 ];

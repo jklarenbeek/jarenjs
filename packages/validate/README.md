@@ -790,6 +790,20 @@ const validator = new JarenValidator({ collectErrors: true, messages: false });
 // errors arrive with message: '', params and msgid still set
 ```
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.validate-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/validate` | JavaScript | declared |
+| `@jarenjs/validate/query` | JavaScript | declared |
+| `@jarenjs/validate/normalize` | JavaScript | declared |
+| `@jarenjs/validate/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/validate/` at the repository root (`npm run test:validate`). Performance against Ajv is measured over the official test suite with the [benchmark workspace](../../benchmark/README.md) (`node benchmark/profiler.js --profile-all`), which also houses the test-failure debugger, coverage and call-graph tools.

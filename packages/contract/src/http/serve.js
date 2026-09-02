@@ -17,9 +17,9 @@
  */
 
 import { compileMessageCatalog } from '@jarenjs/core/message';
-import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { ContractHostError } from '../errors.js';
+import { resolveHostRuntime } from '../runtime.js';
 import { dispatch } from './dispatch.js';
 import { HTTP_ERRORS, WELL_KNOWN_PATH } from './wire.js';
 
@@ -42,7 +42,8 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
 /**
  * The options of `serveHttp`; every one has a default.
  * @typedef {Object} ServeHttpOptions
- * @property {() => string} [trace] - the server trace generator; default `crypto.randomUUID`
+ * @property {() => string} [trace] - the server trace generator; default
+ *   the runtime record's `uuid`, itself `crypto.randomUUID` by default
  * @property {Ledger | null} [ledger] - the idempotency ledger; `null` refuses
  *   (`JC1003`) any operation whose `policy.idempotency` is not `none`
  * @property {(ctx: RequestContext) => string} [scope] - the idempotency scope
@@ -67,7 +68,8 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
  *   - observes `JC2008`/`JC2010` causes and ledger faults; the response never carries them
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
  *   - a message catalog (templates or compiled renderers) consulted before the English one
- * @property {() => number} [now] - the clock stamped into ledger claims; default `Date.now`
+ * @property {() => number} [now] - the clock stamped into ledger claims;
+ *   default the runtime record's `now`, itself `Date.now` by default
  * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
  *   - the host's runtime record: its `uuid` generates the server trace
  *   and its `now` is the clock, each only where `trace` / `now` is absent
@@ -291,13 +293,7 @@ export function serveHttp(contract, handlers, options = {}) {
   if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
-  let runtime;
-  try {
-    runtime = resolveRuntime(options.runtime);
-  }
-  catch (error) {
-    throw host('JC1001', `options.runtime: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
 
   /** @type {Server} */
   const server = {

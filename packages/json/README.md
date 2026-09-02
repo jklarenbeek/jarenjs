@@ -796,6 +796,38 @@ Unmatched nodes follow the XSLT built-in template rules, restated for JSON: cont
 
 This package's roadmap lives in the repository-wide [ROADMAP](../../docs/ROADMAP.md), under its `@jarenjs/json` sections: hoisting `$`-absolute comparables out of filter loops, first-class function values, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: hash-joined equijoins and counting-loop `$range` iteration, the `$fold` accumulator clause, `$allowing-empty` and window bindings, the RFC 3339 date operators, closed-world compilation and the `steps`/`depth` execution limits.
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.json-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/json` | JavaScript | declared |
+| `@jarenjs/json/basic` | JavaScript | declared |
+| `@jarenjs/json/canonical` | JavaScript | declared |
+| `@jarenjs/json/pointer` | JavaScript | declared |
+| `@jarenjs/json/path` | JavaScript | declared |
+| `@jarenjs/json/patch` | JavaScript | declared |
+| `@jarenjs/json/write` | JavaScript | declared |
+| `@jarenjs/json/query` | JavaScript | declared |
+| `@jarenjs/json/jslt` | JavaScript | declared |
+| `@jarenjs/json/jtlt` | JavaScript | declared |
+| `@jarenjs/json/xquery` | JavaScript | declared |
+| `@jarenjs/json/schemas/geojson.draft-07.schema.json` | schema | — |
+| `@jarenjs/json/schemas/geojson.jaren.schema.json` | schema | — |
+| `@jarenjs/json/schemas/geojson.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-jslt.authoring.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-jslt.draft-07.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-jslt.llm-profile.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-jslt.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-query.draft-07.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-query.llm-profile.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-query.schema.json` | schema | — |
+| `@jarenjs/json/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks (all documented in the [benchmark workspace README](../../benchmark/README.md)): `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture.

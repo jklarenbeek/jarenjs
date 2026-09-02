@@ -777,8 +777,8 @@ running the handler and dropping the body (a declared `HEAD` operation
 wins); with `head: false` a HEAD is a 405 listing `GET`. The `wellKnown`
 path (`/.well-known/jaren-contract`, or another absolute path, or `false`)
 answers `describe()` — `revision: null` until the revision lands, `compat`
-present — for negotiation. `trace` (default `crypto.randomUUID`) generates
-the server trace; `scope(ctx)` derives the idempotency scope (§8);
+present — for negotiation. `trace` (default the runtime record's `uuid`,
+`crypto.randomUUID` with no record) generates the server trace; `scope(ctx)` derives the idempotency scope (§8);
 `partial` allows missing handlers; `validateOutput` is `"always" |
 "never"`; `preconditions` maps operation ids to pre-handler tag
 resolvers (§7.5); `errorBody(wire, ctx)` and `onError(err, ctx)` are the
@@ -786,7 +786,15 @@ two host hooks (`ctx` is `null` before an operation is matched);
 `catalog` is a message catalog (templates or compiled renderers)
 consulted before the English one; `now` is the clock stamped into ledger
 claims; `runtime` is the host's runtime record (`@jarenjs/core/runtime`),
-whose `uuid` and `now` apply where `trace` and `now` are absent.
+whose `uuid` and `now` apply where `trace` and `now` are absent. Every
+binding of this format takes the same `runtime` option with the same
+precedence — an explicit option wins over the record's member, which
+wins over the platform default — so one record configures a server, its
+ledger and a client together: `servePort` and `openLocalClient` read its
+`uuid` for their trace, `openPortClient` for its client id,
+`openHttpClient` reads `uuid` for idempotency keys, `now` for key-record
+stamps and `random` for retry jitter, and `createMemoryLedger` reads
+`now` for claim stamps.
 
 ## §8 Idempotency and the ledger
 
@@ -825,16 +833,24 @@ declared failure is recorded as **failed** with its response and its
 key as retryable with no response; a POST-handler `JC2014` (the handler
 already ran and may have mutated) is recorded as **failed**, not
 retryable, with its 412 — a blind retry under the same key replays the
-412 instead of running the handler again. `now` on a claim is the binding's
-clock (`options.now`), which a ledger may prefer to its own. Opaque
+412 instead of running the handler again. `now` on a claim, a commit, a
+failure and a lookup is the binding's clock (`options.now`, or the
+runtime record's): ONE clock judges a record from claim to expiry, so a
+ledger without a clock of its own follows the binding's instants, and a
+ledger with one is given the same `runtime` as the binding — a claim
+stamped by an injected server clock and expired by the platform's is a
+command that runs twice. Opaque
 operations bypass the ledger; reads never carry a key. A ledger that
 throws or rejects is reported to `onError` and the response still goes
 out (a throwing `claim` is `JC2008`).
 
-`createMemoryLedger({ ttlMs = 86_400_000, now })` (`@jarenjs/contract/ledger`)
+`createMemoryLedger({ ttlMs = 86_400_000, now, runtime })` (`@jarenjs/contract/ledger`)
 is the reference implementation over a `Map`: synchronous,
-single-process, expiring on `claim` and `lookup`, with `sweep()` for a
-host timer and `size`. The record it keeps is:
+single-process, expiring on `claim` and `lookup`, with `sweep(now?)` for a
+host timer and `size`. Built without `now` or `runtime` it keeps time by
+the instants the binding passes it (a host-side `lookup`/`sweep` that
+passes none uses the latest one); built with either, that clock judges
+every record. The record it keeps is:
 
 ```jsonc
 { "id": "product.save|tenant-a|k-1",      // "<op>|<scope>|<key>"
@@ -1009,13 +1025,14 @@ operation is reached through `url`).
 { "fetch": "globalThis.fetch",            // (url, init) => Promise<Response>; injectable (a toFetchHandler, a recorder)
   "baseUrl": "",                          // prefixed to every path; '' = relative
   "headers": {},                          // static headers, merged UNDER per-call ones
-  "keys": "crypto.randomUUID",            // the idempotency key generator
+  "keys": "runtime.uuid",                 // the idempotency key generator (crypto.randomUUID with no record)
   "storage": null,                        // { read(), write(value) } — the @jarenjs/app docstore adapter shape — for durable key records
   "timeoutMs": 0,                         // per request; 0 = none; composed with ctx.signal
   "sleep": "(ms, signal) => Promise",      // the retry backoff sleeper (injectable)
   "catalog": null,                        // a message catalog consulted before the English one
   "wellKnown": "/.well-known/jaren-contract",   // where negotiate() asks
-  "now": "Date.now" }                     // the clock stamped into key records
+  "now": "runtime.now",                   // the clock stamped into key records (Date.now with no record)
+  "runtime": "createRuntime()" }          // the host's runtime record; its random draws the retry jitter
 ```
 
 `capabilities` is `{ name: "http", status: true, headers: true, media:
@@ -1792,7 +1809,7 @@ no `negotiate`, no `pending`.
 | any handler fault — a throw, a rejection, an undeclared code, an output or error-details schema violation | kind `contract` `JC2070`, message `contract/local-handler-failed`; the distinguishing cause goes to `onError(error, { op, trace })`, never into the outcome |
 | `ctx.signal` aborted before or while running, or the client closed | kind `cancelled` `JC2052`; a handler that settles later settles into nothing |
 
-Options: `trace`, `validateOutput` (`'never'` is a declared downgrade,
+Options: `trace`, `runtime` (the record `trace` defaults from), `validateOutput` (`'never'` is a declared downgrade,
 reported in `capabilities.validatedOutput`; the output is validated
 ONCE, in the pipeline — the assembler does not re-validate what never
 crossed a wire), `catalog`, `onError`. Capabilities:
@@ -1828,8 +1845,8 @@ The local codes (the table shared with §16; `PORT_LOCAL_ERRORS` in
 ## §16 The port binding
 
 `servePort(contract, handlers, { channel, trace?, validateOutput?,
-catalog?, onError? })` and `openPortClient(contract, { channel,
-timeoutMs = 15000, catalog? })` — request/response over anything with
+catalog?, onError?, runtime? })` and `openPortClient(contract, { channel,
+timeoutMs = 15000, catalog?, runtime? })` — request/response over anything with
 `postMessage` and a message-listener surface: a `MessagePort` (started
 automatically), a `Worker`, a `BroadcastChannel`, a worker's own
 `self`, or a plain object of that shape. The server prepares the same
@@ -1860,7 +1877,10 @@ Frames are JSON-safe plain objects marked `jaren: "contract/0.1"`:
 ```
 
 **Id scoping is the correctness rule.** `id` is `"<clientId>:<seq>"` —
-`clientId` a UUID per client instance, `seq` a per-client counter — so
+`clientId` a fresh identifier per client instance from the runtime
+record's `uuid` (a v4 UUID with no record; a deterministic record MUST
+still answer a distinct value per client, or two clients on one channel
+take each other's frames), `seq` a per-client counter — so
 two clients on one shared channel can never collide, and a client
 ignores every frame whose id does not start with its own `clientId +
 ":"` (one cheap prefix test before any map lookup). A late response

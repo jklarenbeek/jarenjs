@@ -8,12 +8,15 @@
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { npmMismatch, pinnedNpm } from '../../scripts/release-bump.js';
+import { npmMismatch, pinnedNpm, resolveNpmCommand, bump } from '../../scripts/release-bump.js';
+import { npmCliPath } from '../../scripts/lib/portable.js';
 import { checkBenchmarkDrift } from '../../scripts/check-benchmark-drift.js';
 import { verifyLiveSite } from '../../scripts/verify-live-site.js';
 import { checkDocuments, fencesOf } from '../../scripts/check-documents.js';
@@ -38,16 +41,153 @@ describe('release:bump refuses an npm that is not the pinned one', function () {
   });
 });
 
-describe('the deploy guard reads the tracked measurements', function () {
-  it('is clean on a checkout whose benchmarks match HEAD', function () {
-    const report = checkBenchmarkDrift();
-    assert.strictEqual(report.code, 0,
-      `deploying would publish figures no commit carries: ${report.changed.join(', ')}`);
+describe('release:bump runs the npm that launched it, through the current Node', function () {
+  const env = (execpath) => (execpath === undefined ? {} : { npm_execpath: execpath });
+
+  it('resolves the executing CLI to an argument vector — POSIX and Windows paths with spaces intact', function () {
+    const posix = resolveNpmCommand(env('/home/a user/.nvm/versions/node/v24.19.0/lib/node_modules/npm/bin/npm-cli.js'), '/home/a user/.nvm/versions/node/v24.19.0/bin/node');
+    assert.deepStrictEqual(posix, { file: '/home/a user/.nvm/versions/node/v24.19.0/bin/node',
+      prefix: ['/home/a user/.nvm/versions/node/v24.19.0/lib/node_modules/npm/bin/npm-cli.js'] });
+    const windows = resolveNpmCommand(env('C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js'), 'C:\\Program Files\\nodejs\\node.exe');
+    assert.deepStrictEqual(windows, { file: 'C:\\Program Files\\nodejs\\node.exe',
+      prefix: ['C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js'] });
+    assert.strictEqual(npmCliPath(env('/x/npm-cli.js')), '/x/npm-cli.js');
+  });
+
+  it('refuses a missing or foreign executing CLI, naming the invocation that supplies one', function () {
+    for (const [label, e] of [['unset', env(undefined)], ['pnpm', env('/x/pnpm/bin/pnpm.cjs')], ['a shim', env('/usr/bin/npm')]]) {
+      const command = resolveNpmCommand(e, '/usr/bin/node');
+      assert.ok('refusal' in command, `${label}: refused`);
+      assert.match(command.refusal, /npm run release:bump/);
+      assert.strictEqual(npmCliPath(e), null);
+    }
+  });
+
+  it('never spells npm by name, a shell, or a command string', function () {
+    const source = read('scripts/release-bump.js');
+    assert.ok(!/execSync\(/.test(source), 'no shell command string');
+    assert.ok(!/shell:\s*true/.test(source), 'no shell');
+    assert.ok(!/execFileSync\('npm/.test(source) && !/'npm\.cmd'/.test(source), 'no bare npm');
+    assert.match(source, /npmCliPath/, 'the executing CLI comes from the one portable helper');
+  });
+
+  it('runs the whole sequence through an injected executor: version → install → lock test → build, nothing before both refusals pass', function () {
+    const calls = [];
+    const pin = pinnedNpm();
+    const exec = (file, args, options) => {
+      calls.push({ file, args, cwd: options.cwd });
+      if (args[1] === '--version') return `${pin}\n`;
+      return '';
+    };
+    const logs = [];
+    const code = bump({ release: 'minor', env: env('/opt/npm with space/npm-cli.js'), execPath: '/opt/node dir/node', exec, log: (l) => logs.push(l), error: (l) => logs.push(l) });
+    assert.strictEqual(code, 0);
+    assert.deepStrictEqual(calls.map((c) => [c.file, ...c.args]), [
+      ['/opt/node dir/node', '/opt/npm with space/npm-cli.js', '--version'],
+      ['/opt/node dir/node', './scripts/version-packages.js', 'minor'],
+      ['/opt/node dir/node', '/opt/npm with space/npm-cli.js', 'install'],
+      ['/opt/node dir/node', '/opt/npm with space/npm-cli.js', 'run', 'test:lock'],
+      ['/opt/node dir/node', '/opt/npm with space/npm-cli.js', 'run', 'build'],
+    ]);
+    assert.ok(calls.every((c) => c.cwd.length > 0), 'every step runs from the repository root');
+    // a mismatched npm: refused before the first write
+    const mismatched = [];
+    const code2 = bump({ release: 'patch', env: env('/x/npm-cli.js'), execPath: '/x/node',
+      exec: (file, args) => { mismatched.push(args); return '10.0.0\n'; }, log: () => {}, error: () => {} });
+    assert.strictEqual(code2, 2);
+    assert.deepStrictEqual(mismatched, [['/x/npm-cli.js', '--version']], 'only the version probe ran');
+    // a missing CLI: refused before anything runs at all
+    const nothing = [];
+    assert.strictEqual(bump({ release: 'patch', env: env(undefined), execPath: '/x/node', exec: () => { nothing.push(1); return ''; }, log: () => {}, error: () => {} }), 2);
+    assert.deepStrictEqual(nothing, []);
+    // an unknown release word
+    assert.strictEqual(bump({ release: 'huge', env: env('/x/npm-cli.js'), execPath: '/x/node', exec: () => { nothing.push(1); return ''; }, log: () => {}, error: () => {} }), 2);
+    assert.deepStrictEqual(nothing, []);
+  });
+});
+
+describe('the deploy guard reads the tracked measurements of a checkout', function () {
+  /** A disposable git repository carrying one tracked benchmark artifact at HEAD. */
+  function repository() {
+    const root = mkdtempSync(join(tmpdir(), 'jaren-drift-'));
+    // the host's global and system git configuration must not reach the
+    // fixture: a `commit.gpgsign` would fail the commit, a `core.excludesFile`
+    // could hide the very artifact a test plants
+    const config = join(root, 'empty-gitconfig');
+    writeFileSync(config, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.test');
+    git('config', 'user.name', 'test');
+    const dir = join(root, 'packages', 'website', 'public', 'benchmarks');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'alpha.json'), '{"rows":1}\n');
+    writeFileSync(join(dir, 'beta.json'), '{"rows":2}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'measurements');
+    return { root, dir, env, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it('is clean when the tracked artifacts equal HEAD', function () {
+    const repo = repository();
+    try {
+      assert.deepStrictEqual(checkBenchmarkDrift({ root: repo.root }), { code: 0, changed: [] });
+    }
+    finally {
+      repo.cleanup();
+    }
+  });
+
+  it('names a modified, a deleted and an untracked artifact — registration is as unreviewed as drift until its commit', function () {
+    const repo = repository();
+    try {
+      writeFileSync(join(repo.dir, 'alpha.json'), '{"rows":9}\n');
+      unlinkSync(join(repo.dir, 'beta.json'));
+      writeFileSync(join(repo.dir, 'gamma.json'), '{"rows":3}\n');
+      const report = checkBenchmarkDrift({ root: repo.root });
+      assert.strictEqual(report.code, 1);
+      assert.deepStrictEqual([...report.changed].sort(), [
+        'packages/website/public/benchmarks/alpha.json',
+        'packages/website/public/benchmarks/beta.json',
+        'packages/website/public/benchmarks/gamma.json',
+      ]);
+    }
+    finally {
+      repo.cleanup();
+    }
+  });
+
+  it('names an ignored artifact and a path with a space — an ignore rule hides nothing from the deploy', function () {
+    const repo = repository();
+    try {
+      writeFileSync(join(repo.root, '.gitignore'), 'packages/website/public/benchmarks/local-*.json\n');
+      writeFileSync(join(repo.dir, 'local-run.json'), '{"rows":5}\n');
+      writeFileSync(join(repo.dir, 'two words.json'), '{"rows":6}\n');
+      const report = checkBenchmarkDrift({ root: repo.root });
+      assert.strictEqual(report.code, 1);
+      assert.ok(report.changed.includes('packages/website/public/benchmarks/local-run.json'), `the ignored file is named: ${report.changed.join(', ')}`);
+      assert.ok(report.changed.includes('packages/website/public/benchmarks/two words.json'), 'the spaced path is one unquoted path');
+    }
+    finally {
+      repo.cleanup();
+    }
   });
 
   it('reports a directory that is not a git checkout rather than passing it', function () {
     const report = checkBenchmarkDrift({ root: '/' });
     assert.strictEqual(report.code, 2);
+  });
+
+  it('runs on the deploy path before the build, and not inside npm test', function () {
+    const website = JSON.parse(read('packages/website/package.json'));
+    const predeploy = String(website.scripts.predeploy);
+    assert.ok(predeploy.indexOf('check-benchmark-drift.js') < predeploy.indexOf('npm run build'),
+      'predeploy refuses dirty measurements before it builds');
+    // this suite asserts checkout-state behavior on disposable repositories only, so a
+    // registered or remeasured suite can pass `npm test` before its commit
+    assert.ok(!/checkBenchmarkDrift\(\)/.test(read('test/scripts/release-tooling.test.js')),
+      'no test reads this checkout\'s own measurement state');
   });
 });
 

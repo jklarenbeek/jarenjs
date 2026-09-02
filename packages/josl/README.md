@@ -275,6 +275,30 @@ stringifyJsonx(v, { mode: 'json' });     // delegates to JSON.stringify
 
 ## Exports
 
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.josl-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/josl` | JavaScript | declared |
+| `@jarenjs/josl/parse` | JavaScript | declared |
+| `@jarenjs/josl/cst` | JavaScript | declared |
+| `@jarenjs/josl/gbnf` | JavaScript | declared |
+| `@jarenjs/josl/stream` | JavaScript | declared |
+| `@jarenjs/josl/stringify` | JavaScript | declared |
+| `@jarenjs/josl/write` | JavaScript | declared |
+| `@jarenjs/josl/jsonx` | JavaScript | declared |
+| `@jarenjs/josl/jsonx-stream` | JavaScript | declared |
+| `@jarenjs/josl/csv` | JavaScript | declared |
+| `@jarenjs/josl/csv-stream` | JavaScript | declared |
+| `@jarenjs/josl/values` | JavaScript | declared |
+| `@jarenjs/josl/schemas/jaren-josl-data.schema.json` | schema | — |
+| `@jarenjs/josl/package.json` | metadata | — |
+<!--/fact-->
+
+What each subpath carries:
+
 | Subpath | What |
 | --- | --- |
 | `@jarenjs/josl/parse` | `parseJosl`, `parseToml` |

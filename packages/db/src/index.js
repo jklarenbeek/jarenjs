@@ -54,7 +54,7 @@ export { entityCore } from './entity.js';
 export { entityEmitModel } from './emit-model.js';
 export {
   parseChangeset, translateOperations, keyToken, createCaptureEngine,
-  CHANGES_TABLE, DEFAULT_RETENTION,
+  CHANGES_TABLE, CHANGES_STATE_TABLE, DEFAULT_RETENTION,
 } from './capture.js';
 export {
   createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,

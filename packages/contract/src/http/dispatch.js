@@ -1123,11 +1123,14 @@ function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, if
  */
 function settleClaim(server, ledger, ref, response, ctx, armed) {
   let settlement;
+  // the settlement carries the binding's clock, as the claim did: one
+  // clock judges the record from claim to expiry
   try {
-    if (armed.outcome === 0) settlement = ledger.commit(ref, response);
-    else if (armed.outcome === 1) settlement = ledger.fail(ref, armed.retryable, response);
-    else if (armed.outcome === 3) settlement = ledger.fail(ref, false, response);
-    else settlement = ledger.fail(ref, true, undefined);
+    const now = server.now();
+    if (armed.outcome === 0) settlement = ledger.commit(ref, response, now);
+    else if (armed.outcome === 1) settlement = ledger.fail(ref, armed.retryable, response, now);
+    else if (armed.outcome === 3) settlement = ledger.fail(ref, false, response, now);
+    else settlement = ledger.fail(ref, true, undefined, now);
   }
   catch (err) {
     observe(server, err, ctx);

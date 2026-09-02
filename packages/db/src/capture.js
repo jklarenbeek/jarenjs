@@ -38,6 +38,12 @@ import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './curso
 
 /** The persisted change log (LIVE-FORMAT §5). */
 export const CHANGES_TABLE = '_jaren_changes';
+/**
+ * The log's durable state: one row holding the highest sequence ever
+ * allocated for this file, so the high watermark survives a log that
+ * retention or maintenance has emptied (LIVE-FORMAT §5).
+ */
+export const CHANGES_STATE_TABLE = '_jaren_changes_state';
 export const DEFAULT_RETENTION = 1000;
 
 //#region the binary changeset parser
@@ -335,6 +341,9 @@ export function createCaptureEngine(options) {
 
   /** @type {Set<Function>} */
   const observers = new Set();
+  // the last sequence THIS process delivered: the per-process sequence
+  // when no log is kept, and otherwise the file's allocation read back
+  // from the durable row — never an answer to a watermark question
   let seq = 0;
   let depth = 0;
   /** @type {any} */
@@ -354,17 +363,40 @@ export function createCaptureEngine(options) {
         { name: 'patch', type: dialect.typeFor('string', 'key') },
       ],
     }),
-    // the sequence is allocated by the STATEMENT, inside the write's
-    // own transaction: a counter seeded once at open collided with
-    // another store's writes to the same file and rolled the user's
-    // write back with a raw UNIQUE failure
+    // the durable high watermark: a singleton row the file keeps, so an
+    // emptied log still knows the highest sequence it ever allocated
+    createState: dialect.ddl.createPlainTable({
+      table: CHANGES_STATE_TABLE,
+      columns: [
+        { name: 'id', type: dialect.typeFor('integer', 'key'), primaryKey: true },
+        { name: 'high', type: dialect.typeFor('integer', 'key') },
+      ],
+    }),
+    // idempotent: an existing file is upgraded ONCE from its surviving
+    // maximum (a file that never held a row seeds 0); a second open, or
+    // a second store on the same file, changes nothing
+    hasState: `SELECT 1 AS ${q('present')} FROM ${q(CHANGES_STATE_TABLE)} WHERE ${q('id')} = 1`,
+    seedState: `INSERT INTO ${q(CHANGES_STATE_TABLE)} (${q('id')}, ${q('high')}) `
+      + `SELECT 1, (SELECT COALESCE(MAX(${q('seq')}), 0) FROM ${q(CHANGES_TABLE)}) `
+      + `WHERE NOT EXISTS (SELECT 1 FROM ${q(CHANGES_STATE_TABLE)} WHERE ${q('id')} = 1)`,
+    // the sequence is allocated by ONE statement against the durable
+    // row, inside the write's own transaction: the next value is one
+    // past the higher of the durable watermark and whatever survives in
+    // the log (so a state row that went missing can never lower it), and
+    // a rolled-back write takes its allocation back with the row. A
+    // process counter seeded once at open collided with another store's
+    // writes to the same file; the durable row is the file's fact, so two
+    // stores allocate distinct, increasing sequences.
+    allocate: `INSERT INTO ${q(CHANGES_STATE_TABLE)} (${q('id')}, ${q('high')}) `
+      + `VALUES (1, (SELECT COALESCE(MAX(${q('seq')}), 0) + 1 FROM ${q(CHANGES_TABLE)})) `
+      + `ON CONFLICT (${q('id')}) DO UPDATE SET ${q('high')} = CASE `
+      + `WHEN ${q(CHANGES_STATE_TABLE)}.${q('high')} + 1 > ${dialect.excludedRef(q('high'))} `
+      + `THEN ${q(CHANGES_STATE_TABLE)}.${q('high')} + 1 ELSE ${dialect.excludedRef(q('high'))} END `
+      + `RETURNING ${q('high')} AS ${q('seq')}`,
     insert: `INSERT INTO ${q(CHANGES_TABLE)} `
       + `(${['seq', 'at', 'source', 'patch'].map(q).join(', ')}) `
-      + `VALUES ((SELECT COALESCE(MAX(${q('seq')}), 0) + 1 FROM ${q(CHANGES_TABLE)}), `
-      + `${[1, 2, 3].map((i) => dialect.parameterRef(i, 'v')).join(', ')}) `
-      + `RETURNING ${q('seq')} AS ${q('seq')}`,
+      + `VALUES (${[1, 2, 3, 4].map((i) => dialect.parameterRef(i, 'v')).join(', ')})`,
     prune: `DELETE FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} <= ${dialect.parameterRef(1, 'v')}`,
-    highest: `SELECT MAX(${q('seq')}) AS ${q('n')} FROM ${q(CHANGES_TABLE)}`,
     read: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
       + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${dialect.parameterRef(1, 'v')} `
       + `ORDER BY ${q('seq')}`,
@@ -373,21 +405,28 @@ export function createCaptureEngine(options) {
     readPage: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
       + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${dialect.parameterRef(1, 'v')} `
       + `ORDER BY ${q('seq')} LIMIT ${dialect.parameterRef(2, 'v')}`,
-    bounds: `SELECT MIN(${q('seq')}) AS ${q('lo')}, MAX(${q('seq')}) AS ${q('hi')} `
-      + `FROM ${q(CHANGES_TABLE)}`,
+    // the two watermarks are the FILE's facts: the earliest surviving
+    // row, and the durable high (falling back to the surviving maximum
+    // only for a file whose state row is absent — never to this process)
+    bounds: `SELECT (SELECT MIN(${q('seq')}) FROM ${q(CHANGES_TABLE)}) AS ${q('lo')}, `
+      + `COALESCE((SELECT ${q('high')} FROM ${q(CHANGES_STATE_TABLE)} WHERE ${q('id')} = 1), `
+      + `(SELECT MAX(${q('seq')}) FROM ${q(CHANGES_TABLE)}), 0) AS ${q('hi')}`,
   } : null;
 
   const ready = logStatements === null
     ? null
-    : chain(attempt(() => connection.exec(logStatements.create), (error) => new DbCompileError('JD0002',
+    // the seed is written only when the row is absent: a read-only open
+    // of an already-upgraded file reads the row and writes nothing
+    : chain(attempt(() => chain(connection.exec(logStatements.create), () =>
+      chain(connection.exec(logStatements.createState), () =>
+        chain(connection.prepare(logStatements.hasState), (probe) => chain(probe.get([]), (row) =>
+          (row === undefined || row === null
+            ? chain(connection.prepare(logStatements.seedState), (statement) => statement.run([]))
+            : null))))),
+    (error) => new DbCompileError('JD0002',
       `the change log table could not be created (${error?.message ?? String(error)}) — `
       + 'a read-only store creates nothing; open it read-write once, or without capture.log',
-      '/capture', error)), () =>
-      chain(connection.prepare(logStatements.highest), (statement) =>
-        chain(statement.get([]), (row) => {
-          seq = Number(row?.n ?? 0) || 0;
-          return null;
-        })));
+      '/capture', error)), () => null);
 
   /** A patch value must be JSON: a `{ ...doc, m: undefined }` write
    * stores the member ABSENT, and the journal must record the JSON
@@ -468,11 +507,13 @@ export function createCaptureEngine(options) {
 
   const persist = (patch, at) => {
     if (logStatements === null || patch.length === 0) return null;
-    return chain(connection.prepare(logStatements.insert), (insert) =>
-      chain(insert.get([at, mode, JSON.stringify(patch)]), (row) => {
+    return chain(connection.prepare(logStatements.allocate), (allocate) =>
+      chain(allocate.get([]), (row) => {
         seq = Number(row.seq);
-        return chain(connection.prepare(logStatements.prune), (prune) =>
-          chain(prune.run([seq - options.retention]), () => null));
+        return chain(connection.prepare(logStatements.insert), (insert) =>
+          chain(insert.run([seq, at, mode, JSON.stringify(patch)]), () =>
+            chain(connection.prepare(logStatements.prune), (prune) =>
+              chain(prune.run([seq - options.retention]), () => null))));
       }));
   };
 
@@ -674,17 +715,18 @@ export function createCaptureEngine(options) {
   }
   /**
    * The log's two watermarks: the earliest surviving sequence (`null`
-   * when nothing survives) and the highest allocated. Read from the
-   * table, so they are the file's facts, not this process's; an empty
-   * table answers the sequence this process last allocated as its high
-   * watermark, which is the most it can know.
+   * when nothing survives) and the highest ever allocated, read from the
+   * durable state row. Both are the FILE's facts, never this process's:
+   * an emptied log, a reopened file and a second store over the same
+   * file all answer the same high watermark, so a stale consumer meets a
+   * reset rather than a plausible empty history.
    */
   function readBounds() {
     requireLog('changes.bounds');
     return chain(connection.prepare(logStatements.bounds), (statement) =>
       chain(statement.get([]), (row) => ({
         earliestAvailable: row?.lo === null || row?.lo === undefined ? null : Number(row.lo),
-        highWatermark: row?.hi === null || row?.hi === undefined ? seq : Number(row.hi),
+        highWatermark: Number(row?.hi ?? 0),
       })));
   }
   /**
@@ -713,7 +755,12 @@ export function createCaptureEngine(options) {
       ? null : declaredBytes;
     if (maxBytes !== null && !(Number.isSafeInteger(maxBytes) && maxBytes >= 1))
       throw new TypeError('changes.page: maxBytes must be a positive integer, or Infinity for no byte bound');
-    const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal,
+    const deadline = options?.deadline;
+    if (deadline !== undefined && (typeof deadline !== 'number' || !Number.isFinite(deadline)))
+      throw new TypeError('changes.page: deadline is an epoch-millisecond number');
+    // the deadline is read against the store's clock at every record
+    // boundary, as on every other page (JD2075)
+    const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal, deadline, now: clock,
       open: () => chain(connection.prepare(logStatements.readPage),
         (statement) => statement.iterate([after, limit + 1])),
       items: (row) => [{ record: recordOf(row), bytes: utf8Length(String(row.patch)) }] });

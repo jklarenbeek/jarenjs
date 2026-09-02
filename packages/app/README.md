@@ -233,6 +233,20 @@ Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormAct
 
 Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.app-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/app` | JavaScript | declared |
+| `@jarenjs/app/schemas/jaren-app.draft-07.schema.json` | schema | — |
+| `@jarenjs/app/schemas/jaren-app.schema.json` | schema | — |
+| `@jarenjs/app/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../docs/ROADMAP.md) for what's next: dirty-path-pruned re-rendering and time-travel tooling over the action log.

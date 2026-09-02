@@ -844,8 +844,9 @@ The one record a host hands to every subsystem that needs a host fact:
 `createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting
 member for member to the platform's own (`Date.now`, `crypto.randomUUID`,
 `Math.random`, and no zone provider — a named zone stays a refusal). The
-store, the job engine, the migration runner and the http binding take it as
-`runtime`; a subsystem's own explicit option wins over the record's member,
+store (query deadlines included), the job engine, the migration runner, the
+contract bindings and the contract memory ledger take it as `runtime`; a
+subsystem's own explicit option wins over the record's member,
 which wins over the built-in default, so adopting the record changes nothing
 observable and a deterministic run — a fixed clock, a seeded generator, a
 counting identifier — is configured once. It is a type plus a freeze: this

@@ -62,11 +62,14 @@ import {
  * residual.
  * @param {number} [bound]
  * @param {{ functions?: any, extensions?: any } | null} [operators]
- * @param {any} [zoneProvider] - D7's injected clock, or absent
+ * @param {any} [zoneProvider] - D7's injected zone provider, or absent
+ * @param {(() => number) | undefined} [now] - the store's clock, the one a
+ *   `deadline` is compared against before a call and at every row
+ *   boundary; the platform's own when the store threads none
  * @returns {any}
  */
 export function createQueryState(bound = undefined, operators = null,
-  zoneProvider = undefined) {
+  zoneProvider = undefined, now = undefined) {
   return {
     cache: createSemanticCache(bound ?? 128),
     counters: { hits: 0, misses: 0, evictions: 0 },
@@ -78,6 +81,10 @@ export function createQueryState(bound = undefined, operators = null,
     // and the residual is the caller's OWN document, so the frozen spec
     // reaches the kernel unchanged rather than being rebuilt in UTC
     zoneProvider: zoneProvider ?? null,
+    // the clock every deadline is read against: the store's runtime
+    // record's, so an injected clock and a caller's deadline agree on
+    // what time it is — a compiled query never captures the instant
+    now: now ?? Date.now,
   };
 }
 
@@ -161,10 +168,12 @@ function externalSlotKinds(slots, rank) {
  * issues no statement (`JD2072`); a deadline already passed issues none
  * either (`JD2075`). A deadline is an epoch-millisecond number, checked
  * here and at every row boundary of a cursor — never inside a statement,
- * because the shipped drivers expose no interrupt.
+ * because the shipped drivers expose no interrupt — against the clock
+ * the store was opened with, never the platform's directly.
  * @param {any} options
+ * @param {() => number} now - the store's clock
  */
-function requireCallable(options) {
+function requireCallable(options, now) {
   const signal = options?.signal;
   if (signal?.aborted) {
     throw new DbRuntimeError('JD2072',
@@ -174,7 +183,7 @@ function requireCallable(options) {
   if (deadline === undefined) return;
   if (typeof deadline !== 'number' || !Number.isFinite(deadline))
     throw new TypeError('deadline is an epoch-millisecond number');
-  if (Date.now() > deadline) {
+  if (now() > deadline) {
     throw new DbRuntimeError('JD2075',
       `the deadline passed before the call ran (${new Date(deadline).toISOString()}); no statement was issued`);
   }
@@ -754,7 +763,7 @@ export function createQueryEngine(context) {
       throw new TypeError('strictStreaming applies to a cursor (query()); execute() answers '
         + 'the whole result by contract, so there is no stream to hold it to');
     }
-    requireCallable(options);
+    requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
 
@@ -859,7 +868,7 @@ export function createQueryEngine(context) {
    *   pushdown?: boolean, signal?: AbortSignal }} [options]
    */
   const query = (document, options = undefined) => {
-    requireCallable(options);
+    requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     const classified = cursorClass(entry, externals);
@@ -870,13 +879,13 @@ export function createQueryEngine(context) {
     if (entry.planned.wrapped === true) {
       // a chain's element window is ONE item — the array — whatever
       // the plan mode; the cursor hands it over as `execute` answers it
-      return createCursor({ ...classified, signal, deadline,
+      return createCursor({ ...classified, signal, deadline, now: state.now,
         materialize: () => chain(execute(document, options), (value) => [value]) });
     }
     const diverted = mustDivert(entry, externals);
     if (diverted || entry.planned.mode === 'set' || entry.planned.mode === 'knn') {
       // the barrier: materialize candidates, pack the result items
-      return createCursor({ ...classified, signal, deadline,
+      return createCursor({ ...classified, signal, deadline, now: state.now,
         materialize: () => chain(guardScan(entry), () =>
           chain(candidatesOf(entry, externals, diverted), (docs) => {
             const items = packedResidualOf(entry, document)(docs, externals);
@@ -886,7 +895,7 @@ export function createQueryEngine(context) {
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
-      return createCursor({ ...classified, signal, deadline,
+      return createCursor({ ...classified, signal, deadline, now: state.now,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           chain(statement.all(bindParams(entry, externals)), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
@@ -900,7 +909,7 @@ export function createQueryEngine(context) {
     }
     if (entry.plan.aggregate !== null) {
       // a native aggregate yields exactly one item
-      return createCursor({ ...classified, signal, deadline,
+      return createCursor({ ...classified, signal, deadline, now: state.now,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           chain(statement.get(bindParams(entry, externals)), (row) => {
             const value = aggregateResult(entry, row);
@@ -910,8 +919,10 @@ export function createQueryEngine(context) {
     }
     let pulledRows = 0;
     const tally = seriesTally(entry);
-    return createCursor({ ...classified, signal, deadline,
-      open: () => chain(guardScan(entry), () => chain(statementOf(entry),
+    // a cursor iterates a statement of its OWN: two cursors over one
+    // cached statement invalidate each other's iterator at the driver
+    return createCursor({ ...classified, signal, deadline, now: state.now,
+      open: () => chain(guardScan(entry), () => chain(connection.prepare(entry.sql),
         (statement) => statement.iterate(bindParams(entry, externals)))),
       items: (row) => {
         pulledRows++;
@@ -1400,7 +1411,7 @@ export function createEntityQueryEngine(context) {
   };
 
   const execute = (document, options = undefined) => {
-    requireCallable(options);
+    requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     if (entry.planned.mode !== 'native') {
@@ -1504,7 +1515,7 @@ export function createEntityQueryEngine(context) {
    * @param {((entity: string, doc: any) => any) | undefined} [register]
    */
   const query = (document, options = undefined, register = undefined) => {
-    requireCallable(options);
+    requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     if (strict && entry.planned.mode !== 'native') {
@@ -1525,26 +1536,34 @@ export function createEntityQueryEngine(context) {
     const signal = options?.signal;
     const deadline = options?.deadline;
     if (entry.planned.wrapped === true) {
-      return createCursor({ ...classified, signal, deadline,
+      return createCursor({ ...classified, signal, deadline, now: state.now,
         materialize: () => chain(execute(document, options), (value) => [value]) });
     }
     if (classified.barrier !== null) {
-      return createCursor({ ...classified, signal, deadline,
+      return createCursor({ ...classified, signal, deadline, now: state.now,
         materialize: () => chain(fetchRoot(entry), (root) =>
           packedResidualOf(entry, document)(root, externals).map(each)) });
     }
     const params = entry.slots.map((slot) => slotValue(slot, externals));
-    if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+    // the statement is prepared by the first PULL, not here: a root
+    // cursor's construction touches no connection, so it can be handed
+    // back before the pull is admitted (MODEL-FORMAT §5.1)
+    const prepared = () => {
+      if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+      return entry.statement;
+    };
     if (entry.planned.plan.aggregate === 'count') {
-      return createCursor({ ...classified, signal, deadline,
-        materialize: () => chain(guardEntityScan(entry), () => chain(entry.statement, (statement) =>
+      return createCursor({ ...classified, signal, deadline, now: state.now,
+        materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
           chain(statement.get(params), (row) => [row?.value ?? 0]))) });
     }
     const rowEntity = entry.planned.plan.bindings
       .find((binding) => binding.name === entry.planned.plan.ret).entity;
     let pulledRows = 0;
-    return createCursor({ ...classified, signal, deadline,
-      open: () => chain(guardEntityScan(entry), () => chain(entry.statement,
+    // a statement of its own per cursor: two live iterators over one
+    // cached statement invalidate each other at the driver
+    return createCursor({ ...classified, signal, deadline, now: state.now,
+      open: () => chain(guardEntityScan(entry), () => chain(connection.prepare(entry.sql),
         (statement) => statement.iterate(params))),
       items: (row) => {
         pulledRows++;
@@ -2159,12 +2178,14 @@ export function createLoadEngine(context, entityName) {
 
   /** The graph cursor over one built load: one root row per pull. */
   const openCursor = (entry, signal, register, deadline = undefined) => {
-    if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
     const params = entry.slots.map((slot) => slot.literal);
     const each = register === undefined ? (doc) => doc : (doc) => register(entry.tree, doc);
     let pulled = 0;
-    return createCursor({ streaming: 'row', barrier: null, signal, deadline,
-      open: () => chain(entry.statement, (statement) => statement.iterate(params)),
+    // prepared by the first pull, never at construction (MODEL-FORMAT
+    // §5.1), and a statement of this cursor's own: two live iterators
+    // over one cached statement invalidate each other at the driver
+    return createCursor({ streaming: 'row', barrier: null, signal, deadline, now: state.now,
+      open: () => chain(connection.prepare(entry.sql), (statement) => statement.iterate(params)),
       items: (row) => [each(checkRoot(entry, parseGraphRow(entry.tree, row, '__doc'), ++pulled))] });
   };
 
@@ -2189,7 +2210,7 @@ export function createLoadEngine(context, entityName) {
       return buildLoad(spec).tree;
     },
     load(spec, options = undefined) {
-      requireCallable(options);
+      requireCallable(options, state.now);
       const entry = buildLoad(spec, false, profileOf(options));
       if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
       const params = entry.slots.map((slot) => slot.literal);
@@ -2209,7 +2230,7 @@ export function createLoadEngine(context, entityName) {
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
     loadCursor(spec, options = undefined, register = undefined) {
-      requireCallable(options);
+      requireCallable(options, state.now);
       return openCursor(buildLoad(spec, false, profileOf(options)), options?.signal, register,
         options?.deadline);
     },
@@ -2227,7 +2248,7 @@ export function createLoadEngine(context, entityName) {
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
     page(spec, options = undefined, register = undefined) {
-      requireCallable(options);
+      requireCallable(options, state.now);
       const limit = options?.limit ?? PAGE_LIMIT_DEFAULT;
       if (!Number.isSafeInteger(limit) || limit < 1)
         throw refuse('page() limit must be a positive integer', []);

@@ -537,6 +537,25 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2
   tag's attributes — is normalized away on every engine's output, not
   just this one's.
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.md-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/md` | JavaScript | declared |
+| `@jarenjs/md/plugins` | JavaScript | declared |
+| `@jarenjs/md/html` | JavaScript | declared |
+| `@jarenjs/md/mdx` | JavaScript | declared |
+| `@jarenjs/md/directives` | JavaScript | declared |
+| `@jarenjs/md/component` | JavaScript | declared |
+| `@jarenjs/md/styles/md.css` | asset | — |
+| `@jarenjs/md/schemas/jaren-md-ast.schema.json` | schema | — |
+| `@jarenjs/md/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Tests live in the repository root: [`test/md/`](../../test/md)

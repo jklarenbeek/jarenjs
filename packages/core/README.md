@@ -14,7 +14,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), cached regex compilation, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
 | `@jarenjs/core/cache` | the bounded LRU (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS, for caches whose entries decide a result |
 | `@jarenjs/core/random` | the suite's one seeded generator (`mulberry32`, pinned sequence, ToUint32 seed) and the draws built on it: `randomInt` over a half-open range, in-place Fisher–Yates `shuffle`, and `drawDistinct` — `k` distinct indices from one stream |
-| `@jarenjs/core/runtime` | the runtime record — `createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting member for member to the platform's own (`Date.now`, `crypto.randomUUID`, `Math.random`, no zone provider) — that the store, the jobs engine, the migration runner and the http binding take as `runtime`, so a deterministic run is configured once; a subsystem's own explicit option wins over the record, and the record reaches hosts, never query compilation |
+| `@jarenjs/core/runtime` | the runtime record — `createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting member for member to the platform's own (`Date.now`, `crypto.randomUUID`, `Math.random`, no zone provider) — that the store (its query deadlines included), the jobs engine, the migration runner, every contract binding and the contract memory ledger take as `runtime`, so a deterministic run is configured once; a subsystem's own explicit option wins over the record, and the record reaches hosts, never query compilation |
 | `@jarenjs/core/stats` | descriptive statistics over a sample: `mean`, sample `variance`/`stddev`, the midpoint `median`, and `quantile(values, p, { method })` — `p` on 0..1 under a NAMED rule, `'nearest-rank'` or `'linear'`, because a default would decide silently; an empty sample answers `undefined`, never `0` |
 | `@jarenjs/core/async` | `mapConcurrent(items, limit, worker, { signal })` — the bounded ordered asynchronous map: never more than `limit` workers in flight, results in input order, a rejection or an abort stops dispatch and drains the lanes before the map rejects, so nothing is still running when it settles |
 | `@jarenjs/core/chunk` | cutting a value down to size: `sizeOf` (the suite's one size rule — a string is its length, anything else its JSON), `excerpt`, `truncate`, and `chunkText` by size, line or separator with offsets that locate a piece in its source |
@@ -190,6 +190,110 @@ t({ comparison: '>=', limit: 18 });   // 'must be >= 18'
 ## JSON addressing standards
 
 The JSON addressing and query standards — JSON validation helpers, JSON Pointer (RFC 6901), the compiling JSONPath engine (RFC 9535), and the Jaren JSON Query language with its XQuery front-end — live in [`@jarenjs/json`](../json). This package supplies their foundations: the char-code scanner (`@jarenjs/core/scan`), `equalsJson` deep equality, code-point ordering, and the I-Regexp (RFC 9485) toolbox.
+
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.core-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/core` | JavaScript | declared |
+| `@jarenjs/core/array` | JavaScript | declared |
+| `@jarenjs/core/async` | JavaScript | declared |
+| `@jarenjs/core/bigint` | JavaScript | declared |
+| `@jarenjs/core/cache` | JavaScript | declared |
+| `@jarenjs/core/chunk` | JavaScript | declared |
+| `@jarenjs/core/color` | JavaScript | declared |
+| `@jarenjs/core/dates` | JavaScript | declared |
+| `@jarenjs/core/errors` | JavaScript | declared |
+| `@jarenjs/core/dates/civil` | JavaScript | declared |
+| `@jarenjs/core/dates/duration` | JavaScript | declared |
+| `@jarenjs/core/dates/format` | JavaScript | declared |
+| `@jarenjs/core/dates/index` | JavaScript | declared |
+| `@jarenjs/core/dates/parse` | JavaScript | declared |
+| `@jarenjs/core/dates/rfc3339` | JavaScript | declared |
+| `@jarenjs/core/dates/ticks` | JavaScript | declared |
+| `@jarenjs/core/float` | JavaScript | declared |
+| `@jarenjs/core/geo` | JavaScript | declared |
+| `@jarenjs/core/geo/angle` | JavaScript | declared |
+| `@jarenjs/core/geo/bbox` | JavaScript | declared |
+| `@jarenjs/core/geo/distance` | JavaScript | declared |
+| `@jarenjs/core/geo/geohash` | JavaScript | declared |
+| `@jarenjs/core/geo/geojson` | JavaScript | declared |
+| `@jarenjs/core/geo/index` | JavaScript | declared |
+| `@jarenjs/core/geo/index-tree` | JavaScript | declared |
+| `@jarenjs/core/geo/mercator` | JavaScript | declared |
+| `@jarenjs/core/geo/predicates` | JavaScript | declared |
+| `@jarenjs/core/geo/ring` | JavaScript | declared |
+| `@jarenjs/core/geo/simplify` | JavaScript | declared |
+| `@jarenjs/core/geo/valid` | JavaScript | declared |
+| `@jarenjs/core/geo/wkt` | JavaScript | declared |
+| `@jarenjs/core/vector` | JavaScript | declared |
+| `@jarenjs/core/function` | JavaScript | declared |
+| `@jarenjs/core/integer` | JavaScript | declared |
+| `@jarenjs/core/message` | JavaScript | declared |
+| `@jarenjs/core/number` | JavaScript | declared |
+| `@jarenjs/core/object` | JavaScript | declared |
+| `@jarenjs/core/random` | JavaScript | declared |
+| `@jarenjs/core/runtime` | JavaScript | declared |
+| `@jarenjs/core/scan` | JavaScript | declared |
+| `@jarenjs/core/schema` | JavaScript | declared |
+| `@jarenjs/core/series` | JavaScript | declared |
+| `@jarenjs/core/series/asof` | JavaScript | declared |
+| `@jarenjs/core/series/bucket` | JavaScript | declared |
+| `@jarenjs/core/series/downsample` | JavaScript | declared |
+| `@jarenjs/core/series/index` | JavaScript | declared |
+| `@jarenjs/core/series/interval` | JavaScript | declared |
+| `@jarenjs/core/series/interval-index` | JavaScript | declared |
+| `@jarenjs/core/series/normalize` | JavaScript | declared |
+| `@jarenjs/core/series/rolling` | JavaScript | declared |
+| `@jarenjs/core/series/selector` | JavaScript | declared |
+| `@jarenjs/core/series/zone` | JavaScript | declared |
+| `@jarenjs/core/stats` | JavaScript | declared |
+| `@jarenjs/core/string` | JavaScript | declared |
+| `@jarenjs/core/text` | JavaScript | declared |
+| `@jarenjs/core/text/base64` | JavaScript | declared |
+| `@jarenjs/core/text/basic` | JavaScript | declared |
+| `@jarenjs/core/text/email` | JavaScript | declared |
+| `@jarenjs/core/text/host` | JavaScript | declared |
+| `@jarenjs/core/text/i18n` | JavaScript | declared |
+| `@jarenjs/core/text/identifiers` | JavaScript | declared |
+| `@jarenjs/core/text/index` | JavaScript | declared |
+| `@jarenjs/core/text/iregexp` | JavaScript | declared |
+| `@jarenjs/core/text/misc` | JavaScript | declared |
+| `@jarenjs/core/text/punycode` | JavaScript | declared |
+| `@jarenjs/core/text/sse` | JavaScript | declared |
+| `@jarenjs/core/math` | JavaScript | declared |
+| `@jarenjs/core/math/float64` | JavaScript | declared |
+| `@jarenjs/core/math/format` | JavaScript | declared |
+| `@jarenjs/core/math/index` | JavaScript | declared |
+| `@jarenjs/core/math/int32` | JavaScript | declared |
+| `@jarenjs/core/math/mat4` | JavaScript | declared |
+| `@jarenjs/core/math/project` | JavaScript | declared |
+| `@jarenjs/core/math/solve` | JavaScript | declared |
+| `@jarenjs/core/math/vec2f64` | JavaScript | declared |
+| `@jarenjs/core/math/vec2i32` | JavaScript | declared |
+| `@jarenjs/core/math/vec3f64` | JavaScript | declared |
+| `@jarenjs/core/math/word` | JavaScript | declared |
+| `@jarenjs/core/finance` | JavaScript | declared |
+| `@jarenjs/core/finance/amortization` | JavaScript | declared |
+| `@jarenjs/core/finance/bond` | JavaScript | declared |
+| `@jarenjs/core/finance/cashflow` | JavaScript | declared |
+| `@jarenjs/core/finance/depreciation` | JavaScript | declared |
+| `@jarenjs/core/finance/index` | JavaScript | declared |
+| `@jarenjs/core/finance/indicators` | JavaScript | declared |
+| `@jarenjs/core/finance/interest` | JavaScript | declared |
+| `@jarenjs/core/finance/returns` | JavaScript | declared |
+| `@jarenjs/core/finance/tvm` | JavaScript | declared |
+| `@jarenjs/core/convert` | JavaScript | declared |
+| `@jarenjs/core/convert/convert` | JavaScript | declared |
+| `@jarenjs/core/convert/currency` | JavaScript | declared |
+| `@jarenjs/core/convert/index` | JavaScript | declared |
+| `@jarenjs/core/convert/registry` | JavaScript | declared |
+| `@jarenjs/core/package.json` | metadata | — |
+<!--/fact-->
 
 ## Development
 

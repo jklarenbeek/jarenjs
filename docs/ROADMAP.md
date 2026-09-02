@@ -38,13 +38,6 @@ delete it or fix it.
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
 
-- [ ] **Opt-in modes for the remaining pointer divergences** — `hashIndex`
-  established the pattern (a compile-time option, spec answer available, fast
-  historical answer the default). Two siblings could take the same treatment if
-  a consumer ever needs them: own-property-only reads (`/toString` →
-  `NOTHING`) and the strict array-index parse that rejects `01`/`1abc`/`1e0`.
-  Both are deliberate and documented in the package ARCHITECTURE; neither has a
-  requester, so this is a shape to reuse rather than work to schedule.
 - [ ] **Relative pointer index manipulation (`0+1`, `1-1`)** — added by
   draft-bhutton-relative-json-pointer-00 and not accepted by the parser. Jaren
   is conformant to draft-handrews-01, the revision JSON Schema 2020-12
@@ -130,7 +123,6 @@ delete it or fix it.
   scope (with a small dynamic remainder only where refs make it unknowable) is the
   main remaining validator performance workstream.
 - [ ] **Optional codegen backend for nano-schemas** — closure-compiled validators bottom out around 5× Ajv's generated code on trivial schemas (a two-branch `allOf` runs ~90 ns vs ~15 ns), which is the price of the CSP-safe no-`new Function` rule. Mirroring the query engine's codegen-backend idea — same compile pipeline, a codegen emitter where CSP allows, closures as the default — would close the floor without giving up the guarantee.
-- [ ] **`additionalProperties: false` instancePath divergence from ajv** — Jaren points the error at the offending member (`/nested/extra`) where ajv points at the parent object; deliberate and spec-truer, tracked so consumers diffing against ajv output know it is intentional.
 - [ ] **Collected errors inside `allOf` branches** — `allOf` is not
   speculative (every branch must hold), so its branch errors are kept, which
   is right. What is still coarse is that a branch failing deep inside reports
@@ -188,13 +180,6 @@ delete it or fix it.
 
 ## @jarenjs/contract
 
-- [ ] **The other bindings keep their own host-fact injections.** The
-  http binding takes the runtime record (`@jarenjs/core/runtime`) for
-  its trace generator and clock; the port and local bindings' `trace`,
-  the http client's `keys` and `now`, the port client's id and the two
-  ledgers' `now` are still separate options with the same platform
-  defaults. Each is correct alone; a deterministic run that spans them
-  configures each, which is the shape the record exists to remove.
 - [ ] **Stream reconnection stays the host's hand** — the `stream`
   binding shipped (CONTRACT-FORMAT.md §17–§19: the `subscribe` kind,
   LIVE-FORMAT `{ patch, seq }` emissions as SSE over http and push
@@ -212,27 +197,6 @@ delete it or fix it.
   a member whose declared type is non-scalar (a D3 extension) is open;
   until then such operations belong on the JSON-framed bindings or key
   their stream by scalars.
-- [ ] **The schema-driven serializer stays unbuilt — measured, not
-  assumed.** The scheduling criterion was: build it only if serialization
-  is ≥ 25% of the per-request cost on the committed dispatch table. The
-  measured share (`benchmark/contract.js`, the in-process table's
-  heaviest row — the 5×4-body PUT)
-  is <!--fact:contract.serialization.share-->11.6%<!--/fact--> of the whole
-  jaren request, so a perfect serializer that cost nothing
-  would move the pipeline by about a tenth. Not scheduled. Revisit only
-  if a consumer's real payloads push the share past the criterion — the
-  suite prints the share on every run, so the number stays checkable.
-  (The larger measured lever is output validation,
-  at <!--fact:contract.validateOutput.share-->29%<!--/fact--> of the same row;
-  it is a correctness feature, declared off per server with
-  `validateOutput: 'never'`, whose cost the benchmark's fourth column
-  keeps visible. For a large cached representation the contract README's
-  "validate on rebuild, serve by revision" recipe keeps the guarantee
-  per revision instead of per request.)
-- [ ] **Matcher promotion to core** — the static-segment path matcher is
-  private to `packages/contract/src/path.js` by design; it moves to
-  `@jarenjs/core` the moment a second consumer appears (the one-
-  implementation rule), not before.
 - [ ] **A declared-failure door on stream emissions** — re-homing a
   `@jarenjs/db` `live()` on a subscribe output drops the store's own
   coded error from the wire: an `{ error }` emission crosses as the
@@ -242,15 +206,6 @@ delete it or fix it.
   `errors` map applied to the stream's `error` event — would restore
   the fidelity; undesigned, and it touches the SSE event grammar
   (CONTRACT-FORMAT.md §18), so it is an order-sized decision.
-- [ ] **The cross-tab e2e in WebKit awaits an OPFS-capable build** —
-  the db-owner protocol's cross-tab tests (the second-tab read and the
-  port binding's cross-settle proof) pass for real in Chromium and
-  Firefox and skip by their own guard in WebKit: Playwright's WebKit
-  builds on this harness expose no OPFS at all
-  (`navigator.storage.getDirectory` is undefined in page and worker).
-  The tests are written; the gate closes by itself the moment a
-  Playwright WebKit build ships OPFS — re-check on Playwright upgrades.
-
 - [ ] **`jaren-contract` reads JSON files only — there is no module route
   and no automatic types twin.** `jaren-db` loads a model MODULE (`.js`,
   `.mjs`, `.cjs`, or `.ts` where Node strips types), refuses it when two
@@ -354,16 +309,6 @@ delete it or fix it.
   0.1 (geometry never enters the document). A `meta.layout` side-table
   would let a user override the auto-layout without polluting the AST —
   the honest place to add it if a consumer asks.
-- [ ] **Editor: it still ships as a website mode** — the `#/flow` studio is
-  not a package, and the second consumer this was once gated on has
-  arrived: `@jarenjs/studio` has `fsm` and `dag` file kinds that
-  validate and assemble but have no editor. So the open question is no
-  longer *whether* to extract but *where to*, and the answer the project
-  IDE implies is that the canvas becomes a per-kind editor inside
-  `@jarenjs/studio` rather than a third two-layer component. That work
-  and its constraints are stated once, under `@jarenjs/studio` above;
-  the engine remains the product either way.
-
 - [ ] **Nothing composes a DAG and an FSM into one workflow.** Task,
   fan-out/fan-in, switch, bounded loop, nested flow and durable wait/resume
   are each expressible today — static regions as `jaren-dag`, dynamic control
@@ -420,14 +365,6 @@ delete it or fix it.
   remaining half, and they need a hover/focus target the pure render does not
   currently mark.
 - [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
-
-- [ ] **The name-token scanner exists once, in the Gantt** —
-  `ldmlNeedsNames` in `components/mermaid/src/parser/gantt-grammar.js`
-  decides, before compiling, whether a pattern needs a `dateNames`
-  record; the chart time axis states the same rule by wrapping
-  `compileDateFormat`'s refusal. Two spellings of one rule are one more
-  consumer away from the placement rule's move into `@jarenjs/core/dates`,
-  beside `compileDateFormat`'s own token table.
 
 ## @jarenjs/charts
 
@@ -600,15 +537,6 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **A query deadline is compared against the platform clock, not
-  the runtime record's.** `deadline` (`JD2075`) is an absolute instant
-  the caller computed, and the check in the query engine and the cursor
-  reads `Date.now()`, while the store's capture log, job queue and
-  migration stamps read the record's `now`. Under an injected clock a
-  caller computes deadlines from the platform clock. Threading `now`
-  into the query state and the cursor spec closes it, at nine call
-  sites, and waits for a consumer that runs a deterministic scenario
-  with a deadline in it.
 - [ ] **Pushdown promotions.** Two-binding equijoins shipped in phase
   B; the deliberate-residual table still holds `$groupby` (the
   post-group cardinality rebinding deserves its own order —
@@ -674,20 +602,6 @@ what each does is its own documentation's job
   planner refuses `$sum` over integer paths it cannot bound, or the
   overflow becomes a coded residual — today it is the one raw driver
   error left on the query path.
-- [ ] **A many-to-many hop on the chain.** Relation navigation is
-  desugared by the chain now: `p.author.email` and `u.posts.all()
-  .count()` over an entity set lower to the correlated phrases the
-  engine runs, read from the set's relation table (MODEL-FORMAT §10.1,
-  QUERY-PEN §4 "relation navigation"), and the document carries no
-  relation name. The one hop still refused is many-to-many (`u.labels`,
-  `JL0105`): its join table is not a queryable root, so there is no
-  phrase to lower to. The change that closes it: expose the join tables
-  as roots in the entity engine (`$.Label_User[*]` with its two key
-  columns, planned and fetched like an entity), then lower the hop
-  through two equalities — `join.<Own>_key = $it.<key>` and
-  `$r.<targetKey> = join.<To>_key` — under the oracle. The lowered
-  shapes that do exist are residuals (a phrase where the planner wants
-  a member path); their promotion belongs to the pushdown entry above.
 - [ ] **A profile member allow-list.** The safe execution profile
   applies one allow-list of names (`collections`, over collections and
   entity roots alike), operators, externals and collations to every
@@ -697,15 +611,16 @@ what each does is its own documentation's job
   analysis walk on every engine that also accounts for what a residual
   may read over a whole fetched document, and that walk is its own
   order.
-- [ ] **The root store's cursors run ungated.** `collection.query()`,
-  `entity.cursor()` and `entity.loadCursor()` on the store-level handles
-  read on the connection beside whatever transaction is open there,
-  because taking the store gate for the life of a consumer's loop would
-  block every transaction for as long as the consumer reads slowly. A
-  transaction view's cursors are pinned to their exact scope (`JD2070`
-  on every pull); the root's are the deliberate exception, stated in the
-  handle's comment. A cursor that borrows a scope for one pull at a time
-  is the design that would close it.
+- [ ] **A `bun:sqlite` cursor reports `streaming: 'row'` while it
+  buffers.** The Bun adapter deliberately leaves `statement.iterate`
+  absent, so the driver layer composes an iterator over `statement.all()`
+  — correct, and the cursor still classifies itself `streaming: 'row',
+  barrier: null` and `explain()` says the same, while the first pull
+  materialises the whole result and holds the store gate for it. The
+  honest report is a driver capability the classification reads: a
+  binding without a lazy iterator yields `streaming: 'buffered'` with a
+  `{ construct: 'driver', reason }` barrier. Found by reading the code;
+  not run, no Bun build on the authoring host.
 - [ ] **The synchronous entity set has no cursor.** A cursor is
   asynchronous by contract (`next()` answers a promise); `from(
   store.sync.entity('X'))` pushes one whole window as it always did.
@@ -721,14 +636,6 @@ what each does is its own documentation's job
   reporting no ordering identity; a reader wanting the ordering of a
   plain load reads the SQL. Reporting the declared terms beside a
   `tieBreaker: 'rowid'` member is the small change that would fill it.
-- [ ] **`changesSince()` is not deprecated.** It stays a published,
-  unbounded member (LIVE-FORMAT §5 says so and names `changes.page()`
-  as the supported path); nothing in the packages calls it, only two
-  suites do. Deprecating it is a decision about consumers, deferred.
-- [ ] **An empty change log answers the process's last allocated
-  sequence as its high watermark.** A store that only ever read the file
-  reports 0 there until something is written; the table's own
-  `MAX(seq)` is the truth as soon as it holds a row.
 - [ ] **Other SQL dialects.** The dialect seam is real (proven by a
   test double) and the capability slots for statement timeouts and
   row estimates are deliberately empty on SQLite; a second dialect is
@@ -737,10 +644,6 @@ what each does is its own documentation's job
 - [ ] **Introspection of an existing database.** `jaren-db` plans from
   model FILES (a database stores shape hashes, not models); deriving a
   first model from a live schema is unwritten.
-- [ ] **Down migrations.** Named a non-goal with its reason restated in
-  MIGRATION-FORMAT §12 (a transform is not generally invertible); if
-  it ever lands it is an explicit author-written document, never an
-  inferred inverse.
 - [ ] **Model-declared UDF-expression indexes.** The migration engine
   re-registers declared functions (`registerFunctions`) and data steps
   over UDF-indexed tables are tested; what remains is the model-level
@@ -783,38 +686,6 @@ what each does is its own documentation's job
   Pages cannot set COOP/COEP; a host that can set them may use the
   faster SharedArrayBuffer VFS family. Wiring that path (and an
   IndexedDB-backed fallback for hosts with neither) is unwritten.
-- [ ] **The browser store's boot has no failure surface.** Under
-  contention the wasm store can fail to open and never say so: the
-  studio's status line stays at `—` indefinitely while the page keeps
-  claiming to be booting. Measured in WebKit under the full
-  three-engine browser matrix, roughly one run in four; raising the
-  wait to 90 s does not help, so it is stuck rather than slow, and
-  the same load stops the page's own `load` event firing in a spec
-  that touches no store at all. Alone it settles in about a second
-  (8/8). What makes it awkward is that the boot spans page → worker →
-  wasm → VFS acquisition, and only the last stage knows it lost a
-  race, so an honest report needs each stage to time out and name
-  itself rather than one outer deadline; and the reproduction needs a
-  load no single user generates, which is exactly the condition under
-  which "stuck" and "starved" are hardest to tell apart. The e2e
-  suite absorbs it with CI retries and by running `data.spec.js`
-  serially — neither of which is a fix.
-- [ ] **A streaming cursor is not gated.** Every store-level read and
-  write now holds the connection for its own extent, so it cannot fall
-  inside a transaction it is not part of (MODEL-FORMAT §5.1) — except
-  `collection.query()`, which answers an async iterable whose life is
-  the caller's loop. Holding the connection for that long would block
-  every transaction for as long as a consumer reads slowly, so it was
-  left ungated and a streaming read can still observe another
-  transaction's uncommitted rows. Closing it means gating each `next()`
-  rather than the cursor, which is a different granularity than the one
-  the gate is built at. Found while closing same-store ownership.
-- [ ] **`store.live` is ungated while `collection(name).live` is gated.**
-  The collection handle's `live` takes the store-level gate like every
-  other member; the store-level entity-root `live` does not, so
-  registering one while another transaction is open reads uncommitted
-  rows for its initial result. The registration itself is not a
-  statement, which is why it was passed over; the initial query is.
 - [ ] **No job administration surface.** The queue can enqueue, claim,
   settle and recover, and the fence makes settlement exactly-once
   against the store (JOBS-FORMAT §3) — but there is no `page`, no
@@ -1284,28 +1155,6 @@ still open is listed here, each with its reason.
 
 ## Benchmarks & tooling
 
-- [ ] **A benchmark suite cannot be registered with a green `npm test`.** The
-  drift guard asserts the tracked `packages/website/public/benchmarks/*.json`
-  match HEAD and it runs inside `npm test`, while the manifest gate asserts the
-  suite order equals those tracked files exactly — so a change that ADDS a suite
-  must generate the file (for the manifest) and have already committed it (for
-  the guard) to make one `npm test` green, and every re-measure is red until its
-  commit. Two fixes exist and choosing between them is a judgement about where
-  the guard belongs: move the clean-checkout assertion out of `npm test` into
-  `predeploy`, where it already runs, or teach it that an untracked new file
-  whose key is in the suite order is registration rather than drift.
-- [ ] **Citations into the repository's other format documents are held by
-  nobody.** `test/docs/linq-citations.test.js` resolves every relative link,
-  `#anchor` and `§N` citation into `packages/linq/docs/` across the whole
-  repository — and only there, by its own stated scope. The other format
-  documents (QUERY-FORMAT.md, JSLT-FORMAT.md, MODEL-FORMAT.md, APP-FORMAT.md,
-  FLOW-FORMAT.md and the rest) are cited the same way — by basename, section
-  number and anchor, from prose, JSDoc and tests — and a moved section or a
-  renamed heading in one of them still leaves a reader on a dead reference no
-  gate notices. The constraint is scale, not mechanism: the walk generalizes (a
-  directory list, a heading census per document, the same matchers), but the
-  first run over the whole repository will surface a backlog of already-stale
-  citations that has to be triaged rather than asserted empty on day one.
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident
   matrix, and finishes in about ninety seconds; a memory-constrained runner
@@ -1313,21 +1162,3 @@ still open is listed here, each with its reason.
   headroom at the price of measuring a page cache instead of a database, which
   is only worth trading once a runner actually fails.
 - [ ] **Compile-mean coverage in `jslt.js`** — `COMPILE_KEYS` is `['identity', 'surgical', 'annotate']`, so the compile row's stylesheet set omits the reshape stylesheet.
-- [ ] **`--cell-order` shuffle** — the 4-book singular cell reads higher than the 1000-book one run to run (JIT/IC noise across the cell sequence); a shuffle option would pin it down if it ever matters.
-- [ ] **Saxon-JS as an optional competitor** — noted and deliberately excluded so far (heavyweight SEF/XSLT toolchain for a zero-build workspace).
-- [ ] **Drop the fontoxpath baseline-subtraction hack if a compile-only API appears** — the jsonquery adaptor pre-converts XDM and subtracts a baseline because fontoxpath exposes no compile-only entry point; a future compile-only API would let the adaptor measure it fairly.
-- [ ] **A scoped pass over the packaging documentation is owed.** The same
-  reading that produced the validate/emit list above checked the packaging
-  story and found ten claims worth revisiting; five were repaired at the
-  campaign close-out that wrote this entry (the dependency graph's four
-  missing edges, CONSUMING's `dist/types` claim and its "independent of
-  that set" sentence, CONVENTIONS' count of the gates outside `site:gate`,
-  the json README's `./canonical` subpath, and linq's `files` omitting
-  `ARCHITECTURE.md`). What remains, each with its reproduction in the
-  file it names: `scripts/release-bump.js` launches `npm` by bare name,
-  which is a PATH assumption on a release path that otherwise pins its
-  npm; `@jarenjs/emit`'s subpaths and its wasm helpers are undocumented
-  in its README; and there is no gate holding a package README's subpath
-  list equal to its manifest's `exports`, which is why these drift
-  silently rather than loudly. The last is the one worth building: it
-  turns the other two into test failures instead of findings.

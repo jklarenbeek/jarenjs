@@ -51,6 +51,20 @@ the *same* source over each shape. Adding an engine is a descriptor plus
 examples — the picker, panes and switcher all derive from the descriptor.
 See [docs/PLAY-FORMAT.md](docs/PLAY-FORMAT.md).
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.play-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/play` | JavaScript | declared |
+| `@jarenjs/play/component` | JavaScript | declared |
+| `@jarenjs/play/styles/play.css` | asset | — |
+| `@jarenjs/play/package.json` | metadata | — |
+<!--/fact-->
+
 ## Install
 
 ```

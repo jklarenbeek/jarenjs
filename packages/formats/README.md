@@ -139,6 +139,18 @@ These are grouped in `numberFormats`. Formats for numbers validate both numbers 
 - `float` | 32 bit floating point number
 - `double` | 64 bit floating point number
 
+## Exports
+
+Every subpath a consumer can import, derived from the manifest by
+`npm run docs:derive` (`npm run docs:check` fails when the two drift):
+
+<!--fact:exports.formats-->
+| Import | Kind | Declarations |
+|---|---|---|
+| `@jarenjs/formats` | JavaScript | declared |
+| `@jarenjs/formats/package.json` | metadata | — |
+<!--/fact-->
+
 ## Development
 
 Unit tests live in `test/formats/` at the repository root; `test/formats/testers.test.js` enforces that every compiler registry's key set equals its tester group's, so the validator layer and the bare-predicate layer can never drift. The predicates themselves are implemented and tested in [`@jarenjs/core`](../core). See the repository [README](../../README.md) for the monorepo picture and the [ROADMAP](../../docs/ROADMAP.md) for planned formats.

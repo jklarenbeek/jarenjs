@@ -246,3 +246,64 @@ test('two client tabs sharing the owner channel never cross-settle', async ({ br
 
   await context.close();
 });
+
+// The boot's terminal failure and its retry, in a real browser. The
+// worker's module script is the one resource a test can take away from
+// the boot in every engine: aborting its request makes `worker-start`
+// reject (the Worker fires `error`), never answering it makes the stage
+// hang — and the page must reach the named error state in both cases,
+// then boot normally once the resource is back. (Aborting the wasm binary
+// instead names `sqlite-init` in Chromium and WebKit, but Firefox reports
+// a dedicated worker's own fetch to page.route without enforcing the
+// abort, so that proof would not hold in all three engines.) The service
+// worker is blocked because it would serve the module from its cache
+// invisibly to page.route, and the hung stage's production budget is
+// shortened through the page's session so the proof takes seconds.
+test.describe('the boot is terminal: a failed stage is named and a retry starts clean', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  const WORKER = '**/assets/db-worker-*.js';
+
+  test('a worker module that fails to load fails the worker-start stage, and the retry boots once it is back', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(String(error)));
+    await page.route(WORKER, (route) => route.abort());
+    await page.goto('/#/data');
+    await expect(page.locator('h1', { hasText: 'Data' })).toBeVisible();
+    const failure = page.locator('.data-boot-error');
+    await expect(failure).toBeVisible(READY);
+    await expect(failure.locator('.data-boot-stage')).toHaveText('worker-start');
+    await expect(page.locator('.data-booting')).toHaveCount(0);
+    // the resource comes back; the retry boots the same page to ready
+    await page.unroute(WORKER);
+    await failure.locator('.data-boot-retry').click();
+    await expect(page.locator('.data-status .data-vfs')).not.toHaveText('—', READY);
+    await expect(page.locator('.data-boot-error')).toHaveCount(0);
+    await expect(page.locator('.data-live-rows')).toContainText('important', READY);
+    expect(errors, 'no uncaught page errors').toEqual([]);
+  });
+
+  test('a worker module that never arrives fails the worker-start stage within its budget, and a retry recovers', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(String(error)));
+    await page.addInitScript(() => {
+      sessionStorage.setItem('jaren-data-boot-budgets', JSON.stringify({ 'worker-start': 2000 }));
+    });
+    // the request is held, never fulfilled: the stage can only time out
+    // (and the page's load event waits on it in Firefox, so the navigation
+    // is awaited only to the document, not to load)
+    await page.route(WORKER, () => {});
+    await page.goto('/#/data', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('h1', { hasText: 'Data' })).toBeVisible();
+    const failure = page.locator('.data-boot-error');
+    await expect(failure).toBeVisible(READY);
+    await expect(failure.locator('.data-boot-stage')).toHaveText('worker-start');
+    await expect(failure.locator('.data-boot-message')).toContainText('did not finish within 2000 ms');
+    await page.unroute(WORKER);
+    await page.evaluate(() => sessionStorage.removeItem('jaren-data-boot-budgets'));
+    await failure.locator('.data-boot-retry').click();
+    await expect(page.locator('.data-status .data-vfs')).not.toHaveText('—', READY);
+    await expect(page.locator('.data-boot-error')).toHaveCount(0);
+    expect(errors, 'no uncaught page errors').toEqual([]);
+  });
+});

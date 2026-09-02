@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file Version compatibility — the one implementation of the
- * negotiation rule (docs/CONTRACT-FORMAT.md §10.4, §13.1): two ends
+ * negotiation rule (docs/CONTRACT-FORMAT.md §10.4, §13): two ends
  * speak when they declare the same `version`, or when either end's
  * `compat` list names the other's `version`. The client's `negotiate()`
  * and any server that wants to refuse an incompatible peer both call

@@ -29,6 +29,7 @@ import { chain, toPromise, isThenable, attempt } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
+import { admitCursor } from './cursor.js';
 import { normalizeProfile } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
@@ -1379,7 +1380,7 @@ export function openStore(model, options) {
             const classification = liveOptions?.mode === 'rerun'
               ? { strategy: 'rerun', reason: 'rerun was requested' }
               : classifyLiveQuery(document, core.queryShape, keyed, eventTime);
-            return /** @type {any} */ (liveRegistry).register({
+            return closeOnRollback(/** @type {any} */ (liveRegistry).register({
               name: core.model.name,
               tables: new Set([core.model.name]),
               document,
@@ -1390,8 +1391,17 @@ export function openStore(model, options) {
               readRow: (token) => core.get(token),
               keyOf: (doc) => String(extractKey(doc, core.model.keySegments,
                 core.model.key, core.model.name, core.model.docPath)),
-            });
+            }));
           };
+          /** A live query registered INSIDE a transaction initialized from
+           * that transaction's rows; if the transaction rolls back, those
+           * rows never existed and the query is closed with them rather
+           * than left maintaining a result nothing committed. Registered
+           * at the root, the scope settles at once and nothing is owed. */
+          const closeOnRollback = (registered) => chain(registered, (live) => {
+            connection.onSettle({ rollback: () => live.close() });
+            return live;
+          });
           /** Strip relation members before journal diffs — sessions
            * never see them (they are not stored), so the two modes
            * stay identical. */
@@ -1550,7 +1560,7 @@ export function openStore(model, options) {
           });
 
           const queryState = createQueryState(options.statementCacheBound, operators,
-            zoneProvider);
+            zoneProvider, runtime.now);
           const entityEngine = entities.size > 0
             ? createEntityQueryEngine({ connection, entities, mapping, state: queryState,
               profile: storeProfile })
@@ -1890,7 +1900,7 @@ export function openStore(model, options) {
                 'store.live takes an entity-root document — for a collection, '
                 + 'use store.collection(name).live');
             }
-            return liveRegistry.register({
+            return closeOnRollback(liveRegistry.register({
               name: [...roots].join('+'),
               tables: roots,
               document,
@@ -1903,7 +1913,7 @@ export function openStore(model, options) {
               execute: (doc, executeOptions) => entityEngine.execute(doc, executeOptions),
               readRow: null,
               keyOf: null,
-            });
+            }));
           };
 
           /**
@@ -1961,14 +1971,20 @@ export function openStore(model, options) {
             collection(name) {
               let handle = gatedCollections.get(name);
               if (handle === undefined) {
-                // `query` is deliberately NOT gated: a cursor's life spans
-                // the caller's loop, and taking the store gate for that
-                // long would block every transaction for as long as a
-                // consumer reads slowly — so it reads on the connection
-                // beside whatever is open, one row per pull
-                handle = gatedMembers(boundCollection(name),
-                  ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
-                  ['execute']);
+                const inner = boundCollection(name);
+                // `query` borrows the gate PER PULL rather than for the
+                // cursor's life: holding it for the caller's whole loop
+                // would block every transaction for as long as a consumer
+                // reads slowly, while an ungated pull could read a row a
+                // stranger's transaction has not committed. Construction
+                // (preflight, compilation) touches no connection.
+                handle = Object.freeze({
+                  ...gatedMembers(inner,
+                    ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
+                    ['execute']),
+                  query: (document, queryOptions) => admitCursor(inner.query(document, queryOptions),
+                    gated, queryOptions?.signal, 'a root collection cursor pull'),
+                });
                 gatedCollections.set(name, handle);
               }
               return handle;
@@ -1980,13 +1996,21 @@ export function openStore(model, options) {
                 // constructed while an own-unit transaction happens to be
                 // open must not capture that transaction's tracker
                 const inner = rootWork.entityFor(name);
-                // `cursor` is not gated, as a collection's `query` is not:
-                // it spans the caller's loop
+                // `cursor` and `loadCursor` borrow the gate per pull, as a
+                // collection's `query` does: admitted one item at a time,
+                // never held across the caller's loop
                 handle = gatedMembers(inner,
                   ['create', 'get', 'update', 'delete', 'load', 'page', 'explain'],
                   ['execute']);
                 const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load']);
-                handle = Object.freeze({ ...handle, asNoTracking: () => untracked });
+                handle = Object.freeze({
+                  ...handle,
+                  cursor: (document, queryOptions) => admitCursor(inner.cursor(document, queryOptions),
+                    gated, queryOptions?.signal, 'a root entity cursor pull'),
+                  loadCursor: (spec, cursorOptions) => admitCursor(inner.loadCursor(spec, cursorOptions),
+                    gated, cursorOptions?.signal, 'a root graph cursor pull'),
+                  asNoTracking: () => untracked,
+                });
                 gatedEntities.set(name, handle);
               }
               return handle;
@@ -2005,9 +2029,15 @@ export function openStore(model, options) {
             roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             relations: entityEngine === null ? undefined : entityEngine.relations,
             // entity live queries re-run on invalidation — declared,
-            // not attempted (LIVE-FORMAT §7)
+            // not attempted (LIVE-FORMAT §7). Registration takes the
+            // store gate through its INITIAL query, like a collection's
+            // `live`: the registration is local, the first result is a
+            // statement, and a statement here must not read a row a
+            // stranger's transaction has not committed. The live handle
+            // then runs on committed writes alone.
             live: entityEngine === null ? undefined
-              : lift((document, liveOptions) => registerEntityLive(document, liveOptions)),
+              : lift((document, liveOptions) =>
+                gated(() => registerEntityLive(document, liveOptions), 'a root live registration')),
             // A TOP-LEVEL transaction: it takes the connection's gate, so
             // it never shares a savepoint stack with another one. To nest,
             // use the store the callback RECEIVES — the outer store cannot

@@ -18,9 +18,13 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, createCursor } from '@jarenjs/db';
+import { admitCursor } from '../../packages/db/src/cursor.js';
 import { nodeDriver } from '@jarenjs/db/node';
+import { createRuntime } from '@jarenjs/core/runtime';
+import { statementCountingDriver } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -547,5 +551,258 @@ describe('a transaction handle is pinned to its exact scope (JD2070)', () => {
     isScopeRefusal(await settle(begun.next()));
     isScopeRefusal(await settle(unbegun.next()));
     await store.close();
+  });
+});
+
+/**
+ * The model the root-cursor admission tests read through: a collection
+ * and an entity with a to-many relation, so the three root cursor
+ * surfaces — a collection's `query`, an entity set's `cursor` and its
+ * graph `loadCursor` — are all exercised.
+ */
+const ROOTS = {
+  $model: '0.1',
+  collections: {
+    docs: {
+      schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      key: '/id',
+      indexes: [],
+    },
+  },
+  entities: {
+    Item: {
+      schema: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'integer', 'x-entity': { key: true } },
+          tag: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+/** Whether a promise has settled within a short grace period. */
+const settledWithin = (promise, ms = 25) => Promise.race([
+  Promise.resolve(promise).then(() => true, () => true),
+  new Promise((resolve) => setTimeout(() => resolve(false), ms)),
+]);
+
+/** A mutable clock. */
+function clockAt(start) {
+  let at = start;
+  const now = () => at;
+  now.advance = (ms) => { at += ms; };
+  return now;
+}
+
+describe('root cursors borrow admission per pull (MODEL-FORMAT §5.1)', () => {
+  // a bare binding streams one row per pull; a projection would buffer (a barrier)
+  const ITEMS = { $for: { it: '$.Item[*]' }, $orderby: ['$it.id'], $return: '$it' };
+  const DOCS = { $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it.id' };
+
+  /** Open a seeded store and expose the three root cursors as openers. */
+  async function seeded(options = {}) {
+    const counters = { iterate: 0, next: 0, return: 0, all: 0 };
+    const store = await openStore(ROOTS, { driver: statementCountingDriver(counters), ...options });
+    await store.transaction(async (tx) => {
+      await tx.collection('docs').put({ id: 'a' }, 'a');
+      await tx.collection('docs').put({ id: 'b' }, 'b');
+      await tx.entity('Item').create({ id: 1, tag: 'x' });
+      await tx.entity('Item').create({ id: 2, tag: 'y' });
+    });
+    for (const key of Object.keys(counters)) counters[key] = 0;
+    const openers = {
+      query: (o) => store.collection('docs').query(DOCS, o),
+      cursor: (o) => store.entity('Item').cursor(ITEMS, o),
+      loadCursor: (o) => store.entity('Item').loadCursor({ orderBy: '$it.id' }, o),
+    };
+    return { store, counters, openers };
+  }
+  const drain = async (cursor) => {
+    const out = [];
+    for await (const item of cursor) out.push(typeof item === 'object' ? item.id : item);
+    return out;
+  };
+
+  it('a pull made while a transaction is open waits, then reads the committed state — and never a rolled-back row', async () => {
+    const { store, openers } = await seeded();
+    for (const [surface, open] of Object.entries(openers)) {
+      for (const outcome of ['commit', 'rollback']) {
+        const hold = defer();
+        const tx = settle(store.transaction(async (t) => {
+          await t.collection('docs').put({ id: 'staged' }, 'staged');
+          await t.entity('Item').create({ id: 9, tag: 'staged' });
+          await hold.promise;
+          if (outcome === 'rollback') throw new Error('undo');
+        }));
+        // wait until the transaction owns the connection
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const cursor = open();
+        const first = cursor.next();
+        assert.strictEqual(await settledWithin(first), false, `${surface}/${outcome}: the pull waits for the open transaction`);
+        hold.resolve();
+        await tx;
+        const items = [(await first).value, ...(await drain(cursor))];
+        const ids = items.map((item) => (typeof item === 'object' ? item.id : item));
+        if (outcome === 'commit') assert.ok(ids.some((id) => id === 9 || id === 'staged'), `${surface}: the committed row is read (${JSON.stringify(ids)})`);
+        else assert.ok(!ids.some((id) => id === 9 || id === 'staged'), `${surface}: a rolled-back row is never read (${JSON.stringify(ids)})`);
+        // clean the committed rows for the next round
+        if (outcome === 'commit') {
+          await store.collection('docs').delete('staged');
+          await store.entity('Item').delete(9);
+        }
+      }
+    }
+    await store.close();
+  });
+
+  it('a consumer paused between pulls blocks no unrelated transaction', async () => {
+    const { store, openers } = await seeded();
+    for (const open of Object.values(openers)) {
+      const cursor = open();
+      assert.strictEqual((await cursor.next()).done, false, 'one item consumed; the statement is open');
+      // the unrelated transaction must not wait for the paused consumer:
+      // under a held gate this would queue until JD0012 (5 s)
+      const started = Date.now();
+      await store.transaction(async (t) => {
+        await t.collection('docs').put({ id: 'between' }, 'between');
+      });
+      assert.ok(Date.now() - started < 1000, 'the transaction ran while the cursor was paused');
+      assert.notStrictEqual(await store.collection('docs').get('between'), undefined);
+      assert.strictEqual((await cursor.next()).done, false, 'the paused cursor continues afterwards');
+      await cursor.return();
+      await store.collection('docs').delete('between');
+    }
+    await store.close();
+  });
+
+  it('queued abort is JD2064, row-boundary abort is JD2072, a passed deadline is JD2075; the source is released once', async () => {
+    const now = clockAt(1_000);
+    const { store, counters, openers } = await seeded({ runtime: createRuntime({ now }) });
+    for (const open of Object.values(openers)) {
+      // queued: the transaction owns the connection, the pull waits, the abort leaves the queue
+      const hold = defer();
+      const tx = store.transaction(async () => { await hold.promise; });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const controller = new AbortController();
+      const queued = open({ signal: controller.signal });
+      const pull = settle(queued.next());
+      controller.abort(new Error('gave up waiting'));
+      const refusal = await pull;
+      assert.strictEqual(refusal.code, 'JD2064', `${refusal.message}`);
+      hold.resolve();
+      await tx;
+      // the same cursor afterwards: aborted at construction level, so JD2072, no statement
+      const before = counters.iterate;
+      assert.strictEqual((await settle(queued.next())).code, 'JD2072');
+      assert.strictEqual(counters.iterate, before, 'an aborted cursor opens no statement');
+
+      // row boundary: one row pulled, then aborted — released exactly once
+      const boundary = new AbortController();
+      const active = open({ signal: boundary.signal });
+      assert.strictEqual((await active.next()).done, false);
+      const returns = counters.return;
+      boundary.abort();
+      assert.strictEqual((await settle(active.next())).code, 'JD2072');
+      assert.strictEqual((await settle(active.next())).code, 'JD2072');
+      await active.return();
+      assert.strictEqual(counters.return, returns + 1, 'released once, at the row boundary');
+
+      // deadline against the record's clock
+      const timed = open({ deadline: now() + 10 });
+      assert.strictEqual((await timed.next()).done, false);
+      now.advance(11);
+      const late = await settle(timed.next());
+      assert.strictEqual(late.code, 'JD2075');
+      assert.match(late.message, /before the next row/);
+    }
+    await store.close();
+  });
+
+  it('return() is admitted like a pull and releases the source exactly once; a never-pulled cursor releases nothing', async () => {
+    const { store, counters, openers } = await seeded();
+    for (const open of Object.values(openers)) {
+      const cursor = open();
+      assert.strictEqual((await cursor.next()).done, false);
+      const hold = defer();
+      const tx = store.transaction(async () => { await hold.promise; });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const returning = cursor.return();
+      assert.strictEqual(await settledWithin(returning), false, 'the release waits for the open transaction');
+      const returns = counters.return;
+      hold.resolve();
+      await tx;
+      assert.deepStrictEqual(await returning, { done: true, value: undefined });
+      await cursor.return();
+      assert.strictEqual(counters.return, returns + 1, 'the underlying return ran once');
+      assert.deepStrictEqual(await cursor.next(), { done: true, value: undefined });
+      // a cursor that never pulled: nothing to release
+      const untouched = open();
+      const before = counters.return;
+      await untouched.return();
+      assert.strictEqual(counters.return, before);
+      assert.strictEqual(counters.iterate, counters.iterate, 'no statement was ever opened for it');
+    }
+    await store.close();
+  });
+
+  it('construction touches no connection: preflight refusals are still synchronous, and no statement is prepared before the first pull', async () => {
+    const { store, counters, openers } = await seeded();
+    const prepared = counters.iterate + counters.all;
+    for (const open of Object.values(openers)) {
+      assert.throws(() => open({ signal: AbortSignal.abort() }), (e) => e.code === 'JD2072');
+      assert.throws(() => open({ deadline: 0 }), (e) => e.code === 'JD2075');
+      const cursor = open();
+      assert.ok(['row', 'buffered'].includes(cursor.streaming), 'the classification is the inner cursor\'s');
+      assert.ok('barrier' in cursor);
+      assert.strictEqual(cursor[Symbol.asyncIterator](), cursor, 'iterator identity');
+    }
+    assert.strictEqual(counters.iterate + counters.all, prepared, 'constructing cursors issued nothing');
+    await store.close();
+  });
+
+  it("transactions: 'strict' refuses a contended pull as a rejection, not a throw", async () => {
+    const { store, openers } = await seeded({ transactions: 'strict' });
+    const hold = defer();
+    const tx = store.transaction(async () => { await hold.promise; });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    for (const open of Object.values(openers)) {
+      const cursor = open();
+      const refused = await settle(cursor.next());
+      assert.strictEqual(refused.code, 'JD0012', refused.message);
+    }
+    hold.resolve();
+    await tx;
+    await store.close();
+  });
+
+  it('the admitted cursor and the inner cursor each keep their own asynchronous-iterator identity', async () => {
+    const inner = createCursor({ streaming: 'buffered', barrier: { construct: 'test', reason: 'a fixture' },
+      materialize: () => [1, 2, 3] });
+    assert.strictEqual(inner[Symbol.asyncIterator](), inner);
+    const walked = [];
+    for await (const item of inner) walked.push(item);
+    assert.deepStrictEqual(walked, [1, 2, 3], 'the inner cursor iterates on its own');
+    let admitted = 0;
+    const wrapped = admitCursor(createCursor({ streaming: 'buffered', barrier: null, materialize: () => ['a', 'b'] }),
+      (fn) => { admitted++; return fn(); }, undefined, 'a test pull');
+    assert.strictEqual(wrapped[Symbol.asyncIterator](), wrapped);
+    const out = [];
+    for await (const item of wrapped) out.push(item);
+    assert.deepStrictEqual(out, ['a', 'b']);
+    assert.strictEqual(admitted, 3, 'each pull was admitted once (two items and the exhausting pull)');
+  });
+
+  it('exactly one admission implementation exists, and it neither buffers nor imports a store', () => {
+    const cursor = fs.readFileSync(new URL('../../packages/db/src/cursor.js', import.meta.url), 'utf8');
+    const store = fs.readFileSync(new URL('../../packages/db/src/store.js', import.meta.url), 'utf8');
+    assert.strictEqual((cursor.match(/export function admitCursor\(/g) ?? []).length, 1);
+    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 3, 'the three root cursor surfaces route through it');
+    assert.ok(!/query is deliberately NOT gated/.test(store), 'the ungated exception is gone');
+    const body = cursor.slice(cursor.indexOf('export function admitCursor('));
+    const fn = body.slice(0, body.indexOf('\n}\n') + 3);
+    assert.ok(!/\.all\(\)|toArray\(|\[\]/.test(fn), 'the decorator holds no buffer');
   });
 });
