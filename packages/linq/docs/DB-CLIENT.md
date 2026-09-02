@@ -168,7 +168,7 @@ hands it to `explain()` and asserts `mode: 'native'` with no residual.
 ### 2.4 The graph
 
 `include(pick, spec?)` opens a graph: an immutable builder of the store's
-`load` specification, with 15 members of its own.
+`load` specification, with 17 members of its own.
 
 | Member | Emits | Note |
 |---|---|---|
@@ -177,17 +177,19 @@ hands it to `explain()` and asserts `mode: 'native'` with no residual.
 | `orderBy(key, options?)`, `orderByDescending(key, options?)` | `orderBy` | replaces; `options` is `{ empty?, collation? }` |
 | `thenBy(key, options?)`, `thenByDescending(key, options?)` | appends to `orderBy` | `JL0005` when no `orderBy` precedes it |
 | `take(n)`, `skip(n)` | `take`, `skip` | the offset window |
-| `after(cursor)` | `after` | the keyset cursor (§10.5); the ROOT only |
+| `after(cursor)` | `after` | the keyset continuation (§10.5) a `page()` over the same ordering emitted — typed by the declared ordering, so a bare key does not compile; the ROOT only |
 | `maxDepth(n)` | `maxDepth` | the include depth bound (§10.4) |
 | `asNoTracking()` | — | changes the load, never the document |
 | `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document |
 | `toArray()` | — | `load(spec)`: the store's one statement |
-| `explain()` | — | `explainLoad(spec)`: the SQL, the includes, the pagination strategy |
+| `cursor(options?)` | — | `loadCursor(spec, options)`: one root graph per pull from that same statement, its includes attached and bounded per root; `return()` releases it; `{ signal?, tracking? }` — untracked unless `tracking: true` |
+| `page(options?)` | — | `page(spec, options)`: one bounded page over the composite keyset — `{ items, continuation, hasMore, snapshot }`, never more than `limit` roots or `maxBytes` bytes; `{ limit?, after?, maxBytes?, consistency?, signal?, tracking? }`; a `take`/`skip` on the graph beside it is the store's `JD0032` |
+| `explain()` | — | `explainLoad(spec)`: the SQL, the includes, the pagination strategy, the per-root bounds |
 
 The spec's member order is fixed — `where, orderBy, take, skip, after,
 maxDepth, include` at the root; `where, orderBy, take, skip, count,
-include` in an include — so one graph is one document however it was
-built. An include spec is `true` (or absent) for the rows, `{ count:
+maxRows, maxBytes, include` in an include — so one graph is one document
+however it was built. An include spec is `true` (or absent) for the rows, `{ count:
 true }` for the number, or an object of clauses:
 
 | Spec member | Emitted | Note |
@@ -198,6 +200,7 @@ true }` for the number, or an object of clauses:
 | `orderBy: (p) => p.pid` | `orderBy: "$it.pid"` | a bare key, ascending |
 | `orderBy: { key, desc?, empty?, collation? }` | `orderBy: { $key, $dir, $empty, $collation }` | as the chain spells `$orderby`; an array of either is an array |
 | `take`, `skip` | `take`, `skip` | the window inside the subquery (a non-integer is the store's `JD0032`) |
+| `maxRows`, `maxBytes` | `maxRows`, `maxBytes` | the per-root bounds (MODEL-FORMAT §10.4): rows of the relation per parent and serialised bytes per parent; crossing one is the store's `JD2073`, never a truncated graph. Defaults 1000 rows / 1 MiB (a `take` is the row bound of the include it windows); `Infinity` spells the unbounded case and emits as `null` |
 | `include: { comments: spec }` | `include: { comments: <lowered> }` | over the TARGET's relation table (the scope carries every root's) |
 | anything else | `JL0101` | the vocabulary is closed; `after` paginates the root, never an include |
 
@@ -632,8 +635,11 @@ wrong — see [MODEL-PEN.md](MODEL-PEN.md) §5.
   and only the root, because the cursor is a key of the root entity and
   there is one root per load. `{ after: 1 }` inside a spec is `JL0101`
   naming the graph's own `after()` (§4.1); `.after(cursor)` on the graph
-  is the spelling that works, and the graph's `after` is typed `M['key']`
-  so a cursor of the wrong type does not compile.
+  is the spelling that works, and the graph's `after` is typed by the
+  declared ordering — the continuation a `page()` over the same
+  `orderBy`/`thenBy` chain emitted, its `keys` tuple following the
+  ordering and its `key` the row's primary key — so a bare key, or a
+  continuation with the wrong number of values, does not compile.
 
 ### 5.4 What the pin holds
 
@@ -655,7 +661,7 @@ void client.entities.Post.where((p) => p.strs.ge(3));        // a misspelled mem
 void client.entities.User.include((u) => u.email);           // not a relation member
 void client.entities.User.include((u) => u.posts, { where: (p) => p.email.eq('x') });  // the target's shape
 void client.entities.Post.include((p) => p.author, { include: { nope: true } });       // the target's relations
-void client.entities.Post.include((p) => p.author).after('one');  // the cursor is the key's type
+void client.entities.Post.include((p) => p.author).after('one');  // the cursor is the ordering's continuation, never a bare key
 client.entities.User.link('u1', 'posts', 1);                 // oneToMany is not a membership
 client.entities.Post.link(1, 'author', 'u1');                // oneToOne is not a membership
 client.entities.User.link('u1', 'labels', 42);               // the target's key type
@@ -747,10 +753,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->495,063<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->518,731<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->495<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->519<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather

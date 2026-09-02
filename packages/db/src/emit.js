@@ -304,7 +304,18 @@ export function emitPlan(plan, dialect, physical) {
           `${dialect.groupAggregate(entry.fn,
             entry.ref === null ? null : valueOf(entry.ref))} AS ${q(entry.as)}`)].join(', ')
       : plan.aggregate === null
-        ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
+        ? (plan.project === 'document'
+          ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
+          // one member path: its value and its JSON type. A scalar is
+          // the extracted SQL value itself; an object or array is
+          // rendered to JSON text, since the binary extraction of a
+          // compound is a blob. `NULL` type is an absent member (no
+          // item), 'null' a present null, 'true'/'false' a boolean the
+          // integer rendering would otherwise lose
+          : `CASE WHEN ${typeOf(plan.project.path)} IN ('object', 'array') `
+            + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathTextOf(plan.project.path)))} `
+            + `ELSE ${dialect.jsonExtract(docColumn, pathTextOf(plan.project.path))} END AS ${q('v')}, `
+            + `${typeOf(plan.project.path)} AS ${q('t')}`)
         : plan.aggregate.fn === 'count'
           ? `COUNT(*) AS ${q('value')}`
           : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;

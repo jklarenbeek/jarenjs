@@ -54,6 +54,16 @@ async function main(): Promise<void> {
   const authorLabels: Label[] | undefined = nested[0].author?.labels;
   void authorLabels;
   const bare = await client.entities.User.include((u) => u.posts).asNoTracking().toArray();
+  // the graph cursor: one root per pull, typed by the includes; the
+  // per-root bounds ride on the include spec, Infinity spelled
+  const streamed = client.entities.User
+    .include((u) => u.posts, { maxRows: 100, maxBytes: Infinity })
+    .cursor({ signal: new AbortController().signal, tracking: false });
+  for await (const user of streamed) {
+    const titles: (string | undefined)[] = user.posts.map((p) => p.title);
+    void titles;
+  }
+  void streamed.streaming;
   const barePosts: Post[] = bare[0].posts;
   void barePosts;
   const spec = client.entities.User.include((u) => u.posts).toSpec();
@@ -64,8 +74,28 @@ async function main(): Promise<void> {
   void client.entities.User.include((u) => u.posts, { where: (p) => p.email.eq('x') });
   // @ts-expect-error — a nested include member the target does not declare
   void client.entities.Post.include((p) => p.author, { include: { nope: true } });
-  // @ts-expect-error — a keyset cursor is the entity's key type
+  // @ts-expect-error — a keyset cursor is the ordering's continuation, never a bare key
   void client.entities.Post.include((p) => p.author).after('one');
+  // the continuation follows the declared ordering: a two-key ordering
+  // emits and takes a two-value keys tuple, plus the row's key
+  const ordered = client.entities.Post.graph().orderBy((p) => p.stars).thenByDescending((p) => p.title);
+  const page = await ordered.page({ limit: 10, maxBytes: 65536, consistency: 'live' });
+  const continuation: { readonly keys: [number, string]; readonly key: number } | null = page.continuation;
+  void continuation;
+  const pageRows: { pid: number; title?: string }[] = page.items;
+  void pageRows;
+  void page.snapshot;
+  if (page.continuation !== null) void ordered.after(page.continuation);
+  // @ts-expect-error — a two-key ordering needs a two-value continuation
+  void ordered.after({ order: [], keys: [1], key: 1 });
+  // @ts-expect-error — the tuple is typed by the keys' value types
+  void ordered.after({ order: [], keys: ['x', 'y'], key: 1 });
+  // an include-bearing graph declares its ordering the same way, and the
+  // page is typed by the includes
+  const withAuthor = await client.entities.Post.include((p) => p.author).orderBy((p) => p.pid)
+    .after({ order: [], keys: [1], key: 1 }).page({ limit: 5 });
+  const authorEmail: string | undefined = withAuthor.items[0]?.author?.email;
+  void authorEmail;
 
   // membership: exactly the many-to-many members, the target's key or document
   const ada: User = { id: 'u1', email: 'a@x' };

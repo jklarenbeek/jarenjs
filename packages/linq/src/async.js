@@ -26,10 +26,13 @@
  *    refuses (`JL0005`) and `explain()` reports the split.
  *  - a PROVIDER origin (`fromAsync(store.entity('Post'))`) runs nothing
  *    here: everything up to the first `mapAsync` is ONE document the
- *    provider executes whole — the terminal's wrapper included, exactly
- *    as the synchronous surface pushes it — and `execute` may answer a
- *    promise (D8); the residual after the split streams locally, and a
- *    `join` exists on this surface only inside that pushed document.
+ *    provider executes — a terminal's wrapper included, exactly as the
+ *    synchronous surface pushes it, `execute` answering a promise if it
+ *    must (D8). Iteration hands that document to the provider's CURSOR
+ *    when it offers one, so a `for await` pulls one row at a time from
+ *    an open statement and a `break` releases it; the residual after
+ *    the split streams locally, and a `join` exists on this surface
+ *    only inside that pushed document.
  *
  * Early termination CLOSES the source: every consumer is a
  * `for await … break` chain, and async generators propagate `return()`
@@ -437,10 +440,11 @@ export class AsyncSequence {
   }
 
   /** Barriers, the split, the relation hops the callbacks navigated,
-   * and — when representable — the document. Stages are named by the
-   * OPERATOR the caller wrote (`selectMany`, `orderByDescending`), and a
-   * `thenBy` is part of the `$orderby` barrier it extends, not a barrier
-   * of its own. */
+   * and — when representable — the document; plus `streaming` and
+   * `barrier`, what this surface's own execution does. Stages are named
+   * by the OPERATOR the caller wrote (`selectMany`, `orderByDescending`),
+   * and a `thenBy` is part of the `$orderby` barrier it extends, not a
+   * barrier of its own. */
   explain() {
     const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
     // over a provider nothing before the split materialises HERE — the
@@ -455,7 +459,19 @@ export class AsyncSequence {
         barriers.push({ operator: stage.name ?? stage.kind, reason: BARRIERS[stage.kind] });
       }
     }
-    const out = { barriers, hops: this.#hops(), bindings: this.#externals().values };
+    // what THIS surface does with the item stream: one item at a time,
+    // or a buffer at the first local barrier. Over a provider the pushed
+    // document's own class — a set residual, an unbindable external — is
+    // the provider's to report: `explain(document, { externals: bindings })`
+    // on the source answers it, and its cursor carries the same answer
+    const first = barriers[0];
+    const out = {
+      barriers,
+      streaming: first === undefined ? 'row' : 'buffered',
+      barrier: first === undefined ? null : { construct: first.operator, reason: first.reason },
+      hops: this.#hops(),
+      bindings: this.#externals().values,
+    };
     if (firstMap < 0) {
       out.document = this.toDocument();
     }
@@ -487,7 +503,7 @@ export class AsyncSequence {
       // runs whole; the residual continues locally over its rows
       const firstMap = stages.findIndex((s) => s.kind === 'mapAsync');
       i = firstMap < 0 ? stages.length : firstMap;
-      stream = arrayStream(await this.#pushWindow('toArray', undefined, stages.slice(0, i)));
+      stream = this.#providerStream(stages.slice(0, i), values);
     }
     else {
       stream = this.#origin.iterate();
@@ -520,6 +536,33 @@ export class AsyncSequence {
       i++;
     }
     yield* iterateAndClose(stream);
+  }
+
+  /**
+   * The pushed window as a STREAM. A provider that offers the cursor
+   * protocol (`cursor(document, options)` — the store's entity sets and
+   * collections do) is handed the unwrapped document and answers one
+   * item per pull from an open statement; the generator's `for await`
+   * releases that statement on break, throw and exhaustion alike,
+   * exactly once. A provider without one keeps the element window it
+   * always had: the `toArray`-wrapped document run whole, its array
+   * iterated — a materialisation, which is what such a provider can do.
+   * @param {readonly any[]} stages - the stages up to the split
+   * @param {Record<string, any>} values - the bound externals
+   * @returns {AsyncIterator<any>}
+   */
+  #providerStream(stages, values) {
+    const source = this.#origin.source;
+    if (typeof source.cursor === 'function') {
+      return source.cursor(this.#documentOf(stages), { externals: values });
+    }
+    return this.#materializedWindow(stages);
+  }
+
+  /** The legacy element window, iterated: one `toArray` push, run whole.
+   * @param {readonly any[]} stages */
+  async* #materializedWindow(stages) {
+    yield* await this.#pushWindow('toArray', undefined, stages);
   }
 
   /** @param {AsyncIterator<any>} stream @param {any} stage @param {any} values */
@@ -614,7 +657,12 @@ export class AsyncSequence {
     }
   }
 
+  /** The whole result as one array. Over a provider with no `mapAsync`
+   * this is ONE pushed window — the terminal asked for the array, so the
+   * store answers it in one statement rather than one row at a time;
+   * everywhere else it drains the item stream. */
   async toArray() {
+    if (this.#pushable()) return this.#pushWindow('toArray');
     return collect(this[Symbol.asyncIterator]());
   }
 

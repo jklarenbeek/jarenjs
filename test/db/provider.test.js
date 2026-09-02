@@ -546,9 +546,10 @@ describe("a chain's element window is read through by both planners (QUERY-PEN Â
     assert.deepStrictEqual(await users.execute(window(60), { pushdown: false }), [DATA[2]],
       'the residual answers the same shape');
     assert.deepStrictEqual(compileJsonQuery(window(60))(DATA), [DATA[2]], "the engine's own answer");
-    // a projection inside the window: the row residual, still one array
+    // a projection inside the window: one member path projects natively,
+    // still one array
     const projected = [{ $for: { it: ['$[*]'] }, $where: { $ge: ['$it.age', 30] }, $return: '$it.id' }];
-    assert.strictEqual((await users.explain(projected)).mode, 'row');
+    assert.strictEqual((await users.explain(projected)).mode, 'native');
     assert.deepStrictEqual(await users.execute(projected), ['a', 'c']);
     // the cursor yields the one item
     const items = [];

@@ -73,6 +73,23 @@ export function compileSetResidual(document, limits, operators, zoneProvider) {
 }
 
 /**
+ * Compile the whole document for a CURSOR's barrier: `[document]` packs
+ * the result sequence into one unambiguous item array, so a cursor
+ * hands out one item per pull whatever the engine's singleton rule
+ * would have folded — the same packing the row residual uses per row,
+ * applied to the whole set.
+ * @param {any} document
+ * @param {any} [limits]
+ * @param {{ functions?: any, extensions?: any } | null} [operators]
+ * @param {any} [zoneProvider]
+ * @returns {(candidates: any[], externals: any) => any[]} the items
+ */
+export function compilePackedResidual(document, limits, operators, zoneProvider) {
+  const compiled = compileJsonQuery([document], residualOptions(limits, operators, zoneProvider));
+  return (candidates, externals) => /** @type {any[]} */ (compiled(candidates, externals));
+}
+
+/**
  * Compile the per-row projection for row-mode evaluation.
  * @param {any} rowDocument - The planner's complete one-row document
  *   (`{ $for: { <the document's own binding>: '$[*]' },

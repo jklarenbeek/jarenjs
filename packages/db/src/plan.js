@@ -1815,14 +1815,30 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     orderPushed = true; // nothing to push
   }
 
-  // RETURN: the bare binding is the native whole-document projection
+  // RETURN: the bare binding is the native whole-document projection,
+  // and a SINGLE member path over the binding projects that path into
+  // the statement (its value beside its JSON type, so a present null,
+  // a boolean and an absent member each read back as the engine
+  // answers them). Nothing else is projected: the residual rules that
+  // make a projection safe hold only when the whole selection is
+  // pushed, which the caller decides — a projection that dropped a
+  // member a residual conjunct still needs would be a wrong answer
   let projectionNative = false;
+  /** @type {import('./algebra.js').PlanRef | null} */
+  let projectedPath = null;
   assertDecidedKind(node.ret);
   if (bucket !== null) projectionNative = true; // the bucket IS the projection
   else if (isItVar(node.ret, itSlot)) projectionNative = true;
   else {
-    reasons.push(refusal('$return',
-    'projections other than the bare binding run per row (the row residual)'));
+    const ref = pathRef(node.ret, itSlot, shape);
+    if (ref !== null) {
+      projectionNative = true;
+      projectedPath = ref;
+    }
+    else {
+      reasons.push(refusal('$return',
+        'projections other than the bare binding or one member path run per row (the row residual)'));
+    }
   }
 
   return {
@@ -1831,6 +1847,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     whereFullyPushed: whereFullyPushed && structureClean,
     orderPushed: orderPushed && structureClean,
     projectionNative,
+    projectedPath,
     itSlot,
     itName,
     udfs,
@@ -2003,9 +2020,16 @@ function planCollectionCore(document, shape, options = undefined) {
         return {
           analysis, plan: null, mode: 'set',
           reasons: [refusal('$count',
-            'count translates only over the bare binding (a projected return can change the item count)')],
+            'count translates only over the bare binding or one member path (a projected return can change the item count)')],
           rowReturn: null, udfs: [], prefilters: [], series: null,
         };
+      }
+      // a count over one member path counts the rows where the member
+      // is PRESENT — an absent member yields no item — so the presence
+      // test rides the WHERE and the count stays a COUNT(*)
+      if (flwor.projectedPath !== null) {
+        plan.filter = conjoin(plan.filter,
+          { p: 'typeIs', ref: flwor.projectedPath, types: [], positive: true });
       }
       plan.aggregate = { fn: 'count', ref: null };
       return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
@@ -2059,6 +2083,7 @@ function planCollectionCore(document, shape, options = undefined) {
   }
 
   if (fullyPushed && flwor.projectionNative && (windows.length === 0 || plan.window !== null)) {
+    if (flwor.projectedPath !== null) plan.project = { path: flwor.projectedPath };
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
       udfs: flwor.udfs, prefilters: flwor.prefilters,
       series: classifySelection(plan, shape, flwor.orderPushed) };
@@ -2089,14 +2114,28 @@ function planCollectionCore(document, shape, options = undefined) {
     };
   }
 
-  // the set residual: pushed conjuncts narrow, the engine answers
+  // the set residual: pushed conjuncts narrow, the engine answers — so
+  // a temporal selection here is never `native`, whatever index it
+  // seeks through: the index narrows the fetch (hybrid) or nothing does
+  // (engine), and the record follows the PLAN mode, not the index alone
   const narrowing = flwor.bucketRefusal == null
-    ? classifySelection(plan, shape, false)
+    ? underSetMode(classifySelection(plan, shape, false))
     : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby');
   plan.order = null;
   plan.window = null;
   return { analysis, plan, mode: 'set', reasons: flwor.reasons, rowReturn: null,
     udfs: flwor.udfs, prefilters: flwor.prefilters, series: narrowing };
+}
+
+/**
+ * A temporal record under a set-mode plan: the database only narrows,
+ * the engine answers.
+ * @param {any} series - a `classifySelection` record, or null
+ * @returns {any}
+ */
+function underSetMode(series) {
+  if (series === null || series.mode !== 'native') return series;
+  return { ...series, mode: series.index === null ? 'engine' : 'hybrid' };
 }
 
 /**
@@ -2321,17 +2360,8 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // bindings must each range over one entity's array
   const bindings = [];
   for (const binding of root.forBindings) {
-    const source = unpacked(binding.expr);
-    const sourceEntity = source?.kind === 'path' && source.name === '$'
-      && source.external !== true && source.segments.length === 2
-      && source.segments[0].descendant !== true
-      && source.segments[0].selectors.length === 1
-      && source.segments[0].selectors[0].kind === 'name'
-      && source.segments[1].selectors?.length === 1
-      && source.segments[1].selectors[0].kind === 'wildcard'
-      ? source.segments[0].selectors[0].name
-      : null;
-    if (sourceEntity === null || !entities.has(sourceEntity)
+    const sourceEntity = bindingEntity(binding, entities);
+    if (sourceEntity === null
       || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty !== false)
       return residual('$for', 'bindings must each range over one declared entity array ($.Entity[*])');
     bindings.push({
@@ -2491,11 +2521,57 @@ function planEntityQueryCore(document, entities, mapping, operators) {
  */
 export function planEntityQuery(document, entities, mapping, operators = null) {
   const peeled = peelWrappedResult(document);
+  const core = planEntityQueryCore(peeled.document, entities, mapping, operators);
   const planned = {
-    ...planEntityQueryCore(peeled.document, entities, mapping, operators),
+    ...core,
     wrapped: peeled.wrapped,
+    // the entity whose documents the query yields, in EITHER mode: what
+    // a tracked cursor registers, and `null` when there is nothing to
+    // register — a projection, a count, a window handed over whole
+    retEntity: peeled.wrapped ? null : returnedEntity(core.analysis, entities),
   };
   return prependRegisteredReason(planned, document, operators);
+}
+
+/**
+ * The declared entity a `$for` binding ranges over — the array
+ * `$.<Entity>[*]`, spelled exactly so — or `null` for any other source.
+ * @param {any} binding - an analysed `$for` binding
+ * @param {Map<string, any>} entities
+ * @returns {string | null}
+ */
+function bindingEntity(binding, entities) {
+  const source = unpacked(binding.expr);
+  const name = source?.kind === 'path' && source.name === '$'
+    && source.external !== true && source.segments.length === 2
+    && source.segments[0].descendant !== true
+    && source.segments[0].selectors.length === 1
+    && source.segments[0].selectors[0].kind === 'name'
+    && source.segments[1].selectors?.length === 1
+    && source.segments[1].selectors[0].kind === 'wildcard'
+    ? source.segments[0].selectors[0].name
+    : null;
+  return name !== null && entities.has(name) ? name : null;
+}
+
+/**
+ * The entity whose documents a query RETURNS: under any literal
+ * windows, a FLWOR whose `$return` is one bare binding over a declared
+ * entity array. `null` for a projection, a count, or a binding over
+ * anything else — the items are then not entity documents, and a
+ * tracked cursor has nothing it may register.
+ * @param {any} analysis - the engine's analysis of the document
+ * @param {Map<string, any>} entities
+ * @returns {string | null}
+ */
+function returnedEntity(analysis, entities) {
+  let root = analysis.root;
+  while (root.kind === 'op' && root.name === '$subsequence') root = root.args[0];
+  if (root.kind !== 'flwor') return null;
+  const ret = root.ret;
+  if (ret.kind !== 'var' || ret.external === true) return null;
+  const binding = root.forBindings.find((candidate) => candidate.slot === ret.slot);
+  return binding === undefined ? null : bindingEntity(binding, entities);
 }
 
 /** Which binding slots a subtree references (via path roots). */

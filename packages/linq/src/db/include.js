@@ -10,9 +10,10 @@
  * `explainLoad(spec)`: the one-statement guarantee is the store's. A
  * spec is plain JSON in a fixed member order (`where, orderBy, take,
  * skip, after, maxDepth, include` at the root; `where, orderBy, take,
- * skip, count, include` in an include — a keyset cursor paginates the
- * root alone), so one graph is one document; `toJSON()` is that
- * document, as a pen's is.
+ * skip, count, maxRows, maxBytes, include` in an include — a keyset
+ * cursor paginates the root alone), so one graph is one document;
+ * `toJSON()` is that document, as a pen's is. `cursor()` is
+ * `loadCursor(spec)`: one root graph per pull.
  */
 
 import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
@@ -23,7 +24,7 @@ import { requireJson, describeValue } from '../json-boundary.js';
 
 const NO_PARAMS = new Set();
 const ROOT_KEYS = ['where', 'orderBy', 'take', 'skip', 'after', 'maxDepth', 'include'];
-const INCLUDE_KEYS = ['where', 'orderBy', 'take', 'skip', 'count', 'include'];
+const INCLUDE_KEYS = ['where', 'orderBy', 'take', 'skip', 'count', 'maxRows', 'maxBytes', 'include'];
 /** A member path over the row: the shorthand or the bracketed spelling. */
 const MEMBER_PATH = /^\$it(?:\.([A-Za-z_$][\w$]*)|\['((?:[^'\\]|\\.)*)'\])$/;
 
@@ -158,6 +159,12 @@ function lowerInclude(spec, entityName, relationsOf, path) {
     if (spec.count !== true) throw new LinqBuildError('JL0101', `the include spec at ${at}: count takes true`);
     out.count = true;
   }
+  for (const key of ['maxRows', 'maxBytes']) {
+    // the per-root bound (MODEL-FORMAT §10.4); `Infinity` is the spelled
+    // unbounded case, and its JSON form is `null`
+    if (spec[key] === undefined) continue;
+    out[key] = spec[key] === Infinity ? null : requireJson(spec[key], `${at} ${key}`);
+  }
   if (spec.include !== undefined) out.include = lowerIncludes(spec.include, entityName, relationsOf, path);
   return out;
 }
@@ -276,7 +283,9 @@ export class Graph {
   /** @param {number} count */
   skip(count) { return this.#with({ skip: requireJson(count, 'skip()') }); }
 
-  /** The keyset cursor (§10.5). @param {string | number} cursor */
+  /** The keyset continuation (§10.5): the `{ order, keys, key }` value a
+   * page emitted — a bare unique-column value is the single-column form.
+   * @param {any} cursor */
   after(cursor) { return this.#with({ after: requireJson(cursor, 'after()') }); }
 
   /** The include depth bound (§10.4). @param {number} depth */
@@ -307,6 +316,32 @@ export class Graph {
   toArray() {
     const spec = this.toSpec();
     return this.#tracking ? this.#set.load(spec) : this.#set.asNoTracking().load(spec);
+  }
+
+  /**
+   * `loadCursor(spec, options)` — the store's graph cursor: one root
+   * graph per pull, its includes attached and bounded, from the same one
+   * statement; `return()` releases it. Untracked unless `tracking: true`
+   * is spelled per call — a snapshot per yielded root is a unit of work
+   * that grows with the result.
+   * @param {{ signal?: AbortSignal, tracking?: boolean }} [options]
+   */
+  cursor(options) {
+    return this.#set.loadCursor(this.toSpec(), options);
+  }
+
+  /**
+   * `page(spec, options)` — the store's bounded page over the composite
+   * keyset (§10.5): `{ items, continuation, hasMore, snapshot }`, never
+   * more than `limit` roots or `maxBytes` serialised bytes, the
+   * continuation unsigned and structural. Untracked unless `tracking:
+   * true`.
+   * @param {{ limit?: number, after?: any, maxBytes?: number,
+   *   consistency?: 'live' | 'snapshot', signal?: AbortSignal,
+   *   tracking?: boolean }} [options]
+   */
+  page(options) {
+    return this.#set.page(this.toSpec(), options);
   }
 
   /** `explainLoad(spec)` — the SQL, the includes, the pagination strategy. */

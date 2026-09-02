@@ -82,6 +82,7 @@ describe('patch translation, differentially against applyJSONPatch', () => {
         patchFallback: route === 'fallback' ? 1 : 0,
         knn: { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 },
         series: { queries: 0, statements: 0, candidates: 0, results: 0, diverted: 0 },
+        bind: { diverted: 0 },
       }, 'the route is counted, not assumed');
       await store.close();
     });
@@ -146,7 +147,8 @@ describe('translation decisions (unit rows)', () => {
     assert.strictEqual((await docs.get('big')).counter, 2);
     assert.deepStrictEqual(docs.stats(), { patchTranslated: 1, patchFallback: 0,
       knn: { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 },
-      series: { queries: 0, statements: 0, candidates: 0, results: 0, diverted: 0 } });
+      series: { queries: 0, statements: 0, candidates: 0, results: 0, diverted: 0 },
+      bind: { diverted: 0 } });
     await store.close();
   });
 });

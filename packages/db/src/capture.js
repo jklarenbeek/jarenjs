@@ -34,6 +34,7 @@ import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/jso
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, attempt } from './driver.js';
+import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './cursor.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
 export const CHANGES_TABLE = '_jaren_changes';
@@ -364,6 +365,13 @@ export function createCaptureEngine(options) {
     read: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
       + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${dialect.parameterRef(1, 'v')} `
       + `ORDER BY ${q('seq')}`,
+    // the bounded read: a page of records after a cursor, one more than
+    // the page so `hasMore` is a fact and not a guess
+    readPage: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
+      + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${dialect.parameterRef(1, 'v')} `
+      + `ORDER BY ${q('seq')} LIMIT ${dialect.parameterRef(2, 'v')}`,
+    bounds: `SELECT MIN(${q('seq')}) AS ${q('lo')}, MAX(${q('seq')}) AS ${q('hi')} `
+      + `FROM ${q(CHANGES_TABLE)}`,
   } : null;
 
   const ready = logStatements === null
@@ -616,29 +624,114 @@ export function createCaptureEngine(options) {
       observers.add(fn);
       return () => observers.delete(fn);
     },
+    /**
+     * Read the persisted log forward from `after` — EVERY surviving
+     * record, in one array, with no bound and no watermark: a
+     * reconnecting consumer whose cursor fell below the retention floor
+     * receives the surviving suffix and cannot tell it from the whole.
+     * Kept for its callers; `changes.page()` is the bounded reader that
+     * reports the gap instead (LIVE-FORMAT §5).
+     * @param {number} after - the last seq seen
+     */
     changesSince(after) {
-      if (logStatements === null) {
-        throw new DbRuntimeError('JD2051',
-          'the change log is not enabled — open the store with capture.log');
-      }
-      if (typeof after !== 'number' || !Number.isFinite(after)) {
-        throw new TypeError(`changesSince(after) takes the last seq seen as a number, got ${
-          after === undefined ? 'undefined' : JSON.stringify(after)}`);
-      }
+      requireLog('changesSince');
+      requireCursor(after, 'changesSince');
       return chain(connection.prepare(logStatements.read), (statement) =>
-        chain(statement.all([after]), (rows) => rows.map((row) => {
-          const patch = JSON.parse(row.patch);
-          // the same record shape observers receive: `collections` too
-          return {
-            seq: Number(row.seq),
-            at: Number(row.at),
-            source: String(row.source),
-            collections: collectionsOf(patch),
-            patch,
-          };
-        })));
+        chain(statement.all([after]), (rows) => rows.map(recordOf)));
     },
+    /** Whether the persisted log exists — what decides whether the
+     * bounded reader is offered at all. */
+    logged: logStatements !== null,
+    bounds: () => readBounds(),
+    page: (options) => readPage(options),
   };
+
+  /** @param {string} member */
+  function requireLog(member) {
+    if (logStatements !== null) return;
+    throw new DbRuntimeError('JD2051',
+      `${member}: the change log is not enabled — open the store with capture.log`);
+  }
+  /** @param {any} after @param {string} member */
+  function requireCursor(after, member) {
+    if (typeof after === 'number' && Number.isFinite(after)) return;
+    throw new TypeError(`${member} takes the last seq seen as a number (after), got ${
+      after === undefined ? 'undefined' : JSON.stringify(after)}`);
+  }
+  /** The record shape observers receive, `collections` included. */
+  function recordOf(row) {
+    const patch = JSON.parse(row.patch);
+    return {
+      seq: Number(row.seq),
+      at: Number(row.at),
+      source: String(row.source),
+      collections: collectionsOf(patch),
+      patch,
+    };
+  }
+  /**
+   * The log's two watermarks: the earliest surviving sequence (`null`
+   * when nothing survives) and the highest allocated. Read from the
+   * table, so they are the file's facts, not this process's; an empty
+   * table answers the sequence this process last allocated as its high
+   * watermark, which is the most it can know.
+   */
+  function readBounds() {
+    requireLog('changes.bounds');
+    return chain(connection.prepare(logStatements.bounds), (statement) =>
+      chain(statement.get([]), (row) => ({
+        earliestAvailable: row?.lo === null || row?.lo === undefined ? null : Number(row.lo),
+        highWatermark: row?.hi === null || row?.hi === undefined ? seq : Number(row.hi),
+      })));
+  }
+  /**
+   * One bounded page of the log after `after`: never more than `limit`
+   * records or `maxBytes` serialised patch bytes (the one page drain,
+   * cursor.js — a record larger than `maxBytes` is its `JD2074`, the
+   * cursor not advanced), `hasMore` by one peek, `signal` honoured at a
+   * record boundary. The watermarks are read AFTER the rows: a floor
+   * that rose during the read can only make the reset verdict stricter,
+   * never let a pruned gap pass as a continuation. A cursor below the
+   * floor — the record after `after` no longer survives — is a TOTAL
+   * refusal: `resetRequired: true`, no items, no `next`, because a
+   * partial suffix beside a reset flag invites a consumer to use both.
+   * @param {{ after: number, limit?: number, maxBytes?: number | null,
+   *   signal?: AbortSignal }} options
+   */
+  function readPage(options) {
+    requireLog('changes.page');
+    const after = options?.after;
+    requireCursor(after, 'changes.page');
+    const limit = options?.limit ?? PAGE_LIMIT_DEFAULT;
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new TypeError('changes.page: limit must be a positive integer');
+    const declaredBytes = options?.maxBytes;
+    const maxBytes = declaredBytes === undefined || declaredBytes === null || declaredBytes === Infinity
+      ? null : declaredBytes;
+    if (maxBytes !== null && !(Number.isSafeInteger(maxBytes) && maxBytes >= 1))
+      throw new TypeError('changes.page: maxBytes must be a positive integer, or Infinity for no byte bound');
+    const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal,
+      open: () => chain(connection.prepare(logStatements.readPage),
+        (statement) => statement.iterate([after, limit + 1])),
+      items: (row) => [{ record: recordOf(row), bytes: utf8Length(String(row.patch)) }] });
+    return drainPage(cursor, {
+      limit, maxBytes, after,
+      sizeOf: (item) => item.bytes,
+      continuationOf: (item) => item.record.seq,
+    }).then((page) => chain(readBounds(), (bounds) => {
+      const first = bounds.earliestAvailable ?? bounds.highWatermark + 1;
+      if (after + 1 < first) {
+        return { items: [], ...bounds, hasMore: false, resetRequired: true };
+      }
+      return {
+        items: page.items.map((item) => item.record),
+        next: page.continuation ?? after,
+        ...bounds,
+        hasMore: page.hasMore,
+        resetRequired: false,
+      };
+    }));
+  }
 }
 
 //#endregion

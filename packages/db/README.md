@@ -136,7 +136,30 @@ stated per call (`users.execute<User>(…)`) because only the caller
 knows what its `$return` produces. `query()` answers the same document
 as an item cursor (`for await`), one item per pull and never unwrapped —
 the read to use when an item may itself be an array. The handle's own
-shape binds at `store.collection<User>('users')`.
+shape binds at `store.collection<User>('users')`. An entity set answers
+the same cursor as `cursor(document, options)`: one row per pull from
+an open statement, the statement released exactly once when the loop
+breaks, throws, finishes or its `signal` aborts (`JD2072` on the next
+pull). Every cursor says what it will do — `streaming: 'row'`, or
+`'buffered'` with the `barrier` that forces it (a set residual's
+construct, an external the database cannot bind, a chain's window) —
+and a linq chain's `for await` over a set IS this cursor, so a
+`break` after three rows of twenty thousand costs three rows. A cursor
+registers no snapshots unless asked (`tracking: true`, one per yielded
+row — unbounded in the result size, by the caller's choice). A graph
+streams the same way: `loadCursor(spec)` yields one root with its
+includes attached, and every include is bounded per root (`maxRows`,
+`maxBytes`, defaults 1000 rows and 1 MiB; `Infinity` spelled for the
+unbounded case) — crossing a bound is `JD2073` naming the root, the
+member and the bound, never a silently truncated graph. A list pages
+over a composite keyset — `entity.page(spec, { limit, after, maxBytes })`
+with `orderBy` over `(updatedAt, id)`-shaped orderings, the primary
+key appended as the tie-breaker and null placement matching the plan —
+and answers `{ items, continuation, hasMore, snapshot }`: the
+continuation is unsigned and structural (the host signs it), an item
+larger than `maxBytes` is `JD2074` without advancing it, and
+`snapshot` is true only over an immutable ordering; over a mutable one
+the page is live and says so (MODEL-FORMAT §10.5).
 
 - **The pushdown planner with `explain()`.** A query compiles through
   the engine's published AST into a dialect-neutral plan and renders
@@ -144,7 +167,26 @@ shape binds at `store.collection<User>('users')`.
   equivalent runs as a real compiled Jaren query (the residual), and
   `explain()` always says which is which — the SQL, the bound
   parameters, the indexes used (verified against the database's own
-  plan output), and the residual's named reasons. A differential
+  plan output), and the residual's named reasons. It answers for the
+  RUN it describes: given the externals `execute` is given, a value the
+  database cannot bind (a boolean, a null, a missing name) is reported
+  as the set residual the call becomes — mode, statement and reason —
+  and counted in `stats().bind.diverted`, so a production diversion is
+  visible where nobody calls `explain()`. Every explanation carries
+  `streaming` (`'row'` or `'buffered'`) and `barrier` (the construct
+  that forces a buffer, or `null`), the same classification the cursor
+  itself carries; `strictStreaming: true` on a cursor declines a
+  buffering plan by name (`JD0037`) before any statement runs. A
+  `$return` that is ONE member path over the binding projects that
+  path into the statement — its value beside its JSON type, so a
+  present `null`, an absent member and a boolean read back exactly as
+  the engine answers them — and `$count` over it counts the rows where
+  the member is present with a `COUNT(*)`; `explain().projection`
+  names the path, and reading or counting one member no longer reads
+  every document. Every `explain()` also carries `budget`: the profile
+  that applied, every bound it imposed, and the two driver slots
+  (`time`, `estimatedRows`) reported `unavailable` on SQLite rather
+  than estimated (MODEL-FORMAT §8). A differential
   oracle — a committed corpus and a seeded generator, every case run
   in both modes — keeps both paths agreeing, with the one arithmetic
   deviation declared rather than hidden (MODEL-FORMAT §10.6: SQLite's
@@ -602,7 +644,14 @@ answer, and a reason code for every thing the database could not do:
 every one of them before a statement runs, and the counts `explain()`
 prints are the LAST ACTUAL execution's — `null` until the document has
 run, because an estimate wearing a count's name is worse than no
-number.
+number. Every path counts: a set residual, a row projection, a native
+aggregate (whose `candidates` stays `null`, since no row reached the
+engine and SQLite reports no visited-row count) and a cursor, which
+counts as it is drained and is final when it settles — read
+mid-iteration, `counts.partial` is `true`. `series.mode` follows the
+plan mode: a selection the engine finishes is `hybrid` when the index
+narrowed the fetch and `engine` when nothing did, never `native` on the
+strength of an index alone.
 
 **The as-of join is bounded, and the bound is the claim.** `$asof` with
 the collection on the right reads the probes it was given, bounds the

@@ -604,12 +604,19 @@ because the engine itself materialises for `$orderby`/`$groupby`):
 `take(n)`, and an exception mid-chain all call `.return()` on the
 iterator — a generator left suspended holds a file handle or a read
 transaction open. `explain()` reports `{ barriers: [{ operator,
-reason }], hops, document }` — `hops` the relation hops the callbacks
-navigated, as on the sync surface (§4) — or, when a `mapAsync` sits in
-the chain, `{ split: { pushed, residual } }` instead of `document`
-(`toDocument()` refuses with `JL0005`: a host callback has no document
-form). No silent caps, no silent buffering: if a chain materialises,
-the report says which operator forced it.
+reason }], streaming, barrier, hops, document }` — `hops` the relation
+hops the callbacks navigated, as on the sync surface (§4); `streaming`
+(`'row'` or `'buffered'`) and `barrier` what THIS surface does with the
+item stream, one item at a time or a buffer at its first local barrier
+— or, when a `mapAsync` sits in the chain, `{ split: { pushed,
+residual } }` instead of `document` (`toDocument()` refuses with
+`JL0005`: a host callback has no document form). Over a provider the
+pushed document's own class — a set residual, an external the store
+cannot bind — is the provider's `explain(document, { externals:
+bindings })` to report, and the cursor a `for await` pulls from
+carries the same `streaming`/`barrier` (§12). No silent caps, no silent
+buffering: if a chain materialises, the report says which operator
+forced it.
 
 Re-enumeration follows the sync contract: each enumeration calls the
 source's iterator method again. A one-shot generator object simply
@@ -674,8 +681,12 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   `iterateCsvStream` output);
 - any sync iterable (wrapped);
 - a **cursor**: `{ next(): Promise<{done, value}>, return?() }` — the
-  shape the SQL provider's row iterator implements later, adopted
-  as-is;
+  shape the store's own row cursor implements (`QueryCursor`), adopted
+  as-is. A provider that offers `cursor(document, options)` — the
+  store's collections and entity sets do — is handed the pushed
+  document there when the chain is ITERATED, so a `for await` pulls
+  one row at a time from an open statement and a `break` releases it;
+  `toArray()` and the other terminals still push one whole window;
 - a **push queue** (`createPushQueue({ highWaterMark = 1024 })`) for
   feed/end-style readers with no pull protocol of their own (josl's
   push parsers deliberately have no backpressure protocol; the queue
@@ -1583,14 +1594,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->173,080<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->173,354<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->39,025<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->39,299<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
 is the query ENGINE and the core it stands on: a chain's document has to
@@ -1617,7 +1628,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->173<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->495<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->519<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -1626,7 +1637,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->194,155<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,352<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->194,429<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,352<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

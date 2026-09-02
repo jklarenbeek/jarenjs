@@ -126,11 +126,66 @@ answers records in the shape observers receive, `collections`
 included; a cursor that is not a number is a `TypeError`, as is a
 `retention` that is not a positive integer. Retention is
 a bounded count (`retention`, default 1000): older rows are pruned in
-the same transaction. The log is an ordered, replayable stream —
-which is what makes a late-joining consumer possible. **Replication
-is not built here**, and this log alone does not make it safe: there
-is no conflict resolution, no site identity, no causal ordering
-across writers. That sentence is the whole claim.
+the same transaction — every write deletes the records more than
+`retention` behind the one it just appended, and nothing else prunes
+the log. The log is an ordered, replayable stream — which is what
+makes a late-joining consumer possible.
+
+**`changesSince` is unbounded, and unsafe for a reconnecting
+consumer.** It answers every surviving record in one array, with no
+limit, no byte bound and no watermark: a consumer whose last `seq` fell
+below the retention floor receives the suffix that happens to survive
+and cannot distinguish "everything you missed" from "some of what you
+missed, and the rest is gone" — it believes itself caught up with a
+hole in its state. It stays as a published member, and it is not the
+supported path for a consumer that reconnects.
+
+**The bounded reader: `store.changes`.** Present exactly when the log
+is enabled (`JD2051` otherwise, as `changesSince`).
+
+- `changes.bounds()` answers the two watermarks: `earliestAvailable`,
+  the earliest surviving sequence (`null` when nothing survives), and
+  `highWatermark`, the highest allocated — `MIN(seq)`/`MAX(seq)` over
+  the log, cheap, and what a consumer needs before it decides whether
+  its cursor is usable.
+- `changes.page({ after, limit, maxBytes, signal })` answers
+  `{ items, next, earliestAvailable, highWatermark, hasMore,
+  resetRequired }`. `after` is the last sequence seen and is required:
+  there is no legitimate "give me everything" for a change log. The
+  page never holds more than `limit` records (default 100, applied as
+  SQL `LIMIT`) nor more than `maxBytes` serialised patch bytes,
+  accumulated at record boundaries; a single record larger than
+  `maxBytes` is the refusal `JD2074` without advancing `next` — the
+  same rule and the same implementation an entity page uses
+  (MODEL-FORMAT §10.5). `hasMore` is decided by one peek past the
+  page; `next` is the sequence to continue from (`after` itself when
+  nothing was delivered); `signal` cancels at a record boundary
+  (`JD2072`).
+- **`resetRequired: true`** when the record after `after` no longer
+  survives — `after + 1 < earliestAvailable` (or the log is empty
+  above `after`'s successor). Then `items` is **empty** and `next` is
+  **absent**: the refusal is total, because a partial suffix beside a
+  reset flag would invite a consumer to use both. The watermarks are
+  read after the rows, so a floor that rose during the read can only
+  make the verdict stricter, never let a pruned gap pass as a
+  continuation.
+
+**The consumer's recovery procedure**, in words: keep the last `seq`
+you applied; on reconnect, call `changes.page({ after: lastSeq })` and
+apply pages while `hasMore`, storing `next` as you go; when a page
+answers `resetRequired: true`, stop applying — your state has a hole —
+re-seed it from a full snapshot of the collections you follow, and
+resume paging from that page's `highWatermark`, because every record
+at or below it is already reflected in the snapshot you just took.
+Choosing how much history to keep is the host's decision
+(`retention`); what the reader owes is that when rows go, it reports
+the gap instead of hiding it.
+
+**Replication is not built here**, and this log alone does not make
+it safe: there is no conflict resolution, no site identity, no causal
+ordering across writers. The bounded reader with its watermarks and
+its explicit gap is the precondition a replication protocol would be
+built on — not the protocol. That sentence is the whole claim.
 
 ## 6. Cross-connection behaviour and non-claims
 

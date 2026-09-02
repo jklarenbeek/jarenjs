@@ -16,7 +16,8 @@ import type {
   EntityKeyArg, LoadExplanation, SaveReport, Store, StoreCapabilities,
   StoreStats, Collection, ExecuteOptions, SequenceResult, ValueOrPromise,
   Dialect, ChangeRecord, LiveOptions, LiveQuery, JobsApi, SyncStore,
-  EntityScope, RelationEntry, RelationTable,
+  EntityScope, RelationEntry, RelationTable, EntityCursorOptions, QueryCursor,
+  LoadContinuation, PageOptions, Page, ChangesReader,
 } from '@jarenjs/db';
 
 /** The self-referential constraint an interface can satisfy: generated
@@ -44,7 +45,13 @@ export type TypedInclude<E extends MetaMap<E>, M extends EntityMeta> = {
 /** An include's clauses: the root's without `after` (a keyset cursor
  * paginates the root alone; an include windows with `skip`/`take`). */
 export type TypedIncludeSpec<E extends MetaMap<E>, M extends EntityMeta> =
-  TypedLoadSpecBase & { include?: TypedInclude<E, M> };
+  TypedLoadSpecBase & {
+    /** The per-root bounds (MODEL-FORMAT §10.4); `Infinity` spells the
+     * unbounded case. Crossing one is `JD2073`. */
+    maxRows?: number;
+    maxBytes?: number;
+    include?: TypedInclude<E, M>;
+  };
 
 export interface TypedLoadSpecBase {
   /** A query expression over `$it` — its format is the runtime's. */
@@ -57,7 +64,9 @@ export interface TypedLoadSpecBase {
 
 export type TypedLoadSpec<E extends MetaMap<E>, M extends EntityMeta> =
   TypedLoadSpecBase & {
-    after?: M['key'] extends string | number ? M['key'] : never;
+    /** The keyset cursor: a page's structural continuation, or the
+     * single-column form over the key. */
+    after?: (M['key'] extends string | number ? M['key'] : never) | LoadContinuation;
     include?: TypedInclude<E, M>;
   };
 
@@ -103,6 +112,13 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   delete(key: EntityKeyArg): Promise<boolean>;
   load<const S extends TypedLoadSpec<E, M>>(spec?: S):
     Promise<Array<Readonly<Loaded<E, M, S>>>>;
+  /** The graph cursor: one root graph per pull, typed by the includes;
+   * untracked unless `tracking: true`. */
+  loadCursor<const S extends TypedLoadSpec<E, M>>(spec?: S, options?: EntityCursorOptions):
+    QueryCursor<Readonly<Loaded<E, M, S>>>;
+  /** One bounded page over the composite keyset, typed by the includes. */
+  page<const S extends TypedLoadSpec<E, M>>(spec?: S, options?: PageOptions):
+    Promise<Page<Readonly<Loaded<E, M, S>>>>;
   explainLoad(spec?: TypedLoadSpec<E, M>): LoadExplanation;
   add(doc: M['input']): Readonly<M['doc']>;
   put(next: M['doc']): Readonly<M['doc']>;
@@ -118,6 +134,9 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   /** The provider contract over this entity's root (MODEL-FORMAT §10.1);
    * the answer is the engine's result shape, value-or-promise (D2). */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  /** The same document as an item cursor: one row per pull, the
+   * statement released on `return()`; untracked unless `tracking: true`. */
+  cursor<R = M['doc']>(document: unknown, options?: EntityCursorOptions): QueryCursor<R>;
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** The root expression this set's rows are bound through (`$.<Name>[*]`). */
   readonly root: string;
@@ -147,7 +166,10 @@ export interface TypedStore<E extends MetaMap<E>> {
   saveChanges?(): Promise<SaveReport>;
   transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
   observe(fn: (record: ChangeRecord) => void): () => void;
+  /** Unbounded, and unsafe for a reconnecting consumer: `changes.page()`
+   * is the supported path (LIVE-FORMAT §5). */
   changesSince?(after: number): Promise<ChangeRecord[]>;
+  readonly changes?: ChangesReader;
   dataVersion(): Promise<number>;
   live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
   close(options?: { graceMs?: number }): Promise<void>;

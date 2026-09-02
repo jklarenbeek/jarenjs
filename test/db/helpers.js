@@ -11,6 +11,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { chain } from '@jarenjs/db';
+import { adaptNodeDatabase } from '@jarenjs/db/node';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -268,4 +269,51 @@ export function fullDoubleDialect(createDialect) {
       schemaDump: () => 'GET schema-dump',
     },
   });
+}
+
+/**
+ * A driver that counts what a cursor does to a statement: every
+ * `iterate()` opened, every `next()` pulled through it, every `return()`
+ * that released it — and every `all()` that materialised. The counters
+ * are the caller's, so a suite resets them after seeding.
+ * @param {{ iterate: number, next: number, return: number, all: number }} counters
+ * @returns {{ open: () => any }}
+ */
+export function statementCountingDriver(counters) {
+  const db = new DatabaseSync(':memory:');
+  return {
+    open: () => adaptNodeDatabase({
+      exec: (sql) => db.exec(sql),
+      prepare: (sql) => {
+        const statement = db.prepare(sql);
+        return {
+          run: (...p) => statement.run(...p),
+          get: (...p) => statement.get(...p),
+          all: (...p) => {
+            counters.all++;
+            return statement.all(...p);
+          },
+          iterate: (...p) => {
+            counters.iterate++;
+            const iterator = statement.iterate(...p);
+            return {
+              next: () => {
+                counters.next++;
+                return iterator.next();
+              },
+              return: (value) => {
+                counters.return++;
+                return iterator.return(value);
+              },
+              [Symbol.iterator]() { return this; },
+            };
+          },
+        };
+      },
+      function: (name, options, fn) => db.function(name, options, fn),
+      aggregate: (name, spec) => db.aggregate(name, spec),
+      createSession: (options) => (options === undefined ? db.createSession() : db.createSession(options)),
+      close: () => db.close(),
+    }),
+  };
 }

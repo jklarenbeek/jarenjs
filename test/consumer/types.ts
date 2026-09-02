@@ -1101,6 +1101,17 @@ async function dbBlock(): Promise<void> {
   void unstated.id;
   const counted = await typedUsers.execute<number>({ $count: { $for: { it: '$[*]' }, $return: '$it' } });
   void counted;
+  // the per-call safety profile, cancellation and deadline are declared
+  // members of ExecuteOptions — reachable from a typed caller
+  const profiled = await typedUsers.execute<DbUser>({ $for: { it: '$[*]' }, $return: '$it' }, {
+    profile: { maxRows: 50, collections: ['users'], predicates: { users: { $eq: ['$it.id', 'u1'] } },
+      maxIncludedRows: 10, maxDepth: 2, maxBytes: 65536, refuseFullScan: false },
+    signal: new AbortController().signal,
+    deadline: Date.now() + 1000,
+  });
+  void profiled;
+  const safely = typedUsers.query<DbUser>({ $for: { it: '$[*]' }, $return: '$it' }, { profile: 'safe', strictStreaming: true });
+  void safely.streaming;
 
   // the item cursor never unwraps: one item per pull, for-await walks it
   const cursor: QueryCursor<DbUser> = typedUsers.query<DbUser>({ $for: { it: '$[*]' }, $return: '$it' });
@@ -1190,6 +1201,11 @@ const genStore = typedStore<EntityMetaMap>(rawDbStore);
 const genEmails: string[] = linqFrom(genStore.entity('User')).select((u) => u.email).toArray();
 void genEmails;
 const genAsyncEmails: Promise<string[]> = fromAsync(genStore.entity('User')).select((u) => u.email).toArray();
+// the entity cursor: one row per pull, typed by the set, untracked unless said
+const genCursor: QueryCursor<User> = genStore.entity('User').cursor(
+  { $for: { u: '$.User[*]' }, $return: '$u' }, { signal: new AbortController().signal, tracking: true });
+void genCursor.streaming;
+void genCursor.barrier?.construct;
 void genAsyncEmails;
 // the async join is typed as the sync one, over two async sequences of one store
 const genJoined: Promise<{ t: string; e: string }[]> = fromAsync(genStore.entity('Post'))

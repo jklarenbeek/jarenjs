@@ -603,22 +603,22 @@ what each does is its own documentation's job
   already probed and reported, so the driver gate is in place; whole-
   series functions like `$irr` are never index-eligible — the ceiling is
   stated, not hidden.
-- [ ] **No projection pushdown, and `$count` pushes only over a bare
-  binding.** A FLWOR whose `$return` is a single path over the binding
-  plans as `mode: 'row'` and its statement still selects the whole
-  document, so reading or `$distinct`-ing one member costs a full
-  document read of every row the predicate admits. The visible edge of
-  the same gap is `$count`: over `$return: "$r"` it emits `SELECT
-  COUNT(*) … WHERE …`, while the identical document with
-  `$return: "$r.key"` plans as a set and reads every document — correct,
-  and not distinguishable from `explain().mode` alone. It is why the
-  durable ledger adapter (the recipe `packages/ai`'s README publishes)
-  answers its identity check from pushed counts and pays the scan only
-  when the counts prove a mixture. Closing it means projecting a
-  declared scalar path into the statement when the `$return` is a single
-  path over the binding, with the residual rules thought through in the
-  same change: a projection that drops a member a residual conjunct
-  still needs is a wrong answer, not a slow one.
+- [ ] **Projection pushdown beyond one member path.** A collection
+  FLWOR whose `$return` is ONE member path over the binding now projects
+  that path into the statement (its value beside its JSON type,
+  `explain().projection` naming it), and `$count` over it is a
+  `COUNT(*)` with the member's presence in the WHERE — the case the
+  durable ledger adapter (`packages/ai`'s README) paid a full document
+  read for. What remains residual, deliberately: object and array
+  projections (`$return: { … }`), which run per row over the whole
+  document; every projection on the ENTITY engine (one binding or across
+  a join, MODEL-FORMAT §10.6); a `$distinct` over a projected path,
+  which the engine still folds over the projected items; and anything
+  that waits on `$groupby` pushdown. The rule that governs each
+  promotion stays the same: project only when no residual conjunct still
+  needs a member the projection would drop — a projection that dropped
+  one is a wrong answer, not a slow one — and every promotion is proved
+  against the oracle corpus in both modes first.
 - [ ] **A k-nearest probe cannot pick its column at bind time.** Two
   `derive: 'vector'` widths over one member path are two columns, and a
   plan carries one of them; an external probe of the other width
@@ -639,15 +639,6 @@ what each does is its own documentation's job
   unbuilt: shape creation under `BEGIN IMMEDIATE` (the dialect already
   spells it), `CREATE … IF NOT EXISTS`, and open-time driver errors
   wrapped as `JD0002`.
-- [ ] **`explain().series.counts` after a row, aggregate or cursor
-  run.** `countSeries` runs on the set path only: a `$return:
-  '$s.value'` range reports `mode: 'row'`, `series.mode: 'native'` and
-  `counts: null` after `execute`; a `$count` over the range and a
-  `for await` over it leave `counts` null and `stats().series.queries`
-  unchanged; a plain `execute` of the same range then fills
-  `{ statements: 1, candidates: 3, results: 3 }`. Count in all three
-  paths, and derive `series.mode` from the plan mode rather than from
-  the index alone.
 - [ ] **A UDF-hatch error names the wrapper's path.** The hatch compiles
   a fragment as `{ $let: { it: '$' }, $return: body }`, so `$match` over
   a number raises `JQ2001 … at /$return/$match/0` natively and
@@ -659,12 +650,6 @@ what each does is its own documentation's job
   planner refuses `$sum` over integer paths it cannot bound, or the
   overflow becomes a coded residual — today it is the one raw driver
   error left on the query path.
-- [ ] **The plain bind-time diversion is invisible.** `explain(doc,
-  { externals: { flag: true } })` reports `mode: 'row'` with the native
-  SQL, while `execute` with the same externals runs the whole-collection
-  set residual (a boolean cannot bind); the k-nearest divert has its own
-  counter, the plain one has none. `explain` should read the externals
-  it is given, or the divert should count.
 - [ ] **A many-to-many hop on the chain.** Relation navigation is
   desugared by the chain now: `p.author.email` and `u.posts.all()
   .count()` over an entity set lower to the correlated phrases the
@@ -679,6 +664,47 @@ what each does is its own documentation's job
   `$r.<targetKey> = join.<To>_key` — under the oracle. The lowered
   shapes that do exist are residuals (a phrase where the planner wants
   a member path); their promotion belongs to the pushdown entry above.
+- [ ] **A profile member allow-list.** The safe execution profile
+  applies one allow-list of names (`collections`, over collections and
+  entity roots alike), operators, externals and collations to every
+  engine, plus mandatory predicates and the counted bounds
+  (MODEL-FORMAT §8). A per-root MEMBER allow-list — which paths a
+  document may read — is not built: being honest about it needs an
+  analysis walk on every engine that also accounts for what a residual
+  may read over a whole fetched document, and that walk is its own
+  order.
+- [ ] **The root store's cursors run ungated.** `collection.query()`,
+  `entity.cursor()` and `entity.loadCursor()` on the store-level handles
+  read on the connection beside whatever transaction is open there,
+  because taking the store gate for the life of a consumer's loop would
+  block every transaction for as long as the consumer reads slowly. A
+  transaction view's cursors are pinned to their exact scope (`JD2070`
+  on every pull); the root's are the deliberate exception, stated in the
+  handle's comment. A cursor that borrows a scope for one pull at a time
+  is the design that would close it.
+- [ ] **The synchronous entity set has no cursor.** A cursor is
+  asynchronous by contract (`next()` answers a promise); `from(
+  store.sync.entity('X'))` pushes one whole window as it always did.
+  A synchronous row iterator on the `sync` twin is unbuilt.
+- [ ] **A nested include's byte bound re-serialises the embedded JSON to
+  measure it.** The root-level include text already contains every
+  nested relation, so the outer bound covers nested content; per-child
+  measurement below the root stringifies the parsed child. Projecting
+  nested includes as text would make it a length, at the price of a
+  projection change.
+- [ ] **`explainLoad().order` is `null` outside keyset mode.** A plain
+  `load` tie-breaks on the row identity, and the explanation says so by
+  reporting no ordering identity; a reader wanting the ordering of a
+  plain load reads the SQL. Reporting the declared terms beside a
+  `tieBreaker: 'rowid'` member is the small change that would fill it.
+- [ ] **`changesSince()` is not deprecated.** It stays a published,
+  unbounded member (LIVE-FORMAT §5 says so and names `changes.page()`
+  as the supported path); nothing in the packages calls it, only two
+  suites do. Deprecating it is a decision about consumers, deferred.
+- [ ] **An empty change log answers the process's last allocated
+  sequence as its high watermark.** A store that only ever read the file
+  reports 0 there until something is written; the table's own
+  `MAX(seq)` is the truth as soon as it holds a row.
 - [ ] **Other SQL dialects.** The dialect seam is real (proven by a
   test double) and the capability slots for statement timeouts and
   row estimates are deliberately empty on SQLite; a second dialect is
@@ -706,10 +732,16 @@ what each does is its own documentation's job
 - [ ] **Replication.** Change capture (LIVE-FORMAT) is an ordered log
   of RFC 6902 patches with a monotonic sequence, and SQLite's
   changeset/conflict primitives are available — the raw material a
-  replication protocol is built from. None is shipped: there is no
-  conflict resolution, no site identity, no causal ordering across
-  writers. This is the design constraint written down as an open
-  item, not a hint that it is nearly there.
+  replication protocol is built from. The log now has a bounded reader
+  (`store.changes.bounds()` / `changes.page()`, LIVE-FORMAT §5) with
+  two watermarks and an explicit retention gap — `resetRequired`, with
+  no partial suffix beside it — which is the precondition a replication
+  protocol would build on: a consumer can know when its cursor is
+  usable and when it must re-seed. That is the precondition, not the
+  protocol. None of the protocol is shipped: there is no conflict
+  resolution, no site identity, no causal ordering across writers. This
+  is the design constraint written down as an open item, not a hint
+  that it is nearly there.
 - [ ] **Richer incremental live maintenance.** The maintenance table
   (LIVE-FORMAT §7) covers `where`/`select`, the ordered window,
   whole-query aggregates and single-level `groupBy`; joins,

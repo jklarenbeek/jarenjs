@@ -141,8 +141,10 @@ describe('Ring 3 — explain honesty (pushed ≠ residual)', () => {
     // $sqrt does NOT run in the residual, so it must not be named there
     const whereDoc = { $for: { it: '$[*]' }, $where: { $gt: [{ $sqrt: '$it.x' }, 2] }, $return: '$it.id' };
     const e1 = await coll.explain(whereDoc);
-    assert.ok(!e1.residual.reasons.some((r) => r.construct === '$sqrt'),
-      'a pushed $sqrt is not named as a residual reason');
+    // a pushed $sqrt and one projected member path: nothing runs in the
+    // residual at all, so no reason names the $sqrt
+    assert.strictEqual(e1.residual, null, 'a pushed $sqrt is not named as a residual reason');
+    assert.strictEqual(e1.mode, 'native');
     assert.ok(e1.udfs.length >= 1, 'it is in the UDF list instead');
 
     // $sqrt in the projection → it DOES run in the row residual, named

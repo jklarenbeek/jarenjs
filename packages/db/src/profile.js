@@ -45,7 +45,27 @@ export const SAFE_PROFILE = Object.freeze({
   collections: null,
   predicates: Object.freeze({}),
   refuseFullScan: false,
+  // the graph bounds (MODEL-FORMAT §8, §10.4): a cap on any include's
+  // per-root rows, on the include depth, and on one item's serialised
+  // bytes — `null` leaves the include's own declaration and the
+  // store defaults in force
+  maxIncludedRows: null,
+  maxDepth: null,
+  maxBytes: null,
 });
+
+/**
+ * A bound member: a positive integer, or `null`/`Infinity` for none.
+ * @param {any} value
+ * @param {string} member
+ * @returns {number | null}
+ */
+function boundMember(value, member) {
+  if (value === undefined || value === null || value === Infinity) return null;
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw new TypeError(`profile.${member} must be a positive integer, or null for no bound`);
+  return value;
+}
 
 /**
  * Normalize a profile option: the string `'safe'` is the default
@@ -70,6 +90,9 @@ export function normalizeProfile(profile) {
       : profile.collections === null ? null : Object.freeze([...profile.collections]),
     predicates: Object.freeze({ ...profile.predicates }),
     refuseFullScan: profile.refuseFullScan === true,
+    maxIncludedRows: boundMember(profile.maxIncludedRows, 'maxIncludedRows'),
+    maxDepth: boundMember(profile.maxDepth, 'maxDepth'),
+    maxBytes: boundMember(profile.maxBytes, 'maxBytes'),
   };
   if (typeof merged.maxRows !== 'number' || !Number.isInteger(merged.maxRows)
     || merged.maxRows < 1)

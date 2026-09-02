@@ -615,10 +615,18 @@ describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
         JSON.stringify(region).slice(0, 40));
     }
     // the unboundable region has no box, so the call diverts to the full
-    // scan — the same answer, reached without the index
+    // scan — the same answer, reached without the index — and explain(),
+    // given that region, reports the run it describes: the whole
+    // collection read and the engine answering, with the diversion named
     const diverted = await places.explain(document,
       { externals: { region: { type: 'FeatureCollection', features: [] } } });
-    assert.match(diverted.scanNarrative, /SEARCH/, 'explain() reports the PLAN, not the diversion');
+    assert.strictEqual(diverted.mode, 'set');
+    assert.match(diverted.scanNarrative, /SCAN/, 'the diversion statement reads the whole collection');
+    // a spatial plan buffers for its own reason (the engine refines the
+    // box's candidates); the region that would not bind is appended
+    assert.deepStrictEqual([diverted.streaming, diverted.barrier?.construct], ['buffered', '$within']);
+    assert.match(diverted.residual.reasons.at(-1).reason, /'region'/);
+    assert.match(explained.scanNarrative, /SEARCH/, 'the same document with a box still seeks');
     await store.close();
   });
 

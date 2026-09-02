@@ -110,8 +110,9 @@ describe('the store answers what the engine answers, or names the residual', () 
       assert.strictEqual(how.mode, 'set', JSON.stringify(document));
       assert.deepStrictEqual(await native(store, document), reference(document), JSON.stringify(document));
     }
-    // a plain integer path still orders natively
-    assert.strictEqual((await store.collection('rows').explain({ ...FROM, $orderby: ['$it.n'], $return: '$it.id' })).mode, 'row');
+    // a plain integer path still orders natively — and one returned
+    // member path is projected natively too
+    assert.strictEqual((await store.collection('rows').explain({ ...FROM, $orderby: ['$it.n'], $return: '$it.id' })).mode, 'native');
     await store.close();
   });
 

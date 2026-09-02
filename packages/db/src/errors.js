@@ -48,6 +48,10 @@ export const DB_CODES = Object.freeze({
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
   JD0033: 'an entity query names no entity array',
+  JD0034: 'a tracked cursor needs a bare entity return',
+  JD0035: 'the continuation does not belong to this ordering',
+  JD0036: 'a snapshot page needs an immutable ordering',
+  JD0037: 'strictStreaming refused a plan that buffers',
   JD0040: 'the save spans a relation cycle',
   JD0050: 'live queries require change capture',
   JD0051: 'the demanded live mode is unavailable',
@@ -79,6 +83,11 @@ export const DB_CODES = Object.freeze({
   JD2069: 'a resumed run does not match the workflow or input it was checkpointed under',
   JD2070: 'the transaction handle does not belong to the live scope',
   JD2071: 'the savepoint label is blank, duplicate or unknown',
+  JD2072: 'the call was aborted before its next row',
+  JD2073: 'an include exceeded its per-root bound',
+  JD2074: 'an item exceeds the page byte bound',
+  JD2075: 'the deadline passed before the next row',
+  JD2076: 'an item exceeds the profile byte bound',
 });
 
 /**

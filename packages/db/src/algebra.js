@@ -98,8 +98,12 @@ export const PLAN_VERSION = 2;
  *   bucket: PlanBucket | null,
  *   aggregate: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null } | null,
- *   project: 'document',
+ *   project: 'document' | { path: PlanRef },
  * }} Plan
+ *   `project` is what each row answers: the whole document, or ONE
+ *   member path — its value as JSON text beside its JSON type, so the
+ *   reader tells a present `null` from an absent member and a boolean
+ *   from an integer exactly as the engine does.
  */
 
 /**

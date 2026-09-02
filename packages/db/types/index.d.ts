@@ -73,8 +73,57 @@ export type ValueOrPromise<T> = T | Promise<T>;
  */
 export interface QueryCursor<T = unknown> {
   next(): Promise<IteratorResult<T, undefined>>;
+  /** Release the statement, exactly once, at the row boundary the
+   * cursor is on; idempotent, and what `for await`'s break, throw and
+   * exhaustion all reach. */
   return(): Promise<IteratorResult<T, undefined>>;
   [Symbol.asyncIterator](): QueryCursor<T>;
+  /** What this cursor will do for the externals it was given: pull one
+   * database row per `next()`, or fill a buffer on the first pull. */
+  readonly streaming: 'row' | 'buffered';
+  /** What forces the buffer, `null` when the cursor streams. */
+  readonly barrier: CursorBarrier | null;
+}
+
+/** Why a cursor buffers: `construct` is the stable identifier (a
+ * planner construct such as `$orderby` or `$let`, or `external`,
+ * `window`, `pushdown`), `reason` the sentence for a person. */
+export interface CursorBarrier {
+  readonly construct: string;
+  readonly reason: string;
+}
+
+/**
+ * The safe execution profile (MODEL-FORMAT §8): four independent bounds
+ * — engine limits, a row bound, reference containment, mandatory
+ * predicates — plus the graph bounds. Every member is optional over the
+ * `'safe'` defaults. A budget the engine can count is ENFORCED; one it
+ * cannot count on SQLite (visited rows, elapsed statement time) is
+ * refused at preflight on plan shape (`refuseFullScan`) or reported as
+ * unavailable (`explain().budget`), never approximated.
+ */
+export interface ProfileSpec {
+  limits?: { sequenceItems?: number; resultItems?: number; steps?: number; depth?: number };
+  /** Rows a fetch may return, materialise or feed a residual, per call
+   * (`JD2007` when crossed). */
+  maxRows?: number;
+  externals?: readonly string[];
+  functions?: readonly string[];
+  collations?: readonly string[];
+  /** The names a document may read — collections AND entity roots;
+   * `null` allows all of the store's. */
+  collections?: readonly string[] | null;
+  /** A predicate conjoined into every plan over the named collection or
+   * entity, at its root, after translation. */
+  predicates?: Readonly<Record<string, unknown>>;
+  /** Refuse a plan whose shape is a full-table scan — including the
+   * whole-root fetch an entity residual needs (`JD0011`). */
+  refuseFullScan?: boolean;
+  /** A cap on any include's per-root rows, on the include depth, and on
+   * one item's serialised bytes (`JD2076`); `null` for none. */
+  maxIncludedRows?: number | null;
+  maxDepth?: number | null;
+  maxBytes?: number | null;
 }
 
 export interface ExecuteOptions {
@@ -82,6 +131,40 @@ export interface ExecuteOptions {
   strict?: boolean;
   /** `false` forces the set residual — the oracle's harness switch. */
   pushdown?: boolean;
+  /** The safety profile for THIS call, replacing the store's (normalized
+   * over the `'safe'` defaults, MODEL-FORMAT §8); applies to collection,
+   * entity, graph, include and store-root execution alike. */
+  profile?: 'safe' | ProfileSpec;
+  /** Cancellation: a call already aborted runs no statement (`JD2072`);
+   * a cursor or page is released at its next row boundary. */
+  signal?: AbortSignal;
+  /** An epoch-millisecond deadline, checked before a statement runs and
+   * at every row boundary of a cursor or page (`JD2075`). NOT a
+   * statement timeout: the shipped SQLite drivers expose no interrupt
+   * (`capabilities.statementTimeout` is `false`), so a single statement
+   * runs to its end — `explain().budget.time` says so. */
+  deadline?: number;
+  /** On a cursor: a plan that would buffer — a set residual, a
+   * k-nearest cut, a native group, a chain's window, an external the
+   * database cannot bind — is the refusal `JD0037` naming the barrier,
+   * raised before any statement runs; the plan is declined, never run
+   * with its memory behaviour quietly changed. On `execute()` it is a
+   * `TypeError`: a whole answer has no stream to hold to. */
+  strictStreaming?: boolean;
+}
+
+/** What a cursor takes: `execute`'s options, `signal` honoured at every
+ * row boundary — an aborted cursor releases its statement and every
+ * later pull is `JD2072`. */
+export interface CursorOptions extends ExecuteOptions {}
+
+/** An entity cursor's options. `tracking: true` registers every yielded
+ * entity document with the unit of work — a snapshot per row, so the
+ * tracker grows with the result and is bounded by nothing but it; off
+ * by default for exactly that reason. The document must then return a
+ * bare entity binding (`JD0034` for a projection, a count or a window). */
+export interface EntityCursorOptions extends CursorOptions {
+  tracking?: boolean;
 }
 
 /** An include's clauses: the root's without `after` — a keyset cursor
@@ -89,6 +172,14 @@ export interface ExecuteOptions {
 export interface LoadInclude extends Omit<LoadSpec, 'after'> {
   /** Project the related-row COUNT instead of the rows. */
   count?: boolean;
+  /** The per-root bounds (MODEL-FORMAT §10.4): rows of this relation
+   * per parent (default `INCLUDE_ROWS_DEFAULT`, or the include's own
+   * `take`), and serialised bytes per parent (default
+   * `INCLUDE_BYTES_DEFAULT`). Crossing one is the refusal `JD2073`,
+   * never a truncated graph. `Infinity` (`null` in JSON) is the
+   * unbounded case, spelled. */
+  maxRows?: number | null;
+  maxBytes?: number | null;
 }
 
 export interface LoadSpec {
@@ -97,16 +188,79 @@ export interface LoadSpec {
   orderBy?: unknown;
   take?: number;
   skip?: number;
-  /** The keyset cursor: needs a single unique-column ordering. */
-  after?: string | number;
+  /** The keyset cursor (MODEL-FORMAT §10.5): the structural continuation
+   * a page emitted, over the declared ordering with the primary key
+   * appended; or, the single-column form, one value of a unique
+   * ordering column. */
+  after?: string | number | LoadContinuation;
   maxDepth?: number;
   include?: Readonly<Record<string, boolean | LoadInclude>>;
+}
+
+/** One term of a keyset ordering's identity: the mapped column, its
+ * direction, and where its nulls sort. */
+export interface OrderIdentity {
+  readonly column: string;
+  readonly desc: boolean;
+  readonly nullsFirst: boolean;
+}
+
+/**
+ * The continuation a page emits (MODEL-FORMAT §10.5): unsigned,
+ * structural, opaque — the ordering's identity, so it cannot be
+ * replayed against another ordering (`JD0035`); the last row's declared
+ * order-key values as the document carries them; and the row's primary
+ * key, the tie-breaker the plan appends. Signing, tenant scoping, expiry
+ * and wire encoding are the HOST's: the store has no principal and no
+ * key, and a continuation handed to an untrusted client unsigned is the
+ * host's mistake, not a store guarantee.
+ */
+export interface LoadContinuation {
+  readonly order: readonly OrderIdentity[];
+  readonly keys: readonly unknown[];
+  readonly key: EntityKeyArg;
+}
+
+/** A page's options: `limit` roots at most (default `PAGE_LIMIT_DEFAULT`),
+ * `maxBytes` serialised bytes at most (`Infinity`/absent for no byte
+ * bound), the continuation to resume from, and `consistency` —
+ * `'snapshot'` is refused (`JD0036`) over an ordering whose keys a
+ * write may change; `'live'` (the default) reports the truth in
+ * `snapshot`. */
+export interface PageOptions<C = LoadContinuation> extends EntityCursorOptions {
+  limit?: number;
+  after?: C;
+  maxBytes?: number | null;
+  consistency?: 'live' | 'snapshot';
+}
+
+/** One page: never more than `limit` items or `maxBytes` bytes; the
+ * continuation of the last delivered item (or the one resumed from, when
+ * nothing fit); `hasMore` by one peek past the page; `snapshot` true
+ * only over an immutable ordering — otherwise LIVE pagination, where a
+ * row whose order key changes can move across the cursor. */
+export interface Page<T, C = LoadContinuation> {
+  readonly items: T[];
+  readonly continuation: C | null;
+  readonly hasMore: boolean;
+  readonly snapshot: boolean;
 }
 
 export interface LoadExplanation {
   sql: string;
   pagination: 'keyset' | 'offset' | 'none';
   includes: ReadonlyArray<{ path: string; kind: string; count: boolean }>;
+  /** The per-root bounds every row-projecting include runs under;
+   * `null` is the unbounded case a caller spelled. */
+  bounds: ReadonlyArray<{ path: string; maxRows: number | null; maxBytes: number | null }>;
+  /** The keyset ordering's identity, with the appended tie-breaker, and
+   * whether a page over it is a snapshot; `null` for a load outside
+   * keyset mode, whose tie-breaker is the row identity. */
+  order: readonly OrderIdentity[] | null;
+  snapshot: boolean | null;
+  /** A graph load pulls one root row per statement row, always. */
+  streaming: 'row';
+  barrier: null;
 }
 
 /** What `saveChanges()` returns: data, not a boolean (§11.6). */
@@ -171,7 +325,7 @@ export interface Collection<T = unknown> {
    * a synchronous driver stays synchronous. */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   /** The same document as an item cursor — one item per pull. */
-  query<R = unknown>(document: unknown, options?: ExecuteOptions): QueryCursor<R>;
+  query<R = unknown>(document: unknown, options?: CursorOptions): QueryCursor<R>;
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** Register a live query (LIVE-FORMAT §7); requires capture. */
   live(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
@@ -233,6 +387,13 @@ export interface EntitySet<T = unknown, I = unknown> {
   update(key: EntityKeyArg, changes: Partial<T>): Promise<Readonly<T>>;
   delete(key: EntityKeyArg): Promise<boolean>;
   load(spec?: LoadSpec): Promise<ReadonlyArray<Readonly<T>>>;
+  /** The graph cursor: one root graph per pull, its includes attached
+   * and bounded (§10.4), from the same one statement `load` runs;
+   * `return()` releases it. Untracked unless `tracking: true`. */
+  loadCursor(spec?: LoadSpec, options?: EntityCursorOptions): QueryCursor<Readonly<T>>;
+  /** One bounded page over the composite keyset (§10.5). A `take` or
+   * `skip` in the spec is refused: the page windows by its limit. */
+  page(spec?: LoadSpec, options?: PageOptions): Promise<Page<Readonly<T>>>;
   explainLoad(spec?: LoadSpec): LoadExplanation;
   /** Track a pending insert (local, synchronous — no round trip). */
   add(doc: I): Readonly<T>;
@@ -253,6 +414,12 @@ export interface EntitySet<T = unknown, I = unknown> {
    * the document is over the multi-entity root and arrives whole; the
    * answer is the engine's result shape, value-or-promise (D2). */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  /** The same document as an item cursor: one row per pull from an open
+   * statement, released on `return()`; a set residual materialises the
+   * fetched root first and says so (`streaming: 'buffered'`). A chain's
+   * `for await` over this set is this cursor. Untracked unless
+   * `tracking: true`. */
+  cursor<R = T>(document: unknown, options?: EntityCursorOptions): QueryCursor<R>;
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** The root expression this set's rows are bound through (`$.<Name>[*]`). */
   readonly root: string;
@@ -356,8 +523,17 @@ export interface Store {
     options?: TransactionScopeOptions): Promise<Awaited<R>>;
   /** Register a change observer; requires capture. Returns unsubscribe. */
   observe(fn: (record: ChangeRecord) => void): () => void;
-  /** Read the persisted log forward (JD2051 without capture.log). */
+  /** Read the persisted log forward from `after` (`JD2051` without
+   * `capture.log`) — EVERY surviving record in one array, UNBOUNDED, with
+   * no watermark: a reconnecting consumer whose cursor fell below the
+   * retention floor receives the surviving suffix and cannot tell it
+   * from the whole. Unsafe for a reconnecting consumer; `changes.page()`
+   * is the supported path (LIVE-FORMAT §5). */
   changesSince?(after: number): Promise<ChangeRecord[]>;
+  /** The bounded change reader: the log's watermarks and pages that
+   * never exceed their bounds and report a retention gap explicitly;
+   * present exactly when the log is enabled. */
+  readonly changes?: ChangesReader;
   /** PRAGMA data_version — the coarse cross-connection signal. */
   dataVersion(): Promise<number>;
   /** Register a live query over an entity-root document (re-run
@@ -446,6 +622,51 @@ export interface TransactionStore extends Omit<Store, 'close' | 'transaction' | 
   readonly savepoints: SavepointController;
   /** Present exactly when the driver is synchronous, as on the store. */
   readonly sync?: TransactionSyncStore;
+}
+
+/** The log's two watermarks (LIVE-FORMAT §5): the earliest surviving
+ * sequence (`null` when nothing survives) and the highest allocated. */
+export interface ChangeBounds {
+  readonly earliestAvailable: number | null;
+  readonly highWatermark: number;
+}
+
+/** A change page's options: `after` is the last sequence seen and is
+ * required — there is no legitimate "give me everything" for a change
+ * log; `limit` records at most (default `PAGE_LIMIT_DEFAULT`),
+ * `maxBytes` serialised patch bytes at most (none unless given),
+ * `signal` honoured at a record boundary (`JD2072`). */
+export interface ChangePageOptions {
+  after: number;
+  limit?: number;
+  maxBytes?: number | null;
+  signal?: AbortSignal;
+}
+
+/**
+ * One page of the log. `resetRequired: true` means the record after
+ * `after` no longer survives: `items` is EMPTY and `next` absent — a
+ * total refusal, never a partial suffix — and the consumer re-seeds
+ * from a snapshot and resumes at `highWatermark`. Otherwise `next` is
+ * the sequence to continue from (`after` itself when nothing was
+ * delivered), `hasMore` says whether records remain above it, and the
+ * watermarks are the log's as read after the page.
+ */
+export interface ChangePage {
+  readonly items: ChangeRecord[];
+  readonly next?: number;
+  readonly earliestAvailable: number | null;
+  readonly highWatermark: number;
+  readonly hasMore: boolean;
+  readonly resetRequired: boolean;
+}
+
+/** The bounded change reader (LIVE-FORMAT §5). A record larger than
+ * `maxBytes` is `JD2074` without advancing `next` — the same rule, the
+ * same implementation, as an entity page. */
+export interface ChangesReader {
+  bounds(): Promise<ChangeBounds>;
+  page(options: ChangePageOptions): Promise<ChangePage>;
 }
 
 /** One committed transaction's change record (LIVE-FORMAT §§1–5). */
@@ -595,7 +816,8 @@ export interface OpenStoreOptions {
   queueTimeout?: number;
   journalMode?: string;
   statementCacheBound?: number;
-  profile?: unknown;
+  /** The store-level safety profile (MODEL-FORMAT §8). */
+  profile?: 'safe' | ProfileSpec;
   readOnly?: boolean;
   /** A `createJsltRegistry()` registry (Ring 2/3): the operators a
    * query may use, and the pushable subset. */
@@ -750,6 +972,18 @@ export declare function typeOfPath(shape: unknown, segments: unknown): unknown;
 export declare function isNumericType(type: unknown): boolean;
 export declare function compileSetResidual(document: unknown, limits?: unknown): unknown;
 export declare function compileRowResidual(rowReturn: unknown, limits?: unknown): unknown;
+export declare function compilePackedResidual(document: unknown, limits?: unknown): unknown;
+/** The one cursor mechanism every engine builds on: a row source pulled
+ * one row per `next()` and released exactly once, or a materialised
+ * source that says so. */
+export declare function createCursor<T = unknown>(spec: {
+  streaming: 'row' | 'buffered';
+  barrier?: CursorBarrier | null;
+  signal?: AbortSignal;
+  materialize?: () => unknown;
+  open?: () => unknown;
+  items?: (row: unknown) => T[];
+}): QueryCursor<T>;
 export declare function sequenceResult(items: unknown[]): unknown;
 export declare function deterministicFragment(fragment: unknown): unknown;
 export declare function registerFragment(connection: unknown, registered: Set<string>, fragment: unknown): void;
@@ -758,6 +992,9 @@ export declare function createQueryState(bound?: number): unknown;
 export declare function createEntityQueryEngine(context: unknown): unknown;
 export declare function createLoadEngine(context: unknown, entityName: string): unknown;
 export declare const INCLUDE_DEPTH_DEFAULT: number;
+export declare const INCLUDE_ROWS_DEFAULT: number;
+export declare const INCLUDE_BYTES_DEFAULT: number;
+export declare const PAGE_LIMIT_DEFAULT: number;
 export declare function normalizeProfile(profile: unknown): unknown;
 export declare const SAFE_PROFILE: unknown;
 export declare function translateProfilePredicate(predicate: unknown, shape: unknown): unknown;

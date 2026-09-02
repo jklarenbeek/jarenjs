@@ -27,7 +27,10 @@ export { emitPlan, createEntityPredicateEmitters, emitEntityPlan } from './emit.
 export { mergeEntityRow, parseGraphRow } from './graph.js';
 export { selectPlan, conjoin, assertNoSqlText, PLAN_VERSION } from './algebra.js';
 export { typeOfPath, isNumericType } from './types.js';
-export { compileSetResidual, compileRowResidual, sequenceResult } from './residual.js';
+export {
+  compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
+} from './residual.js';
+export { createCursor, PAGE_LIMIT_DEFAULT } from './cursor.js';
 export { deterministicFragment, registerFragment } from './udf.js';
 export {
   DERIVE_KINDS, DERIVE_MAPPING, PHYSICAL_KINDS, BBOX_COMPONENTS, BBOX_INDEX_ORDER,
@@ -38,7 +41,7 @@ export {
 export { KNN_MARGIN, IDENTITY_CHUNK, cutCandidates, identityBatches } from './knn.js';
 export {
   createQueryEngine, createQueryState, createEntityQueryEngine,
-  createLoadEngine, INCLUDE_DEPTH_DEFAULT,
+  createLoadEngine, INCLUDE_DEPTH_DEFAULT, INCLUDE_ROWS_DEFAULT, INCLUDE_BYTES_DEFAULT,
 } from './query.js';
 export {
   normalizeProfile, SAFE_PROFILE, translateProfilePredicate,

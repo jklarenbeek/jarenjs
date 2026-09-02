@@ -583,6 +583,32 @@ graph in ONE statement; a write is the unit of work — get an entity,
 mutate it, `saveChanges()` — and `live` re-answers a chain when the
 store changes.
 
+Every large read is a real cursor or a bounded page. A `for await`
+over a chain pulls one row per item from an open statement and a
+`break` releases it (three rows of twenty thousand cost three rows);
+`graph.cursor()` yields one root graph per pull with its includes
+attached, every include bounded per root (`maxRows`, `maxBytes`, a
+coded refusal — never a truncated graph); and `graph.page({ limit,
+after, maxBytes })` — `db.entities.Post.graph()` opens a graph with
+nothing included — pages over a composite keyset with the primary key
+appended, answering `{ items, continuation, hasMore, snapshot }`
+whose continuation is typed by the declared `orderBy`/`thenBy` and is
+unsigned and structural: the host signs it. The store's `explain()`
+says what each read will do (`streaming`, `barrier`, `budget`) before
+it runs:
+
+```js
+for await (const post of db.entities.Post.where((p) => p.stars.ge(3))) {   // one row per pull
+  if (post.stars > 100) break;                                              // the statement is released here
+}
+const page = await db.entities.Post.graph()
+  .orderByDescending((p) => p.stars).thenBy((p) => p.pid)
+  .page({ limit: 20, maxBytes: 65536 });                                    // { items, continuation, hasMore, snapshot: false }
+const next = await db.entities.Post.graph()
+  .orderByDescending((p) => p.stars).thenBy((p) => p.pid)
+  .page({ limit: 20, after: page.continuation });                            // the same ordering, or JD0035
+```
+
 `transaction` hands its callback a client of the same shape, over the
 store INSIDE the transaction, with a unit of work of its own — so two
 request handlers on one client hold two records for the same entity key
@@ -622,7 +648,7 @@ against Prisma, Drizzle and Kysely — is
 A pen builds a **definition** — once, at module load — and the engine
 compiles the document it emitted. That is the only place its price is
 paid, and `benchmark/db.js` measures it as ns per build beside the
-hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 61.1×, model 87.1×, JSLT 72.1× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same two shape hashes<!--/fact-->.
+hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 55.7×, model 89.4×, JSLT 61.2× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same two shape hashes<!--/fact-->.
 
 Multiples that size are what typed builders, `$defs` hoisting, a
 deep-freeze and a coded refusal per mistake cost against typing the JSON

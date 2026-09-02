@@ -475,6 +475,13 @@ export interface Provider<T = unknown> {
 export interface AsyncProvider<T = unknown> {
   readonly __item?: T;
   execute(document: unknown, options: { externals: Record<string, unknown> }): unknown | Promise<unknown>;
+  /** The cursor protocol, optional: the same document as an item
+   * cursor, one item per pull, `return()` releasing whatever it holds.
+   * A `for await` over the chain hands its pushed document here when
+   * the provider offers it, so iteration never materialises what the
+   * provider can stream; a provider without it is run whole. */
+  cursor?(document: unknown, options: { externals: Record<string, unknown> }):
+    AsyncIterator<unknown> & { return(): Promise<unknown> };
   readonly root?: string;
   readonly roots?: readonly string[];
   readonly scope?: unknown;
@@ -657,6 +664,13 @@ export interface MapAsyncOptions {
 
 export interface AsyncExplanation {
   barriers: { operator: string, reason: string }[];
+  /** What THIS surface does with the item stream: one item at a time, or
+   * a buffer at its first local barrier. Over a provider the pushed
+   * document's own class — a set residual, an external the database
+   * cannot bind — is the provider's `explain(document, { externals:
+   * bindings })` to report, and its cursor carries the same answer. */
+  streaming: 'row' | 'buffered';
+  barrier: { construct: string, reason: string } | null;
   /** The relation hops the chain's callbacks navigated (as `Explanation`). */
   hops: Hop[];
   /** The values `params()` bound, by name (as `Explanation`). */

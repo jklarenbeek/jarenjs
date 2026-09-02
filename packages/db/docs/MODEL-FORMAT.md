@@ -877,6 +877,10 @@ error.
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
 | `JD0033` | an entity query names no entity array |
+| `JD0034` | a tracked cursor needs a bare entity return |
+| `JD0035` | the continuation does not belong to this ordering |
+| `JD0036` | a snapshot page needs an immutable ordering |
+| `JD0037` | strictStreaming refused a plan that buffers |
 | `JD0040` | the save spans a relation cycle |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
@@ -904,6 +908,11 @@ error.
 | `JD2069` | a resumed run does not match the workflow or input it was checkpointed under |
 | `JD2070` | the transaction handle does not belong to the live scope |
 | `JD2071` | the savepoint label is blank, duplicate or unknown |
+| `JD2072` | the call was aborted before its next row |
+| `JD2073` | an include exceeded its per-root bound |
+| `JD2074` | an item exceeds the page byte bound |
+| `JD2075` | the deadline passed before the next row |
+| `JD2076` | an item exceeds the profile byte bound |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
@@ -929,7 +938,59 @@ so a store-level mandatory predicate or allow-list does not carry into
 per call, or set it once on the store and pass none. The defaults: engine limits
 `{ sequenceItems: 100000, resultItems: 10000, steps: 1000000, depth: 32 }`,
 `maxRows: 1000`, no externals, no host functions, no collations, all
-of the store's collections, no mandatory predicates, no scan refusal.
+of the store's collections, no mandatory predicates, no scan refusal,
+and no graph caps (`maxIncludedRows`, `maxDepth`, `maxBytes` all
+`null`).
+
+**One profile, every engine.** A profile — the store's, or the call's
+through `ExecuteOptions.profile` on `execute`, `query`, `cursor`,
+`loadCursor`, `page` and `explain` alike — applies identically to
+collection execution, entity execution (`entity.execute`, the chain's
+cursor), graph loading (`load`, `loadCursor`, `page`, every include
+subquery) and store-root execution (`store.execute`). `collections` is
+the one allow-list and names collections AND entity roots; a document
+that reads a name outside it is `JD0011` on every engine, with the
+same reason. `predicates` is keyed by collection or entity name, and
+an entity's predicate is conjoined into every fetch of that entity —
+the native statement, each root the residual fetches, the load's root
+and every include subquery over that entity. `maxRows` bounds every
+fetch on every engine (`JD2007`), the residual's input rows included:
+each root an entity residual fetches carries `LIMIT maxRows + 1`. The
+graph caps are hard maxima an include's own declaration cannot exceed:
+`maxIncludedRows` refuses an include that declares more rows per root
+(or `Infinity`), `maxDepth` refuses a deeper load, and `maxBytes`
+refuses any one item — a document, an entity row, a loaded root graph —
+larger than that many serialised bytes (`JD2076`).
+
+**Enforced, or refused — never approximated.** A budget the engine
+can COUNT is enforced during execution: rows returned, rows
+materialised, residual-input rows, included rows per root, depth,
+bytes, and the engine limits. A budget SQLite cannot measure is
+refused at preflight on plan shape instead: `refuseFullScan` declines
+a native plan whose own `EXPLAIN QUERY PLAN` shows a full-table scan,
+and declines an entity residual outright, because the residual reads
+every row of every referenced root before the engine decides — that
+is a full-table scan by shape, so it is refused before any fetch
+rather than estimated. Visited-row and elapsed-time budgets exist
+only where a driver supplies a progress or interrupt hook; the
+shipped SQLite drivers supply neither, and `explain().budget` reports
+`time: 'unavailable'` and `estimatedRows: 'unavailable'` rather than
+a number nothing measured.
+
+**`signal` and `deadline`.** `ExecuteOptions.signal` cancels: a call
+already aborted issues no statement (`JD2072`), and a cursor or page
+releases its statement at the next row boundary. `deadline` is an
+epoch-millisecond instant checked before a statement runs and at
+every row boundary of a cursor or page (`JD2075`) — a row-boundary
+check, never a statement interrupt, for the reason above.
+
+**Provenance.** Every `explain()` — collection, entity, graph —
+carries `budget`: the profile that applied and from where (`{ source:
+'call' | 'store', name: 'safe' | 'custom' }`, or `null`), every bound
+it imposed (`rows`, `includedRows`, `depth`, `bytes`, `limits`), the
+scan verdict (`'refused-by-shape'` or `'unbounded'`), and the two
+driver slots by name (`time`, `estimatedRows`). A budget nobody can
+prove was applied is not a budget.
 
 1. **Engine limits.** The four engine limits ride into every residual
    compilation, so the JavaScript portion of a query is bounded by the
@@ -1314,10 +1375,13 @@ match — and every successful write bumps it (§11.5).
 
 ### 9.7 Error-code additions
 
-The entity engine adds three codes to the package's single table (§7):
+The entity engine adds four codes to the package's single table (§7):
 `JD0030` — an unknown or unread `x-entity` member; `JD0031` — relation
 declarations whose inverses contradict; `JD0033` — an entity query
-document that binds no entity array (§10.1). Everything else raises the
+document that binds no entity array (§10.1); `JD0034` — a cursor asked
+to track (`tracking: true`) over a document that yields no entity
+document to register: a projection, a count or a window (§10.1, the
+cursor). Everything else raises the
 existing codes: `JD0005` for structural model defects (a key, index or
 version property without a column of its own, a default on a relation,
 `default: "auto"` off the key, a self-referencing many-to-many, a
@@ -1490,18 +1554,126 @@ Include depth is bounded (default 3, override with `maxDepth`);
 exceeding it is `JD0032` with the bound printed. A cyclic include
 specification is rejected. Unknown relation names are `JD0032` too.
 
+**Every include is bounded per root.** One root graph is the unit a
+graph cursor yields and a page counts, and "one root" is no bound at
+all if one root may aggregate a million related rows. So a to-many
+include carries `maxRows` — related rows per parent — and every
+row-projecting include carries `maxBytes` — serialised bytes of the
+relation per parent, measured on the JSON text the database projects.
+A relation that crosses either bound is the coded refusal **`JD2073`**
+naming the root (entity and key), the member and the bound that was
+hit — never a truncated graph, which a caller could not tell from a
+whole one. The refusal names the two supported alternatives: read
+`{ count: true }` when the size is the question, or page that relation
+separately. A bound always exists: an include with none declared
+inherits the store defaults, `INCLUDE_ROWS_DEFAULT` (1000 rows) and
+`INCLUDE_BYTES_DEFAULT` (1 MiB); an include with a `take` has that
+window as its row bound. The unbounded case is spelled, never
+inherited — `maxRows: Infinity` (`null` in the JSON spec) — so loading
+a relation whole is a decision rather than an oversight. The to-many
+subquery carries `LIMIT maxRows + 1`, so the bound is detected at the
+bound instead of after aggregating the whole relation; a `count`
+include is a number and carries neither. `explainLoad().bounds` lists
+the bounds every include ran under.
+
+**The graph cursor.** `store.entity(name).loadCursor(spec, options)` —
+`graph.cursor(options)` on the client — yields one root graph per
+pull, its includes attached and bounded as above, from the same one
+statement `load` runs: the include rows ride inside each root row as
+the JSON the database projected, so the window is the row itself and
+there is no second statement per level to hold or release. `return()`
+releases the statement exactly once; `signal` cancels at a row boundary
+(`JD2072`). The cursor registers nothing with the unit of work unless
+`tracking: true` is spelled per call — a snapshot per yielded root is a
+tracker that grows with the result.
+
 ### 10.5 Pagination
 
 `$orderby` + `$subsequence` translate to `ORDER BY` + `LIMIT/OFFSET`
-on the query surface. On the `load` surface, `after` (a cursor) with a
-single ascending or descending ordering over a UNIQUE column — the
-key, or any `unique: true` column — compiles to **keyset pagination**
-(`WHERE col > ?` / `< ?`) instead of a growing `OFFSET`; `skip`
-compiles to offset. `explainLoad()` reports which strategy ran
-(`keyset` / `offset` / `none`) — offset degrading quietly on large
-tables is a well-known footgun, and naming it is cheap. A cursor over
-a non-unique column, a document path, or a multi-key ordering is
-refused (`JD0032`).
+on the query surface. On the `load` surface `skip` compiles to offset,
+and `after` — a cursor — to **keyset pagination** (`WHERE …` over the
+last row's order keys) instead of a growing `OFFSET`; `explainLoad()`
+reports which strategy ran (`keyset` / `offset` / `none`) — offset
+degrading quietly on large tables is a well-known footgun, and naming
+it is cheap.
+
+**The single-column form.** `after: <value>` with a single ascending or
+descending ordering over a UNIQUE column — the key, or any `unique:
+true` column — compiles to `WHERE col > ?` / `< ?`. A scalar cursor
+over a non-unique column, a document path, or a multi-key ordering is
+refused (`JD0032`), because such a cursor either skips rows or repeats
+them wherever the value ties.
+
+**The composite keyset.** The orderings a list actually wants —
+`(updatedAt, id)`, `(createdAt, id)`, `(priority desc, id)` — have a
+non-unique first column. `page()` and a structural `after` compile them
+as the lexicographic expansion over the declared terms
+`(k1 dir1, k2 dir2, …)` with **the primary key appended** as the
+tie-breaker whether or not the caller named it (it is the one column
+guaranteed unique, and a tie on every declared key would otherwise be a
+skipped row or a repeated one):
+
+```sql
+(k1 > v1) OR (k1 = v1 AND k2 > v2) OR (k1 = v1 AND k2 = v2 AND pk > vpk)
+```
+
+with `<` for a descending term, and the `ORDER BY` ending in the key
+column(s) rather than the row identity. **Null placement agrees with
+the plan**: every term's null order (`NULLS FIRST`/`LAST`, from `$dir`
+and `$empty`) is spelled in the expansion too — after a null value come
+the non-nulls when nulls sort first and nothing when they sort last;
+after a non-null value come the greater (or lesser) values and, when
+nulls sort last, the nulls — because SQL's `col > ?` is neither true
+nor false for `NULL`, and a comparison alone would visit a null-keyed
+row twice or never. Only mapped columns carry a keyset; a document path
+in the ordering is refused (`JD0032`).
+
+**The continuation** a page emits is unsigned, structural and opaque:
+
+```jsonc
+{ "order": [{ "column": "updatedAt", "desc": true, "nullsFirst": false },
+            { "column": "id", "desc": false, "nullsFirst": false }],
+  "keys": [v1],         // the declared order-key values, as the document carries them
+  "key": vpk }          // the row's primary key (a record for a composite key)
+```
+
+`order` is the ordering's identity: a continuation replayed against a
+different ordering is the refusal `JD0035`, never a wrong page; a
+continuation whose `keys` do not match the declared key count, or
+whose `key` is not the entity's key shape, is `JD0035` too. Signing,
+tenant scoping, expiry and wire encoding are the **host's**: the store
+has no principal and no key, so any signature it invented would be
+security theatre — a host that ships a continuation to an untrusted
+client signs it first.
+
+**The page.** `store.entity(name).page(spec, { limit, after, maxBytes,
+consistency, signal })` — `graph.page(options)` on the client — drains
+the graph cursor in keyset mode and answers `{ items, continuation,
+hasMore, snapshot }`: never more than `limit` roots (default
+`PAGE_LIMIT_DEFAULT`, 100) nor more than `maxBytes` serialised bytes
+(none unless given; every root is bounded by §10.4 regardless), the
+continuation of the last delivered root, and `hasMore` decided by one
+peek past the page. A `take` or `skip` in the spec beside `page()` is
+refused (`JD0032`): the page windows by its limit. **The
+`item_too_large` rule**: an item that alone exceeds `maxBytes` when
+nothing has been delivered yet is the coded refusal `JD2074`, raised
+without advancing the continuation — a caller that retries meets the
+same refusal, which is the honest answer, never a loop and never a
+silent breach; an item that does not fit beside earlier ones ends the
+page before it (`hasMore: true`). A page registers no snapshots unless
+`tracking: true` is spelled.
+
+**Snapshot versus live.** A page reports `snapshot: true` only when
+every order key is immutable — and the primary key is the one column
+the engine itself guarantees never moves (`update()` refuses to rewrite
+it). Ordering a live table by a mutable column such as `updatedAt` is
+**live pagination**, and the page says so (`snapshot: false`): later
+inserts land where their keys sort, but an existing row whose order
+key changes between two pages can move across the cursor — it may be
+seen twice, or not at all — and no cutoff on later writes prevents
+that. `consistency: 'snapshot'` over such an ordering is refused
+(`JD0036`) rather than mislabelled; the default `'live'` reports the
+truth either way. A caller who needs a snapshot orders by the key.
 
 ### 10.6 What remains residual
 

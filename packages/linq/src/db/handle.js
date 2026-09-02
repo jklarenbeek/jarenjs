@@ -56,6 +56,9 @@ export function createEntityHandle(store, name) {
   const members = { ...set };
   chainStart(set, members);
   members.include = (pick, spec) => new Graph(set, name).include(pick, spec);
+  // the graph with nothing included: the root clauses, the keyset and
+  // the page over the rows alone
+  members.graph = () => new Graph(set, name);
   members.link = (own, member, target) => {
     requireMembership(set.relations, name, member, 'link');
     set.link(own, member, target);

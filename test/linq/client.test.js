@@ -202,7 +202,7 @@ describe('entity handles: the set, the chain, the provider', () => {
     const chain = client.entities.Post.where((p) => p.stars.ge(3));
     const expected = { $for: { it: '$.Post[*]' }, $where: { $ge: ['$it.stars', 3] }, $return: '$it' };
     assert.deepStrictEqual(chain.toDocument(), expected);
-    assert.deepStrictEqual(chain.explain(), { barriers: [], hops: [], bindings: {}, document: expected });
+    assert.deepStrictEqual(chain.explain(), { barriers: [], streaming: 'row', barrier: null, hops: [], bindings: {}, document: expected });
     const explained = await client.entities.Post.explain(chain.toDocument());
     assert.strictEqual(explained.mode, 'native');
     assert.deepStrictEqual(explained.referenced, ['Post']);
@@ -211,7 +211,7 @@ describe('entity handles: the set, the chain, the provider', () => {
     assert.deepStrictEqual(rows, ['p1', 'p3', 'p4']);
     // the handle's own explain(): the empty chain
     assert.deepStrictEqual(client.entities.Post.explain(),
-      { barriers: [], hops: [], bindings: {}, document: '$.Post[*]' });
+      { barriers: [], streaming: 'row', barrier: null, hops: [], bindings: {}, document: '$.Post[*]' });
     assert.strictEqual(client.entities.Post.toDocument(), '$.Post[*]');
     // terminals, a hop, params, the iterator, and fromAsync over the handle itself
     assert.strictEqual(await client.entities.Post.count(), 4);
@@ -435,7 +435,7 @@ describe('live(): the store\'s registration with the chain\'s document and bindi
     const chain = handle.where((p) => p.t.gt(1)).select((p) => p.id);
     assert.deepStrictEqual(await chain.toArray(), ['p2', 'p3']);
     assert.strictEqual((await handle.explain(handle.where((p) => p.t.gt(1)).toDocument())).mode, 'native');
-    assert.strictEqual((await handle.explain(chain.toDocument())).mode, 'row', 'a projection is per-row');
+    assert.strictEqual((await handle.explain(chain.toDocument())).mode, 'native', 'one member path projects natively');
     assert.strictEqual(handle.explain().document, '$[*]');
     const query = await handle.live(handle.where((p) => p.t.gt(1)));
     assert.strictEqual(query.mode.mode, 'incremental');

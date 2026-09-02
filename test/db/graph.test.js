@@ -13,7 +13,7 @@ import { describe, it, before, after } from 'node:test';
 import * as assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 
-import { openStore, INCLUDE_DEPTH_DEFAULT } from '@jarenjs/db';
+import { openStore, INCLUDE_DEPTH_DEFAULT, INCLUDE_ROWS_DEFAULT } from '@jarenjs/db';
 import { adaptNodeDatabase } from '@jarenjs/db/node';
 
 const MODEL = {
@@ -309,8 +309,10 @@ describe("an include windows with skip and take; after is the root's alone (§10
     });
     assert.deepStrictEqual(users.map((u) => u.posts.map((p) => p.pid)), [[1], []],
       'desc by stars: 3, 1, 2 → skip one, take one → pid 1; u2 has one post → none');
+    // a skip with no take still runs under the per-root row bound (§10.4):
+    // the subquery detects the bound at maxRows + 1, never LIMIT -1
     const explained = store.entity('User').explainLoad({ include: { posts: { skip: 2 } } });
-    assert.match(explained.sql, /LIMIT -1 OFFSET 2/);
+    assert.match(explained.sql, new RegExp(`LIMIT ${INCLUDE_ROWS_DEFAULT + 1} OFFSET 2`));
     assert.throws(() => store.entity('User').explainLoad({ include: { posts: { after: 1 } } }),
       (e) => e.code === 'JD0032' && /paginates the root/.test(e.message) && /include path: posts/.test(e.message));
     await store.close();

@@ -13,7 +13,7 @@
  * subpath has them; no other subpath of the package refers to them.
  */
 
-import type { AsyncSequence, AsyncExplanation, Expr, BoolExpr, OrderOptions } from './index.js';
+import type { AsyncSequence, AsyncExplanation, Expr, ExprBase, BoolExpr, OrderOptions } from './index.js';
 import type { ModelDocument, CollectionSpec, InferMeta } from './model.js';
 import type {
   EntityMeta, MetaMap, TypedEntitySet, TypedStore, TypedLoadSpec, Loaded,
@@ -21,6 +21,7 @@ import type {
 import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
   SavepointController, SaveReport, StoreCapabilities, TransactionStore,
+  EntityCursorOptions, QueryCursor, LoadContinuation, Page,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 
@@ -110,6 +111,12 @@ export type IncludeSpec<E extends MetaMap<E>, M extends EntityMeta> =
     readonly orderBy?: OrderKey<M['doc']> | readonly OrderKey<M['doc']>[];
     readonly take?: number;
     readonly skip?: number;
+    /** The per-root bounds (MODEL-FORMAT §10.4): rows of this relation
+     * per parent and serialised bytes per parent; crossing one is the
+     * store's `JD2073`, never a truncated graph. `Infinity` spells the
+     * unbounded case (emitted as `null`). */
+    readonly maxRows?: number;
+    readonly maxBytes?: number;
     readonly include?: Includes<E, M>;
   };
 
@@ -118,9 +125,35 @@ export type Includes<E extends MetaMap<E>, M extends EntityMeta> = {
   readonly [K in keyof M['relations'] & string]?: IncludeSpec<E, TargetMeta<E, M, K>>;
 };
 
+/** The order-key VALUE types a graph declared, in order: `orderBy` starts
+ * the tuple, every `thenBy` appends to it. */
+export type OrderOf<S> = S extends { order: infer O extends readonly unknown[] } ? O : [];
+type WithOrder<S, O extends readonly unknown[]> = Omit<S, 'order'> & { order: O };
+
+/** The continuation a page over this graph emits, and `after()` takes:
+ * the declared order-key values as a tuple whose shape follows
+ * `orderBy`/`thenBy` — a two-key ordering needs a two-value `keys` —
+ * plus the row's primary key, the tie-breaker the store appends, and
+ * the ordering's identity. Unsigned and structural (MODEL-FORMAT §10.5):
+ * signing, scoping and expiry are the host's. */
+export type Continuation<S, M extends EntityMeta> = LoadContinuation & {
+  readonly keys: OrderOf<S>;
+  readonly key: M['key'];
+};
+
+/** A page's options over this graph (the store's `PageOptions`, the
+ * continuation typed by the declared ordering). */
+export interface GraphPageOptions<S, M extends EntityMeta> extends EntityCursorOptions {
+  limit?: number;
+  after?: Continuation<S, M>;
+  maxBytes?: number;
+  consistency?: 'live' | 'snapshot';
+}
+
 /** The graph over one entity set: an immutable builder of the `load`
- * spec, typed by what it included. `S` accumulates the include
- * specification `Loaded<>` reads. */
+ * spec, typed by what it included and by what it ordered by. `S`
+ * accumulates the include specification `Loaded<>` reads and the
+ * `order` tuple `after()`/`page()` are typed by. */
 export interface Graph<E extends MetaMap<E>, M extends EntityMeta, S> {
   /** Include one more relation member. (`NoInfer` keeps the spec's
    * callbacks contextually typed while `I` is inferred from the literal —
@@ -130,14 +163,24 @@ export interface Graph<E extends MetaMap<E>, M extends EntityMeta, S> {
   ): Graph<E, M, S & { include: { [P in K]: I } }>;
   /** Filter the root rows; consecutive calls conjoin. */
   where(predicate: (it: Expr<M['doc']>) => BoolExpr | boolean): Graph<E, M, S>;
-  orderBy(key: (it: Expr<M['doc']>) => unknown, options?: OrderOptions): Graph<E, M, S>;
-  orderByDescending(key: (it: Expr<M['doc']>) => unknown, options?: OrderOptions): Graph<E, M, S>;
-  thenBy(key: (it: Expr<M['doc']>) => unknown, options?: OrderOptions): Graph<E, M, S>;
-  thenByDescending(key: (it: Expr<M['doc']>) => unknown, options?: OrderOptions): Graph<E, M, S>;
+  /** Start the ordering: the key's value type opens the `order` tuple. */
+  orderBy<V>(key: (it: Expr<M['doc']>) => ExprBase<V>, options?: OrderOptions): Graph<E, M, WithOrder<S, [V]>>;
+  orderByDescending<V>(key: (it: Expr<M['doc']>) => ExprBase<V>, options?: OrderOptions): Graph<E, M, WithOrder<S, [V]>>;
+  /** Extend the ordering: the key's value type is appended to the tuple. */
+  thenBy<V>(key: (it: Expr<M['doc']>) => ExprBase<V>, options?: OrderOptions): Graph<E, M, WithOrder<S, [...OrderOf<S>, V]>>;
+  thenByDescending<V>(key: (it: Expr<M['doc']>) => ExprBase<V>, options?: OrderOptions): Graph<E, M, WithOrder<S, [...OrderOf<S>, V]>>;
   take(count: number): Graph<E, M, S>;
   skip(count: number): Graph<E, M, S>;
-  /** The keyset cursor (§10.5): the key of the last row of the previous page. */
-  after(cursor: M['key']): Graph<E, M, S>;
+  /** Resume after a continuation (§10.5): the value a `page()` over this
+   * ordering emitted — its `keys` tuple follows the declared ordering,
+   * its `key` is the row's primary key. A bare key is not a continuation. */
+  after(cursor: Continuation<S, M>): Graph<E, M, S>;
+  /** One bounded page over the composite keyset: `{ items, continuation,
+   * hasMore, snapshot }`, never more than `limit` roots or `maxBytes`
+   * serialised bytes; `snapshot` is true only over an immutable ordering
+   * (the primary key), and `consistency: 'snapshot'` over any other is
+   * the store's `JD0036`. Untracked unless `tracking: true`. */
+  page(options?: GraphPageOptions<S, M>): Promise<Page<Loaded<E, M, S>, Continuation<S, M>>>;
   /** The include depth bound (§10.4, default 3). */
   maxDepth(depth: number): Graph<E, M, S>;
   /** The same graph, loaded without registering snapshots. */
@@ -148,6 +191,10 @@ export interface Graph<E extends MetaMap<E>, M extends EntityMeta, S> {
   toJSON(): TypedLoadSpec<E, M>;
   /** `load(spec)`: the store's one statement, typed by the includes. */
   toArray(): Promise<Array<Loaded<E, M, S>>>;
+  /** `loadCursor(spec, options)`: one root graph per pull, its includes
+   * attached and bounded, from the same one statement; `return()`
+   * releases it. Untracked unless `tracking: true` is spelled per call. */
+  cursor(options?: EntityCursorOptions): QueryCursor<Loaded<E, M, S>>;
   /** `explainLoad(spec)`: the SQL, the includes, the pagination strategy. */
   explain(): LoadExplanation;
 }
@@ -161,6 +208,9 @@ export type EntityHandle<E extends MetaMap<E>, M extends EntityMeta> =
     include<K extends keyof M['relations'] & string, const I extends IncludeSpec<E, TargetMeta<E, M, K>> = true>(
       pick: (u: RelationPicker<M>) => Picked<K>, spec?: I | NoInfer<IncludeSpec<E, TargetMeta<E, M, K>>>,
     ): Graph<E, M, { include: { [P in K]: I } }>;
+    /** Open a graph with nothing included: the root clauses, the keyset
+     * continuation and the page over the rows alone. */
+    graph(): Graph<E, M, {}>;
     /** A live query over a chain of this set (the whole set when none
      * is given), through the store's entity-root registration. */
     live<T = M['doc']>(source?: AsyncSequence<T, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<T>>;

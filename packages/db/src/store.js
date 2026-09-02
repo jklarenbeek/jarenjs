@@ -1537,7 +1537,8 @@ export function openStore(model, options) {
           const queryState = createQueryState(options.statementCacheBound, operators,
             options.zoneProvider);
           const entityEngine = entities.size > 0
-            ? createEntityQueryEngine({ connection, entities, mapping, state: queryState })
+            ? createEntityQueryEngine({ connection, entities, mapping, state: queryState,
+              profile: storeProfile })
             : null;
           /** @type {Map<string, any>} */
           const loadEngines = new Map();
@@ -1550,7 +1551,8 @@ export function openStore(model, options) {
                   { docPath: '/entities', collection: name });
               }
               engine = createLoadEngine(
-                { connection, entities, mapping, state: queryState }, name);
+                { connection, entities, mapping, state: queryState, coreFor: entityCoreFor,
+                  profile: storeProfile }, name);
               loadEngines.set(name, engine);
             }
             return engine;
@@ -1696,9 +1698,18 @@ export function openStore(model, options) {
                 tracker.discard(name, key);
                 return done;
               }),
-              load: (spec) => chain(loads.load(spec),
+              load: (spec, loadOptions) => chain(loads.load(spec, loadOptions),
                 (docs) => tracker.registerGraph(loads.treeFor(spec), docs)),
-              explainLoad: (spec) => loads.explainLoad(spec),
+              // the graph cursor registers nothing unless asked: a
+              // snapshot per yielded root is a tracker that grows with the
+              // result, so it is the caller's decision (`tracking: true`)
+              loadCursor: (spec, cursorOptions) => loads.loadCursor(spec, cursorOptions,
+                cursorOptions?.tracking === true
+                  ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
+              page: (spec, pageOptions) => loads.page(spec, pageOptions,
+                pageOptions?.tracking === true
+                  ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
+              explainLoad: (spec, loadOptions) => loads.explainLoad(spec, loadOptions),
               add: (doc) => tracker.add(name, doc),
               put: (next) => tracker.put(name, next),
               remove: (keyOrDoc) => tracker.remove(name, keyOrDoc),
@@ -1709,7 +1720,7 @@ export function openStore(model, options) {
               unlink: (own, member, target) => tracker.unlink(name, own, member, target),
               noTracking: {
                 get: (key) => core.get(key),
-                load: (spec) => loads.load(spec),
+                load: (spec, loadOptions) => loads.load(spec, loadOptions),
               },
             };
             trackedOps.set(name, ops);
@@ -1728,14 +1739,16 @@ export function openStore(model, options) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
                   get: lift((key) => ops.noTracking.get(key)),
-                  load: lift((spec) => ops.noTracking.load(spec)),
+                  load: lift((spec, loadOptions) => ops.noTracking.load(spec, loadOptions)),
                 });
                 handle = Object.freeze({
                   create: lift((doc) => ops.create(doc)),
                   get: lift((key) => ops.get(key)),
                   update: lift((key, changes) => ops.update(key, changes)),
                   delete: lift((key) => ops.delete(key)),
-                  load: lift((spec) => ops.load(spec)),
+                  load: lift((spec, loadOptions) => ops.load(spec, loadOptions)),
+                  loadCursor: (spec, cursorOptions) => ops.loadCursor(spec, cursorOptions),
+                  page: lift((spec, pageOptions) => ops.page(spec, pageOptions)),
                   explainLoad: ops.explainLoad,
                   add: ops.add,
                   put: ops.put,
@@ -1753,6 +1766,15 @@ export function openStore(model, options) {
                   // `relations` this entity's own relation table (§10.1).
                   // `execute` stays value-or-promise (D2), as a collection's
                   execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
+                  // the item cursor over the same document: one row per
+                  // pull, the statement released on break. It registers
+                  // NO snapshot by default — a cursor that tracked every
+                  // row it yielded would be an unbounded tracker — and
+                  // `tracking: true` opts in per call, documented as
+                  // unbounded in the result size
+                  cursor: (document, queryOptions) => entityEngine.query(document, queryOptions,
+                    queryOptions?.tracking === true
+                      ? (entity, doc) => tracker.register(entity, doc) : undefined),
                   explain: lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
                   root: entityRoot(name),
                   scope: entityEngine,
@@ -1770,14 +1792,14 @@ export function openStore(model, options) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
                   get: (key) => ops.noTracking.get(key),
-                  load: (spec) => ops.noTracking.load(spec),
+                  load: (spec, loadOptions) => ops.noTracking.load(spec, loadOptions),
                 });
                 handle = Object.freeze({
                   create: (doc) => ops.create(doc),
                   get: (key) => ops.get(key),
                   update: (key, changes) => ops.update(key, changes),
                   delete: (key) => ops.delete(key),
-                  load: (spec) => ops.load(spec),
+                  load: (spec, loadOptions) => ops.load(spec, loadOptions),
                   explainLoad: ops.explainLoad,
                   add: ops.add,
                   put: ops.put,
@@ -1924,10 +1946,11 @@ export function openStore(model, options) {
             collection(name) {
               let handle = gatedCollections.get(name);
               if (handle === undefined) {
-                // `query` is deliberately absent: it answers an async
-                // iterable whose life spans the caller's loop, and holding
-                // the connection for that long would block every
-                // transaction for as long as a consumer reads slowly
+                // `query` is deliberately NOT gated: a cursor's life spans
+                // the caller's loop, and taking the store gate for that
+                // long would block every transaction for as long as a
+                // consumer reads slowly — so it reads on the connection
+                // beside whatever is open, one row per pull
                 handle = gatedMembers(boundCollection(name),
                   ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
                   ['execute']);
@@ -1942,8 +1965,10 @@ export function openStore(model, options) {
                 // constructed while an own-unit transaction happens to be
                 // open must not capture that transaction's tracker
                 const inner = rootWork.entityFor(name);
+                // `cursor` is not gated, as a collection's `query` is not:
+                // it spans the caller's loop
                 handle = gatedMembers(inner,
-                  ['create', 'get', 'update', 'delete', 'load', 'explain'],
+                  ['create', 'get', 'update', 'delete', 'load', 'page', 'explain'],
                   ['execute']);
                 const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load']);
                 handle = Object.freeze({ ...handle, asNoTracking: () => untracked });
@@ -1998,6 +2023,12 @@ export function openStore(model, options) {
             },
             changesSince: capture === null ? undefined
               : lift((after) => gated(() => capture.changesSince(after))),
+            // the bounded reader (LIVE-FORMAT §5): watermarks, and pages
+            // that report a retention gap instead of a misleading suffix
+            changes: capture === null || !capture.logged ? undefined : Object.freeze({
+              bounds: lift(() => gated(() => capture.bounds())),
+              page: lift((pageOptions) => gated(() => capture.page(pageOptions))),
+            }),
             dataVersion: lift(() => gated(() => readDataVersion())),
             // The ROOT jobs surface: every finite call takes the store
             // gate, exactly as a root collection write does, so an
@@ -2109,36 +2140,43 @@ export function openStore(model, options) {
             return out;
           };
 
+          /** A cursor pinned to one exact scope: it opens under the
+           * scope check, and `next()` re-checks the scope on every pull,
+           * so iteration can neither begin nor continue once that exact
+           * scope settled. The classification (`streaming`, `barrier`)
+           * is the inner cursor's own. */
+          const scopedCursor = (identity, open) => {
+            requireScope(identity);
+            const cursor = open();
+            const step = (/** @type {string} */ member) => () => {
+              try {
+                requireScope(identity);
+              }
+              catch (error) {
+                return Promise.reject(error);
+              }
+              return cursor[member]();
+            };
+            /** @type {any} */
+            const wrapped = {
+              streaming: cursor.streaming,
+              barrier: cursor.barrier,
+              next: step('next'),
+              return: step('return'),
+              [Symbol.asyncIterator]: () => wrapped,
+            };
+            return Object.freeze(wrapped);
+          };
+
           /** A collection handle pinned to one exact scope, its lazy
-           * cursor included: `query()`'s `next()` re-checks the scope on
-           * every pull, so iteration can neither begin nor continue once
-           * that exact scope settled. */
+           * cursor included. */
           const scopedCollection = (identity, name) => {
             const inner = boundCollection(name);
             const out = scopedMembers(identity, inner,
               ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
               ['execute']);
-            out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
-              /** @type {any} */
-              let cursor = null;
-              const step = (/** @type {string} */ member) => () => {
-                try {
-                  requireScope(identity);
-                  if (cursor === null) cursor = inner.query(document, queryOptions);
-                }
-                catch (error) {
-                  return Promise.reject(error);
-                }
-                return cursor[member]();
-              };
-              /** @type {any} */
-              const wrapped = {
-                next: step('next'),
-                return: step('return'),
-                [Symbol.asyncIterator]: () => wrapped,
-              };
-              return wrapped;
-            };
+            out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
+              scopedCursor(identity, () => inner.query(document, queryOptions));
             return Object.freeze(out);
           };
 
@@ -2152,8 +2190,12 @@ export function openStore(model, options) {
               scopedMembers(identity, inner.asNoTracking(), ['get', 'load']));
             return Object.freeze({
               ...scopedMembers(identity, inner,
-                ['create', 'get', 'update', 'delete', 'load', 'explain'],
+                ['create', 'get', 'update', 'delete', 'load', 'page', 'explain'],
                 ['execute', 'add', 'put', 'remove', 'discard', 'link', 'unlink']),
+              cursor: (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
+                scopedCursor(identity, () => inner.cursor(document, queryOptions)),
+              loadCursor: (/** @type {any} */ spec, /** @type {any} */ cursorOptions) =>
+                scopedCursor(identity, () => inner.loadCursor(spec, cursorOptions)),
               asNoTracking: () => untracked,
             });
           };
@@ -2365,6 +2407,16 @@ export function openStore(model, options) {
               members.changesSince = override(lift((/** @type {any} */ after) => {
                 requireScope(identity);
                 return capture.changesSince(after);
+              }));
+              if (capture.logged) members.changes = override(Object.freeze({
+                bounds: lift(() => {
+                  requireScope(identity);
+                  return capture.bounds();
+                }),
+                page: lift((/** @type {any} */ pageOptions) => {
+                  requireScope(identity);
+                  return capture.page(pageOptions);
+                }),
               }));
             }
             if (jobsEngine !== null) {

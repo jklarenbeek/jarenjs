@@ -69,8 +69,11 @@ const KNN_MODES = {
     { indexed: ['set', /only descending/], unindexed: ['set', /only descending/] },
   'knn/offset-window': { indexed: ['knn', RANK], unindexed: ['set', NO_COLUMN] },
   'knn/near-tie-at-the-boundary': { indexed: ['knn', RANK], unindexed: ['set', NO_COLUMN] },
-  'knn/external-probe-of-another-width': { indexed: ['knn', RANK], unindexed: ['set', NO_COLUMN] },
-  'knn/external-probe-not-a-vector': { indexed: ['knn', RANK], unindexed: ['set', NO_COLUMN] },
+  // a probe the plan cannot bind diverts the RUN to the whole collection:
+  // explain(), given that probe, says `set` and still names the rank the
+  // plan would have taken
+  'knn/external-probe-of-another-width': { indexed: ['set', RANK], unindexed: ['set', NO_COLUMN] },
+  'knn/external-probe-not-a-vector': { indexed: ['set', RANK], unindexed: ['set', NO_COLUMN] },
   'knn/filtered-then-ranked': { indexed: ['set', /pushed whole/], unindexed: ['set', NO_COLUMN] },
 };
 
@@ -154,6 +157,10 @@ describe('the vector corpus through SQLite', () => {
                   assert.strictEqual(explained.rank.decides, 'engine');
                   assert.strictEqual(explained.rank.dims, CORPUS.dims);
                   assert.doesNotMatch(explained.sql, /ORDER BY|LIMIT/);
+                }
+                else if (mapping === 'indexed' && /external-probe/.test(entry.name)) {
+                  assert.strictEqual(explained.rank.dims, CORPUS.dims, 'the diverted plan still names its rank');
+                  assert.ok(explained.residual.reasons.some((r) => /is not a value the database binds/.test(r.reason)));
                 }
                 else {
                   assert.strictEqual(explained.rank, null);

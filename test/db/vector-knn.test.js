@@ -375,13 +375,19 @@ describe('execution — the column cuts, the engine decides', () => {
       const nonFinite = await rows.execute(topK(2), { externals: { q: [1, Infinity, 0] } });
       assert.deepStrictEqual(nonFinite, ['east', 'narrow']);
       // and every one of those calls read the whole collection, which is
-      // the number a consumer needs: the plan is still `knn` in
-      // `explain()`, so a probe bound at the wrong width would otherwise
-      // turn a k-nearest query into a full scan with nothing said
+      // the number a consumer needs — counted, so a probe bound at the
+      // wrong width never turns a k-nearest query into a full scan with
+      // nothing said
       assert.strictEqual(rows.stats().knn.diverted, 4,
         'a knn plan that diverted at bind time is counted, not silent');
+      // explain(), given that probe, answers for the run: the cut never
+      // runs, the whole collection is read and the engine ranks — the
+      // plan's rank is still reported as the shape it would have taken
       const explained = await rows.explain(topK(3), { externals: { q: [1, 0] } });
-      assert.strictEqual(explained.mode, 'knn', 'the PLAN is the shape; the bound value is not');
+      assert.strictEqual(explained.mode, 'set', 'the run reads the whole collection');
+      assert.strictEqual(explained.rank.dims, DIMS, 'the k-nearest shape is still named');
+      assert.match(explained.residual.reasons.at(-1).reason, /the external 'q' is not a value the database binds/);
+      assert.strictEqual((await rows.explain(topK(3))).mode, 'knn', 'without externals: the plan as planned');
     }
     finally {
       await store.close();
