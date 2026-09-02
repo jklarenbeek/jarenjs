@@ -84,12 +84,15 @@ export { PORT_LOCAL_ERRORS };
  * There is no heartbeat on a port — delivery is in-process — so no
  * silence watchdog runs here.
  * @typedef {Object} PortSubscribeOptions
- * @property {(value: unknown, info: { seq: number, resumed: boolean }) => void} [onSnapshot]
+ * @property {(value: unknown, info: { seq: number, resumed: boolean, reset: boolean, earliestAvailable: number | null, highWatermark: number | null }) => void} [onSnapshot]
  * @property {(emission: { patch: unknown[], seq: number }) => void} [onPatch]
  * @property {(outcome: Outcome) => void} [onError]
  * @property {(info: { reason: string }) => void} [onEnd]
  * @property {AbortSignal} [signal] - stops the subscription silently
- * @property {number} [lastSeq] - the resume seq (what a reconnect passes)
+ * @property {number} [lastSeq] - the resume seq (what a re-entered subscribe passes)
+ * @property {{ max: number }} [reconnect] - validated as on the HTTP client, then
+ *   nothing: a channel has no network loss to reconnect from (a closed channel is
+ *   `JC2074`, final), so the same options object serves both clients
  */
 
 /**
@@ -429,6 +432,12 @@ export function openPortClient(contract, options) {
       if (!Number.isInteger(options.lastSeq) || options.lastSeq < 0) throw host('JC1008', 'options.lastSeq must be a non-negative integer');
       lastSeq = options.lastSeq;
     }
+    if (options.reconnect !== undefined && options.reconnect !== null) {
+      const r = /** @type {any} */ (options.reconnect);
+      if (typeof r !== 'object' || !Number.isInteger(r.max) || r.max < 0) {
+        throw host('JC1008', 'options.reconnect must be { max } with a non-negative integer number of further attempts');
+      }
+    }
     const signal = options.signal === undefined || options.signal === null ? null : options.signal;
     const meta = makeMeta(route.op.id, null, null);
     const id = prefix + (++seq);
@@ -459,10 +468,17 @@ export function openPortClient(contract, options) {
         }
       }
     };
+    /** @type {Subscription} */
+    const subscription = Object.freeze({
+      stop,
+      get lastSeq() {
+        return consumer.lastSeq();
+      },
+    });
 
     if (closed || (signal !== null && signal.aborted)) {
       queueMicrotask(() => consumer.cancel());
-      return { stop };
+      return subscription;
     }
 
     // validate before anything is posted — the shared pre-send refusal
@@ -480,7 +496,7 @@ export function openPortClient(contract, options) {
     if (refusal !== null) {
       const outcome = failedOutcome('contract', clientError(catalog, 'JC2050', { op: route.op.id }, null, refusal), meta);
       queueMicrotask(() => consumer.fail(outcome));
-      return { stop };
+      return subscription;
     }
 
     streams.set(id, consumer);
@@ -496,7 +512,7 @@ export function openPortClient(contract, options) {
       const outcome = bindingOutcome('network', 'JC2074', { op: route.op.id }, meta);
       queueMicrotask(() => consumer.fail(outcome));
     }
-    return { stop };
+    return subscription;
   }
 
   /** @type {PortClientCapabilities} */

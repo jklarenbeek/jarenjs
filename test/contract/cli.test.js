@@ -13,7 +13,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { load } from './helpers.js';
 
@@ -179,5 +179,115 @@ describe('jaren-contract diff — the compatibility gate', () => {
       withV2((v2) => { v2.operations['product.save'].kind = 'write'; }));
     assert.strictEqual(refused.status, 2);
     assert.match(refused.stderr, /JC0004/);
+  });
+});
+
+describe('jaren-contract — module documents (the shared @jarenjs/json/node loader)', () => {
+  const PEN = pathToFileURL(fileURLToPath(new URL('../../packages/linq/src/contract/index.js', import.meta.url))).href;
+  /** The shop contract as a module: a default export, a named export, a pen builder. */
+  const modules = (/** @type {string} */ dir) => {
+    fs.writeFileSync(path.join(dir, 'default.mjs'), `export default ${JSON.stringify(shop)};\n`);
+    fs.writeFileSync(path.join(dir, 'named.mjs'), `export const contract = ${JSON.stringify(shop)};\n`);
+    fs.writeFileSync(path.join(dir, 'pen.mjs'), [
+      `import { defineContract, read, command, error, http } from '${PEN}';`,
+      "export const contract = defineContract({ id: 'pen' }, {",
+      "  'catalog.load': read({ input: { type: 'object', properties: { since: { type: 'string' } } }, output: { type: 'object', required: ['revision'], properties: { revision: { type: 'integer' } } }, http: http({ method: 'GET', path: '/api/catalog' }) }),",
+      "  'product.save': command({ input: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } }, output: { type: 'object' }, errors: { conflict: error({ status: 409 }) }, http: http({ method: 'PUT', path: '/api/products/{id}' }) }),",
+      '});',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(dir, 'impure.mjs'), `export default { ...${JSON.stringify(shop)}, id: 'shop-' + Date.now() + Math.random() };\n`);
+    fs.writeFileSync(path.join(dir, 'nodoc.mjs'), 'export default 42;\n');
+    fs.writeFileSync(path.join(dir, 'shop.txt'), JSON.stringify(shop));
+    fs.writeFileSync(path.join(dir, 'typed.ts'), `const contract: unknown = ${JSON.stringify(shop)};\nexport default contract;\n`);
+  };
+
+  it('every command reads a module: default export, named `contract` export, and a real linq contract pen', () => {
+    for (const file of ['default.mjs', 'named.mjs']) {
+      const described = run(['describe', '--contract', file], modules);
+      assert.strictEqual(described.status, 0, described.stderr);
+      assert.strictEqual(JSON.parse(described.stdout).operations.length, 5, file);
+      const pub = run(['public', '--contract', file], modules);
+      assert.strictEqual(JSON.parse(pub.stdout).$contract, '0.1');
+    }
+    const pen = run(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts'], modules);
+    assert.strictEqual(pen.status, 0, pen.stderr);
+    assert.match(pen.files['pen.d.ts'], /'catalog.load'/);
+    assert.match(pen.files['pen.d.ts'], /'product.save'/);
+    const docs = run(['docs', '--contract', 'pen.mjs', '--out', 'out/'], modules);
+    assert.match(docs.files[path.join('out', 'pen.md')], /^# pen\n/);
+    const openapi = run(['openapi', '--contract', 'pen.mjs'], modules);
+    assert.strictEqual(openapi.status, 0, openapi.stderr);
+    assert.strictEqual(JSON.parse(openapi.stdout).openapi.startsWith('3.'), true);
+  });
+
+  it('an impure module, a non-document export, an unknown extension and a .ts where types are not stripped exit 2 under the jaren-contract: prefix', () => {
+    const impure = run(['describe', '--contract', 'impure.mjs'], modules);
+    assert.strictEqual(impure.status, 2);
+    assert.match(impure.stderr, /^jaren-contract: the contract module 'impure\.mjs' is not pure — two loads emitted different documents; no clock, no env, no randomness in a contract module/m);
+    const nodoc = run(['describe', '--contract', 'nodoc.mjs'], modules);
+    assert.strictEqual(nodoc.status, 2);
+    assert.match(nodoc.stderr, /jaren-contract: module 'nodoc\.mjs' exports neither a default nor a 'contract' document/);
+    const ext = run(['describe', '--contract', 'shop.txt'], modules);
+    assert.strictEqual(ext.status, 2);
+    assert.match(ext.stderr, /jaren-contract: cannot read contract 'shop\.txt': neither a \.json file nor a module/);
+    const stripped = run(['describe', '--contract', 'typed.ts'], modules);
+    assert.strictEqual(stripped.status, 0, stripped.stderr);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-contract-ts-'));
+    try {
+      modules(dir);
+      const refused = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--no-strip-types', CLI, 'describe', '--contract', 'typed.ts'], { cwd: dir, encoding: 'utf8' });
+      assert.strictEqual(refused.status, 2);
+      assert.match(refused.stderr, /cannot load contract module 'typed\.ts': .* — a \.ts module loads only where Node strips types/);
+    }
+    finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('types --out … --check against the module is the types twin: missing 1, generated 0, current 0, a changed module 1; two ordinary runs are identical and claim nothing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-contract-check-'));
+    const cli = (/** @type {string[]} */ args) => spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: 'utf8' });
+    try {
+      modules(dir);
+      const missing = cli(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts', '--check']);
+      assert.strictEqual(missing.status, 1);
+      assert.match(missing.stderr, /missing: pen\.d\.ts/);
+      const generated = cli(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts']);
+      assert.strictEqual(generated.status, 0, generated.stderr);
+      assert.match(generated.stdout, /wrote pen\.d\.ts/);
+      const before = fs.statSync(path.join(dir, 'pen.d.ts')).mtimeMs;
+      const text = fs.readFileSync(path.join(dir, 'pen.d.ts'), 'utf8');
+      const current = cli(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts', '--check']);
+      assert.strictEqual(current.status, 0, current.stderr);
+      const again = cli(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts']);
+      assert.strictEqual(again.status, 0, again.stderr);
+      assert.strictEqual(again.stdout, '', 'an unchanged output is not claimed as written');
+      assert.strictEqual(fs.statSync(path.join(dir, 'pen.d.ts')).mtimeMs, before, 'an unchanged output is not rewritten');
+      assert.strictEqual(fs.readFileSync(path.join(dir, 'pen.d.ts'), 'utf8'), text);
+      // the module moves: the committed declaration is stale
+      const source = fs.readFileSync(path.join(dir, 'pen.mjs'), 'utf8');
+      fs.writeFileSync(path.join(dir, 'pen.mjs'), source.replace("'catalog.load'", "'catalog.reload'"));
+      const drifted = cli(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts', '--check']);
+      assert.strictEqual(drifted.status, 1);
+      assert.match(drifted.stderr, /out of date: pen\.d\.ts/);
+      assert.strictEqual(fs.readFileSync(path.join(dir, 'pen.d.ts'), 'utf8'), text, '--check never writes');
+    }
+    finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('diff loads both endpoints independently — a module on either side — and names the flag of the one that failed', () => {
+    const ok = run(['diff', '--from', 'shop.json', '--to', 'named.mjs'], modules);
+    assert.strictEqual(ok.status, 0, ok.stderr);
+    const both = run(['diff', '--from', 'default.mjs', '--to', 'pen.mjs', '--fail-on', 'breaking'], modules);
+    assert.strictEqual(both.status, 1, 'the pen drops operations: breaking');
+    const badFrom = run(['diff', '--from', 'impure.mjs', '--to', 'shop.json'], modules);
+    assert.strictEqual(badFrom.status, 2);
+    assert.match(badFrom.stderr, /the --from module 'impure\.mjs' is not pure/);
+    const badTo = run(['diff', '--from', 'shop.json', '--to', 'nope.mjs'], modules);
+    assert.strictEqual(badTo.status, 2);
+    assert.match(badTo.stderr, /cannot load --to module 'nope\.mjs'/);
   });
 });

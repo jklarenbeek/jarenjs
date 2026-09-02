@@ -25,30 +25,21 @@
  * that must buffer hands the buffered items in as `materialize`, named.
  */
 
+import { utf8ByteLength } from '@jarenjs/core/string';
+
 import { DbRuntimeError } from './errors.js';
 import { chain, attempt } from './driver.js';
 
 /**
  * The serialised size of a JSON text in UTF-8 bytes — the one measure
  * every byte bound in this package counts (an include per root, a page,
- * a change record), computed without encoding a copy.
+ * a change record): the suite's counter, re-exported under the name the
+ * engines read.
  * @param {string} text
  * @returns {number}
  */
 export function utf8Length(text) {
-  let bytes = 0;
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      // a surrogate pair is one four-byte code point
-      bytes += 4;
-      i++;
-    }
-    else bytes += 3;
-  }
-  return bytes;
+  return utf8ByteLength(text);
 }
 
 /**

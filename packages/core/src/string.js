@@ -167,6 +167,37 @@ export function countCharCode(str, code, start = 0, end = str.length) {
 }
 
 /**
+ * The UTF-8 byte length of a slice of a string — the one measure every
+ * byte bound in the suite counts (a body limit, a page, a change
+ * record, a parser's record or token limit) — computed without encoding
+ * a copy: one byte below U+0080, two below U+0800, four for a surrogate
+ * pair (one code point), three otherwise; a lone surrogate counts three,
+ * as its replacement would.
+ * @param {string} str
+ * @param {number} [start] - Inclusive start offset (defaults to 0)
+ * @param {number} [end] - Exclusive end offset (defaults to full length)
+ * @returns {number} The UTF-8 bytes of `str[start, end)`
+ */
+export function utf8ByteLength(str, start = 0, end = str.length) {
+  let bytes = 0;
+  for (let i = start; i < end; i++) {
+    const code = str.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < end) {
+      const next = str.charCodeAt(i + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        bytes += 4;
+        i++;
+      }
+      else bytes += 3;
+    }
+    else bytes += 3;
+  }
+  return bytes;
+}
+
+/**
  * Count the Unicode code points of a string (surrogate-pair aware;
  * a lone surrogate counts as one code point).
  * @param {string} str

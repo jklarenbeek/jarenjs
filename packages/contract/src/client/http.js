@@ -16,10 +16,14 @@
  *
  * `invoke` NEVER rejects for anything a server or a network can do; it
  * throws only for the host's own mistakes (`JC1005`: an unknown or
- * opaque operation). `url(op, input)` builds the URL of any operation —
- * what an `<img src>` uses for an opaque one. `negotiate()` asks the
- * server's well-known description whether the two ends speak compatible
- * versions. Everything per operation is decided once at `open`.
+ * opaque operation). `bytes(op, input, ctx)` is the opaque twin: one
+ * request whose success value carries the status, the headers, the
+ * media and the LIVE response body as a `ReadableStream` — never
+ * `text()`, never collected — and whose `ctx.body` streams an upload.
+ * `url(op, input)` builds the URL of any operation — what an `<img src>`
+ * uses for an opaque one. `negotiate()` asks the server's well-known
+ * description whether the two ends speak compatible versions.
+ * Everything per operation is decided once at `open`.
  */
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
@@ -31,12 +35,13 @@ import { createSseEventDecoder } from '@jarenjs/core/text/sse';
 
 import { ContractHostError } from '../errors.js';
 import { resolveHostRuntime } from '../runtime.js';
+import { isReadableStream, isAsyncByteSource } from '../http/body.js';
 import { compatReason } from '../compat.js';
 import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage } from '../http/wire.js';
 import { createStreamConsumer, STREAM_ERRORS } from '../stream/client.js';
 import { STREAM_MEDIA } from '../stream/sse.js';
 import {
-  CLIENT_ERRORS, prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, clientError, outcomeError,
+  CLIENT_ERRORS, prepareOutcomeRoute, assembleOutcome, makeMeta, okOutcome, failedOutcome, clientError, outcomeError,
 } from './outcome.js';
 
 export { CLIENT_ERRORS };
@@ -94,6 +99,30 @@ export { CLIENT_ERRORS };
  */
 
 /**
+ * Per-call context of `bytes` (docs/CONTRACT-FORMAT.md §10.6): the
+ * members of `InvokeContext` that apply to an opaque call — no
+ * idempotency key, an opaque operation carries none — plus `body`, the
+ * request body to send: text, bytes, a Web `ReadableStream`, an async
+ * iterable of `Uint8Array` chunks (pulled one chunk per demand), or
+ * none.
+ * @typedef {Object} ByteContext
+ * @property {AbortSignal} [signal] - cancels the request (`kind: "cancelled"`)
+ * @property {unknown} [attempt] - the caller's attempt id, echoed in `meta.attempt`, never sent
+ * @property {Record<string, string>} [headers] - per-call headers (over the static ones)
+ * @property {string} [ifNoneMatch] - sent as `If-None-Match`
+ * @property {string} [ifMatch] - sent as `If-Match`
+ * @property {string | Uint8Array | ReadableStream<Uint8Array> | AsyncIterable<Uint8Array> | null} [body] - the request body
+ */
+
+/**
+ * The success value of `bytes`: the status, the response headers
+ * (lowercase names), the response media (`content-type`, or `null`) and
+ * the LIVE body — a `ReadableStream` the caller reads, never collected
+ * by the client; `null` when the response carries none (a 304, a 204).
+ * @typedef {{ status: number, headers: Record<string, string>, media: string | null, body: ReadableStream<Uint8Array> | null }} ByteResponse
+ */
+
+/**
  * The negotiation result.
  * @typedef {Object} Negotiation
  * @property {boolean} compatible
@@ -119,19 +148,36 @@ export { CLIENT_ERRORS };
 /**
  * The options of one `subscribe` call (docs/CONTRACT-FORMAT.md §19).
  * @typedef {Object} SubscribeOptions
- * @property {(value: unknown, info: { seq: number, resumed: boolean }) => void} [onSnapshot]
+ * @property {(value: unknown, info: { seq: number, resumed: boolean, reset: boolean, earliestAvailable: number | null, highWatermark: number | null }) => void} [onSnapshot]
  * @property {(emission: { patch: unknown[], seq: number }) => void} [onPatch]
  * @property {(outcome: Outcome) => void} [onError]
  * @property {(info: { reason: string }) => void} [onEnd]
  * @property {AbortSignal} [signal] - stops the subscription silently
- * @property {number} [lastSeq] - the resume seq (what a reconnect passes)
+ * @property {number} [lastSeq] - the resume seq (what a re-entered subscribe passes)
+ * @property {{ max: number }} [reconnect] - opt into re-establishing the
+ *   stream after a network loss: at most `max` further attempts, each
+ *   after the retry backoff and from the last delivered seq; the budget
+ *   spent, `onError` gets one `JC2097`. Absent (or `max: 0`), a network
+ *   outcome is delivered as is
+ */
+
+/**
+ * A live subscription (docs/CONTRACT-FORMAT.md §19): `stop()` releases
+ * it silently; `lastSeq` is the last delivered seq — `null` before the
+ * first, the passed `lastSeq` until an event moves it — what a
+ * re-entered `subscribe` passes.
+ * @typedef {Object} Subscription
+ * @property {() => void} stop
+ * @property {number | null} lastSeq - read-only
  */
 
 /**
  * The client — the binding-agnostic shape every client binding exposes.
  * @typedef {Object} HttpClient
  * @property {(op: string, input?: unknown, ctx?: InvokeContext) => Promise<Outcome>} invoke
- * @property {(op: string, input?: unknown, options?: SubscribeOptions) => { stop: () => void }} subscribe
+ * @property {(op: string, input?: unknown, ctx?: ByteContext) => Promise<Outcome>} bytes - an
+ *   opaque operation: the outcome's value is a {@link ByteResponse} (§10.6)
+ * @property {(op: string, input?: unknown, options?: SubscribeOptions) => Subscription} subscribe
  * @property {(op: string, input?: unknown) => string} url
  * @property {(options?: { signal?: AbortSignal }) => Promise<Negotiation>} negotiate
  * @property {() => Promise<{ op: string, key: string }[]>} pending - the key records a restart must reconcile
@@ -386,6 +432,18 @@ export function openHttpClient(contract, options = {}) {
   };
   const keys = options.keys === undefined ? runtime.uuid : options.keys;
   const sleep = options.sleep === undefined ? defaultSleep : options.sleep;
+
+  /**
+   * The backoff before further attempt `n` (0-based): 1,000 × 2^n ms
+   * capped at `BACKOFF_MAX`, plus 0–249 ms of jitter drawn from the
+   * runtime's `random` — the one formula of `invoke`'s retry and
+   * `subscribe`'s reconnect.
+   * @param {number} n
+   * @returns {number}
+   */
+  function backoffDelay(n) {
+    return Math.min(1000 * 2 ** n, BACKOFF_MAX) + Math.floor(hostFact('random', runtime.random) * BACKOFF_JITTER);
+  }
   const now = options.now === undefined ? runtime.now : options.now;
   /** @type {Catalog | null} */
   const catalog = options.catalog === undefined ? null : compileMessageCatalog(options.catalog);
@@ -790,7 +848,7 @@ export function openHttpClient(contract, options = {}) {
     for (;;) {
       outcome = await send(route, url, headers, body, ctx, signal);
       if (route.retry === null || n >= route.retry.max || !retryable(route, outcome)) break;
-      const delay = Math.min(1000 * 2 ** n, BACKOFF_MAX) + Math.floor(hostFact('random', runtime.random) * BACKOFF_JITTER);
+      const delay = backoffDelay(n);
       n++;
       try {
         await sleep(delay, signal === null ? undefined : signal);
@@ -816,17 +874,194 @@ export function openHttpClient(contract, options = {}) {
   }
 
   /**
+   * The lowercase header table of a platform response, read guardedly.
+   * @param {any} response
+   * @returns {Record<string, string>}
+   */
+  function responseHeaders(response) {
+    /** @type {Record<string, string>} */
+    const out = {};
+    const h = response.headers;
+    if (h !== null && typeof h === 'object' && typeof h.forEach === 'function') {
+      h.forEach((/** @type {string} */ value, /** @type {string} */ name) => { setObjectMember(out, String(name).toLowerCase(), String(value)); });
+    }
+    return out;
+  }
+
+  /**
+   * The request body of a byte call as `fetch` takes it: text and bytes
+   * pass; a Web stream passes; an async iterable of chunks is wrapped
+   * in a `ReadableStream` that pulls one chunk per demand and cancels
+   * the iterator once. Anything else is the host's mistake.
+   * @param {unknown} body
+   * @returns {{ init: any, streamed: boolean }}
+   */
+  function uploadBody(body) {
+    if (body === undefined || body === null) return { init: undefined, streamed: false };
+    if (typeof body === 'string' || body instanceof Uint8Array) return { init: body, streamed: false };
+    if (isReadableStream(body)) return { init: body, streamed: true };
+    if (isAsyncByteSource(body)) {
+      /** @type {AsyncIterator<Uint8Array> | null} */
+      let iterator = null;
+      let cancelled = false;
+      const stream = new ReadableStream({
+        async pull(controller) {
+          if (iterator === null) iterator = body[Symbol.asyncIterator]();
+          let r;
+          try {
+            r = await iterator.next();
+          }
+          catch (err) {
+            controller.error(err);
+            return;
+          }
+          if (r.done) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(r.value);
+        },
+        async cancel() {
+          if (cancelled) return;
+          cancelled = true;
+          if (iterator !== null && typeof iterator.return === 'function') {
+            try {
+              await iterator.return();
+            }
+            catch {
+              // the upstream refused its cancel; it is gone either way
+            }
+          }
+        },
+      }, { highWaterMark: 0 });
+      return { init: stream, streamed: true };
+    }
+    throw host('JC1008', 'bytes(): ctx.body must be a string, a Uint8Array, a ReadableStream, an async iterable of Uint8Array chunks, or null');
+  }
+
+  /**
+   * Call an opaque operation and expose its response as bytes
+   * (docs/CONTRACT-FORMAT.md §10.6): one request, no retry, and on a
+   * 2xx the LIVE response body — a `ReadableStream` the caller reads,
+   * never collected here. `ctx.body` is the request body to send.
+   * @param {string} op
+   * @param {unknown} [input]
+   * @param {ByteContext} [ctx]
+   * @returns {Promise<Outcome>}
+   * @throws {ContractHostError} `JC1005` for a JSON operation (use `invoke`), `JC1008` for a malformed context
+   */
+  async function bytes(op, input, ctx = {}) {
+    const route = routeOf(op);
+    if (!route.opaque) {
+      throw new ContractHostError('JC1005', `client: '${route.id}' is a JSON operation (media ${route.media}); bytes carries opaque operations only — use invoke`);
+    }
+    if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
+    const meta = newMeta(route.id, ctx.attempt);
+    const signal = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
+
+    // 1. validate — the transport members are the whole input of an opaque operation
+    let value;
+    if (!route.hasInput) {
+      if (input !== undefined && input !== null) return invalidInput(route, meta, [{ path: '', keyword: 'input' }]);
+      value = null;
+    }
+    else {
+      value = inputValue(input);
+      const v = verdict(/** @type {(value: unknown) => any} */ (route.validateInput), value);
+      if (!v.valid) return invalidInput(route, meta, projectValidationDetails(route.details, v.errors));
+    }
+
+    // 2. the request line and the headers
+    let url;
+    let headers;
+    try {
+      url = baseUrl + pathOf(route, value === null ? {} : value);
+      headers = headersOf(route, value === null ? {} : value, ctx);
+    }
+    catch {
+      return invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]);
+    }
+    const upload = uploadBody(ctx.body);
+    if (upload.init !== undefined && headers['content-type'] === undefined) headers['content-type'] = route.media;
+    if ((signal !== null && signal.aborted) || closed) return cancelled(route, meta);
+
+    // 3. one request; a streamed upload needs the half-duplex flag
+    /** @type {any} */
+    const init = { method: route.method, headers, signal: composeSignal(signal) };
+    if (upload.init !== undefined) {
+      init.body = upload.init;
+      if (upload.streamed) init.duplex = 'half';
+    }
+    let response;
+    try {
+      response = await fetchFn(url, init);
+    }
+    catch (err) {
+      return rejected(route, err, signal, meta);
+    }
+
+    // 4. the answer: a 2xx exposes the live body; anything else classifies through the error envelope
+    let status;
+    /** @type {Record<string, string>} */
+    let responseHeaderTable;
+    try {
+      status = response.status;
+      responseHeaderTable = responseHeaders(response);
+    }
+    catch (err) {
+      return rejected(route, err, signal, meta);
+    }
+    if (!Number.isInteger(status) || status < 100 || status > 599) {
+      return failedOutcome('contract', clientError(catalog, 'JC2053', { op: route.id }, null, [{ path: '', keyword: 'status' }]), meta);
+    }
+    const trace = responseHeaderTable['x-jaren-trace'];
+    if (typeof trace === 'string' && trace.length > 0) meta.trace = trace;
+    const etag = responseHeaderTable.etag;
+    if (status === 304) {
+      meta.etag = typeof etag === 'string' && etag.length > 0 ? etag : null;
+      meta.notModified = true;
+      return okOutcome({ status, headers: responseHeaderTable, media: null, body: null }, meta);
+    }
+    if (status >= 200 && status <= 299) {
+      meta.etag = typeof etag === 'string' && etag.length > 0 ? etag : null;
+      const body = /** @type {any} */ (response).body;
+      const media = responseHeaderTable['content-type'];
+      return okOutcome({
+        status,
+        headers: responseHeaderTable,
+        media: typeof media === 'string' && media.length > 0 ? media : null,
+        body: body === undefined || body === null ? null : body,
+      }, meta);
+    }
+    let text = null;
+    try {
+      text = await response.text();
+    }
+    catch (err) {
+      return rejected(route, err, signal, meta);
+    }
+    return assembleOutcome(route.outcome, { status, headers: etag === undefined ? null : { etag }, text }, meta, catalog);
+  }
+
+  /**
    * Subscribe to a subscribe operation's stream (docs/CONTRACT-FORMAT.md
    * §19): one `GET` with `accept: text/event-stream`, the SSE events
    * decoded and delivered through the callbacks; snapshots validated
    * against the output schema, `seq` strictly increasing (`JC2092`),
    * silence beyond `2 × heartbeatMs` a `JC2094` network outcome.
-   * Reconnection is the caller's: pass the last delivered seq as
-   * `lastSeq`.
+   * `reconnect: { max }` opts into re-establishing the stream after a
+   * network loss — a fetch rejection (`JC2051`), a missed heartbeat
+   * (`JC2094`), the server's `JC2096`, or a body that ends before an
+   * `end` event — up to `max` times, each attempt after the shared
+   * backoff and from the last delivered seq, no callback in between;
+   * the budget spent, `onError` gets one `JC2097`. Without it a network
+   * outcome is delivered as is and re-entering is the caller's (pass
+   * `lastSeq`). A declared failure, a contract outcome, the server's
+   * `end`, `stop()` and the signal are terminal on every setting.
    * @param {string} op
    * @param {unknown} [input]
    * @param {SubscribeOptions} [options]
-   * @returns {{ stop: () => void }}
+   * @returns {Subscription}
    * @throws {ContractHostError} `JC1010` for a non-subscribe operation, `JC1008` for a malformed option
    */
   function subscribe(op, input, options = {}) {
@@ -845,201 +1080,321 @@ export function openHttpClient(contract, options = {}) {
       if (!Number.isInteger(options.lastSeq) || options.lastSeq < 0) throw host('JC1008', 'options.lastSeq must be a non-negative integer');
       lastSeq = options.lastSeq;
     }
+    let reconnectMax = 0;
+    if (options.reconnect !== undefined && options.reconnect !== null) {
+      const r = /** @type {any} */ (options.reconnect);
+      if (typeof r !== 'object' || !Number.isInteger(r.max) || r.max < 0) {
+        throw host('JC1008', 'options.reconnect must be { max } with a non-negative integer number of further attempts');
+      }
+      reconnectMax = r.max;
+    }
     const signal = options.signal === undefined || options.signal === null ? null : options.signal;
     const meta = newMeta(route.id, null);
     const streamPolicy = route.op.policy.stream;
     const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;
+    const callbacks = { onSnapshot: options.onSnapshot, onPatch: options.onPatch, onError: options.onError, onEnd: options.onEnd };
 
+    // one subscription across every transport attempt: `controller` is
+    // its stop, `attempts` the further attempts made, `current` the
+    // consumer of the attempt in flight (the seq getter reads it)
     const controller = new AbortController();
-    const composed = signal === null
+    const base = signal === null
       ? AbortSignal.any([closer.signal, controller.signal])
       : AbortSignal.any([closer.signal, controller.signal, signal]);
-    /** @type {ReadableStreamDefaultReader<Uint8Array> | null} */
-    let reader = null;
-    /** @type {ReturnType<typeof setTimeout> | 0} */
-    let watchdog = 0;
+    let attempts = 0;
+    let stopped = false;
+    /** @type {ReturnType<typeof createStreamConsumer> | null} */
+    let current = null;
 
-    const consumer = createStreamConsumer({
-      route: route.outcome,
-      catalog,
-      meta,
-      callbacks: { onSnapshot: options.onSnapshot, onPatch: options.onPatch, onError: options.onError, onEnd: options.onEnd },
-      finish: () => {
+    /** Whether a network loss of the attempt in flight is answered by a further attempt. */
+    function mayReconnect() {
+      return attempts < reconnectMax && !stopped && !closed && !base.aborted;
+    }
+
+    /**
+     * Release a response body the subscription will not read, or the
+     * transport keeps the connection reserved for a read that never comes.
+     * @param {any} body
+     */
+    function discard(body) {
+      try {
+        if (body !== null && body !== undefined && typeof body.cancel === 'function') {
+          Promise.resolve(body.cancel()).catch(() => {});
+        }
+      }
+      catch {
+        // release is best-effort; the outcome is the answer
+      }
+    }
+
+    /**
+     * A network failure of this attempt's request or read.
+     * @param {unknown} err
+     * @returns {Outcome}
+     */
+    function lost(err) {
+      return failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta);
+    }
+
+    /**
+     * One transport attempt from `resumeSeq`: a consumer, a request, a
+     * reader and a watchdog of its own — a stale attempt's settlements
+     * touch nothing of a newer one. Resolves with the network code that
+     * ended it when a further attempt follows, else `null`: the attempt
+     * ended finally (an outcome delivered, the server's end, a cancel).
+     * @param {number | null} resumeSeq
+     * @returns {Promise<string | null>}
+     */
+    function attempt(resumeSeq) {
+      /** @type {PromiseWithResolvers<string | null>} */
+      const settled = Promise.withResolvers();
+      const own = new AbortController();
+      const composed = AbortSignal.any([base, own.signal]);
+      /** @type {ReadableStreamDefaultReader<Uint8Array> | null} */
+      let reader = null;
+      /** @type {ReturnType<typeof setTimeout> | 0} */
+      let watchdog = 0;
+
+      const consumer = createStreamConsumer({
+        route: route.outcome,
+        catalog,
+        meta,
+        callbacks: {
+          onSnapshot: callbacks.onSnapshot,
+          onPatch: callbacks.onPatch,
+          onEnd: (info) => {
+            settled.resolve(null);
+            if (callbacks.onEnd !== undefined) callbacks.onEnd(info);
+          },
+          onError: (outcome) => {
+            if (outcome.kind !== 'network' || reconnectMax === 0) {
+              settled.resolve(null);
+              if (callbacks.onError !== undefined) callbacks.onError(outcome);
+              return;
+            }
+            if (mayReconnect()) {
+              // an intermediate loss: answered by the next attempt, never delivered
+              settled.resolve(outcome.error.code);
+              return;
+            }
+            settled.resolve(null);
+            const details = { attempts, lastCode: outcome.error.code };
+            if (callbacks.onError !== undefined) {
+              callbacks.onError(failedOutcome('network', outcomeError('JC2097',
+                renderMessage(catalog, STREAM_ERRORS.JC2097.msgid, { op: route.id, ...details }), null, details, false), meta));
+            }
+          },
+        },
+        finish: () => {
+          if (watchdog !== 0) clearTimeout(watchdog);
+          watchdog = 0;
+          if (reader !== null) reader.cancel().catch(() => {});
+        },
+        lastSeq: resumeSeq,
+      });
+      current = consumer;
+
+      /** Push the silence watchdog forward: any bytes count as life. */
+      function resetWatchdog() {
         if (watchdog !== 0) clearTimeout(watchdog);
-        watchdog = 0;
-        if (reader !== null) reader.cancel().catch(() => {});
-      },
-      lastSeq,
-    });
+        watchdog = setTimeout(() => {
+          consumer.fail(failedOutcome('network',
+            outcomeError('JC2094', renderMessage(catalog, STREAM_ERRORS.JC2094.msgid, { op: route.id, ms: 2 * heartbeatMs }), null, null, true), meta));
+          own.abort();
+        }, 2 * heartbeatMs);
+        /** @type {any} */ (watchdog).unref?.();
+      }
 
-    /** Push the silence watchdog forward: any bytes count as life. */
-    function resetWatchdog() {
-      if (watchdog !== 0) clearTimeout(watchdog);
-      watchdog = setTimeout(() => {
-        consumer.fail(failedOutcome('network',
-          outcomeError('JC2094', renderMessage(catalog, STREAM_ERRORS.JC2094.msgid, { op: route.id, ms: 2 * heartbeatMs }), null, null, true), meta));
-        controller.abort();
-      }, 2 * heartbeatMs);
-      /** @type {any} */ (watchdog).unref?.();
-    }
-
-    /** @param {import('@jarenjs/core/text/sse').SseEvent} ev */
-    function deliver(ev) {
-      const parsed = ev.id === null ? NaN : Number.parseInt(ev.id, 10);
-      const seq = Number.isFinite(parsed) ? parsed : null;
-      let data;
-      try {
-        data = JSON.parse(ev.data);
-      }
-      catch {
-        data = undefined;
-      }
-      switch (ev.event) {
-        case 'snapshot':
-          consumer.snapshot(seq, data);
-          break;
-        case 'patch':
-          consumer.patch(seq, data);
-          break;
-        case 'error':
-          consumer.error(data);
-          break;
-        case 'end':
-          consumer.end(data);
-          break;
-        // an unknown event name is ignored — SSE's forward compatibility
-      }
-    }
-
-    (async () => {
-      if (closed || (signal !== null && signal.aborted)) {
-        consumer.cancel();
-        return;
-      }
-      // 1. validate before anything is sent — the shared pre-send refusal
-      let value;
-      if (!route.hasInput) {
-        if (input !== undefined && input !== null) {
-          consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'input' }]));
-          return;
-        }
-        value = {};
-      }
-      else {
-        value = inputValue(input);
-        const v = verdict(/** @type {(value: unknown) => any} */ (route.validateInput), value);
-        if (!v.valid) {
-          consumer.fail(invalidInput(route, meta, projectValidationDetails(route.details, v.errors)));
-          return;
-        }
-      }
-      // 2. the request
-      let requestUrl;
-      try {
-        requestUrl = baseUrl + pathOf(route, value);
-      }
-      catch {
-        consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]));
-        return;
-      }
-      /** @type {Record<string, string>} */
-      const requestHeaders = { ...staticHeaders, accept: STREAM_MEDIA };
-      if (lastSeq !== null) requestHeaders['last-event-id'] = String(lastSeq);
-      let response;
-      try {
-        response = await fetchFn(requestUrl, { method: 'GET', headers: requestHeaders, signal: composed });
-      }
-      catch (err) {
-        if (consumer.finished()) return;
-        if (composed.aborted || safeName(err) === 'AbortError') consumer.cancel();
-        else consumer.fail(failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta));
-        return;
-      }
-      // 3. the answer must be a 200 event stream — anything else classifies
-      let status;
-      let contentType = null;
-      try {
-        status = response.status;
-        const h = response.headers;
-        if (h !== null && typeof h === 'object' && typeof h.get === 'function') {
-          contentType = h.get('content-type');
-          const t = h.get('x-jaren-trace');
-          if (typeof t === 'string' && t.length > 0) meta.trace = t;
-        }
-      }
-      catch (err) {
-        if (!consumer.finished()) consumer.fail(failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta));
-        return;
-      }
-      if (!Number.isInteger(status) || status < 200 || status > 299) {
-        let text = null;
+      /** @param {import('@jarenjs/core/text/sse').SseEvent} ev */
+      function deliver(ev) {
+        const parsed = ev.id === null ? NaN : Number.parseInt(ev.id, 10);
+        const seq = Number.isFinite(parsed) ? parsed : null;
+        let data;
         try {
-          text = await response.text();
+          data = JSON.parse(ev.data);
         }
         catch {
-          text = null;
+          data = undefined;
         }
-        consumer.fail(assembleOutcome(route.outcome, { status, headers: null, text }, meta, catalog));
-        return;
+        switch (ev.event) {
+          case 'snapshot':
+            consumer.snapshot(seq, data);
+            break;
+          case 'patch':
+            consumer.patch(seq, data);
+            break;
+          case 'error':
+            consumer.error(data);
+            break;
+          case 'end':
+            consumer.end(data);
+            break;
+          // an unknown event name is ignored — SSE's forward compatibility
+        }
       }
-      const body = /** @type {any} */ (response).body;
-      if (typeof contentType !== 'string' || contentType.toLowerCase().indexOf(STREAM_MEDIA) === -1
-        || body === null || body === undefined || typeof body.getReader !== 'function') {
-        // a refused stream still holds a live response body; release it,
-        // or the transport keeps the connection reserved for a read that
-        // will never come
-        try {
-          if (body !== null && body !== undefined && typeof body.cancel === 'function') {
-            Promise.resolve(body.cancel()).catch(() => {});
+
+      (async () => {
+        if (closed || stopped || base.aborted) {
+          consumer.cancel();
+          return null;
+        }
+        // 1. validate before anything is sent — the shared pre-send refusal
+        let value;
+        if (!route.hasInput) {
+          if (input !== undefined && input !== null) {
+            consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'input' }]));
+            return null;
+          }
+          value = {};
+        }
+        else {
+          value = inputValue(input);
+          const v = verdict(/** @type {(value: unknown) => any} */ (route.validateInput), value);
+          if (!v.valid) {
+            consumer.fail(invalidInput(route, meta, projectValidationDetails(route.details, v.errors)));
+            return null;
           }
         }
-        catch {
-          // cancellation is best-effort; the outcome below is the answer
+        // 2. the request, from the cursor
+        let requestUrl;
+        try {
+          requestUrl = baseUrl + pathOf(route, value);
         }
-        consumer.fail(failedOutcome('contract',
-          outcomeError('JC2090', renderMessage(catalog, STREAM_ERRORS.JC2090.msgid, { op: route.id }), status, null, false), meta));
-        return;
-      }
-      // 4. the event loop under the silence watchdog
-      reader = body.getReader();
-      const textDecoder = new TextDecoder();
-      const sse = createSseEventDecoder();
-      resetWatchdog();
-      try {
-        for (;;) {
-          const { done, value: chunk } = await reader.read();
-          if (done) break;
-          if (consumer.finished()) return;
-          resetWatchdog();
-          for (const ev of sse.feed(textDecoder.decode(chunk, { stream: true }))) {
+        catch {
+          consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]));
+          return null;
+        }
+        /** @type {Record<string, string>} */
+        const requestHeaders = { ...staticHeaders, accept: STREAM_MEDIA };
+        if (resumeSeq !== null) requestHeaders['last-event-id'] = String(resumeSeq);
+        let response;
+        try {
+          response = await fetchFn(requestUrl, { method: 'GET', headers: requestHeaders, signal: composed });
+        }
+        catch (err) {
+          if (consumer.finished()) return null;
+          if (composed.aborted || safeName(err) === 'AbortError') consumer.cancel();
+          else consumer.fail(lost(err));
+          return null;
+        }
+        if (consumer.finished()) {
+          // stopped while the request was in flight: the answer is nobody's
+          discard(/** @type {any} */ (response)?.body);
+          return null;
+        }
+        // 3. the answer must be a 200 event stream — anything else classifies
+        let status;
+        let contentType = null;
+        try {
+          status = response.status;
+          const h = response.headers;
+          if (h !== null && typeof h === 'object' && typeof h.get === 'function') {
+            contentType = h.get('content-type');
+            const t = h.get('x-jaren-trace');
+            if (typeof t === 'string' && t.length > 0) meta.trace = t;
+          }
+        }
+        catch (err) {
+          consumer.fail(lost(err));
+          return null;
+        }
+        if (!Number.isInteger(status) || status < 200 || status > 299) {
+          let text = null;
+          try {
+            text = await response.text();
+          }
+          catch {
+            text = null;
+          }
+          consumer.fail(assembleOutcome(route.outcome, { status, headers: null, text }, meta, catalog));
+          return null;
+        }
+        const body = /** @type {any} */ (response).body;
+        if (typeof contentType !== 'string' || contentType.toLowerCase().indexOf(STREAM_MEDIA) === -1
+          || body === null || body === undefined || typeof body.getReader !== 'function') {
+          // a refused stream still holds a live response body
+          discard(body);
+          consumer.fail(failedOutcome('contract',
+            outcomeError('JC2090', renderMessage(catalog, STREAM_ERRORS.JC2090.msgid, { op: route.id }), status, null, false), meta));
+          return null;
+        }
+        // 4. the event loop under the silence watchdog
+        reader = body.getReader();
+        const textDecoder = new TextDecoder();
+        const sse = createSseEventDecoder();
+        resetWatchdog();
+        try {
+          for (;;) {
+            const { done, value: chunk } = await reader.read();
+            if (done) break;
+            if (consumer.finished()) return null;
+            resetWatchdog();
+            for (const ev of sse.feed(textDecoder.decode(chunk, { stream: true }))) {
+              deliver(ev);
+              if (consumer.finished()) return null;
+            }
+          }
+          for (const ev of sse.end()) {
             deliver(ev);
-            if (consumer.finished()) return;
+            if (consumer.finished()) return null;
           }
+          // a body that ends without an end event: a network loss under a
+          // reconnect policy, otherwise reported as closed
+          if (reconnectMax > 0) consumer.fail(lost({ name: 'EOF' }));
+          else consumer.end(undefined);
         }
-        for (const ev of sse.end()) {
-          deliver(ev);
-          if (consumer.finished()) return;
+        catch (err) {
+          if (consumer.finished()) return null;
+          if (composed.aborted || safeName(err) === 'AbortError') consumer.cancel();
+          else consumer.fail(lost(err));
         }
-        // a stream that ends without an end event is reported as closed
-        consumer.end(undefined);
-      }
-      catch (err) {
-        if (consumer.finished()) return;
-        if (composed.aborted || safeName(err) === 'AbortError') consumer.cancel();
-        else consumer.fail(failedOutcome('network', clientError(catalog, 'JC2051', { op: route.id, name: safeName(err) ?? typeof err }, null, undefined), meta));
-      }
-      finally {
-        if (watchdog !== 0) clearTimeout(watchdog);
-        watchdog = 0;
-      }
-    })();
+        finally {
+          if (watchdog !== 0) clearTimeout(watchdog);
+          watchdog = 0;
+        }
+        return null;
+      })().catch(() => {}).finally(() => {
+        // a network loss resolved the code from inside the consumer; every
+        // other way out of this attempt is final
+        settled.resolve(null);
+      });
+      return settled.promise;
+    }
 
-    return {
+    /**
+     * Drive the attempts: a further one after each network loss the
+     * budget admits, from the last delivered seq, after the backoff.
+     */
+    async function drive() {
+      let resumeSeq = lastSeq;
+      for (;;) {
+        // attempt() resolves its own promise; the returned value is the
+        // network code the consumer answered with, `null` when final
+        const code = await attempt(resumeSeq);
+        if (code === null) return;
+        attempts += 1;
+        try {
+          await sleep(backoffDelay(attempts - 1), base);
+        }
+        catch {
+          return; // stopped, closed or aborted during the backoff: silent, the caller asked
+        }
+        if (stopped || closed || base.aborted) return;
+        resumeSeq = /** @type {ReturnType<typeof createStreamConsumer>} */ (current).lastSeq();
+      }
+    }
+    drive().catch(() => {});
+
+    return Object.freeze({
       stop: () => {
-        consumer.cancel();
+        stopped = true;
+        if (current !== null) current.cancel();
         controller.abort();
       },
-    };
+      get lastSeq() {
+        return current === null ? lastSeq : current.lastSeq();
+      },
+    });
   }
 
   /**
@@ -1168,6 +1523,7 @@ export function openHttpClient(contract, options = {}) {
 
   return Object.freeze({
     invoke,
+    bytes,
     subscribe,
     url,
     negotiate,

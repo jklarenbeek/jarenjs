@@ -79,7 +79,9 @@ import {
 } from '@jarenjs/core/scan';
 
 import { JsonxSyntaxError } from './errors.js';
+import { JoslLimitError, limitOption } from './limits.js';
 import { setObjectMember } from '@jarenjs/core/object';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import {
   isValueEndCode,
   decodeString,
@@ -154,6 +156,13 @@ export class JsonxMachine {
     this.onEvent = options.onEvent ?? null;
     this.partialText = options.partialText === true;
     this.detach = options.detach === undefined ? null : detachPattern(options.detach);
+    // the hostile-input limits: Infinity unless asked for (limits.js)
+    this.maxTotalBytes = limitOption(options, 'maxTotalBytes');
+    this.maxTokenBytes = limitOption(options, 'maxTokenBytes');
+    this.maxDepth = limitOption(options, 'maxDepth');
+    this.maxRetainedValues = limitOption(options, 'maxRetainedValues');
+    this.totalBytes = 0;
+    this.retained = 0; // values linked into the tree
     this.partialFrom = -1; // body offset the next text-partial delta starts at
     this.partialHold = ''; // lone high surrogate held back for the next delta
     this.buf = '';
@@ -188,10 +197,36 @@ export class JsonxMachine {
     if (this.ended)
       throw new Error('cannot feed after end()');
     if (chunk.length !== 0) {
+      if (this.maxTotalBytes !== Infinity) {
+        this.totalBytes += utf8ByteLength(chunk);
+        if (this.totalBytes > this.maxTotalBytes)
+          throw new JoslLimitError('JSONX2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, this.curLine);
+      }
+      if (this.maxTokenBytes !== Infinity && this.scanPos >= 0) {
+        // a token still being scanned grows by this chunk: refused
+        // before the concatenation that would hold it
+        const pending = utf8ByteLength(this.buf, this.pos, this.buf.length) + utf8ByteLength(chunk);
+        if (pending > this.maxTokenBytes)
+          throw new JoslLimitError('JSONX2002', 'a token exceeds maxTokenBytes', this.maxTokenBytes, this.curLine);
+      }
       this.buf += chunk;
       this.pump();
     }
     return this;
+  }
+
+  // A token whose extent is known, judged before it is decoded.
+  token(buf, start, end) {
+    if (this.maxTokenBytes !== Infinity && utf8ByteLength(buf, start, end) > this.maxTokenBytes)
+      throw new JoslLimitError('JSONX2002', 'a token exceeds maxTokenBytes', this.maxTokenBytes, this.curLine);
+  }
+
+  // One more value linked into the tree, judged before the link. A
+  // detached value is never linked and never counted: that is what
+  // detaching means.
+  retain() {
+    if (++this.retained > this.maxRetainedValues)
+      throw new JoslLimitError('JSONX2004', 'the root retains more than maxRetainedValues values', this.maxRetainedValues, this.curLine);
   }
 
   /**
@@ -301,6 +336,7 @@ export class JsonxMachine {
           const end = this.scanString(buf, pos);
           if (end < 0)
             break pumping;
+          this.token(buf, pos, end);
           this.stack[this.stack.length - 1].key = decodeString(buf, pos, this.errCb)[0];
           this.state = ST_COLON;
           pos = end;
@@ -394,6 +430,7 @@ export class JsonxMachine {
           this.emitPartialText(buf, pos, buf.length, true);
         return -1;
       }
+      this.token(buf, pos, end);
       const value = decodeString(buf, pos, this.errCb)[0];
       if (this.partialText) {
         // the closing delta completes the run, so the deltas for a string
@@ -408,8 +445,10 @@ export class JsonxMachine {
     if (c === CC_SLASH) {
       if (this.mode === 'json')
         this.errAt(pos, 'a regexp literal is a JSONX extension', 'quote the pattern as a string');
-      if (this.scanRegExp(buf, pos) < 0)
+      const scanned = this.scanRegExp(buf, pos);
+      if (scanned < 0)
         return -1;
+      this.token(buf, pos, scanned);
       const [re, end] = matchRegExp(buf, pos, this.errCb);
       this.checkValueEnd(buf, end);
       this.completeScalar(re);
@@ -420,6 +459,7 @@ export class JsonxMachine {
     const end = this.scanScalar(buf, pos);
     if (end < 0)
       return -1;
+    this.token(buf, pos, end);
     return this.decodeScalarToken(buf, pos, c);
   }
 
@@ -525,9 +565,13 @@ export class JsonxMachine {
       const index = frame.count++;
       // A detached scalar is not stored: the `item` event below already
       // carries it, so linking it in would retain exactly what the
-      // caller asked not to retain.
-      if (!this.detaches(index))
+      // caller asked not to retain. A value inside a detached subtree is
+      // linked into that subtree, which the root never holds: not counted.
+      if (!this.detaches(index)) {
+        if (!frame.detached)
+          this.retain();
         frame.value[index] = value;
+      }
       if (this.onEvent !== null)
         this.onEvent({
           type: 'item',
@@ -539,8 +583,11 @@ export class JsonxMachine {
       this.state = ST_ARR_NEXT;
     }
     else {
-      if (!this.detaches(frame.key))
+      if (!this.detaches(frame.key)) {
+        if (!frame.detached)
+          this.retain();
         setObjectMember(frame.value, frame.key, value);
+      }
       if (this.onEvent !== null)
         this.onEvent({
           type: 'pair',
@@ -561,7 +608,12 @@ export class JsonxMachine {
   openContainer(isArray) {
     const container = isArray ? [] : {};
     const stack = this.stack;
+    if (stack.length + 1 > this.maxDepth)
+      throw new JoslLimitError('JSONX2003', 'the document nests deeper than maxDepth', this.maxDepth, this.curLine);
     const parent = stack.length !== 0 ? stack[stack.length - 1] : null;
+    // whether this container lives outside the root: detached itself, or
+    // inside a detached subtree — nothing linked into it counts as retained
+    let detached = parent !== null && parent.detached;
     if (parent === null)
       this.rootValue = container;
     else if (parent.array) {
@@ -571,13 +623,23 @@ export class JsonxMachine {
       // so the memory is not freed later — it is not held in the first
       // place, and a document with a million records never builds a
       // million-slot array either.
-      if (!this.detaches(index))
+      if (this.detaches(index))
+        detached = true;
+      else {
+        if (!detached)
+          this.retain();
         parent.value[index] = container;
+      }
       this.path.push(index);
     }
     else {
-      if (!this.detaches(parent.key))
+      if (this.detaches(parent.key))
+        detached = true;
+      else {
+        if (!detached)
+          this.retain();
         setObjectMember(parent.value, parent.key, container);
+      }
       this.path.push(parent.key);
     }
     stack.push({
@@ -586,6 +648,7 @@ export class JsonxMachine {
       key: undefined,
       count: 0,
       pathed: parent !== null,
+      detached,
     });
     if (this.onEvent !== null)
       this.onEvent({
@@ -802,5 +865,6 @@ export async function parseJsonxStream(chunks, options = undefined) {
 }
 
 export { JsonxSyntaxError } from './errors.js';
+export { JoslLimitError, JSONX_LIMIT_CODES } from './limits.js';
 
 //#endregion

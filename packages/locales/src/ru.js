@@ -185,6 +185,8 @@ export const ru = {
   'contract/seq-regression': 'поток операции {op} нарушил порядок своих seq',
   'contract/stream-error': 'поток операции {op} завершился ошибкой сервера ({code})',
   'contract/heartbeat-missed': 'поток операции {op} молчал {ms} мс',
+  'contract/slow-consumer': 'поток операции {op} завершён: потребитель отстал от своей ограниченной очереди',
+  'contract/reconnect-exhausted': 'поток операции {op} не удалось восстановить после {attempts} попыток (последняя: {lastCode})',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

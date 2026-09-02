@@ -250,8 +250,10 @@ function needsQuoteTester(delimiter, quote) {
 
 /**
  * Render one value as CSV cell text. `null`/`undefined` become empty,
- * bigints lose the `n` suffix JOSL uses (CSV has no type marks), and the
- * JOSL date classes and `Date` render as ISO-8601.
+ * bigints lose the `n` suffix JOSL uses (CSV has no type marks), the
+ * JOSL date classes and `Date` render as ISO-8601, and a plain object or
+ * an array — a nested document in a flat format — is its JSON text, so
+ * a reader gets the value back instead of `[object Object]`.
  * @param {*} value - The value
  * @returns {string} Cell text, unquoted
  */
@@ -267,6 +269,8 @@ export function formatCsvValue(value) {
   }
   if (value instanceof Date)
     return Number.isNaN(value.getTime()) ? '' : value.toISOString();
+  if (Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+    return JSON.stringify(value);
   // LocalDate / LocalTime / LocalDateTime, and anything else that knows
   // how to render itself
   return String(value);
@@ -301,13 +305,19 @@ export function stringifyCsv(rows, options = {}) {
 }
 
 /**
- * Serialize records as an iterable of chunks, one record at a time, so a
- * large table never exists as a single string.
- * @param {Iterable<Array|object>} rows - Records
+ * The one row formatter behind every CSV writer: the same delimiter,
+ * quote and terminator rules and the same header-once rule, whether
+ * rows arrive as an array, an iterable, an async iterable or one at a
+ * time through the stream writer — so all of them produce byte-identical
+ * text for the same records by construction.
  * @param {object} [options] - Writer options; see `stringifyCsv`
- * @yields {string} One record (or the header) at a time
+ * @returns {{ lines: (row: Array|object) => string[], tail: () => string, fields: () => string[] | null }}
+ *   `lines` formats one record as its line — preceded by the header
+ *   line exactly once, before the first object row — `tail` answers the
+ *   header an explicit field list is still owed when no record was
+ *   ever written, `fields` the columns as decided
  */
-export function* stringifyCsvChunks(rows, options = {}) {
+export function createCsvRowFormatter(options = {}) {
   const delimiter = options.delimiter ?? ',';
   const quote = options.quote ?? '"';
   const newline = options.newline ?? '\r\n';
@@ -321,39 +331,58 @@ export function* stringifyCsvChunks(rows, options = {}) {
       return s;
     return quote + (s.includes(quote) ? s.replaceAll(quote, escaped) : s) + quote;
   };
+  const line = (values) => {
+    let out = '';
+    for (let i = 0; i < values.length; i++)
+      out += (i === 0 ? '' : delimiter) + cell(values[i]);
+    return out + newline;
+  };
 
   let fields = options.fields ?? null;
   let emittedHeader = false;
-  for (const row of rows) {
-    if (Array.isArray(row)) {
-      let line = '';
-      for (let i = 0; i < row.length; i++)
-        line += (i === 0 ? '' : delimiter) + cell(row[i]);
-      yield line + newline;
-      continue;
-    }
-    if (fields === null)
-      fields = Object.keys(row);
-    if (wantHeader && !emittedHeader) {
-      emittedHeader = true;
-      let head = '';
+  return {
+    lines(row) {
+      if (Array.isArray(row))
+        return [line(row)];
+      if (fields === null)
+        fields = Object.keys(row);
+      const values = new Array(fields.length);
       for (let i = 0; i < fields.length; i++)
-        head += (i === 0 ? '' : delimiter) + cell(fields[i]);
-      yield head + newline;
-    }
-    let line = '';
-    for (let i = 0; i < fields.length; i++)
-      line += (i === 0 ? '' : delimiter) + cell(row[fields[i]]);
-    yield line + newline;
-  }
-  // an explicit field list still deserves its header when there were no
-  // records to infer one from
-  if (wantHeader && !emittedHeader && fields !== null && options.fields !== undefined) {
-    let head = '';
-    for (let i = 0; i < fields.length; i++)
-      head += (i === 0 ? '' : delimiter) + cell(fields[i]);
-    yield head + newline;
-  }
+        values[i] = row[fields[i]];
+      if (wantHeader && !emittedHeader) {
+        emittedHeader = true;
+        return [line(fields), line(values)];
+      }
+      return [line(values)];
+    },
+    tail() {
+      // an explicit field list still deserves its header when there
+      // were no records to infer one from
+      if (wantHeader && !emittedHeader && fields !== null && options.fields !== undefined) {
+        emittedHeader = true;
+        return line(fields);
+      }
+      return '';
+    },
+    fields: () => fields,
+  };
+}
+
+/**
+ * Serialize records as an iterable of chunks, one record at a time, so a
+ * large table never exists as a single string. The header precedes the
+ * first object row; a chunk is one line.
+ * @param {Iterable<Array|object>} rows - Records
+ * @param {object} [options] - Writer options; see `stringifyCsv`
+ * @yields {string} One record (or the header) at a time
+ */
+export function* stringifyCsvChunks(rows, options = {}) {
+  const formatter = createCsvRowFormatter(options);
+  for (const row of rows)
+    yield* formatter.lines(row);
+  const tail = formatter.tail();
+  if (tail.length !== 0)
+    yield tail;
 }
 
 //#endregion

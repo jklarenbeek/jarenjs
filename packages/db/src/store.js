@@ -1125,8 +1125,14 @@ export function openStore(model, options) {
        * @param {AbortSignal} [signal]
        * @param {any} [ownWork]
        */
-      let topLevelTransaction = (fn, signal, ownWork) =>
-        withScope((inner) => opened.transaction(inner, signal),
+      // a driver failure of the transaction itself — a `BEGIN IMMEDIATE`
+      // that outwaits the busy timeout — is classified like a statement's
+      // (`wrapDriverError` passes a callback's own error through untouched)
+      const beginTransaction = (inner, signal, mode) =>
+        attempt(() => opened.transaction(inner, signal, mode),
+          (error) => wrapDriverError(error, { docPath: '/transaction' }));
+      let topLevelTransaction = (fn, signal, ownWork, mode) =>
+        withScope((inner) => beginTransaction(inner, signal, mode),
           (inner, identity) => fn(scopedStore(inner, identity)), ownWork);
 
       /**
@@ -1394,8 +1400,16 @@ export function openStore(model, options) {
               });
             }
           }
+          // every first-open object — the change log and its state row
+          // here, the job tables below — is created or verified under
+          // the same immediate bracket as the collections' shape, so two
+          // processes opening one fresh file cannot race the seed row or
+          // a column upgrade; a read-only store creates nothing and takes
+          // no lock
+          const firstOpen = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
           const capture = captureMode === 'none' ? null : createCaptureEngine({
             connection,
+            bracket: firstOpen,
             shapes: captureShapes,
             mode: captureMode,
             log: captureRequested.log === true
@@ -1418,8 +1432,8 @@ export function openStore(model, options) {
             // and `ownWork`, with `capture.nest` inside the opened scope.
             // The view is built from the scope capture's wrap opens —
             // the INNERMOST one, the exact scope the callback runs in.
-            topLevelTransaction = (fn, signal, ownWork) =>
-              withScope((inner) => opened.transaction(inner, signal),
+            topLevelTransaction = (fn, signal, ownWork, mode) =>
+              withScope((inner) => beginTransaction(inner, signal, mode),
                 () => capture.nest((innerScope, identity) =>
                   fn(scopedStore(innerScope, identity))),
                 ownWork);
@@ -1439,6 +1453,7 @@ export function openStore(model, options) {
             || (options.jobs !== undefined && options.jobs !== false);
           const jobsEngine = !jobsRequested ? null : createJobEngine({
             connection,
+            bracket: firstOpen,
             // the WORKER's control-plane I/O (claims, renewals, its
             // checkpoint stores, its settlements) is root-owned and takes
             // the store gate, so it can never join an open application
@@ -2167,14 +2182,24 @@ export function openStore(model, options) {
             // key and neither sees the other's pending state. It is opt-in
             // because the shared default is what lets a caller add() a
             // document outside the transaction and save it inside.
+            // `mode: 'immediate'` takes the write lock up front (`BEGIN
+            // IMMEDIATE`): a body that reads before it writes never meets
+            // the read→write upgrade busy the handler cannot retry. The
+            // default stays the deferred savepoint; nesting is a savepoint
+            // under either.
             transaction: lift((fn, transactionOptions) => {
               const wanted = transactionOptions?.unitOfWork;
               if (wanted !== undefined && wanted !== 'own' && wanted !== 'shared') {
                 throw new TypeError(
                   "store.transaction: unitOfWork must be 'shared' or 'own'");
               }
+              const mode = transactionOptions?.mode;
+              if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate') {
+                throw new TypeError(
+                  "store.transaction: mode must be 'deferred' or 'immediate'");
+              }
               return topLevelTransaction(fn, transactionOptions?.signal,
-                wanted === 'own' ? createUnitOfWork() : undefined);
+                wanted === 'own' ? createUnitOfWork() : undefined, mode);
             }),
             observe: (fn) => {
               if (capture === null) {

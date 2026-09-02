@@ -172,7 +172,7 @@ describe('stream over port — a MessageChannel pair', () => {
     assert.strictEqual(client.capabilities.stream, true);
     const { seen, sub } = record(client);
     await wait(() => seen.snapshots.length === 1);
-    assert.deepStrictEqual(seen.snapshots[0], { value: { rows: [] }, seq: 0, resumed: false });
+    assert.deepStrictEqual(seen.snapshots[0], { value: { rows: [] }, seq: 0, resumed: false, reset: false, earliestAvailable: null, highWatermark: null });
     source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 1 }], seq: 3 }, { rows: [1] });
     source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: 5 }, { rows: [1, 2] });
     await wait(() => seen.patches.length === 2);
@@ -187,7 +187,10 @@ describe('stream over port — a MessageChannel pair', () => {
   it('resume replay yields only the later patches; a refused resume yields a fresh snapshot', async () => {
     const { server, client: clientPort } = pair();
     const replaying = makeSource({ rows: [1, 2] }, {
-      replay: (/** @type {number} */ seq) => [{ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: seq + 1 }],
+      replay: (/** @type {number} */ seq) => ({
+        items: [{ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: seq + 1 }],
+        next: seq + 1, earliestAvailable: 1, highWatermark: seq + 1, hasMore: false, resetRequired: false,
+      }),
     });
     track(servePort(CONTRACT, { 'data.live': () => replaying.sub, 'data.rows': () => [] }, { channel: server }));
     const client = track(openPortClient(CONTRACT, { channel: clientPort }));
@@ -203,7 +206,7 @@ describe('stream over port — a MessageChannel pair', () => {
     const client2 = track(openPortClient(CONTRACT, { channel: c2 }));
     const refused = record(client2, { collection: 'notes' }, { lastSeq: 7 });
     await wait(() => refused.seen.snapshots.length === 1);
-    assert.deepStrictEqual(refused.seen.snapshots[0], { value: { rows: ['fresh'] }, seq: 0, resumed: false });
+    assert.deepStrictEqual(refused.seen.snapshots[0], { value: { rows: ['fresh'] }, seq: 0, resumed: false, reset: false, earliestAvailable: null, highWatermark: null });
     refused.sub.stop();
     await wait(() => fresh.counts.closes === 1);
   });
@@ -295,6 +298,100 @@ describe('stream over port — a MessageChannel pair', () => {
     assert.deepStrictEqual(seen.errors, []);
   });
 
+  it('a source whose stop() and close() answer promises is released once, stop before close, and the push frames stay in order', async () => {
+    const { server, client: clientPort } = pair();
+    /** @type {string[]} */
+    const order = [];
+    const counts = { stops: 0, closes: 0 };
+    /** @type {Set<(emission: any) => void>} */
+    const cbs = new Set();
+    const sub = /** @type {any} */ ({
+      result: { rows: [] },
+      subscribe(/** @type {(emission: any) => void} */ cb) {
+        cbs.add(cb);
+        return async () => {
+          counts.stops += 1;
+          cbs.delete(cb);
+          await new Promise((r) => setTimeout(r, 5));
+          order.push('stop');
+        };
+      },
+      async close() {
+        counts.closes += 1;
+        await new Promise((r) => setTimeout(r, 5));
+        order.push('close');
+      },
+    });
+    track(servePort(CONTRACT, { 'data.live': () => sub, 'data.rows': () => [] }, { channel: server }));
+    const client = track(openPortClient(CONTRACT, { channel: clientPort }));
+    const { seen, sub: handle } = record(client);
+    await wait(() => seen.snapshots.length === 1);
+    for (const cb of [...cbs]) cb({ patch: [{ op: 'add', path: '/rows/-', value: 1 }], seq: 1 });
+    for (const cb of [...cbs]) cb({ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: 2 });
+    await wait(() => seen.patches.length === 2);
+    assert.deepStrictEqual(seen.patches.map((p) => p.seq), [1, 2]);
+    handle.stop();
+    await wait(() => order.length === 2);
+    assert.deepStrictEqual(order, ['stop', 'close'], 'stop settled before close began');
+    assert.deepStrictEqual(counts, { stops: 1, closes: 1 });
+  });
+
+  it('paged replay and the reset snapshot cross the port with the same intents as SSE', async () => {
+    const { server, client: clientPort, emitted } = pair();
+    /** @type {number[]} */
+    const asked = [];
+    const paging = makeSource({ rows: [] }, {
+      replay: (/** @type {number} */ after) => {
+        asked.push(after);
+        const items = [after + 1, after + 2].map((seq) => ({ patch: [{ op: 'add', path: '/rows/-', value: seq }], seq }));
+        return { items, next: after + 2, earliestAvailable: 1, highWatermark: 9, hasMore: true, resetRequired: false };
+      },
+    });
+    const reset = makeSource({ rows: ['seeded'] }, {
+      replay: () => ({ items: [], earliestAvailable: 30, highWatermark: 40, hasMore: false, resetRequired: true }),
+    });
+    let which = paging;
+    track(servePort(CONTRACT, { 'data.live': () => which.sub, 'data.rows': () => [] }, { channel: server, streamLimits: { replay: { limit: 2 } } }));
+    const client = track(openPortClient(CONTRACT, { channel: clientPort }));
+    const paged = record(client, { collection: 'notes' }, { lastSeq: 5 });
+    await wait(() => paged.seen.patches.length === 4);
+    assert.deepStrictEqual(paged.seen.patches.map((p) => p.seq), [6, 7, 8, 9]);
+    assert.deepStrictEqual(asked, [5, 7]);
+    assert.deepStrictEqual(paged.seen.snapshots, []);
+    paged.sub.stop();
+    await wait(() => paging.counts.closes === 1);
+
+    which = reset;
+    const seeded = record(client, { collection: 'notes' }, { lastSeq: 5 });
+    await wait(() => seeded.seen.snapshots.length === 1);
+    assert.deepStrictEqual(seeded.seen.snapshots[0], { value: { rows: ['seeded'] }, seq: 40, resumed: false, reset: true, earliestAvailable: 30, highWatermark: 40 });
+    const frame = emitted.find((f) => f.event === 'snapshot' && f.seq === 40);
+    assert.deepStrictEqual(frame.data, { value: { rows: ['seeded'] }, resumed: false, reset: true, earliestAvailable: 30, highWatermark: 40 });
+    seeded.sub.stop();
+    await wait(() => reset.counts.closes === 1);
+  });
+
+  it('a source that outruns a loading page past the queue bound ends the stream with JC2096 on the port', async () => {
+    const { server, client: clientPort, emitted } = pair();
+    /** @type {(value: any) => void} */
+    let releasePage = () => {};
+    const source = makeSource({ rows: [] }, { replay: () => new Promise((resolve) => { releasePage = resolve; }) });
+    track(servePort(CONTRACT, { 'data.live': () => source.sub, 'data.rows': () => [] }, { channel: server, streamLimits: { queue: { events: 2 } } }));
+    const client = track(openPortClient(CONTRACT, { channel: clientPort }));
+    const { seen } = record(client, { collection: 'notes' }, { lastSeq: 1 });
+    await wait(() => source.active() === 1);
+    for (let i = 2; i <= 4; i++) source.emit({ patch: [{ op: 'add', path: '/rows/-', value: i }], seq: i });
+    await wait(() => seen.errors.length === 1);
+    assert.strictEqual(seen.errors[0].kind, 'network');
+    assert.strictEqual(seen.errors[0].error.code, 'JC2096');
+    assert.strictEqual(seen.errors[0].error.retryable, true);
+    assert.ok(emitted.some((f) => f.event === 'error' && f.data.code === 'JC2096'), 'the terminal frame crossed the channel');
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    releasePage({ items: [], earliestAvailable: 1, highWatermark: 1, hasMore: false, resetRequired: false });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepStrictEqual(seen.patches, [], 'the late page rendered nothing');
+  });
+
   it("the server's close() pushes end (server-shutdown) to every live subscription", async () => {
     const { server, client: clientPort } = pair();
     const source = makeSource({ rows: [] });
@@ -337,5 +434,36 @@ describe('stream over port — two clients on one shared channel', () => {
     await wait(() => seenB.seen.patches.length === 1);
     assert.deepStrictEqual(seenA.seen.patches, [], 'A hears nothing after its stop');
     assert.deepStrictEqual(seenB.seen.patches[0].seq, 2);
+  });
+});
+
+describe('stream over port — the subscription\'s lastSeq', () => {
+  it('null before the first frame, then the snapshot\'s seq, then every patch; frozen; readable after stop', async () => {
+    const ports = pair();
+    const source = makeSource({ rows: [] });
+    track(servePort(CONTRACT, { 'data.live': () => source.sub, 'data.rows': () => [] }, { channel: ports.server }));
+    const client = track(openPortClient(CONTRACT, { channel: ports.client }));
+    /** @type {string[]} */
+    const events = [];
+    const sub = client.subscribe('data.live', { collection: 'c' }, {
+      onSnapshot: (/** @type {any} */ value, /** @type {any} */ info) => events.push(`snapshot:${info.seq}`),
+      onPatch: (/** @type {any} */ e) => events.push(`patch:${e.seq}`),
+    });
+    assert.strictEqual(sub.lastSeq, null);
+    assert.ok(Object.isFrozen(sub));
+    await wait(() => events.length === 1);
+    assert.strictEqual(sub.lastSeq, 0);
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 1 }], seq: 2 }, { rows: [1] });
+    await wait(() => sub.lastSeq === 2);
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: 3 }, { rows: [1, 2] });
+    await wait(() => sub.lastSeq === 3);
+    assert.deepStrictEqual(events, ['snapshot:0', 'patch:2', 'patch:3']);
+    sub.stop();
+    assert.strictEqual(sub.lastSeq, 3);
+    const resumed = client.subscribe('data.live', { collection: 'c' }, { lastSeq: 3, reconnect: { max: 2 } });
+    assert.strictEqual(resumed.lastSeq, 3, 'reconnect is accepted for parity with the HTTP client and changes nothing here');
+    resumed.stop();
+    assert.throws(() => client.subscribe('data.live', { collection: 'c' }, { reconnect: /** @type {any} */ ({ max: -1 }) }),
+      (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1008');
   });
 });

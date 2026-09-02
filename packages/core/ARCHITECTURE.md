@@ -161,7 +161,7 @@ flowchart TB
 
         subgraph FunctionModule["Function Utilities"]
             FunctionUtil["function.js<br/>trueThat, falseThat"]
-            AsyncUtil["async.js<br/>Bounded ordered asynchronous map"]
+            AsyncUtil["async.js<br/>Bounded ordered asynchronous map, awaited sink"]
         end
 
         subgraph RandomModule["Randomness"]

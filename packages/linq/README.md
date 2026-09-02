@@ -409,6 +409,10 @@ const api = typedClient(openHttpClient(compileContract(shop.document), { baseUrl
 const outcome = await api.invoke('product.save', { id: 1, product });   // Outcome<Product>: ok | conflict, both typed
 ```
 
+An HTTP client takes `typedHttpClient` instead: the same typed client
+plus `bytes` over the opaque operations (`OpaqueOf<typeof shop>`), whose
+success is a live response stream rather than a JSON value.
+
 How to read it: an operation is a kind (`read`, `command`, `subscribe`),
 its input and output schemas by the schema pen, its named errors and its
 binding. A `named()` schema is hoisted into the contract's own `$defs`
@@ -575,6 +579,14 @@ await db.transaction(async (tx) => {                         // a client of its 
   await tx.saveChanges();                                    // its own unit of work: nobody else sees it
 });
 ```
+
+`createDbLedger(db)` is the third export: the `@jarenjs/contract`
+idempotency ledger over a declared collection of the store the client
+opened — root claims under an immediate transaction so two processes
+see one `new`, a transaction client's settlements inside the host's own
+transaction, a persisted generation fence (`JL2007` for a stale ref) —
+with no edge from the contract package to a store
+([DB-CLIENT §2.6](docs/DB-CLIENT.md#26-the-ledger)).
 
 How to read it: `db.entities.Post` is a chain root typed from the model,
 so `p.stars` is a number in the editor and `p.author.email` is a

@@ -170,15 +170,17 @@ describe('idempotency — the binding over the memory ledger', () => {
     assert.strictEqual(ledger.claim({ op: 'p', scope: 's', key: 'k', hash: 'h1' }).state, 'new');
     ledger.commit(first.ref, { status: 200, headers: {}, body: 'ok' });
     assert.deepStrictEqual(ledger.claim({ op: 'o', scope: 's', key: 'k', hash: 'h1' }), { state: 'replay', response: { status: 200, headers: {}, body: 'ok' } });
-    // a stale ref (the record was replaced) is ignored
+    // a stale ref (the record was replaced under a newer generation) is refused JC1011 and changes nothing
     const failed = ledger.claim({ op: 'o', scope: 's', key: 'f', hash: 'h' });
     ledger.fail(failed.ref, true);
     const again = ledger.claim({ op: 'o', scope: 's', key: 'f', hash: 'h' });
     assert.strictEqual(again.state, 'new');
-    ledger.commit(failed.ref, { status: 200, headers: {}, body: 'stale' });
+    assert.notStrictEqual(again.ref.generation, failed.ref.generation);
+    assert.throws(() => ledger.commit(failed.ref, { status: 200, headers: {}, body: 'stale' }), (/** @type {any} */ err) => err.code === 'JC1011');
     assert.strictEqual(ledger.lookup({ op: 'o', scope: 's', key: 'f' })?.status, 'started');
-    ledger.fail(failed.ref, false, { status: 400, headers: {}, body: 'stale' });
+    assert.throws(() => ledger.fail(failed.ref, false, { status: 400, headers: {}, body: 'stale' }), (/** @type {any} */ err) => err.code === 'JC1011');
     assert.strictEqual(ledger.lookup({ op: 'o', scope: 's', key: 'f' })?.status, 'started');
+    assert.strictEqual(ledger.lookup({ op: 'o', scope: 's', key: 'f' })?.generation, again.ref.generation);
     // a non-retryable failure without a stored response cannot replay: the key is new again
     const nores = ledger.claim({ op: 'o', scope: 's', key: 'n', hash: 'h' });
     ledger.fail(nores.ref, false);

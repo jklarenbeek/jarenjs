@@ -28,7 +28,7 @@ import { createToolbox } from '@jarenjs/ai/toolbox';
 import { LinqBuildError } from '@jarenjs/linq';
 import * as s from '@jarenjs/linq/schema';
 import {
-  command, defineContract, error, http, read, subscribe, typedClient, typedHandlers, typedTools,
+  command, defineContract, error, http, read, subscribe, typedClient, typedHttpClient, typedHandlers, typedTools,
 } from '@jarenjs/linq/contract';
 
 import { CORPUS, Catalog, Conflict, Product, Shop } from './contract-corpus.js';
@@ -422,6 +422,9 @@ describe('a pen contract is a contract: it serves, invokes and becomes tools', (
       'product.save': (input) => input.product,
     });
     const tools = typedTools(contractTools(compiled, client), Shop);
+    // the HTTP wrapper is the same identity: the value it is handed, unchanged
+    const httpLike = { invoke() {}, bytes() {}, url() {}, close() {} };
+    assert.strictEqual(typedHttpClient(httpLike, Shop), httpLike);
     assert.deepStrictEqual(tools.map((t) => t.name), ['catalog_load', 'product_save'],
       'the opaque operation is not a tool');
     const toolbox = createToolbox();

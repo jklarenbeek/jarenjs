@@ -7,8 +7,9 @@
  * the `Infer<>` of its output, the union of its declared error codes,
  * and whether its media makes it opaque. Every one of those is a
  * compile-time reading of the SAME builders the emitted document was
- * written from (D2), so the three wrappers below can type a client, a
- * handler table and an AI toolbox with no `generate` step.
+ * written from (D2), so the wrappers below can type a client (an HTTP
+ * one with its byte method), a handler table and an AI toolbox with no
+ * `generate` step.
  *
  * The agreement is a gate: `test/consumer/linq-contract.ts` proves
  * `ContractOf<>`'s members EQUAL to what
@@ -215,6 +216,13 @@ export type SubscribableOf<C> = Simplify<{
   ContractOf<C>[K]
 }>;
 
+/** The opaque operations of a contract: what an HTTP client's `bytes`
+ * reaches — exactly the set §12.3's `ByteOperations` declares. */
+export type OpaqueOf<C> = Simplify<{
+  [K in keyof ContractOf<C> as ContractOf<C>[K] extends { opaque: true } ? K : never]:
+  ContractOf<C>[K]
+}>;
+
 // ——— the fixed outcome shapes (§10.1, rendered by §12.3) ———
 
 /** The correlation members of every outcome. A member a binding cannot
@@ -249,36 +257,104 @@ export type Failure = {
   retryable: boolean | null;
 };
 
-/** The per-request context a server binding hands a handler. */
-export interface HandlerContext {
+/** The binding a handler context comes from. */
+export type CarrierName = 'http' | 'port' | 'local';
+
+/** The members every carrier's context shares; `host` is the host
+ * lifecycle's acquired value (§7.7), `null` by default. */
+export interface HandlerContextBase<Host = null> {
   op: unknown;
   trace: string;
+  host: Host;
+  headers: Readonly<Record<string, string>>;
+  signal: AbortSignal | null;
+  fail(code: string, params?: Record<string, unknown>, details?: unknown,
+    options?: { retryable?: boolean }): Failure;
+}
+
+/** The HTTP binding's context: the request line, the raw body of an
+ * opaque operation, the idempotency key, and the entity-tag and status
+ * arms. */
+export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> {
+  carrier: 'http';
   method: string;
   path: string;
   params: Readonly<Record<string, string>>;
-  headers: Readonly<Record<string, string>>;
-  body: string | Uint8Array | null;
-  signal: AbortSignal | null;
+  body: string | Uint8Array | AsyncIterable<Uint8Array> | null;
   idempotency: Readonly<{ key: string; scope: string }> | null;
-  fail(code: string, params?: Record<string, unknown>, details?: unknown,
-    options?: { retryable?: boolean }): Failure;
   etag(tag: string, options?: { strong?: boolean }): void;
   status(status: number): void;
 }
 
-/** What `client.subscribe` takes (§19); every callback is optional. */
+/** The port and local bindings' context: no request line, no body, no
+ * key, and no callable `etag` or `status` — spelled `null`, never
+ * omitted (§15, §16). */
+export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'local' = 'port' | 'local'>
+  extends HandlerContextBase<Host> {
+  carrier: Carrier;
+  method: null;
+  path: null;
+  params: null;
+  body: null;
+  idempotency: null;
+  etag: null;
+  status: null;
+}
+
+/** The per-request context a server binding hands a handler, selected
+ * by carrier: the HTTP context by default (`HandlerContext` is the
+ * shape it always was, plus `carrier` and `host`); a carrier union is a
+ * discriminated union — narrow on `carrier` before an HTTP-only
+ * member. */
+export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> =
+  Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;
+
+/** Per-call options of `bytes` (§10.6): the members of `InvokeContext`
+ * that apply to an opaque call, plus the request body to send. */
+export interface ByteContext {
+  signal?: AbortSignal; attempt?: unknown; headers?: Record<string, string>;
+  ifNoneMatch?: string; ifMatch?: string;
+  body?: string | Uint8Array | ReadableStream<Uint8Array> | AsyncIterable<Uint8Array> | null;
+}
+
+/** The success value of `bytes`: the status, the lowercase response
+ * headers, the response media and the LIVE body — a stream the caller
+ * reads; `null` when the response carries none. */
+export type ByteResponse = {
+  status: number; headers: Record<string, string>; media: string | null;
+  body: ReadableStream<Uint8Array> | null;
+};
+
+/** The info beside every snapshot (§19): the event's seq, whether the
+ * stream resumed, whether the snapshot re-seeds a consumer whose cursor
+ * fell behind the server's retention (`reset`), and the server log's
+ * watermarks when it reported them. */
+export interface SnapshotInfo {
+  seq: number; resumed: boolean; reset: boolean;
+  earliestAvailable: number | null; highWatermark: number | null;
+}
+
+/** What `client.subscribe` takes (§19); every callback is optional.
+ * `reconnect` opts the HTTP client into re-establishing the stream
+ * after a network loss, up to `max` further attempts from the last
+ * delivered seq; the budget spent, `onError` gets one `JC2097`. The
+ * port client has no network loss to reconnect from and ignores it. */
 export interface SubscribeHandlers<T> {
-  onSnapshot?(value: T, info: { seq: number; resumed: boolean }): void;
+  onSnapshot?(value: T, info: SnapshotInfo): void;
   onPatch?(emission: { patch: readonly Json[]; seq: number }): void;
   onError?(outcome: Outcome<never>): void;
   onEnd?(info: { reason: string }): void;
   signal?: AbortSignal;
   lastSeq?: number;
+  reconnect?: { max: number };
 }
 
-/** A live subscription: `stop()` releases it (§19). */
+/** A live subscription: `stop()` releases it; `lastSeq` is the last
+ * delivered seq (`null` before the first, the passed `lastSeq` until an
+ * event moves it) — what a re-entered `subscribe` passes (§19). */
 export interface Subscription {
   stop(): void;
+  readonly lastSeq: number | null;
 }
 
 // ——— the three identity wrappers ———
@@ -303,11 +379,25 @@ export interface TypedClient<C> {
   close(): void;
 }
 
-/** The handler table of a server binding, one handler per invokable operation. */
-export type TypedHandlerTable<C> = {
+/** An HTTP client typed by one contract's operations: `TypedClient` plus
+ * `bytes` over the opaque ones, whose success owns a live stream. */
+export interface TypedHttpClient<C> extends TypedClient<C> {
+  bytes<K extends keyof OpaqueOf<C>>(
+    op: K,
+    input: OpaqueOf<C>[K] extends { input: infer I } ? I : never,
+    ctx?: ByteContext,
+  ): Promise<Outcome<ByteResponse>>;
+}
+
+/** The handler table of a server binding, one handler per invokable
+ * operation. `Host` is what the host lifecycle's `acquire` hands the
+ * handler as `ctx.host`; `Carrier` selects the context — `'http'` by
+ * default, a union for a table several bindings share (narrow on
+ * `ctx.carrier` before an HTTP-only member). */
+export type TypedHandlerTable<C, Host = null, Carrier extends CarrierName = 'http'> = {
   [K in keyof InvokableOf<C>]: (
     input: InvokableOf<C>[K] extends { input: infer I } ? I : never,
-    ctx: HandlerContext,
+    ctx: HandlerContext<Host, Carrier>,
   ) => (InvokableOf<C>[K] extends { output: infer O } ? O : never)
   | Failure
   | Promise<(InvokableOf<C>[K] extends { output: infer O } ? O : never) | Failure>;
@@ -360,10 +450,17 @@ export function defineContract<O extends Record<string, AnyOperation | ({
 /** Bind a contract client to the contract that types it. Identity at runtime. */
 export function typedClient<C extends Contract<any>>(client: unknown, contract: C): TypedClient<C>;
 
+/** Bind an HTTP client (`openHttpClient`) to the contract that types it:
+ * `typedClient` plus `bytes` over the opaque operations. Identity at
+ * runtime; a local or port client has no `bytes` and takes `typedClient`. */
+export function typedHttpClient<C extends Contract<any>>(client: unknown, contract: C): TypedHttpClient<C>;
+
 /** Bind a handler table to the contract it serves. Identity at runtime;
- * a missing or misspelled operation is a type error. */
-export function typedHandlers<C extends Contract<any>>(
-  contract: C, handlers: TypedHandlerTable<C>): TypedHandlerTable<C>;
+ * a missing or misspelled operation is a type error. Name `Host` and
+ * `Carrier` explicitly for a table whose context is not the HTTP default:
+ * `typedHandlers<typeof Shop, { db: Client }, 'http' | 'port'>(Shop, …)`. */
+export function typedHandlers<C extends Contract<any>, Host = null, Carrier extends CarrierName = 'http'>(
+  contract: C, handlers: TypedHandlerTable<C, Host, Carrier>): TypedHandlerTable<C, Host, Carrier>;
 
 /** Bind `contractTools`' output to the contract that types it. Identity
  * at runtime. */

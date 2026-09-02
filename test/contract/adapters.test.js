@@ -13,7 +13,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 
 import { compileContract } from '@jarenjs/contract';
 import { serveHttp } from '@jarenjs/contract/http';
@@ -366,5 +366,209 @@ describe('adapters — headers and the signal', () => {
     assert.strictEqual(written.status, 200);
     assert.strictEqual(written.headers['x-jaren-trace'], 'fixed-trace');
     assert.deepStrictEqual(JSON.parse(written.body), { revision: 1, products: [{ id: 1, name: 'a', price: 1 }] });
+  });
+});
+
+describe('adapters — the node SSE sink waits for drain', () => {
+  const FEED = compileContract({
+    $contract: '0.1',
+    operations: {
+      feed: {
+        kind: 'subscribe',
+        output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+        policy: { stream: { heartbeatMs: 1000 } },
+      },
+    },
+  });
+
+  /**
+   * A dispatcher whose stream pump hands the test the adapter's raw sink
+   * beside the pump's own view of it.
+   * @param {ReturnType<typeof serveHttp>} dispatcher
+   * @param {(sink: any) => void} onSink
+   */
+  function exposingSink(dispatcher, onSink) {
+    return /** @type {any} */ ({
+      ...dispatcher,
+      dispatch: async (/** @type {any} */ request) => {
+        const response = await dispatcher.dispatch(request);
+        if (typeof response.stream !== 'function') return response;
+        const pump = response.stream;
+        return { ...response, stream: (/** @type {any} */ sink) => { onSink(sink); return pump(sink); } };
+      },
+    });
+  }
+
+  /**
+   * A LIVE-shaped source with stop/close counters.
+   * @param {any} initial
+   */
+  function makeSource(initial) {
+    /** @type {Set<(emission: any) => void>} */
+    const cbs = new Set();
+    const counts = { stops: 0, closes: 0 };
+    const sub = /** @type {any} */ ({
+      result: initial,
+      subscribe(/** @type {(emission: any) => void} */ cb) {
+        cbs.add(cb);
+        return () => { counts.stops += 1; cbs.delete(cb); };
+      },
+      close() { counts.closes += 1; },
+    });
+    return { sub, counts, emit: (/** @type {any} */ e) => { for (const cb of [...cbs]) cb(e); } };
+  }
+
+  /** A response whose write answers `false` every time: the socket is always full. */
+  class FullResponse extends EventEmitter {
+    constructor() {
+      super();
+      /** @type {string[]} */
+      this.chunks = [];
+      this.ended = 0;
+      this.destroyed = false;
+      this.writableEnded = false;
+      this.writableFinished = false;
+    }
+
+    writeHead() {}
+
+    flushHeaders() {}
+
+    /** @param {string} chunk */
+    write(chunk) {
+      this.chunks.push(chunk);
+      return false;
+    }
+
+    end() {
+      this.ended += 1;
+      this.writableEnded = true;
+      this.writableFinished = true;
+    }
+
+    destroy() {
+      this.destroyed = true;
+    }
+  }
+
+  /** The request side: a GET with the stream accept header. */
+  function streamRequest() {
+    return /** @type {any} */ ({ method: 'GET', url: '/feed', headers: { accept: 'text/event-stream' }, on: () => {} });
+  }
+
+  /** @param {() => boolean} until */
+  async function wait(until) {
+    for (let i = 0; i < 400 && !until(); i++) await new Promise((r) => setTimeout(r, 2));
+    assert.ok(until(), 'the condition never held');
+  }
+
+  it('a write that answers false parks the pump: no second write before drain, and the drain listeners are removed after it', async () => {
+    const source = makeSource({ rows: [] });
+    const feed = serveHttp(FEED, { feed: () => source.sub }, { trace: () => 't' });
+    const handler = toNodeHandler(feed);
+    const res = new FullResponse();
+    handler(streamRequest(), /** @type {any} */ (res));
+    await wait(() => res.chunks.length === 1);
+    assert.match(res.chunks[0], /^event: snapshot\n/);
+    assert.strictEqual(res.listenerCount('drain'), 1, 'the pump waits on drain');
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 1 }], seq: 1 });
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: 2 });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.strictEqual(res.chunks.length, 1, 'nothing more was written while the socket is full');
+    res.emit('drain');
+    await wait(() => res.chunks.length === 2);
+    assert.match(res.chunks[1], /^event: patch\nid: 1\n/);
+    assert.strictEqual(res.chunks.length, 2, 'one drain releases exactly one write');
+    res.emit('drain');
+    await wait(() => res.chunks.length === 3);
+    assert.match(res.chunks[2], /^event: patch\nid: 2\n/);
+    assert.strictEqual(res.listenerCount('drain'), 1, 'the settled waits removed their listeners; only the pending write listens');
+    assert.strictEqual(res.listenerCount('error'), 1);
+    // the heartbeat interval fires while the sink is full: one heartbeat
+    // queues behind the pending write, and while it waits the interval
+    // never queues a second
+    await new Promise((r) => setTimeout(r, 2300));
+    assert.strictEqual(res.chunks.length, 3, 'a full sink took no heartbeat');
+    res.emit('drain');
+    await wait(() => res.chunks.length === 4);
+    assert.strictEqual(res.chunks[3], ':\n\n', 'exactly one heartbeat was waiting, though two intervals elapsed');
+    feed.close();
+    res.emit('drain');
+    await wait(() => source.counts.closes === 1);
+    await wait(() => res.chunks.length === 5);
+    assert.match(res.chunks[4], /^event: end\n/);
+    res.emit('drain');
+    await wait(() => res.ended === 1);
+    assert.strictEqual(res.listenerCount('drain'), 0, 'every wait cleaned up');
+    assert.strictEqual(res.listenerCount('error'), 0);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+  });
+
+  it('close before drain settles the pending write, releases the subscription once and removes the listeners', async () => {
+    const source = makeSource({ rows: [] });
+    const feed = serveHttp(FEED, { feed: () => source.sub }, { trace: () => 't' });
+    const handler = toNodeHandler(feed);
+    const res = new FullResponse();
+    handler(streamRequest(), /** @type {any} */ (res));
+    await wait(() => res.chunks.length === 1);
+    source.emit({ patch: [], seq: 1 });
+    assert.strictEqual(res.listenerCount('close') >= 1, true);
+    res.emit('close');
+    await wait(() => source.counts.closes === 1);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.strictEqual(res.chunks.length, 1, 'the queued patch never reached a closed response');
+    assert.strictEqual(res.listenerCount('drain'), 0, 'the drain wait cleaned up on close');
+    assert.strictEqual(res.listenerCount('error'), 0);
+    assert.strictEqual(res.ended, 0, 'a closed response is not ended again');
+    assert.strictEqual(feed.capabilities.stream, true);
+  });
+
+  it('an error on the response while a write waits for drain settles the wait and releases the subscription once', async () => {
+    const source = makeSource({ rows: [] });
+    const feed = serveHttp(FEED, { feed: () => source.sub }, { trace: () => 't' });
+    const handler = toNodeHandler(feed);
+    const res = new FullResponse();
+    handler(streamRequest(), /** @type {any} */ (res));
+    await wait(() => res.chunks.length === 1);
+    source.emit({ patch: [], seq: 1 });
+    res.emit('error', new Error('EPIPE'));
+    await wait(() => source.counts.closes === 1);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    assert.strictEqual(res.listenerCount('drain'), 0);
+    assert.strictEqual(res.listenerCount('error'), 0);
+    assert.strictEqual(res.chunks.length, 1);
+  });
+
+  it("the sink's abort destroys the response and settles the pending write", async () => {
+    const source = makeSource({ rows: [] });
+    /** @type {any} */
+    let sink = null;
+    const feed = serveHttp(FEED, { feed: () => source.sub }, { trace: () => 't' });
+    const handler = toNodeHandler(exposingSink(feed, (s) => { sink = s; }));
+    const res = new FullResponse();
+    handler(streamRequest(), /** @type {any} */ (res));
+    await wait(() => res.chunks.length === 1 && sink !== null);
+    assert.strictEqual(res.destroyed, false);
+    sink.abort(new Error('slow consumer'));
+    assert.strictEqual(res.destroyed, true, 'abort destroys the platform response');
+    sink.abort(new Error('again'));
+    res.emit('close');
+    await wait(() => source.counts.closes === 1);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+  });
+
+  it('a response that already ended or was destroyed refuses the write instead of emitting write-after-end', async () => {
+    const source = makeSource({ rows: [] });
+    const feed = serveHttp(FEED, { feed: () => source.sub }, { trace: () => 't' });
+    const handler = toNodeHandler(feed);
+    const res = new FullResponse();
+    handler(streamRequest(), /** @type {any} */ (res));
+    await wait(() => res.chunks.length === 1);
+    res.destroyed = true;
+    res.emit('drain');
+    source.emit({ patch: [], seq: 1 });
+    await wait(() => source.counts.closes === 1);
+    assert.strictEqual(res.chunks.length, 1, 'no write reached a destroyed response');
   });
 });

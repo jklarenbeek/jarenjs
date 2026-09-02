@@ -10,6 +10,7 @@ Everything here follows the house architecture of the schema validator (see [`pa
 |------|---------|
 | `src/basic.js` | string validation for JSON, JSON Pointer, JSONPath (`isValidJSON`, `isValidJSONPointer`, `isValidJSONPathStrict`, ...) |
 | `src/canonical.js` | Canonical JSON (RFC 8785 / JCS): `canonicalizeJson` deterministic serialization for hashing and signing |
+| `src/node.js` | the `./node` subpath — the ONLY file of the package that imports a Node builtin: `loadDocument(file, { what, exportName, impure })`, the document loader `jaren-db` and `jaren-contract` share (a `.json` file, or a module evaluated twice — freshly on ESM and CommonJS alike — and refused when its two emissions differ), plus `isDocumentFile` and `DOCUMENT_EXTENSIONS`; never re-exported from the root |
 | `src/pointer.js` | the RFC 6901 + Relative JSON Pointer compiler (`compileJSONPointer`, `compileRelativeJSONPointer`, `compileDataRef`) and the reference-token codec (`encodeJSONPointerSegment`, `decodeJSONPointerSegment`, `formatJSONPointer`) |
 | `src/cow.js` | package-internal copy-on-write core: owned-set state, spine cloning, step encoding (not exported) |
 | `src/patch.js` | JSON Patch (RFC 6902) + JSON Merge Patch (RFC 7396): compiled copy-on-write appliers and the structural diffs |

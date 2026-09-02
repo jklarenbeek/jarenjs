@@ -27,8 +27,12 @@ import { STREAM_ERRORS } from './sse.js';
 
 /**
  * The callbacks of one `client.subscribe` call; every one optional.
+ * `onSnapshot`'s `info` is stable in shape: `reset` says the snapshot
+ * re-seeds a consumer whose cursor fell behind the server's retention
+ * (its `seq` is then the cursor to resume from), and the two watermarks
+ * are the server log's when it reported them (`null` on a fresh stream).
  * @typedef {Object} StreamCallbacks
- * @property {(value: unknown, info: { seq: number, resumed: boolean }) => void} [onSnapshot]
+ * @property {(value: unknown, info: { seq: number, resumed: boolean, reset: boolean, earliestAvailable: number | null, highWatermark: number | null }) => void} [onSnapshot]
  * @property {(emission: { patch: unknown[], seq: number }) => void} [onPatch]
  * @property {(outcome: Outcome) => void} [onError]
  * @property {(info: { reason: string }) => void} [onEnd]
@@ -51,7 +55,9 @@ import { STREAM_ERRORS } from './sse.js';
  * wire carried (the SSE id, the frame's `seq`) — `null` falls back to
  * the data's own `seq`; `error`/`end` take the event data; `fail` takes
  * a ready outcome (a transport failure the carrier classified). All are
- * no-ops once finished.
+ * no-ops once finished. `lastSeq` reads the cursor: the resume seq the
+ * caller passed until a snapshot or patch moves it — what a further
+ * attempt resumes from.
  * @param {StreamConsumerOptions} options
  * @returns {{ snapshot: (seq: number | null, data: unknown) => void,
  *   patch: (seq: number | null, data: unknown) => void,
@@ -59,7 +65,8 @@ import { STREAM_ERRORS } from './sse.js';
  *   end: (data: unknown) => void,
  *   fail: (outcome: Outcome) => void,
  *   cancel: () => void,
- *   finished: () => boolean }}
+ *   finished: () => boolean,
+ *   lastSeq: () => number | null }}
  */
 export function createStreamConsumer(options) {
   const { route, catalog, meta, callbacks, finish } = options;
@@ -135,13 +142,23 @@ export function createStreamConsumer(options) {
           clientError(catalog, 'JC2053', { op: route.id }, null, projectValidationDetails(route.details, v.errors)), meta));
         return;
       }
-      // a mid-stream snapshot (a maxPatchBytes replacement) must still advance
-      if (at !== null && lastSeq !== null && at !== 0 && at <= lastSeq) {
+      const reset = envelope.reset === true;
+      // a mid-stream snapshot (a maxPatchBytes replacement) must still
+      // advance; a reset snapshot may land AT the resume cursor — the
+      // server's watermark had not moved past what the consumer held
+      if (at !== null && lastSeq !== null && at !== 0 && (reset ? at < lastSeq : at <= lastSeq)) {
         if (terminate()) call(callbacks.onError, streamOutcome('JC2092', {}));
         return;
       }
       if (at !== null) lastSeq = at;
-      call(callbacks.onSnapshot, envelope.value, { seq: at === null ? 0 : at, resumed: envelope.resumed === true });
+      const watermark = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+      call(callbacks.onSnapshot, envelope.value, {
+        seq: at === null ? 0 : at,
+        resumed: envelope.resumed === true,
+        reset,
+        earliestAvailable: watermark(envelope.earliestAvailable),
+        highWatermark: watermark(envelope.highWatermark),
+      });
     },
     patch(seq, data) {
       if (done) return;
@@ -175,6 +192,16 @@ export function createStreamConsumer(options) {
         call(callbacks.onError, failedOutcome('failure', outcomeError(code, message, null, record.details, retryable), meta));
         return;
       }
+      // a stream code the server ends with that is a NETWORK verdict (the
+      // consumer fell behind, JC2096) is a network outcome under its own
+      // code — retryable, and what a reconnect policy keys on
+      if (code !== null && Object.hasOwn(STREAM_ERRORS, code)
+        && STREAM_ERRORS[/** @type {keyof typeof STREAM_ERRORS} */ (code)].kind === 'network') {
+        const row = STREAM_ERRORS[/** @type {keyof typeof STREAM_ERRORS} */ (code)];
+        const message = typeof record.message === 'string' ? record.message : renderMessage(catalog, row.msgid, { op: route.id });
+        call(callbacks.onError, failedOutcome('network', outcomeError(code, message, null, record.details, row.retryable), meta));
+        return;
+      }
       // an undeclared server error ends the stream as a contract violation;
       // the server's record rides in details so a JC2091 stays visible
       const details = code === null ? null : {
@@ -206,6 +233,7 @@ export function createStreamConsumer(options) {
       }
     },
     finished: () => done,
+    lastSeq: () => lastSeq,
   };
 }
 

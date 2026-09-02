@@ -146,7 +146,7 @@ describe('stream over SSE — the happy path on a real node:http wire', () => {
     source = makeSource({ rows: [] });
     const { seen, sub } = record();
     await wait(() => seen.snapshots.length === 1);
-    assert.deepStrictEqual(seen.snapshots[0], { value: { rows: [] }, seq: 0, resumed: false });
+    assert.deepStrictEqual(seen.snapshots[0], { value: { rows: [] }, seq: 0, resumed: false, reset: false, earliestAvailable: null, highWatermark: null });
     source.emit({ patch: [{ op: 'add', path: '/rows/-', value: { id: 'n1' } }], seq: 4 }, { rows: [{ id: 'n1' }] });
     source.emit({ patch: [{ op: 'add', path: '/rows/-', value: { id: 'n2' } }], seq: 7 }, { rows: [{ id: 'n1' }, { id: 'n2' }] });
     await wait(() => seen.patches.length === 2);
@@ -178,7 +178,7 @@ describe('stream over SSE — the happy path on a real node:http wire', () => {
       text += decoder.decode(value, { stream: true });
     }
     controller.abort();
-    assert.match(text, /event: snapshot\nid: 0\ndata: \{"value":\{"rows":\[1\]\},"resumed":false\}\n\n/);
+    assert.match(text, /event: snapshot\nid: 0\ndata: \{"value":\{"rows":\[1\]\},"resumed":false,"reset":false,"earliestAvailable":null,"highWatermark":null\}\n\n/);
     assert.match(text, /event: patch\nid: 9\ndata: \{"patch":\[\{"op":"replace","path":"\/rows\/0","value":2\}\],"seq":9\}\n\n/);
     assert.match(text, /\n:\n\n/, 'a heartbeat comment line');
     await wait(() => source.counts.closes === 1);
@@ -199,10 +199,13 @@ describe('stream over SSE — the happy path on a real node:http wire', () => {
 
   it('resume replay: Last-Event-ID + a replay-capable handler yields only the later patches, no snapshot', async () => {
     source = makeSource({ rows: [1, 2, 3] }, {
-      replay: (/** @type {number} */ seq) => [
-        { patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: seq + 1 },
-        { patch: [{ op: 'add', path: '/rows/-', value: 3 }], seq: seq + 2 },
-      ],
+      replay: (/** @type {number} */ seq) => ({
+        items: [
+          { patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: seq + 1 },
+          { patch: [{ op: 'add', path: '/rows/-', value: 3 }], seq: seq + 2 },
+        ],
+        next: seq + 2, earliestAvailable: 1, highWatermark: seq + 2, hasMore: false, resetRequired: false,
+      }),
     });
     const { seen, sub } = record({ room: 'r1' }, { lastSeq: 10 });
     await wait(() => seen.patches.length === 2);
@@ -210,6 +213,98 @@ describe('stream over SSE — the happy path on a real node:http wire', () => {
     assert.deepStrictEqual(seen.patches.map((p) => p.seq), [11, 12]);
     sub.stop();
     await wait(() => source.counts.closes === 1);
+  });
+
+  it('resume replay pages: a changes.page()-shaped source is drained page by page to the first watermark, live overlap deduplicated', async () => {
+    /** @type {number[]} */
+    const asked = [];
+    source = makeSource({ rows: [] }, {
+      replay: async (/** @type {number} */ after, /** @type {any} */ options) => {
+        asked.push(after);
+        assert.strictEqual(options.limit, 2, 'the page bound the server was given');
+        const items = [after + 1, after + 2].map((seq) => ({ patch: [{ op: 'add', path: '/rows/-', value: seq }], seq }));
+        return { items, next: after + 2, earliestAvailable: 1, highWatermark: 14, hasMore: true, resetRequired: false };
+      },
+    });
+    const limited = serveHttp(CONTRACT, { feed: () => source.sub, tiny: () => source.sub }, { trace: () => 'trace-p', streamLimits: { replay: { limit: 2 } } });
+    const paged = http.createServer(toNodeHandler(limited));
+    paged.listen(0, '127.0.0.1');
+    await once(paged, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (paged.address()).port;
+    const pagedClient = openHttpClient(CONTRACT, { baseUrl: `http://127.0.0.1:${port}` });
+    try {
+      /** @type {number[]} */
+      const seqs = [];
+      /** @type {any[]} */
+      const snapshots = [];
+      const sub = pagedClient.subscribe('feed', { room: 'r1' }, { lastSeq: 10, onPatch: (e) => seqs.push(e.seq), onSnapshot: (v, info) => snapshots.push(info) });
+      await wait(() => seqs.length === 4);
+      assert.deepStrictEqual(seqs, [11, 12, 13, 14], 'two pages to the first page\'s watermark, no snapshot');
+      assert.deepStrictEqual(asked, [10, 12]);
+      assert.deepStrictEqual(snapshots, []);
+      source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 15 }], seq: 15 });
+      await wait(() => seqs.length === 5);
+      sub.stop();
+      await wait(() => source.counts.closes === 1);
+    }
+    finally {
+      pagedClient.close();
+      limited.close();
+      paged.closeAllConnections();
+      paged.close();
+      await once(paged, 'close');
+    }
+  });
+
+  it('a retention gap: resetRequired yields one snapshot with reset true, both watermarks, and the resume cursor at the watermark', async () => {
+    source = makeSource({ rows: ['seeded'] }, {
+      replay: () => ({ items: [], earliestAvailable: 30, highWatermark: 40, hasMore: false, resetRequired: true }),
+    });
+    /** @type {any[]} */
+    const snapshots = [];
+    /** @type {number[]} */
+    const seqs = [];
+    const sub = client.subscribe('feed', { room: 'r1' }, { lastSeq: 10, onSnapshot: (value, info) => snapshots.push({ value, ...info }), onPatch: (e) => seqs.push(e.seq) });
+    await wait(() => snapshots.length === 1);
+    assert.deepStrictEqual(snapshots[0], { value: { rows: ['seeded'] }, seq: 40, resumed: false, reset: true, earliestAvailable: 30, highWatermark: 40 });
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 'late' }], seq: 41 });
+    await wait(() => seqs.length === 1);
+    assert.deepStrictEqual(seqs, [41], 'live continues above the snapshot id');
+    assert.strictEqual(sub.lastSeq === undefined || sub.lastSeq === 41, true);
+    sub.stop();
+    await wait(() => source.counts.closes === 1);
+  });
+
+  it('a consumer that stops reading ends the stream with JC2096 and the socket is torn down, the subscription released once', async () => {
+    source = makeSource({ rows: [] });
+    const bounded = serveHttp(CONTRACT, { feed: () => source.sub, tiny: () => source.sub }, { trace: () => 'trace-q', streamLimits: { queue: { events: 4 } } });
+    const handler = toNodeHandler(bounded);
+    /** @type {string[]} */
+    const chunks = [];
+    const res = /** @type {any} */ (new (class extends (await import('node:events')).EventEmitter {
+      constructor() {
+        super();
+        this.destroyed = false;
+        this.writableEnded = false;
+        this.writableFinished = false;
+      }
+      writeHead() {}
+      flushHeaders() {}
+      /** @param {string} chunk */
+      write(chunk) { chunks.push(chunk); return false; }
+      end() { this.writableEnded = true; }
+      destroy() { this.destroyed = true; }
+    })());
+    handler(/** @type {any} */ ({ method: 'GET', url: '/rooms/r1/feed', headers: { accept: 'text/event-stream' }, on: () => {} }), res);
+    await wait(() => chunks.length === 1);
+    // the snapshot write is parked on a full socket; four more fit, the fifth does not
+    for (let i = 1; i <= 5; i++) source.emit({ patch: [{ op: 'add', path: '/rows/-', value: i }], seq: i });
+    await wait(() => source.counts.closes === 1);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    await wait(() => res.destroyed === true);
+    assert.strictEqual(chunks.length, 1, 'nothing more reached a socket that never drained');
+    assert.strictEqual(res.destroyed, true, 'the carrier tore the socket down');
+    bounded.close();
   });
 
   it('resume refused: a replay that answers null yields a fresh snapshot with resumed: false', async () => {
@@ -224,7 +319,7 @@ describe('stream over SSE — the happy path on a real node:http wire', () => {
       text += decoder.decode(value, { stream: true });
     }
     await reader.cancel();
-    assert.match(text, /event: snapshot\nid: 0\ndata: \{"value":\{"rows":\["fresh"\]\},"resumed":false\}/);
+    assert.match(text, /event: snapshot\nid: 0\ndata: \{"value":\{"rows":\["fresh"\]\},"resumed":false,"reset":false,"earliestAvailable":null,"highWatermark":null\}/);
     await wait(() => source.counts.closes === 1);
   });
 
@@ -428,9 +523,91 @@ describe('stream over the fetch adapter', () => {
       if (done) break;
       text += decoder.decode(value, { stream: true });
     }
-    assert.match(text, /event: snapshot\nid: 0\ndata: \{"value":\{"rows":\["f"\]\},"resumed":false\}/);
+    assert.match(text, /event: snapshot\nid: 0\ndata: \{"value":\{"rows":\["f"\]\},"resumed":false,"reset":false,"earliestAvailable":null,"highWatermark":null\}/);
     assert.match(text, /event: patch\nid: 2\n/);
     await reader.cancel();
+    await wait(() => source.counts.closes === 1);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+  });
+
+  it('the Response body produces on demand: a write settles only when the reader pulls, and cancel stops the subscription once', async () => {
+    source = makeSource({ rows: [] });
+    /** @type {string[]} */
+    const written = [];
+    /** @type {string[]} */
+    const settled = [];
+    /** @type {unknown[]} */
+    const rejected = [];
+    // a dispatcher whose stream pump records each write and its settlement
+    const spying = {
+      ...dispatcher,
+      dispatch: async (/** @type {any} */ request) => {
+        const response = await dispatcher.dispatch(request);
+        if (typeof response.stream !== 'function') return response;
+        const pump = response.stream;
+        return {
+          ...response,
+          stream: (/** @type {any} */ sink) => pump({
+            write: (/** @type {string} */ chunk) => {
+              written.push(chunk);
+              const answer = sink.write(chunk);
+              Promise.resolve(answer).then(() => settled.push(chunk), (err) => rejected.push(err));
+              return answer;
+            },
+            end: () => sink.end(),
+            abort: (/** @type {unknown} */ reason) => sink.abort?.(reason),
+          }),
+        };
+      },
+    };
+    const handler = toFetchHandler(/** @type {any} */ (spying));
+    const response = await handler(new Request('http://contract.local/rooms/r1/feed', { headers: { accept: 'text/event-stream' } }));
+    assert.strictEqual(response.status, 200);
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 1 }], seq: 1 }, { rows: [1] });
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 2 }], seq: 2 }, { rows: [1, 2] });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.strictEqual(written.length, 1, 'only the snapshot was handed to the sink; nobody pulled yet');
+    assert.deepStrictEqual(settled, [], 'and it has not settled: no eager enqueue');
+    const reader = /** @type {NonNullable<typeof response.body>} */ (response.body).getReader();
+    const decoder = new TextDecoder();
+    const first = await reader.read();
+    assert.match(decoder.decode(first.value), /^event: snapshot\n/);
+    await wait(() => settled.length === 1);
+    await wait(() => written.length === 2);
+    assert.match(written[1], /^event: patch\nid: 1\n/);
+    assert.strictEqual(settled.length, 1, 'the second write waits for the next pull');
+    const second = await reader.read();
+    assert.match(decoder.decode(second.value), /^event: patch\nid: 1\n/);
+    await wait(() => settled.length === 2 && written.length === 3);
+    await reader.cancel();
+    await wait(() => source.counts.closes === 1);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 }, 'cancel stopped the subscription exactly once');
+    await wait(() => rejected.length === 1);
+    assert.strictEqual(written.length, 3, 'nothing was written after the cancel');
+  });
+
+  it("the sink's abort errors the Response body: a pending read rejects with the reason and the subscription is released once", async () => {
+    source = makeSource({ rows: [] });
+    /** @type {any} */
+    let sink = null;
+    const exposing = {
+      ...dispatcher,
+      dispatch: async (/** @type {any} */ request) => {
+        const response = await dispatcher.dispatch(request);
+        if (typeof response.stream !== 'function') return response;
+        const pump = response.stream;
+        return { ...response, stream: (/** @type {any} */ raw) => { sink = raw; return pump(raw); } };
+      },
+    };
+    const handler = toFetchHandler(/** @type {any} */ (exposing));
+    const response = await handler(new Request('http://contract.local/rooms/r1/feed', { headers: { accept: 'text/event-stream' } }));
+    const reader = /** @type {NonNullable<typeof response.body>} */ (response.body).getReader();
+    await reader.read();
+    assert.ok(sink !== null);
+    const pending = reader.read();
+    const why = new Error('slow consumer');
+    sink.abort(why);
+    await assert.rejects(pending, (e) => e === why);
     await wait(() => source.counts.closes === 1);
     assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
   });

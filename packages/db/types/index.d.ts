@@ -755,6 +755,13 @@ export interface TransactionScopeOptions {
   /** `'own'` gives the callback an independent tracker; `'shared'`
    * (the default) writes through the store's. */
   unitOfWork?: 'own' | 'shared';
+  /** `'immediate'` takes the write lock up front (`BEGIN IMMEDIATE`), so
+   * a body that reads before it writes never meets the read→write
+   * upgrade `SQLITE_BUSY` the busy handler cannot retry — what a claim
+   * needs under concurrent writers; `'deferred'` (the default) is the
+   * savepoint as always. A nested `tx.transaction()` is a savepoint
+   * whichever mode the root chose; the synchronous twin has no mode. */
+  mode?: 'deferred' | 'immediate';
 }
 
 /**

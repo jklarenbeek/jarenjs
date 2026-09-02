@@ -295,7 +295,9 @@ slots:
   (`status: 'error'`, the outcome's `kind`/`error`/`meta`); a server
   `end` lands the same way as a `network`-kind outcome with the
   channel-closed code — the stream is gone and the slot says so, so a
-  view can offer a reconnect (a fresh `start`; reconnection is never
-  automatic).
+  view can offer a reconnect: a fresh `start`. The binding passes no
+  `reconnect` to `client.subscribe`, so the client's opt-in reconnect
+  (CONTRACT-FORMAT.md §19) is for subscriptions the host opens itself;
+  a slot is re-entered by the view.
 - **`reset` releases the slot** exactly as for tasks: `status 'idle'`,
   `kind`/`error` cleared, `id`/`input`/`value`/`meta`/`seq` kept.

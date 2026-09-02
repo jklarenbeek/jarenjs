@@ -487,6 +487,37 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
     });
   };
 
+  /**
+   * Own the connection with the write lock taken up front: `BEGIN
+   * IMMEDIATE` around `fn`, committed or rolled back as a whole. A body
+   * that reads before it writes — a claim: read the record, decide,
+   * insert — otherwise meets the read→write upgrade `SQLITE_BUSY` the
+   * busy handler cannot retry when another connection commits in
+   * between; taking the lock first makes that wait an ordinary busy
+   * wait the timeout covers. Nesting inside it is savepoints, as always.
+   * @param {(scope: any) => any} fn
+   */
+  const immediateAround = (fn) => {
+    const succeed = (result) => chain(raw.exec(dialect.tx.commit), () => result);
+    const fail = (error) => chain(raw.exec(dialect.tx.rollback), () => {
+      throw error;
+    });
+    return chain(raw.exec(dialect.tx.beginImmediate), () => {
+      let out;
+      const wasOnStack = onStack;
+      onStack = true;
+      try {
+        out = fn(scopeFor());
+      }
+      catch (error) {
+        onStack = wasOnStack;
+        return fail(error);
+      }
+      onStack = wasOnStack; // the body has returned or awaited
+      return isThenable(out) ? out.then(succeed, fail) : succeed(out);
+    });
+  };
+
   /** The scope handed to a transaction callback: the owner's direct
    * access to the connection, plus nesting. Deliberately narrow —
    * registering a function or opening a change session belongs to store
@@ -562,15 +593,18 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
      * @param {(scope: any) => any} fn
      * @param {AbortSignal} [signal] - abandons a QUEUED transaction; a
      *   transaction that has already taken the connection runs on
+     * @param {'deferred' | 'immediate'} [mode] - `'immediate'` takes the
+     *   write lock up front (a top-level transaction only; a nested call
+     *   is a savepoint whichever mode the root chose)
      */
-    transaction(fn, signal) {
+    transaction(fn, signal, mode = 'deferred') {
       requireOpen();
       if (onStack) return savepointAround(fn);
       return whenFree(() => {
         owned = true;
         let out;
         try {
-          out = savepointAround(fn);
+          out = mode === 'immediate' ? immediateAround(fn) : savepointAround(fn);
         }
         catch (error) {
           release();

@@ -84,7 +84,7 @@ suffice — the first three are required, the rest only when their row says so:
 | `@jarenjs/formats` | Only if you use the `format` keyword |
 | `@jarenjs/refs` | Only if you `$ref` the official meta-schemas offline |
 | `@jarenjs/emit` | Only if you generate TypeScript from your schemas |
-| `@jarenjs/contract` | Only if two ends exchange operations over a wire. Closure: `core`, `json`, `validate` — plus `emit`, reached only from its `./project` subpath (projections), so a bundle that never projects never carries it. Ships the `jaren-contract` CLI (projections, `--check`, `diff --fail-on breaking`) |
+| `@jarenjs/contract` | Only if two ends exchange operations over a wire. Closure: `core`, `json`, `validate` — plus `emit`, reached only from its `./project` subpath (projections), so a bundle that never projects never carries it. Ships the `jaren-contract` CLI (projections, `--check`, `diff --fail-on breaking`); every document flag takes a `.json` file or a pure module (`.js`/`.mjs`/`.cjs`/`.ts`) whose `default` or `contract` export is the document or a `@jarenjs/linq/contract` pen, loaded through `@jarenjs/json/node` — the Node-only subpath of `json`, shared with `jaren-db` |
 
 Which contract subpath needs what: `.` and every binding and runtime
 subpath — `./http`, `./fetch`, `./node`, `./client`, `./app`, `./local`,
@@ -93,6 +93,14 @@ subpath — `./http`, `./fetch`, `./node`, `./client`, `./app`, `./local`,
 projections) and the `jaren-contract` CLI additionally need `emit`. The
 tree-shaking gate holds this: a bundle that never imports `./project`
 carries no emit code.
+
+The CI recipe for a code-first contract: keep the contract as a module
+(`contract.js` exporting the pen's `defineContract(…)`), commit the
+projected declaration beside it, and let the drift gate run against the
+module directly — `jaren-contract types --contract contract.js --out
+src/shop.d.ts --check` exits 1 when the declaration is missing or stale
+and 0 when it is current; the module is evaluated twice and refused when
+its two emissions differ (a clock, the environment, randomness in it).
 
 Which linq subpath needs what: `.` (the chain) and every pen —
 `./schema`, `./model`, `./jslt`, `./migration`, `./contract`, `./flow`,

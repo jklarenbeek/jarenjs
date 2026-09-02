@@ -11,13 +11,13 @@
  * earlier than the compiler's `JC0008`), `error()` one entry of an
  * operation's `errors`.
  *
- * The three identity wrappers — `typedClient`, `typedHandlers`,
- * `typedTools` — carry the inferred `Operations` type onto a client, a
- * handler table and an AI toolbox without running the TypeScript
- * projection. The document is the deliverable; nothing here imports
+ * The identity wrappers — `typedClient`, `typedHttpClient`,
+ * `typedHandlers`, `typedTools` — carry the inferred `Operations` type
+ * onto a client (an HTTP one with its byte method), a handler table and
+ * an AI toolbox without running the TypeScript projection. The document is the deliverable; nothing here imports
  * `@jarenjs/contract` or an engine.
  */
 
-export { defineContract, typedClient, typedHandlers, typedTools, Contract } from './define.js';
+export { defineContract, typedClient, typedHttpClient, typedHandlers, typedTools, Contract } from './define.js';
 export { read, command, subscribe, error } from './operation.js';
 export { http } from './http.js';

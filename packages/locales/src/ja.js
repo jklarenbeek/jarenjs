@@ -162,6 +162,8 @@ export const ja = {
   'contract/seq-regression': '操作 {op} のストリームが seq の順序に違反しました',
   'contract/stream-error': '操作 {op} のストリームはサーバーエラーで終了しました ({code})',
   'contract/heartbeat-missed': '操作 {op} のストリームが {ms} ミリ秒間沈黙しました',
+  'contract/slow-consumer': '操作 {op} のストリームは終了しました: 消費側が有界キューに追いつけませんでした',
+  'contract/reconnect-exhausted': '操作 {op} のストリームは {attempts} 回の試行後も再確立できませんでした（最後: {lastCode}）',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

@@ -24,6 +24,7 @@ import type {
   EntityCursorOptions, QueryCursor, LoadContinuation, Page,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
+import type { Runtime } from '@jarenjs/core/runtime';
 
 // ————— open —————
 
@@ -225,6 +226,80 @@ export interface EntityClientMembers {
   live<T>(source: AsyncSequence<T, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<T>>;
 }
 
+// ————— the ledger —————
+
+/** The record `createDbLedger` keeps per `(op, scope, key)`: exactly
+ * `idempotencyLedgerModel`'s (`@jarenjs/contract/ledger`), the
+ * `generation` the fence verifies included. */
+export interface DbLedgerRecord {
+  id: string;
+  generation: string;
+  op: string;
+  scope: string;
+  key: string;
+  hash: string;
+  status: 'started' | 'committed' | 'failed';
+  response: unknown;
+  retryable: boolean | null;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+}
+
+/** The ref a `new` claim hands back: the record's id and the generation
+ * the claim minted — portable across processes, stale once the key
+ * expires or is reclaimed. */
+export interface DbLedgerRef {
+  readonly id: string;
+  readonly generation: string;
+}
+
+export type DbClaimResult =
+  | { state: 'new'; ref: DbLedgerRef }
+  | { state: 'replay'; response: unknown }
+  | { state: 'in-progress' }
+  | { state: 'mismatch' };
+
+export interface DbLedgerOptions {
+  /** The declared collection; `'ledger'` (the model's) by default. */
+  collection?: string;
+  /** The retention of a key; 86,400,000 ms by default. */
+  ttlMs?: number;
+  /** The host's runtime record: its `now` is the clock, its `uuid`
+   * mints every generation. */
+  runtime?: Partial<Runtime>;
+  /** The clock; wins over the runtime's. Given neither, the ledger
+   * follows the instants the binding passes. */
+  now?: () => number;
+}
+
+/** The ledger the http binding calls, over the store: structurally the
+ * contract package's `Ledger`, every method asynchronous. A `commit` or
+ * `fail` whose ref settles no started record rejects `JL2007`. */
+export interface DbLedger {
+  claim(claim: { op: string; scope: string; key: string; hash: string; now?: number }): Promise<DbClaimResult>;
+  commit(ref: unknown, response: unknown, now?: number): Promise<void>;
+  fail(ref: unknown, retryable: boolean, response?: unknown, now?: number): Promise<void>;
+  lookup(key: { op: string; scope: string; key: string; now?: number }): Promise<DbLedgerRecord | null>;
+  /** Drop every expired record; answers how many. */
+  sweep(now?: number): Promise<number>;
+}
+
+/** What `createDbLedger` needs of a client: the declared collections
+ * and a transaction — the root client (claims take the write lock up
+ * front, `mode: 'immediate'`) or the one a transaction callback
+ * received (claims and settlements nest in that transaction). */
+export type LedgerClient =
+  | Pick<Client<any, any>, 'collections' | 'transaction' | 'close'>
+  | Pick<TransactionClientOf<any, any>, 'collections' | 'transaction'>;
+
+/** The contract ledger over a declared collection of the client's
+ * store — no import of `@jarenjs/contract`, no driver, the client's
+ * own surface only (DB-CLIENT.md §2.6). A `TypeError` names a client
+ * that is not one, a collection the model does not declare, a bad
+ * `ttlMs` or `now`. */
+export function createDbLedger(client: LedgerClient, options?: DbLedgerOptions): DbLedger;
+
 /** How a transaction relates to the client's unit of work: `'own'` (the
  * default) gives the callback a tracker of its own, so two handlers on
  * one client hold two records for the same entity key; `'shared'` opts
@@ -232,6 +307,12 @@ export interface EntityClientMembers {
  * transaction and means to save them inside it. */
 export interface TransactionOptions {
   readonly unitOfWork?: 'own' | 'shared';
+  /** `'immediate'` takes the write lock up front (`BEGIN IMMEDIATE`),
+   * so a body that reads before it writes never meets the read→write
+   * upgrade busy the handler cannot retry; `'deferred'` (the default)
+   * is the savepoint as always. A nested `tx.transaction()` is a
+   * savepoint whichever mode the root chose. */
+  readonly mode?: 'deferred' | 'immediate';
   /** Abandons the call while it is still QUEUED: the callback never
    * runs and no statement is issued (`JD2064`). */
   readonly signal?: AbortSignal;

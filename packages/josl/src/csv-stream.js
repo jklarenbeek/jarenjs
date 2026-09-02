@@ -9,7 +9,8 @@
 // test suite asserts exactly that at every chunk size.
 
 import { CsvMachine } from './csv-machine.js';
-import { stringifyCsvChunks, formatCsvValue } from './csv.js';
+import { stringifyCsvChunks, formatCsvValue, createCsvRowFormatter } from './csv.js';
+import { closeIterator, abortedError } from './pull.js';
 
 //#region reading
 
@@ -83,20 +84,80 @@ export async function parseCsvStream(chunks, options = undefined) {
  */
 export async function* iterateCsvStream(chunks, options = undefined) {
   const machine = new CsvMachine(options);
+  const signal = options?.signal ?? null;
   const pending = machine.rows();
-  for await (const chunk of chunks) {
-    machine.feed(chunk);
-    if (pending.length !== 0) {
-      // hand over the completed rows and drop them, so the machine never
-      // accumulates the document it is streaming
-      const batch = pending.splice(0, pending.length);
-      for (const row of batch)
-        yield row;
+  const iterator = chunks[Symbol.asyncIterator]?.() ?? chunks[Symbol.iterator]();
+  let finished = false;
+  try {
+    for (;;) {
+      if (signal !== null && signal.aborted)
+        throw abortedError(signal);
+      const step = await iterator.next();
+      if (step.done) {
+        finished = true;
+        break;
+      }
+      machine.feed(step.value);
+      if (pending.length !== 0) {
+        // hand over the completed rows and drop them, so the machine never
+        // accumulates the document it is streaming
+        const batch = pending.splice(0, pending.length);
+        for (const row of batch)
+          yield row;
+      }
     }
+  }
+  finally {
+    // a consumer that stops early, an abort, or a throw: the source is
+    // closed exactly once; a source read to its end needs no close
+    if (!finished)
+      await closeIterator(iterator);
   }
   machine.end();
   for (const row of pending.splice(0, pending.length))
     yield row;
+}
+
+/**
+ * Serialize an async iterable of records as an async iterable of CSV
+ * text chunks — the pull form of `stringifyCsvChunks`, byte-identical
+ * to it for the same records: the header exactly once before the first
+ * object row, one line per chunk. Pull is the backpressure: the next
+ * record is requested only when the consumer asks for the next chunk,
+ * so a database cursor behind it never runs ahead of the socket in
+ * front of it. `options.signal` aborts between pulls (the rejection is
+ * the signal's reason); an abort, a consumer that stops early or a throw
+ * closes the record source exactly once.
+ * @param {AsyncIterable<Array|object>|Iterable<Array|object>} rows - Records
+ * @param {object} [options] - Writer options; see `stringifyCsv`, plus `signal`
+ * @yields {string} One line at a time
+ * @example
+ * response.body = stringifyCsvStream(store.collection('rows').query(doc), { signal });
+ */
+export async function* stringifyCsvStream(rows, options = {}) {
+  const formatter = createCsvRowFormatter(options);
+  const signal = options.signal ?? null;
+  const iterator = rows[Symbol.asyncIterator]?.() ?? rows[Symbol.iterator]();
+  let finished = false;
+  try {
+    for (;;) {
+      if (signal !== null && signal.aborted)
+        throw abortedError(signal);
+      const step = await iterator.next();
+      if (step.done) {
+        finished = true;
+        break;
+      }
+      yield* formatter.lines(step.value);
+    }
+  }
+  finally {
+    if (!finished)
+      await closeIterator(iterator);
+  }
+  const tail = formatter.tail();
+  if (tail.length !== 0)
+    yield tail;
 }
 
 //#endregion
@@ -114,8 +175,7 @@ export class CsvStreamWriter {
     this.options = options;
     this.chunks = [];
     this.onChunk = options.onChunk ?? null;
-    this.fields = options.fields ?? null;
-    this.wroteHeader = options.header === false;
+    this.formatter = createCsvRowFormatter(options);
   }
 
   #emit(text) {
@@ -126,23 +186,19 @@ export class CsvStreamWriter {
     return this;
   }
 
+  /** @returns {string[]|null} The columns as decided, once known. */
+  get fields() {
+    return this.formatter.fields();
+  }
+
   /**
    * Write one record.
    * @param {Array|object} row - An array, or an object keyed by column
    * @returns {this} The writer, for chaining
    */
   write(row) {
-    if (!Array.isArray(row) && this.fields === null)
-      this.fields = Object.keys(row);
-    for (const chunk of stringifyCsvChunks([row], {
-      ...this.options,
-      fields: this.fields,
-      header: !this.wroteHeader && this.options.header !== false,
-    })) {
+    for (const chunk of this.formatter.lines(row))
       this.#emit(chunk);
-    }
-    if (!Array.isArray(row))
-      this.wroteHeader = true;
     return this;
   }
 
@@ -166,10 +222,14 @@ export class CsvStreamWriter {
   }
 
   /**
-   * Finish writing.
+   * Finish writing: the header an explicit field list is still owed
+   * goes out when no record was written.
    * @returns {string} The complete document, or `''` with an `onChunk` sink
    */
   end() {
+    const tail = this.formatter.tail();
+    if (tail.length !== 0)
+      this.#emit(tail);
     return this.toString();
   }
 }
@@ -192,5 +252,6 @@ export function createCsvStreamWriter(options = undefined) {
 //#endregion
 
 export { stringifyCsvChunks, formatCsvValue };
+export { JoslLimitError, CSV_LIMIT_CODES } from './limits.js';
 
 //#endregion

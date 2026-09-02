@@ -23,9 +23,10 @@
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
-import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS } from '../pipeline.js';
+import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
+import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
-import { isSubscriptionLike, runSubscription, STREAM_ERRORS } from '../stream/server.js';
+import { isSubscriptionLike, runSubscription, resolveStreamLimits, STREAM_ERRORS } from '../stream/server.js';
 import { HTTP_ERRORS, renderMessage, declaredMessage } from '../http/wire.js';
 import { isContractFrame, valueFrame, errorFrame, pushFrame, attach, isChannel } from './frame.js';
 
@@ -52,11 +53,25 @@ export { PORT_LOCAL_ERRORS };
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
  *   - a message catalog consulted before the English one
  * @property {(error: unknown, ctx: { op: string, trace: string } | null) => void} [onError]
+ * @property {(meta: import('../host.js').IdentifyMeta) => unknown} [identify]
+ *   - the host lifecycle's first hook (docs/CONTRACT-FORMAT.md §7.7), run
+ *   after the operation resolved and before the input is validated;
+ *   `meta.carrier` is `'port'` and the request-line members are `null`
+ * @property {(input: unknown, identity: unknown, enter: (lease: unknown) => Promise<unknown>) => unknown} [acquire]
+ *   - the second hook, run after the input validated; a `settlement` on
+ *   its lease is accepted and unused — this binding carries no
+ *   idempotency
  *   - observes the cause behind every `JC2070` frame, validator throws
  *   and a channel whose `postMessage` throws
  * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
  *   - the host's runtime record: its `uuid` generates the server trace
  *   where `trace` is absent
+ * @property {{ replay?: { limit?: number, maxBytes?: number }, queue?: { events?: number, bytes?: number } }} [streamLimits]
+ *   - the bounds of every push-frame stream (docs/CONTRACT-FORMAT.md
+ *   §18.1): a replay page asks for at most `replay.limit` emissions /
+ *   `replay.maxBytes` patch bytes (default 256 / 1 MiB); the undelivered
+ *   queue holds at most `queue.events` frames / `queue.bytes` frame
+ *   bytes (default 256 / 1 MiB) before the stream ends with `JC2096`
  */
 
 /**
@@ -175,6 +190,8 @@ export function servePort(contract, handlers, options) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
   const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
+  const streamLimits = resolveStreamLimits(options.streamLimits, (reason) => host('JC1001', reason));
+  const lifecycle = resolveLifecycle(options, (reason) => host('JC1001', reason));
   const traceGen = options.trace === undefined ? runtime.uuid : options.trace;
   const onError = options.onError === undefined ? null : options.onError;
   /** @type {Catalog | null} */
@@ -196,6 +213,77 @@ export function servePort(contract, handlers, options) {
   /** @type {Map<string, AbortController>} */
   const active = new Map();
   let closed = false;
+
+  /**
+   * The frozen context of one request or subscription on this carrier:
+   * the request-line members are `null` here, `etag`/`status` are not
+   * callable, and `host` is the identity's until `acquire` entered.
+   * @param {PortRoute} route
+   * @param {string} trace
+   * @param {AbortSignal} signal
+   * @param {unknown} hostValue
+   */
+  const contextOf = (route, trace, signal, hostValue) => Object.freeze({
+    op: route.op, trace, carrier: /** @type {const} */ ('port'), host: hostValue, signal,
+    method: null, path: null, params: null, headers: NO_HEADERS, body: null,
+    fail: ContractFailure, idempotency: null, etag: null, status: null,
+  });
+
+  /**
+   * Run the host lifecycle around a served request or subscription:
+   * identify before validation, the validation itself (`validate`),
+   * acquire after it, then `enter` with the handler's context. Every
+   * fault of a hook is the binding's host fault (`JC2070`); a declared
+   * failure is classified like a handler's. The answer is what `enter`
+   * (or a refusal) produced, plus the releases the caller runs at its
+   * own boundary.
+   * @param {PortRoute} route
+   * @param {string} trace
+   * @param {AbortSignal} signal
+   * @param {unknown} value - the input as the frame carried it
+   * @param {(error: unknown) => void} observed
+   * @param {(code: 'JC2006' | 'JC2070', details: unknown, cause: unknown) => void} refuse - a pre-handler refusal
+   * @param {(result: import('../pipeline.js').OperationResult) => void} failed - a declared failure of a hook
+   * @param {(hctx: any) => Promise<unknown>} enter
+   * @returns {Promise<{ entered: boolean, value: unknown, release: () => Promise<boolean> }>}
+   */
+  async function lifecycleAround(route, trace, signal, value, observed, refuse, failed, enter) {
+    const meta = Object.freeze({ op: route.op, trace, signal, carrier: /** @type {const} */ ('port'), method: null, path: null, headers: null, fail: ContractFailure });
+    const identified = await identifyHost(lifecycle, meta);
+    const none = () => Promise.resolve(true);
+    if (identified.kind === 'fault') {
+      refuse('JC2070', undefined, identified.cause);
+      return { entered: false, value: undefined, release: none };
+    }
+    if (identified.kind === 'failure') {
+      failed(classifyDeclared(route, identified.failure));
+      return { entered: false, value: undefined, release: none };
+    }
+    const identity = once(identified.lease.release, observed);
+    /** @type {(() => Promise<boolean>) | null} */
+    let acquired = null;
+    const release = () => (acquired === null ? identity() : acquired().then((a) => identity().then((b) => a && b)));
+    const invalid = validateOperationInput(route, value);
+    if (invalid !== null && invalid.kind === 'contract') {
+      refuse('JC2006', invalid.details, invalid.cause);
+      return { entered: false, value: undefined, release };
+    }
+    const ictx = contextOf(route, trace, signal, identified.lease.host);
+    const out = await acquireHost(lifecycle, value, ictx, (lease) => {
+      acquired = once(lease.release, observed);
+      return enter(Object.freeze({ ...ictx, host: lease.host }));
+    });
+    if (out.kind === 'fault') {
+      refuse('JC2070', undefined, out.cause);
+      return { entered: false, value: undefined, release };
+    }
+    if (out.kind === 'failure') {
+      failed(classifyDeclared(route, out.failure));
+      return { entered: false, value: undefined, release };
+    }
+    if (out.afterFault !== undefined) observed(out.afterFault);
+    return { entered: true, value: out.result, release };
+  }
 
   /**
    * @param {unknown} error
@@ -244,37 +332,46 @@ export function servePort(contract, handlers, options) {
     }
     const opId = route.op.id;
     const value = route.validateInput === null ? null : input === undefined ? null : input;
-    const invalid = validateOperationInput(route, value);
-    if (invalid !== null && invalid.kind === 'contract') {
-      if (invalid.cause !== undefined) observe(invalid.cause, { op: opId, trace });
-      post(errorFrame(id, 'JC2006', renderMessage(catalog, HTTP_ERRORS.JC2006.msgid, { op: opId }),
-        invalid.details, false, trace), { op: opId, trace });
-      return;
-    }
     const controller = new AbortController();
     active.set(id, controller);
-    const ctx = Object.freeze({
-      op: route.op, trace, signal: controller.signal, params: null, headers: NO_HEADERS,
-      fail: ContractFailure, idempotency: null,
-    });
-    settleOperation(route, value, ctx, validate).then((result) => {
-      if (active.get(id) === controller) active.delete(id);
-      // a cancelled request's client is gone and drops late responses
-      // anyway; not answering just keeps the channel quiet
-      if (controller.signal.aborted || closed) return;
+    const pushCtx = { op: opId, trace };
+    /** @param {import('../pipeline.js').OperationResult} result */
+    const answer = (result) => {
       if (result.kind === 'value') {
-        post(valueFrame(id, result.value, trace), { op: opId, trace });
+        post(valueFrame(id, result.value, trace), pushCtx);
       }
       else if (result.kind === 'failure') {
         post(errorFrame(id, result.code, declaredMessage(catalog, opId, result.code, result.params),
-          result.details, result.retryable, trace), { op: opId, trace });
+          result.details, result.retryable, trace), pushCtx);
       }
       else {
-        if (result.cause !== undefined) observe(result.cause, { op: opId, trace });
+        if (result.cause !== undefined) observe(result.cause, pushCtx);
         post(errorFrame(id, 'JC2070', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }),
-          undefined, false, trace), { op: opId, trace });
+          undefined, false, trace), pushCtx);
       }
-    });
+    };
+    lifecycleAround(route, trace, controller.signal, value,
+      (error) => observe(error, pushCtx),
+      (code, details, cause) => {
+        if (cause !== undefined) observe(cause, pushCtx);
+        post(errorFrame(id, code, renderMessage(catalog, code === 'JC2006' ? HTTP_ERRORS.JC2006.msgid : PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }),
+          details, false, trace), pushCtx);
+      },
+      answer,
+      // inside enter: the handler through the neutral pipeline; a host
+      // fault rejects enter with the rollback carrier so a transaction
+      // around it rolls back, the fault still the answer
+      (hctx) => settleOperation(route, value, hctx, validate).then((result) => {
+        if (result.kind === 'contract') throw new RollbackCarrier(result, result.cause);
+        return result;
+      }))
+      .then((run) => {
+        if (active.get(id) === controller) active.delete(id);
+        // a cancelled request's client is gone and drops late responses
+        // anyway; not answering just keeps the channel quiet
+        if (run.entered && !controller.signal.aborted && !closed) answer(/** @type {any} */ (run.value));
+        return run.release();
+      });
   }
 
   /**
@@ -320,67 +417,102 @@ export function servePort(contract, handlers, options) {
     }
     const opId = route.op.id;
     const value = route.validateInput === null ? null : input === undefined ? null : input;
-    const invalid = validateOperationInput(route, value);
-    if (invalid !== null && invalid.kind === 'contract') {
-      if (invalid.cause !== undefined) observe(invalid.cause, { op: opId, trace });
-      post(pushFrame(id, 'error', 0, wireError('JC2006', renderMessage(catalog, HTTP_ERRORS.JC2006.msgid, { op: opId }), trace, invalid.details, false)), { op: opId, trace });
-      return;
-    }
     const lastSeq = Number.isInteger(lastSeqRaw) && /** @type {number} */ (lastSeqRaw) >= 0 ? /** @type {number} */ (lastSeqRaw) : null;
     const entry = { stopped: false, stop: /** @type {(reason: string | null) => void} */ (() => { entry.stopped = true; }) };
     streams.set(id, entry);
     const controller = new AbortController();
-    const ctx = Object.freeze({
-      op: route.op, trace, signal: controller.signal, params: null, headers: NO_HEADERS,
-      fail: ContractFailure, idempotency: null,
-    });
     const pushCtx = { op: opId, trace };
-    settleOperation(route, value, ctx, false).then((result) => {
-      if (closed || entry.stopped) {
-        streams.delete(id);
-        // the settlement may still hold a live subscription — release it
-        if (result.kind === 'value' && isSubscriptionLike(result.value)) {
-          try {
-            result.value.close();
-          }
-          catch {
-            // a throwing close changes nothing for a gone client
-          }
-        }
-        return;
-      }
+    /** @param {import('../pipeline.js').OperationResult} result */
+    const preStream = (result) => {
+      streams.delete(id);
       if (result.kind === 'failure') {
-        streams.delete(id);
         post(pushFrame(id, 'error', 0, wireError(result.code, declaredMessage(catalog, opId, result.code, result.params), trace, result.details, result.retryable)), pushCtx);
         return;
       }
       if (result.kind === 'contract') {
-        streams.delete(id);
         if (result.cause !== undefined) observe(result.cause, pushCtx);
         post(pushFrame(id, 'error', 0, wireError('JC2070', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), trace, undefined, false)), pushCtx);
-        return;
       }
-      const sub = result.value;
-      if (!isSubscriptionLike(sub)) {
+    };
+    lifecycleAround(route, trace, controller.signal, value,
+      (error) => observe(error, pushCtx),
+      (code, details, cause) => {
         streams.delete(id);
-        observe(new TypeError(`the handler of subscribe operation '${opId}' did not answer a subscription ({ result | snapshot(), subscribe, close })`), pushCtx);
-        post(pushFrame(id, 'error', 0, wireError('JC2070', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), trace, undefined, false)), pushCtx);
-        return;
-      }
+        if (cause !== undefined) observe(cause, pushCtx);
+        post(pushFrame(id, 'error', 0, wireError(code, renderMessage(catalog, code === 'JC2006' ? HTTP_ERRORS.JC2006.msgid : PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), trace, details, false)), pushCtx);
+      },
+      preStream,
+      (hctx) => settleOperation(route, value, hctx, false))
+      .then((run) => {
+        if (!run.entered) return run.release();
+        const result = /** @type {import('../pipeline.js').OperationResult} */ (run.value);
+        if (closed || entry.stopped) {
+          streams.delete(id);
+          // the settlement may still hold a live subscription — release it
+          if (result.kind === 'value' && isSubscriptionLike(result.value)) {
+            try {
+              result.value.close();
+            }
+            catch {
+              // a throwing close changes nothing for a gone client
+            }
+          }
+          return run.release();
+        }
+        if (result.kind !== 'value') {
+          preStream(result);
+          return run.release();
+        }
+        const sub = result.value;
+        if (!isSubscriptionLike(sub)) {
+          streams.delete(id);
+          observe(new TypeError(`the handler of subscribe operation '${opId}' did not answer a subscription ({ result | snapshot(), subscribe, close })`), pushCtx);
+          post(pushFrame(id, 'error', 0, wireError('JC2070', renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), trace, undefined, false)), pushCtx);
+          return run.release();
+        }
+        return streamSubscription(id, route, sub, lastSeq, trace, pushCtx, entry, run.release);
+      });
+  }
+
+  /**
+   * The runner over a live subscription on this channel; the leases are
+   * released after the runner's stop/close/done sequence.
+   * @param {string} id
+   * @param {PortRoute} route
+   * @param {any} sub
+   * @param {number | null} lastSeq
+   * @param {string} trace
+   * @param {{ op: string, trace: string }} pushCtx
+   * @param {{ stopped: boolean, stop: (reason: string | null) => void }} entry
+   * @param {() => Promise<boolean>} release
+   */
+  function streamSubscription(id, route, sub, lastSeq, trace, pushCtx, entry, release) {
+    const opId = route.op.id;
+    {
       const runner = runSubscription(route, sub, {
-        snapshot: (seq, snapValue, resumed) => post(pushFrame(id, 'snapshot', seq, { value: snapValue, resumed }), pushCtx),
-        patch: (seq, emission) => post(pushFrame(id, 'patch', seq, emission), pushCtx),
-        error: (intent, cause, seq) => {
-          observe(cause, pushCtx);
-          const code = intent === 'invalid-snapshot' ? 'JC2091' : 'JC2070';
-          const msgid = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091.msgid : PORT_LOCAL_ERRORS.JC2070.msgid;
-          post(pushFrame(id, 'error', seq, wireError(code, renderMessage(catalog, msgid, { op: opId }), trace, undefined, false)), pushCtx);
+        snapshot: (seq, data) => pushFrame(id, 'snapshot', seq, data),
+        patch: (seq, emission) => pushFrame(id, 'patch', seq, emission),
+        error: (intent, cause, seq, declared) => {
+          if (intent !== 'slow-consumer') observe(cause, pushCtx);
+          if (intent === 'declared' && declared !== null) {
+            return pushFrame(id, 'error', seq, wireError(declared.code, declaredMessage(catalog, opId, declared.code, {}), trace, declared.details, declared.retryable));
+          }
+          const code = intent === 'invalid-snapshot' ? 'JC2091' : intent === 'slow-consumer' ? 'JC2096' : 'JC2070';
+          const row = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091
+            : intent === 'slow-consumer' ? STREAM_ERRORS.JC2096 : PORT_LOCAL_ERRORS.JC2070;
+          return pushFrame(id, 'error', seq, wireError(code, renderMessage(catalog, row.msgid, { op: opId }), trace, undefined, row.retryable));
         },
-        end: (reason, seq) => post(pushFrame(id, 'end', seq, { reason }), pushCtx),
-        done: () => streams.delete(id),
-      }, { lastSeq, validate });
+        end: (reason, seq) => pushFrame(id, 'end', seq, { reason }),
+        // the byte account is the frame as posted: its JSON text
+        size: (frame) => JSON.stringify(frame).length,
+        write: (frame) => post(frame, pushCtx),
+        done: () => {
+          streams.delete(id);
+          return release().then(() => undefined);
+        },
+      }, { lastSeq, validate, limits: streamLimits });
       entry.stop = (reason) => runner.stop(reason);
-    });
+    }
   }
 
   /** @param {any} event */

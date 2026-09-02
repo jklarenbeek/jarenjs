@@ -105,15 +105,16 @@ decides which document answers a question about behaviour.
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
-### 2.2 The two exported names
+### 2.2 The three exported names
 
-The whole export surface: a door, and a type-level reader for what it
-hands back.
+The whole export surface: a door, a type-level reader for what it hands
+back, and the durable ledger over what it opened.
 
 | Name | Answers | Type reading |
 |---|---|---|
 | `open(model, options)` | a promise of the frozen client — `store`, `capabilities`, `entities`, `collections`, `transaction`, `close`, and `saveChanges`/`live` when the model declares entities | `Client<InferMeta<typeof model>>` for a pen model; `Client<E>` for `open<E>(json, …)`; the wide map for a bare JSON model |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
+| `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
 
 `open` is the only door, and it is deliberately not a coded refusal: a
 missing `options`, or a `validator` that is not a `JarenValidator`, is a
@@ -235,6 +236,67 @@ A collection handle is 49 members: 10 from the store's collection
 because a collection has no relations and no tracking — and neither does
 its client: a collections-only model opens a client with no
 `saveChanges` and no `live` of its own, exactly as the store does.
+
+### 2.6 The ledger
+
+`createDbLedger(client, { collection = 'ledger', ttlMs = 86_400_000,
+runtime, now })` is the `Ledger` the `@jarenjs/contract` http binding
+calls under `policy.idempotency` (CONTRACT-FORMAT.md §8), over a
+declared collection of the store the client opened — the collection
+`idempotencyLedgerModel` declares, or any collection with that
+record's schema (`collection` names it; a name the model does not
+declare is a `TypeError` at construction, not at the first claim).
+The implementation is the client's own surface and nothing else: it
+imports no contract module, no driver, no store; the record it writes
+is exactly the model's, and the id is the same versioned JSON tuple the
+memory ledger spells (`1:["op","scope","key"]`, injective over `|`,
+control characters and Unicode). The contract package keeps its D1
+edge: it depends on no store, and this door depends on no contract.
+
+**Which client decides the transaction.** A root client (the one `open`
+answered) runs every claim, settlement, lookup and sweep in a
+transaction of its own with `mode: 'immediate'` — the write lock taken
+before the read, so two processes claiming one key from one file see
+exactly one `new` and the other `in-progress`, never two handlers. The
+client a transaction callback received runs them as savepoints inside
+that transaction instead: a domain write and the settlement then
+commit together or roll back together — the ledger a lifecycle
+settlement lease carries. Atomicity is same-store only: a ledger on
+one file and a domain write on another are two commits.
+
+**The generation fence.** A `new` claim mints a `generation` (the
+runtime record's `uuid`), persists it with the record and hands it
+back in the ref (`{ id, generation }`). `commit`/`fail` settle the
+record whose id AND generation the ref names while it is `started`; a
+ref whose key expired, was reclaimed under a newer generation, or was
+settled already is refused with **`JL2007`** (rejected), and the
+record it would have touched is unchanged — across processes and
+restarts, because the generation is in the file. The binding reports
+the refusal to its `onError`; the response still goes out.
+
+**Clocks and expiry.** `now` wins, then the runtime record's clock;
+given neither, the ledger follows the instants the binding passes with
+each call (a host-side `lookup`/`sweep` without one uses the latest).
+A record past `expiresAt` is dropped on `claim` and `lookup`;
+`sweep(now?)` drops every expired record and answers the count. A
+record written under the earlier `"<op>|<scope>|<key>"` id spelling
+is matched by no claim: it expires by its own `expiresAt`, or a host
+rewrites its `id` once with `ledgerId` from `@jarenjs/contract/ledger`.
+
+```js
+import { open, createDbLedger } from '@jarenjs/linq/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { idempotencyLedgerModel } from '@jarenjs/contract/ledger';
+import { serveHttp } from '@jarenjs/contract/http';
+
+const db = await open(idempotencyLedgerModel, { driver: nodeDriver(), path: 'ledger.db' });
+const server = serveHttp(contract, handlers, { ledger: createDbLedger(db) });   // root: immediate claims
+
+await db.transaction(async (tx) => {                          // a settlement inside the host's transaction
+  await tx.collections.orders.insert(order);
+  await createDbLedger(tx).commit(ref, response);             // commits with the order, or not at all
+});
+```
 
 ## 3. Worked examples
 
@@ -753,7 +815,7 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->541,639<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->542,234<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.db.kb-->542<!--/fact--> kB) beside the other nine subpath prices in
@@ -783,7 +845,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->40,857<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->40,929<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

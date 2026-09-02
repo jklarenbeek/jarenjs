@@ -176,3 +176,155 @@ describe('a real @jarenjs/db live() over the stream binding', () => {
     sub.stop();
   });
 });
+
+/**
+ * A live() whose store-coded error is mapped to a code the operation
+ * declares: declared codes are lowercase by grammar, a store's `JD2060`
+ * is not one, so the handler maps it — the cause rides along for the
+ * server's observer.
+ * @param {any} live
+ */
+function declaring(live) {
+  return {
+    get result() {
+      return live.result;
+    },
+    subscribe: (/** @type {(e: any) => void} */ cb) => live.subscribe((/** @type {any} */ e) => cb(
+      Object.hasOwn(e, 'error') && e.error?.code === 'JD2060' ? { error: { code: 'overflow', cause: e.error } } : e)),
+    close: () => live.close(),
+  };
+}
+
+describe('a live() source error over the stream binding', () => {
+  const SSE_DECLARING = compileContract({
+    $contract: '0.1',
+    operations: {
+      'data.live': {
+        kind: 'subscribe',
+        input: { type: 'object', required: ['collection'], properties: { collection: { type: 'string' } } },
+        output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+        errors: { overflow: { status: 507 } },
+      },
+    },
+  });
+  const PORT_DECLARING = compileContract({
+    $contract: '0.1',
+    operations: {
+      'data.live': {
+        kind: 'subscribe',
+        input: { type: 'object', required: ['collection', 'document'], properties: { collection: { type: 'string' }, document: true } },
+        output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+        errors: { overflow: { status: 507 } },
+      },
+    },
+  });
+
+  /** A store whose live queries hold at most two entries: the third insert is a real JD2060. */
+  async function boundedStore() {
+    const store = await openStore(MODEL, { driver: nodeDriver(), capture: true, live: { maxMaintained: 2 } });
+    cleanups.push(() => store.close());
+    await store.collection('notes').insert({ id: 'n1', title: 'first', points: 5 });
+    return store;
+  }
+
+  /** Cross the bound: two more inserts, the second past `maxMaintained`. @param {any} store */
+  async function overflow(store) {
+    await store.collection('notes').insert({ id: 'n2', title: 'second', points: 6 });
+    await store.collection('notes').insert({ id: 'n3', title: 'third', points: 7 });
+  }
+
+  /** @param {any} contract @param {(live: any) => any} shape @param {any[]} observed */
+  async function sse(contract, shape, observed) {
+    const store = await boundedStore();
+    const dispatcher = serveHttp(contract, {
+      'data.live': async (/** @type {any} */ input) => shape(await store.collection(input.collection).live(SCAN)),
+    }, { onError: (/** @type {unknown} */ error) => observed.push(error) });
+    const server = http.createServer(toNodeHandler(dispatcher));
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = /** @type {import('node:net').AddressInfo} */ (server.address());
+    cleanups.push(async () => {
+      dispatcher.close();
+      server.closeAllConnections();
+      server.close();
+      await once(server, 'close');
+    });
+    const client = openHttpClient(contract, { baseUrl: `http://127.0.0.1:${address.port}` });
+    cleanups.push(() => client.close());
+    const consumer = consumerDoc();
+    client.subscribe('data.live', { collection: 'notes' }, consumer.callbacks);
+    await wait(() => consumer.state.doc !== null);
+    await overflow(store);
+    await wait(() => consumer.state.errors.length === 1);
+    return consumer.state.errors[0];
+  }
+
+  /** @param {any} contract @param {(live: any) => any} shape @param {any[]} observed */
+  async function port(contract, shape, observed) {
+    const store = await boundedStore();
+    const { port1, port2 } = new MessageChannel();
+    cleanups.push(() => {
+      port1.close();
+      port2.close();
+    });
+    const portServer = servePort(contract, {
+      'data.live': async (/** @type {any} */ input) => shape(await store.collection(input.collection).live(input.document)),
+    }, { channel: port1, onError: (/** @type {unknown} */ error) => observed.push(error) });
+    cleanups.push(() => portServer.close());
+    const client = openPortClient(contract, { channel: port2 });
+    cleanups.push(() => client.close());
+    const consumer = consumerDoc();
+    client.subscribe('data.live', { collection: 'notes', document: SCAN }, consumer.callbacks);
+    await wait(() => consumer.state.doc !== null);
+    await overflow(store);
+    await wait(() => consumer.state.errors.length === 1);
+    return consumer.state.errors[0];
+  }
+
+  /** The undeclared shape: the store's error crosses as the host fault, its text never on the wire. @param {any} outcome @param {string} hostCode @param {any[]} observed */
+  function assertUndeclared(outcome, hostCode, observed) {
+    assert.strictEqual(outcome.kind, 'contract');
+    assert.strictEqual(outcome.error.code, 'JC2093');
+    assert.strictEqual(outcome.error.details.code, hostCode);
+    const wire = JSON.stringify(outcome);
+    assert.ok(!wire.includes('JD2060') && !wire.includes('maxMaintained'), `the store's error text stays off the wire: ${wire}`);
+    assert.strictEqual(observed.length, 1);
+    assert.strictEqual(observed[0].name, 'DbRuntimeError');
+    assert.strictEqual(observed[0].code, 'JD2060');
+  }
+
+  /** The declared shape: one failure outcome under the declared code. @param {any} outcome @param {any[]} observed */
+  function assertDeclared(outcome, observed) {
+    assert.strictEqual(outcome.kind, 'failure');
+    assert.strictEqual(outcome.error.code, 'overflow');
+    assert.strictEqual(outcome.error.retryable, false);
+    assert.strictEqual(outcome.error.details, null, 'no details crossed');
+    assert.strictEqual(outcome.error.message, 'operation data.live failed with overflow');
+    assert.strictEqual(observed.length, 1);
+    assert.strictEqual(observed[0].cause.code, 'JD2060');
+  }
+
+  it('over SSE, returned as is: JD2060 is the host fault JC2008 on the wire and JC2093 at the client; the observer gets the DbRuntimeError', async () => {
+    /** @type {any[]} */
+    const observed = [];
+    assertUndeclared(await sse(SSE_CONTRACT, (live) => live, observed), 'JC2008', observed);
+  });
+
+  it('over SSE, mapped to a declared code: one failure outcome under that code, the cause observed', async () => {
+    /** @type {any[]} */
+    const observed = [];
+    assertDeclared(await sse(SSE_DECLARING, declaring, observed), observed);
+  });
+
+  it('over port, returned as is: the host fault JC2070 on the wire and JC2093 at the client', async () => {
+    /** @type {any[]} */
+    const observed = [];
+    assertUndeclared(await port(PORT_CONTRACT, (live) => live, observed), 'JC2070', observed);
+  });
+
+  it('over port, mapped to a declared code: the same failure outcome as SSE', async () => {
+    /** @type {any[]} */
+    const observed = [];
+    assertDeclared(await port(PORT_DECLARING, declaring, observed), observed);
+  });
+});

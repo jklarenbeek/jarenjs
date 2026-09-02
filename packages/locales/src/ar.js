@@ -224,6 +224,8 @@ export const ar = {
   'contract/seq-regression': 'خالف دفق العملية ⁨{op}⁩ ترتيب seq الخاص به',
   'contract/stream-error': 'انتهى دفق العملية ⁨{op}⁩ بخطأ من الخادم (⁨{code}⁩)',
   'contract/heartbeat-missed': 'ظل دفق العملية ⁨{op}⁩ صامتًا لمدة {ms} مللي ثانية',
+  'contract/slow-consumer': 'انتهى دفق العملية ⁨{op}⁩: تأخر المستهلك عن طابوره المحدود',
+  'contract/reconnect-exhausted': 'تعذّر إعادة إنشاء دفق العملية ⁨{op}⁩ بعد {attempts} محاولات (الأخيرة: {lastCode})',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

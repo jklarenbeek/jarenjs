@@ -166,6 +166,8 @@ export const nl = {
   'contract/seq-regression': 'de stream van operatie {op} heeft de seq-volgorde geschonden',
   'contract/stream-error': 'de stream van operatie {op} is geëindigd met een serverfout ({code})',
   'contract/heartbeat-missed': 'de stream van operatie {op} is {ms} ms stil gebleven',
+  'contract/slow-consumer': 'de stream van operatie {op} is geëindigd: de afnemer bleef achter bij zijn begrensde wachtrij',
+  'contract/reconnect-exhausted': 'de stream van operatie {op} kon na {attempts} pogingen niet worden hersteld (laatste: {lastCode})',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

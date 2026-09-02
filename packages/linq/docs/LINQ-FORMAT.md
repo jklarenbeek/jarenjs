@@ -35,17 +35,17 @@ is the index of the ten, and it is how a reader reaches any of them.
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 815 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,647 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 817 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,652 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,218 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,083 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 781 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,217 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,221 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,026 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,143 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 940 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
-| [DB-CLIENT.md](DB-CLIENT.md) | 820 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [DB-CLIENT.md](DB-CLIENT.md) | 882 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 <!--/fact-->
 
 Every row of that table is derived, and none of it is written here: the
@@ -201,18 +201,18 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 815 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,647 | 34 | 8 | 14 | 173,354 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 32,427 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 40,857 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,124 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 23,599 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,217 | 37 | 6 | 3 | 44,644 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,181 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 46,862 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 36,587 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 820 | 39 | 4 | 2 | 541,639 B |
-| **eleven documents** | | **11,645** | **288** | **67** | | |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 817 | — | — | — | — |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,652 | 34 | 8 | 14 | 173,426 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 32,499 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 40,929 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,196 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 23,671 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 44,716 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,253 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 46,934 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 36,659 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 882 | 40 | 4 | 2 | 542,234 B |
+| **eleven documents** | | **11,718** | **290** | **67** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -254,16 +254,16 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 173,354 B | 173 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 32,427 B | 32 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 40,857 B | 41 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,124 B | 19 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 23,599 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 44,644 B | 45 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,181 B | 19 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 46,862 B | 47 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 36,587 B | 37 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 541,639 B | 542 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 173,426 B | 173 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 32,499 B | 32 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 40,929 B | 41 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,196 B | 19 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 23,671 B | 24 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 44,716 B | 45 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,253 B | 19 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 46,934 B | 47 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 36,659 B | 37 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 542,234 B | 542 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -627,7 +627,8 @@ it says.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
-| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C>`: one handler per invokable operation, `(input, ctx) => output \| Failure` | native; a missing or misspelled operation does not compile |
+| `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
+| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`; `ctx` is `HandlerContext<Host, Carrier>` — the HTTP context by default, `Host` the host lifecycle's `ctx.host`, a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7) | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either |
 | `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, `execute` takes the operation's ACCEPTED input | native |
 
 **What the pen does not judge**
@@ -764,12 +765,13 @@ it says.
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
-**The two exported names**
+**The three exported names**
 
 | Name | Answers | Type reading |
 |---|---|---|
 | `open(model, options)` | a promise of the frozen client — `store`, `capabilities`, `entities`, `collections`, `transaction`, `close`, and `saveChanges`/`live` when the model declares entities | `Client<InferMeta<typeof model>>` for a pen model; `Client<E>` for `open<E>(json, …)`; the wide map for a bare JSON model |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
+| `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
 
 **The entity handle**
 

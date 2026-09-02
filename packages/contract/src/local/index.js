@@ -33,7 +33,8 @@
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
-import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS } from '../pipeline.js';
+import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
+import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { renderMessage, declaredMessage } from '../http/wire.js';
 import {
@@ -157,6 +158,12 @@ function prepare(op, handler) {
 function race(settled, signal) {
   return new Promise((resolve) => {
     const onAbort = () => resolve(ABORTED);
+    // a signal already aborted when the race begins fires no event: it
+    // is an abort all the same, and the settlement lands into nothing
+    if (signal.aborted) {
+      resolve(ABORTED);
+      return;
+    }
     signal.addEventListener('abort', onAbort, { once: true });
     settled.then((result) => {
       signal.removeEventListener('abort', onAbort);
@@ -216,6 +223,7 @@ export function openLocalClient(contract, handlers, options = {}) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
   const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
+  const lifecycle = resolveLifecycle(options, (reason) => host('JC1001', reason));
   const trace = options.trace === undefined ? runtime.uuid : options.trace;
   const onError = options.onError === undefined ? null : options.onError;
   /** @type {Catalog | null} */
@@ -285,13 +293,59 @@ export function openLocalClient(contract, handlers, options = {}) {
     const meta = makeMeta(route.outcome.id, ctx.attempt, null);
     const caller = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
     if ((caller !== null && caller.aborted) || closed) return cancelled(route, meta);
+    const signal = caller === null ? closer.signal : AbortSignal.any([closer.signal, caller]);
+    const id = safeTrace(trace);
+    meta.trace = id;
+    const opId = route.outcome.id;
+    const observed = (/** @type {unknown} */ error) => observe(error, { op: opId, trace: id });
+    /** @param {import('../pipeline.js').OperationResult} result */
+    const outcomeOf = (result) => {
+      if (result.kind === 'contract') {
+        if (result.cause !== undefined) observed(result.cause);
+        return failedOutcome('contract', outcomeError('JC2070',
+          renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), null, null, false), meta);
+      }
+      if (result.kind === 'failure') {
+        return assembleOutcome(route.outcome, {
+          status: null,
+          headers: null,
+          error: {
+            code: result.code,
+            message: declaredMessage(catalog, opId, result.code, result.params),
+            details: result.details,
+            retryable: result.retryable,
+          },
+        }, meta, catalog);
+      }
+      return assembleOutcome(route.outcome, { status: null, headers: null, value: result.value }, meta, catalog);
+    };
+    /** The binding's host fault as an outcome. @param {unknown} cause */
+    const hostFault = (cause) => {
+      observed(cause);
+      return failedOutcome('contract', outcomeError('JC2070',
+        renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), null, null, false), meta);
+    };
 
-    // 1. validate — the same verdict the pipeline would reach, once
+    // 1. identify — before the input is judged (§7.7)
+    const identified = await identifyHost(lifecycle, Object.freeze({
+      op: route.op, trace: id, signal, carrier: /** @type {const} */ ('local'), method: null, path: null, headers: null, fail: ContractFailure,
+    }));
+    if (identified.kind === 'fault') return hostFault(identified.cause);
+    if (identified.kind === 'failure') return outcomeOf(classifyDeclared(route, identified.failure));
+    const identity = once(identified.lease.release, observed);
+    /** @type {(() => Promise<boolean>) | null} */
+    let acquired = null;
+    const release = () => (acquired === null ? identity() : acquired().then((a) => identity().then((b) => a && b)));
+    /** Release, then answer: a release that fails before the outcome is exposed is the host's fault — its cause was observed as it failed. @param {import('../client/outcome.js').Outcome} outcome */
+    const expose = async (outcome) => ((await release()) ? outcome : failedOutcome('contract', outcomeError('JC2070',
+      renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), null, null, false), meta));
+
+    // 2. validate — the same verdict the pipeline would reach, once
     let value;
     if (!route.hasInput) {
       if (input !== undefined && input !== null) {
-        return failedOutcome('contract', clientError(catalog, 'JC2050', { op: route.outcome.id }, null,
-          [{ path: '', keyword: 'input' }]), meta);
+        return expose(failedOutcome('contract', clientError(catalog, 'JC2050', { op: opId }, null,
+          [{ path: '', keyword: 'input' }]), meta));
       }
       value = null;
     }
@@ -300,40 +354,36 @@ export function openLocalClient(contract, handlers, options = {}) {
       const invalid = validateOperationInput(route, value);
       if (invalid !== null && invalid.kind === 'contract') {
         if (invalid.cause !== undefined) observe(invalid.cause, null);
-        return failedOutcome('contract', clientError(catalog, 'JC2050', { op: route.outcome.id }, null, invalid.details), meta);
+        return expose(failedOutcome('contract', clientError(catalog, 'JC2050', { op: opId }, null, invalid.details), meta));
       }
     }
+    // an abort that landed while identity ran is the race's to settle: the
+    // handler is still invoked with the aborted signal — told to stop, as
+    // a superseded attempt always was — and its settlement is dropped
 
-    // 2. run the neutral pipeline under the composed signal
-    const signal = caller === null ? closer.signal : AbortSignal.any([closer.signal, caller]);
-    const id = safeTrace(trace);
-    meta.trace = id;
-    const handlerCtx = Object.freeze({
-      op: route.op, trace: id, signal, params: null, headers: NO_HEADERS,
-      fail: ContractFailure, idempotency: null,
+    // 3. acquire, then the neutral pipeline inside enter under the composed signal
+    const identityCtx = Object.freeze({
+      op: route.op, trace: id, carrier: /** @type {const} */ ('local'), host: identified.lease.host, signal,
+      method: null, path: null, params: null, headers: NO_HEADERS, body: null,
+      fail: ContractFailure, idempotency: null, etag: null, status: null,
     });
-    const result = await race(settleOperation(route, value, handlerCtx, validate), signal);
-    if (result === ABORTED) return cancelled(route, meta);
+    const out = await acquireHost(lifecycle, value, identityCtx, (lease) => {
+      acquired = once(lease.release, observed);
+      const handlerCtx = Object.freeze({ ...identityCtx, host: lease.host });
+      return race(settleOperation(route, value, handlerCtx, validate), signal).then((result) => {
+        // a host fault rejects enter with the carrier: a transaction around it rolls back, the fault stands
+        if (result !== ABORTED && result.kind === 'contract') throw new RollbackCarrier(result, result.cause);
+        return result;
+      });
+    });
+    if (out.kind === 'fault') return expose(hostFault(out.cause));
+    if (out.kind === 'failure') return expose(outcomeOf(classifyDeclared(route, out.failure)));
+    if (out.afterFault !== undefined) observed(out.afterFault);
+    const result = /** @type {import('../pipeline.js').OperationResult | typeof ABORTED} */ (out.result);
+    if (result === ABORTED) return expose(cancelled(route, meta));
 
-    // 3. assemble the D6 outcome
-    if (result.kind === 'contract') {
-      if (result.cause !== undefined) observe(result.cause, { op: route.outcome.id, trace: id });
-      return failedOutcome('contract', outcomeError('JC2070',
-        renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: route.outcome.id }), null, null, false), meta);
-    }
-    if (result.kind === 'failure') {
-      return assembleOutcome(route.outcome, {
-        status: null,
-        headers: null,
-        error: {
-          code: result.code,
-          message: declaredMessage(catalog, route.outcome.id, result.code, result.params),
-          details: result.details,
-          retryable: result.retryable,
-        },
-      }, meta, catalog);
-    }
-    return assembleOutcome(route.outcome, { status: null, headers: null, value: result.value }, meta, catalog);
+    // 4. assemble the D6 outcome
+    return expose(outcomeOf(result));
   }
 
   /** @type {LocalCapabilities} */

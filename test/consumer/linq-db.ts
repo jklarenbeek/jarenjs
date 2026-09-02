@@ -175,3 +175,27 @@ async function main(): Promise<void> {
   void places.saveChanges;
 }
 void main;
+
+// ——— the ledger: structurally the contract package's Ledger, typed here ———
+import { createDbLedger } from '@jarenjs/linq/db';
+import type { DbLedger, DbClaimResult, DbLedgerRecord, LedgerClient } from '@jarenjs/linq/db';
+import type { Ledger, ClaimResult, LedgerRecord } from '@jarenjs/contract/ledger';
+
+export async function ledgerTyping(client: LedgerClient) {
+  const ledger: DbLedger = createDbLedger(client, { ttlMs: 60_000, collection: 'ledger', now: () => Date.now() });
+  const asContract: Ledger = ledger;                                   // assignable: the binding takes it as is
+  const claimed: DbClaimResult = await ledger.claim({ op: 'a', scope: '', key: 'k', hash: 'h' });
+  const wide: ClaimResult = claimed;
+  if (claimed.state === 'new') {
+    const id: string = claimed.ref.id;
+    const generation: string = claimed.ref.generation;
+    await ledger.commit(claimed.ref, { status: 200, headers: {}, body: null });
+    void id; void generation;
+  }
+  const record: DbLedgerRecord | null = await ledger.lookup({ op: 'a', scope: '', key: 'k' });
+  const asRecord: LedgerRecord | null = record;
+  const swept: number = await ledger.sweep();
+  // @ts-expect-error — a ref is named by id and generation; a bare string is not one the types admit
+  const bad: DbClaimResult = { state: 'new', ref: 'seq-1' };
+  void asContract; void wide; void asRecord; void swept; void bad;
+}

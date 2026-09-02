@@ -7,20 +7,30 @@
  * `headersDistinct` (or `headers`) and a readable-stream event surface,
  * the response anything with `writeHead`/`end`.
  *
- * The body is collected chunk by chunk up to the matched operation's
- * `policy.limits.maxBodyBytes`; on overflow the read stops, the 413 is
- * answered with `connection: close`, and once the response has flushed
- * the socket lingers — draining and discarding the rest of the upload
- * (bounded by a grace timer) before it is destroyed, so the close is a
- * FIN the peer can read the 413 through, not an RST that discards it. A declared `content-length` above the limit
- * is never read at all; an unmatched request's body is never read (the
+ * The body reaches the dispatcher as a PULL SOURCE over the request's
+ * own chunks — nothing is collected here: a JSON operation drains it
+ * under `policy.limits.maxBodyBytes` in the dispatcher (its strict
+ * UTF-8 decode decides `JC2005`), an opaque handler pulls it one chunk
+ * at a time through a source that never yields past the limit. When an
+ * upload was pulled and left unread (a limit crossing, a response
+ * before EOF) the answer carries `connection: close`, and once it has
+ * flushed the socket lingers — draining and discarding the rest of the
+ * upload (bounded by a grace timer) before it is destroyed, so the
+ * close is a FIN the peer can read the 413 through, not an RST that
+ * discards it. A declared `content-length` above the limit is never
+ * read at all; an unmatched request's body is never read (the
  * dispatcher answers 404/405 without it and the platform discards the
- * rest). Bytes are handed to the dispatcher as received — for a JSON
- * operation too, so its strict UTF-8 decode decides `JC2005`. Repeated
+ * rest). A streamed response body is written chunk by chunk behind the
+ * socket's `drain`. Repeated
  * header lines reach the dispatcher as arrays (`headersDistinct`), which
  * is how a repeated scalar header member becomes `JC2015`. `ctx.signal`
- * aborts when the client goes away before the response finished.
+ * aborts when the client goes away before the response finished. A
+ * streaming (SSE) response writes each event only after the previous
+ * one drained: a `res.write()` that answers `false` parks the pump
+ * until `drain`, so a slow reader never grows the process's buffers.
  */
+
+import { createAwaitedSink } from '@jarenjs/core/async';
 
 /**
  * @typedef {import('../http/serve.js').HttpDispatcher} HttpDispatcher
@@ -49,17 +59,211 @@ const LINGER_MS = 1000;
 
 /**
  * The response surface the adapter writes — `http.ServerResponse` fits.
- * `write` and `flushHeaders` are read only for a streaming (SSE)
- * response.
+ * `write`, `flushHeaders`, `once`/`removeListener` (or `off`),
+ * `destroy`, `destroyed` and `writableEnded` are read only for a
+ * streaming (SSE) response: `write`'s `false` is waited out on `drain`
+ * (settled on `close`/`error` too, with the listeners removed), and a
+ * response already ended or destroyed refuses the write instead of
+ * emitting `write after end`.
  * @typedef {Object} NodeResponseLike
  * @property {(status: number, headers?: Record<string, string>) => unknown} writeHead
  * @property {(body?: string | Uint8Array, callback?: () => void) => unknown} end
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} on
+ * @property {(event: string, listener: (...args: any[]) => void) => unknown} [once]
+ * @property {(event: string, listener: (...args: any[]) => void) => unknown} [removeListener]
+ * @property {(event: string, listener: (...args: any[]) => void) => unknown} [off]
  * @property {(chunk: string | Uint8Array) => unknown} [write]
  * @property {() => unknown} [flushHeaders]
+ * @property {(error?: Error) => unknown} [destroy]
  * @property {boolean} [writableFinished]
+ * @property {boolean} [writableEnded]
+ * @property {boolean} [destroyed]
  * @property {boolean} [headersSent]
  */
+
+/**
+ * The streaming sink over a platform response: `write` hands the chunk
+ * to `res.write` and answers nothing when the platform took it (`true`),
+ * or a promise that resolves on the next `drain` when it answered
+ * `false` — so the pump behind it writes the next event only once the
+ * socket has room — and rejects when the response closes or errors
+ * first. Every listener the wait registered is removed at settlement.
+ * `end` ends the response; `abort` destroys it.
+ * @param {NodeResponseLike} res
+ * @returns {import('@jarenjs/core/async').SinkLike<string>}
+ */
+function responseSink(res) {
+  const listen = typeof res.once === 'function' ? res.once.bind(res) : res.on.bind(res);
+  const unlisten = typeof res.removeListener === 'function'
+    ? res.removeListener.bind(res)
+    : typeof res.off === 'function' ? res.off.bind(res) : null;
+  return {
+    write: (chunk) => {
+      if (typeof res.write !== 'function') return undefined;
+      if (res.writableEnded === true || res.destroyed === true) {
+        return Promise.reject(new Error('the response is closed'));
+      }
+      let taken;
+      try {
+        taken = res.write(chunk);
+      }
+      catch (err) {
+        return Promise.reject(err);
+      }
+      if (taken !== false) return undefined;
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        /** @type {() => void} */
+        const off = () => {
+          settled = true;
+          if (unlisten === null) return;
+          unlisten('drain', onDrain);
+          unlisten('close', onClose);
+          unlisten('error', onError);
+        };
+        const onDrain = () => {
+          if (settled) return;
+          off();
+          resolve();
+        };
+        const onClose = () => {
+          if (settled) return;
+          off();
+          reject(new Error('the response closed before it drained'));
+        };
+        /** @param {unknown} err */
+        const onError = (err) => {
+          if (settled) return;
+          off();
+          reject(err);
+        };
+        listen('drain', onDrain);
+        listen('close', onClose);
+        listen('error', onError);
+      });
+    },
+    end: () => {
+      try {
+        res.end();
+      }
+      catch {
+        // the socket may already be gone
+      }
+    },
+    abort: () => {
+      if (typeof res.destroy === 'function' && res.destroyed !== true) res.destroy();
+    },
+  };
+}
+
+/**
+ * The request as a pull source of its body chunks — what a body-carrying
+ * matched request hands the dispatcher. Chunks come from the platform's
+ * own async iterator (paused between pulls, so an unpulled upload never
+ * fills memory); `return()` does NOT destroy the request — a mid-upload
+ * cancel (a limit crossing, a response before EOF) must answer through
+ * a readable close, so the source only records that it was cancelled
+ * and `send` lingers and destroys after the response flushed. `state`
+ * says whether the request was pulled at all and whether it reached
+ * EOF, which decides `connection: close`.
+ * @param {NodeRequestLike} req
+ * @returns {AsyncIterable<Uint8Array> & { state: { started: boolean, ended: boolean, cancelled: boolean } }}
+ */
+function requestSource(req) {
+  const state = { started: false, ended: false, cancelled: false };
+  /** @type {AsyncIterator<Uint8Array> | null} */
+  let inner = null;
+  return {
+    state,
+    [Symbol.asyncIterator]() {
+      return {
+        async next() {
+          if (state.ended || state.cancelled) return { done: true, value: undefined };
+          state.started = true;
+          if (inner === null) {
+            const iterable = /** @type {any} */ (req);
+            if (typeof iterable[Symbol.asyncIterator] !== 'function') {
+              state.ended = true;
+              return { done: true, value: undefined };
+            }
+            inner = iterable[Symbol.asyncIterator]();
+          }
+          let r;
+          try {
+            r = await inner.next();
+          }
+          catch (err) {
+            state.cancelled = true;
+            throw err;
+          }
+          if (r.done) {
+            state.ended = true;
+            return { done: true, value: undefined };
+          }
+          return { done: false, value: r.value };
+        },
+        async return(value) {
+          // no destroy here: the response decides how the socket closes
+          state.cancelled = true;
+          if (typeof req.pause === 'function') req.pause();
+          return { done: true, value };
+        },
+      };
+    },
+  };
+}
+
+/**
+ * Write a streamed response body: chunk by chunk through the
+ * drain-aware sink, then end; the peer going away — or a sink failure —
+ * cancels the source exactly once, and a source that throws destroys
+ * the response (its status is already on the wire; the body is cut).
+ * @param {NodeResponseLike} res
+ * @param {AsyncIterable<Uint8Array>} body
+ * @param {(() => void) | undefined} done
+ */
+function pumpBody(res, body, done) {
+  const sink = createAwaitedSink(responseSink(res));
+  const iterator = body[Symbol.asyncIterator]();
+  let cancelled = false;
+  const cancel = async () => {
+    if (cancelled) return;
+    cancelled = true;
+    if (typeof iterator.return === 'function') {
+      try {
+        await iterator.return();
+      }
+      catch {
+        // the source refused its cancel; it is released either way
+      }
+    }
+  };
+  const onClose = () => {
+    if (res.writableFinished !== true) void cancel();
+  };
+  res.on('close', onClose);
+  (async () => {
+    try {
+      for (;;) {
+        const r = await iterator.next();
+        if (r.done) break;
+        if (cancelled) break;
+        await sink.write(r.value);
+      }
+      if (cancelled) {
+        await sink.abort(new Error('the response was cancelled'));
+        return;
+      }
+      await sink.end();
+      if (done !== undefined) done();
+    }
+    catch (err) {
+      // a source that threw, or a sink that failed: the body is cut
+      await cancel();
+      await sink.abort(err).catch(() => undefined);
+    }
+  })();
+}
 
 /**
  * Whether the request could carry a body the operation reads.
@@ -100,23 +304,6 @@ function headersOf(req) {
 }
 
 /**
- * Concatenate collected chunks into one Uint8Array.
- * @param {Uint8Array[]} chunks
- * @param {number} total
- * @returns {Uint8Array}
- */
-function concat(chunks, total) {
-  if (chunks.length === 1) return chunks[0];
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    out.set(chunks[i], offset);
-    offset += chunks[i].byteLength;
-  }
-  return out;
-}
-
-/**
  * Write a dispatcher response to the platform response.
  * @param {NodeResponseLike} res
  * @param {import('../http/wire.js').HttpResponse} response
@@ -128,30 +315,26 @@ function send(res, response, close, done) {
   const headers = { ...response.headers };
   if (typeof response.stream === 'function') {
     // an SSE response: headers out immediately, then the pump writes
-    // events until the stream ends (the pump ends the response itself);
-    // the peer-gone path runs through the request's abort signal
+    // events until the stream ends (the pump ends the response itself),
+    // each event only once the previous one drained; the peer-gone path
+    // runs through the request's abort signal
     res.writeHead(response.status, headers);
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    response.stream({
-      write: (chunk) => {
-        if (typeof res.write === 'function') res.write(chunk);
-      },
-      end: () => {
-        try {
-          res.end();
-        }
-        catch {
-          // the socket may already be gone
-        }
-      },
-    });
+    response.stream(responseSink(res));
     return;
   }
   const body = response.body;
+  if (close) headers.connection = 'close';
+  if (body !== null && typeof body === 'object' && !(body instanceof Uint8Array)) {
+    // a streamed body: chunked, each chunk behind the previous one's
+    // drain; the peer going away cancels the source once
+    res.writeHead(response.status, headers);
+    pumpBody(res, body, done);
+    return;
+  }
   if (body !== null && headers['content-length'] === undefined) {
     headers['content-length'] = String(typeof body === 'string' ? new TextEncoder().encode(body).byteLength : body.byteLength);
   }
-  if (close) headers.connection = 'close';
   res.writeHead(response.status, headers);
   if (body === null) res.end(undefined, done);
   else res.end(body, done);
@@ -214,10 +397,18 @@ export function toNodeHandler(dispatcher, options = {}) {
     const finish = (response, close) => {
       send(res, response, close, close ? lingerThenDestroy : undefined);
     };
-    /** @param {string | Uint8Array | null} body @param {boolean} close */
-    const answer = (body, close) => {
+    /**
+     * Dispatch and answer. A request whose upload was pulled and left
+     * unread (a limit crossing, a response before EOF) cannot keep its
+     * connection: the answer carries `connection: close` and the socket
+     * lingers, draining and discarding the rest, before it is destroyed
+     * — so the 413 is readable through a FIN, never lost to an RST. An
+     * upload that was never pulled is the platform's to discard.
+     * @param {(AsyncIterable<Uint8Array> & { state: { started: boolean, ended: boolean, cancelled: boolean } }) | null} body
+     */
+    const answer = (body) => {
       dispatcher.dispatch({ method, url, headers, body, signal: controller.signal })
-        .then((response) => finish(response, close), (err) => {
+        .then((response) => finish(response, body !== null && body.state.started && !body.state.ended), (err) => {
           // only JC1004 can arrive here, and this adapter builds a
           // well-formed request; still, a rejection must not hang the socket
           const message = err instanceof Error ? err.message : String(err);
@@ -231,46 +422,19 @@ export function toNodeHandler(dispatcher, options = {}) {
       if (hit === null && method === 'HEAD' && head) hit = contract.match('GET', path);
     }
     if (hit === null) {
-      answer(null, false);
+      answer(null);
       return;
     }
-    const op = hit.op;
-    const limit = op.policy.limits.maxBodyBytes;
+    const limit = hit.op.policy.limits.maxBodyBytes;
     const declared = Number(headers['content-length']);
     if (Number.isFinite(declared) && declared > limit) {
       // the dispatcher answers the 413 from the header; the body is never read
-      answer(null, false);
+      answer(null);
       return;
     }
-
-    /** @type {Uint8Array[]} */
-    const chunks = [];
-    let total = 0;
-    let settled = false;
-    req.on('data', (chunk) => {
-      if (settled) return;
-      const bytes = /** @type {Uint8Array} */ (chunk);
-      total += bytes.byteLength;
-      if (total > limit) {
-        settled = true;
-        if (typeof req.pause === 'function') req.pause();
-        // an oversize stream: the bytes read so far already exceed the
-        // limit, so the dispatcher answers the 413 from that length
-        // without a body; the request is destroyed after the response
-        // has flushed
-        headers['content-length'] = String(total);
-        answer(null, true);
-        return;
-      }
-      chunks.push(bytes);
-    });
-    req.on('end', () => {
-      if (settled) return;
-      settled = true;
-      answer(total === 0 ? null : concat(chunks, total), false);
-    });
-    req.on('error', () => {
-      settled = true;
-    });
+    // the body reaches the dispatcher as a pull source: a JSON operation
+    // drains it under its limit there, an opaque handler pulls it chunk
+    // by chunk, and nothing is collected here
+    answer(requestSource(req));
   };
 }

@@ -18,6 +18,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/json/jslt` | the Jaren JSLT stylesheet compiler and dispatcher |
 | `@jarenjs/json/jtlt` | the Jaren JTLT template compiler — JSON to text/XML |
 | `@jarenjs/json/xquery` | the XQuery text front-end for the query engine |
+| `@jarenjs/json/node` | **Node only** — `loadDocument`, the document loader the suite's CLIs share: a `.json` file or a pure module (`.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`) whose `default` or named export is the document or a pen builder; the only subpath that imports a Node builtin, never re-exported from the root |
 
 ## JSON utilities
 
@@ -807,6 +808,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/json` | JavaScript | declared |
 | `@jarenjs/json/basic` | JavaScript | declared |
 | `@jarenjs/json/canonical` | JavaScript | declared |
+| `@jarenjs/json/node` | JavaScript | declared |
 | `@jarenjs/json/pointer` | JavaScript | declared |
 | `@jarenjs/json/path` | JavaScript | declared |
 | `@jarenjs/json/patch` | JavaScript | declared |

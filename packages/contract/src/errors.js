@@ -66,6 +66,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1008: 'openHttpClient, openPortClient, client.url, createContractEffect, createContractSubscription or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
   JC1009: 'encodeSseEvent (the stream wire): an event, id or data string the SSE frame cannot carry — a bare carriage return inside data, a line terminator inside event or id',
   JC1010: 'client.subscribe was asked for an operation that is not a subscribe operation (invoke carries reads and commands; subscribe carries streams)',
+  JC1011: 'a ledger commit or fail named a ref that settles no started record: the key expired, was reclaimed under a newer generation, or was settled already — the settlement is refused; the binding reports it to onError and the response still goes out',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',
@@ -105,6 +106,8 @@ export const CONTRACT_CODES = Object.freeze({
   JC2093: 'the stream ended with a server error event whose code the operation does not declare (kind contract; a declared code is a failure outcome under its own code)',
   JC2094: 'the stream went silent for twice policy.stream.heartbeatMs (kind network, client-side)',
   JC2095: 'a requested resume was refused — informational, carried as resumed:false in the fresh snapshot\'s event data, never an outcome',
+  JC2096: 'the stream\'s bounded queue would overflow — the consumer reads slower than the source emits, or a replay page outran it (kind network, retryable; the stream ends with an error event carrying this code and the carrier tears the connection down)',
+  JC2097: 'the client\'s reconnect budget is exhausted: every attempt after a network loss failed the same way (kind network, not retryable; details carry the attempts made and the last network code, client-side)',
 });
 
 /**

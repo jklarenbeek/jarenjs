@@ -167,6 +167,8 @@ export const de = {
   'contract/seq-regression': 'der Stream der Operation {op} hat seine seq-Reihenfolge verletzt',
   'contract/stream-error': 'der Stream der Operation {op} endete mit einem Serverfehler ({code})',
   'contract/heartbeat-missed': 'der Stream der Operation {op} blieb {ms} ms lang still',
+  'contract/slow-consumer': 'der Stream der Operation {op} wurde beendet: der Verbraucher blieb hinter seiner begrenzten Warteschlange zurück',
+  'contract/reconnect-exhausted': 'der Stream der Operation {op} konnte nach {attempts} Versuchen nicht wiederhergestellt werden (zuletzt: {lastCode})',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

@@ -48,8 +48,10 @@ import {
 } from '@jarenjs/core/scan';
 
 import { CsvSyntaxError } from './errors.js';
+import { JoslLimitError, limitOption } from './limits.js';
 import { columnOf, feedMachine, beginParseAll } from './util.js';
 import { setObjectMember } from '@jarenjs/core/object';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import {
   LocalDate,
   LocalTime,
@@ -241,6 +243,16 @@ export class CsvMachine {
     this.onEvent = options.onEvent ?? null;
     this.onRepair = options.onRepair ?? null;
 
+    // the hostile-input limits: Infinity unless asked for, checked while
+    // the text is still in cutter or cell state (limits.js)
+    this.maxTotalBytes = limitOption(options, 'maxTotalBytes');
+    this.maxRecordBytes = limitOption(options, 'maxRecordBytes');
+    this.maxFieldBytes = limitOption(options, 'maxFieldBytes');
+    this.maxColumns = limitOption(options, 'maxColumns');
+    this.limited = this.maxTotalBytes !== Infinity || this.maxRecordBytes !== Infinity
+      || this.maxFieldBytes !== Infinity || this.maxColumns !== Infinity;
+    this.totalBytes = 0;
+
     const headers = options.headers;
     this.wantHeader = headers === true;
     this.headerFields = Array.isArray(headers)
@@ -294,7 +306,36 @@ export class CsvMachine {
       this.nextLf = -2;
     if (this.nextCr === -1)
       this.nextCr = -2;
+    if (this.limited)
+      this.count(chunk);
     return feedMachine(this, chunk);
+  }
+
+  // The byte limits, checked BEFORE the chunk is buffered: a chunk that
+  // takes the document past maxTotalBytes is refused whole, and a record
+  // still being cut — the unconsumed tail plus this chunk — that would
+  // pass maxRecordBytes is refused before the concatenation that would
+  // hold it. `parseAll` counts its one text the same way.
+  count(text) {
+    if (this.maxTotalBytes !== Infinity) {
+      this.totalBytes += utf8ByteLength(text);
+      if (this.totalBytes > this.maxTotalBytes)
+        throw new JoslLimitError('CSV2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, this.line);
+    }
+    if (this.maxRecordBytes !== Infinity) {
+      // the pending record is what the cutter has not handed off yet;
+      // a fresh chunk extends it
+      const pending = utf8ByteLength(this.buf) + utf8ByteLength(text);
+      if (pending > this.maxRecordBytes && !this.endsRecordWithin(text))
+        throw new JoslLimitError('CSV2002', 'a record exceeds maxRecordBytes', this.maxRecordBytes, this.recordOrigin);
+    }
+  }
+
+  // Whether a chunk can end the pending record within the bound: cheap
+  // and permissive — a terminator anywhere in the chunk means the cutter
+  // gets its chance; the span check in readSpan is the exact judge.
+  endsRecordWithin(text) {
+    return text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0;
   }
 
   /**
@@ -326,6 +367,8 @@ export class CsvMachine {
    */
   parseAll(text) {
     text = beginParseAll(this, text);
+    if (this.maxTotalBytes !== Infinity && utf8ByteLength(text) > this.maxTotalBytes)
+      throw new JoslLimitError('CSV2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, 1);
     this.readSpan(text, 0, text.length);
     return this.outRows;
   }
@@ -586,11 +629,27 @@ export class CsvMachine {
       }
       this.recordOrigin = this.line;
       this.dropRecord = false;
+      const start = pos;
       pos = this.parseRecord(text, pos, end, cells);
+      // the record's source bytes, terminator included — judged before
+      // the record is kept (the streaming path also refused it at every
+      // chunk boundary while it was still being cut)
+      if (this.maxRecordBytes !== Infinity && utf8ByteLength(text, start, pos) > this.maxRecordBytes)
+        throw new JoslLimitError('CSV2002', 'a record exceeds maxRecordBytes', this.maxRecordBytes, this.recordOrigin);
       if (!this.dropRecord)
         this.emitRecord(cells);
     }
     return pos;
+  }
+
+  // One cell about to be kept: its source bytes (quotes included, as
+  // written) and the column count are judged before the slice or the
+  // push that would hold it.
+  admitCell(cells, text, start, stop) {
+    if (this.maxFieldBytes !== Infinity && utf8ByteLength(text, start, stop) > this.maxFieldBytes)
+      throw new JoslLimitError('CSV2003', 'a field exceeds maxFieldBytes', this.maxFieldBytes, this.line);
+    if (cells.length >= this.maxColumns)
+      throw new JoslLimitError('CSV2004', 'a record has more than maxColumns fields', this.maxColumns, this.recordOrigin);
   }
 
   // The single grammar path: fill `cells` with one record's fields and
@@ -668,6 +727,8 @@ export class CsvMachine {
       stop = nlf;
     if (ncr >= 0 && ncr < stop)
       stop = ncr;
+    if (this.limited)
+      this.admitCell(cells, text, pos, stop);
     const raw = text.slice(pos, stop);
     cells.push(this.plainCells ? raw : this.finish(raw));
     return stop;
@@ -677,6 +738,7 @@ export class CsvMachine {
   parseQuoted(text, pos, end, cells) {
     const quote = this.quote;
     const delim = this.delimiter;
+    const opened = pos;
     pos++; // opening quote
     let start = pos;
     let out = null;
@@ -685,6 +747,8 @@ export class CsvMachine {
         // Out of input with the field still open. Closing it here is the
         // only reading that keeps the text.
         this.heal('CSV1001', this.recordOrigin, columnOf(text, pos));
+        if (this.limited)
+          this.admitCell(cells, text, opened, pos);
         cells.push(this.finishQuoted(joinCell(out, text, start, pos)));
         return pos;
       }
@@ -697,12 +761,16 @@ export class CsvMachine {
       }
       const n = pos + 1 < end ? text.charCodeAt(pos + 1) : -1;
       if (n === quote) { // "" — one literal quote
+        if (this.maxFieldBytes !== Infinity && utf8ByteLength(text, opened, pos + 2) > this.maxFieldBytes)
+          throw new JoslLimitError('CSV2003', 'a field exceeds maxFieldBytes', this.maxFieldBytes, this.line);
         out = (out === null ? '' : out) + text.slice(start, pos + 1);
         pos += 2;
         start = pos;
         continue;
       }
       if (n === delim || n === CC_LF || n === CC_CR || n === -1) {
+        if (this.limited)
+          this.admitCell(cells, text, opened, pos + 1);
         cells.push(this.finishQuoted(joinCell(out, text, start, pos)));
         return pos + 1; // past the closing quote
       }
@@ -733,6 +801,8 @@ export class CsvMachine {
           break;
         pos++;
       }
+      if (this.limited)
+        this.admitCell(cells, text, opened, pos);
       cells.push(this.finishQuoted(closed + text.slice(stray, pos)));
       return pos;
     }

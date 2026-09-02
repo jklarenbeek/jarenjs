@@ -167,6 +167,18 @@ function declaredResult(route, code, params, details, retryable) {
 }
 
 /**
+ * Classify a declared failure a HOST hook answered (`identify`/`acquire`,
+ * docs/CONTRACT-FORMAT.md §7.7): the same rules as a handler's `ctx.fail`
+ * — the code must be declared, the details must pass the declaration.
+ * @param {PipelineRoute} route
+ * @param {import('./errors.js').ContractFailureValue} failure
+ * @returns {OperationResult}
+ */
+export function classifyDeclared(route, failure) {
+  return declaredResult(route, failure.code, failure.params, failure.details, failure.retryable);
+}
+
+/**
  * Classify the handler's resolved value: a `ContractFailure` is a
  * declared failure; anything else is the output, validated unless the
  * route is raw or validation is off.

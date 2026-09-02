@@ -327,13 +327,17 @@ export function translateOperations(connection, shapes, operations) {
  * @param {{ connection: any, shapes: Map<string, TableShape>,
  *   mode: 'session' | 'journal',
  *   log: boolean, retention: number,
- *   now?: () => number }} options - `now` is the clock a delivery is
- *   stamped with (the store's runtime record); the platform's when absent
+ *   now?: () => number,
+ *   bracket?: (fn: () => any) => any }} options - `now` is the clock a
+ *   delivery is stamped with (the store's runtime record); the platform's
+ *   when absent. `bracket` runs the first-open DDL (the store's immediate
+ *   transaction on a writable store); bare when absent
  * @returns {any}
  */
 export function createCaptureEngine(options) {
   const { connection, shapes, mode } = options;
   const clock = options.now ?? Date.now;
+  const bracket = options.bracket ?? ((/** @type {() => any} */ fn) => fn());
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   if (options.log && !(Number.isInteger(options.retention) && options.retention >= 1)) {
@@ -420,12 +424,12 @@ export function createCaptureEngine(options) {
     ? null
     // the seed is written only when the row is absent: a read-only open
     // of an already-upgraded file reads the row and writes nothing
-    : chain(attempt(() => chain(connection.exec(logStatements.create), () =>
+    : chain(attempt(() => bracket(() => chain(connection.exec(logStatements.create), () =>
       chain(connection.exec(logStatements.createState), () =>
         chain(connection.prepare(logStatements.hasState), (probe) => chain(probe.get([]), (row) =>
           (row === undefined || row === null
             ? chain(connection.prepare(logStatements.seedState), (statement) => statement.run([]))
-            : null))))),
+            : null)))))),
     (error) => new DbCompileError('JD0002',
       `the change log table could not be created (${error?.message ?? String(error)}) — `
       + 'a read-only store creates nothing; open it read-write once, or without capture.log',

@@ -53,6 +53,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { JoslSyntaxError } from './errors.js';
+import { JoslLimitError, limitOption } from './limits.js';
 import {
   LocalDate,
   LocalTime,
@@ -64,7 +65,7 @@ import {
   getOwn, columnOf, feedMachine, beginParseAll, stickyExec, RE_DATETIME, RE_TIMEONLY,
 } from './util.js';
 import { setObjectMember } from '@jarenjs/core/object';
-import { countCharCode } from '@jarenjs/core/string';
+import { countCharCode, utf8ByteLength } from '@jarenjs/core/string';
 
 function isBareKeyCode(c) {
   return isAsciiLetterCode(c)
@@ -133,6 +134,20 @@ export class JoslMachine {
   constructor(options = {}) {
     this.mode = options.mode === 'toml' ? 'toml' : 'josl';
     this.onEvent = options.onEvent ?? null;
+    // Root-item detachment: when set, a completed `[[]]` item is handed
+    // to it and dropped from the root, so the root never holds more
+    // than the item in progress (iterateJoslStream's reason to exist).
+    this.detachRoot = options.detachRoot ?? null;
+    this.rootCount = 0; // root items opened so far (indices survive detachment)
+    // the hostile-input limits: Infinity unless asked for (limits.js)
+    this.maxTotalBytes = limitOption(options, 'maxTotalBytes');
+    this.maxRecordBytes = limitOption(options, 'maxRecordBytes');
+    this.maxTokenBytes = limitOption(options, 'maxTokenBytes');
+    this.maxDepth = limitOption(options, 'maxDepth');
+    this.maxRetainedValues = limitOption(options, 'maxRetainedValues');
+    this.totalBytes = 0;
+    this.retained = 0; // values linked into the root since the last detachment
+    this.depth = 0; // inline container nesting while a value is parsed
     // Logical-line sink used by the CST layer: reports each line's source
     // span, and the span of a pair's value inside it, so a rewriter can
     // replace a value without disturbing the bytes around it.
@@ -169,6 +184,18 @@ export class JoslMachine {
    * @returns {this} The machine, for chaining
    */
   feed(chunk) {
+    if (this.maxTotalBytes !== Infinity) {
+      this.totalBytes += utf8ByteLength(chunk);
+      if (this.totalBytes > this.maxTotalBytes)
+        throw new JoslLimitError('JOSL2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, this.startLine);
+    }
+    if (this.maxRecordBytes !== Infinity && chunk.indexOf('\n') < 0
+      && utf8ByteLength(this.buf) + utf8ByteLength(chunk) > this.maxRecordBytes) {
+      // the logical line still being cut, plus this chunk, would pass the
+      // bound before any newline could end it: refused before the
+      // concatenation that would hold it
+      throw new JoslLimitError('JOSL2002', 'a logical line exceeds maxRecordBytes', this.maxRecordBytes, this.startLine);
+    }
     return feedMachine(this, chunk);
   }
 
@@ -206,6 +233,8 @@ export class JoslMachine {
    */
   parseAll(text) {
     text = beginParseAll(this, text);
+    if (this.maxTotalBytes !== Infinity && utf8ByteLength(text) > this.maxTotalBytes)
+      throw new JoslLimitError('JOSL2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, 1);
     // positions are offsets into the whole source, which starts at line 1
     this.lineOrigin = 1;
     const tracking = this.onEvent !== null;
@@ -215,6 +244,11 @@ export class JoslMachine {
       this.lineValueStart = -1;
       this.lineValueEnd = -1;
       const end = this.parseLine(text, pos);
+      // the whole document is already in memory here: a logical line is
+      // judged by its extent once the parser found it (the streaming
+      // path refuses it earlier, while it is still being cut)
+      if (this.maxRecordBytes !== Infinity && utf8ByteLength(text, pos, end) > this.maxRecordBytes)
+        throw new JoslLimitError('JOSL2002', 'a logical line exceeds maxRecordBytes', this.maxRecordBytes, this.startLine);
       const next = end < len && text.charCodeAt(end) === CC_LF ? end + 1 : end;
       if (this.onLine !== null)
         this.onLine(pos, next, this.lineValueStart, this.lineValueEnd);
@@ -235,12 +269,45 @@ export class JoslMachine {
   /**
    * The (possibly still growing) root value: `{}`-rooted for documents,
    * `[]`-rooted after a `[[]]` header. Undefined content yields `{}`.
+   * Under `detachRoot` a finished document hands its last item over
+   * here, so the root ends empty.
    * @returns {*} Current root value
    */
   root() {
     if (this.rootValue === undefined)
       this.rootValue = {};
+    if (this.ended && this.detachRoot !== null && this.rootIsArray && this.rootValue.length !== 0)
+      this.detachLast();
     return this.rootValue;
+  }
+
+  // Hand the last root item to the detach sink and drop it: the root
+  // keeps at most the item in progress, and the retained-value count
+  // starts over with it.
+  detachLast() {
+    const item = this.rootValue.pop();
+    this.retained = 0;
+    this.detachRoot(item);
+  }
+
+  // One more value linked into the root: a pair, an array element, an
+  // inline-table member, a table or a root item. Judged before the link.
+  retain() {
+    if (++this.retained > this.maxRetainedValues)
+      throw new JoslLimitError('JOSL2005', 'the root retains more than maxRetainedValues values', this.maxRetainedValues, this.startLine);
+  }
+
+  // One nesting level deeper — an inline array or table, or a header
+  // path segment — judged before it opens.
+  deeper(depth) {
+    if (depth > this.maxDepth)
+      throw new JoslLimitError('JOSL2004', 'the document nests deeper than maxDepth', this.maxDepth, this.startLine);
+  }
+
+  // A token about to be sliced: its byte size, judged first.
+  token(line, start, end) {
+    if (this.maxTokenBytes !== Infinity && utf8ByteLength(line, start, end) > this.maxTokenBytes)
+      throw new JoslLimitError('JOSL2003', 'a token exceeds maxTokenBytes', this.maxTokenBytes, this.startLine);
   }
 
   //#endregion
@@ -402,6 +469,8 @@ export class JoslMachine {
       ? nlPos - 1
       : nlPos;
     if (end > start) {
+      if (this.maxRecordBytes !== Infinity && utf8ByteLength(buf, start, end) > this.maxRecordBytes)
+        throw new JoslLimitError('JOSL2002', 'a logical line exceeds maxRecordBytes', this.maxRecordBytes, this.startLine);
       this.lineOrigin = this.startLine;
       this.parseLine(buf.slice(start, end));
     }
@@ -544,7 +613,7 @@ export class JoslMachine {
 
   headerBase() {
     if (this.rootIsArray)
-      return [this.rootValue[this.rootValue.length - 1], [this.rootValue.length - 1]];
+      return [this.rootValue[this.rootValue.length - 1], [this.rootCount - 1]];
     if (this.rootValue === undefined)
       this.rootValue = {};
     return [this.rootValue, []];
@@ -554,6 +623,7 @@ export class JoslMachine {
   // descending into the last element of arrays-of-tables
   navigate(keys, pos) {
     let [t, path] = this.headerBase();
+    this.deeper(keys.length);
     for (let i = 0; i < keys.length - 1; ++i) {
       const k = keys[i];
       const ex = getOwn(t, k);
@@ -593,6 +663,7 @@ export class JoslMachine {
     const k = keys[keys.length - 1];
     const ex = getOwn(t, k);
     if (ex === undefined) {
+      this.retain();
       const nt = {};
       this.meta.set(nt, { explicit: true });
       setObjectMember(t, k, nt);
@@ -622,6 +693,7 @@ export class JoslMachine {
     }
     else if (!Array.isArray(arr) || this.meta.get(arr)?.aot !== true)
       this.err(pos, `key '${keys.join('.')}' is not an array of tables`);
+    this.retain();
     const el = {};
     arr.push(el);
     this.current = el;
@@ -641,14 +713,20 @@ export class JoslMachine {
     else if (!this.rootIsArray)
       this.err(pos, 'cannot mix a root table and a root array',
         'a document that starts with key-value pairs has an object root');
+    // the previous item is complete the moment the next header opens:
+    // under detachment it leaves the root here
+    if (this.detachRoot !== null && this.rootValue.length !== 0)
+      this.detachLast();
+    this.retain();
     const el = {};
     this.rootValue.push(el);
+    this.rootCount++;
     this.current = el;
-    this.currentPath = [this.rootValue.length - 1];
+    this.currentPath = [this.rootCount - 1];
     this.emit({
       type: 'root-item',
       path: this.currentPath,
-      index: this.rootValue.length - 1,
+      index: this.rootCount - 1,
       line: this.startLine,
     });
   }
@@ -710,6 +788,7 @@ export class JoslMachine {
     const k = keys[keys.length - 1];
     if (Object.hasOwn(t, k))
       this.err(pos, `duplicate key '${k}'`);
+    this.retain();
     setObjectMember(t, k, value);
   }
 
@@ -736,6 +815,7 @@ export class JoslMachine {
           pos++;
         if (pos === start)
           this.err(pos, 'expected a key');
+        this.token(line, start, pos);
         keys.push(line.slice(start, pos));
       }
       pos = this.skipWs(line, pos);
@@ -875,13 +955,16 @@ export class JoslMachine {
   }
 
   parseBasicString(line, pos) {
+    const opened = pos;
     pos++; // consume '"'
     let out = '';
     let chunk = pos;
     while (pos < line.length) {
       const c = line.charCodeAt(pos);
-      if (c === CC_DQUOTE)
+      if (c === CC_DQUOTE) {
+        this.token(line, opened, pos + 1);
         return [out + line.slice(chunk, pos), pos + 1];
+      }
       if (c === CC_BACKSLASH) {
         out += line.slice(chunk, pos);
         const [dec, p] = this.decodeEscape(line, pos);
@@ -903,8 +986,10 @@ export class JoslMachine {
     const start = pos;
     while (pos < line.length) {
       const c = line.charCodeAt(pos);
-      if (c === CC_SQUOTE)
+      if (c === CC_SQUOTE) {
+        this.token(line, start - 1, pos + 1);
         return [line.slice(start, pos), pos + 1];
+      }
       if (c === CC_LF)
         break;
       this.checkStringChar(line, pos, false);
@@ -914,6 +999,7 @@ export class JoslMachine {
   }
 
   parseMlBasicString(line, pos) {
+    const mlStart = pos;
     pos += 3; // consume '"""'
     if (line.charCodeAt(pos) === CC_CR && line.charCodeAt(pos + 1) === CC_LF)
       pos += 2;
@@ -931,6 +1017,7 @@ export class JoslMachine {
         if (n >= 3) {
           if (n > 5)
             this.err(pos, 'too many quotes closing a multi-line string');
+          this.token(line, mlStart, run);
           return [out + line.slice(chunk, pos) + '"'.repeat(n - 3), run];
         }
         pos = run;
@@ -991,6 +1078,7 @@ export class JoslMachine {
         if (n >= 3) {
           if (n > 5)
             this.err(pos, 'too many quotes closing a multi-line string');
+          this.token(line, start - 3, run);
           return [line.slice(start, pos) + "'".repeat(n - 3), run];
         }
         pos = run;
@@ -1008,15 +1096,19 @@ export class JoslMachine {
 
   parseArray(line, pos) {
     pos++; // consume '['
+    this.deeper(++this.depth);
     const arr = [];
     this.meta.set(arr, { aot: false });
     for (;;) {
       pos = this.skipWsNlComment(line, pos);
       if (pos >= line.length)
         this.err(pos, 'unterminated array', "close the array with ']'");
-      if (line.charCodeAt(pos) === CC_RBRACKET)
+      if (line.charCodeAt(pos) === CC_RBRACKET) {
+        this.depth--;
         return [arr, pos + 1];
+      }
       const [v, p] = this.parseValue(line, pos);
+      this.retain();
       arr.push(v);
       pos = this.skipWsNlComment(line, p);
       if (pos >= line.length)
@@ -1026,19 +1118,24 @@ export class JoslMachine {
         pos++;
         continue;
       }
-      if (c === CC_RBRACKET)
+      if (c === CC_RBRACKET) {
+        this.depth--;
         return [arr, pos + 1];
+      }
       this.err(pos, "expected ',' or ']' in array");
     }
   }
 
   parseInlineTable(line, pos) {
     pos++; // consume '{'
+    this.deeper(++this.depth);
     const obj = {};
     this.meta.set(obj, { inline: true });
     pos = this.skipWs(line, pos);
-    if (pos < line.length && line.charCodeAt(pos) === CC_RBRACE)
+    if (pos < line.length && line.charCodeAt(pos) === CC_RBRACE) {
+      this.depth--;
       return [obj, pos + 1];
+    }
     for (;;) {
       if (pos < line.length && line.charCodeAt(pos) === CC_LF)
         this.err(pos, 'newlines are not allowed inside inline tables',
@@ -1054,8 +1151,10 @@ export class JoslMachine {
       if (pos >= line.length)
         this.err(pos, 'unterminated inline table', "close the table with '}'");
       const c = line.charCodeAt(pos);
-      if (c === CC_RBRACE)
+      if (c === CC_RBRACE) {
+        this.depth--;
         return [obj, pos + 1];
+      }
       if (c === CC_COMMA) {
         pos = this.skipWs(line, pos + 1);
         continue;
@@ -1086,6 +1185,7 @@ export class JoslMachine {
     const k = keys[keys.length - 1];
     if (Object.hasOwn(t, k))
       this.err(pos, `duplicate key '${k}'`);
+    this.retain();
     setObjectMember(t, k, value);
   }
 

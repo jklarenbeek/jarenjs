@@ -5,13 +5,16 @@
  * most workers ever inside at once), the order is proven with workers
  * that finish out of order, and every way the map can stop — a bad
  * limit, a rejection, an abort before or during — leaves no worker
- * running when the promise settles.
+ * running when the promise settles. Then the awaited sink, one clause
+ * per test too: the fast path answers no promise, an asynchronous
+ * underlying write is never overlapped, a failure stops what is queued
+ * behind it, and end/abort are exactly-once and mutually terminal.
  */
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { mapConcurrent } from '@jarenjs/core/async';
+import { mapConcurrent, createAwaitedSink } from '@jarenjs/core/async';
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -135,5 +138,186 @@ describe('core/async — mapConcurrent', function () {
   it('passes the index beside the item', async function () {
     const seen = await mapConcurrent(['a', 'b'], 2, async (item, index) => `${index}:${item}`);
     assert.deepStrictEqual(seen, ['0:a', '1:b']);
+  });
+});
+
+/** A deferred: a promise with its settlers in hand. */
+function deferred() {
+  /** @type {(value?: unknown) => void} */
+  let resolve = () => {};
+  /** @type {(reason?: unknown) => void} */
+  let reject = () => {};
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+/** Let every settled microtask run. */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe('core/async — createAwaitedSink', function () {
+  it('refuses a value without a write function', function () {
+    for (const bad of [null, undefined, {}, { write: 'x' }, 5]) {
+      assert.throws(() => createAwaitedSink(/** @type {any} */ (bad)), TypeError, String(bad));
+    }
+  });
+
+  it('a synchronous sink stays on the fast path: write answers undefined, order is kept, end runs once after every write', async function () {
+    const seen = [];
+    let ended = 0;
+    const sink = createAwaitedSink({ write: (c) => { seen.push(c); }, end: () => { ended++; } });
+    assert.strictEqual(sink.write('a'), undefined);
+    assert.strictEqual(sink.write('b'), undefined);
+    const end = sink.end();
+    assert.ok(end instanceof Promise);
+    assert.strictEqual(ended, 1, 'end ran synchronously behind synchronous writes');
+    await end;
+    assert.deepStrictEqual(seen, ['a', 'b']);
+    assert.strictEqual(sink.end(), end, 'a repeated end answers the same promise');
+    assert.strictEqual(ended, 1);
+    assert.strictEqual(sink.closed(), true);
+    assert.strictEqual(sink.failed(), false);
+    await assert.rejects(/** @type {Promise<void>} */ (sink.write('c')), /write after end/);
+    assert.deepStrictEqual(seen, ['a', 'b'], 'nothing reaches the sink after end');
+  });
+
+  it('an asynchronous sink is serialized: the next underlying write begins only after the previous one settled', async function () {
+    const started = [];
+    const gates = [];
+    const sink = createAwaitedSink({
+      write: (c) => {
+        started.push(c);
+        const d = deferred();
+        gates.push(d);
+        return d.promise;
+      },
+    });
+    const first = sink.write('a');
+    const second = sink.write('b');
+    const third = sink.write('c');
+    assert.ok(first instanceof Promise && second instanceof Promise && third instanceof Promise);
+    await tick();
+    assert.deepStrictEqual(started, ['a'], 'b waits for a');
+    gates[0].resolve();
+    await first;
+    await tick();
+    assert.deepStrictEqual(started, ['a', 'b'], 'b started once a settled; c still waits');
+    gates[1].resolve();
+    await second;
+    await tick();
+    assert.deepStrictEqual(started, ['a', 'b', 'c']);
+    gates[2].resolve();
+    await third;
+    // the queue is idle again: a synchronous answer returns to the fast path
+    const sync = createAwaitedSink({ write: () => undefined });
+    assert.strictEqual(sync.write('x'), undefined);
+  });
+
+  it('an idle queue returns to the fast path after its promise settled', async function () {
+    let async = true;
+    const sink = createAwaitedSink({ write: () => (async ? Promise.resolve() : undefined) });
+    const p = sink.write('a');
+    assert.ok(p instanceof Promise);
+    await p;
+    async = false;
+    assert.strictEqual(sink.write('b'), undefined, 'nothing pending and a synchronous answer: no promise');
+  });
+
+  it('a rejected write fails the sink: the queued writes reject with the same reason and never reach the sink, later writes reject at once, end rejects', async function () {
+    const reached = [];
+    const boom = new Error('socket gone');
+    const gate = deferred();
+    const sink = createAwaitedSink({
+      write: (c) => {
+        reached.push(c);
+        return c === 'a' ? gate.promise : undefined;
+      },
+      end: () => { reached.push('end'); },
+    });
+    const a = sink.write('a');
+    const b = sink.write('b');
+    const end = sink.end();
+    gate.reject(boom);
+    await assert.rejects(/** @type {Promise<void>} */ (a), (e) => e === boom);
+    await assert.rejects(/** @type {Promise<void>} */ (b), (e) => e === boom);
+    await assert.rejects(end, (e) => e === boom);
+    await assert.rejects(/** @type {Promise<void>} */ (sink.write('c')), (e) => e === boom);
+    assert.deepStrictEqual(reached, ['a'], 'neither b, c nor end reached the sink');
+    assert.strictEqual(sink.failed(), true);
+  });
+
+  it('a synchronous throw from the sink is a rejection of that write and fails the sink', async function () {
+    const boom = new Error('sync');
+    const sink = createAwaitedSink({ write: () => { throw boom; } });
+    await assert.rejects(/** @type {Promise<void>} */ (sink.write('a')), (e) => e === boom);
+    await assert.rejects(/** @type {Promise<void>} */ (sink.write('b')), (e) => e === boom);
+    await assert.rejects(sink.end(), (e) => e === boom);
+  });
+
+  it('abort runs the underlying abort once, at once, rejects the queued writes with the reason, and is terminal with end', async function () {
+    const reached = [];
+    const aborts = [];
+    const gate = deferred();
+    const sink = createAwaitedSink({
+      write: (c) => {
+        reached.push(c);
+        return gate.promise;
+      },
+      end: () => { reached.push('end'); },
+      abort: (reason) => { aborts.push(reason); },
+    });
+    const a = sink.write('a');
+    const b = sink.write('b');
+    const why = new Error('cancelled');
+    const aborted = sink.abort(why);
+    assert.deepStrictEqual(aborts, [why], 'the underlying abort ran immediately, not behind the pending write');
+    assert.strictEqual(sink.abort(why), aborted, 'a repeated abort answers the same promise');
+    assert.strictEqual(sink.end(), aborted, 'end after abort answers the abort');
+    await aborted;
+    await assert.rejects(/** @type {Promise<void>} */ (b), (e) => e === why, 'the queued write rejects with the reason');
+    await assert.rejects(/** @type {Promise<void>} */ (sink.write('c')), (e) => e === why);
+    gate.resolve();
+    await a;
+    assert.deepStrictEqual(reached, ['a'], 'b, c and end never reached the sink');
+    assert.deepStrictEqual(aborts, [why], 'exactly one underlying abort');
+    assert.strictEqual(sink.closed(), true);
+    assert.strictEqual(sink.failed(), true);
+  });
+
+  it('abort without a reason rejects with an Error; abort after end answers the end', async function () {
+    const sink = createAwaitedSink({ write: () => Promise.resolve() });
+    const p = sink.write('a');
+    const q = sink.write('b');
+    sink.abort();
+    await p;
+    await assert.rejects(/** @type {Promise<void>} */ (q), (e) => e instanceof Error && /aborted/.test(e.message));
+    const other = createAwaitedSink({ write: () => undefined, abort: () => { throw new Error('never'); } });
+    const end = other.end();
+    assert.strictEqual(other.abort(new Error('late')), end, 'abort after end answers the end promise and never runs the underlying abort');
+    await end;
+  });
+
+  it('a throwing or rejecting underlying abort rejects the abort promise, once', async function () {
+    const boom = new Error('abort failed');
+    const sink = createAwaitedSink({ write: () => undefined, abort: () => { throw boom; } });
+    const first = sink.abort(new Error('x'));
+    await assert.rejects(first, (e) => e === boom);
+    assert.strictEqual(sink.abort(new Error('y')), first);
+    const rejecting = createAwaitedSink({ write: () => undefined, abort: () => Promise.reject(boom) });
+    await assert.rejects(rejecting.abort(new Error('z')), (e) => e === boom);
+  });
+
+  it('end waits for the pending write, and a rejecting end rejects the end promise', async function () {
+    const gate = deferred();
+    const order = [];
+    const sink = createAwaitedSink({ write: () => gate.promise, end: () => { order.push('end'); } });
+    sink.write('a');
+    const end = sink.end();
+    await tick();
+    assert.deepStrictEqual(order, [], 'end waits for the write');
+    gate.resolve();
+    await end;
+    assert.deepStrictEqual(order, ['end']);
+    const failing = createAwaitedSink({ write: () => undefined, end: () => Promise.reject(new Error('end failed')) });
+    await assert.rejects(failing.end(), /end failed/);
   });
 });

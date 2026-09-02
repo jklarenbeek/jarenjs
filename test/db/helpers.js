@@ -141,8 +141,8 @@ export function recordingDriver(driver) {
       executed.push(String(sql));
       return target.exec(sql);
     },
-    /** @param {(scope: any) => any} fn */
-    transaction: (fn) => target.transaction((scope) => fn(recording(scope))),
+    /** @param {(scope: any) => any} fn @param {any[]} rest - the signal and the mode, forwarded */
+    transaction: (fn, ...rest) => target.transaction((scope) => fn(recording(scope)), ...rest),
   });
   return {
     executed,

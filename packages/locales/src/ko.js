@@ -165,6 +165,8 @@ export const ko = {
   'contract/seq-regression': '작업 {op}의 스트림이 seq 순서를 위반했습니다',
   'contract/stream-error': '작업 {op}의 스트림이 서버 오류로 종료되었습니다 ({code})',
   'contract/heartbeat-missed': '작업 {op}의 스트림이 {ms}ms 동안 침묵했습니다',
+  'contract/slow-consumer': '작업 {op}의 스트림이 종료되었습니다: 소비자가 제한된 큐를 따라가지 못했습니다',
+  'contract/reconnect-exhausted': '작업 {op}의 스트림을 {attempts}회 시도 후에도 다시 연결하지 못했습니다 (마지막: {lastCode})',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

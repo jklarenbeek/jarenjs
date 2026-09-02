@@ -196,14 +196,18 @@ function isLease(value) {
  * @param {{ connection: any, now?: () => number,
  *   random?: () => number,
  *   gate?: (fn: () => any, what?: string, signal?: AbortSignal) => any,
+ *   bracket?: (fn: () => any) => any,
  *   defaults?: Partial<typeof JOB_DEFAULTS>,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
  *   `runtime` is the host's runtime record: its `now` and `random` apply
  *   where the explicit `now` and `random` options are absent, and its
  *   `uuid` mints every job id, lease token and default worker owner.
+ *   `bracket` runs the first-open DDL (the store's immediate transaction
+ *   on a writable store); bare when absent.
  */
 export function createJobEngine(options) {
   const { connection } = options;
+  const bracket = options.bracket ?? ((/** @type {() => any} */ fn) => fn());
   const runtime = resolveRuntime(options.runtime);
   const now = options.now ?? runtime.now;
   const random = options.random ?? runtime.random;
@@ -272,7 +276,7 @@ export function createJobEngine(options) {
 
   // the tables are created here, or refused here: a read-only store
   // leaked the driver's "attempt to write a readonly database"
-  const ready = attempt(() => chain(connection.exec(CREATE_JOBS), upgradeColumns),
+  const ready = attempt(() => bracket(() => chain(connection.exec(CREATE_JOBS), upgradeColumns)),
     (error) => new DbCompileError('JD0002',
       `the job tables could not be created (${error?.message ?? String(error)}) — `
       + 'a read-only store creates nothing; open it read-write once, or without jobs',

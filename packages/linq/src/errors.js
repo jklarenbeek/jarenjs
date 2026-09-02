@@ -36,6 +36,7 @@ export const LINQ_CODES = Object.freeze({
   JL2004: 'an asynchronous provider cannot back the synchronous surface',
   JL2005: 'a push queue was fed after it ended',
   JL2006: 'a provider answered an element terminal with something other than one array',
+  JL2007: 'a ledger settlement named a ref that settles no started record',
 });
 
 /**
@@ -136,6 +137,9 @@ export class LinqBuildError extends CodedError {
  *    the provider directly instead.
  *  - `JL2005` — `feed()` was called on a push queue after `end()`
  *    closed it (a condition of the running stream, not of the build)
+ *  - `JL2007` — `createDbLedger`'s `commit`/`fail` named a ref that
+ *    settles no started record: the key expired, was reclaimed under a
+ *    newer generation, or was settled already (DB-CLIENT.md §2.6)
  *  - `JL2006` — a provider answered an element terminal (`toArray`,
  *    `first`, …) with something other than exactly one array; the
  *    emitted document is an array constructor, so a conforming

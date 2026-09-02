@@ -11,9 +11,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import { pathToFileURL } from 'url';
 
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/node';
 
 import {
   planModelMigration, migrate, migrationStatus, shapeHash, compareShapeToModel,
@@ -92,6 +91,7 @@ function parseArgs(argv) {
   return options;
 }
 
+/** A committed snapshot: JSON on disk, read as it is. */
 const readJson = (file, what) => {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -101,68 +101,28 @@ const readJson = (file, what) => {
   }
 };
 
-const MODULE_EXT = /\.(?:m?js|cjs|m?ts|cts)$/;
-const TS_EXT = /\.[mc]?ts$/;
-let loads = 0;
-
-/** The document a module exports — `default`, or the named export — as
- * its JSON emission (a pen builder's `toJSON()`), or a named failure. */
-const emissionOf = (mod, exportName, file) => {
-  const value = mod.default !== undefined ? mod.default : mod[exportName];
-  if (value === null || typeof value !== 'object') {
-    return fail(`module '${file}' exports neither a default nor a '${exportName}' document`);
-  }
-  let doc;
-  try {
-    doc = JSON.parse(JSON.stringify(value));
-  }
-  catch (error) {
-    return fail(`module '${file}': the ${exportName} emission is not JSON (${error.message})`);
-  }
-  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) {
-    return fail(`module '${file}': the ${exportName} emission is not a document`);
-  }
-  return doc;
-};
-
 /**
  * A model or migration document: a `.json` file, or a module loaded
  * TWICE — an emission that changes between loads is not pure (a clock,
  * the environment, randomness), and a migration that hashes differently
- * per load can never match its own history.
+ * per load can never match its own history. The loader is the suite's
+ * one (`@jarenjs/json/node`, shared with `jaren-contract`); every
+ * refusal it names exits here under this CLI's prefix.
  */
 async function loadDocument(file, what, exportName) {
-  if (file.endsWith('.json')) return readJson(file, what);
-  if (!MODULE_EXT.test(file)) {
-    return fail(`cannot read ${what} '${file}': neither a .json file nor a module `
-      + '(.js, .mjs, .cjs — or .ts where Node strips types)');
+  try {
+    return await loadDocumentFile(file, { what, exportName, impure: 'no clock, no env, no randomness in a model or migration module' });
   }
-  const url = pathToFileURL(path.resolve(file)).href;
-  const load = async () => {
-    try {
-      return await import(`${url}?jaren-db-load=${++loads}`);
-    }
-    catch (error) {
-      return fail(`cannot load ${what} module '${file}': ${error.message}`
-        + (TS_EXT.test(file)
-          ? ' — a .ts module loads only where Node strips types (Node >= 24 does by default; --no-strip-types turns it off)'
-          : ''));
-    }
-  };
-  const first = emissionOf(await load(), exportName, file);
-  const second = emissionOf(await load(), exportName, file);
-  if (canonicalizeJson(first) !== canonicalizeJson(second)) {
-    return fail(`the ${what} module '${file}' is not pure — two loads emitted different documents; `
-      + 'no clock, no env, no randomness in a model or migration module');
+  catch (error) {
+    return fail(error.message);
   }
-  return first;
 }
 
 /** The migrations directory, sorted by file name — the full ordered chain. */
 const loadMigrationsDir = async (dir) => {
   if (dir === null) return [];
   const files = fs.readdirSync(dir)
-    .filter((file) => (file.endsWith('.json') || MODULE_EXT.test(file)) && !file.endsWith('.d.ts'))
+    .filter((file) => isDocumentFile(file))
     .sort();
   const migrations = [];
   for (const file of files) migrations.push(await loadDocument(path.join(dir, file), 'migration', 'migration'));

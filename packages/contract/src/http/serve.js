@@ -20,10 +20,13 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError } from '../errors.js';
 import { resolveHostRuntime } from '../runtime.js';
+import { resolveStreamLimits } from '../stream/server.js';
+import { resolveLifecycle } from '../host.js';
 import { dispatch } from './dispatch.js';
 import { HTTP_ERRORS, WELL_KNOWN_PATH } from './wire.js';
+import { BodyLimitError } from './body.js';
 
-export { HTTP_ERRORS, WELL_KNOWN_PATH };
+export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError };
 
 /**
  * @typedef {import('./wire.js').HttpRequest} HttpRequest
@@ -73,6 +76,26 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH };
  * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime]
  *   - the host's runtime record: its `uuid` generates the server trace
  *   and its `now` is the clock, each only where `trace` / `now` is absent
+ * @property {{ replay?: { limit?: number, maxBytes?: number }, queue?: { events?: number, bytes?: number } }} [streamLimits]
+ *   - the bounds of every SSE stream (docs/CONTRACT-FORMAT.md §18.1):
+ *   a replay page asks for at most `replay.limit` emissions / `replay.
+ *   maxBytes` patch bytes (default 256 / 1 MiB); the undelivered queue
+ *   holds at most `queue.events` frames / `queue.bytes` SSE bytes
+ *   (default 256 / 1 MiB) before the stream ends with `JC2096`
+ * @property {(meta: import('../host.js').IdentifyMeta) => unknown} [identify]
+ *   - the host lifecycle's first hook (docs/CONTRACT-FORMAT.md §7.7):
+ *   runs after the route resolved and before any byte of the body is
+ *   read; answers a lease `{ host, release? }` — `host` is what `scope`
+ *   and, without `acquire`, the handler see as `ctx.host` — or a
+ *   declared failure (`meta.fail`); default `{ host: null }`
+ * @property {(input: unknown, identity: RequestContext, enter: (lease: unknown) => Promise<unknown>) => unknown} [acquire]
+ *   - the second hook: runs after the input validated and, on a claimed
+ *   command, after the claim answered `new`; calls `enter({ host,
+ *   release?, settlement? })` exactly once and answers what `enter`
+ *   answers — a host that opens a transaction around `enter` commits it
+ *   when `enter` resolves and rolls it back when it rejects; `settlement:
+ *   { ledger, required: true }` records the claim through that ledger
+ *   inside `enter`; default `enter({ host: identity.host })`
  */
 
 /**
@@ -294,6 +317,8 @@ export function serveHttp(contract, handlers, options = {}) {
     throw host('JC1001', 'options.catalog must be a message catalog object');
   }
   const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
+  const streamLimits = resolveStreamLimits(options.streamLimits, (reason) => host('JC1001', reason));
+  const lifecycle = resolveLifecycle(options, (reason) => host('JC1001', reason));
 
   /** @type {Server} */
   const server = {
@@ -311,6 +336,8 @@ export function serveHttp(contract, handlers, options = {}) {
     now: options.now === undefined ? runtime.now : options.now,
     described: { text: null },
     streams: new Set(),
+    streamLimits,
+    lifecycle,
   };
 
   /** @type {HttpCapabilities} */

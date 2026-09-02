@@ -23,10 +23,16 @@
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { toPromise, isThenable } from '@jarenjs/core/function';
+import { createAwaitedSink } from '@jarenjs/core/async';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { canonicalSha256, JsonCanonicalizeError } from '@jarenjs/json/canonical';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
-import { validateOperationInput, settleOperation, safeTrace } from '../pipeline.js';
+import { validateOperationInput, settleOperation, safeTrace, classifyDeclared } from '../pipeline.js';
+import { identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
+import {
+  BodyLimitError, isAsyncByteSource, normalizeBody, collectBytes, countingSource, onSettled,
+} from './body.js';
 import {
   isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
 } from '../stream/server.js';
@@ -51,19 +57,25 @@ import {
  * The per-request context a handler receives — frozen. `params` are the
  * raw decoded path strings; `headers` carries the declared header members
  * (by header name) plus `if-match`/`if-none-match` when present; `body`
- * is the raw request body for an OPAQUE operation and `null` for a JSON
- * one (whose body was decoded into the input). `fail` makes a declared
+ * is the raw request body for an OPAQUE operation — text, bytes, or a
+ * pull source of chunks that never yields a byte past
+ * `policy.limits.maxBodyBytes` (the chunk that would cross it throws a
+ * `BodyLimitError` to the puller instead; let it propagate and the
+ * response is `JC2003`) — and `null` for a JSON one (whose body was
+ * decoded into the input). `fail` makes a declared
  * failure by code; `etag` arms the entity-tag path; `status` overrides
  * the success status (2xx only — `JC1006` otherwise, a host error the
  * handler boundary settles into `JC2008` and reports through `onError`).
  * @typedef {Object} RequestContext
  * @property {CompiledOperation} op
  * @property {string} trace
+ * @property {'http'} carrier - the binding this context comes from
+ * @property {any} host - the identity's host until `acquire` entered; the acquired host in the handler's context (§7.7) — `any`, so a table typed by the projection's `HandlerContext<Host>` is a `Handler`
  * @property {string} method
  * @property {string} path
  * @property {Readonly<Record<string, string>>} params
  * @property {Readonly<Record<string, string>>} headers
- * @property {string | Uint8Array | null} body
+ * @property {string | Uint8Array | AsyncIterable<Uint8Array> | null} body
  * @property {AbortSignal | null} signal
  * @property {Readonly<{ key: string, scope: string }> | null} idempotency
  * @property {(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }) => ContractFailureValue} fail
@@ -84,8 +96,10 @@ import {
  */
 
 /**
- * The raw response of an opaque operation's handler.
- * @typedef {{ status: number, headers?: Record<string, string>, body?: string | Uint8Array | null }} RawResponse
+ * The raw response of an opaque operation's handler: `body` may be text,
+ * bytes, a pull source of chunks (an async iterable, or a Web
+ * `ReadableStream` — normalized, never collected), or none.
+ * @typedef {{ status: number, headers?: Record<string, string>, body?: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null }} RawResponse
  */
 
 /**
@@ -151,6 +165,17 @@ import {
  * @property {{ text: string | null }} described - the memoized well-known body
  * @property {Set<(reason: string | null) => void>} streams - the live SSE
  *   streams' stoppers; the dispatcher's `close()` ends them all
+ * @property {import('../stream/server.js').StreamLimits} streamLimits - the bounds of every SSE stream
+ * @property {import('../host.js').Lifecycle} lifecycle - the host lifecycle hooks (§7.7)
+ */
+
+/**
+ * The lifetime of one request's leases: the identity's release, the
+ * acquired lease's release once entered, and whether the releases were
+ * handed to a body or a stream (`deferred`) rather than run before the
+ * response is exposed. Each release runs at most once, acquired before
+ * identity.
+ * @typedef {{ op: string, trace: string, identity: () => Promise<boolean>, acquired: (() => Promise<boolean>) | null, deferred: boolean }} Life
  */
 
 /** The strict decoder of a JSON body given as bytes. */
@@ -160,7 +185,7 @@ const utf8 = new TextDecoder('utf-8', { fatal: true });
 const NO_HEADERS = Object.freeze({});
 
 /** The valid shape of a request object — `JC1004` otherwise. */
-const REQUEST_SHAPE = 'a request is { method: string, url: string, headers: object, body: string | Uint8Array | null }';
+const REQUEST_SHAPE = 'a request is { method: string, url: string, headers: object, body: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream | null }';
 
 //#region the boundary
 
@@ -215,8 +240,8 @@ function requestShapeError(request) {
   if (r.headers === null || typeof r.headers !== 'object') {
     return new ContractHostError('JC1004', `dispatch: request.headers must be an object of lowercase names; ${REQUEST_SHAPE}`);
   }
-  if (!(r.body === null || r.body === undefined || typeof r.body === 'string' || r.body instanceof Uint8Array)) {
-    return new ContractHostError('JC1004', `dispatch: request.body must be a string, a Uint8Array or null; ${REQUEST_SHAPE}`);
+  if (normalizeBody(r.body) === undefined) {
+    return new ContractHostError('JC1004', `dispatch: request.body must be a string, a Uint8Array, an async iterable of Uint8Array chunks, a ReadableStream or null; ${REQUEST_SHAPE}`);
   }
   return null;
 }
@@ -286,12 +311,33 @@ function decodable(path) {
 }
 
 /**
- * Whether the request carried a non-empty body.
- * @param {string | Uint8Array | null} body
+ * Whether the request carried a non-empty body. A pull source counts as
+ * content: whether it yields anything is known only by pulling it.
+ * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null} body
  * @returns {boolean}
  */
 function hasContent(body) {
-  return body !== null && (typeof body === 'string' ? body.length > 0 : body.byteLength > 0);
+  if (body === null) return false;
+  if (typeof body === 'string') return body.length > 0;
+  if (body instanceof Uint8Array) return body.byteLength > 0;
+  return true;
+}
+
+/**
+ * Cancel a pull source exactly once, for a body nobody will read (a
+ * HEAD's returned stream, a request source a response left unread).
+ * @param {AsyncIterable<Uint8Array>} source
+ * @returns {Promise<void>}
+ */
+async function discard(source) {
+  const iterator = source[Symbol.asyncIterator]();
+  if (typeof iterator.return !== 'function') return;
+  try {
+    await iterator.return();
+  }
+  catch {
+    // a source that refuses its cancel is already gone
+  }
 }
 
 /**
@@ -321,7 +367,9 @@ function signalOf(request) {
  * claim. `decided` is set by a `preconditions` resolver that already
  * evaluated the conditionals; the post-handler comparison then stands
  * down.
- * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean }} Armed
+ * `settled` is set by a required settlement (§7.7) that recorded the
+ * claim inside `enter`; the root ledger then stands down.
+ * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean, settled: boolean }} Armed
  */
 
 /**
@@ -339,7 +387,7 @@ function run(server, request) {
   const path = q === -1 ? url : url.slice(0, q);
   const query = q === -1 ? '' : url.slice(q + 1);
   const headers = request.headers;
-  const body = request.body === undefined ? null : request.body;
+  const body = /** @type {import('./body.js').Body} */ (normalizeBody(request.body));
 
   // ——— 2. route ———
   let hit = server.contract.match(method, path);
@@ -366,11 +414,178 @@ function run(server, request) {
   const op = route.op;
   if (route.handler === null) return refuse(server, 'JC2013', trace, { op: op.id }, undefined, null, null);
 
+  // ——— 3. identify: the host's first look at the request, before any
+  // byte of the body is read — the operation, the trace, the signal and
+  // the transport facts; never a parsed input (§7.7) ———
+  const meta = Object.freeze({ op, trace, signal: signalOf(request), carrier: /** @type {const} */ ('http'), method, path, headers, fail: ContractFailure });
+  const identified = identifyHost(server.lifecycle, meta);
+  /** @param {ReturnType<typeof identifyHost> extends Promise<infer A> ? A : never} answer */
+  const identifiedAs = (answer) => {
+    if (answer.kind === 'fault') {
+      observe(server, answer.cause, null);
+      return refuse(server, 'JC2008', trace, { op: op.id }, undefined, null, null);
+    }
+    if (answer.kind === 'failure') return hookFailure(server, route, null, answer.failure, trace, freshArmed());
+    /** @type {Life} */
+    const life = { op: op.id, trace, identity: once(answer.lease.release, (err) => observe(server, err, null)), acquired: null, deferred: false };
+    return exposeWith(server, life, () => afterIdentity(server, request, route, trace, hit, isHead, method, path, query, headers, body, life, answer.lease.host));
+  };
+  return isThenable(identified) ? /** @type {Promise<any>} */ (identified).then(identifiedAs) : identifiedAs(/** @type {any} */ (identified));
+}
+
+/** A fresh per-request state record. @returns {Armed} */
+function freshArmed() {
+  return { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false, settled: false };
+}
+
+/**
+ * Run the pipeline after identity and expose its response: the leases
+ * are released (acquired, then identity) before the response is
+ * exposed — unless the response handed them to its body or stream — and
+ * a release that fails before exposure is the host's fault (`JC2008`,
+ * the cause observed); one that fails after exposure is observed only.
+ * A defect of the pipeline itself still releases before it reaches the
+ * last resort.
+ * @param {Server} server
+ * @param {Life} life
+ * @param {() => HttpResponse | Promise<HttpResponse>} produce
+ * @returns {Promise<HttpResponse>}
+ */
+function exposeWith(server, life, produce) {
+  let out;
+  try {
+    out = produce();
+  }
+  catch (err) {
+    out = Promise.reject(err);
+  }
+  return toPromise(out).then(
+    (response) => (life.deferred ? response : releaseLife(life).then((clean) =>
+      (clean ? response : refuse(server, 'JC2008', life.trace, { op: life.op }, undefined, null, null)))),
+    (err) => releaseLife(life).then(() => { throw err; }));
+}
+
+/**
+ * Release a request's leases in order — acquired, then identity — each
+ * at most once; answers whether every release was clean.
+ * @param {Life} life
+ * @returns {Promise<boolean>}
+ */
+function releaseLife(life) {
+  const acquired = life.acquired === null ? Promise.resolve(true) : life.acquired();
+  return acquired.then((a) => life.identity().then((b) => a && b));
+}
+
+/**
+ * Hand the releases to a pull-source body: they run once when the body
+ * reaches EOF, throws, or is cancelled by the consumer (a HEAD's
+ * discard included) — after the headers went out, so a failing release
+ * is observed, never answered.
+ * @param {Server} server
+ * @param {Life} life
+ * @param {HttpResponse} response
+ * @returns {HttpResponse}
+ */
+function deferToBody(server, life, response) {
+  if (life.deferred) return response;
+  const body = response.body;
+  if (!isAsyncByteSource(body)) return response;
+  life.deferred = true;
+  return { ...response, body: onSettled(body, () => releaseLife(life).then(() => undefined)) };
+}
+
+/**
+ * A declared failure a host hook answered: classified against the
+ * operation like a handler's (an undeclared code or bad details is the
+ * host's fault), rendered as the declared response.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext | null} ctx
+ * @param {import('../errors.js').ContractFailureValue} failure
+ * @param {string} trace
+ * @param {Armed} armed
+ * @returns {HttpResponse}
+ */
+function hookFailure(server, route, ctx, failure, trace, armed) {
+  const result = classifyDeclared(route, failure);
+  if (result.kind === 'failure') return declaredFailure(server, route, ctx, result, trace, armed);
+  if (result.cause !== undefined) observe(server, result.cause, ctx);
+  armed.outcome = 2;
+  return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+}
+
+/**
+ * The handler's context: the identity context with the acquired host,
+ * frozen. The host value itself is the host's and is not deep-frozen.
+ * @param {RequestContext} ctx
+ * @param {unknown} host
+ * @returns {RequestContext}
+ */
+function handlerContext(ctx, host) {
+  return Object.freeze({ ...ctx, host });
+}
+
+/**
+ * Run `acquire` around a continuation and settle its answer: a lease
+ * entered is the continuation's response (a rejection of the hook after
+ * the continuation settled is observed, the response stands); a declared
+ * failure is rendered; a fault is the host's (`JC2008`, observed). The
+ * acquired release is registered on the lifetime as the lease enters.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} ctx - the identity context (frozen)
+ * @param {unknown} input
+ * @param {string} trace
+ * @param {Armed} armed
+ * @param {Life} life
+ * @param {(lease: import('../host.js').Lease, hctx: RequestContext) => HttpResponse | Promise<HttpResponse>} enter
+ * @returns {Promise<HttpResponse>}
+ */
+function acquireAround(server, route, ctx, input, trace, armed, life, enter) {
+  return acquireHost(server.lifecycle, input, ctx, (lease) => {
+    const hctx = handlerContext(ctx, lease.host);
+    life.acquired = once(lease.release, (err) => observe(server, err, hctx));
+    return enter(lease, hctx);
+  }).then((out) => {
+    if (out.kind === 'fault') {
+      observe(server, out.cause, ctx);
+      armed.outcome = 2;
+      return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+    }
+    if (out.kind === 'failure') return hookFailure(server, route, ctx, out.failure, trace, armed);
+    if (out.afterFault !== undefined) observe(server, out.afterFault, ctx);
+    return /** @type {HttpResponse} */ (out.result);
+  });
+}
+
+/**
+ * The pipeline after identity: the body limit, the transport members,
+ * the context, then the opaque branch or the parse. Every early refusal
+ * returns a response; the lifetime's releases run at exposure.
+ * @param {Server} server
+ * @param {HttpRequest} request
+ * @param {Route} route
+ * @param {string} trace
+ * @param {{ params: Record<string, string> }} hit
+ * @param {boolean} isHead
+ * @param {string} method
+ * @param {string} path
+ * @param {string} query
+ * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @param {import('./body.js').Body} body
+ * @param {Life} life
+ * @param {unknown} identityHost
+ * @returns {HttpResponse | Promise<HttpResponse>}
+ */
+function afterIdentity(server, request, route, trace, hit, isHead, method, path, query, headers, body, life, identityHost) {
+  const op = route.op;
+
   // ——— 4. the body limit: by declaration before the read, by length after ———
   const declared = contentLength(headers);
   if (declared > route.maxBody) return refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
   const content = hasContent(body);
-  if (content && exceedsBytes(/** @type {string | Uint8Array} */ (body), route.maxBody)) {
+  const sourced = isAsyncByteSource(body);
+  if (content && !sourced && exceedsBytes(/** @type {string | Uint8Array} */ (body), route.maxBody)) {
     return refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
   }
 
@@ -434,12 +649,15 @@ function run(server, request) {
   Object.freeze(ctxHeaders);
   const transported = route.normalize === null ? input : route.normalize(input);
 
-  /** @type {Armed} */
-  const armed = { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false };
+  const armed = freshArmed();
+  // an opaque handler pulls its bytes through a counting source that
+  // never yields past the limit; text and bytes were already measured
+  /** @type {import('./body.js').CountingSource | null} */
+  const requestSource = route.raw && sourced ? countingSource(/** @type {AsyncIterable<Uint8Array>} */ (body), route.maxBody) : null;
   /** @type {RequestContext} */
   const ctx = {
-    op, trace, method, path, params, headers: ctxHeaders,
-    body: route.raw ? body : null,
+    op, trace, carrier: 'http', host: identityHost, method, path, params, headers: ctxHeaders,
+    body: route.raw ? (requestSource !== null ? requestSource : body) : null,
     signal: signalOf(request),
     idempotency: null,
     fail: ContractFailure,
@@ -466,23 +684,74 @@ function run(server, request) {
     const invalid = validateOperationInput(route, transported);
     if (invalid !== null && invalid.kind === 'contract') {
       if (invalid.cause !== undefined) observe(server, invalid.cause, null);
+      if (requestSource !== null) void requestSource.cancel();
       return refuse(server, 'JC2006', trace, { op: op.id }, invalid.details, null, null);
     }
     Object.freeze(ctx);
-    return boundary(server, route, ctx, op.input === null ? null : transported, trace, armed, isHead, ifMatch, ifNoneMatch, true);
+    const rawInput = op.input === null ? null : transported;
+    return acquireAround(server, route, ctx, rawInput, trace, armed, life, (lease, hctx) => {
+      const ran = boundary(server, route, hctx, rawInput, trace, armed, isHead, ifMatch, ifNoneMatch, true);
+      return (requestSource === null ? ran : ran.then((response) => settleUpload(server, hctx, response, requestSource)))
+        .then((response) => deferToBody(server, life, response));
+    });
   }
 
   // ——— 5. media, 6. parse ———
-  let parsed;
   if (route.hasBody && content) {
     if (!mediaMatches(headerValue(headers, 'content-type'), route.media)) {
+      if (sourced) void discard(/** @type {AsyncIterable<Uint8Array>} */ (body));
       return refuse(server, 'JC2004', trace, { op: op.id, media: route.media }, undefined, null, null);
     }
+    if (sourced) {
+      // a JSON body must be parsed and validated whole: drain the
+      // source under the limit — never past it — then parse
+      return collectBytes(/** @type {AsyncIterable<Uint8Array>} */ (body), route.maxBody, signalOf(request)).then((collected) => {
+        if (!collected.ok) {
+          if (collected.kind === 'limit') return refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
+          // the body never arrived whole (the source failed, or the
+          // request was aborted between pulls): not a valid document
+          return refuse(server, 'JC2005', trace, { op: op.id }, undefined, null, null);
+        }
+        return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers, collected.bytes.byteLength === 0 ? null : collected.bytes, life);
+      });
+    }
+  }
+  else if (sourced) {
+    // a body-less operation ignores the body; a source is released, never read
+    void discard(/** @type {AsyncIterable<Uint8Array>} */ (body));
+  }
+  return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers,
+    route.hasBody && content && !sourced ? /** @type {string | Uint8Array} */ (body) : null, life);
+}
+
+/**
+ * The pipeline from the parse on: the materialized JSON body (or none),
+ * the body members, validation, then the subscribe / idempotency /
+ * precondition / handler branches.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} ctx - not yet frozen
+ * @param {HttpRequest} request
+ * @param {string} trace
+ * @param {Armed} armed
+ * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
+ * @param {any} transported
+ * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @param {string | Uint8Array | null} body - the whole JSON body, or none
+ * @param {Life} life
+ * @returns {HttpResponse | Promise<HttpResponse>}
+ */
+function parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers, body, life) {
+  const op = route.op;
+  let parsed;
+  if (body !== null) {
     let text;
     if (typeof body === 'string') text = body;
     else {
       try {
-        text = utf8.decode(/** @type {Uint8Array} */ (body));
+        text = utf8.decode(body);
       }
       catch {
         return refuse(server, 'JC2005', trace, { op: op.id }, undefined, null, null);
@@ -525,7 +794,8 @@ function run(server, request) {
   // ——— subscribe: the stream branch (§17–§18), or the one-shot read ———
   if (route.stream) {
     Object.freeze(ctx);
-    return subscribeBranch(server, route, ctx, assembled, trace, headers, armed, isHead, ifMatch, ifNoneMatch);
+    return acquireAround(server, route, ctx, assembled, trace, armed, life, (lease, hctx) =>
+      subscribeBranch(server, route, hctx, assembled, trace, headers, armed, isHead, ifMatch, ifNoneMatch, life));
   }
 
   // ——— 9. idempotency ———
@@ -534,12 +804,85 @@ function run(server, request) {
     if (key === undefined || key.length === 0) {
       if (route.idempotency === 'required') return refuse(server, 'JC2007', trace, { op: op.id }, undefined, null, null);
     }
-    else return idempotent(server, route, ctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch, key);
+    else return idempotent(server, route, ctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch, key, life);
   }
 
+  // ——— 10. acquire, then the handler inside enter ———
   Object.freeze(ctx);
-  if (route.tag !== null) return preconditionedBoundary(server, route, ctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch);
-  return boundary(server, route, ctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+  return acquireAround(server, route, ctx, assembled, trace, armed, life, (lease, hctx) =>
+    enterHandler(server, route, hctx, assembled, trace, armed, isHead, ifMatch, ifNoneMatch, lease, undefined));
+}
+
+/**
+ * The continuation inside `enter` for a JSON operation: the
+ * precondition, the handler, the output validation and the response
+ * serialization; then, for a lease that requires settlement of a new
+ * claim, the settlement through the lease's ledger — inside `enter`, so
+ * a host transaction around it commits the domain write and the receipt
+ * together. A host fault or a pre-handler refusal (outcome 2) rejects
+ * `enter` with the rollback carrier: the host transaction rolls back
+ * and the intended fault is still the answer.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {RequestContext} hctx - the handler's context (frozen)
+ * @param {any} input
+ * @param {string} trace
+ * @param {Armed} armed
+ * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
+ * @param {import('../host.js').Lease} lease
+ * @param {unknown} ref - the new claim's ref, `undefined` without one
+ * @returns {Promise<HttpResponse>}
+ */
+function enterHandler(server, route, hctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, lease, ref) {
+  const ran = route.tag !== null
+    ? preconditionedBoundary(server, route, hctx, input, trace, armed, isHead, ifMatch, ifNoneMatch)
+    : boundary(server, route, hctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+  return toPromise(ran).then((response) => {
+    if (armed.outcome === 2) throw new RollbackCarrier(response, undefined);
+    if (lease.settlement === null || ref === undefined) return response;
+    return requiredSettlement(server, route, lease.settlement.ledger, ref, response, hctx, armed, trace);
+  });
+}
+
+/**
+ * The required settlement (§7.7): the same receipt `settleClaim` would
+ * record, through the lease's ledger, inside `enter`. A settlement that
+ * throws or rejects is the host's fault: observed, and `enter` rejects
+ * with the carrier of a `JC2008` so the host transaction rolls back and
+ * the root claim is released retryable outside it.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {Ledger} ledger
+ * @param {unknown} ref
+ * @param {HttpResponse} response
+ * @param {RequestContext} hctx
+ * @param {Armed} armed
+ * @param {string} trace
+ * @returns {Promise<HttpResponse>}
+ */
+function requiredSettlement(server, route, ledger, ref, response, hctx, armed, trace) {
+  /** @param {unknown} err */
+  const carrier = (err) => {
+    observe(server, err, hctx);
+    armed.outcome = 2;
+    return new RollbackCarrier(refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, hctx), err);
+  };
+  let settlement;
+  try {
+    const now = server.now();
+    if (armed.outcome === 0) settlement = ledger.commit(ref, response, now);
+    else if (armed.outcome === 1) settlement = ledger.fail(ref, armed.retryable, response, now);
+    else settlement = ledger.fail(ref, false, response, now);
+  }
+  catch (err) {
+    return Promise.reject(carrier(err));
+  }
+  return toPromise(settlement).then(() => {
+    armed.settled = true;
+    return response;
+  }, (err) => { throw carrier(err); });
 }
 
 /**
@@ -593,9 +936,10 @@ function wellKnown(server, method, trace) {
  * @param {boolean} isHead
  * @param {string | undefined} ifMatch
  * @param {string | undefined} ifNoneMatch
+ * @param {Life} life
  * @returns {Promise<HttpResponse>}
  */
-function subscribeBranch(server, route, ctx, input, trace, headers, armed, isHead, ifMatch, ifNoneMatch) {
+function subscribeBranch(server, route, ctx, input, trace, headers, armed, isHead, ifMatch, ifNoneMatch, life) {
   const accept = headerValue(headers, 'accept');
   const wantsStream = !isHead && accept !== undefined && accept.toLowerCase().indexOf(STREAM_MEDIA) !== -1;
   return settleOperation(route, input, ctx, false).then((result) => {
@@ -612,7 +956,10 @@ function subscribeBranch(server, route, ctx, input, trace, headers, armed, isHea
       return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
     }
     if (!wantsStream) return oneShotSnapshot(server, route, ctx, sub, trace, armed, isHead, ifMatch, ifNoneMatch);
-    return sseResponse(server, route, ctx, sub, trace, headers);
+    // the stream owns the leases from here: they are released after the
+    // runner's stop/close/done sequence, once the sink has ended
+    life.deferred = true;
+    return sseResponse(server, route, ctx, sub, trace, headers, life);
   });
 }
 
@@ -666,19 +1013,29 @@ function oneShotSnapshot(server, route, ctx, sub, trace, armed, isHead, ifMatch,
 /**
  * The SSE response of a live subscription: `200 text/event-stream` with
  * the pump behind `stream`. The pump runs the carrier-neutral
- * subscription runner — snapshot/patch/error/end land as SSE events, a
- * heartbeat comment line goes out every `policy.stream.heartbeatMs`,
- * the peer's abort (`ctx.signal`) stops silently, and the dispatcher's
- * `close()` ends with `server-shutdown`.
+ * subscription runner over the adapter's sink, serialized through the
+ * suite's awaited-sink primitive: snapshot/patch/error/end land as SSE
+ * events, each written only after the previous write settled (a Node
+ * response that answered `false` waits for `drain`; a Web stream
+ * bridge waits for the consumer's pull), a heartbeat comment line goes
+ * out every `policy.stream.heartbeatMs` unless the previous heartbeat
+ * is still waiting on the sink (a stalled consumer never queues a
+ * second), the peer's abort (`ctx.signal`) stops silently, and the
+ * dispatcher's `close()` ends with `server-shutdown`. A sink write that
+ * rejects is the peer being gone: the runner releases the subscription
+ * silently and nothing is observed. The pump answers the runner's
+ * stopper and its completion signal, which settles only after the
+ * subscription's `stop()`/`close()` and the sink's `end()` have.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
  * @param {import('../stream/server.js').SubscriptionLike} sub
  * @param {string} trace
  * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @param {Life} life
  * @returns {HttpResponse}
  */
-function sseResponse(server, route, ctx, sub, trace, headers) {
+function sseResponse(server, route, ctx, sub, trace, headers, life) {
   const lastRaw = headerValue(headers, 'last-event-id');
   let lastSeq = null;
   if (lastRaw !== undefined) {
@@ -689,29 +1046,41 @@ function sseResponse(server, route, ctx, sub, trace, headers) {
   const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;
 
   /** @type {NonNullable<HttpResponse['stream']>} */
-  const stream = (sink) => {
+  const stream = (raw) => {
+    const sink = createAwaitedSink(raw);
+    let heartbeatPending = false;
+    const heartbeatSettled = () => { heartbeatPending = false; };
     const timer = setInterval(() => {
-      try {
-        sink.write(HEARTBEAT_LINE);
-      }
-      catch {
-        // a dead sink is ended by the abort path
+      if (heartbeatPending) return;
+      const answer = sink.write(HEARTBEAT_LINE);
+      if (answer !== undefined) {
+        heartbeatPending = true;
+        // a rejected heartbeat is the sink being gone; the runner's own
+        // next write meets the same rejection and releases the stream
+        answer.then(heartbeatSettled, heartbeatSettled);
       }
     }, heartbeatMs);
     if (timer !== null && typeof (/** @type {any} */ (timer)).unref === 'function') /** @type {any} */ (timer).unref();
 
-    /** @param {string} event @param {number | null} seq @param {unknown} data */
-    const write = (event, seq, data) => {
+    /**
+     * Encode one event as its SSE text — the frame the runner measures,
+     * queues and writes. An event the frame cannot carry (`JC1009`, a
+     * host error) is observed and skipped; the stream goes on.
+     * @param {string} event @param {number | null} seq @param {unknown} data
+     * @returns {string | null}
+     */
+    const frame = (event, seq, data) => {
       try {
-        sink.write(encodeStreamEvent(event, seq, data));
+        return encodeStreamEvent(event, seq, data);
       }
       catch (err) {
         observe(server, err, ctx);
+        return null;
       }
     };
     // registered BEFORE the runner starts, so a stream that fails during
     // construction removes itself and never lingers in the set
-    /** @type {{ stop: (reason: string | null) => void } | null} */
+    /** @type {import('../stream/server.js').StreamRunner | null} */
     let runner = null;
     /** @type {(reason: string | null) => void} */
     const stopper = (reason) => {
@@ -719,31 +1088,46 @@ function sseResponse(server, route, ctx, sub, trace, headers) {
     };
     server.streams.add(stopper);
     runner = runSubscription(route, sub, {
-      snapshot: (seq, value, resumed) => write('snapshot', seq, { value, resumed }),
-      patch: (seq, emission) => write('patch', seq, emission),
-      error: (intent, cause) => {
-        observe(server, cause, ctx);
-        const code = intent === 'invalid-snapshot' ? 'JC2091' : 'JC2008';
-        const msgid = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091.msgid : HTTP_ERRORS.JC2008.msgid;
-        write('error', null, { code, message: renderMessage(server.catalog, msgid, { op: route.op.id }), requestId: trace, retryable: false });
+      snapshot: (seq, data) => frame('snapshot', seq, data),
+      patch: (seq, emission) => frame('patch', seq, emission),
+      error: (intent, cause, seq, declared) => {
+        // a slow consumer is the peer's doing, not the host's: not observed
+        if (intent !== 'slow-consumer') observe(server, cause, ctx);
+        if (intent === 'declared' && declared !== null) {
+          // the operation's own declared failure, its message rendered
+          // from the catalog — never the error's text
+          const message = declaredMessage(server.catalog, route.op.id, declared.code, {});
+          return frame('error', null, declared.details === undefined
+            ? { code: declared.code, message, requestId: trace, retryable: declared.retryable }
+            : { code: declared.code, message, requestId: trace, details: declared.details, retryable: declared.retryable });
+        }
+        const code = intent === 'invalid-snapshot' ? 'JC2091' : intent === 'slow-consumer' ? 'JC2096' : 'JC2008';
+        const row = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091
+          : intent === 'slow-consumer' ? STREAM_ERRORS.JC2096 : HTTP_ERRORS.JC2008;
+        return frame('error', null, { code, message: renderMessage(server.catalog, row.msgid, { op: route.op.id }), requestId: trace, retryable: row.retryable });
       },
-      end: (reason) => write('end', null, { reason }),
-      done: () => {
+      end: (reason) => frame('end', null, { reason }),
+      size: (text) => utf8ByteLength(text),
+      write: (text) => sink.write(text),
+      done: (reason) => {
         clearInterval(timer);
         server.streams.delete(stopper);
-        try {
-          sink.end();
-        }
-        catch {
-          // the sink may already be gone
-        }
+        // a consumer that fell behind is not waited for: the sink is
+        // torn down (the node adapter destroys the socket, the fetch
+        // bridge errors the stream); otherwise the sink ends, and one
+        // that cannot end cleanly (the peer dropped it) is the fact a
+        // silent release expects, not a fault
+        const ended = reason === 'slow-consumer'
+          ? sink.abort(new Error('the consumer fell behind the stream\'s bounded queue')).catch(() => undefined)
+          : sink.end().catch(() => undefined);
+        return ended.then(() => releaseLife(life)).then(() => undefined);
       },
-    }, { lastSeq, validate: server.validateOutput });
+    }, { lastSeq, validate: server.validateOutput, limits: server.streamLimits });
     if (ctx.signal !== null) {
       if (ctx.signal.aborted) stopper(null);
       else ctx.signal.addEventListener('abort', () => stopper(null), { once: true });
     }
-    return () => stopper(null);
+    return { stop: () => stopper(null), done: runner.done };
   };
 
   return {
@@ -876,6 +1260,12 @@ function boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNo
 function project(server, route, ctx, result, trace, armed, isHead, ifMatch, ifNoneMatch, raw) {
   if (result.kind === 'failure') return declaredFailure(server, route, ctx, result, trace, armed);
   if (result.kind === 'contract') {
+    if (raw && result.code === 'JC2008' && result.cause instanceof BodyLimitError) {
+      // the raw handler let the upload's limit crossing propagate: the
+      // request is too large, and the handler is not at fault
+      armed.outcome = 2;
+      return refuse(server, 'JC2003', trace, { op: route.op.id, limit: result.cause.limit }, undefined, null, ctx);
+    }
     if (result.cause !== undefined) observe(server, result.cause, ctx);
     armed.outcome = 2;
     return refuse(server, result.code, trace, { op: route.op.id }, result.details, null, ctx);
@@ -951,7 +1341,9 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
 /**
  * The value of a raw (opaque) handler: passed through verbatim plus the
  * trace header; anything that is not `{ status, headers?, body? }` is
- * `JC2010`.
+ * `JC2010`. A body that is a pull source (an async iterable, or a Web
+ * stream, normalized) is passed through as one — the adapter writes it
+ * chunk by chunk — and under HEAD it is cancelled, never drained.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
@@ -974,7 +1366,8 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
     body = r.body;
     if (!Number.isInteger(status) || status < 100 || status > 599) throw new TypeError('raw status');
     if (rawHeaders !== undefined && (rawHeaders === null || typeof rawHeaders !== 'object')) throw new TypeError('raw headers');
-    if (!(body === undefined || body === null || typeof body === 'string' || body instanceof Uint8Array)) throw new TypeError('raw body');
+    body = normalizeBody(body);
+    if (body === undefined) throw new TypeError('raw body');
     if (rawHeaders !== undefined) {
       const names = Object.keys(rawHeaders);
       for (let i = 0; i < names.length; i++) {
@@ -989,7 +1382,43 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
     return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
   }
   headers['x-jaren-trace'] = trace;
-  return { status, headers, body: isHead || body === undefined ? null : body };
+  if (isHead && isAsyncByteSource(body)) {
+    // a HEAD drops the body: a source nobody will read is released, never pulled
+    void discard(body);
+    body = null;
+  }
+  return { status, headers, body: isHead ? null : body };
+}
+
+/**
+ * Settle an opaque upload after its handler answered: a response whose
+ * body is not a stream goes out only after an unread request source
+ * was cancelled once (the connection cannot be reused with an upload
+ * still arriving, and nothing will read it); a streamed response keeps
+ * the request source alive — the handler may be transforming it — and
+ * releases it once when the response body reaches EOF, throws, or is
+ * cancelled by the consumer. A throw from the response body after the
+ * headers are out (a limit crossing met mid-transform among them) cuts
+ * the body and is observed: the status cannot be rewritten by then.
+ * @param {Server} server
+ * @param {RequestContext} ctx
+ * @param {HttpResponse} response
+ * @param {import('./body.js').CountingSource} source
+ * @returns {HttpResponse | Promise<HttpResponse>}
+ */
+function settleUpload(server, ctx, response, source) {
+  const body = response.body;
+  if (isAsyncByteSource(body)) {
+    return {
+      ...response,
+      body: onSettled(body, (cause) => {
+        if (cause !== undefined) observe(server, cause, ctx);
+        return source.state.finished ? undefined : source.cancel();
+      }),
+    };
+  }
+  if (source.state.finished) return response;
+  return source.cancel().then(() => response);
 }
 
 /**
@@ -1029,9 +1458,10 @@ function declaredFailure(server, route, ctx, result, trace, armed) {
  * @param {string | undefined} ifMatch
  * @param {string | undefined} ifNoneMatch
  * @param {string} key
+ * @param {Life} life
  * @returns {Promise<HttpResponse>}
  */
-function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, key) {
+function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, key, life) {
   const ledger = /** @type {Ledger} */ (server.ledger);
   let scope;
   try {
@@ -1066,13 +1496,16 @@ function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, if
       return fault(err);
     }
     if (state === 'new') {
-      // claim first, precondition second: a committed key replays its
-      // stored response before the resolver runs (a retried command
-      // that already succeeded must not answer 412)
-      const ran = route.tag !== null
-        ? preconditionedBoundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch)
-        : boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
-      return toPromise(ran).then((response) => settleClaim(server, ledger, ref, response, ctx, armed));
+      // claim first, acquire second, precondition third: a committed key
+      // replays its stored response before any host resource is taken
+      // and before the resolver runs (a retried command that already
+      // succeeded must not answer 412). A lease that requires settlement
+      // records the claim inside `enter`; otherwise, or when the host
+      // transaction rolled back, the root ledger settles it here — a
+      // rollback releases the key retryable (outcome 2)
+      return acquireAround(server, route, ctx, input, trace, armed, life, (lease, hctx) =>
+        enterHandler(server, route, hctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, lease, ref))
+        .then((response) => (armed.settled ? response : settleClaim(server, ledger, ref, response, ctx, armed)));
     }
     if (state === 'replay') return replay(server, route, stored, trace, ctx);
     if (state === 'in-progress') {

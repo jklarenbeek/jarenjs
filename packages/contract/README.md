@@ -90,7 +90,9 @@ a command by default, or an explicit `in` map). Path and query strings
 are decoded by a normalizer compiled over exactly those members; body
 members are never coerced. An operation without `http` is bound to the
 canonical `POST /<op-id>`. A non-JSON `media` marks an operation
-*opaque*: routed and matched, never validated as JSON.
+*opaque*: routed and matched, never validated as JSON, its bytes
+streamed both ways — the handler pulls the upload chunk by chunk and
+may answer a stream, and the HTTP client reaches it through `bytes()`.
 
 ## The same document, by code
 
@@ -228,6 +230,34 @@ is refused at construction. `GET /.well-known/jaren-contract` answers
 `describe()`. The normative pipeline, taxonomy and ledger interface are
 [CONTRACT-FORMAT.md §7–§9](docs/CONTRACT-FORMAT.md#7-the-http-server-binding).
 
+**The host lifecycle.** Every server binding takes the same two hooks
+([§7.7](docs/CONTRACT-FORMAT.md#77-the-host-lifecycle-identify-acquire-release-settle)):
+`identify(meta)` runs after the route resolved and before a byte of the
+body is read, and answers `{ host, release? }` — the host `scope(ctx)`
+sees; `acquire(input, identity, enter)` runs after the input validated
+and after a new idempotency claim, and calls `enter({ host, release?,
+settlement? })` once — the host the handler sees as `ctx.host`, frozen
+beside it. A host that opens a transaction around `enter` commits it
+when `enter` resolves and rolls it back when it rejects, and a lease
+whose `settlement` is `{ ledger: createDbLedger(tx), required: true }`
+has the claim recorded inside `enter`, so the domain write and the
+receipt commit together or not at all. Releases run once each, acquired
+before identity, before the response is exposed — or when an opaque
+body or an SSE stream is done. A hook fault is the host's (`JC2008`,
+observed), a hook's `meta.fail(code)` a declared failure. The generated
+`HandlerContext<Host, Carrier>` carries `ctx.host` and `ctx.carrier`;
+port and local contexts spell the HTTP-only members as `null`.
+
+```js
+const server = serveHttp(contract, handlers, {
+  ledger: createDbLedger(db),
+  identify: (meta) => ({ host: { tenant: meta.headers['x-tenant'] ?? null } }),
+  acquire: (input, identity, enter) => db.transaction(
+    (tx) => enter({ host: { db: tx }, settlement: { ledger: createDbLedger(tx), required: true } }),
+    { mode: 'immediate' }),
+});
+```
+
 Without a declared resolver, `If-Match`/`If-None-Match` are applied
 **after** the handler and only when it armed a tag — a cache device,
 **never a write guard**. The `preconditions` option is the write guard:
@@ -266,8 +296,10 @@ beat the wildcard, and Fastify's own `bodyLimit` never answers — the
 operation's `policy.limits.maxBodyBytes` is the single body ceiling,
 refusing as the contract's coded `JC2003` instead of Fastify's
 `FST_ERR_CTP_BODY_TOO_LARGE`. Subscribe operations stream (the adapter
-calls `response.stream`) and a dropped peer reaches the handler as
-`ctx.signal` — the earlier buffer-parser recipe carried neither. To
+calls `response.stream`, writing each event only after the previous one
+drained — a slow reader parks the source instead of growing a buffer)
+and a dropped peer reaches the handler as `ctx.signal` — the earlier
+buffer-parser recipe carried neither. To
 confine the contract, register the same route in an encapsulated plugin
 with `{ prefix }`; the prefix must then prefix the contract's declared
 paths (canonical bindings and the well-known path included). One
@@ -413,10 +445,10 @@ its frozen `capabilities`:
 |---|---|---|---|
 | `status` | yes | no (`error.status: null`) | no (`error.status: null`) |
 | `headers` | yes | no | no |
-| `media` (opaque operations) | yes | no (`JC1005` at invoke) | no (`JC1005`; `JC2071` to a foreign asker) |
+| `media` (opaque operations) | yes — streamed both ways; `client.bytes()` | no (`JC1005` at invoke) | no (`JC1005`; `JC2071` to a foreign asker) |
 | `etag` | yes | no | no |
 | `idempotency` | with a `ledger` / always sent | no — declared policy inert, stated | no — `key` reserved in the frame grammar |
-| `stream` (`subscribe`) | yes — SSE, `Last-Event-ID` resumption | no (`JC1005` at invoke) | yes — push frames, per-client streams |
+| `stream` (`subscribe`) | yes — SSE, `Last-Event-ID` resumption (paged replay, bounded queue) | no (`JC1005` at invoke) | yes — push frames, per-client streams (the same replay and bounds) |
 | `cancel` | `'signal'` | `'signal'` | `'message'` |
 
 The normative bindings are [CONTRACT-FORMAT.md §15–§16](docs/CONTRACT-FORMAT.md#15-the-local-binding),
@@ -487,12 +519,27 @@ And on the command line, the drift gate:
 
 ```sh
 jaren-contract openapi --contract shop.json --out api/ --info-title Shop
-jaren-contract types   --contract shop.json --out src/shop.d.ts --check   # exit 1 when stale
+jaren-contract types   --contract shop.js   --out src/shop.d.ts --check   # exit 1 when stale; the module IS the source
 jaren-contract docs    --contract shop.json --out docs/
+jaren-contract diff    --from api/v1.json --to shop.js --fail-on breaking
 ```
 
+Every document flag — `--contract`, `--from`, `--to` — takes a `.json`
+file or a pure module (`.js`, `.mjs`, `.cjs`, and `.ts`/`.mts`/`.cts`
+where Node strips types) whose `default` or `contract` export is the
+document or a `@jarenjs/linq/contract` pen (its `toJSON()` is the
+emission); the module is evaluated twice and refused (exit 2) when the
+two emissions differ, so a clock or randomness in a contract module
+never projects two different declarations. The loader is
+`@jarenjs/json/node`, the Node-only subpath `jaren-db` shares — this
+package imports neither `linq` nor `db`. `types --out … --check` against
+the module is the types twin CI runs: exit 1 when the declaration is
+missing or stale, 0 when current, and an ordinary run rewrites nothing
+that did not change.
+
 `describe` and `public` print JSON; exit 0 current/written, 1 drift
-under `--check`, 2 on a compile refusal printed as `code docPath reason`.
+under `--check`, 2 on a compile refusal printed as `code docPath reason`
+or an unreadable, impure or undocumented input.
 The normative projection rules — the public projection's member order
 (the revision hashes those bytes), the OpenAPI mapping and keyword
 policy, the tool naming — are
@@ -553,19 +600,19 @@ benchmark-figure gate so no number here is typed by hand:
 
 - **Route match**: the compiled matcher resolves the probe mix —
   static hot paths, variables, the static-beats-variable case, a miss —
-  at <!--fact:contract.match.vs-fmw-->172 ns per lookup vs find-my-way's 180 ns<!--/fact-->;
-  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.8x<!--/fact--> behind, and its RegExpRouter refuses this
+  at <!--fact:contract.match.vs-fmw-->172 ns per lookup vs find-my-way's 185 ns<!--/fact-->;
+  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.9x<!--/fact--> behind, and its RegExpRouter refuses this
   route table outright (a static path registered after a param sibling).
 - **Dispatch, in-process**: the whole pipeline (route, decode, validate
   input, handler, validate output,
-  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.8–15.1x<!--/fact-->
+  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.8–11.9x<!--/fact-->
   faster than Fastify driven through its own `inject` — a number that
   includes Fastify's mock-stream harness, which is why the next row
   exists.
 - **The honest loss**: the bare pieces Fastify composes — find-my-way +
   Ajv + fast-json-stringify, called directly with no harness and no
   response validation
-  — are <!--fact:contract.dispatch.losses-->2.4–7.5x<!--/fact--> faster than
+  — are <!--fact:contract.dispatch.losses-->2.5–11.4x<!--/fact--> faster than
   this pipeline. The wide end of that band is the bare `{ok:true}`
   route, where the rival's compiled serializer answers in ~200 ns and
   there is almost no work to amortize the pipeline against; on the
@@ -575,7 +622,7 @@ benchmark-figure gate so no number here is typed by hand:
   server kept its own contract before a byte leaves. Over a real
   loopback socket the two stacks are level: the socket dominates both.
 - **The optimization trigger**: on the heaviest in-process row (the
-  5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.6%<!--/fact-->
+  5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.5%<!--/fact-->
   of the request and output validation is <!--fact:contract.validateOutput.share-->29%<!--/fact-->.
   A schema-driven serializer stays unscheduled while serialization is below
   25%: even making that stage free would move the whole request by only about a
@@ -583,7 +630,7 @@ benchmark-figure gate so no number here is typed by hand:
   cached representation, validate on rebuild and serve by revision instead of
   paying validation on every request.
 - **Revision**: computing it
-  costs <!--fact:contract.revision.ms-->1.4 ms<!--/fact--> for the 123-operation
+  costs <!--fact:contract.revision.ms-->2.8 ms<!--/fact--> for the 123-operation
   contract, once per process.
 
 ## What it is not
@@ -607,19 +654,31 @@ deliberate decision, not a gap:
   a nonce scheme and does not authenticate the sender.
 - **Bytes are not JSON.** A non-JSON `media` marks an operation opaque:
   routed and matched, path and query still decoded and validated, the
-  body handed over raw and never modeled. Images and OAuth redirects
-  are host paths, not JSON operations.
-- **No replication or durability.** The ledger and the command
-  lifecycle ship as JSON documents (`$model`, `$fsm`) a host may open
-  with `@jarenjs/db`; the in-memory ledger is for tests and
-  single-process hosts. Durability is the host's — and needs no
-  dependency: [CONTRACT-FORMAT.md §8.1](docs/CONTRACT-FORMAT.md#81-a-durable-ledger-over-nodesqlite--an-example-not-an-export)
+  body streamed to the handler as a pull source that never yields past
+  the declared limit, and never modeled. `client.bytes()` is its typed
+  door — a live response stream, never a JSON value — and `invoke`
+  refuses it. Images and OAuth redirects are host paths, not JSON
+  operations.
+- **No replication, and no storage of its own.** The ledger and the
+  command lifecycle ship as JSON documents (`$model`, `$fsm`); the
+  in-memory ledger is for tests and single-process hosts. A durable
+  ledger is one import away and adds no dependency here:
+  `createDbLedger` in `@jarenjs/linq/db` implements the ledger over a
+  `@jarenjs/db` store (immediate claims, a persisted generation fence,
+  settlement inside the host's transaction), and
+  [CONTRACT-FORMAT.md §8.1](docs/CONTRACT-FORMAT.md#81-a-durable-ledger-over-nodesqlite--an-example-not-an-export)
   is a complete, tested ~60-line ledger over `node:sqlite` (built into
-  Node ≥ 24), deliberately an example rather than an export.
-- **No automatic reconnect.** A stream that ends with a `network`
-  outcome is re-entered by the host calling `subscribe` again with the
-  last delivered seq (`lastSeq` is the hook); the backoff/resume/give-up
-  policy is the open decision tracked in the repository ROADMAP.
+  Node ≥ 24) for a host without the store — an example, not an export.
+- **Reconnect is opt-in, HTTP-only, and network-only.**
+  `subscribe(op, input, { reconnect: { max } })` re-establishes a
+  stream after a network loss — a rejected request, a missed heartbeat,
+  the server's `JC2096`, a body that ends before `end` — from the last
+  delivered seq under the retry backoff, and ends with one `JC2097`
+  when the budget is spent; a declared failure, a contract outcome or
+  the server's `end` never reconnects, and the port client has no
+  network loss to reconnect from. Absent, a `network` outcome is
+  delivered as is and the host re-enters `subscribe` with the
+  subscription's `lastSeq`.
 
 ## What is here
 
@@ -629,7 +688,10 @@ Here: the document and its grammar, `compileContract`, `contract.match`,
 `fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
 and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
 client (`openHttpClient`, the D6 outcomes with the `JC2050–JC2058` client
-codes, the client half of idempotency, retry, `negotiate`); the app
+codes, the client half of idempotency, retry, `negotiate`, and `bytes`
+for the opaque operations — a live response stream and a streamed
+upload, typed as `HttpClient`/`ByteOperations` by the projection and
+`typedHttpClient`/`OpaqueOf` by the pen); the app
 binding (`contractAppBinding`, `createContractEffect`); the projections
 (`publicProjection`, `toOpenApi` with `JC0060`, `toTypeScript`,
 `toMarkdown`, `contractTools`); `contract.revision()` with `JC0061`,

@@ -136,9 +136,31 @@ visits leaves bottom-up, only after the full text has arrived, and never
 tells you where you are.
 
 The write side mirrors this: `createStreamWriter` emits text chunks
-event by event (`pair`, `table`, `tableArray`, `rootItem`), and
-`stringifyJoslChunks` streams an existing value one `[[]]` record at a
-time — byte-identical to `stringifyJosl` output.
+event by event (`pair`, `table`, `tableArray`, `rootItem`; `buffer:
+false` retains none of them), `stringifyJoslChunks` streams an existing
+value one `[[]]` record at a time, and `stringifyJoslStream` pulls
+records from an async source one per chunk — all byte-identical to
+`stringifyJosl` output. `iterateJoslStream` is the reading twin: a
+`[[]]` root array as a pull source of records, each detached from the
+root as the next header completes it; a table root is refused, being one
+retained value rather than a record stream.
+
+**Limits.** A reader refuses a document by size only when asked. Every
+limit defaults to `Infinity`, counts UTF-8 bytes, and is judged while
+the text is still in cutter, token or container state; a crossing is a
+`JoslLimitError` with a stable code — never a repair.
+
+| reader | option | code |
+| --- | --- | --- |
+| JOSL / TOML | `maxTotalBytes` | `JOSL2001` |
+| JOSL / TOML | `maxRecordBytes` — one logical line | `JOSL2002` |
+| JOSL / TOML | `maxTokenBytes` — a string or key as written, quotes included | `JOSL2003` |
+| JOSL / TOML | `maxDepth` — inline nesting and header path depth | `JOSL2004` |
+| JOSL / TOML | `maxRetainedValues` — values the root holds, starting over per detached `[[]]` item | `JOSL2005` |
+| JSONX / JSON (stream reader) | `maxTotalBytes` | `JSONX2001` |
+| JSONX / JSON (stream reader) | `maxTokenBytes` — a string, key, number or regexp as written | `JSONX2002` |
+| JSONX / JSON (stream reader) | `maxDepth` | `JSONX2003` |
+| JSONX / JSON (stream reader) | `maxRetainedValues` — linked values only; a detached subtree never counts | `JSONX2004` |
 
 ## JSONX
 
@@ -212,7 +234,20 @@ information that cannot be recovered downstream:
 **Writing** quotes a field only when it contains the delimiter, the quote
 character, a newline, or edge whitespace a lenient reader might trim. The
 default terminator is CRLF, per RFC 4180 §2.1 and what spreadsheet
-software expects.
+software expects. `stringifyCsv`, `stringifyCsvChunks`, the stream writer
+and the pull form `stringifyCsvStream` share one row formatter and are
+byte-identical for the same records; the pull form requests a record only
+when its consumer asks for the next line.
+
+**Limits.** Optional, `Infinity` by default, in UTF-8 bytes, judged before
+the text is kept; a crossing is a `JoslLimitError`, never a repair:
+
+| option | code |
+| --- | --- |
+| `maxTotalBytes` | `CSV2001` |
+| `maxRecordBytes` — one record, its terminator included | `CSV2002` |
+| `maxFieldBytes` — one field as written, quotes included | `CSV2003` |
+| `maxColumns` | `CSV2004` |
 
 ## Compliance notes
 

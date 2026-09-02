@@ -266,8 +266,9 @@ describe('deterministic_run_is_byte_identical', () => {
     const runtime = buildRuntime();
     const out = [];
 
-    // the http binding: a trace per request and a ledger claim per key
-    const ledger = createMemoryLedger({ now: runtime.now });
+    // the http binding: a trace per request and a ledger claim per key —
+    // the ledger is given the SAME record (its uuid mints each generation)
+    const ledger = createMemoryLedger({ runtime });
     const server = serveHttp(shop, shopHandlers(), { ledger, runtime });
     const first = await server.dispatch(jsonReq('PUT', SAVE_URL, SAVE, { 'idempotency-key': 'k' }));
     const replay = await server.dispatch(jsonReq('PUT', SAVE_URL, SAVE, { 'idempotency-key': 'k' }));

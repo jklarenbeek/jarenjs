@@ -167,6 +167,8 @@ export const fr = {
   'contract/seq-regression': "le flux de l'opération {op} a violé l'ordre de ses seq",
   'contract/stream-error': "le flux de l'opération {op} s'est terminé par une erreur serveur ({code})",
   'contract/heartbeat-missed': "le flux de l'opération {op} est resté silencieux pendant {ms} ms",
+  'contract/slow-consumer': "le flux de l'opération {op} s'est terminé : le consommateur a pris du retard sur sa file bornée",
+  'contract/reconnect-exhausted': "le flux de l'opération {op} n'a pas pu être rétabli après {attempts} tentatives (dernière : {lastCode})",
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

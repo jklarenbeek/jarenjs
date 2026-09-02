@@ -17,6 +17,7 @@ import {
   formatSection,
   isPlainTable,
 } from './stringify.js';
+import { closeIterator, abortedError } from './pull.js';
 
 class JoslStreamWriter {
   constructor(options = {}) {
@@ -26,7 +27,14 @@ class JoslStreamWriter {
       onRegExp: options.onRegExp,
     };
     this.onChunk = options.onChunk ?? null;
+    // `buffer: false` hands every chunk to `onChunk` and keeps none: the
+    // caller chose its sink, so the writer retains no second copy of the
+    // document; `text()`/`end()` then answer '' and say so
+    this.buffered = options.buffer !== false;
+    if (!this.buffered && this.onChunk === null)
+      throw new JoslStringifyError('buffer: false needs an onChunk sink to deliver the chunks to');
     this.chunks = [];
+    this.emitted = false;
     this.ended = false;
     this.rootIsArray = false;
     this.rootHasPairs = false;
@@ -37,7 +45,9 @@ class JoslStreamWriter {
   }
 
   emit(chunk) {
-    this.chunks.push(chunk);
+    this.emitted = true;
+    if (this.buffered)
+      this.chunks.push(chunk);
     if (this.onChunk !== null)
       this.onChunk(chunk);
   }
@@ -48,7 +58,7 @@ class JoslStreamWriter {
   }
 
   blank() {
-    if (this.chunks.length !== 0)
+    if (this.emitted)
       this.emit('\n');
   }
 
@@ -159,7 +169,8 @@ class JoslStreamWriter {
   }
 
   /**
-   * The document text emitted so far.
+   * The document text emitted so far; `''` under `buffer: false`, whose
+   * chunks went to the sink and nowhere else.
    * @returns {string} Concatenated chunks
    */
   text() {
@@ -179,12 +190,15 @@ class JoslStreamWriter {
 /**
  * Create a streaming JOSL/TOML writer - the write-side mirror of
  * `createStreamReader`. Chunks are delivered through `onChunk` as they
- * are produced and also accumulate for `text()` / `end()`.
+ * are produced and also accumulate for `text()` / `end()` — unless
+ * `buffer: false`, which keeps no copy: the sink is the only holder.
  * @param {object} [options] - Writer options
  * @param {'josl'|'toml'} [options.mode] - 'toml' emits strict TOML 1.0
  * @param {'error'|'omit'} [options.onNull] - See `stringifyJosl`
  * @param {'error'|'string'} [options.onRegExp] - See `stringifyJosl`
  * @param {(chunk: string) => void} [options.onChunk] - Chunk sink
+ * @param {boolean} [options.buffer] - `false` retains no emitted text
+ *  (needs `onChunk`); `text()` and `end()` then answer `''`
  * @returns {JoslStreamWriter} The writer
  */
 export function createStreamWriter(options = undefined) {
@@ -203,15 +217,8 @@ export function* stringifyJoslChunks(value, options = {}) {
   if (Array.isArray(value)) {
     if (options.mode === 'toml')
       throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');
-    for (let i = 0; i < value.length; ++i) {
-      if (!isPlainTable(value[i]))
-        throw new JoslStringifyError('root array elements must be tables', [i]);
-      const body = formatSection(value[i], options);
-      // keep byte-identical with stringifyJosl: a body that opens with a
-      // section header gets a blank line after the [[]] header
-      yield (i === 0 ? '' : '\n') + '[[]]\n'
-        + (body.startsWith('[') ? '\n' : '') + body;
-    }
+    for (let i = 0; i < value.length; ++i)
+      yield rootItemChunk(value[i], i, options);
     return;
   }
   if (!isPlainTable(value))
@@ -219,6 +226,64 @@ export function* stringifyJoslChunks(value, options = {}) {
   const text = formatSection(value, options);
   if (text.length !== 0)
     yield text;
+}
+
+/**
+ * One `[[]]` record as a chunk — the text both `stringifyJoslChunks` and
+ * `stringifyJoslStream` yield for record `index`, so the two are
+ * byte-identical by construction (and identical to `stringifyJosl`: a
+ * body that opens with a section header gets a blank line after the
+ * `[[]]` header).
+ * @param {*} record - A plain table
+ * @param {number} index - The record's position in the root array
+ * @param {object} options - Writer options
+ * @returns {string} The chunk
+ * @throws {JoslStringifyError} When the record is not a table
+ */
+function rootItemChunk(record, index, options) {
+  if (!isPlainTable(record))
+    throw new JoslStringifyError('root array elements must be tables', [index]);
+  const body = formatSection(record, options);
+  return (index === 0 ? '' : '\n') + '[[]]\n' + (body.startsWith('[') ? '\n' : '') + body;
+}
+
+/**
+ * Serialize an async iterable of table records as an async iterable of
+ * `[[]]` chunks — the pull form of `stringifyJoslChunks` over a root
+ * array, byte-identical to it for the same records. Pull is the
+ * backpressure: the next record is requested only when the consumer
+ * asks for the next chunk. `options.signal` aborts between pulls (the
+ * rejection is the signal's reason); an abort, a consumer that stops
+ * early or a throw closes the record source exactly once.
+ * @param {AsyncIterable<object>|Iterable<object>} records - Table records
+ * @param {object} [options] - Writer options; see `stringifyJosl`, plus `signal`
+ * @yields {string} One `[[]]` record per chunk
+ * @example
+ * response.body = stringifyJoslStream(store.collection('rows').query(doc), { signal });
+ */
+export async function* stringifyJoslStream(records, options = {}) {
+  if (options.mode === 'toml')
+    throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');
+  const signal = options.signal ?? null;
+  const iterator = records[Symbol.asyncIterator]?.() ?? records[Symbol.iterator]();
+  let index = 0;
+  let finished = false;
+  try {
+    for (;;) {
+      if (signal !== null && signal.aborted)
+        throw abortedError(signal);
+      const step = await iterator.next();
+      if (step.done) {
+        finished = true;
+        break;
+      }
+      yield rootItemChunk(step.value, index++, options);
+    }
+  }
+  finally {
+    if (!finished)
+      await closeIterator(iterator);
+  }
 }
 
 export { JoslStringifyError } from './errors.js';

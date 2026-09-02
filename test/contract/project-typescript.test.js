@@ -75,8 +75,22 @@ describe('toTypeScript — what it declares', () => {
     assert.match(out, /^export interface InvokeContext \{ signal\?: AbortSignal; attempt\?: unknown; idempotencyKey\?: string; headers\?: Record<string, string>; ifNoneMatch\?: string; ifMatch\?: string \}$/m);
     assert.match(out, /invoke<K extends keyof Operations>\(op: K, input: Operations\[K\]\['input'\], ctx\?: InvokeContext\): Promise<Outcome<Operations\[K\]\['output'\]>>;/);
     assert.match(out, /url<K extends keyof UrlOperations>\(op: K, input: UrlOperations\[K\]\): string;/);
-    assert.match(out, /^export type Handlers = \{ \[K in keyof Operations\]: \(input: Operations\[K\]\['input'\], ctx: HandlerContext\) => Operations\[K\]\['output'\] \| Failure \| Promise<Operations\[K\]\['output'\] \| Failure> \};$/m);
-    assert.match(out, /^export interface HandlerContext \{$/m);
+    assert.match(out, /^export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = \{ \[K in keyof Operations\]: \(input: Operations\[K\]\['input'\], ctx: HandlerContext<Host, Carrier>\) => Operations\[K\]\['output'\] \| Failure \| Promise<Operations\[K\]\['output'\] \| Failure> \};$/m);
+    assert.match(out, /^export type CarrierName = 'http' \| 'port' \| 'local';$/m);
+    assert.match(out, /^export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> \{$/m);
+    assert.match(out, /^export interface ChannelHandlerContext<Host = null, Carrier extends 'port' \| 'local' = 'port' \| 'local'> extends HandlerContextBase<Host> \{$/m);
+    assert.match(out, /^export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> = Extract<HttpHandlerContext<Host> \| ChannelHandlerContext<Host, 'port'> \| ChannelHandlerContext<Host, 'local'>, \{ carrier: Carrier \}>;$/m);
+  });
+
+  it('declares the byte surface: ByteOperations holds exactly the opaque operations, and HttpClient extends Client with bytes over them', () => {
+    assert.match(out, /^export interface ByteOperations \{\n {2}'image\.bytes': ImageBytesInput;\n\}/m, 'the one opaque operation, and nothing else');
+    assert.match(out, /^export interface ByteContext \{ signal\?: AbortSignal; attempt\?: unknown; headers\?: Record<string, string>; ifNoneMatch\?: string; ifMatch\?: string; body\?: string \| Uint8Array \| ReadableStream<Uint8Array> \| AsyncIterable<Uint8Array> \| null \}$/m);
+    assert.match(out, /^export type ByteResponse = \{ status: number; headers: Record<string, string>; media: string \| null; body: ReadableStream<Uint8Array> \| null \};$/m);
+    assert.match(out, /^export interface HttpClient extends Client \{\n {2}bytes<K extends keyof ByteOperations>\(op: K, input: ByteOperations\[K\], ctx\?: ByteContext\): Promise<Outcome<ByteResponse>>;\n\}/m);
+    assert.doesNotMatch(out, /^export interface Client \{[^}]*bytes/m, 'the binding-neutral Client carries no byte method');
+    // a contract without an opaque operation declares an EMPTY ByteOperations: bytes is uncallable, never absent
+    const none = toTypeScript(compileContract({ $contract: '0.1', operations: { a: { kind: 'read', output: true } } }), { banner: false });
+    assert.match(none, /^export interface ByteOperations \{\n\}/m);
   });
 
   it('types an input-less operation as null, keeps names unique under collisions, and leaves server operations out', () => {

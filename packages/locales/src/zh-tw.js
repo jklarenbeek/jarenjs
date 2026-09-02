@@ -165,6 +165,8 @@ export const zhTW = {
   'contract/seq-regression': '操作 {op} 的串流違反了其 seq 順序',
   'contract/stream-error': '操作 {op} 的串流以伺服器錯誤結束({code})',
   'contract/heartbeat-missed': '操作 {op} 的串流沉默了 {ms} 毫秒',
+  'contract/slow-consumer': '操作 {op} 的串流已結束：消費端落後於其有界佇列',
+  'contract/reconnect-exhausted': '操作 {op} 的串流在 {attempts} 次嘗試後仍無法重新建立（最後：{lastCode}）',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

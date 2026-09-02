@@ -129,6 +129,49 @@ records went past. The pattern matches an exact path, not a prefix, so a
 feature's own rings are not separately detached: they belong to their
 feature and are freed with it.
 
+The JOSL twin is `iterateJoslStream`: a `[[]]` root array read as a pull
+source of records, each detached from the root the moment the next
+`[[]]` header (or the end) completes it, so the reader holds at most the
+record in progress. A table root is one retained value, not a record
+stream, and is refused by name.
+
+```js
+import { iterateJoslStream } from '@jarenjs/josl/stream';
+
+for await (const record of iterateJoslStream(response.body, { signal }))
+  await save(record);        // the source is closed exactly once on an abort or an early return
+```
+
+### Hostile input
+
+Every reader refuses a document by size only when asked: the limits
+default to `Infinity`, count **UTF-8 bytes** (never code units), and are
+checked while the offending text is still in cutter, token or container
+state — before a concatenation or a link could cross them. A crossing
+throws `JoslLimitError` with a stable code and the limit; it is never a
+repair, because a document that is too large is not damaged.
+
+| reader | option | code |
+| --- | --- | --- |
+| CSV | `maxTotalBytes` | `CSV2001` |
+| CSV | `maxRecordBytes` (one record, its terminator included) | `CSV2002` |
+| CSV | `maxFieldBytes` (one field as written, quotes included) | `CSV2003` |
+| CSV | `maxColumns` | `CSV2004` |
+| JOSL / TOML | `maxTotalBytes` | `JOSL2001` |
+| JOSL / TOML | `maxRecordBytes` (one logical line) | `JOSL2002` |
+| JOSL / TOML | `maxTokenBytes` (a string or key as written, quotes included) | `JOSL2003` |
+| JOSL / TOML | `maxDepth` (inline nesting, header path depth) | `JOSL2004` |
+| JOSL / TOML | `maxRetainedValues` (values the root holds; starts over per detached `[[]]` item) | `JOSL2005` |
+| JSONX / JSON stream | `maxTotalBytes` | `JSONX2001` |
+| JSONX / JSON stream | `maxTokenBytes` (a string, key, number or regexp as written) | `JSONX2002` |
+| JSONX / JSON stream | `maxDepth` | `JSONX2003` |
+| JSONX / JSON stream | `maxRetainedValues` (linked values only — a detached subtree is never counted) | `JSONX2004` |
+
+The CSV and JOSL limits guard the whole-document parsers too, which run
+the same machines; the JSONX limits are the stream reader's, which is
+where a document arrives a chunk at a time. `CSV_LIMIT_CODES`,
+`JOSL_LIMIT_CODES` and `JSONX_LIMIT_CODES` are the tables as data.
+
 Measured on a synthetic OpenStreetMap-shaped extract (`node --expose-gc
 benchmark/jsonx-stream.js`), reading 20 000 features of 40 vertices each:
 
@@ -212,23 +255,33 @@ The write-side mirror of the reader — build a document event by event and
 ship each chunk as it is produced:
 
 ```js
-import { createStreamWriter, stringifyJoslChunks } from '@jarenjs/josl/write';
+import { createStreamWriter, stringifyJoslChunks, stringifyJoslStream } from '@jarenjs/josl/write';
 
-const w = createStreamWriter({ onChunk: (c) => response.write(c) });
+const w = createStreamWriter({ onChunk: (c) => response.write(c), buffer: false });
 w.pair('title', 'run 42')
   .table('server')
   .pair('host', 'localhost');
 // root-array documents: w.rootItem(record) per completed record
-const text = w.end();
+w.end();                                     // '' — buffer: false retains nothing; the sink has it
 
 // or stream an existing value, one chunk per [[]] record:
 for (const chunk of stringifyJoslChunks(records))
   response.write(chunk);
+
+// or pull records from an async source — a database cursor — one per chunk:
+response.body = stringifyJoslStream(store.collection('rows').query(doc), { signal });
 ```
 
 The writer validates what the reader would reject (duplicate keys and
 headers, root table/array mixing, TOML downleveling) and shares its
 serialization with `stringifyJosl`, so both produce identical text.
+`stringifyJoslStream` is the pull form: the next record is requested only
+when the consumer asks for the next chunk, so a cursor behind it never
+runs ahead of the socket in front of it; its chunks are byte-identical to
+`stringifyJoslChunks` for the same records, and an abort (`signal`), a
+consumer that stops early or a throw closes the record source exactly
+once. `buffer: false` (with an `onChunk` sink) keeps the event writer from
+retaining a second copy of the document it streams.
 
 ## Editing a document (CST)
 
@@ -328,9 +381,21 @@ parseCsv('a,b\n1,2');                     // [['a','b'], ['1','2']]
 parseCsv('a,b\n1,2', { headers: true });  // [{ a: '1', b: '2' }]
 
 // rows as they complete, without ever holding the table
-for await (const row of iterateCsvStream(response.body, { headers: true }))
+for await (const row of iterateCsvStream(response.body, { headers: true, signal }))
   await save(row);
+
+// and the other way: pull records from a cursor into CSV lines, header once
+response.body = stringifyCsvStream(store.collection('rows').query(doc), { signal });
 ```
+
+`stringifyCsvStream` is byte-identical to `stringifyCsvChunks` and
+`stringifyCsv` for the same records and pulls one record per line, so the
+source is never asked for a row the consumer has not asked for; `signal`
+aborts between pulls, and an abort, an early return or a throw closes the
+source exactly once. The reader's `signal` does the same for
+`iterateCsvStream`. The hostile-input limits (`maxTotalBytes`,
+`maxRecordBytes`, `maxFieldBytes`, `maxColumns`, the `CSV2xxx` codes) are
+listed under Streaming.
 
 **Strict by default.** Anything RFC 4180 forbids throws a
 `CsvSyntaxError` carrying a `CSV1xxx` code, a line and a column — the

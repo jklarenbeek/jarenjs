@@ -62,6 +62,8 @@ export const contractMessagesEn = Object.freeze({
   'contract/seq-regression': 'the stream of operation {op} violated its seq order',
   'contract/stream-error': 'the stream of operation {op} ended with a server error ({code})',
   'contract/heartbeat-missed': 'the stream of operation {op} went silent for {ms}ms',
+  'contract/slow-consumer': 'the stream of operation {op} ended: the consumer fell behind its bounded queue',
+  'contract/reconnect-exhausted': 'the stream of operation {op} could not be re-established after {attempts} attempts (last: {lastCode})',
 });
 
 /** The compiled English catalog (module-level singleton). */

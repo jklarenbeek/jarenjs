@@ -8,7 +8,7 @@
 
 export { parseJosl, parseToml } from './parse.js';
 export { parseJoslCst, parseTomlCst, JoslCstDocument } from './cst.js';
-export { createStreamReader, parseJoslStream } from './stream.js';
+export { createStreamReader, parseJoslStream, iterateJoslStream } from './stream.js';
 export {
   stringifyJosl,
   stringifyToml,
@@ -17,7 +17,7 @@ export {
   formatValue,
   formatSection,
 } from './stringify.js';
-export { createStreamWriter, stringifyJoslChunks } from './write.js';
+export { createStreamWriter, stringifyJoslChunks, stringifyJoslStream } from './write.js';
 export { toGbnf, tomlToGbnf } from './gbnf.js';
 export { parseJsonx, stringifyJsonx } from './jsonx.js';
 export { createJsonxStreamReader, parseJsonxStream } from './jsonx-stream.js';
@@ -35,10 +35,12 @@ export {
   createCsvStreamReader,
   parseCsvStream,
   iterateCsvStream,
+  stringifyCsvStream,
   createCsvStreamWriter,
   CsvStreamWriter,
 } from './csv-stream.js';
 export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError, CsvSyntaxError } from './errors.js';
+export { JoslLimitError, CSV_LIMIT_CODES, JOSL_LIMIT_CODES, JSONX_LIMIT_CODES } from './limits.js';
 export {
   LocalDate,
   LocalTime,

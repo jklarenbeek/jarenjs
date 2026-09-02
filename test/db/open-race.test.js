@@ -51,15 +51,19 @@ const CHILD = `
   console.log('ok ' + who);
 `;
 
+/** The same child with every first-open object the options can create: the change log and the job tables. */
+const FULL_CHILD = CHILD.replace('busyTimeout: 5000 }', 'busyTimeout: 5000, capture: { log: { retention: 100 } }, jobs: true }');
+
 /**
  * Release `CHILDREN` processes on one fresh path at once and collect
  * every outcome.
  * @param {string} dbPath
+ * @param {string} [source] - the child program
  * @returns {Promise<{ status: number | null, stderr: string, stdout: string }[]>}
  */
-function race(dbPath) {
+function race(dbPath, source = CHILD) {
   const children = Array.from({ length: CHILDREN }, (_, i) => spawn(process.execPath,
-    ['--no-warnings=ExperimentalWarning', '--input-type=module', '-e', CHILD, dbPath, `p${i}`],
+    ['--no-warnings=ExperimentalWarning', '--input-type=module', '-e', source, dbPath, `p${i}`],
     { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }));
   return Promise.all(children.map((child) => new Promise((resolve) => {
     let stdout = '';
@@ -90,6 +94,63 @@ describe('two processes opening one fresh file', () => {
     }
     finally {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+});
+
+describe('two processes opening one fresh file with the change log and the job tables', () => {
+  it(`${ROUNDS} rounds × ${CHILDREN} processes: the log's seed row and the job tables are created under the same immediate bracket; zero failures`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-race-full-'));
+    const failures = [];
+    try {
+      for (let round = 0; round < ROUNDS; round++) {
+        const dbPath = path.join(dir, `round-${round}.db`);
+        const outcomes = await race(dbPath, FULL_CHILD);
+        for (const [i, outcome] of outcomes.entries()) {
+          if (outcome.status !== 0 || !outcome.stdout.includes(`ok p${i}`)) {
+            failures.push({ round, child: i, status: outcome.status, stderr: outcome.stderr.slice(0, 400) });
+          }
+          assert.doesNotMatch(outcome.stderr, /database is locked|UNIQUE constraint|duplicate column/,
+            `round ${round} child ${i}: a raw driver error escaped`);
+        }
+        // the shapes verify: a third open sees both rows and creates nothing
+        const again = recordingDriver(nodeDriver());
+        const reopened = await openStore(MODEL, { driver: again.driver, path: dbPath, capture: { log: { retention: 100 } }, jobs: true });
+        assert.strictEqual((await reopened.collection('notes').execute([{ $for: { it: '$[*]' }, $return: '$it.id' }])).length, CHILDREN);
+        await reopened.close();
+        assert.deepStrictEqual(again.executed.filter((sql) => /^CREATE (TABLE|INDEX|UNIQUE INDEX) (?!IF NOT EXISTS)/.test(sql)), []);
+      }
+      assert.deepStrictEqual(failures, []);
+    }
+    finally {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it('the change log and the job tables are created inside BEGIN IMMEDIATE on a fresh file', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const { driver, executed } = recordingDriver(nodeDriver());
+      const store = await openStore(MODEL, { driver, path: dbPath, capture: { log: { retention: 100 } }, jobs: true });
+      await store.close();
+      /** @type {string[][]} */
+      const brackets = [];
+      let open = false;
+      for (const sql of executed) {
+        if (sql === 'BEGIN IMMEDIATE') {
+          open = true;
+          brackets.push([]);
+        }
+        else if (sql === 'COMMIT') open = false;
+        else if (open && /CREATE /.test(sql)) brackets[brackets.length - 1].push(sql);
+      }
+      const created = brackets.flat();
+      assert.ok(created.some((sql) => /_jaren_changes/.test(sql)), `the change log is created under an immediate bracket: ${JSON.stringify(executed)}`);
+      assert.ok(created.some((sql) => /_jaren_jobs/.test(sql)), 'the job tables are created under an immediate bracket');
+      assert.ok(!executed.some((sql) => /CREATE /.test(sql) && !created.includes(sql)), 'no first-open CREATE runs outside a bracket');
+    }
+    finally {
+      cleanup();
     }
   });
 });

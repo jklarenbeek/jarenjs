@@ -183,7 +183,7 @@ async function exercise(origin) {
   await first.until((t) => t.includes('event: snapshot'));
   source.emit({ patch: [{ op: 'replace', path: '/revision', value: 2 }], seq: 5 }, { revision: 2 });
   await first.until((t) => t.includes('event: patch'));
-  assert.match(first.text, /event: snapshot\nid: 0\ndata: \{"value":\{"revision":1\},"resumed":false\}\n\n/);
+  assert.match(first.text, /event: snapshot\nid: 0\ndata: \{"value":\{"revision":1\},"resumed":false,"reset":false,"earliestAvailable":null,"highWatermark":null\}\n\n/);
   assert.match(first.text, /event: patch\nid: 5\ndata: \{"patch":\[\{"op":"replace","path":"\/revision","value":2\}\],"seq":5\}\n\n/);
 
   // the peer's disconnect releases the live source exactly once

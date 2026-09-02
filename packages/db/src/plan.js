@@ -1907,7 +1907,17 @@ function composeWindows(windows) {
  *   `series` is the temporal record (`series.js`) when the document
  *   asked a §8.16 question, and `null` when it did not.
  */
+/**
+ * The whole-collection scan a bare root wildcard means: the degenerate
+ * query of every pen (`'$[*]'`, LINQ-FORMAT's "the degenerate query is a
+ * JSONPath string") is planned as the `$for` phrase over the collection
+ * it abbreviates — a row cursor from an open statement — instead of the
+ * path barrier that would fetch the collection whole and walk it in JS.
+ */
+const ROOT_SCAN = Object.freeze({ $for: Object.freeze({ it: '$[*]' }), $return: '$it' });
+
 function planCollectionCore(document, shape, options = undefined) {
+  if (document === '$[*]') document = ROOT_SCAN;
   const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
   let root = analysis.root;
   assertDecidedKind(root);

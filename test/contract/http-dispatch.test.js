@@ -767,11 +767,12 @@ describe('the English catalog', () => {
     assert.strictEqual(Object.isFrozen(contractMessagesEn), true);
     assert.strictEqual(Object.isFrozen(contractCatalogEn), true);
     // the parameters are trusted artifacts or protocol facts only: op ids, limits, media, method lists,
-    // header names, codes, statuses, a platform error's name, contract ids, versions and a declared timeout
+    // header names, codes, statuses, a platform error's name, contract ids, versions, a declared timeout,
+    // and the client's own reconnect count with the last loss's code
     const placeholders = new Set();
     for (const template of Object.values(contractMessagesEn)) {
-      for (const m of template.matchAll(/\{([a-z]+)\}/g)) placeholders.add(m[1]);
+      for (const m of template.matchAll(/\{([a-zA-Z]+)\}/g)) placeholders.add(m[1]);
     }
-    assert.deepStrictEqual([...placeholders].sort(), ['allow', 'client', 'code', 'header', 'id', 'kind', 'limit', 'media', 'ms', 'name', 'op', 'server', 'status']);
+    assert.deepStrictEqual([...placeholders].sort(), ['allow', 'attempts', 'client', 'code', 'header', 'id', 'kind', 'lastCode', 'limit', 'media', 'ms', 'name', 'op', 'server', 'status']);
   });
 });

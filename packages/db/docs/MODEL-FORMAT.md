@@ -766,6 +766,21 @@ await store.transaction(async (tx) => {
 });
 ```
 
+**A root transaction may take the write lock up front.**
+`store.transaction(fn, { mode: 'immediate' })` begins with `BEGIN
+IMMEDIATE` instead of a deferred savepoint. A body that reads before it
+writes — a ledger claim: read the record, decide, insert — otherwise
+meets the read→write upgrade `SQLITE_BUSY` when another connection
+commits between its read and its write, the one busy the busy handler
+cannot retry; with the lock taken first that wait is an ordinary busy
+wait the `busyTimeout` covers, and two processes claiming one key see
+one `new`. The default `'deferred'` is unchanged, `tx.transaction()`
+inside either mode is a savepoint, `signal` and `unitOfWork` behave the
+same, and the synchronous twin has no mode. The open path already
+brackets every first-open object — collection, entity and join tables,
+indexes, the change log and its state row, the job tables — the same
+way (§2.4).
+
 **A transaction handle lives exactly as long as its own scope.** Every
 `tx` view is pinned to the exact scope that created it, and every
 stateful member — connection work, unit-of-work bookkeeping like

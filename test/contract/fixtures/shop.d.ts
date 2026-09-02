@@ -139,24 +139,64 @@ export interface Client {
   close(): void;
 }
 
+/** Every opaque public operation by id, with its input type, for `HttpClient.bytes`. */
+export interface ByteOperations {
+  'image.bytes': ImageBytesInput;
+}
+
+/** Per-call options of bytes: the members of InvokeContext that apply to an opaque call, plus the request body to send — text, bytes, a Web stream, an async iterable of chunks, or none. */
+export interface ByteContext { signal?: AbortSignal; attempt?: unknown; headers?: Record<string, string>; ifNoneMatch?: string; ifMatch?: string; body?: string | Uint8Array | ReadableStream<Uint8Array> | AsyncIterable<Uint8Array> | null }
+
+/** The success value of bytes: the status, the response headers (lowercase names), the response media (null when none) and the live response body — a stream the caller reads; null when the response carries none. */
+export type ByteResponse = { status: number; headers: Record<string, string>; media: string | null; body: ReadableStream<Uint8Array> | null };
+
+/** The HTTP client: the binding-neutral Client plus bytes over the opaque operations, whose success owns a live stream rather than a JSON value. */
+export interface HttpClient extends Client {
+  bytes<K extends keyof ByteOperations>(op: K, input: ByteOperations[K], ctx?: ByteContext): Promise<Outcome<ByteResponse>>;
+}
+
 /** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details and whether the caller may retry (null defers to the operation's retry policy). */
 export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null };
 
-/** The per-request context a server binding hands a handler. */
-export interface HandlerContext {
+/** The binding a handler context comes from. */
+export type CarrierName = 'http' | 'port' | 'local';
+
+/** The members every carrier's context shares; `host` is the host lifecycle's acquired value (null by default). */
+export interface HandlerContextBase<Host = null> {
   op: unknown;
   trace: string;
+  host: Host;
+  headers: Readonly<Record<string, string>>;
+  signal: AbortSignal | null;
+  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }): Failure;
+}
+
+/** The HTTP binding's context: the request line, the raw body of an opaque operation, the idempotency key, and the entity-tag and status arms. */
+export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> {
+  carrier: 'http';
   method: string;
   path: string;
   params: Readonly<Record<string, string>>;
-  headers: Readonly<Record<string, string>>;
-  body: string | Uint8Array | null;
-  signal: AbortSignal | null;
+  body: string | Uint8Array | AsyncIterable<Uint8Array> | null;
   idempotency: Readonly<{ key: string; scope: string }> | null;
-  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }): Failure;
   etag(tag: string, options?: { strong?: boolean }): void;
   status(status: number): void;
 }
 
+/** The port and local bindings' context: no request line, no body, no key, and no callable etag or status — spelled null, never omitted. */
+export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'local' = 'port' | 'local'> extends HandlerContextBase<Host> {
+  carrier: Carrier;
+  method: null;
+  path: null;
+  params: null;
+  body: null;
+  idempotency: null;
+  etag: null;
+  status: null;
+}
+
+/** The per-request context a server binding hands a handler, selected by carrier: the HTTP context by default; a carrier union is a discriminated union to narrow on `carrier`. */
+export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> = Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;
+
 /** The typed handler table of a server binding: one handler per invokable operation, answering the output, a declared failure, or a promise of either. */
-export type Handlers = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext) => Operations[K]['output'] | Failure | Promise<Operations[K]['output'] | Failure> };
+export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext<Host, Carrier>) => Operations[K]['output'] | Failure | Promise<Operations[K]['output'] | Failure> };

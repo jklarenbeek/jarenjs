@@ -18,11 +18,17 @@
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
 
+import { ContractHostError } from './errors.js';
+
 /**
  * The record a ledger keeps per `(op, scope, key)`; the schema of
  * `idempotencyLedgerModel`'s collection.
  * @typedef {Object} LedgerRecord
- * @property {string} id - `"<op>|<scope>|<key>"`
+ * @property {string} id - {@link ledgerId} of the tuple
+ * @property {string} generation - the identity of the claim that started
+ *   this record: minted per `started` record, carried by the `ref`, and
+ *   verified by `commit`/`fail` — a ref of an earlier generation settles
+ *   nothing (`JC1011`)
  * @property {string} op
  * @property {string} scope
  * @property {string} key
@@ -36,10 +42,17 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
  */
 
 /**
+ * The ref a `new` claim hands back and a settlement names: the record's
+ * `id` and the `generation` the claim minted — portable across
+ * processes, and stale the moment the key expires or is reclaimed.
+ * @typedef {{ readonly id: string, readonly generation: string }} LedgerRef
+ */
+
+/**
  * The claim result: `new` hands back a `ref` to commit or fail; `replay`
  * carries the stored response; `in-progress` and `mismatch` are the two
  * 409 answers.
- * @typedef {{ state: 'new', ref: unknown }
+ * @typedef {{ state: 'new', ref: LedgerRef }
  *   | { state: 'replay', response: any }
  *   | { state: 'in-progress' }
  *   | { state: 'mismatch' }} ClaimResult
@@ -57,7 +70,10 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
  * (epoch ms): ONE clock must judge a record from claim to expiry, so a
  * ledger that has no clock of its own follows the binding's, and a
  * ledger with its own clock is given the same record as the binding
- * (`runtime`) rather than a second one.
+ * (`runtime`) rather than a second one. A `commit`/`fail` whose ref
+ * settles no `started` record — expired, reclaimed under a newer
+ * generation, or settled already — throws (or rejects) `JC1011`; the
+ * binding reports it to `onError` and the response still goes out.
  * @typedef {Object} Ledger
  * @property {(claim: { op: string, scope: string, key: string, hash: string, now?: number }) => ClaimResult | Promise<ClaimResult>} claim
  * @property {(ref: unknown, response: any, now?: number) => void | Promise<void>} commit
@@ -69,13 +85,31 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 const DEFAULT_TTL_MS = 86_400_000;
 
 /**
+ * The id of one `(op, scope, key)` tuple: the version `1`, a colon, the
+ * JSON array of the three. Injective — a `|`, a control character or
+ * any Unicode inside a member cannot spell another tuple — and readable
+ * in a store. A record written under the legacy `"<op>|<scope>|<key>"`
+ * spelling is matched by no claim again: it expires by its own
+ * `expiresAt` (`sweep`), or a host rewrites its `id` once
+ * (docs/CONTRACT-FORMAT.md §8).
  * @param {string} op
  * @param {string} scope
  * @param {string} key
  * @returns {string}
  */
-function idOf(op, scope, key) {
-  return `${op}|${scope}|${key}`;
+export function ledgerId(op, scope, key) {
+  return `1:${JSON.stringify([op, scope, key])}`;
+}
+
+/**
+ * The `JC1011` refusal of a settlement whose ref settles no started record.
+ * @param {unknown} ref
+ * @returns {ContractHostError}
+ */
+function staleSettlement(ref) {
+  const r = /** @type {any} */ (ref);
+  const named = r !== null && typeof r === 'object' && typeof r.id === 'string' ? r.id : 'a ref this ledger did not issue';
+  return new ContractHostError('JC1011', `ledger: ${named} settles no started record — the key expired, was reclaimed under a newer generation, or was settled already`);
 }
 
 /**
@@ -92,7 +126,9 @@ function idOf(op, scope, key) {
  * stamped by an injected server clock and judged by the platform's was
  * dropped as expired the moment `sweep()` ran, and the command ran
  * twice.) A ledger WITH its own clock uses it for everything and is
- * given the same record as the binding, never a second one.
+ * given the same record as the binding, never a second one. The runtime
+ * record's `uuid` mints each record's `generation`; `lookup` answers a
+ * copy, never the ledger's own record.
  * @param {{ ttlMs?: number, now?: () => number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} [options]
  * @returns {Ledger & { sweep(now?: number): number, size: number }}
@@ -123,10 +159,22 @@ export function createMemoryLedger(options = {}) {
   /** @type {Map<string, LedgerRecord>} */
   const records = new Map();
 
+  /**
+   * The started record a ref settles, or the `JC1011` refusal.
+   * @param {unknown} ref
+   * @returns {LedgerRecord}
+   */
+  function settling(ref) {
+    const r = /** @type {any} */ (ref);
+    const record = r !== null && typeof r === 'object' && typeof r.id === 'string' ? records.get(r.id) : undefined;
+    if (record === undefined || record.generation !== r.generation || record.status !== 'started') throw staleSettlement(ref);
+    return record;
+  }
+
   return {
     claim({ op, scope, key, hash, now }) {
       const at = instant(now);
-      const id = idOf(op, scope, key);
+      const id = ledgerId(op, scope, key);
       const existing = records.get(id);
       if (existing !== undefined) {
         if (existing.expiresAt <= at) records.delete(id);
@@ -136,38 +184,37 @@ export function createMemoryLedger(options = {}) {
         else if (existing.retryable !== true && existing.response !== null) return { state: 'replay', response: existing.response };
         else records.delete(id);
       }
+      const generation = runtime.uuid();
       /** @type {LedgerRecord} */
       const record = {
-        id, op, scope, key, hash, status: 'started', response: null, retryable: null,
+        id, generation, op, scope, key, hash, status: 'started', response: null, retryable: null,
         createdAt: at, updatedAt: at, expiresAt: at + ttlMs,
       };
       records.set(id, record);
-      return { state: 'new', ref: record };
+      return { state: 'new', ref: Object.freeze({ id, generation }) };
     },
     commit(ref, response, now = undefined) {
-      const record = /** @type {LedgerRecord} */ (ref);
-      if (records.get(record.id) !== record) return;
+      const record = settling(ref);
       record.status = 'committed';
       record.response = response;
       record.retryable = null;
       record.updatedAt = instant(now);
     },
     fail(ref, retryable, response, now = undefined) {
-      const record = /** @type {LedgerRecord} */ (ref);
-      if (records.get(record.id) !== record) return;
+      const record = settling(ref);
       record.status = 'failed';
       record.retryable = retryable === true;
       record.response = response === undefined ? null : response;
       record.updatedAt = instant(now);
     },
     lookup({ op, scope, key, now = undefined }) {
-      const record = records.get(idOf(op, scope, key));
+      const record = records.get(ledgerId(op, scope, key));
       if (record === undefined) return null;
       if (record.expiresAt <= instant(now)) {
         records.delete(record.id);
         return null;
       }
-      return record;
+      return { ...record };
     },
     sweep(now = undefined) {
       const at = instant(now);
@@ -188,11 +235,12 @@ export function createMemoryLedger(options = {}) {
 
 /**
  * The `$model` 0.1 document of a durable ledger: one collection,
- * `ledger`, keyed by `/id` (`"<op>|<scope>|<key>"`), indexed on
- * `expiresAt` (the sweep) and `status` (the in-flight scan). A host
- * opens it with `@jarenjs/db`'s `openStore` and implements the `Ledger`
- * interface over the collection; the record shape is exactly what
- * `createMemoryLedger` keeps.
+ * `ledger`, keyed by `/id` ({@link ledgerId}), indexed on `expiresAt`
+ * (the sweep) and `status` (the in-flight scan). A host opens it with
+ * `@jarenjs/db`'s `openStore` and implements the `Ledger` interface over
+ * the collection — `createDbLedger` in `@jarenjs/linq/db` is that
+ * implementation over the typed client; the record shape is exactly
+ * what `createMemoryLedger` keeps, the `generation` included.
  */
 export const idempotencyLedgerModel = Object.freeze({
   $model: '0.1',
@@ -200,9 +248,10 @@ export const idempotencyLedgerModel = Object.freeze({
     ledger: {
       schema: {
         type: 'object',
-        required: ['id', 'op', 'scope', 'key', 'hash', 'status', 'response', 'retryable', 'createdAt', 'updatedAt', 'expiresAt'],
+        required: ['id', 'generation', 'op', 'scope', 'key', 'hash', 'status', 'response', 'retryable', 'createdAt', 'updatedAt', 'expiresAt'],
         properties: {
           id: { type: 'string', minLength: 1 },
+          generation: { type: 'string', minLength: 1 },
           op: { type: 'string', minLength: 1 },
           scope: { type: 'string' },
           key: { type: 'string', minLength: 1 },

@@ -329,8 +329,12 @@ canonical binding takes part (`POST /<id>` may collide with a declared
 A `media` other than `application/json` (or a `+json` structured-syntax
 suffix, parameters ignored) marks the operation **opaque**: it is routed
 and matched, its path/query still decoded, its body neither decoded nor
-validated by the contract, and it is excluded from generated clients
-except as a URL builder. `image.bytes` in §2 is one. Because its body is
+validated by the contract, and it is excluded from `invoke` and from the
+generated `Operations` map — an HTTP client reaches it through `bytes`
+(§10.6), whose success owns the live response stream, and through `url`.
+Its bytes are **streamed** in both directions: the handler pulls the
+upload one chunk at a time and may answer a pull source of its own
+(§7.1). `image.bytes` in §2 is one. Because its body is
 bytes the contract never decodes, an opaque operation MUST NOT declare a
 **body-located member** — neither through `http.body`, nor `http.in`,
 nor the `command` default (`JC0017` at the member that placed it there,
@@ -498,10 +502,12 @@ is the operation's output. `ctx` is frozen per request:
 |---|---|
 | `op` | the compiled operation |
 | `trace` | the server trace id of this request (also `x-jaren-trace` on the response and `requestId` in an error body) |
+| `carrier` | `"http"` — the binding this context comes from (`"port"` and `"local"` on theirs, §15–§16) |
+| `host` | the host lifecycle's value (§7.7): what `acquire` entered with — `null` by default, the identity's host when only `identify` is named; the value itself is the host's and is not deep-frozen |
 | `method`, `path` | the request line, path without the query |
 | `params` | the raw decoded path strings, frozen |
 | `headers` | **declared header members only** (by header name, string values) plus `if-match`/`if-none-match` when present — the binding reads no other request header on a handler's behalf |
-| `body` | the raw request body of an **opaque** operation (`string | Uint8Array | null`); `null` for a JSON operation, whose body was decoded into `input` |
+| `body` | the raw request body of an **opaque** operation: text, bytes, or — when the adapter handed the request over as a stream — a pull source (`AsyncIterable<Uint8Array>`) that never yields a byte past `policy.limits.maxBodyBytes` (the chunk that would cross it throws a `BodyLimitError`, exported by `@jarenjs/contract/http`, to the puller); `null` for a JSON operation, whose body was decoded into `input` |
 | `signal` | the request's `AbortSignal` when the adapter has one (the node adapter aborts it when the client goes away before the response finished), else `null` |
 | `idempotency` | `{ key, scope }` when this request runs under an idempotency key, else `null` |
 | `fail(code, params?, details?, { retryable? }?)` | a declared failure by code — returns a `ContractFailure` value the handler returns; `params` feed the message catalog, `details` become the wire `details` (validated against the declaration's schema when it has one), `retryable` overrides the default taken from `policy.retry.on` |
@@ -511,6 +517,26 @@ is the operation's output. `ctx` is frozen per request:
 An **opaque** operation (`http.opaque`) takes a *raw* handler: `(input,
 ctx) => { status, headers?, body? }` with the bytes in `ctx.body`; it
 bypasses media, parse, body assembly, idempotency and output validation.
+**The bytes stream.** Through the adapters (§9) `ctx.body` is a pull
+source: the handler reads it with `for await`, one chunk at a time, and
+nothing is collected on its behalf. The source counts: the chunk that
+would cross `policy.limits.maxBodyBytes` is never yielded — the upstream
+is cancelled once and a `BodyLimitError` is thrown to the puller. A
+handler that lets it propagate answers `JC2003` (the request's fault,
+not a host fault — `onError` does not see it); one that catches it
+decides for itself. The handler's `body` may likewise be a pull source
+(an async iterable, or a Web `ReadableStream`, normalized): the adapter
+writes it chunk by chunk behind the socket's backpressure, and under
+HEAD it is cancelled once, never drained. A plain (non-stream) response
+answered with the upload still unread cancels the upload once before the
+response is exposed; a streamed response keeps the upload alive — the
+handler may be transforming it — and releases it once when the response
+reaches EOF, throws, or is cancelled by the consumer. A limit crossing
+met by such a transform after the headers went out cuts the response
+body (the status cannot be rewritten) and is reported to `onError`.
+Effects a handler made before a chunked upload crossed its limit are its
+own to undo; the host lifecycle's acquired transaction (a later order's
+seam) is where such a rollback belongs.
 Its transport members are decoded and normalized into `input` and
 validated like any other input (`JC2006`) — they **are** its whole
 input, since an opaque operation cannot declare a body-located member
@@ -528,8 +554,10 @@ is `JC2008`.
 ### §7.2 The pipeline, in order
 
 1. **The request object.** `method`/`url` strings, `headers` an object,
-   `body` a string, `Uint8Array` or `null` (an absent body is `null`) — a
-   malformed object is `JC1004`, **rejected**, never a response.
+   `body` a string, `Uint8Array`, a pull source (`AsyncIterable<
+   Uint8Array>`, or a Web `ReadableStream`, normalized to one) or `null`
+   (an absent body is `null`) — a malformed object is `JC1004`,
+   **rejected**, never a response.
 2. **Route.** `url` is split at the first `?`; the path goes to
    `contract.match(method, path)`; under `HEAD` with `head` on, `HEAD`
    is tried, then `GET`. No match: an undecodable path (a malformed
@@ -538,10 +566,21 @@ is `JC2008`.
    (with `HEAD` added beside `GET` when `head` is on) is `JC2002` with
    `Allow`; else `JC2001`. A matched operation without a handler (a
    `partial` server) is `JC2013`.
+   Then **identify** (§7.7): the host lifecycle's first hook runs with
+   the operation, the trace, the signal and the raw transport facts —
+   before any byte of the body is read — and answers the identity
+   lease (its `host` is what `scope` sees) or a declared failure; a
+   hook fault is `JC2008`. Every later refusal in this list releases the
+   identity before it is exposed.
 3. **The body limit.** A `content-length` above `policy.limits.maxBodyBytes`
    is `JC2003` **before** any read (the adapters honor this too, §9); a
-   body whose byte length exceeds the limit is `JC2003` after. Applies to
-   every matched operation, opaque and body-less included.
+   text or byte body whose length exceeds the limit is `JC2003` after; a
+   pull source is measured as it is pulled — a JSON operation drains it
+   under the limit and answers `JC2003` at the first byte past it (the
+   source cancelled once, the crossing chunk never retained), an opaque
+   handler's source throws `BodyLimitError` there (§7.1). Applies to
+   every matched operation, opaque and body-less included; a body-less
+   operation releases a source without pulling it.
 4. **Opaque** → the transport input validated as in step 8 when no
    member is body-located (`JC2006`), then the raw handler through the
    same boundary as step 11; done.
@@ -552,9 +591,10 @@ is `JC2008`.
    accepted for `application/json`); else `JC2004`. A body-less
    operation with a body **ignores** the body. An empty body needs no
    media.
-6. **Parse.** Bytes are decoded as strict UTF-8 first (invalid → `JC2005`;
-   a leading BOM is stripped by the decoder); then `JSON.parse` (a failure
-   is `JC2005`).
+6. **Parse.** A pull source is drained whole first (a source that fails
+   or is aborted before EOF never arrived whole: `JC2005`); bytes are
+   decoded as strict UTF-8 (invalid → `JC2005`; a leading BOM is
+   stripped by the decoder); then `JSON.parse` (a failure is `JC2005`).
 7. **Assemble** the input object through a prototype-safe setter only, in
    this order: path members (raw decoded strings), query members
    (`URLSearchParams` semantics — `+` is a space; a member listed in
@@ -579,7 +619,13 @@ is `JC2008`.
    (its `policy.idempotency` is `none` by construction).
 9. **Idempotency** when `policy.idempotency !== "none"` (§8): a missing
    `Idempotency-Key` is `JC2007` under `required` and runs plainly under
-   `optional`; otherwise the input is hashed and the ledger claimed.
+   `optional`; otherwise the input is hashed and the ledger claimed. A
+   `replay`, `mismatch` or `in-progress` answer returns here — the host
+   lifecycle's `acquire` is never called for it.
+   Then **acquire** (§7.7): the second hook runs with the validated
+   input and the identity context, and calls `enter` with the lease the
+   handler runs under; the handler's context is the identity context
+   with the acquired `host`, frozen. Steps 10–14 run inside `enter`.
 10. **Preconditions, opt-in** (§7.5): when the operation has a
     `preconditions` resolver, the CURRENT tag is resolved BEFORE the
     handler — a command consults it only under a conditional header, a
@@ -621,6 +667,19 @@ is `JC2008`.
     charset=utf-8` (when a body), `x-jaren-trace`, `etag` when armed;
     a `204` carries no body; a HEAD carries the `content-length` of the
     body it dropped and no body. Then the ledger claim is settled (§8).
+    A raw handler's body passes through as it is: text, bytes, or a pull
+    source the adapter streams (no `content-length`; HEAD cancels it).
+    Under a lease that **requires settlement** (§7.7) the claim is
+    recorded through the lease's ledger inside `enter`, before `enter`
+    resolves, and the root ledger stands down; a host fault or a
+    pre-handler refusal makes `enter` reject — a host transaction
+    around it rolls back — and the root ledger releases the key
+    retryable outside it.
+15. **Release.** The acquired lease, then the identity, each once: before
+    the response is exposed (a release that fails there is `JC2008`,
+    its cause observed), or — for a pull-source body and an SSE stream
+    — when the body settles or the stream is done (a failure then is
+    observed only).
 
 Every step's failure path returns a response. `dispatch` never rejects
 for request content; a defect of the binding itself is caught last and
@@ -709,6 +768,7 @@ wire response:
 | `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect`, `createContractSubscription` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16) |
 | `JC1009` | the stream wire's SSE encoder was handed text the frame cannot carry: a bare carriage return inside `data`, a line terminator inside `event` or `id` (§18) |
 | `JC1010` | `client.subscribe` was asked for an operation that is not a subscribe operation (§19) |
+| `JC1011` | a ledger `commit`/`fail` named a ref that settles no started record — expired, reclaimed under a newer generation, or settled already (§8); refused by the ledger, reported to `onError` by the binding |
 
 ### §7.4 Headers
 
@@ -796,6 +856,117 @@ ledger and a client together: `servePort` and `openLocalClient` read its
 stamps and `random` for retry jitter, and `createMemoryLedger` reads
 `now` for claim stamps.
 
+### §7.7 The host lifecycle: identify, acquire, release, settle
+
+A host owns resources a handler needs — a principal, a tenant's store, a
+transaction — and the binding owns the moments they may be taken and
+must be given back. `serveHttp`, `servePort` and `openLocalClient` take
+the same two hooks, validated at construction (`JC1001` otherwise) and
+defaulted exactly:
+
+```
+identify(meta)                    → { host, release? } | declared failure | Promise<…>
+acquire(input, identity, enter)   → enter({ host, release?, settlement? }) | declared failure | Promise<…>
+settlement                        := { ledger, required: true }
+
+default identify → { host: null }
+default acquire  → enter({ host: identity.host })
+```
+
+`meta` is `{ op, trace, signal, carrier, method, path, headers, fail }`
+— the matched operation, the trace, the request signal, the carrier
+name, the request line and the raw request headers on HTTP (`null` on
+port and local), and the declared-failure factory. It carries **no
+parsed input and no authentication vocabulary**: what an identity is
+made of is the host's. `identity` is the frozen identity context (the
+request context with the identity's `host`); `scope(ctx)` sees that
+context. A lease is an object with an own `host` — the value the
+handler sees as `ctx.host` — and an optional `release` function; the
+acquired lease may add `settlement`. A host that names only `identify`
+sees its host in `scope` and in the handler; one that names `acquire`
+owns the handler's host.
+
+**Order.** (1) the request shape, the route and the trace; (2)
+`identify`; (3) media, parse, assembly and validation; (4) the
+idempotency key, scope, hash and claim of an HTTP JSON command; (5) a
+replay, mismatch or in-progress answer returns here, `acquire` never
+called; (6) `acquire(validatedInput, identity, enter)`; (7) inside
+`enter`: the frozen handler context, the precondition, the handler, the
+output validation and the serialization; (8) a required settlement,
+then `enter` resolves and the host's continuation around it settles;
+(9) the response is exposed, and the releases run at the lifetime
+boundary. Opaque, subscribe, port and local paths skip the ledger steps
+that do not apply and keep the order otherwise.
+
+**Faults.** A hook that throws or rejects, answers something that is
+not a lease (no own `host`, a `release` that is not a function, a
+`settlement` without a ledger that commits and fails), never calls
+`enter`, calls it twice, or resolves before `enter` settled is the
+host's fault: observed through `onError` and answered as the binding's
+host fault — `JC2008` on HTTP, `JC2070` on port and local. A declared
+failure is recognized by the `ContractFailure` brand only (`meta.fail`,
+or the package's `ContractFailure`), never by shape, and is validated
+against the operation exactly as a handler's `ctx.fail` is. A
+shape-compatible object is a malformed lease.
+
+**Release.** The acquired release runs, then the identity's, each at
+most once, on every exit that reached it: an ordinary response releases
+after the whole pipeline (the required settlement included) and before
+the response is exposed; a pull-source body of an opaque operation
+carries the releases and runs them once at EOF, on a throw, on the
+consumer's cancel, on HEAD's discard and on a disconnect; an SSE stream
+and a port subscription release after the runner's stop/close/done
+sequence. The identity releases on every early refusal too — malformed
+JSON, unsupported media, the body limit, a malformed query or header,
+invalid input, replay, mismatch, in-progress — and the acquired release
+never runs when `acquire` did not enter. A release that fails before
+the response is exposed is observed and answered as the host fault; one
+that fails after exposure is observed only. A release failure after a
+committed settlement therefore answers `JC2008` for work that was done:
+under an idempotency key the retry replays the committed response.
+
+**Required settlement.** An `acquire` that hands `enter` a lease with
+`settlement: { ledger, required: true }` — the ledger being one over
+the host's own transaction, `createDbLedger(tx)` from
+`@jarenjs/linq/db` (§8) — has the claim of a newly claimed JSON command
+recorded through that ledger inside `enter`: a success commits, a
+declared failure and a post-handler `JC2014` record the same failed
+receipt and retryability `settleClaim` would, and only then does
+`enter` resolve, so a host transaction opened around it commits the
+domain write and the receipt together or not at all. A pre-handler
+refusal, a handler throw, an invalid output, a fault of the binding's
+own continuation or a settlement that throws makes `enter` reject with
+a private carrier of the intended wire fault: the host transaction rolls
+back, the dispatcher releases the root claim retryable outside it, and
+the fault is the answer. The lease's ledger never settles a replay or a
+claim it did not enter for; a settlement on a non-idempotent operation,
+on port or on local is accepted and unused. Without a required
+settlement the root ledger settles after `enter`, best-effort, as it
+always did.
+
+```js
+import { open, createDbLedger } from '@jarenjs/linq/db';
+
+const db = await open(model, { driver: nodeDriver(), path: 'app.db' });
+const server = serveHttp(contract, handlers, {
+  ledger: createDbLedger(db),                                   // the root claim: immediate, one writer
+  identify: (meta) => ({ host: { tenant: meta.headers['x-tenant'] ?? null } }),
+  acquire: (input, identity, enter) => db.transaction(          // one transaction around the handler
+    (tx) => enter({ host: { db: tx, tenant: identity.host.tenant }, settlement: { ledger: createDbLedger(tx), required: true } }),
+    { mode: 'immediate' }),
+});
+```
+
+**What this is, exactly.** The claim is taken before the transaction
+and recovered outside it: a rolled-back `enter` leaves the key
+retryable, a crashed host leaves it `started` until it expires, and a
+retry under the same key finds the recorded receipt or a fresh claim.
+Atomicity is the store's: a ledger and a domain write on ONE store
+commit together; a ledger on one store and a write on another are two
+commits, and nothing here makes an external effect — a mail, a payment
+— exactly-once. The receipt says the command's response was recorded,
+not that the world outside the store agrees.
+
 ## §8 Idempotency and the ledger
 
 An operation with `policy.idempotency` of `optional` or `required` runs
@@ -814,10 +985,21 @@ is the same request. The binding then calls the ledger:
 ```jsonc
 // the Ledger interface — every method may return its value or a promise of it
 { "claim":  "({ op, scope, key, hash, now }) → { state: 'new', ref } | { state: 'replay', response } | { state: 'in-progress' } | { state: 'mismatch' }",
-  "commit": "(ref, response) → void",
-  "fail":   "(ref, retryable, response?) → void",
-  "lookup": "({ op, scope, key }) → record | null" }
+  "commit": "(ref, response, now?) → void",
+  "fail":   "(ref, retryable, response?, now?) → void",
+  "lookup": "({ op, scope, key, now? }) → record | null" }
 ```
+
+The `ref` a `new` claim hands back is `{ id, generation }` — the
+record's id and the **generation** the claim minted for it — and is
+portable: it names the record across processes rather than holding it.
+A settlement is fenced by both: `commit`/`fail` settle the record whose
+`id` AND `generation` the ref names while it is still `started`, and a
+ref whose record expired, was reclaimed under a newer generation, or was
+settled already is refused with `JC1011` (thrown or rejected) — the
+binding reports it to `onError` and the response still goes out, so a
+stale settlement is visible instead of silently landing on a later
+claim's record.
 
 Semantics the binding relies on: same key + same hash → `replay` — the
 stored `{ status, headers, body }` **verbatim** with a fresh
@@ -850,10 +1032,12 @@ single-process, expiring on `claim` and `lookup`, with `sweep(now?)` for a
 host timer and `size`. Built without `now` or `runtime` it keeps time by
 the instants the binding passes it (a host-side `lookup`/`sweep` that
 passes none uses the latest one); built with either, that clock judges
-every record. The record it keeps is:
+every record; the runtime record's `uuid` mints each generation, and
+`lookup` answers a copy. The record it keeps is:
 
 ```jsonc
-{ "id": "product.save|tenant-a|k-1",      // "<op>|<scope>|<key>"
+{ "id": "1:[\"product.save\",\"tenant-a\",\"k-1\"]",   // ledgerId(op, scope, key): version 1, the JSON tuple
+  "generation": "0f3c…",                    // minted per started record; what a ref names
   "op": "product.save", "scope": "tenant-a", "key": "k-1",
   "hash": "9f2a…",                          // 64 lowercase hex characters
   "status": "committed",                    // started | committed | failed
@@ -862,12 +1046,26 @@ every record. The record it keeps is:
   "createdAt": 1755000000000, "updatedAt": 1755000000000, "expiresAt": 1755086400000 }
 ```
 
+`ledgerId(op, scope, key)` (`@jarenjs/contract/ledger`) spells the id:
+the version `1`, a colon, the JSON array of the tuple — injective, so a
+`|`, a control character or any Unicode inside a member cannot collide
+with another tuple. A record written under the earlier
+`"<op>|<scope>|<key>"` spelling is matched by no claim again: it
+expires by its own `expiresAt` (a `sweep` drops it), and a host that
+must keep such records reachable rewrites their `id` once
+(`ledgerId(record.op, record.scope, record.key)`) before the new
+version serves.
+
 Two documents ship the same shape as **data**, for a host that wants
 durability (this package imports neither `@jarenjs/db` nor
 `@jarenjs/flow`): `idempotencyLedgerModel` is a `$model` 0.1 document —
-collection `ledger`, key `/id`, that record as its schema (closed),
-indexes on `expiresAt` and `status` — a host opens it with `openStore`
-and implements the interface over the collection; `commandLifecycleFsm`
+collection `ledger`, key `/id`, that record as its schema (closed, the
+`generation` required), indexes on `expiresAt` and `status` — a host
+opens it with `openStore` and implements the interface over the
+collection, or takes `createDbLedger` from `@jarenjs/linq/db`, which is
+that implementation over the typed client (root claims under
+`mode: 'immediate'`, a transaction client's settlements inside the
+host's own transaction; DB-CLIENT.md §2.6); `commandLifecycleFsm`
 is a `$fsm` 0.1 document — `idle → started` on `claim`, `started →
 committed` on `commit`, `started → failed` on `fail`, `failed → started`
 on `claim` guarded by `$.context.retryable` — which the memory ledger
@@ -878,82 +1076,88 @@ walks exactly.
 A host that retries commands needs a ledger that survives a restart, and
 it does NOT need `@jarenjs/db` for that: `node:sqlite` is built into
 Node ≥ 24 — the suite's floor — so the ~60 lines below are as
-dependency-free as the package. Two design points carry the semantics:
-`BEGIN IMMEDIATE` makes each `claim` one writer (two processes cannot
-both claim a key), and the ref is the `AUTOINCREMENT` sequence of one
-specific insert — never reused, where a bare SQLite rowid would be — so
-a stale ref can never settle over a record a later claim re-created
-(the memory ledger's object-identity guard, spelled in SQL). Everything
-else mirrors `createMemoryLedger` exactly: expiry on `claim` and
-`lookup`, `sweep()` for a host timer, mismatch before status, a
-retryable failure handing the key back, a non-retryable one replaying
-its stored response. Remember the boundary (§8): this ledger
+dependency-free as the package (a host on `@jarenjs/db` takes
+`createDbLedger` from `@jarenjs/linq/db` instead). Two design points
+carry the semantics: `BEGIN IMMEDIATE` makes each `claim` one writer
+(two processes cannot both claim a key), and a settlement names the
+record's id AND the generation the claim minted — persisted with the
+record — so a stale ref matches no row and is refused `JC1011` rather
+than settling over a record a later claim re-created. Everything else
+mirrors `createMemoryLedger` exactly: the same `ledgerId`, expiry on
+`claim` and `lookup`, `sweep()` for a host timer, mismatch before
+status, a retryable failure handing the key back, a non-retryable one
+replaying its stored response; the shared ledger contract in the test
+suite runs all three. Remember the boundary (§8): this ledger
 deduplicates DELIVERY — the domain's own durable records stay
 authoritative for business state.
 
 ```js
 import { DatabaseSync } from 'node:sqlite';
+import { ledgerId } from '@jarenjs/contract/ledger';
 
 /** A durable Ledger over one SQLite file — a host's example, not an export. */
 export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date.now } = {}) {
   const db = new DatabaseSync(path);
   db.exec(`
     CREATE TABLE IF NOT EXISTS ledger (
-      seq INTEGER PRIMARY KEY AUTOINCREMENT,
-      id TEXT NOT NULL UNIQUE, op TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL,
+      id TEXT PRIMARY KEY, generation TEXT NOT NULL, op TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL,
       hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('started', 'committed', 'failed')),
       response TEXT, retryable INTEGER,
       createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS ledger_by_expires ON ledger (expiresAt);
     CREATE INDEX IF NOT EXISTS ledger_by_status ON ledger (status);`);
   const one = db.prepare('SELECT * FROM ledger WHERE id = ?');
-  const put = db.prepare("INSERT INTO ledger (id, op, scope, key, hash, status, createdAt, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, 'started', ?, ?, ?)");
+  const put = db.prepare("INSERT INTO ledger (id, generation, op, scope, key, hash, status, createdAt, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?, ?)");
   const drop = db.prepare('DELETE FROM ledger WHERE id = ?');
-  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE seq = ? AND status = 'started'");
+  // the fence: a settlement names the id AND the generation of the claim
+  // that started the record, so a ref of an earlier claim matches no row
+  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE id = ? AND generation = ? AND status = 'started'");
   const reap = db.prepare('DELETE FROM ledger WHERE expiresAt <= ?');
   const stored = (row) => (row.response === null ? null : JSON.parse(row.response));
+  const at = (now) => (typeof now === 'number' ? now : clock());
+  const settled = (ref, changes) => {
+    if (changes !== 1) throw Object.assign(new Error(`ledger: ${ref?.id ?? 'a foreign ref'} settles no started record`), { code: 'JC1011' });
+  };
   return {
     claim({ op, scope, key, hash, now }) {
-      const at = typeof now === 'number' ? now : clock();
-      const id = `${op}|${scope}|${key}`;
+      const id = ledgerId(op, scope, key);
       db.exec('BEGIN IMMEDIATE'); // one writer: two processes cannot both claim the key
       try {
-        const row = one.get(id);
+        const row = (one.get(id));
         if (row !== undefined) {
-          if (row.expiresAt <= at) drop.run(id);
+          if (row.expiresAt <= at(now)) drop.run(id);
           else if (row.hash !== hash) { db.exec('COMMIT'); return { state: 'mismatch' }; }
           else if (row.status === 'started') { db.exec('COMMIT'); return { state: 'in-progress' }; }
           else if (row.status === 'committed') { db.exec('COMMIT'); return { state: 'replay', response: stored(row) }; }
           else if (row.retryable !== 1 && row.response !== null) { db.exec('COMMIT'); return { state: 'replay', response: stored(row) }; }
           else drop.run(id); // a retryable failure: the key runs again
         }
-        const ref = { seq: put.run(id, op, scope, key, hash, at, at, at + ttlMs).lastInsertRowid };
+        const generation = crypto.randomUUID();
+        put.run(id, generation, op, scope, key, hash, at(now), at(now), at(now) + ttlMs);
         db.exec('COMMIT');
-        return { state: 'new', ref };
+        return { state: 'new', ref: { id, generation } };
       }
       catch (err) {
         db.exec('ROLLBACK');
         throw err;
       }
     },
-    commit(ref, response) {
-      settle.run('committed', JSON.stringify(response), null, clock(), ref.seq);
+    commit(ref, response, now) {
+      settled(ref, settle.run('committed', JSON.stringify(response), null, at(now), (ref)?.id ?? '', (ref)?.generation ?? '').changes);
     },
-    fail(ref, retryable, response) {
-      settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, clock(), ref.seq);
+    fail(ref, retryable, response, now) {
+      settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, at(now), (ref)?.id ?? '', (ref)?.generation ?? '').changes);
     },
-    lookup({ op, scope, key }) {
-      const row = one.get(`${op}|${scope}|${key}`);
+    lookup({ op, scope, key, now }) {
+      const row = (one.get(ledgerId(op, scope, key)));
       if (row === undefined) return null;
-      if (row.expiresAt <= clock()) {
+      if (row.expiresAt <= at(now)) {
         drop.run(row.id);
         return null;
       }
-      const record = { ...row, response: stored(row), retryable: row.retryable === null ? null : row.retryable === 1 };
-      delete record.seq; // the record shape is exactly LedgerRecord (§8)
-      return record;
+      return { ...row, response: stored(row), retryable: row.retryable === null ? null : row.retryable === 1 }; // exactly LedgerRecord (§8)
     },
-    sweep: () => Number(reap.run(clock()).changes),
+    sweep: (now) => Number(reap.run(at(now)).changes),
     close: () => db.close(),
   };
 }
@@ -979,26 +1183,53 @@ the platform:
 - **`toFetchHandler(dispatcher)`** (`@jarenjs/contract/fetch`) →
   `(Request) => Promise<Response>` — Bun.serve, Deno, service workers,
   Cloudflare-style hosts, and Hono. It lowercases the headers into a
-  plain object, matches the operation first (cheap) to decide how the
-  body is read — `text()` for a JSON operation, `arrayBuffer()` for an
-  opaque one, and **not at all** for an unmatched request or a declared
-  `content-length` above the operation's limit (the dispatcher answers
-  the 413 from the header) — forwards `request.signal`, and builds the
-  `Response` from the dispatcher's status, headers and body.
+  plain object, matches the operation first (cheap) to decide whether
+  the body is handed over at all — the request's stream reaches the
+  dispatcher as a pull source for a matched body-carrying operation
+  (a JSON operation drains it under its limit there, an opaque handler
+  pulls it chunk by chunk), and **not at all** for an unmatched request
+  or a declared `content-length` above the operation's limit (the
+  dispatcher answers the 413 from the header) — forwards
+  `request.signal`, and builds the `Response` from the dispatcher's
+  status, headers and body; a streamed body becomes a `ReadableStream`
+  that pulls one chunk per read and cancels the source once.
 - **`toNodeHandler(dispatcher)`** (`@jarenjs/contract/node`) → `(req,
-  res)` — `http.createServer`'s listener and Express middleware. It
-  collects the body chunk by chunk up to the operation's limit; on
-  overflow it stops reading, answers the 413 with `connection: close`,
-  then lingers — draining and discarding the rest of the upload, bounded
-  by a grace timer (`toNodeHandler(dispatcher, { lingerMs })`, default
-  1000 ms) — before destroying the request, so the close is a FIN the
-  client can read the 413 through rather than an RST that discards it
-  (winsock drops buffered receive data on RST); a declared
-  `content-length` above the limit is never read; an unmatched request's
-  body is never read. Bytes reach the dispatcher as received (its strict
-  UTF-8 decode decides `JC2005`); repeated header lines arrive as arrays
-  (`headersDistinct`); `ctx.signal` aborts when the client goes away
-  before the response finished; `content-length` is set on every body.
+  res)` — `http.createServer`'s listener and Express middleware. The
+  request reaches the dispatcher as a pull source over its own chunks —
+  nothing is collected in the adapter, and an unpulled upload never
+  fills memory. When an upload was pulled and left unread (a limit
+  crossing, a response answered before EOF) the answer carries
+  `connection: close`, then the socket lingers — draining and discarding
+  the rest of the upload, bounded by a grace timer
+  (`toNodeHandler(dispatcher, { lingerMs })`, default 1000 ms) — before
+  the request is destroyed, so the close is a FIN the client can read
+  the 413 through rather than an RST that discards it (winsock drops
+  buffered receive data on RST); a declared `content-length` above the
+  limit is never read; an unmatched request's body is never read. Bytes
+  reach the dispatcher as received (its strict UTF-8 decode decides
+  `JC2005`); repeated header lines arrive as arrays (`headersDistinct`);
+  `ctx.signal` aborts when the client goes away before the response
+  finished; `content-length` is set on every text or byte body, and a
+  streamed body is written chunk by chunk behind the socket's `drain`,
+  its source cancelled once when the peer goes away.
+
+**A streaming response is written behind backpressure.** The dispatcher
+hands the adapter's sink to `createAwaitedSink` (`@jarenjs/core/async`),
+so every SSE event is written only after the previous write settled,
+and the adapter's `write` says when that is: the node adapter answers
+nothing when `res.write()` took the chunk and a promise resolved on the
+next `drain` when it answered `false` (rejected when the response
+closes or errors first, its listeners removed either way); the fetch
+adapter's `ReadableStream` produces on demand — a write settles when
+the consumer's `pull` takes the chunk, never from an eager loop in
+`start()` — and `cancel()` rejects the write waiting for demand and
+stops the subscription exactly once. Behind either, the carrier-neutral
+runner calls its hooks one at a time (§17.1), so a slow reader parks
+the source's emissions instead of growing the process's buffers. An
+adapter of your own supplies `{ write, end, abort? }` where `write` may
+answer a promise; `response.stream(sink)` answers `{ stop, done }` —
+`stop()` ends the stream when the consumer cancels, `done` settles once
+the subscription is released and the sink has ended.
 
 Fastify, Hono and Express are recipes in the README, each ≤15 lines and
 executed by a test that imports the framework from the benchmark
@@ -1011,14 +1242,14 @@ streaming and peer abort behave identically through all three.
 
 `openHttpClient(contract, options)` (`@jarenjs/contract/client`) is the
 client half of the http driver pair: `open(contract, options) → Client`
-with `Client = { invoke, url, negotiate, pending, capabilities, contract,
-describe(), close() }`. It is **binding-agnostic in shape** — the app
+with `Client = { invoke, bytes, url, negotiate, pending, capabilities,
+contract, describe(), close() }`. It is **binding-agnostic in shape** — the app
 binding (§11) and later the AI tools read only `invoke`, `contract` and
 `capabilities` — and **total in behavior**: `invoke` resolves an
 **outcome** for everything a server or a network can do and rejects
 only for the host's own mistake (`JC1005`: an operation the contract
 does not declare, or an opaque one — `invoke` carries JSON; an opaque
-operation is reached through `url`).
+operation is reached through `bytes` (§10.6) and `url`).
 
 ```jsonc
 // options — every one has a default
@@ -1234,6 +1465,38 @@ one of:
 itself (`null` when unreachable or not a contract). **Nothing else is
 inferred**: an unrelated service on the port is exactly `not-a-contract`;
 two unversioned contracts are `same-version`.
+
+### §10.6 `bytes(op, input, ctx)` — the opaque operations
+
+`bytes(op, input, ctx) → Promise<Outcome>` is `invoke`'s twin for an
+**opaque** operation (§4.5): the same pre-send validation of the
+transport members (`JC2050`), the same URL and header assembly, one
+request through the injected `fetch`, and a D6 outcome — but its
+success owns a **live stream**, never a JSON value. `op` must be opaque
+(`JC1005` for a JSON operation: use `invoke`); `ctx` is `{ signal?,
+attempt?, headers?, ifNoneMatch?, ifMatch?, body? }` — no idempotency
+key, an opaque operation carries none — where `body` is the request
+body to send: text, bytes, a Web `ReadableStream`, an async iterable of
+`Uint8Array` chunks (wrapped in a stream that pulls one chunk per
+demand and cancels the iterator once), or none (`JC1008` for anything
+else). A streamed upload goes out with `duplex: "half"`; a body without
+a caller's `content-type` is sent as the operation's `media`.
+
+The outcome: a `2xx` is `{ ok: true, value: { status, headers, media,
+body }, meta }` — `headers` the response headers under lowercase names,
+`media` its `content-type` (`null` when none), `body` the response's
+`ReadableStream<Uint8Array>` (`null` when the platform has none) which
+the **caller** reads; the client never calls `text()` or
+`arrayBuffer()` on a success. A `304` is `ok: true` with `body: null`,
+`media: null` and `meta.notModified`. Every other status is classified
+exactly as §10.1 classifies an `invoke` answer — a declared or taxonomy
+code is a `failure`, anything else `contract` `JC2055` — from the error
+body's text. A transport rejection before the headers is `network`
+(`JC2051`), an abort `cancelled` (`JC2052`). **`bytes` never retries**,
+whatever `policy.retry` declares: an upload stream cannot be replayed
+and a body already exposed cannot be re-read — a failure after the
+headers reaches the caller as the rejection of its own read of `body`.
+`meta` carries the trace, the attempt and the `etag`.
 
 ## §11 The app binding
 
@@ -1574,13 +1837,28 @@ name), the reachable `$defs` once, then — fixed text in a JTLT
 stylesheet (`src/project/typescript.jtlt.json`) — `Operations` (the
 typed operation map: kind, input, output, the declared error codes as a
 literal union), `UrlOperations` (opaque operations included, for
-`Client.url`), and `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`,
-`Client`, `Failure`, `HandlerContext`, `Handlers`. `Meta` and
+`Client.url`), `ByteOperations` (the opaque operations only, for
+`HttpClient.bytes`), and `Meta`, `WireError`, `Outcome<T>`,
+`InvokeContext`, `Client`, `ByteContext`, `ByteResponse`, `HttpClient`
+(`Client` plus `bytes` over `ByteOperations`, §10.6 — the
+binding-neutral `Client` never requires a byte method), `Failure`,
+`CarrierName`, `HandlerContextBase<Host>`, `HttpHandlerContext<Host>`,
+`ChannelHandlerContext<Host, Carrier>`, `HandlerContext<Host = null,
+Carrier = 'http'>` and `Handlers<Host = null, Carrier = 'http'>` — the
+handler context selected by carrier (§7.7): omitted generics are the
+HTTP context with `host: null`, exactly the shape it always was plus
+`carrier` and `host`; a port or local context spells the request-line
+members, the body, the key, `etag` and `status` as `null` rather than
+omitting them, so an HTTP-only member is a compile error there; a
+carrier union is a discriminated union to narrow on `ctx.carrier`. `Meta` and
 `WireError` spell **exactly** the fixed D6 shapes (§10.1) —
 `OUTCOME_META_MEMBERS`/`OUTCOME_ERROR_MEMBERS` are the runtime twins and
 a test holds the text to them; `details` is `unknown` and `status`
 `number | null`, never optional members. An input-less operation's
-`input` is `null`; an opaque operation appears only in `UrlOperations`.
+`input` is `null`; an opaque operation appears in `UrlOperations` and
+`ByteOperations`, never in `Operations`; a contract without one still
+declares an empty `ByteOperations`, so `bytes` is uncallable rather
+than absent.
 
 One convention rides on top of emit's reading, and it is the suite's:
 a string with `format: "date-time"` or `format: "date"` is declared as
@@ -1792,14 +2070,19 @@ no `negotiate`, no `pending`.
    refusal is the pre-send `JC2050` outcome (kind `contract`, details
    by `policy.errors.details`) and nothing ran — the same refusal every
    client binding shares;
-3. the handler runs through the neutral pipeline with the frozen
-   context `{ op, trace, signal, params: null, headers: {}, fail,
-   idempotency: null }` — `trace` from the `trace` option (default
-   `crypto.randomUUID`), `signal` the caller's composed with the
-   client's closer. There is no `ctx.etag`, `ctx.status` or `ctx.body`:
-   statuses, entity tags and bytes do not exist here, and a handler
-   that reaches for them fails honestly (`JC2070`) instead of
-   pretending;
+3. the host lifecycle's `identify` runs (§7.7, `carrier: "local"`,
+   the request-line members `null`), then the validation, then
+   `acquire`, and the handler runs inside `enter` through the neutral
+   pipeline with the frozen context `{ op, trace, carrier: "local",
+   host, signal, method: null, path: null, params: null, headers: {},
+   body: null, fail, idempotency: null, etag: null, status: null }` —
+   `trace` from the `trace` option (default `crypto.randomUUID`),
+   `signal` the caller's composed with the client's closer. `etag`,
+   `status` and `body` are `null`, never callable: statuses, entity tags
+   and bytes do not exist here, and a handler that reaches for them
+   fails honestly (`JC2070`) instead of pretending; a hook fault is
+   `JC2070` too, a hook's declared failure is a `failure` outcome, and
+   the releases run before the outcome is exposed;
 4. the outcome (§10.1 shapes, assembled by the same assembler):
 
 | settlement | outcome |
@@ -1843,6 +2126,17 @@ The local codes (the table shared with §16; `PORT_LOCAL_ERRORS` in
 | `JC2070` | contract | `contract/local-handler-failed` | no | the serving host's handler failed in any class — a throw, an undeclared code, a broken output or error-details schema; `onError` sees the cause |
 
 ## §16 The port binding
+
+A request and a subscription on this carrier run the host lifecycle
+of §7.7 with `carrier: "port"`: `identify` after the operation
+resolved and before the input is validated, `acquire` after it, the
+handler inside `enter` with the frozen context `{ op, trace, carrier:
+"port", host, signal, method: null, path: null, params: null,
+headers: {}, body: null, fail, idempotency: null, etag: null, status:
+null }`. A hook fault is `JC2070`, a hook's declared failure the
+declared error frame; the releases run after the response frame was
+posted, and for a subscription after the runner's stop/close/done
+sequence.
 
 `servePort(contract, handlers, { channel, trace?, validateOutput?,
 catalog?, onError?, runtime? })` and `openPortClient(contract, { channel,
@@ -1974,10 +2268,25 @@ Subscription = {
   result | snapshot(),        // the current snapshot document; snapshot() preferred when both exist
   subscribe(cb) → stop,       // cb receives LIVE-FORMAT emissions { patch, seq } or { error }
   close(),                    // release the registration
-  replay?(seq),               // optional: the emissions after seq, or null/undefined when it cannot
+  replay?(after, { limit, maxBytes, signal }),   // optional: ONE page of the emissions after `after`
+                              //   → { items, next?, earliestAvailable, highWatermark, hasMore, resetRequired }
   mode?,                      // ignored by the binding
 }
 ```
+
+`replay` answers a **page**, never an array — the exact shape
+`@jarenjs/db`'s `changes.page()` answers (LIVE-FORMAT §5), so a store's
+bounded change reader is a replay source as returned: `items` are
+`{ patch, seq }` emissions in ascending seq above `after`, at most
+`limit` of them and at most `maxBytes` serialized patch bytes; `next`
+is the seq to continue from; `earliestAvailable`/`highWatermark` are
+the log's watermarks; `hasMore` says records remain; `resetRequired:
+true` is the total refusal — `items` empty, `next` absent — for a
+cursor that fell behind the log's retention. Every member is read
+defensively: a page that breaks the shape or its bounds is a host fault
+(`JC2008` / `JC2070`) that ends the stream, and a `replay` that answers
+an array is that fault too (an array would materialize a history the
+bounds exist to keep out).
 
 — a `@jarenjs/db` `live()` object satisfies it **as returned** (`result`
 + `subscribe` + `close`; it has no `replay`), so a handler is one line:
@@ -1997,7 +2306,50 @@ the server broke the contract; the cause goes to `onError`, never the
 wire), forwards each emission verbatim (the binding never mutates a
 patch), and calls `stop()` then `close()` **exactly once** — on peer
 disconnect (`ctx.signal`), on an `unsubscribe`/stream cancel, on server
-close, and after an `error` emission ends the stream.
+close, and after an `error` emission ends the stream. Both may answer
+a promise: the binding awaits `stop()`, then `close()`, then releases
+the carrier, and reports completion only after all three settled. The
+carrier's writes are serialized — one event at a time, the next only
+after the previous write settled (`createAwaitedSink`,
+`@jarenjs/core/async`) — so an emission that arrives while the carrier
+is waiting on the socket is queued in order, never overlapped and never
+dropped; a carrier write that fails (the peer dropped the socket, the
+consumer cancelled the stream) releases the subscription silently. The
+queue is **bounded** (§18.1): what it holds is charged until each write
+settled, and the emission that would cross the bound ends the stream
+with `JC2096` instead of growing memory or dropping an event.
+
+An `{ error }` emission ends the stream, and the binding classifies it
+once, carrier-neutrally. When the error's `code` — read guardedly — is
+a string the operation **declares**, the stream ends with that declared
+failure: the `error` event carries the code, the operation's declared
+message rendered from the host catalog (never the error's own text),
+the error's `details` when they are JSON-safe, and `retryable` — the
+error's own boolean, else whether `policy.retry.on` names the code —
+and the client delivers a `failure` outcome under that code. Any other
+error — an undeclared code, a code that is not a string, a hostile
+accessor — is the host fault (`JC2008` / `JC2070`): the cause goes to
+`onError`, the wire carries the generic message, and the client reports
+`JC2093`. Declared codes are lowercase by grammar (`JC0011`), so a
+store's own coded error — `@jarenjs/db`'s `JD2060` when a live query
+crosses `live.maxMaintained` — is declared by **mapping** it in the
+handler, the cause riding along for the observer:
+
+```js
+// errors: { overflow: { status: 507 } } declared on the operation
+'data.live': async (input) => {
+  const live = await store.collection(input.collection).live(query);
+  return {
+    get result() { return live.result; },
+    subscribe: (cb) => live.subscribe((e) => cb(
+      'error' in e && e.error?.code === 'JD2060' ? { error: { code: 'overflow', cause: e.error } } : e)),
+    close: () => live.close(),
+  };
+},
+```
+
+Returned as is, the same error reaches the client as `JC2093` and the
+server's `onError` as the `DbRuntimeError` it is.
 
 ## §18 The stream wire
 
@@ -2014,11 +2366,15 @@ Response: `200`, `content-type: text/event-stream`, `cache-control:
 no-store`, `x-jaren-trace`. Events, in order:
 
 - `snapshot` — `id: <seq>` (the stream's starting seq; `0` for a source
-  that names none), data `{ "value": <snapshot>, "resumed": false }`.
+  that names none), data `{ "value": <snapshot>, "resumed": false,
+  "reset": false, "earliestAvailable": null, "highWatermark": null }`.
   The envelope exists because a resume verdict cannot ride *inside* the
   snapshot value without breaking a closed output schema; `resumed:
   false` states this snapshot is a fresh document (a refused resume —
   `JC2095` — looks exactly like this, which is how the client learns).
+  The shape is stable: `reset: true` marks the snapshot that re-seeds a
+  consumer whose cursor fell behind the server's retention (below), and
+  the two watermarks are the replay source's when it reported them.
 - `patch` — `id: <seq>`, data `{ "patch": [...], "seq": n }`: the
   LIVE-FORMAT emission verbatim.
 - heartbeat comment lines (`:`) every `policy.stream.heartbeatMs`.
@@ -2033,20 +2389,50 @@ at that emission's seq — the consumer swaps its document instead of
 patching it; nothing is dropped.
 
 **Resumption.** A request carrying `Last-Event-ID: <seq>` asks to
-resume. Under `resume: "replay"` the binding asks
-`subscription.replay?.(seq)`; when the handler answers an array of
-emissions, the stream starts with the `patch` events after that seq
-(no snapshot) and continues live. Otherwise — `resume: "snapshot"`, no
-`replay`, or a `replay` that answers `null` — the stream starts with a
-fresh `snapshot` whose data carries `resumed: false` (`JC2095`,
+resume. Under `resume: "replay"` with a `replay` on the subscription
+the binding **pages**: it subscribes live first, then calls
+`replay(seq, { limit, maxBytes, signal })` and delivers each page's
+items as `patch` events (no snapshot), continuing from `next` until the
+**first page's** `highWatermark` is reached or the log has no more —
+a watermark that keeps rising on later pages cannot make replay chase a
+busy writer forever — and then continues live, discarding the
+emissions that arrived meanwhile whose seq the pages already covered.
+A page with `resetRequired: true` ends the replay without a suffix:
+the binding reads a fresh snapshot and emits it with `resumed: false`,
+`reset: true`, `earliestAvailable`, and `highWatermark` — where the
+event id and the `highWatermark` are the higher of the page's watermark
+and the highest live emission already buffered, because the snapshot
+just read reflects those emissions (§17.1's contract), and replaying
+one of them would apply a change twice. The consumer resumes from that
+id. Otherwise — `resume: "snapshot"`, or no `replay` — the stream starts
+with a fresh `snapshot` whose data carries `resumed: false` (`JC2095`,
 informational, never an outcome).
 
-`toNodeHandler` writes SSE with `flushHeaders()` + `res.write` and ends
-on close; `toFetchHandler` answers a `ReadableStream` body; both abort
-`ctx.signal` when the peer goes away (`request.signal`, `req` close),
-which runs the exactly-once `stop()`/`close()`. A dispatcher's
-`close()` ends every live SSE stream with `end` (`server-shutdown`)
-before releasing it.
+**Bounds.** `serveHttp`/`servePort` take `streamLimits: { replay: {
+limit, maxBytes }, queue: { events, bytes } }` (defaults 256 / 1 MiB
+for both): a replay page asks for at most `replay.limit` emissions and
+`replay.maxBytes` serialized patch bytes; the undelivered queue — the
+events that arrived while a carrier write was pending or a page was
+loading, the SSE text or port frame as it will go on the wire — holds
+at most `queue.events` frames and `queue.bytes` bytes, each charged
+until its write settled. When the next event would cross either bound
+the stream ends with the terminal `error` event `JC2096` (`kind:
+network`, retryable — the consumer reads slower than the source
+emits), then the subscription is released and the carrier tears its
+sink down (the node adapter destroys the socket, the fetch bridge
+errors the stream) rather than wait for a consumer that stopped
+reading; nothing is dropped silently, oldest or newest.
+
+`toNodeHandler` writes SSE with `flushHeaders()` + `res.write`, waits
+for `drain` whenever `res.write()` answered `false` before the next
+event, and ends on close; `toFetchHandler` answers a `ReadableStream`
+body that produces on the consumer's `pull`; both abort `ctx.signal`
+when the peer goes away (`request.signal`, `req` close), which runs the
+exactly-once `stop()`/`close()`, and both tear the connection down
+after a `JC2096`. A heartbeat is never queued behind a
+heartbeat: while one waits on the sink, the interval skips. A
+dispatcher's `close()` ends every live SSE stream with `end`
+(`server-shutdown`) before releasing it (§9 has the adapter contract).
 
 ### §18.2 Port: push frames
 
@@ -2087,8 +2473,10 @@ other range:
 | `JC2093` | contract | `contract/stream-error` | no | the stream ended with a server `error` event whose code the operation does not declare — a **declared** code lands as a `failure` outcome under its own code instead |
 | `JC2094` | network | `contract/heartbeat-missed` | yes | no bytes for `2 × heartbeatMs` (client-side, SSE only) |
 | `JC2095` | — | — | — | a requested resume was refused; informational, carried as `resumed: false` in the fresh snapshot's event data, never an outcome |
+| `JC2096` | network | `contract/slow-consumer` | yes | the stream's bounded queue would overflow — the consumer reads slower than the source emits; sent as the terminal `error` event, then the carrier tears the connection down |
+| `JC2097` | network | `contract/reconnect-exhausted` | no | the HTTP client's reconnect budget is spent: every further attempt after a network loss ended in another loss (client-side); `details` is `{ attempts, lastCode }` — the further attempts made and the last loss's code |
 
-`JC2096–JC2109` are reserved for later stream codes. `JC1009` (an SSE
+`JC2098–JC2109` are reserved for later stream codes. `JC1009` (an SSE
 data string the frame cannot carry) and `JC1010` (`subscribe` of a
 non-subscribe operation) are the stream's host programming errors
 (§7.3's host table).
@@ -2096,32 +2484,63 @@ non-subscribe operation) are the stream's host programming errors
 ## §19 The client: `subscribe`
 
 `client.subscribe(op, input, { onSnapshot, onPatch, onError, onEnd,
-signal, lastSeq }) → { stop() }` — on the `http` and `port` clients
-alike (`capabilities.stream: true`); `serveLocal` keeps
+signal, lastSeq, reconnect }) → { stop(), lastSeq }` — on the `http`
+and `port` clients alike (`capabilities.stream: true`); `serveLocal` keeps
 `capabilities.stream: false` and needs no handler for a subscribe
 operation (`invoke` of one throws `JC1005` there). A non-subscribe
 operation is `JC1010`, thrown — the host named the wrong operation.
 
-- `onSnapshot(value, { seq, resumed })` — a fresh, validated snapshot;
-  the consumer replaces its document. `resumed` is `false` exactly as
-  §18.1 defines it.
+- `onSnapshot(value, { seq, resumed, reset, earliestAvailable,
+  highWatermark })` — a fresh, validated snapshot; the consumer
+  replaces its document. `resumed` is `false` exactly as §18.1 defines
+  it; `reset: true` marks the re-seed after a retention gap — its `seq`
+  is the cursor to resume from — and the watermarks are the server
+  log's when it reported them, `null` otherwise. The shape is the same
+  for every snapshot.
 - `onPatch({ patch, seq })` — the LIVE emission, **not applied**: the
   client forwards patches; the app binding (§11.4) and the consumer
   apply them (`@jarenjs/json/patch`). `seq` is strictly increasing or
   the stream ends with `JC2092`.
 - `onError(outcome)` — a D6 `ok: false` outcome (`failure` for a
-  declared error event; `network` for a transport failure or a missed
-  heartbeat; `contract` for `JC2090`/`JC2092`/`JC2093`, an invalid
-  snapshot value, or a pre-send input refusal `JC2050`). Its `error`
-  and `meta` carry every member (`status: null` where the wire has
-  none). After `onError` the stream is finished and cleaned up.
+  declared error event; `network` for a transport failure, a missed
+  heartbeat, the server's `JC2096` — the consumer fell behind the
+  stream's bounded queue — or `JC2097`, a spent reconnect budget;
+  `contract` for `JC2090`/`JC2092`/`JC2093`, an invalid snapshot value,
+  or a pre-send input refusal `JC2050`). Its `error` and `meta` carry
+  every member (`status: null` where the wire has none). After
+  `onError` the stream is finished and cleaned up.
 - `onEnd({ reason })` — the server's `end` event; a stream that ends
   without one is reported as `reason: "closed"`.
 
 Every callback is optional and total for the client: a callback that
 throws does not break the stream machinery. `signal` aborts the
 subscription silently (the caller asked); `stop()` does the same and,
-on `port`, posts the `unsubscribe` frame. `lastSeq` is what a
-reconnect passes (§18's resumption). **Reconnection is not automatic**:
-the host decides — a `subscribe` that ends with a `network` outcome is
-re-entered by calling `subscribe` again with the last delivered seq.
+on `port`, posts the `unsubscribe` frame. The subscription's read-only
+`lastSeq` is the last delivered seq — `null` before the first event,
+the passed `lastSeq` until an event moves it — and the `lastSeq` option
+is what a re-entered `subscribe` passes (§18's resumption).
+
+**Reconnection is opt-in and HTTP-only.** `reconnect: { max }` — a
+non-negative integer of *further* attempts, `0` when absent — makes the
+HTTP client re-establish the stream after a **network loss**: a
+rejected request (`JC2051`), a missed heartbeat (`JC2094`), the
+server's `JC2096`, or a body that ends before an `end` event. Each
+further attempt waits the retry backoff of §10.4 (`min(1000 · 2^n,
+8000)` ms plus up to 250 ms of the runtime's jitter, `n` counting from
+0) and sends the last delivered seq as `Last-Event-ID` — the seq a
+reset snapshot advanced included — with no callback for the loss in
+between; every attempt is a fresh request with a consumer, reader and
+watchdog of its own, so a stale attempt's late bytes and settlements
+reach no callback and close no newer reader. A declared failure, a
+contract outcome, the server's `end`, `stop()` and the signal are
+terminal on every setting. When the budget is spent the subscription
+ends with one `onError` — `JC2097` (`kind: network`, not retryable),
+its `details` `{ attempts, lastCode }` naming the further attempts
+made and the last loss's code — after the reader, the watchdog and the
+backoff were released. Without `reconnect` (or with `max: 0`) a
+`network` outcome is delivered as is and re-entering is the host's;
+a body that ends without an `end` event is then `onEnd({ reason:
+"closed" })`, not a loss. The port client validates the option exactly
+as the HTTP client does and then does nothing with it: a channel has no
+network loss to reconnect from (a closed channel is `JC2074`, final),
+and one options object serves both clients.

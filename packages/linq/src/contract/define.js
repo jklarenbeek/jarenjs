@@ -236,6 +236,24 @@ export function typedClient(client, contract) {
 }
 
 /**
+ * Bind an HTTP client to the contract that types it: `typedClient` plus
+ * `bytes` over the opaque operations. Identity at runtime — a local or
+ * port client carries no `bytes` and takes `typedClient`.
+ * @template C
+ * @template T
+ * @param {T} client - an `openHttpClient` client
+ * @param {C} contract - the pen's contract; the type argument only
+ * @returns {T}
+ * @example
+ * const api = typedHttpClient(openHttpClient(compileContract(shop.document), { baseUrl }), shop);
+ * const outcome = await api.bytes('image.bytes', { id: 3 });   // ok: { status, headers, media, body: ReadableStream }
+ */
+export function typedHttpClient(client, contract) {
+  void contract;
+  return client;
+}
+
+/**
  * Bind a handler table to the contract it serves. Identity at runtime:
  * the table is checked against the operation ids and each handler's
  * input and output typed by the pen's phantoms.

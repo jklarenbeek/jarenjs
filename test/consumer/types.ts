@@ -681,6 +681,7 @@ const failureValue: contract.ContractFailureValue = contract.ContractFailure('co
 void [failureValue.code, failureValue.retryable, contract.isContractFailure(failureValue)];
 const serveOptions: ServeHttpOptions = {
   ledger: createMemoryLedger({ ttlMs: 1000 }), partial: false, head: true, validateOutput: 'always', wellKnown: false,
+  streamLimits: { replay: { limit: 128, maxBytes: 65536 }, queue: { events: 64, bytes: 262144 } },
   trace: () => 'trace', scope: (ctx) => ctx.op.id, onError: (err, ctx) => void [err, ctx], errorBody: (wire, ctx) => ({ error: wire.code, status: wire.status, op: ctx?.op.id }),
   catalog: { 'contract/not-found': 'nope' }, now: () => 0,
 };
@@ -702,7 +703,7 @@ void [claimed, record, idempotencyLedgerModel.$model === '0.1', commandLifecycle
 // @jarenjs/contract/client, /app — the client binding (outcomes, the
 // identity trinity, negotiation) and the generated app documents + effect
 import { openHttpClient, CLIENT_ERRORS } from '@jarenjs/contract/client';
-import type { HttpClient, HttpClientOptions, InvokeContext, Outcome, OutcomeMeta, OutcomeError, Negotiation } from '@jarenjs/contract/client';
+import type { HttpClient, HttpClientOptions, InvokeContext, ByteContext, ByteResponse, Outcome, OutcomeMeta, OutcomeError, Negotiation } from '@jarenjs/contract/client';
 import { contractAppBinding, createContractEffect } from '@jarenjs/contract/app';
 import type { ContractAppBinding, ContractEffect, TaskSlot, StreamSlot } from '@jarenjs/contract/app';
 
@@ -719,6 +720,16 @@ outcome.then((o) => {
   else { const e: OutcomeError = o.error; const k: 'failure' | 'network' | 'contract' | 'cancelled' = o.kind; void [e.code, e.status, e.retryable, k]; }
   const m: OutcomeMeta = o.meta;
   void [m.op, m.attempt, m.trace, m.revision, m.etag, m.notModified];
+});
+const byteContext: ByteContext = { attempt: 2, headers: { accept: 'image/png' }, ifNoneMatch: 'W/"1"', signal: new AbortController().signal, body: new Uint8Array([1, 2, 3]) };
+const bytesOutcome: Promise<Outcome> = httpClient.bytes('image.bytes', { id: 3 }, byteContext);
+bytesOutcome.then((o) => {
+  if (o.ok) {
+    const value = o.value as ByteResponse;
+    const body: ReadableStream<Uint8Array> | null = value.body;
+    const media: string | null = value.media;
+    void [value.status, value.headers['content-type'], body, media];
+  }
 });
 const negotiation: Promise<Negotiation> = httpClient.negotiate({ signal: new AbortController().signal });
 void [negotiation, httpClient.url('product.save', { id: 1 }), httpClient.pending(), httpClient.capabilities.name === 'http', httpClient.contract.ids, httpClient.describe(), CLIENT_ERRORS.JC2050.msgid];
@@ -1573,6 +1584,33 @@ const summary: Array<number | undefined> = [
   quantile(readings, 0.5, { method: 'linear' }),
 ];
 void summary;
+
+// @jarenjs/josl — the pull pipelines and the hostile-input limits, typed:
+// async serializers over async sources, the detaching root-array reader,
+// the limit error with its code and limit, and the code tables as data.
+import {
+  stringifyCsvStream, stringifyJoslStream, iterateJoslStream, iterateCsvStream, createStreamWriter as createJoslStreamWriter,
+  JoslLimitError, CSV_LIMIT_CODES, JOSL_LIMIT_CODES, JSONX_LIMIT_CODES,
+} from '@jarenjs/josl';
+async function joslPull(rows: AsyncIterable<Record<string, unknown>>, chunks: AsyncIterable<string>): Promise<void> {
+  const csv: AsyncIterable<string> = stringifyCsvStream(rows, { header: true, signal: new AbortController().signal });
+  const josl: AsyncIterable<string> = stringifyJoslStream(rows, { signal: new AbortController().signal });
+  for await (const line of csv) void line;
+  for await (const chunk of josl) void chunk;
+  for await (const record of iterateJoslStream(chunks, { maxRecordBytes: 65536, maxDepth: 8 })) void record;
+  for await (const row of iterateCsvStream(chunks, { headers: true, maxFieldBytes: 4096, maxColumns: 64 })) void row;
+}
+void joslPull;
+const joslSink = createJoslStreamWriter({ onChunk: (chunk: string) => void chunk, buffer: false });
+const joslEmpty: string = joslSink.pair('a', 1).end();
+void joslEmpty;
+const limitError = new JoslLimitError('CSV2003', 'a field exceeds maxFieldBytes', 4096, 12);
+const limitCode: string = limitError.code;
+const limitValue: number = limitError.limit;
+const csvCode: string = CSV_LIMIT_CODES.CSV2001;
+const joslCode: string = JOSL_LIMIT_CODES.JOSL2005;
+const jsonxCode: string = JSONX_LIMIT_CODES.JSONX2004;
+void [limitCode, limitValue, csvCode, joslCode, jsonxCode];
 
 // @jarenjs/core/async — the bounded ordered map keeps the worker's
 // result type and the input order; the signal is optional.

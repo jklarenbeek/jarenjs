@@ -239,11 +239,12 @@ they exist so a mismatch is a compile error rather than a 404.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
-| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C>`: one handler per invokable operation, `(input, ctx) => output \| Failure` | native; a missing or misspelled operation does not compile |
+| `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
+| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`; `ctx` is `HandlerContext<Host, Carrier>` — the HTTP context by default, `Host` the host lifecycle's `ctx.host`, a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7) | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either |
 | `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, `execute` takes the operation's ACCEPTED input | native |
 
-All three are `void contract; return x;` at run time — they add nothing,
-wrap nothing and cost nothing. What they do is carry the phantom `Ops`
+All of them are `void contract; return x;` at run time — they add
+nothing, wrap nothing and cost nothing. What they do is carry the phantom `Ops`
 onto a value the engine produced, which is what makes one authored
 document type a client, a server's handler table and an AI toolbox with
 no generate step. §3.6 runs all three over one contract and §5 is what
@@ -1017,8 +1018,11 @@ const handlers = typedHandlers(shop, {
 const served = openLocalClient(compiled, handlers);    // the binding: any contract client
 const api = typedClient(served, shop);                 // the same object, narrowed by the phantom
 const outcome: Outcome<Product> = await api.invoke('product.save', { id: 1, revision: 4, product });
-api.url('image.bytes', { id: 3 });                     // an opaque operation: a URL builder only
+api.url('image.bytes', { id: 3 });                     // an opaque operation: a URL builder here
 api.invoke('image.bytes', { id: 3 });                  // does not compile — it carries bytes
+const web = typedHttpClient(openHttpClient(compiled, { baseUrl }), shop);
+const image = await web.bytes('image.bytes', { id: 3 });  // Outcome<ByteResponse>: { status, headers, media, body: ReadableStream }
+web.bytes('product.save', { id: 1, revision: 4, product });  // does not compile — a JSON operation is invoked, not streamed
 for (const tool of typedTools(contractTools(compiled, api), shop)) toolbox.add(tool);
 
 declare const anyContract: Contract<any>;              // the class: an annotation, never a `new`
@@ -1184,7 +1188,7 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->44,644<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->44,716<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->45<!--/fact--> kB) beside the other nine subpath prices in
@@ -1196,7 +1200,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->32,427<!--/fact--> of its <!--fact:bundle.contract-->44,644<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->32,499<!--/fact--> of its <!--fact:bundle.contract-->44,716<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,

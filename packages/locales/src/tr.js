@@ -164,6 +164,8 @@ export const tr = {
   'contract/seq-regression': '{op} işleminin akışı seq sırasını ihlal etti',
   'contract/stream-error': '{op} işleminin akışı bir sunucu hatasıyla sona erdi ({code})',
   'contract/heartbeat-missed': '{op} işleminin akışı {ms} ms boyunca sessiz kaldı',
+  'contract/slow-consumer': '{op} işleminin akışı sona erdi: tüketici sınırlı kuyruğunun gerisinde kaldı',
+  'contract/reconnect-exhausted': '{op} işleminin akışı {attempts} denemeden sonra yeniden kurulamadı (son: {lastCode})',
   //#endregion
 
   //#region calendar language (the date names, relative phrasing and

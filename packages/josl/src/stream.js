@@ -7,6 +7,8 @@
 // array-of-tables indices), so events are directly JSON-Pointer-able.
 
 import { JoslMachine } from './machine.js';
+import { JoslSyntaxError } from './errors.js';
+import { closeIterator, abortedError } from './pull.js';
 
 /**
  * Create an incremental JOSL/TOML reader.
@@ -52,6 +54,62 @@ export async function parseJoslStream(chunks, options = undefined) {
   return machine.end();
 }
 
+/**
+ * Yield the `[[]]` root items of a JOSL document as they complete,
+ * without ever holding the whole document: each item is DETACHED from
+ * the root the moment the next `[[]]` header (or the end) completes it,
+ * so `root()`-style retention never grows past one record — the JOSL
+ * twin of the JSONX reader's `detach`. A document with a table root is
+ * refused by name (`JoslSyntaxError`): a table root is one retained
+ * value, not a stream of records. `options.signal` aborts between
+ * chunks; an abort, a consumer that stops early or a throw closes the
+ * chunk source exactly once.
+ * @param {AsyncIterable<string>|Iterable<string>} chunks - Source chunks
+ * @param {object} [options] - Reader options; see `createStreamReader`,
+ *  plus `signal` and the `JOSL2xxx` limits
+ * @yields {object} One completed root item at a time
+ * @example
+ * for await (const record of iterateJoslStream(response.body))
+ *   await save(record);
+ */
+export async function* iterateJoslStream(chunks, options = undefined) {
+  /** @type {object[]} */
+  const completed = [];
+  const machine = new JoslMachine({
+    ...(options ?? {}),
+    detachRoot: (item) => { completed.push(item); },
+  });
+  const signal = options?.signal ?? null;
+  const iterator = chunks[Symbol.asyncIterator]?.() ?? chunks[Symbol.iterator]();
+  let finished = false;
+  try {
+    for (;;) {
+      if (signal !== null && signal.aborted)
+        throw abortedError(signal);
+      const step = await iterator.next();
+      if (step.done) {
+        finished = true;
+        break;
+      }
+      machine.feed(step.value);
+      if (machine.rootValue !== undefined && !machine.rootIsArray) {
+        throw new JoslSyntaxError('iterateJoslStream reads a [[]] root array; this document has a table root',
+          machine.lineOrigin, 1, 'stream a document of [[]] records, or read a table root with parseJoslStream');
+      }
+      while (completed.length !== 0)
+        yield /** @type {object} */ (completed.shift());
+    }
+  }
+  finally {
+    if (!finished)
+      await closeIterator(iterator);
+  }
+  machine.end();
+  while (completed.length !== 0)
+    yield /** @type {object} */ (completed.shift());
+}
+
 export { JoslSyntaxError } from './errors.js';
+export { JoslLimitError, JOSL_LIMIT_CODES } from './limits.js';
 
 //#endregion

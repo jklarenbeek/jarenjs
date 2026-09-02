@@ -24,30 +24,44 @@ import { contractCatalogEn } from '../messages.js';
  * test hands to `dispatch` directly. `url` is origin-less: the path plus
  * an optional `?query`; header names are lowercase; a header value is a
  * string, or an array of strings when the adapter can see repeated field
- * lines; `body` is the bytes/text as received (`null` for none);
- * `signal` is the request's abort signal when the host has one.
+ * lines; `body` is the text or bytes as received, or a pull source of
+ * chunks (an async iterable, or a Web `ReadableStream` the dispatcher
+ * normalizes) the pipeline drains under the operation's limit for a
+ * JSON operation and hands an opaque handler one chunk at a time
+ * (`null` for none); `signal` is the request's abort signal when the
+ * host has one.
  * @typedef {Object} HttpRequest
  * @property {string} method
  * @property {string} url
  * @property {Readonly<Record<string, string | readonly string[]>>} headers
- * @property {string | Uint8Array | null} body
+ * @property {string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null} body
  * @property {AbortSignal | null} [signal]
  */
 
 /**
  * A response as the binding answers it: a status, lowercase header names,
- * and a body that is a string (JSON text), bytes (an opaque operation) or
- * `null` (HEAD, 204, 304). A streaming response (a subscribe operation
+ * and a body that is a string (JSON text), bytes (an opaque operation), a
+ * pull source of chunks (an opaque handler's streamed body: the adapter
+ * writes it chunk by chunk behind the socket's backpressure and cancels
+ * it once when the peer goes away) or `null` (HEAD, 204, 304). A
+ * streaming response (a subscribe operation
  * under `accept: text/event-stream`) carries `body: null` plus `stream`:
  * the adapter writes the headers, then MUST call `stream` exactly once
  * with its sink — the pump writes SSE text through `sink.write` and
- * calls `sink.end()` when the stream terminates; the returned function
- * stops the stream when the consumer cancels.
+ * calls `sink.end()` when the stream terminates. The sink is a
+ * `SinkLike<string>` (`@jarenjs/core/async`): `write` may answer a
+ * promise that settles when the platform has taken the chunk — a Node
+ * response that answered `false` resolves on `drain`; a Web stream
+ * bridge resolves on the consumer's pull — and the pump writes the next
+ * chunk only after that; the optional `abort(reason)` is how the pump
+ * tears the carrier down when it must. The pump answers `{ stop, done }`:
+ * `stop()` ends the stream when the consumer cancels, `done` settles
+ * once the subscription is released and the sink has ended.
  * @typedef {Object} HttpResponse
  * @property {number} status
  * @property {Readonly<Record<string, string>>} headers
- * @property {string | Uint8Array | null} body
- * @property {(sink: { write: (chunk: string) => void, end: () => void }) => (() => void)} [stream]
+ * @property {string | Uint8Array | AsyncIterable<Uint8Array> | null} body
+ * @property {(sink: import('@jarenjs/core/async').SinkLike<string>) => { stop: () => void, done: Promise<void> }} [stream]
  */
 
 /**

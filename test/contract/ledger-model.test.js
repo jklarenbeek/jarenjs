@@ -16,7 +16,7 @@ import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { JarenValidator } from '@jarenjs/validate';
 import { compileFsm, createFsmSession } from '@jarenjs/flow';
-import { idempotencyLedgerModel, commandLifecycleFsm, createMemoryLedger } from '@jarenjs/contract/ledger';
+import { idempotencyLedgerModel, commandLifecycleFsm, createMemoryLedger, ledgerId } from '@jarenjs/contract/ledger';
 
 const manifest = JSON.parse(readFileSync(new URL('../../packages/contract/package.json', import.meta.url), 'utf8'));
 /** The store's write validation hook (`compileTypeTest` signature). */
@@ -42,20 +42,23 @@ describe('idempotencyLedgerModel — a $model 0.1 document', () => {
     const record = memory.lookup({ op: 'product.save', scope: 'tenant-a', key: 'k1' });
     assert.ok(record !== null);
     await ledger.insert(record);
-    const stored = await ledger.get('product.save|tenant-a|k1');
+    const stored = await ledger.get(ledgerId('product.save', 'tenant-a', 'k1'));
     assert.deepStrictEqual(stored, record);
+    assert.strictEqual(typeof stored.generation, 'string');
     const failed = memory.claim({ op: 'product.save', scope: '', key: 'k2', hash: 'b'.repeat(64) });
     memory.fail(failed.ref, true);
     await ledger.insert(memory.lookup({ op: 'product.save', scope: '', key: 'k2' }));
-    assert.strictEqual((await ledger.get('product.save||k2')).status, 'failed');
+    assert.strictEqual((await ledger.get(ledgerId('product.save', '', 'k2'))).status, 'failed');
     await store.close();
   });
 
   it('refuses a malformed record through the collection schema', async () => {
     const store = await openStore(idempotencyLedgerModel, { driver: nodeDriver(), compileSchema });
     const ledger = store.collection('ledger');
-    await assert.rejects(() => ledger.insert({ id: 'x', op: 'o', scope: '', key: 'k', hash: 'nope', status: 'started', response: null, retryable: null, createdAt: 1, updatedAt: 1, expiresAt: 2 }));
-    await assert.rejects(() => ledger.insert({ id: 'x', op: 'o', scope: '', key: 'k', hash: 'a'.repeat(64), status: 'pending', response: null, retryable: null, createdAt: 1, updatedAt: 1, expiresAt: 2 }));
+    await assert.rejects(() => ledger.insert({ id: 'x', generation: 'g', op: 'o', scope: '', key: 'k', hash: 'nope', status: 'started', response: null, retryable: null, createdAt: 1, updatedAt: 1, expiresAt: 2 }));
+    await assert.rejects(() => ledger.insert({ id: 'x', generation: 'g', op: 'o', scope: '', key: 'k', hash: 'a'.repeat(64), status: 'pending', response: null, retryable: null, createdAt: 1, updatedAt: 1, expiresAt: 2 }));
+    // the generation is required: a record without one is refused
+    await assert.rejects(() => ledger.insert({ id: 'x', op: 'o', scope: '', key: 'k', hash: 'a'.repeat(64), status: 'started', response: null, retryable: null, createdAt: 1, updatedAt: 1, expiresAt: 2 }));
     await store.close();
   });
 });

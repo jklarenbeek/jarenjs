@@ -410,6 +410,14 @@ describe('csv: writing', () => {
     strictEqual(sink.end(), '');
   });
 
+  it('writes a nested object or array cell as its JSON text, never its toString', () => {
+    strictEqual(stringifyCsv([{ a: { b: 1 }, c: [1, 2], d: Object.create(null) }]), 'a,c,d\r\n"{""b"":1}","[1,2]",{}\r\n');
+    strictEqual(stringifyCsv([[{ b: 1 }, [1, 2], 3]]), '"{""b"":1}","[1,2]",3\r\n');
+    deepStrictEqual(parseCsv(stringifyCsv([{ a: { b: 1 } }]), { headers: true }), [{ a: '{"b":1}' }], 'the reader hands the JSON text back');
+    class Money { toString() { return '€1.50'; } }
+    strictEqual(stringifyCsv([[new Money()]]), '€1.50\r\n', 'a value that renders itself still does');
+  });
+
   it('round-trips values that need every escape', () => {
     const rows = [{
       plain: 'x',

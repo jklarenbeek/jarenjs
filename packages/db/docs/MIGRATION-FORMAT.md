@@ -373,7 +373,8 @@ jaren-db shape    --model <model>
   `--from`, `--to` and `--baseline` accept a `.json` file or a module
   (`.js`, `.mjs`, `.cjs` — and `.ts` where the host strips types: Node
   ≥ 24 does by default, and `--no-strip-types` is refused by name)
-  loaded with `import()` and read as its `default` export or its `model`
+  loaded through `@jarenjs/json/node` — the suite's one document loader,
+  shared with `jaren-contract` — and read as its `default` export or its `model`
   export — the model pen's document, or any object whose `toJSON()`
   emits one; `--migrations <dir>` reads `.json` files and modules
   (`default` or `migration` — the migration pen's builder), sorted by

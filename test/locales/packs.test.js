@@ -131,6 +131,8 @@ const SAMPLE_PARAMS = {
   'contract/seq-regression': { op: 'catalog.live' },
   'contract/stream-error': { op: 'catalog.live', code: 'server-shutdown' },
   'contract/heartbeat-missed': { op: 'catalog.live', ms: 30000 },
+  'contract/slow-consumer': { op: 'catalog.live' },
+  'contract/reconnect-exhausted': { op: 'catalog.live', attempts: 3, lastCode: 'JC2051' },
 };
 
 /**

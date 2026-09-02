@@ -20,6 +20,7 @@ import * as path from 'node:path';
 import { compileContract } from './compile.js';
 import { ContractCompileError, ContractHostError } from './errors.js';
 import { diffContracts } from './diff.js';
+import { loadDocument } from '@jarenjs/json/node';
 import { publicProjection } from './public.js';
 import { toOpenApi } from './project/openapi.js';
 
@@ -147,16 +148,22 @@ function fail(message, usage = false) {
 const DIFF_CLASSES = ['breaking', 'additive', 'neutral', 'unknown'];
 
 /**
- * Read a contract document, exit 2 on an unreadable file.
+ * Read a contract document — a `.json` file, or a pure module whose
+ * `default` (or `contract`) export is the document or a pen builder
+ * that emits one — through the suite's one loader (`@jarenjs/json/node`,
+ * shared with `jaren-db`): the module is evaluated twice and refused
+ * when the two emissions differ. Exit 2 on every refusal, naming the
+ * flag and the file.
  * @param {string} file
- * @param {string} flag
+ * @param {string} what - `contract`, or the diff flag (`--from`, `--to`)
+ * @returns {Promise<any>}
  */
-function readDocument(file, flag) {
+async function readDocument(file, what) {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    return await loadDocument(file, { what, exportName: 'contract' });
   }
   catch (error) {
-    fail(`cannot read ${flag} '${file}': ${/** @type {Error} */ (error).message}`);
+    fail(/** @type {Error} */ (error).message);
     return null; // unreachable — fail() exits
   }
 }
@@ -166,7 +173,7 @@ function readDocument(file, flag) {
  * `--fail-on` exit 1 when a named class is non-empty.
  * @param {ReturnType<typeof parseArgs>} options
  */
-function runDiff(options) {
+async function runDiff(options) {
   if (options.from === null || options.to === null) return fail('diff needs --from <file> and --to <file>', true);
   /** @type {string[]} */
   let failOn = [];
@@ -176,8 +183,8 @@ function runDiff(options) {
       if (!DIFF_CLASSES.includes(name)) return fail(`--fail-on '${name}' is not a change class (${DIFF_CLASSES.join(', ')})`, true);
     }
   }
-  const from = readDocument(options.from, '--from');
-  const to = readDocument(options.to, '--to');
+  const from = await readDocument(options.from, '--from');
+  const to = await readDocument(options.to, '--to');
   let diff;
   try {
     diff = diffContracts(from, to);
@@ -214,13 +221,7 @@ async function main() {
   if (options.contract === null) return fail('--contract <file> is required', true);
   if (options.check && options.out === null) return fail('--check needs --out', true);
 
-  let doc;
-  try {
-    doc = JSON.parse(fs.readFileSync(options.contract, 'utf8'));
-  }
-  catch (error) {
-    return fail(`cannot read contract '${options.contract}': ${/** @type {Error} */ (error).message}`);
-  }
+  const doc = await readDocument(options.contract, 'contract');
   let rendered;
   try {
     const contract = compileContract(doc);
