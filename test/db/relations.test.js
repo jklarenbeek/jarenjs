@@ -2,8 +2,9 @@
 /**
  * @file The relations differential oracle: every corpus
  * group's cases run through the in-memory engine over the multi-entity
- * root AND through the store's entity translator — native and
- * forced-residual — and must agree, values and error codes alike.
+ * root AND through the store's entity translator — native, native over
+ * a model with every declared index removed, and forced-residual — and
+ * must agree, values and error codes alike.
  * Alongside the corpus: strict mode, `explain` with its join and scan
  * narrative, the EQP proof that an instant comparison narrows through
  * the derived column's index while the document string decides, and
@@ -15,6 +16,8 @@ import * as fs from 'node:fs';
 import * as assert from 'node:assert';
 
 import { openStore } from '@jarenjs/db';
+import { from } from '@jarenjs/linq';
+import { compileJsonQuery } from '@jarenjs/json/query';
 import { nodeDriver } from '@jarenjs/db/node';
 import {
   loadRelationGroups, storeForEntityGroup, runEntityCase,
@@ -23,22 +26,29 @@ import { renderLinqRootsGroup, renderLinqHopsGroup } from '../../scripts/lib/lin
 
 const groups = loadRelationGroups();
 
-for (const mode of /** @type {const} */ (['native', 'residual'])) {
-  describe(`relations oracle — ${mode} mode`, () => {
+/** The multi-entity root the ENGINE side reads: the group's entity
+ * documents plus its join rows, which are roots of their own (§10.7). */
+const rootOf = (group) => ({ ...group.documents, ...(group.memberships ?? {}) });
+
+for (const [mode, side] of /** @type {const} */ ([
+  ['native', 'indexed'], ['native', 'unindexed'], ['residual', 'indexed'],
+])) {
+  const label = mode === 'native' ? `native mode, ${side}` : `${mode} mode`;
+  describe(`relations oracle — ${label}`, () => {
     for (const group of groups) {
       describe(group.group, () => {
         /** @type {any} */
         let opened = null;
         const openOnce = async () => {
-          if (opened === null) opened = await storeForEntityGroup(group);
+          if (opened === null) opened = await storeForEntityGroup(group, side);
           return opened;
         };
         for (const kase of group.cases) {
           it(kase.name, async () => {
             const { store } = await openOnce();
-            const divergence = await runEntityCase(store, group.documents, kase, mode);
+            const divergence = await runEntityCase(store, rootOf(group), kase, mode);
             assert.strictEqual(divergence, null,
-              divergence === null ? '' : `${group.group}/${kase.name} [${mode}] diverged\n`
+              divergence === null ? '' : `${group.group}/${kase.name} [${label}] diverged\n`
                 + `  sql:      ${divergence.sql ?? '<none>'}\n`
                 + `  engine:   ${JSON.stringify(divergence.expected)}\n`
                 + `  pushdown: ${JSON.stringify(divergence.actual)}`);
@@ -81,10 +91,11 @@ describe('the translated modes are the claimed ones', () => {
       $return: '$p',
     });
     assert.strictEqual(join.mode, 'native');
-    assert.deepStrictEqual(join.join, {
-      left: { binding: 'p', column: 'authorId' },
-      right: { binding: 'u', column: 'id' },
-    });
+    assert.deepStrictEqual(join.joins, [
+      { binding: 'u', on: [] },
+      { binding: 'p', on: [{ op: 'eq', left: { binding: 'p', column: 'authorId' },
+        right: { binding: 'u', column: 'id' } }] },
+    ], 'the FROM order, and the equality that attached each binding');
     assert.match(join.scanNarrative, /SEARCH/,
       'the equijoin probes an index, not a second scan');
   });
@@ -215,6 +226,151 @@ describe('the linq-roots groups are what the chains emit', () => {
       await assert.rejects(async () => store.execute(kase.query, { strict: true }),
         (error) => /** @type {any} */ (error).code === 'JD0010', kase.name);
     }
+    await store.close();
+  });
+});
+
+// ————— More than two bindings —————
+
+describe('the relation graph: every binding past the first is attached, or nothing lowers', () => {
+  const MULTI = JSON.parse(fs.readFileSync('test/db/oracle/relations/16-multi-binding.json', 'utf8'));
+  const openMulti = async () => (await storeForEntityGroup(MULTI)).store;
+  const chained = {
+    $for: { a: '$.Author[*]', t: '$.Talk[*]', v: '$.Venue[*]' },
+    $where: { $and: [{ $eq: ['$t.authorId', '$a.id'] }, { $eq: ['$t.venueId', '$v.vid'] }] },
+    $orderby: ['$t.tid'],
+    $return: '$t',
+  };
+
+  it('three and four bindings are ONE statement, joined in attachment order', async () => {
+    const store = await openMulti();
+    const three = await store.explain(chained);
+    assert.strictEqual(three.mode, 'native');
+    assert.deepStrictEqual(three.joins.map((join) => join.binding), ['a', 't', 'v']);
+    assert.deepStrictEqual(three.joins[0].on, [], 'the first binding attaches to nothing');
+    assert.deepStrictEqual(three.joins[1].on,
+      [{ op: 'eq', left: { binding: 't', column: 'authorId' }, right: { binding: 'a', column: 'id' } }]);
+    assert.strictEqual(three.sql.match(/ JOIN /g).length, 2, 'two joins for three bindings');
+
+    const four = await store.explain({
+      $for: { a: '$.Author[*]', t: '$.Talk[*]', v: '$.Venue[*]', s: '$.Slot[*]' },
+      $where: { $and: [{ $eq: ['$t.authorId', '$a.id'] }, { $eq: ['$t.venueId', '$v.vid'] },
+        { $eq: ['$s.venueId', '$v.vid'] }] },
+      $return: '$t',
+    });
+    assert.strictEqual(four.mode, 'native');
+    assert.deepStrictEqual(four.joins.map((join) => join.binding), ['a', 't', 'v', 's']);
+    assert.strictEqual(four.sql.match(/ JOIN /g).length, 3);
+    await store.close();
+  });
+
+  it('a binding nothing attaches is a cartesian product, refused by name and JD0010 under strict', async () => {
+    const store = await openMulti();
+    const loose = {
+      $for: { a: '$.Author[*]', t: '$.Talk[*]', v: '$.Venue[*]' },
+      $where: { $eq: ['$t.authorId', '$a.id'] },
+      $return: '$t',
+    };
+    const explained = await store.explain(loose);
+    assert.strictEqual(explained.mode, 'set');
+    assert.match(explained.reasons[0].reason, /cartesian product/);
+    await assert.rejects(async () => store.execute(loose, { strict: true }),
+      (error) => /** @type {any} */ (error).code === 'JD0010');
+    await store.close();
+  });
+
+  it('a repeated equality between two attached bindings is one more condition, not a second join', async () => {
+    const store = await openMulti();
+    const cyclic = await store.explain({
+      $for: { a: '$.Author[*]', t: '$.Talk[*]', v: '$.Venue[*]' },
+      $where: { $and: [{ $eq: ['$t.authorId', '$a.id'] }, { $eq: ['$t.venueId', '$v.vid'] },
+        { $eq: ['$v.vid', '$t.venueId'] }] },
+      $return: '$t',
+    });
+    assert.strictEqual(cyclic.mode, 'native');
+    assert.strictEqual(cyclic.sql.match(/ JOIN /g).length, 2);
+    assert.strictEqual(cyclic.joins.at(-1).on.length, 2, 'both equalities ride the last ON');
+    await store.close();
+  });
+
+  it('the per-binding filters and the count still push over three bindings', async () => {
+    const store = await openMulti();
+    const filtered = await store.explain({
+      $for: { a: '$.Author[*]', t: '$.Talk[*]', v: '$.Venue[*]' },
+      $where: { $and: [{ $eq: ['$t.authorId', '$a.id'] }, { $eq: ['$t.venueId', '$v.vid'] },
+        { $eq: ['$a.city', 'delft'] }, { $gt: ['$v.seats', 100] }] },
+      $return: '$t',
+    });
+    assert.strictEqual(filtered.mode, 'native');
+    assert.match(filtered.sql, /WHERE .* AND /);
+    const counted = await store.explain({ $count: chained });
+    assert.strictEqual(counted.mode, 'native');
+    assert.match(counted.sql, /COUNT\(\*\)/);
+    await store.close();
+  });
+});
+
+// ————— The join table as a read-only query root (§10.7) —————
+
+describe('a declared join table is a query root, and only a query root', () => {
+  const JOINS = JSON.parse(fs.readFileSync('test/db/oracle/relations/17-join-roots.json', 'utf8'));
+  const openJoins = async () => (await storeForEntityGroup(JOINS)).store;
+
+  it('$.<JoinTable>[*] answers exactly its two declared keys, from one statement', async () => {
+    const store = await openJoins();
+    const document = { $for: { m: '$.Person_Tag[*]' },
+      $orderby: ['$m.Person_key', '$m.Tag_key'], $return: '$m' };
+    const explained = await store.explain(document);
+    assert.strictEqual(explained.mode, 'native');
+    assert.match(explained.sql, /FROM "Person_Tag" AS "t0"/);
+    assert.doesNotMatch(explained.sql, /json\("t0"\."doc"\)/,
+      'a join row has no document column of its own');
+    const rows = await store.execute(document);
+    assert.deepStrictEqual(rows, [
+      { Person_key: 'p1', Tag_key: 'blue' },
+      { Person_key: 'p1', Tag_key: 'red' },
+      { Person_key: 'p2', Tag_key: 'red' },
+    ]);
+    for (const row of rows) assert.deepStrictEqual(Object.keys(row).sort(), ['Person_key', 'Tag_key']);
+    await store.close();
+  });
+
+  it('it is not a write collection: the entity surface refuses it by name', async () => {
+    const store = await openJoins();
+    assert.throws(() => store.entity('Person_Tag'),
+      (error) => /** @type {any} */ (error).code === 'JD2004'
+        && /no entity 'Person_Tag'/.test(/** @type {any} */ (error).message));
+    assert.throws(() => store.sync.entity('Person_Tag'),
+      (error) => /** @type {any} */ (error).code === 'JD2004');
+    await store.close();
+  });
+
+  it('a join table whose name is a declared entity is refused at open, both being roots', async () => {
+    await assert.rejects(() => openStore({
+      $model: '0.1',
+      entities: {
+        A_B: { schema: { type: 'object', required: ['id'],
+          properties: { id: { type: 'string', 'x-entity': { key: true } } } } },
+        A: { schema: { type: 'object', required: ['id'], properties: {
+          id: { type: 'string', 'x-entity': { key: true } },
+          bs: { 'x-entity': { relation: { to: 'B', many: true } } } } } },
+        B: { schema: { type: 'object', required: ['id'],
+          properties: { id: { type: 'string', 'x-entity': { key: true } } } } },
+      },
+    }, { driver: nodeDriver() }),
+    (error) => /** @type {any} */ (error).code === 'JD0005'
+      && /has the name of a declared entity/.test(/** @type {any} */ (error).message));
+  });
+
+  it('a many-to-many hop lowers through it, and answers what the engine answers', async () => {
+    const store = await openJoins();
+    const people = store.sync.entity('Person');
+    const tagged = from(people).where((p) => p.tags.all().exists()).select((p) => p.id);
+    assert.match(JSON.stringify(tagged.toDocument()), /Person_Tag/);
+    const root = { ...JOINS.documents, ...JOINS.memberships };
+    assert.deepStrictEqual(tagged.toArray(),
+      compileJsonQuery([tagged.toDocument()])(root));
+    assert.deepStrictEqual(tagged.toArray(), ['p1', 'p2']);
     await store.close();
   });
 });

@@ -155,11 +155,12 @@ describe('the vector corpus through SQLite', () => {
                 }
                 if (mode === 'knn') {
                   assert.strictEqual(explained.rank.decides, 'engine');
-                  assert.strictEqual(explained.rank.dims, CORPUS.dims);
+                  assert.strictEqual(explained.rank.selected, CORPUS.dims);
                   assert.doesNotMatch(explained.sql, /ORDER BY|LIMIT/);
                 }
                 else if (mapping === 'indexed' && /external-probe/.test(entry.name)) {
-                  assert.strictEqual(explained.rank.dims, CORPUS.dims, 'the diverted plan still names its rank');
+                  assert.deepStrictEqual(explained.rank.alternatives.map((a) => a.dims),
+                    [CORPUS.dims], 'the diverted plan still names its rank');
                   assert.ok(explained.residual.reasons.some((r) => /is not a value the database binds/.test(r.reason)));
                 }
                 else {

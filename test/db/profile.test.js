@@ -292,3 +292,134 @@ describe('signal and deadline are declared per call and honoured', () => {
     await store.close();
   });
 });
+
+describe('the member allow-list: what a caller may read, per root', () => {
+  const MEMBERS = {
+    ...TENANT_A,
+    members: { docs: ['$.id', '$.n'], User: ['$.id', '$.age'] },
+  };
+
+  it('a projection of allowed members answers; a denied member is JD0011 naming root, member and document path', async () => {
+    const { store } = await seeded();
+    const rows = await Promise.resolve(store.collection('docs').execute(
+      { $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: { id: '$it.id', n: '$it.n' } },
+      { profile: MEMBERS }));
+    assert.deepStrictEqual(rows, [{ id: 'a1', n: 1 }, { id: 'a2', n: 2 }, { id: 'a3', n: 3 }]);
+
+    await assert.rejects(
+      async () => store.collection('docs').execute(
+        { $for: { it: '$[*]' }, $return: { b: '$it.body' } }, { profile: MEMBERS }),
+      codeIs('JD0011', /does not allow the member 'body' of 'docs'.*at \/\$return\/b/));
+    // the same policy over a predicate, an ordering and an external
+    // comparison — one collector, every clause
+    for (const document of [
+      { $for: { it: '$[*]' }, $where: { $eq: ['$it.body', 'x'] }, $return: { id: '$it.id' } },
+      { $for: { it: '$[*]' }, $orderby: ['$it.body'], $return: { id: '$it.id' } },
+      { $count: { $for: { it: '$[*]' }, $return: '$it.body' } },
+    ]) {
+      await assert.rejects(async () => store.collection('docs').execute(document, { profile: MEMBERS }),
+        codeIs('JD0011', /does not allow the member 'body' of 'docs'/), JSON.stringify(document));
+    }
+    await store.close();
+  });
+
+  it('a bare-root return does not bypass the list — it reads the whole item, and says so', async () => {
+    const { store } = await seeded();
+    await assert.rejects(
+      async () => store.collection('docs').execute({ $for: { it: '$[*]' }, $return: '$it' },
+        { profile: MEMBERS }),
+      codeIs('JD0011', /allows only the members \(\$\.id, \$\.n\) of 'docs'.*reads the whole item/));
+    // an alias through $let is the same read under another name
+    await assert.rejects(
+      async () => store.collection('docs').execute(
+        { $for: { it: '$[*]' }, $let: { alias: '$it' }, $return: { b: '$alias.body' } },
+        { profile: MEMBERS }),
+      codeIs('JD0011', /reads the whole item/));
+    // and so is a wildcard with no singular prefix
+    await assert.rejects(
+      async () => store.collection('docs').execute(
+        { $for: { it: '$[*]' }, $return: { any: { $count: '$it[*]' } } }, { profile: MEMBERS }),
+      codeIs('JD0011', /reads the whole item/));
+    await store.close();
+  });
+
+  it('allowing a member allows what is under it, and never its siblings', async () => {
+    const { store } = await seeded();
+    // `$.o` allows `$.o.k`; `$.o.k` does not allow `$.o`
+    const nested = { $model: '0.1', collections: { rows: {
+      schema: { type: 'object', properties: { id: { type: 'string' },
+        o: { type: 'object', properties: { k: { type: 'integer' }, secret: { type: 'string' } } } } },
+      key: '/id' } } };
+    const inner = await openStore(nested, { driver: nodeDriver() });
+    await inner.collection('rows').insert({ id: 'r1', o: { k: 4, secret: 'no' } });
+    const under = await Promise.resolve(inner.collection('rows').execute(
+      { $for: { it: '$[*]' }, $return: { k: '$it.o.k' } }, { profile: { members: { rows: ['$.o'] } } }));
+    assert.deepStrictEqual(under, { k: 4 });
+    await assert.rejects(
+      async () => inner.collection('rows').execute(
+        { $for: { it: '$[*]' }, $return: { o: '$it.o' } },
+        { profile: { members: { rows: ['$.o.k'] } } }),
+      codeIs('JD0011', /does not allow the member 'o' of 'rows'/),
+      'reading the parent exposes the sibling the list withheld');
+    await inner.close();
+    await store.close();
+  });
+
+  it('the entity engine applies it per referenced root, and a graph load is refused whole', async () => {
+    const { store } = await seeded();
+    const users = await Promise.resolve(store.entity('User').execute(
+      { $for: { u: '$.User[*]' }, $orderby: ['$u.id'], $return: { id: '$u.id', age: '$u.age' } },
+      { profile: MEMBERS }));
+    assert.deepStrictEqual(users, [{ id: 1, age: 21 }, { id: 2, age: 22 }, { id: 3, age: 23 }]);
+    await assert.rejects(
+      async () => store.entity('User').execute(
+        { $for: { u: '$.User[*]' }, $return: { b: '$u.body' } }, { profile: MEMBERS }),
+      codeIs('JD0011', /does not allow the member 'body' of 'User'/));
+    // Post carries no list, so its members stay readable in the same document
+    const joined = await Promise.resolve(store.entity('User').execute({
+      $for: { u: '$.User[*]', p: '$.Post[*]' },
+      $where: { $eq: ['$u.id', '$p.authorId'] },
+      $orderby: ['$p.pid'],
+      $return: { id: '$u.id', title: '$p.title' },
+    }, { profile: MEMBERS }));
+    assert.strictEqual(Array.isArray(joined) && joined.length, 6);
+    // a graph load answers whole documents: refused by name, with the
+    // allowed members in the message
+    assert.throws(() => store.entity('User').explainLoad({}, { profile: MEMBERS }),
+      codeIs('JD0011', /a graph load answers whole documents/));
+    await assert.rejects(() => store.entity('User').page({}, { profile: MEMBERS }),
+      codeIs('JD0011', /a graph load answers whole documents/));
+    // an entity with no list loads as before
+    assert.ok(typeof store.entity('Post').explainLoad({}, { profile: MEMBERS }).sql === 'string');
+    await store.close();
+  });
+
+  it('an undeclared root in the list refuses before any statement, at the store and per call', async () => {
+    await assert.rejects(
+      () => openStore(MODEL, { driver: nodeDriver(), profile: { members: { nope: ['$.id'] } } }),
+      codeIs('JD0011', /names 'nope', which the model does not declare/));
+    const { store, counters } = await seeded();
+    await assert.rejects(
+      async () => store.collection('docs').execute({ $for: { it: '$[*]' }, $return: { id: '$it.id' } },
+        { profile: { members: { nope: ['$.id'] } } }),
+      codeIs('JD0011', /names 'nope'/));
+    assert.strictEqual(counters.all + counters.iterate, 0, 'no statement ran');
+    await store.close();
+  });
+
+  it('a malformed list is host misuse, refused at normalization', async () => {
+    for (const members of [
+      { docs: [] },
+      { docs: 'name' },
+      { docs: ['name'] },
+      { docs: ['$.a[*]'] },
+      { docs: ['$..a'] },
+      { docs: [3] },
+    ]) {
+      assert.throws(() => openStore(MODEL, { driver: nodeDriver(), profile: { members } }),
+        TypeError, JSON.stringify(members));
+    }
+    assert.throws(() => openStore(MODEL, { driver: nodeDriver(), profile: { members: ['$.id'] } }),
+      TypeError);
+  });
+});

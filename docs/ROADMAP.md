@@ -575,11 +575,6 @@ what each does is its own documentation's job
   measurement below the root stringifies the parsed child. Projecting
   nested includes as text would make it a length, at the price of a
   projection change.
-- [ ] **`explainLoad().order` is `null` outside keyset mode.** A plain
-  `load` tie-breaks on the row identity, and the explanation says so by
-  reporting no ordering identity; a reader wanting the ordering of a
-  plain load reads the SQL. Reporting the declared terms beside a
-  `tieBreaker: 'rowid'` member is the small change that would fill it.
 - [ ] **Other SQL dialects.** The dialect seam is real (proven by a
   test double) and the capability slots for statement timeouts and
   row estimates are deliberately empty on SQLite; a second dialect is
@@ -674,10 +669,11 @@ what each does is its own documentation's job
 - [ ] **An as-of join with no tolerance is bounded above and not below.**
   The batched fetch is one statement whatever the probes number, which is the
   bound it was built for — but a backward join with no `tolerance` can only
-  cap the far side, and at the benchmark's shape that is 99,129 of 100,000
-  rows, costing 1,424× fifty-one separate index reads (published beside the
-  win in the `@jarenjs/db` README). The tight lower limit is a BIND-time
-  scalar, and the plan algebra's external operand emits the guarded
+  cap the far side, and at the benchmark's largest shape it reads nearly the
+  whole far side and loses badly to separate index reads (the current measured
+  ratio is published beside the win in the `@jarenjs/db` README). The tight
+  lower limit is a BIND-time scalar, and the plan algebra's external operand
+  emits the guarded
   two-branch text-OR-number comparison, which is not a seek: paying an OR to
   save a range is the wrong trade. Closing it means a fourth `ParamSlot` kind
   that binds a scalar of known type without the guard — a real change to a
@@ -913,8 +909,9 @@ theirs.
   restatement or two facts that differ in the one detail that matters.
 
 - [ ] **The site's own ledger adapter sits outside the single-writer
-  contract.** A storage adapter is four async methods, not a transaction, and
-  the ledger's header says so — but the website's assistant keeps its ledger in
+  contract.** A storage adapter's mutation contract is four async methods, not
+  a transaction; an adapter may also expose the optional `rank` capability —
+  but the website's assistant keeps its ledger in
   one browser storage slot that it caches in memory and rewrites whole on every
   write, so two tabs are two writers over one adapter and the last one to write
   wins wholesale. It predates the contract sentence rather than regressing
@@ -922,16 +919,19 @@ theirs.
   transaction narrows the cross-process race but cannot end it, because minting
   an id is a read and then a write across two adapter calls. Closing it means
   either electing one writer (a lock, an owner tab) or moving the mint into the
-  adapter as an atomic operation — which is a fifth method, and the fact that
-  there are only four is what makes an adapter cheap enough to write.
+  adapter as an atomic operation — another optional capability whose extra
+  weight has to be justified against the deliberately small mutation contract.
 
-- [ ] **Nothing evicts an archived round.** Compaction writes every dropped
-  round to a slot and never deletes one, which is exactly the property that makes
+- [ ] **Archived rounds have no automatic budget eviction.** Compaction writes
+  every dropped round to a slot and never deletes one during a live conversation,
+  which is exactly the property that makes
   a synopsis address trustworthy — and it means a ledger grows for as long as a
   conversation does. In memory that is a session's worth of strings; over a
   browser slot it eventually meets the storage quota, where the site degrades by
   keeping the session correct (the in-memory map still answers every address) and
-  losing the next visit. An eviction rule needs to answer what may be dropped
+  losing the next visit. The site deletes those slots when the user explicitly
+  clears the conversation; it does not enforce a storage budget before that.
+  An eviction rule needs to answer what may be dropped
   from a store whose promise is that nothing was, so the honest shape is probably
   a host-set budget with the ledger REPORTING what it evicted, not a silent LRU.
 

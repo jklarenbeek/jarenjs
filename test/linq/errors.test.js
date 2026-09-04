@@ -152,7 +152,9 @@ describe('every JL code fires', () => {
       { type: 'string', deprecated: true, $comment: 'c' });
   });
 
-  it('JL0105 — a relation hop that cannot lower: the many-to-many member, at build time', () => {
+  it('JL0105 — a relation hop that cannot lower: an INCOMPLETE relation entry, at build time', () => {
+    // a declared many-to-many hop lowers through the join ROOT; an entry
+    // that does not name the join row's columns has no phrase to lower to
     const users = {
       root: '$.User[*]',
       relations: { labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' } },
@@ -160,7 +162,28 @@ describe('every JL code fires', () => {
     };
     assert.throws(() => from(users).where((u) => u.labels.all().exists()),
       (e) => e instanceof LinqBuildError && e.code === 'JL0105'
-        && /Label_User/.test(e.message) && /load\(\{ include/.test(e.message));
+        && /join row's columns/.test(e.message));
+    // the same member, declared whole, lowers
+    const whole = {
+      root: '$.User[*]',
+      relations: { labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User',
+        targetKey: 'name', ownColumn: 'User_key', ownKey: 'id', targetColumn: 'Label_key' } },
+      execute: () => [],
+    };
+    assert.deepStrictEqual(from(whole).where((u) => u.labels.all().exists()).toDocument().$where,
+      { $exists: { $for: { r1: '$.Label_User[*]' },
+        $where: { $eq: ['$r1.User_key', '$it.id'] },
+        $return: { $for: { r2: '$.Label[*]' },
+          $where: { $eq: ['$r2.name', '$r1.Label_key'] }, $return: '$r2' } } });
+    // a relation KIND the surface does not lower still refuses, named
+    const strange = {
+      root: '$.User[*]',
+      relations: { labels: { to: 'Label', kind: 'sideways', targetKey: 'name' } },
+      execute: () => [],
+    };
+    assert.throws(() => from(strange).where((u) => u.labels.all().exists()),
+      (e) => e instanceof LinqBuildError && e.code === 'JL0105'
+        && /'sideways'/.test(e.message));
   });
 
   it('JL2001/JL2002/JL2003 — the terminal codes by name', () => {

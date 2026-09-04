@@ -516,6 +516,12 @@ export function relationTables(entities) {
           kind: relation.kind,
           joinTable: relation.joinTable,
           targetKey: entities.get(relation.to).keys[0],
+          // the join row's two columns and the key each references, so a
+          // hop can lower through the join ROOT (§10.7) rather than
+          // refusing for want of one
+          ownColumn: `${entity.name}_key`,
+          ownKey: entity.keys[0],
+          targetColumn: `${relation.to}_key`,
         }
         : {
           to: relation.to,
@@ -628,6 +634,13 @@ export function explainMapping(model) {
     for (const declaring of entity.relations) {
       const relation = declaring.relation;
       if (relation.kind !== 'manyToMany' || seenJoins.has(relation.joinTable)) continue;
+      // a join table is a queryable ROOT (§10.7), so its name shares one
+      // namespace with the entities: a collision would make `$.X[*]`
+      // mean two things
+      if (entities.has(relation.joinTable)) {
+        throw modelError(`the join table '${relation.joinTable}' has the name of a declared `
+          + 'entity, and both are query roots', declaring.docPath ?? entity.docPath);
+      }
       seenJoins.add(relation.joinTable);
       const [a, b] = [entity.name, relation.to].sort();
       mapping.joinTables[relation.joinTable] = {
@@ -638,4 +651,59 @@ export function explainMapping(model) {
     }
   }
   return mapping;
+}
+
+/**
+ * The read-only query ROOTS a model's join tables contribute (§10.7):
+ * one pseudo-entity per declared many-to-many join table, carrying
+ * exactly its two key columns and no document of its own. They are
+ * queryable — `$.<JoinTable>[*]` binds like any entity array — and they
+ * are NOT writable: `store.entity(name)` reads the model's own entity
+ * map, which these are deliberately not in, so a membership is still
+ * written through `link`/`unlink` and the tracker's join rows.
+ * @param {Map<string, any>} entities - the normalized entities
+ * @param {any} mapping - `explainMapping(...)`
+ * @returns {{ entities: Map<string, any>, mappings: Record<string, any> }}
+ */
+export function joinTableRoots(entities, mapping) {
+  /** @type {Map<string, any>} */
+  const roots = new Map();
+  /** @type {any} */
+  const mappings = {};
+  for (const [name, join] of Object.entries(mapping.joinTables ?? {})) {
+    const sides = [join.left, join.right];
+    /** @type {any} */
+    const properties = new Map();
+    /** @type {any} */
+    const schemaProperties = {};
+    const columns = [];
+    for (const side of sides) {
+      const referenced = entities.get(side.entity).properties.get(side.referencesKey);
+      properties.set(side.column, { name: side.column, type: referenced.type, key: true });
+      schemaProperties[side.column] = { type: referenced.type };
+      columns.push({ name: side.column, storage: referenced.type, source: 'column' });
+    }
+    roots.set(name, {
+      name,
+      docPath: `/entities/${sides[0].entity}` ,
+      schema: { type: 'object', required: sides.map((side) => side.column),
+        properties: schemaProperties },
+      properties,
+      keys: sides.map((side) => side.column),
+      relations: [],
+      version: null,
+      joinTable: true,
+    });
+    mappings[name] = {
+      table: name,
+      columns,
+      foreignKeys: [],
+      indexes: [],
+      keys: sides.map((side) => side.column),
+      // a join row IS its two keys: there is no document column to read,
+      // and the merge is handed an empty one
+      document: false,
+    };
+  }
+  return { entities: roots, mappings };
 }

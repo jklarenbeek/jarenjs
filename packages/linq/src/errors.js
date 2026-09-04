@@ -27,7 +27,7 @@ export const LINQ_CODES = Object.freeze({
   JL0102: 'a pen was asked for a construct the format cannot carry',
   JL0103: 'a $defs name collision, a dangling ref, or an unnamed recursion',
   JL0104: 'a pen-owned keyword through meta(), or an external a captured rule did not declare',
-  JL0105: 'a relation hop cannot lower: a many-to-many member, a composite or undeclared key, or a malformed relation entry',
+  JL0105: 'a relation hop cannot lower: a composite or undeclared key, an incomplete many-to-many entry, or a malformed relation record',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
   JL2001: 'first/single found no element',

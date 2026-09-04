@@ -125,12 +125,22 @@ describe('duplicate first-order values across composite pages produce no omissio
     // the tie-break branch appends the key
     assert.match(explained.sql, /WHERE \("r"\."age" > \? OR \("r"\."age" = \? AND "r"\."id" > \?\)\)/);
     assert.match(explained.sql, /ORDER BY "r"\."age" ASC NULLS FIRST, "r"\."id" ASC NULLS FIRST$/);
-    assert.deepStrictEqual(explained.order, continuation.order);
+    // the continuation's identity is reported as `identity`; `order` is
+    // the effective ORDER BY, which in keyset mode is the same terms
+    // with the appended key marked as the tie-breaker it is
+    assert.deepStrictEqual(explained.identity, continuation.order);
+    assert.deepStrictEqual(explained.order, [
+      { source: 'column', binding: null, column: 'age', path: null, desc: false, nullsFirst: true, tieBreaker: false },
+      { source: 'column', binding: null, column: 'id', path: null, desc: false, nullsFirst: true, tieBreaker: true },
+    ]);
     assert.strictEqual(explained.snapshot, false, 'age is not immutable: live pagination');
     // a page over the key alone is a snapshot, and appends nothing twice
     const byKey = users.explainLoad({ orderBy: '$it.id', after: { order: [{ column: 'id', desc: false, nullsFirst: true }], keys: ['u03'], key: 'u03' } });
     assert.strictEqual(byKey.snapshot, true);
-    assert.deepStrictEqual(byKey.order, [{ column: 'id', desc: false, nullsFirst: true }]);
+    assert.deepStrictEqual(byKey.identity, [{ column: 'id', desc: false, nullsFirst: true }]);
+    assert.deepStrictEqual(byKey.order, [
+      { source: 'column', binding: null, column: 'id', path: null, desc: false, nullsFirst: true, tieBreaker: false },
+    ]);
   });
 
   it('a composite primary key is appended whole, and the continuation carries it as a record', async () => {

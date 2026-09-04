@@ -1,0 +1,225 @@
+{
+ "group": "join-table roots",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Person": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "tags": {
+       "x-entity": {
+        "relation": {
+         "to": "Tag",
+         "many": true
+        }
+       }
+      }
+     }
+    }
+   },
+   "Tag": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "name"
+     ],
+     "properties": {
+      "name": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "hue": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Person": [
+   {
+    "id": "p1",
+    "name": "ada"
+   },
+   {
+    "id": "p2",
+    "name": "lin"
+   },
+   {
+    "id": "p3",
+    "name": "mo"
+   }
+  ],
+  "Tag": [
+   {
+    "name": "blue",
+    "hue": "#00f"
+   },
+   {
+    "name": "red",
+    "hue": "#f00"
+   }
+  ]
+ },
+ "memberships": {
+  "Person_Tag": [
+   {
+    "Person_key": "p1",
+    "Tag_key": "blue"
+   },
+   {
+    "Person_key": "p1",
+    "Tag_key": "red"
+   },
+   {
+    "Person_key": "p2",
+    "Tag_key": "red"
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "the join root answers exactly its two keys",
+   "query": {
+    "$for": {
+     "m": "$.Person_Tag[*]"
+    },
+    "$orderby": [
+     "$m.Person_key",
+     "$m.Tag_key"
+    ],
+    "$return": "$m"
+   }
+  },
+  {
+   "name": "a count of the memberships",
+   "query": {
+    "$count": {
+     "$for": {
+      "m": "$.Person_Tag[*]"
+     },
+     "$return": "$m"
+    }
+   }
+  },
+  {
+   "name": "the join root filtered on one key",
+   "query": {
+    "$for": {
+     "m": "$.Person_Tag[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$m.Tag_key",
+      "red"
+     ]
+    },
+    "$orderby": [
+     "$m.Person_key"
+    ],
+    "$return": "$m"
+   }
+  },
+  {
+   "name": "the join root joined to the owning entity",
+   "query": {
+    "$for": {
+     "m": "$.Person_Tag[*]",
+     "p": "$.Person[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$m.Person_key",
+      "$p.id"
+     ]
+    },
+    "$orderby": [
+     "$p.id",
+     "$m.Tag_key"
+    ],
+    "$return": {
+     "who": "$p.name",
+     "tag": "$m.Tag_key"
+    }
+   }
+  },
+  {
+   "name": "three roots through the join table",
+   "query": {
+    "$for": {
+     "p": "$.Person[*]",
+     "m": "$.Person_Tag[*]",
+     "t": "$.Tag[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$m.Person_key",
+        "$p.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$m.Tag_key",
+        "$t.name"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$p.id",
+     "$t.name"
+    ],
+    "$return": {
+     "who": "$p.name",
+     "hue": "$t.hue"
+    }
+   }
+  },
+  {
+   "name": "one key projected off the join root",
+   "query": {
+    "$for": {
+     "m": "$.Person_Tag[*]"
+    },
+    "$orderby": [
+     "$m.Person_key",
+     "$m.Tag_key"
+    ],
+    "$return": "$m.Tag_key"
+   }
+  },
+  {
+   "name": "the join root with no matching rows",
+   "query": {
+    "$for": {
+     "m": "$.Person_Tag[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$m.Tag_key",
+      "green"
+     ]
+    },
+    "$return": "$m"
+   }
+  }
+ ]
+}

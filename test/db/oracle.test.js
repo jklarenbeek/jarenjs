@@ -1,10 +1,13 @@
 //@ts-check
 /**
- * @file The differential oracle (D3, D8): the whole corpus in three
- * modes — native (pushdown on), forced-residual (pushdown off, the
- * regression net for future pushdown work), and generated (a seeded
- * property sweep over the pushable grammar; no `Math.random`, one
- * fixed seed, a flaky oracle is worse than none). Reading the engine's
+ * @file The differential oracle (D3, D8): the whole corpus in four
+ * modes — native (pushdown on), native over a store with every declared
+ * index REMOVED (so the same documents reach a plan with no generated
+ * column to read: a promotion that only agrees where an index exists is
+ * not a promotion), forced-residual (pushdown off, the regression net
+ * for future pushdown work), and generated (a seeded property sweep
+ * over the pushable grammar; no `Math.random`, one fixed seed, a flaky
+ * oracle is worse than none). Reading the engine's
  * published AST removed *syntactic* drift; this suite is what closes
  * the *semantic* gap — SQL affinity, collation and null propagation
  * against Jaren's JSON types and empty sequences. The construct
@@ -25,23 +28,26 @@ const startedAt = process.hrtime.bigint();
 const tally = new Map();
 const groups = loadGroups();
 
-for (const mode of /** @type {const} */ (['native', 'residual'])) {
-  describe(`oracle corpus — ${mode} mode`, () => {
+for (const [mode, side] of /** @type {const} */ ([
+  ['native', 'indexed'], ['native', 'unindexed'], ['residual', 'indexed'],
+])) {
+  const label = mode === 'native' ? `native mode, ${side}` : `${mode} mode`;
+  describe(`oracle corpus — ${label}`, () => {
     for (const group of groups) {
       describe(group.group, () => {
         /** @type {any} */
         let opened = null;
         const openOnce = async () => {
-          if (opened === null) opened = await storeForGroup(group);
+          if (opened === null) opened = await storeForGroup(group, undefined, side);
           return opened;
         };
         for (const kase of group.cases) {
           it(kase.name, async () => {
-            if (mode === 'native') recordConstructs(kase.query, tally);
+            if (mode === 'native' && side === 'indexed') recordConstructs(kase.query, tally);
             const { collection } = await openOnce();
             const divergence = await runCase(collection, group.documents, kase, mode);
             assert.strictEqual(divergence, null,
-              divergence === null ? '' : `${group.group}/${kase.name} [${mode}] diverged\n`
+              divergence === null ? '' : `${group.group}/${kase.name} [${label}] diverged\n`
                 + `  sql:      ${divergence.sql ?? '<none>'}\n`
                 + `  engine:   ${JSON.stringify(divergence.expected)}\n`
                 + `  pushdown: ${JSON.stringify(divergence.actual)}`);

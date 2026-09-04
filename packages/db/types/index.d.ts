@@ -129,10 +129,10 @@ export interface CursorBarrier {
 }
 
 /**
- * The safe execution profile (MODEL-FORMAT §8): four independent bounds
+ * The safe execution profile (MODEL-FORMAT §8): five independent bounds
  * — engine limits, a row bound, reference containment, mandatory
- * predicates — plus the graph bounds. Every member is optional over the
- * `'safe'` defaults. A budget the engine can count is ENFORCED; one it
+ * predicates, a member allow-list — plus the graph bounds. Every member
+ * is optional over the `'safe'` defaults. A budget the engine can count is ENFORCED; one it
  * cannot count on SQLite (visited rows, elapsed statement time) is
  * refused at preflight on plan shape (`refuseFullScan`) or reported as
  * unavailable (`explain().budget`), never approximated.
@@ -159,6 +159,16 @@ export interface ProfileSpec {
   maxIncludedRows?: number | null;
   maxDepth?: number | null;
   maxBytes?: number | null;
+  /** Per ROOT (a collection or an entity), the members a document may
+   * READ, as the model's own singular index-path spelling (`'$.name'`,
+   * `'$.address.city'`). Allowing a member allows everything under it
+   * and none of its siblings. A root the list does not name is
+   * unrestricted; a root the MODEL does not declare is `JD0011` before
+   * any statement. Reading a root item whole — the bare binding, an
+   * alias of it, a wildcard with no singular prefix — is refused rather
+   * than narrowed, and so is a graph `load()` of a policed entity, which
+   * answers whole documents by definition. */
+  members?: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface ExecuteOptions {
@@ -240,6 +250,24 @@ export interface OrderIdentity {
   readonly nullsFirst: boolean;
 }
 
+/** One term of the order a statement actually executes under. `source`
+ * is closed: a mapped `column`, a `document` path the dialect extracts,
+ * the `group` key of a bucketed plan, or the row `identity` an emitter
+ * appends so a sequence answers in insertion order. Only a `column`
+ * term carries a column name, only a `document` term a path; the
+ * identity term carries neither, and its `nullsFirst` is `null` because
+ * a row identity is never absent. `tieBreaker` marks a term the plan
+ * appended rather than one the caller declared. */
+export interface EffectiveOrderTerm {
+  readonly source: 'column' | 'document' | 'group' | 'identity';
+  readonly binding: string | null;
+  readonly column: string | null;
+  readonly path: readonly (string | number)[] | null;
+  readonly desc: boolean;
+  readonly nullsFirst: boolean | null;
+  readonly tieBreaker: boolean;
+}
+
 /**
  * The continuation a page emits (MODEL-FORMAT §10.5): unsigned,
  * structural, opaque — the ordering's identity, so it cannot be
@@ -288,10 +316,16 @@ export interface LoadExplanation {
   /** The per-root bounds every row-projecting include runs under;
    * `null` is the unbounded case a caller spelled. */
   bounds: ReadonlyArray<{ path: string; maxRows: number | null; maxBytes: number | null }>;
-  /** The keyset ordering's identity, with the appended tie-breaker, and
-   * whether a page over it is a snapshot; `null` for a load outside
-   * keyset mode, whose tie-breaker is the row identity. */
-  order: readonly OrderIdentity[] | null;
+  /** The effective deterministic order the statement executes under, in
+   * every load mode: the declared terms, then the tie-breaker the clause
+   * appends — the primary key in keyset mode, the row identity
+   * otherwise. */
+  order: readonly EffectiveOrderTerm[];
+  /** The keyset ordering's IDENTITY: the value a continuation carries and
+   * is checked against (`JD0035`); `null` for a load outside keyset
+   * mode, which has no continuation to emit. Whether a page over it is a
+   * snapshot is `snapshot`. */
+  identity: readonly OrderIdentity[] | null;
   snapshot: boolean | null;
   /** A graph load pulls one root row per statement row, always. */
   streaming: 'row';
@@ -1244,6 +1278,15 @@ export declare const KEY_COLUMN: string;
 export declare const DOC_COLUMN: string;
 export declare function planQuery(document: unknown, shape: unknown, options?: unknown): unknown;
 export declare function assertDecidedKind(node: unknown): void;
+/** The planner's reason vocabulary: every cause a plan can name for work
+ * it left in the engine, under a stable identifier. Most entries are the
+ * whole sentence; the four that quote the caller's own values carry the
+ * stable opening they begin with. */
+export declare const PLANNER_REASONS: Readonly<Record<string,
+  { readonly text: string } | { readonly prefix: string }>>;
+/** The vocabulary identifier of one reason sentence, or `null` when no
+ * entry claims it. */
+export declare function reasonId(reason: string): string | null;
 export declare function entityShape(entity: unknown, entityMapping: unknown): unknown;
 export declare function entityPathRef(node: unknown, slot: number, shape: unknown): unknown;
 export declare function planEntityPredicate(node: unknown, slot: number, shape: unknown): unknown;
@@ -1256,6 +1299,19 @@ export declare function parseGraphRow(node: unknown, row: unknown, docField?: st
 export declare function selectPlan(collection: string): unknown;
 export declare function conjoin(plan: unknown, predicate: unknown): unknown;
 export declare function assertNoSqlText(plan: unknown): void;
+/** Whether an order term reads its value from a mapped column rather
+ * than the document. */
+export declare function ordersByColumn(ref: unknown): boolean;
+/** The effective order a set of declared terms executes under: the terms,
+ * then the tie-breaker the emitter appends — the primary key when
+ * `keyColumns` is given (keyset mode), one row identity per binding
+ * otherwise. */
+export declare function effectiveOrder(
+  terms: unknown, options?: { bindings?: (string | null)[]; keyColumns?: readonly string[] },
+): EffectiveOrderTerm[];
+/** The effective order of one plan, in the same normalized form its
+ * emitter renders; `null` for a statement that orders nothing. */
+export declare function planOrder(plan: unknown): EffectiveOrderTerm[] | null;
 export declare const PLAN_VERSION: number;
 export declare function typeOfPath(shape: unknown, segments: unknown): unknown;
 export declare function isNumericType(type: unknown): boolean;

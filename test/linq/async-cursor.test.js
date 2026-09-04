@@ -187,18 +187,33 @@ describe('cancellation performs no further pulls', () => {
 });
 
 describe('a barrier plan still materializes and records why', () => {
-  it('a projection is a set residual: the cursor buffers and names $return', async () => {
+  it('a projection of member paths STREAMS; one an operator touches buffers and names $return', async () => {
     const { client, counters } = await seeded(6);
-    const chain = client.entities.Row.select((r) => r.n);
+    // a member path projects into the statement, so the cursor pulls
+    const streamed = client.entities.Row.select((r) => r.n);
+    const rowCursor = client.entities.Row.cursor(streamed.toDocument());
+    assert.strictEqual(rowCursor.streaming, 'row');
+    assert.strictEqual(rowCursor.barrier, null);
+    const pulled = [];
+    for await (const n of streamed) {
+      pulled.push(n);
+      if (pulled.length === 2) break;
+    }
+    assert.deepStrictEqual(pulled, [1, 2]);
+    assert.ok(counters.iterate >= 1, 'a row-streamable plan pulls through iterate()');
+
+    counters.iterate = 0;
+    counters.all = 0;
+    const chain = client.entities.Row.select((r) => ({ c: r.n.add(1) }));
     const cursor = client.entities.Row.cursor(chain.toDocument());
     assert.strictEqual(cursor.streaming, 'buffered');
     assert.strictEqual(cursor.barrier?.construct, '$return');
     const seen = [];
-    for await (const n of chain) {
-      seen.push(n);
+    for await (const item of chain) {
+      seen.push(item);
       if (seen.length === 2) break;
     }
-    assert.deepStrictEqual(seen, [1, 2]);
+    assert.deepStrictEqual(seen, [{ c: 2 }, { c: 3 }]);
     assert.strictEqual(counters.iterate, 0, 'a barrier opens no row iterator');
     assert.ok(counters.all >= 1, 'the fetched root was materialised, as declared');
     await client.close();

@@ -22,6 +22,7 @@ describe('the plan algebra', () => {
       window: null,
       rank: null,
       bucket: null,
+      group: null,
       aggregate: null,
       project: 'document',
     });

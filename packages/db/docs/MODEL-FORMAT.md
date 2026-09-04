@@ -1074,7 +1074,7 @@ document path (`/$where/…`, never the hatch's `/$return/…`).
 A query document that arrives from a tenant, a remote client or a
 language model can reach a database. Parameter binding makes injection
 structurally impossible; it does nothing about resource exhaustion or
-cross-tenant reads. A **profile** composes four independent bounds:
+cross-tenant reads. A **profile** composes five independent bounds:
 
 ```js
 const store = await openStore(model, { driver, profile: 'safe' });
@@ -1092,7 +1092,7 @@ per call, or set it once on the store and pass none. The defaults: engine limits
 `maxRows: 1000`, no externals, no host functions, no collations, all
 of the store's collections, no mandatory predicates, no scan refusal,
 and no graph caps (`maxIncludedRows`, `maxDepth`, `maxBytes` all
-`null`).
+`null`), and no member allow-list (`members: null`).
 
 **One profile, every engine.** A profile — the store's, or the call's
 through `ExecuteOptions.profile` on `execute`, `query`, `cursor`,
@@ -1113,6 +1113,35 @@ graph caps are hard maxima an include's own declaration cannot exceed:
 (or `Infinity`), `maxDepth` refuses a deeper load, and `maxBytes`
 refuses any one item — a document, an entity row, a loaded root graph —
 larger than that many serialised bytes (`JD2076`).
+
+**The member allow-list.** `collections` says which roots a document
+may read; `members` says which MEMBERS of a root it may read. It is
+keyed by collection or entity name, and each value is a list in the
+model's own singular index-path spelling:
+
+```js
+collection.query(doc, { profile: {
+  members: { docs: ['$.id', '$.n'], User: ['$.id', '$.age'] } } });
+```
+
+A root the list does not name is unrestricted; a root the MODEL does
+not declare is `JD0011` before any statement runs, because a policy
+that applies to nothing is a policy failing open. Allowing a member
+allows everything UNDER it (`$.address` allows `$.address.city`) and
+none of its siblings (`$.address.city` does not allow `$.address`,
+which would answer the rest of the address). One collector reads every
+member path a document references — in `$where`, in `$orderby`, in
+`$return`, in a join condition, in a registered operator's operands —
+so a denial is the same `JD0011` wherever the member was named, and it
+names the root, the member and the place in the caller's document.
+
+Reading a root item WHOLE is refused, not narrowed: `$return: '$it'`,
+an alias of the binding through `$let`, and a wildcard with no singular
+prefix each answer members the list does not allow, and no list can
+cover them. For the same reason a graph `load()`, `page()` or
+`loadCursor()` over a policed entity is refused — it answers whole
+documents by definition — and the refusal names the members that ARE
+allowed, which the document query engine can project.
 
 **Enforced, or refused — never approximated.** A budget the engine
 can COUNT is enforced during execution: rows returned, rows
@@ -1313,6 +1342,38 @@ to build one on — a crude guess would be dishonest. It pushes
 deterministically and this profile is published so the shape of the win
 is known; add a narrowing predicate or a `LIMIT` and the push pays.
 
+**`pushable: 'aggregate'` — the whole-sequence fold, in SQL.** A pack
+entry marked `'aggregate'` is lowered to a registered **SQL aggregate**
+where the driver has one (`capabilities.aggregateFunctions`): the plan
+emits `… SELECT jaren_a_<hash>(<the member's column>)`, SQLite drives
+the accumulation, and the SAME pure function the residual would call
+folds the values it collected. `$mean`, `$median`, `$variance` and
+`$stddev` of the statistics pack carry the token.
+
+The token is a promise about the FOLD, and three rules enforce it:
+
+- **order-insensitive.** A SQL aggregate visits rows in an order
+  nothing specifies, so only a summary whose value depends on the
+  multiset alone may be declared pushable.
+- **one sequence operand.** A SQL aggregate's final step sees only what
+  the row steps accumulated, so a second operand does not reach a fold
+  over zero rows. An entry declaring anything but a single
+  `'seq<number>'` operand and a `'number'` result is a `TypeError` at
+  `openStore`, naming the operator — loud, rather than a silent
+  non-promotion. `$percentile`, whose second operand is the percentile,
+  is therefore `pushable: false` and folds in the engine.
+- **a numeric member that cannot hold `null`.** SQL cannot tell a
+  stored `null` from an absent member and the engine's sequence can, so
+  the promotion needs the same schema-typed path the core `$sum` and
+  `$avg` need. An absent member contributes nothing on either side.
+
+A grouped fold is not promoted — a `$groupby` outside the fixed
+temporal bucket is engine work (§6) — and neither is an aggregate under
+a window. Both answer what the engine answers, and `explain()` names
+the reason. As with the scalar hatch, a profiled document triggers no
+registration: the same `$mean` under a profile folds in the residual,
+and `strict: true` refuses it by name (`JD0010`).
+
 **The same profile for a spatial predicate.** A `$within` against a
 LITERAL region takes the hatch only on a collection that declares **no**
 derived spatial index on the member: where one is declared the
@@ -1343,15 +1404,11 @@ it returns, which is faster than either column above.
 
 **The honest ceiling.** A `pushable:false` operator (a whole-series
 `$npv`, an `$sma`) is never a UDF — it stays the residual, `explain()`
-lists no `udfs` for it. Aggregate-UDF pushdown (`db.aggregate` step/final
-over `GROUP BY`) is **not emitted**: no shipped pack marks an entry
-`pushable:'aggregate'` (the finance/stats aggregators fold a *per-document*
-sequence — that is a per-row scalar to SQL, already covered by the scalar
-path where marked — not a cross-row column), and cross-row aggregate
-pushdown additionally waits on `$groupby` pushdown, itself a deliberate
-residual today. The `aggregateFunctions` capability is probed and
-reported regardless, so the day a pack marks `'aggregate'` the driver
-gate is already in place.
+lists no `udfs` for it, and neither does a `pushable:'aggregate'` entry
+whose shape the store refuses (above). A registered aggregate lowers
+only as the top-level fold of a whole selection: inside a `$groupby`'s
+`$return` the closed BUILT-IN set is what SQL groups by, and a
+registered summary there stays the engine's.
 
 ## 9. Entities, the `x-entity` vocabulary, relations
 
@@ -1837,13 +1894,17 @@ because joins make residuals more expensive — accompanied by the
 `EXPLAIN QUERY PLAN` narrative (SQLite exposes no row estimates;
 a number appears only where `capabilities.rowEstimates` is filled):
 
-- three or more bindings;
+- a binding nothing joins to — the cartesian product a nested-loop plan
+  must never emit by accident; every binding past the first attaches by
+  a column equality to one already joined, and a graph that does not
+  close is the engine's;
 - non-equality join predicates, and disjunctions spanning bindings;
-- `$groupby`, except the `$time-bucket` ladder the series plan pushes
-  (README, *Time series*) — the engine's post-group cardinality
-  rebinding deserves its own order; the count-of-related-rows case
-  ORMs are bad at is already native via `count: true` includes;
-- projections (`$return` objects) — over one binding or across a join;
+- a `$groupby` whose key is untyped or admits `null`, whose `$return`
+  reads the binding (after a grouping it holds the group's ROWS), or
+  whose `$orderby` names anything but a group key; a window over the
+  groups, or an aggregate of them;
+- projections (`$return` objects) ACROSS a join — over one binding a
+  nested shape of member paths lowers (§ the projection tree);
 - externals against document paths; booleans and `null` at bind time;
 - everything phase A already listed (§8 of `QUERY-FORMAT.md`
   notwithstanding, the truth table is the contract).
@@ -1865,6 +1926,29 @@ arithmetic:
   where the in-memory engine refuses. Everywhere else an ordering or
   an aggregate over a path that admits `null`, or over a boolean path,
   is a named residual, so the two paths keep answering alike.
+
+### 10.7 The join table as a query root
+
+A declared many-to-many join table is a **read-only query root**:
+`$.<JoinTable>[*]` binds like any entity array and answers rows carrying
+exactly its two key columns — `<A>_key` and `<B>_key`, the names the DDL
+creates — and nothing else, because a join row has no document of its
+own. It joins to the entities it relates like any other binding, so
+`Person → Person_Tag → Tag` is one statement over three roots.
+
+It is a ROOT and not an entity: `store.entity('<JoinTable>')` is
+`JD2004`, memberships are still written through `link`/`unlink` and the
+unit of work, and nothing about the table's lifecycle changes. The two
+namespaces are one, so a join table whose name is also a declared
+entity's is refused at open (`JD0005`) — `$.X[*]` may mean one thing.
+
+Because the root exists, a many-to-many **hop** lowers: a chain's
+`u.labels` becomes two links — the join row that names the membership,
+then the target row it names — instead of the `JL0105` refusal it was.
+A relation entry that does not name its join row's columns
+(`{ joinTable, ownColumn, ownKey, targetColumn, targetKey }` — §10.1)
+still refuses with that code, because there is then nothing to lower
+through.
 
 
 ## 11. The unit of work

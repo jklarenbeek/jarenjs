@@ -339,7 +339,9 @@ describe('a linq chain over an entity set (entity roots)', () => {
     assert.strictEqual(store.entity('Post'), store.entity('Post'));
     assert.strictEqual(store.sync.entity('User').execute(doc), 'lin@x', 'a value on the sync surface');
     assert.strictEqual(await store.entity('User').execute(doc), 'lin@x');
-    assert.strictEqual(store.sync.entity('User').explain(doc).mode, 'set');
+    // one member path over a binding projects, exactly as it does over
+    // a collection: the statement fetches the member, not the document
+    assert.strictEqual(store.sync.entity('User').explain(doc).mode, 'native');
     assert.strictEqual(store.sync.entity('User').explain(bare).mode, 'native');
     assert.strictEqual((await store.entity('Post').explain(bare)).mode, 'native',
       'a handle contributes its root as a hint; the document is over the multi-entity root');
@@ -359,15 +361,21 @@ describe('a linq chain over an entity set (entity roots)', () => {
     });
     const explained = store.sync.explain(doc);
     assert.strictEqual(explained.mode, 'native');
-    assert.deepStrictEqual(explained.join,
-      { left: { binding: 'it', column: 'authorId' }, right: { binding: 'it2', column: 'id' } });
+    assert.deepStrictEqual(explained.joins, [
+      { binding: 'it', on: [] },
+      { binding: 'it2', on: [{ op: 'eq', left: { binding: 'it', column: 'authorId' },
+        right: { binding: 'it2', column: 'id' } }] },
+    ]);
     assert.deepStrictEqual(chain.toArray(), ENTITY_POSTS);
-    // a projected join is the declared residual (MODEL-FORMAT §10.6) and agrees with the engine
+    // a projected join lowers too: the statement fetches one value/type
+    // pair per DISTINCT leaf of the shape, from each leaf's own binding
     const projected = from(posts).join(from(users), (p) => p.authorId, (u) => u.id,
       (p, u) => ({ title: p.title, by: u.email }));
     const root = { User: ENTITY_USERS, Post: ENTITY_POSTS };
     assert.deepStrictEqual(projected.toArray(), compileJsonQuery([projected.toDocument()])(root));
-    assert.strictEqual(store.sync.explain(projected.toDocument()).mode, 'set');
+    const projectedPlan = store.sync.explain(projected.toDocument());
+    assert.strictEqual(projectedPlan.mode, 'native');
+    assert.doesNotMatch(projectedPlan.sql, /__doc/, 'no document blob is fetched');
     const other = await seededEntities();
     assert.throws(() => from(posts).join(from(other.sync.entity('User')), (p) => p.authorId, (u) => u.id, (p) => p),
       (e) => e.code === 'JL0005' && /same source/.test(e.message));
@@ -417,12 +425,16 @@ describe('the relation table on the entity handles (MODEL-FORMAT §10.1)', () =>
     const expected = {
       User: {
         posts: { to: 'Post', kind: 'oneToMany', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' },
-        labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' },
+        labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name',
+          ownColumn: 'User_key', ownKey: 'id', targetColumn: 'Label_key' },
       },
       Post: {
         author: { to: 'User', kind: 'oneToOne', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' },
       },
       Label: {},
+      // the join table is a read-only query root of its own (§10.7),
+      // so it carries a table too — an empty one, having no relations
+      Label_User: {},
     };
     assert.deepStrictEqual(store.relations, expected);
     assert.strictEqual(store.sync.relations, store.relations, 'one record, both surfaces');
@@ -494,9 +506,15 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
     [{ title: 'p1', n: 2 }, { title: 'p2', n: 1 }, { title: 'p3', n: 2 }]);
     assert.strictEqual(from(users).where((u) => u.posts.all().exists()).count(), 2);
     assert.strictEqual(await fromAsync(store.entity('User')).where((u) => u.posts.all().exists()).count(), 2);
-    // the many-to-many hop is refused at build time, naming the join table the model made
-    assert.throws(() => from(users).where((u) => u.labels.all().exists()),
-      (e) => e.code === 'JL0105' && /Label_User/.test(e.message));
+    // the many-to-many hop lowers through the join ROOT the model made,
+    // and agrees with the engine over the fetched roots exactly as every
+    // other hop does — the join table is one more root to fetch
+    const membership = from(users).where((u) => u.labels.all().exists()).select((u) => u.id);
+    assert.match(JSON.stringify(membership.toDocument()), /Label_User/,
+      'the phrase names the join root, not a refusal');
+    assert.deepStrictEqual(membership.toArray(),
+      compileJsonQuery([membership.toDocument()])({ ...root, Label_User: [] }),
+      'no memberships were written, so no user has a label');
     await store.close();
   });
 

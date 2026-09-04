@@ -165,3 +165,52 @@ export function registerFragment(connection, registered, fragment) {
   registered.set(fragment.key, name);
   return name;
 }
+
+/**
+ * The SQL identifier for one registered aggregate. Unlike a predicate
+ * fragment, the identity IS the operator name — one registry, one
+ * function per name — so the fingerprint has nothing to disambiguate.
+ * @param {string} name
+ * @returns {string}
+ */
+const aggregateNameFor = (name) => `jaren_a_${hashContent(name)}`;
+
+/**
+ * Register a pushable aggregate once per store and answer the SQL name
+ * to call. The SQL fold accumulates the column's values and hands them
+ * to the SAME pure function the residual would call, so the two sides
+ * differ in who drives the loop and in nothing else.
+ *
+ * A `NULL` column value is SKIPPED, because the engine's sequence has no
+ * item where the member is absent — which is why only a path the schema
+ * types as a number that cannot hold `null` reaches here: a stored
+ * `null` and an absent member are one value in SQL, and dropping a
+ * present `null` would answer where the engine does not.
+ *
+ * `undefined` — what these summaries answer for an input they cannot
+ * summarise — becomes SQL `NULL`, which the aggregate decoder reads back
+ * as the empty answer, exactly as the engine's empty sequence does.
+ * @param {any} connection
+ * @param {Map<string, string>} registered - operator name → SQL name
+ * @param {string} name - the registry operator name (`$mean`)
+ * @param {{ fn: Function }} spec
+ * @returns {string} the SQL function name to call
+ */
+export function registerAggregateOperator(connection, registered, name, spec) {
+  const owned = registered.get(name);
+  if (owned !== undefined) return owned;
+  const sqlName = aggregateNameFor(name);
+  connection.registerAggregate(sqlName, {
+    start: () => [],
+    step: (values, value) => {
+      if (value !== null && value !== undefined) values.push(value);
+      return values;
+    },
+    result: (values) => {
+      const out = spec.fn(values);
+      return out === undefined || out === null ? null : out;
+    },
+  });
+  registered.set(name, sqlName);
+  return sqlName;
+}

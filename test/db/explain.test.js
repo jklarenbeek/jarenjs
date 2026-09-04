@@ -128,7 +128,7 @@ describe('a set, group or barrier plan declares that it materializes', () => {
       [users, { $for: { it: '$[*]' }, $groupby: { g: '$it.active' }, $return: { g: '$g', n: { $count: '$it' } } }, {}, '$groupby'],
       [users, FLAGGED, { flag: true }, 'external'],
       [users, [{ $for: { it: '$[*]' }, $return: '$it' }], {}, 'window'],
-      [rows, { $for: { r: '$.Row[*]' }, $return: '$r.n' }, {}, '$return'],
+      [rows, { $for: { r: '$.Row[*]' }, $return: { n: { $count: '$r.n' } } }, {}, '$return'],
       [rows, { $for: { r: '$.Row[*]' }, $let: { k: 1 }, $return: '$r' }, {}, '$let'],
     ];
     for (const [handle, document, externals, construct] of cases) {
@@ -154,7 +154,7 @@ describe('the classification agrees with what the cursor does', () => {
       [users, FLAGGED, { flag: 'yes' }],
       [users, { $count: { $for: { it: '$[*]' }, $return: '$it' } }, {}],
       [rows, { $for: { r: '$.Row[*]' }, $where: { $gt: ['$r.n', 1] }, $return: '$r' }, {}],
-      [rows, { $for: { r: '$.Row[*]' }, $return: '$r.n' }, {}],
+      [rows, { $for: { r: '$.Row[*]' }, $return: { n: { $count: '$r.n' } } }, {}],
       [rows, { $count: { $for: { r: '$.Row[*]' }, $return: '$r' } }, {}],
     ];
     for (const [handle, document, externals] of cases) {
@@ -193,6 +193,159 @@ describe('the classification agrees with what the cursor does', () => {
   });
 });
 
+describe('an explanation names the order its statement executes under', () => {
+  const ORDER_MODEL = {
+    $model: '0.1',
+    collections: {
+      docs: {
+        schema: { type: 'object', properties: { id: { type: 'string' }, n: { type: 'integer' } } },
+        key: '/id',
+      },
+    },
+    entities: {
+      Item: {
+        schema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'integer', 'x-entity': { key: true } },
+            // two rows share every `bucket`, so the appended tie-breaker
+            // is what decides the sequence — the term the explanation
+            // reports is load-bearing, not decoration
+            bucket: { type: 'integer', 'x-entity': { index: true } },
+            inner: { type: 'object', properties: { tag: { type: 'string' } } },
+          },
+        },
+      },
+    },
+  };
+  const ITEMS = [
+    { id: 1, bucket: 2, inner: { tag: 'm' } },
+    { id: 2, bucket: 1, inner: { tag: 'z' } },
+    { id: 3, bucket: 2, inner: { tag: 'a' } },
+    { id: 4, bucket: 1, inner: { tag: 'a' } },
+  ];
+
+  const freshOrder = async () => {
+    const store = await openStore(ORDER_MODEL, { driver: statementCountingDriver({}) });
+    const items = store.entity('Item');
+    // created in this order, so the row identity IS this order
+    for (const item of ITEMS) await items.create(item);
+    const docs = store.collection('docs');
+    for (const item of ITEMS) await docs.insert({ id: `d${item.id}`, n: item.bucket });
+    return { store, items, docs };
+  };
+
+  /**
+   * The sequence the reported order predicts, from the documents alone:
+   * an `identity` term is the creation order, which is what the row
+   * identity of a never-updated table is.
+   */
+  const predicted = (terms, documents) => {
+    const valueOf = (term, doc, index) => {
+      if (term.source === 'identity') return index;
+      if (term.source === 'column') return doc[term.column] ?? null;
+      return term.path.reduce((node, segment) => node?.[segment], doc) ?? null;
+    };
+    return documents
+      .map((doc, index) => ({ doc, index }))
+      .sort((left, right) => {
+        for (const term of terms) {
+          const a = valueOf(term, left.doc, left.index);
+          const b = valueOf(term, right.doc, right.index);
+          if (a === b) continue;
+          // an absent key sorts where the term says it does
+          if (a === null) return term.nullsFirst ? -1 : 1;
+          if (b === null) return term.nullsFirst ? 1 : -1;
+          return (a < b ? -1 : 1) * (term.desc ? -1 : 1);
+        }
+        return 0;
+      })
+      .map((entry) => entry.doc.id);
+  };
+
+  it('an explicit non-keyset ordering reports its terms and the appended tie-breaker', async () => {
+    const { store, items } = await freshOrder();
+    const explained = items.explainLoad({ orderBy: '$it.bucket' });
+    assert.strictEqual(explained.pagination, 'none', 'no keyset here — and the order is still known');
+    assert.deepStrictEqual(explained.order, [
+      { source: 'column', binding: null, column: 'bucket', path: null, desc: false, nullsFirst: true, tieBreaker: false },
+      { source: 'identity', binding: null, column: null, path: null, desc: false, nullsFirst: null, tieBreaker: true },
+    ]);
+    assert.strictEqual(explained.identity, null, 'the continuation identity is a keyset fact, and stays one');
+    const loaded = await Promise.resolve(items.load({ orderBy: '$it.bucket' }));
+    assert.deepStrictEqual(loaded.map((row) => row.id), [2, 4, 1, 3]);
+    assert.deepStrictEqual(loaded.map((row) => row.id), predicted(explained.order, ITEMS),
+      'the reported order predicts the sequence the statement answers');
+    await store.close();
+  });
+
+  it('a load with no declared ordering reports the implicit tie-breaker alone', async () => {
+    const { store, items } = await freshOrder();
+    const explained = items.explainLoad({});
+    assert.deepStrictEqual(explained.order, [
+      { source: 'identity', binding: null, column: null, path: null, desc: false, nullsFirst: null, tieBreaker: true },
+    ]);
+    const loaded = await Promise.resolve(items.load({}));
+    assert.deepStrictEqual(loaded.map((row) => row.id), [1, 2, 3, 4]);
+    assert.deepStrictEqual(loaded.map((row) => row.id), predicted(explained.order, ITEMS));
+    await store.close();
+  });
+
+  it('a genuinely unordered statement reports no order, and appends none either', async () => {
+    const { store, docs } = await freshOrder();
+    for (const document of [{ $count: { $for: { it: '$[*]' }, $return: '$it' } },
+      { $sum: { $for: { it: '$[*]' }, $return: '$it.n' } }]) {
+      const explained = await Promise.resolve(docs.explain(document));
+      assert.strictEqual(explained.mode, 'native', JSON.stringify(document));
+      assert.strictEqual(explained.order, null, JSON.stringify(document));
+      assert.doesNotMatch(explained.sql, /ORDER BY/,
+        'an aggregate answers one row: the plan appends no identity, and the explanation does not invent one');
+    }
+    await store.close();
+  });
+
+  it('the vocabulary is closed, and every term agrees with the clause it describes', async () => {
+    const { store, items, docs } = await freshOrder();
+    const cases = [
+      [items.explainLoad({ orderBy: '$it.inner.tag' }), 'document'],
+      [items.explainLoad({ orderBy: { $key: '$it.bucket', $dir: 'desc' } }), 'column'],
+      [await Promise.resolve(docs.explain({ $for: { it: '$[*]' }, $orderby: ['$it.n'], $return: '$it' })), 'document'],
+    ];
+    for (const [explained, source] of cases) {
+      assert.strictEqual(explained.order[0].source, source);
+      assert.strictEqual(explained.order.at(-1).source, 'identity');
+      assert.strictEqual(explained.order.at(-1).tieBreaker, true);
+      for (const term of explained.order) {
+        assert.ok(['column', 'document', 'group', 'identity'].includes(term.source), term.source);
+        assert.strictEqual(term.column === null, term.source !== 'column' && term.source !== 'group');
+        assert.strictEqual(term.path === null, term.source !== 'document');
+        assert.strictEqual(term.nullsFirst === null, term.source === 'identity');
+      }
+      // every term the report names is spelled in the clause it
+      // describes, and the identity closes it
+      const clause = explained.sql.split(' ORDER BY ')[1];
+      assert.match(clause, /"rowid"$/, clause);
+      for (const term of explained.order) {
+        if (term.source === 'column') assert.ok(clause.includes(`"${term.column}"`), clause);
+        if (term.source === 'document') {
+          for (const segment of term.path) assert.ok(clause.includes(`"${segment}"`), clause);
+        }
+        if (term.source !== 'identity') {
+          assert.ok(clause.includes(term.desc ? 'DESC' : 'ASC'), clause);
+          assert.ok(clause.includes(term.nullsFirst ? 'NULLS FIRST' : 'NULLS LAST'), clause);
+        }
+      }
+    }
+    // the document-path term names the path the clause extracts
+    const nested = items.explainLoad({ orderBy: '$it.inner.tag' });
+    assert.deepStrictEqual(nested.order[0].path, ['inner', 'tag']);
+    const loaded = await Promise.resolve(items.load({ orderBy: '$it.inner.tag' }));
+    assert.deepStrictEqual(loaded.map((row) => row.id), predicted(nested.order, ITEMS));
+    await store.close();
+  });
+});
+
 describe('strictStreaming refuses a buffered plan before any statement runs', () => {
   it('names the barrier, runs nothing, and leaves a row-streamable plan alone', async () => {
     const { store, users, rows, counters } = await fresh();
@@ -201,8 +354,8 @@ describe('strictStreaming refuses a buffered plan before any statement runs', ()
       codeIs('JD0037', /strictStreaming refused a plan that buffers: '\$let'/));
     assert.throws(() => users.query(FLAGGED, { externals: { flag: true }, strictStreaming: true }),
       codeIs('JD0037', /'external' — the external 'flag'/));
-    assert.throws(() => rows.cursor({ $for: { r: '$.Row[*]' }, $return: '$r.n' }, { strictStreaming: true }),
-      codeIs('JD0037', /'\$return'/));
+    assert.throws(() => rows.cursor({ $for: { r: '$.Row[*]' }, $return: { n: { $count: '$r.n' } } },
+      { strictStreaming: true }), codeIs('JD0037', /'\$return'/));
     assert.strictEqual(counters.all + counters.iterate + counters.next, 0, 'no statement ran');
     const seen = [];
     for await (const id of users.query(FLAGGED, { externals: { flag: 'yes' }, strictStreaming: true })) seen.push(id);

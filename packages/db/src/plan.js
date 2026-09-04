@@ -52,7 +52,7 @@ import {
 } from './derive.js';
 import { KNN_MARGIN } from './knn.js';
 import {
-  SERIES_ROOT_OPS, NATIVE_AGGREGATES, seriesReason,
+  SERIES_ROOT_OPS, NATIVE_AGGREGATES, SERIES_REASONS, seriesReason,
   instantIndexesOver, seekingIndexFor, filterFacts, fixedLadder, instantRefusal,
   valueRefusal, seriesRecord, singularSelector,
 } from './series.js';
@@ -93,6 +93,105 @@ const KIND_REASONS = {
   quant: 'a quantifier over a nested sequence runs in the engine',
 };
 
+/** Why one PREDICATE stayed in the engine. */
+const PREDICATE_REASONS = {
+  notPredicate: 'not a predicate the planner translates',
+  negatedPrefilter: 'a negated predicate cannot ride an implied pre-filter '
+    + '(negating a superset drops rows)',
+  existence: 'existence tests translate only over a singular member path on the binding',
+  joinTerritory: 'comparisons where both sides are paths are join territory',
+  operands: 'comparisons translate only between a singular member path and a literal or external',
+  compoundLiteral: 'array and object literals have no guarded native comparison form',
+  stringSubject: 'string operators translate only over schema-typed string paths '
+    + '(the engine ERRORS on non-string subjects)',
+  stringPattern: 'string operators translate only with literal string patterns '
+    + "(an external pattern's type is unknowable at plan time)",
+  emptyPattern: "the empty pattern's vacuous-truth corner (true even on a missing member) "
+    + 'is not translated',
+  noSpelling: 'no native spelling of this operator is proven equivalent',
+};
+
+/** Why one FLWOR clause stayed in the engine. */
+const FLWOR_REASONS = {
+  binding: 'only a single plain binding over the whole collection is translated',
+  as: 'type assertions run in the engine',
+  orderPath: 'ordering translates only over singular schema-typed paths '
+    + '(numbers and strings that cannot hold null)',
+  collation: 'a collation the dialect cannot reproduce is refused, not approximated',
+  projection: 'projections other than the bare binding or one member path run per row '
+    + '(the row residual)',
+};
+
+/** Why a whole DOCUMENT stayed in the engine, decided above the FLWOR. */
+const PLAN_REASONS = {
+  windowBounds: 'window bounds must be literal numbers to push (non-negative integers)',
+  windowedAggregate: 'a windowed aggregate is not translated',
+  notFlwor: 'only a FLWOR over the collection is translated',
+  countProjection: 'count translates only over the bare binding or one member path '
+    + '(a projected return can change the item count)',
+  groupedAggregate: 'an aggregate over a grouped phrase folds its groups, which the engine does',
+  windowedGroup: 'a window over the GROUPS is engine work: the plan groups whole, '
+    + 'and a LIMIT over the groups would cut a different set',
+  aggregatePath: 'aggregates translate only over a singular schema-typed path '
+    + '(the engine ERRORS on non-conforming operands)',
+};
+
+/**
+ * Why the statement a call RUNS is not the one the planner planned:
+ * causes decided at bind time or forced by the harness, which the query
+ * engines report through the same `{ construct, reason }` shape a plan
+ * carries. They live beside the planner's own so the whole explanation
+ * vocabulary is one closed set (see {@link PLANNER_REASONS}).
+ */
+export const BIND_REASONS = Object.freeze({
+  pushdown: 'disabled by the harness switch',
+  untranslated: 'the document did not translate',
+  wrappedWindow: "a chain's element window is one item — the whole array — "
+    + 'whatever the plan mode',
+  bucketWhole: 'a native bucket answers its groups whole: the groups are the result',
+  overflow: 'the pushed aggregate overflowed int64; the engine answered the document '
+    + 'over the fetched rows',
+  /**
+   * A value the database cannot bind: the call reads its whole source
+   * and the engine answers. `over` names what that source is — a
+   * collection's rows, or an entity query's fetched root.
+   * @param {string | null} name - the external, or `null` for a literal
+   * @param {'collection' | 'root'} over
+   */
+  external: (name, over) =>
+    `${name === null ? 'a literal' : `the external '${name}'`} is not a value the `
+    + 'database binds; the call runs in the residual over the '
+    + `${over === 'root' ? 'fetched root' : 'whole collection'}`,
+});
+
+/**
+ * Why a REGISTERED operator stayed in the engine. The sentence quotes
+ * the operators the document used, so the entry is the function that
+ * builds it — the vocabulary claims it by its stable opening.
+ */
+const OPERATOR_REASONS = {
+  /** @param {string[]} used */
+  registered: (used) => {
+    const many = used.length > 1;
+    return `registered operator${many ? 's' : ''} `
+      + `${used.map((name) => `'${name}'`).join(', ')} run${many ? '' : 's'} in the residual `
+      + '(Ring 2 — correct, not pushed to SQL)';
+  },
+};
+
+/** Why an ENTITY document, or one of its clauses, stayed in the engine. */
+const ENTITY_REASONS = {
+  notFlwor: 'only a FLWOR over entity arrays is translated',
+  bindingRoot: 'bindings must each range over one declared entity array ($.Entity[*])',
+  joinKey: 'every binding past the first needs a column equality to one already joined — '
+    + 'a binding nothing connects is a cartesian product, which is engine work',
+  conjunctBinding: 'a conjunct must belong to one binding (or be the single join equality)',
+  external: 'externals compare only against entity columns in this version',
+  projection: 'entity queries return one bare binding natively; projections run in the engine',
+  order: 'ordering translates only over typed entity paths (never a boolean, never a document '
+    + 'path that admits null)',
+};
+
 /**
  * Assert a node kind is one this planner has decided. Called on every
  * dispatch; the throw names the kind and the AST version so a language
@@ -119,12 +218,6 @@ for (const kind of NODE_KINDS) {
   }
 }
 
-/**
- * One named refusal.
- * @param {string} construct
- * @param {string} reason
- * @returns {{ construct: string, reason: string }}
- */
 /** Whether a literal window bound is one SQL takes as written: a
  * non-negative safe integer. A negative, fractional or non-finite bound
  * is the ENGINE's to interpret (it answers `[]`, a truncation or a
@@ -150,6 +243,14 @@ function orderable(ref, schema) {
   return ref.type !== 'unknown' && ref.type !== 'boolean' && !admitsNull(schema, ref.segments);
 }
 
+/**
+ * One named refusal: the construct that stayed behind and the cause,
+ * drawn from {@link PLANNER_REASONS} so an explanation's vocabulary is
+ * one closed set rather than prose invented at each site.
+ * @param {string} construct
+ * @param {string} reason
+ * @returns {{ construct: string, reason: string }}
+ */
 function refusal(construct, reason) {
   return { construct, reason };
 }
@@ -247,16 +348,10 @@ function prependRegisteredReason(planned, document, operators) {
   const residualPart = planned.mode === 'row' ? planned.rowReturn : document;
   const used = registeredOpsUsed(residualPart, registered);
   if (used.length === 0) return planned;
-  const many = used.length > 1;
   return {
     ...planned,
     reasons: [
-      {
-        construct: used.join(', '),
-        reason: `registered operator${many ? 's' : ''} `
-          + `${used.map((n) => `'${n}'`).join(', ')} run${many ? '' : 's'} in the residual `
-          + '(Ring 2 — correct, not pushed to SQL)',
-      },
+      refusal(used.join(', '), OPERATOR_REASONS.registered(used)),
       ...planned.reasons,
     ],
   };
@@ -406,6 +501,8 @@ const SPATIAL_REASONS = {
   rtreeBox: "the box is stored in an R*Tree, whose coordinates are 32-bit floats rounded "
     + 'OUTWARD, so the stored box is a superset of the row\'s; the exact box test refines '
     + 'in the engine',
+  radius: 'a distance bound is a finite, non-negative number of metres',
+  unboundedFar: 'only a BOUNDED distance is promoted; no box narrows "farther than r"',
 };
 
 /**
@@ -658,8 +755,7 @@ function planDistanceBound(node, itSlot, shape) {
   const at = probePosition(constant.value);
   if (at === null) return { refusal: refusal('$distance', SPATIAL_REASONS.unbounded) };
   if (!Number.isFinite(radius.value) || radius.value < 0) {
-    return { refusal: refusal('$distance',
-      'a distance bound is a finite, non-negative number of metres') };
+    return { refusal: refusal('$distance', SPATIAL_REASONS.radius) };
   }
   const box = probeCircleBox(at, radius.value);
   if (box === null) return { refusal: refusal('$distance', SPATIAL_REASONS.pole) };
@@ -831,10 +927,71 @@ const KNN_REASONS = {
   /** @param {string} path @param {number} want @param {number[]} have */
   dims: (path, want, have) =>
     `the literal probe has ${want} components but the vector column over ${path} is declared at ${have.join(', ')}`,
-  /** @param {string} path */
-  widths: (path) =>
-    `several vector widths are declared over ${path}; an external probe cannot choose one at plan time`,
 };
+
+/**
+ * The planner's reason VOCABULARY (D6): every cause a plan can name for
+ * work it left in the engine, under a stable identifier. An explanation
+ * is public behaviour, so the sentences are a closed set — a new
+ * promotion adds an entry here, it does not write prose at the refusal
+ * site — and a test can then assert that every reason a corpus observes
+ * is one of these and nothing else.
+ *
+ * Most entries are the whole sentence. The four that quote the caller's
+ * own values — a vector width, a member path, the registered operators
+ * a document used — carry instead the stable opening they always begin
+ * with, which is what {@link reasonId} matches them by.
+ */
+export const PLANNER_REASONS = Object.freeze({
+  ...Object.fromEntries(Object.entries(KIND_REASONS)
+    .map(([key, text]) => [`kind.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(PREDICATE_REASONS)
+    .map(([key, text]) => [`predicate.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(FLWOR_REASONS)
+    .map(([key, text]) => [`flwor.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(PLAN_REASONS)
+    .map(([key, text]) => [`plan.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(ENTITY_REASONS)
+    .map(([key, text]) => [`entity.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(SPATIAL_REASONS)
+    .map(([key, text]) => [`spatial.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(KNN_REASONS)
+    .filter(([, text]) => typeof text === 'string')
+    .map(([key, text]) => [`knn.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(SERIES_REASONS)
+    // the temporal planner spells its code into the sentence, so the
+    // reason a plan carries is the code and the sentence at once
+    .map(([code, text]) => [`series.${code}`, { text: `${code}: ${text}` }])),
+  ...Object.fromEntries(Object.entries(BIND_REASONS)
+    .filter(([, text]) => typeof text === 'string')
+    .map(([key, text]) => [`bind.${key}`, { text }])),
+  'knn.noColumn': { prefix: 'no vector column over ' },
+  'knn.dims': { prefix: 'the literal probe has ' },
+  'operators.registered': { prefix: 'registered operator' },
+  'bind.external': { prefix: 'the external ' },
+  'bind.externalLiteral': { prefix: 'a literal is not a value the database binds' },
+  // the sentence itself is the dialect's, raised where the path is
+  // spelled; the vocabulary claims its stable opening
+  'bind.path': { prefix: 'a member name the dialect' },
+});
+
+/**
+ * The vocabulary identifier of one reason sentence, or `null` when no
+ * entry claims it — an unnamed reason, which the explanation contract
+ * treats as a defect rather than a variation.
+ * @param {string} reason
+ * @returns {string | null}
+ */
+export function reasonId(reason) {
+  for (const [id, entry] of Object.entries(PLANNER_REASONS)) {
+    if (entry.text !== undefined) {
+      if (entry.text === reason) return id;
+    }
+    else if (reason.startsWith(entry.prefix)) return id;
+  }
+  return null;
+}
+
 
 /**
  * Recognize the k-nearest ordering, or say why not. `null` when the
@@ -871,10 +1028,14 @@ function planKnnOrder(orderby, itSlot, shape, selectionPushed) {
 
   if (probeNode.kind === 'var' && probeNode.external === true) {
     if (declared.length === 0) return refuse(KNN_REASONS.noColumn(path, null));
-    if (declared.length > 1) return refuse(KNN_REASONS.widths(path));
     if (!selectionPushed) return refuse(KNN_REASONS.selection);
-    return { rank: { column: declared[0].column, dims: declared[0].dims,
-      probe: { ext: probeNode.name } } };
+    // EVERY declared width is an alternative: the plan carries them all
+    // and the BIND picks the one the probe's own width names. A `CASE`
+    // across the columns would read every one of them per row, and a
+    // statement per call would give up the prepared cache
+    return { rank: { alternatives: declared.map((entry) =>
+      ({ column: entry.column, dims: entry.dims })),
+    probe: { ext: probeNode.name } } };
   }
   const constant = constantOf(probeNode);
   if (constant === null || !Array.isArray(constant.value)) return refuse(KNN_REASONS.probe);
@@ -887,7 +1048,8 @@ function planKnnOrder(orderby, itSlot, shape, selectionPushed) {
       : KNN_REASONS.dims(path, dims, declared.map((entry) => entry.dims)));
   }
   if (!selectionPushed) return refuse(KNN_REASONS.selection);
-  return { rank: { column: /** @type {string} */ (column), dims, probe: { lit: constant.value } } };
+  return { rank: { alternatives: [{ column: /** @type {string} */ (column), dims }],
+    probe: { lit: constant.value } } };
 }
 
 /**
@@ -910,8 +1072,7 @@ function planSpatial(node, itSlot, shape) {
     // `$distance >= r` — "farther than" — is narrowed by no box at all
     const other = upperOnLeft ? node.args[1] : node.args[0];
     if (other?.kind === 'op' && other.name === '$distance') {
-      return { refusal: refusal('$distance',
-        'only a BOUNDED distance is promoted; no box narrows "farther than r"') };
+      return { refusal: refusal('$distance', SPATIAL_REASONS.unboundedFar) };
     }
     return null;
   }
@@ -943,8 +1104,8 @@ function planSpatial(node, itSlot, shape) {
 function planPredicate(node, itSlot, shape) {
   assertDecidedKind(node);
   if (node.kind !== 'op') {
-    return { refusal: refusal(node.kind, KIND_REASONS[node.kind]
-      ?? 'not a predicate the planner translates') };
+    return { refusal: refusal(node.kind,
+      KIND_REASONS[node.kind] ?? PREDICATE_REASONS.notPredicate) };
   }
 
   if (node.name === '$and' || node.name === '$or') {
@@ -969,8 +1130,7 @@ function planPredicate(node, itSlot, shape) {
     if (inner.refinements.length > 0) {
       // negating a superset is a SUBSET, which drops matching rows —
       // the one composition an implied conjunct may never enter
-      return { refusal: refusal('$not',
-        'a negated predicate cannot ride an implied pre-filter (negating a superset drops rows)') };
+      return { refusal: refusal('$not', PREDICATE_REASONS.negatedPrefilter) };
     }
     return { pred: { p: 'not', item: inner.pred },
       exact: true, prefilters: inner.prefilters, refinements: [] };
@@ -982,8 +1142,7 @@ function planPredicate(node, itSlot, shape) {
   if (node.name === '$exists' || node.name === '$empty') {
     const ref = pathRef(node.args[0], itSlot, shape);
     if (ref === null) {
-      return { refusal: refusal(node.name,
-        'existence tests translate only over a singular member path on the binding') };
+      return { refusal: refusal(node.name, PREDICATE_REASONS.existence) };
     }
     return exactly({ p: 'typeIs', ref, types: [], positive: node.name === '$exists' });
   }
@@ -1001,14 +1160,12 @@ function planPredicate(node, itSlot, shape) {
     const operand = operandOf(right);
     if (ref === null || operand === null) {
       if (pathRef(left, itSlot, shape) !== null && pathRef(right, itSlot, shape) !== null)
-        return { refusal: refusal(node.name, 'comparisons where both sides are paths are join territory') };
-      return { refusal: refusal(node.name,
-        'comparisons translate only between a singular member path and a literal or external') };
+        return { refusal: refusal(node.name, PREDICATE_REASONS.joinTerritory) };
+      return { refusal: refusal(node.name, PREDICATE_REASONS.operands) };
     }
     if ('lit' in operand) {
       if (!isScalarLiteral(operand.lit)) {
-        return { refusal: refusal(node.name,
-          'array and object literals have no guarded native comparison form') };
+        return { refusal: refusal(node.name, PREDICATE_REASONS.compoundLiteral) };
       }
       const lit = operand.lit;
       if (typeof lit === 'boolean' || lit === null) {
@@ -1025,22 +1182,18 @@ function planPredicate(node, itSlot, shape) {
     const ref = pathRef(node.args[0], itSlot, shape);
     const operand = operandOf(node.args[1]);
     if (ref === null || ref.type !== 'string') {
-      return { refusal: refusal(node.name,
-        'string operators translate only over schema-typed string paths (the engine ERRORS on non-string subjects)') };
+      return { refusal: refusal(node.name, PREDICATE_REASONS.stringSubject) };
     }
     if (operand === null || !('lit' in operand) || typeof operand.lit !== 'string') {
-      return { refusal: refusal(node.name,
-        "string operators translate only with literal string patterns (an external pattern's type is unknowable at plan time)") };
+      return { refusal: refusal(node.name, PREDICATE_REASONS.stringPattern) };
     }
     if (operand.lit === '') {
-      return { refusal: refusal(node.name,
-        "the empty pattern's vacuous-truth corner (true even on a missing member) is not translated") };
+      return { refusal: refusal(node.name, PREDICATE_REASONS.emptyPattern) };
     }
     return exactly({ p: 'strop', kind: /** @type {any} */ (stringOp), ref, operand });
   }
 
-  return { refusal: refusal(node.name,
-    'no native spelling of this operator is proven equivalent') };
+  return { refusal: refusal(node.name, PREDICATE_REASONS.noSpelling) };
 }
 
 // ————— Time series: the three closed shapes over a declared index —————
@@ -1663,6 +1816,206 @@ function planSeriesOperator(root, shape) {
 }
 
 /**
+ * The GENERAL grouping: a `$groupby` whose keys are safe member paths
+ * and whose `$return` is built from those keys, the closed aggregate
+ * set, literals and constructors. `null` when the shape is not one the
+ * plan can rebuild — the fixed temporal bucket is tried FIRST and is a
+ * different, narrower promotion; this is what the rest of the groupings
+ * fall to instead of the engine.
+ *
+ * The rules that make it agree with the engine, each one a refusal
+ * rather than an approximation:
+ *
+ * - a key is a singular schema-typed path that cannot hold `null`, so
+ *   the group SQL forms is the group the engine forms. An ABSENT key is
+ *   its own group, and its value comes back with its JSON type beside
+ *   it, so the decoder can leave the member out exactly as the object
+ *   constructor does;
+ * - the `$return` may not read the binding: after a grouping the tuple
+ *   variable holds the group's rows, and an object member of several
+ *   items is the engine's own error, not something to reproduce;
+ * - an aggregate over no values is the ENGINE's answer: `$count` and
+ *   `$sum` are `0`, the other three are the empty sequence and their
+ *   member is omitted. SQL answers `NULL` for all of them, so the
+ *   mapping rides the plan.
+ * @param {any} node - the FLWOR node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any | null}
+ */
+function planGeneralGrouping(node, itSlot, shape) {
+  const keys = [];
+  /** @type {Map<number, number>} */
+  const keySlot = new Map();
+  for (const key of node.groupby.keys) {
+    const ref = pathRef(key.expr, itSlot, shape);
+    if (ref === null || ref.type === 'unknown' || admitsNull(shape.schema, ref.segments))
+      return null;
+    keySlot.set(key.slot, keys.length);
+    keys.push({ as: key.name, ref });
+  }
+  const aggregates = [];
+  /** @type {Map<string, number>} */
+  const byAggregate = new Map();
+  const build = (child) => {
+    assertDecidedKind(child);
+    if (child.kind === 'literal') return { p: 'lit', value: child.value };
+    if (child.kind === 'var' && child.external !== true && keySlot.has(child.slot))
+      return { p: 'key', index: keySlot.get(child.slot) };
+    if (child.kind === 'op') {
+      const entry = groupAggregate(child, itSlot, shape);
+      if (entry === null) return null;
+      // one aggregate per distinct (function, path): two members that
+      // ask the same question are one SQL aggregate
+      const identity = `${entry.fn}:${entry.ref === null ? '' : canonicalOf(entry.ref.segments)}`;
+      let index = byAggregate.get(identity);
+      if (index === undefined) {
+        index = aggregates.length;
+        aggregates.push(entry);
+        byAggregate.set(identity, index);
+      }
+      return { p: 'agg', index };
+    }
+    if (child.kind === 'object') {
+      const members = [];
+      for (const entry of child.entries) {
+        const built = build(entry.expr);
+        if (built === null) return null;
+        members.push({ name: entry.name, node: built });
+      }
+      return { p: 'object', members };
+    }
+    if (child.kind === 'array') {
+      const items = [];
+      for (const element of child.elements) {
+        const built = build(element);
+        if (built === null) return null;
+        items.push(built);
+      }
+      return { p: 'array', items };
+    }
+    return null;
+  };
+  const tree = build(node.ret);
+  if (tree === null) return null;
+  const order = groupOrder(node.orderby, keySlot);
+  if (order === null) return null;
+  return { keys, aggregates, tree, order };
+}
+
+/**
+ * One aggregate of a grouped `$return`, or `null`. `$count` over the
+ * BINDING is the group's row count; over a path it counts the rows that
+ * HAVE the member, which `COUNT(column)` does not reproduce for a
+ * stored `null`.
+ * @param {any} node - an `op` node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {{ as: string, fn: string, ref: any, empty: string } | null}
+ */
+function groupAggregate(node, itSlot, shape) {
+  if (node.name === '$count') {
+    return isItVar(node.args[0], itSlot)
+      ? { fn: 'rows', ref: null, empty: 'zero' } : null;
+  }
+  const fn = AGGREGATES.get(node.name);
+  if (fn === undefined || fn === 'count') return null;
+  const ref = pathRef(node.args[0], itSlot, shape);
+  const numeric = fn === 'sum' || fn === 'avg';
+  const acceptable = ref !== null
+    && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
+    && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments);
+  if (!acceptable) return null;
+  // what an aggregate over NO values says, in the ENGINE's words
+  return { fn, ref, empty: fn === 'sum' ? 'zero' : 'omit' };
+}
+
+/**
+ * How the groups come out: the engine's order of FIRST APPEARANCE
+ * (§6.5) when nothing declares otherwise, else the group-key ordering
+ * an `$orderby` asked for. `null` when the ordering names anything but
+ * group keys — after a grouping there is nothing else a row can order
+ * by that the plan could reproduce.
+ * @param {any} orderby
+ * @param {Map<number, number>} keySlot
+ * @returns {'first-seen' | { index: number, desc: boolean, nullsFirst: boolean }[] | null}
+ */
+function groupOrder(orderby, keySlot) {
+  if (orderby === null) return 'first-seen';
+  const terms = [];
+  for (const spec of orderby.specs) {
+    if (spec.collation !== null || spec.collationName !== null) return null;
+    const key = spec.key;
+    if (key.kind !== 'var' || key.external === true || !keySlot.has(key.slot)) return null;
+    terms.push({ index: keySlot.get(key.slot), desc: spec.desc === true,
+      nullsFirst: (spec.emptyGreatest === true) === (spec.desc === true) });
+  }
+  return terms;
+}
+
+/**
+ * The projection TREE one `$return` compiles to, or `null` when the
+ * shape is not one the plan can rebuild. Object and array constructors,
+ * literals and singular member paths compose; anything else — a
+ * function call, a conditional, a dynamic member, a reference to the
+ * binding itself — refuses the WHOLE projection, because a projection
+ * that dropped part of what the caller asked for would be a wrong
+ * answer, not a partial one.
+ *
+ * Distinct paths are collected once: a path named twice is one fetched
+ * column and two leaves pointing at it. A projection with NO path is
+ * refused too — a statement needs a column to select, and a projection
+ * of pure literals has nothing the database could contribute.
+ * @param {any} node - the `$return` AST node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {{ tree: any, leaves: import('./algebra.js').PlanRef[] } | null}
+ */
+function projectionTree(node, itSlot, shape) {
+  /** @type {import('./algebra.js').PlanRef[]} */
+  const leaves = [];
+  /** @type {Map<string, number>} */
+  const byCanonical = new Map();
+  const build = (child) => {
+    assertDecidedKind(child);
+    if (child.kind === 'literal') return { p: 'lit', value: child.value };
+    if (child.kind === 'path') {
+      const ref = pathRef(child, itSlot, shape);
+      if (ref === null) return null;
+      const canonical = canonicalOf(ref.segments);
+      let index = byCanonical.get(canonical);
+      if (index === undefined) {
+        index = leaves.length;
+        leaves.push(ref);
+        byCanonical.set(canonical, index);
+      }
+      return { p: 'leaf', index };
+    }
+    if (child.kind === 'object') {
+      const members = [];
+      for (const entry of child.entries) {
+        const built = build(entry.expr);
+        if (built === null) return null;
+        members.push({ name: entry.name, node: built });
+      }
+      return { p: 'object', members };
+    }
+    if (child.kind === 'array') {
+      const items = [];
+      for (const element of child.elements) {
+        const built = build(element);
+        if (built === null) return null;
+        items.push(built);
+      }
+      return { p: 'array', items };
+    }
+    return null;
+  };
+  const tree = build(node);
+  return tree === null || leaves.length === 0 ? null : { tree, leaves };
+}
+
+/**
  * Plan a FLWOR node into a select plan, recording refusals. When a
  * conjunct refuses native translation, the injected `udf` hook may
  * promote it to a deterministic-function predicate instead (the D9
@@ -1694,11 +2047,11 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     && binding.window === null && binding.atSlot === -1
     && binding.allowingEmpty === false;
   if (!sourceIsCollection) {
-    reasons.push(refusal('$for',
-      'only a single plain binding over the whole collection is translated'));
+    reasons.push(refusal('$for', FLWOR_REASONS.binding));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, itSlot: -1, itName: null, udfs: [], prefilters: [],
-      knn: null, bucket: null, bucketRefusal: null };
+      projectionNative: false, projectedTree: null,
+      itSlot: -1, itName: null, udfs: [], prefilters: [],
+      knn: null, bucket: null, group: null, bucketRefusal: null };
   }
   const itSlot = binding.slot;
   // the document's own name for the collection binding. The residual and
@@ -1709,20 +2062,26 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
 
   if (node.fold !== null) reasons.push(refusal('$fold', KIND_REASONS.let));
   if (node.letBindings.length > 0) reasons.push(refusal('$let', KIND_REASONS.let));
-  if (node.asChecks !== null) reasons.push(refusal('$as', 'type assertions run in the engine'));
+  if (node.asChecks !== null) reasons.push(refusal('$as', FLWOR_REASONS.as));
   // A grouping is an unconditional residual EXCEPT in one closed shape:
   // a fixed-width `$time-bucket` key with the exact aggregates, which
   // is a `GROUP BY` over integer arithmetic. The bucket then owns the
   // ordering and the projection too, so it is decided before either.
   let bucket = null;
+  let group = null;
   let bucketRefusal = null;
   if (node.groupby !== null && node.fold === null && node.letBindings.length === 0
     && node.asChecks === null && node.count === null) {
     const grouped = planBucketGrouping(node, itSlot, shape);
     if ('bucket' in grouped) bucket = grouped.bucket;
     else {
-      bucketRefusal = grouped.code;
-      reasons.push(seriesReason(grouped.code, '$groupby'));
+      // not the fixed temporal ladder: the GENERAL grouping is the next
+      // question, and only when it refuses too does the engine group
+      group = planGeneralGrouping(node, itSlot, shape);
+      if (group === null) {
+        bucketRefusal = grouped.code;
+        reasons.push(seriesReason(grouped.code, '$groupby'));
+      }
     }
   }
   else if (node.groupby !== null) reasons.push(refusal('$groupby', KIND_REASONS.let));
@@ -1785,9 +2144,12 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   // caller's to name once the window is known)
   let orderPushed = false;
   let knn = null;
-  const ranked = bucket !== null || node.orderby === null ? null
+  const grouped = bucket !== null || group !== null;
+  const ranked = grouped || node.orderby === null ? null
     : planKnnOrder(node.orderby, itSlot, shape, whereFullyPushed && structureClean);
-  if (bucket !== null) orderPushed = true; // the groups' order is the bucket's
+  // a grouping owns its own ordering: the groups' order is the bucket's
+  // or the group's, and an `$orderby` over the keys is inside it
+  if (grouped) orderPushed = true;
   else if (ranked !== null) {
     if ('rank' in ranked) knn = ranked.rank;
     else reasons.push(ranked.refusal);
@@ -1798,13 +2160,11 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     for (const spec of node.orderby.specs) {
       const ref = pathRef(spec.key, itSlot, shape);
       if (ref === null || !orderable(ref, shape.schema)) {
-        refused = refusal('$orderby',
-          'ordering translates only over singular schema-typed paths (numbers and strings that cannot hold null)');
+        refused = refusal('$orderby', FLWOR_REASONS.orderPath);
         break;
       }
       if (spec.collation !== null || spec.collationName !== null) {
-        refused = refusal('$collation',
-          'a collation the dialect cannot reproduce is refused, not approximated');
+        refused = refusal('$collation', FLWOR_REASONS.collation);
         break;
       }
       terms.push({ ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
@@ -1830,8 +2190,13 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   let projectionNative = false;
   /** @type {import('./algebra.js').PlanRef | null} */
   let projectedPath = null;
+  /** @type {{ tree: any, leaves: any[] } | null} */
+  let projectedTree = null;
   assertDecidedKind(node.ret);
-  if (bucket !== null) projectionNative = true; // the bucket IS the projection
+  const tree = grouped || isItVar(node.ret, itSlot)
+    ? null : projectionTree(node.ret, itSlot, shape);
+  // a grouping IS the projection: its own tree rebuilds each group
+  if (grouped) projectionNative = true;
   else if (isItVar(node.ret, itSlot)) projectionNative = true;
   else {
     const ref = pathRef(node.ret, itSlot, shape);
@@ -1839,9 +2204,12 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
       projectionNative = true;
       projectedPath = ref;
     }
+    else if (tree !== null) {
+      projectionNative = true;
+      projectedTree = tree;
+    }
     else {
-      reasons.push(refusal('$return',
-        'projections other than the bare binding or one member path run per row (the row residual)'));
+      reasons.push(refusal('$return', FLWOR_REASONS.projection));
     }
   }
 
@@ -1852,12 +2220,14 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     orderPushed: orderPushed && structureClean,
     projectionNative,
     projectedPath,
+    projectedTree,
     itSlot,
     itName,
     udfs,
     prefilters,
     knn,
     bucket,
+    group,
     bucketRefusal,
   };
 }
@@ -1932,7 +2302,7 @@ function planCollectionCore(document, shape, options = undefined) {
       // non-literal bounds: the whole document is a set residual
       return {
         analysis, plan: null, mode: 'set',
-        reasons: [refusal('$subsequence', 'window bounds must be literal numbers to push (non-negative integers)')],
+        reasons: [refusal('$subsequence', PLAN_REASONS.windowBounds)],
         rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
@@ -1942,17 +2312,26 @@ function planCollectionCore(document, shape, options = undefined) {
     assertDecidedKind(root);
   }
 
-  // a top-level aggregate over a FLWOR
+  // a top-level aggregate over a FLWOR: one of the core five, or a
+  // REGISTERED aggregate the store declared pushable and the driver can
+  // register (Ring 3). Only a one-operand aggregate can be declared
+  // pushable at all — a SQL fold over zero rows never sees a second
+  // operand, and `aggregateSpec` refuses the declaration at open — so
+  // the recognizer here reads the phrase and nothing else
   let aggregate = null;
-  if (root.kind === 'op' && AGGREGATES.has(root.name)) {
+  const registeredAggregate = root.kind === 'op' && !AGGREGATES.has(root.name)
+    ? (options?.aggregate?.(root.name) ?? null) : null;
+  if (root.kind === 'op' && (AGGREGATES.has(root.name) || registeredAggregate !== null)) {
     if (windows.length > 0) {
       return {
         analysis, plan: null, mode: 'set',
-        reasons: [refusal(root.name, 'a windowed aggregate is not translated')],
+        reasons: [refusal(root.name, PLAN_REASONS.windowedAggregate)],
         rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
-    aggregate = { name: root.name, fn: AGGREGATES.get(root.name) };
+    aggregate = registeredAggregate === null
+      ? { name: root.name, fn: AGGREGATES.get(root.name) }
+      : { name: root.name, fn: 'registered', sql: registeredAggregate.sql };
     root = root.args[0];
     rawInner = rawInner?.[aggregate.name] ?? rawInner;
     assertDecidedKind(root);
@@ -1986,8 +2365,7 @@ function planCollectionCore(document, shape, options = undefined) {
   if (root.kind !== 'flwor') {
     return {
       analysis, plan: null, mode: 'set',
-      reasons: [refusal(root.kind, KIND_REASONS[root.kind]
-        ?? 'only a FLWOR over the collection is translated')],
+      reasons: [refusal(root.kind, KIND_REASONS[root.kind] ?? PLAN_REASONS.notFlwor)],
       rowReturn: null, udfs: [], prefilters: [], series: null,
     };
   }
@@ -2019,13 +2397,12 @@ function planCollectionCore(document, shape, options = undefined) {
       return { analysis, plan: null, mode: 'set', reasons: flwor.reasons,
         rowReturn: null, udfs: [], prefilters: flwor.prefilters, series: null };
     }
-    if (flwor.bucket !== null || flwor.bucketRefusal != null) {
+    if (flwor.bucket !== null || flwor.group !== null || flwor.bucketRefusal != null) {
       // the phrase's items are its GROUPS; a COUNT(*) over the rows
       // answered the row count for a `$count` of the groups
       return {
         analysis, plan: null, mode: 'set',
-        reasons: [refusal(aggregate.name,
-          'an aggregate over a grouped phrase folds its groups, which the engine does')],
+        reasons: [refusal(aggregate.name, PLAN_REASONS.groupedAggregate)],
         rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
@@ -2033,8 +2410,7 @@ function planCollectionCore(document, shape, options = undefined) {
       if (!flwor.projectionNative) {
         return {
           analysis, plan: null, mode: 'set',
-          reasons: [refusal('$count',
-            'count translates only over the bare binding or one member path (a projected return can change the item count)')],
+          reasons: [refusal('$count', PLAN_REASONS.countProjection)],
           rowReturn: null, udfs: [], prefilters: [], series: null,
         };
       }
@@ -2051,21 +2427,29 @@ function planCollectionCore(document, shape, options = undefined) {
         series: classifySelection(plan, shape, true) };
     }
     const ref = pathRef(root.ret, flwor.itSlot, shape);
-    const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg';
+    // a registered aggregate declares `seq<number>`, so its input is the
+    // numeric family too — and a path that admits `null` is refused for
+    // every aggregate alike: SQL cannot tell a stored null from an
+    // absent member, and the engine's sequence has an item for one and
+    // not the other
+    const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg'
+      || aggregate.fn === 'registered';
     const acceptable = ref !== null
       && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
       && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments);
     if (!acceptable) {
       return {
         analysis, plan: null, mode: 'set',
-        reasons: [refusal(aggregate.name,
-          'aggregates translate only over a singular schema-typed path (the engine ERRORS on non-conforming operands)')],
+        reasons: [refusal(aggregate.name, PLAN_REASONS.aggregatePath)],
         rowReturn: null, udfs: [], prefilters: [], series: null,
       };
     }
-    plan.aggregate = { fn: /** @type {any} */ (aggregate.fn), ref };
+    plan.aggregate = aggregate.fn === 'registered'
+      ? { fn: 'registered', ref, operator: aggregate.name, sql: aggregate.sql }
+      : { fn: /** @type {any} */ (aggregate.fn), ref };
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs, prefilters: flwor.prefilters,
+      udfs: aggregate.fn === 'registered' ? [...flwor.udfs, aggregate.sql] : flwor.udfs,
+      prefilters: flwor.prefilters,
       series: classifySelection(plan, shape, true) };
   }
 
@@ -2075,6 +2459,12 @@ function planCollectionCore(document, shape, options = undefined) {
   // the temporal bucket: only over a WHOLE pushed selection, because a
   // conjunct the residual would still apply would arrive after the rows
   // were already summed
+  if (flwor.group !== null && fullyPushed && windows.length === 0 && aggregate === null) {
+    plan.group = flwor.group;
+    return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
+      udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+  }
+
   if (flwor.bucket !== null && fullyPushed && (windows.length === 0 || plan.window !== null)) {
     plan.bucket = flwor.bucket;
     const facts = filterFacts(plan.filter);
@@ -2096,15 +2486,25 @@ function planCollectionCore(document, shape, options = undefined) {
     };
   }
 
-  if (fullyPushed && flwor.projectionNative && (windows.length === 0 || plan.window !== null)) {
+  // a RECOGNIZED grouping that did not lower: the engine groups, and the
+  // projection branches below must not claim the shape as their own —
+  // a grouping IS the projection, and answering it as one would answer
+  // per row instead of per group
+  const groupedResidual = flwor.group !== null || flwor.bucket !== null;
+  if (groupedResidual && windows.length > 0)
+    flwor.reasons.push(refusal('$groupby', PLAN_REASONS.windowedGroup));
+
+  if (!groupedResidual && fullyPushed && flwor.projectionNative
+    && (windows.length === 0 || plan.window !== null)) {
     if (flwor.projectedPath !== null) plan.project = { path: flwor.projectedPath };
+    else if (flwor.projectedTree !== null) plan.project = flwor.projectedTree;
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
       udfs: flwor.udfs, prefilters: flwor.prefilters,
       series: classifySelection(plan, shape, flwor.orderPushed) };
   }
 
   // the row residual: everything but the projection pushed
-  if (fullyPushed && !flwor.projectionNative
+  if (!groupedResidual && fullyPushed && !flwor.projectionNative
     && (windows.length === 0 || plan.window !== null)) {
     const rawFlwor = rawInner;
     const name = flwor.itName ?? 'it';
@@ -2263,6 +2663,99 @@ export function entityPathRef(node, slot, shape) {
 }
 
 /**
+ * The projection TREE of an ENTITY query: the same closed shape a
+ * collection projection composes — objects, arrays, literals and
+ * singular member paths — with each leaf carrying the BINDING it reads
+ * from, so the statement extracts it from that binding's alias. `null`
+ * when the shape is not one the plan can rebuild, and a projection with
+ * no path at all is refused for the same reason a collection's is: a
+ * statement needs a column to select.
+ * @param {any} node - the `$return` AST node
+ * @param {Map<number, any>} byName - binding slot → binding
+ * @returns {{ tree: any, leaves: { binding: string, ref: any }[] } | null}
+ */
+function entityProjectionTree(node, byName) {
+  const leaves = [];
+  /** @type {Map<string, number>} */
+  const byCanonical = new Map();
+  const build = (child) => {
+    assertDecidedKind(child);
+    if (child.kind === 'literal') return { p: 'lit', value: child.value };
+    if (child.kind === 'path') {
+      const binding = child.external === true ? undefined : byName.get(child.rootSlot);
+      if (binding === undefined) return null;
+      const ref = entityPathRef(child, child.rootSlot, binding.shape);
+      if (ref === null) return null;
+      const identity = `${binding.name}${canonicalOf(ref.segments)}`;
+      let index = byCanonical.get(identity);
+      if (index === undefined) {
+        index = leaves.length;
+        leaves.push({ binding: binding.name, ref });
+        byCanonical.set(identity, index);
+      }
+      return { p: 'leaf', index };
+    }
+    if (child.kind === 'object') {
+      const members = [];
+      for (const entry of child.entries) {
+        const built = build(entry.expr);
+        if (built === null) return null;
+        members.push({ name: entry.name, node: built });
+      }
+      return { p: 'object', members };
+    }
+    if (child.kind === 'array') {
+      const items = [];
+      for (const element of child.elements) {
+        const built = build(element);
+        if (built === null) return null;
+        items.push(built);
+      }
+      return { p: 'array', items };
+    }
+    return null;
+  };
+  const tree = build(node);
+  return tree === null || leaves.length === 0 ? null : { tree, leaves };
+}
+
+/**
+ * A comparison whose two sides are member paths on DIFFERENT bindings,
+ * as a join refinement — or `null` when it is not one this plan can
+ * prove. Both sides must be mapped columns of the same comparison
+ * family: SQL compares by column affinity where the engine compares by
+ * JSON type, so a string column against a number column would answer
+ * differently on the two sides, and a column that admits `null` would
+ * make the comparison neither true nor false where the engine has an
+ * answer. An epoch column is refused too — it stores an integer beside
+ * a document string the engine reads, and the two need not order alike
+ * across mixed stored precisions.
+ * @param {any} node - an `op` node whose name is a comparison
+ * @param {Map<number, any>} byName - binding slot → binding
+ * @returns {{ op: string, left: any, right: any } | null}
+ */
+function crossBindingComparison(node, byName) {
+  const [left, right] = node.args;
+  const leftBinding = left?.kind === 'path' ? byName.get(left.rootSlot) : undefined;
+  const rightBinding = right?.kind === 'path' ? byName.get(right.rootSlot) : undefined;
+  if (leftBinding === undefined || rightBinding === undefined
+    || leftBinding === rightBinding) return null;
+  const leftRef = entityPathRef(left, left.rootSlot, leftBinding.shape);
+  const rightRef = entityPathRef(right, right.rootSlot, rightBinding.shape);
+  const usable = (binding, ref) => ref !== null && ref.flavor === 'entity-column'
+    && ref.type !== 'unknown' && ref.type !== 'boolean'
+    && !admitsNull(binding.shape.schema, ref.segments);
+  if (!usable(leftBinding, leftRef) || !usable(rightBinding, rightRef)) return null;
+  const family = (ref) => (isNumericType(ref.type) ? 'number' : ref.type);
+  if (family(leftRef) !== family(rightRef)) return null;
+  return {
+    op: COMPARISONS.get(node.name),
+    left: { binding: leftBinding, ref: leftRef },
+    right: { binding: rightBinding, ref: rightRef },
+  };
+}
+
+/**
  * Plan one predicate over an entity binding: the same operator
  * grammar as phase A, with entity-flavored refs. Reuses
  * {@link planPredicate} for the recognition, then re-resolves refs
@@ -2288,8 +2781,7 @@ export function planEntityPredicate(node, slot, shape) {
       // externals against DOC paths are not translated here (the
       // phase-A external forms assume the collection layout)
       if (pred.p === 'cmp' && 'ext' in pred.operand) {
-        blocked = { construct: '$eq',
-          reason: 'externals compare only against entity columns in this version' };
+        blocked = refusal('$eq', ENTITY_REASONS.external);
       }
       return { ...pred, ref: { ...pred.ref, flavor: 'entity-doc' } };
     }
@@ -2297,8 +2789,7 @@ export function planEntityPredicate(node, slot, shape) {
       flavor: flavored.flavor, storage: flavored.storage, format: flavored.format };
     if (flavored.flavor === 'entity-epoch' && pred.p === 'cmp') {
       if ('ext' in pred.operand) {
-        blocked = { construct: pred.op,
-          reason: 'externals compare only against entity columns in this version' };
+        blocked = refusal(pred.op, ENTITY_REASONS.external);
         return { ...pred, ref };
       }
       // the plan-time instant translation: an ordering comparison
@@ -2354,7 +2845,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     const [inner, start, length] = root.args;
     if (start?.kind !== 'literal' || !isWindowBound(start.value)
       || (length !== undefined && (length.kind !== 'literal' || !isWindowBound(length.value))))
-      return residual('$subsequence', 'window bounds must be literal numbers to push (non-negative integers)');
+      return residual('$subsequence', PLAN_REASONS.windowBounds);
     windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
     root = inner;
     assertDecidedKind(root);
@@ -2366,10 +2857,10 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     assertDecidedKind(root);
   }
   if (root.kind !== 'flwor')
-    return residual(root.kind, 'only a FLWOR over entity arrays is translated');
+    return residual(root.kind, ENTITY_REASONS.notFlwor);
   if (root.fold !== null || root.letBindings.length > 0 || root.asChecks !== null
     || root.groupby !== null || root.count !== null)
-    return residual('$let', 'no equivalence proof exists yet; residual by default');
+    return residual('$let', KIND_REASONS.let);
 
   // bindings must each range over one entity's array
   const bindings = [];
@@ -2377,7 +2868,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     const sourceEntity = bindingEntity(binding, entities);
     if (sourceEntity === null
       || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty !== false)
-      return residual('$for', 'bindings must each range over one declared entity array ($.Entity[*])');
+      return residual('$for', ENTITY_REASONS.bindingRoot);
     bindings.push({
       name: binding.name,
       slot: binding.slot,
@@ -2385,9 +2876,6 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       shape: entityShape(entities.get(sourceEntity), mapping.entities[sourceEntity]),
     });
   }
-  if (bindings.length > 2)
-    return residual('$for', 'at most two bindings are translated (one join per statement)');
-
   const byName = new Map(bindings.map((binding) => [binding.slot, binding]));
   const conjuncts = root.where === null
     ? []
@@ -2395,14 +2883,21 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       ? root.where.args
       : [root.where];
 
-  let joinOn = null;
+  /** Every column equality between two DIFFERENT bindings: the edges of
+   * the relation graph the join order is built over. */
+  const edges = [];
+  /** Cross-binding comparisons that are not equalities. They REFINE a
+   * match, they never make one: a binding still attaches by an
+   * equality, so a range between two bindings can never be the thing
+   * that turns a product into a join. */
+  const refinements = [];
   const filters = new Map(bindings.map((binding) => [binding.slot, null]));
   const reasons = [];
   let whereFullyPushed = true;
   for (const conjunct of conjuncts) {
-    // a key equality between the two bindings is the join condition
-    if (bindings.length === 2 && joinOn === null
-      && conjunct.kind === 'op' && conjunct.name === '$eq') {
+    // a column equality between two bindings is a join edge, whatever
+    // the binding count — several between one pair simply conjoin
+    if (bindings.length > 1 && conjunct.kind === 'op' && conjunct.name === '$eq') {
       const [left, right] = conjunct.args;
       const leftBinding = left.kind === 'path' ? byName.get(left.rootSlot) : undefined;
       const rightBinding = right.kind === 'path' ? byName.get(right.rootSlot) : undefined;
@@ -2411,20 +2906,28 @@ function planEntityQueryCore(document, entities, mapping, operators) {
         const leftRef = entityPathRef(left, left.rootSlot, leftBinding.shape);
         const rightRef = entityPathRef(right, right.rootSlot, rightBinding.shape);
         if (leftRef?.flavor === 'entity-column' && rightRef?.flavor === 'entity-column') {
-          joinOn = {
+          edges.push({
             left: { binding: leftBinding, ref: leftRef },
             right: { binding: rightBinding, ref: rightRef },
-          };
+          });
           continue;
         }
+      }
+    }
+    // a cross-binding comparison that is not an equality: a refinement
+    if (bindings.length > 1 && conjunct.kind === 'op'
+      && COMPARISONS.has(conjunct.name) && conjunct.name !== '$eq') {
+      const refinement = crossBindingComparison(conjunct, byName);
+      if (refinement !== null) {
+        refinements.push(refinement);
+        continue;
       }
     }
     // otherwise the conjunct must belong wholly to ONE binding
     const slots = new Set();
     collectBindingSlots(conjunct, byName, slots);
     if (slots.size !== 1) {
-      reasons.push({ construct: '$where',
-        reason: 'a conjunct must belong to one binding (or be the single join equality)' });
+      reasons.push(refusal('$where', ENTITY_REASONS.conjunctBinding));
       whereFullyPushed = false;
       continue;
     }
@@ -2438,15 +2941,61 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     }
     filters.set(slot, conjoin(filters.get(slot), outcome.pred));
   }
-  if (bindings.length === 2 && joinOn === null)
-    return residual('$for', 'two bindings need a key equality between them (the join condition)');
+  // the join ORDER: start at the first binding and attach, one at a
+  // time, any binding an edge connects to what is already attached.
+  // A binding nothing connects would be a CARTESIAN product — the one
+  // thing a nested-loop plan must never emit by accident — so a graph
+  // that does not close is the residual, named
+  const joins = [];
+  if (bindings.length > 1) {
+    const attached = new Set([bindings[0].name]);
+    joins.push({ binding: bindings[0].name, on: [] });
+    let progress = true;
+    while (attached.size < bindings.length && progress) {
+      progress = false;
+      for (const binding of bindings) {
+        if (attached.has(binding.name)) continue;
+        const on = edges.filter((edge) =>
+          (edge.left.binding === binding && attached.has(edge.right.binding.name))
+          || (edge.right.binding === binding && attached.has(edge.left.binding.name)));
+        if (on.length === 0) continue;
+        joins.push({ binding: binding.name, on });
+        attached.add(binding.name);
+        progress = true;
+        break;
+      }
+    }
+    if (attached.size < bindings.length)
+      return residual('$for', ENTITY_REASONS.joinKey);
+    // an edge between two bindings that were BOTH already attached is a
+    // further equality, not another join: it rides the later one's ON,
+    // which is where a nested loop can use it. A non-equality refinement
+    // rides the same place, for the same reason
+    const place = (entry) => {
+      const later = joins.findLast((join) =>
+        join.binding === entry.left.binding.name || join.binding === entry.right.binding.name);
+      later.on.push(entry);
+    };
+    for (const edge of edges) {
+      if (!joins.some((join) => join.on.includes(edge))) place(edge);
+    }
+    for (const refinement of refinements) place(refinement);
+  }
+  else if (refinements.length > 0) {
+    // one binding cannot have a cross-binding comparison; this is
+    // unreachable, and the graph walk above is what makes it so
+    reasons.push(refusal('$where', ENTITY_REASONS.conjunctBinding));
+    whereFullyPushed = false;
+  }
 
-  // the return must be one bare binding
+  // the return is one bare binding — the entity's own documents — or a
+  // SHAPE the projection tree rebuilds from the bindings' members
   const retBinding = root.ret.kind === 'var' && root.ret.external !== true
     ? byName.get(root.ret.slot) : undefined;
-  if (retBinding === undefined) {
-    reasons.push({ construct: '$return',
-      reason: 'entity queries return one bare binding natively; projections run in the engine' });
+  const projection = retBinding === undefined && aggregate === null
+    ? entityProjectionTree(root.ret, byName) : null;
+  if (retBinding === undefined && projection === null) {
+    reasons.push(refusal('$return', ENTITY_REASONS.projection));
   }
 
   // ordering over flavored refs of either binding
@@ -2467,8 +3016,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
         || (ref.flavor === 'entity-doc' && admitsNull(binding.shape.schema, ref.segments))
         || spec.collation !== null || spec.collationName !== null) {
         orderPushed = false;
-        reasons.push({ construct: '$orderby',
-          reason: 'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)' });
+        reasons.push(refusal('$orderby', ENTITY_REASONS.order));
         break;
       }
       terms.push({ binding, ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
@@ -2476,8 +3024,8 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     if (orderPushed) order = terms;
   }
 
-  const fullyPushed = whereFullyPushed && orderPushed && retBinding !== undefined
-    && (aggregate === null || retBinding !== undefined);
+  const fullyPushed = whereFullyPushed && orderPushed
+    && (retBinding !== undefined || projection !== null);
   if (!fullyPushed) {
     return { analysis, mode: 'set', plan: null, referenced, reasons };
   }
@@ -2502,12 +3050,19 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     reasons: [],
     plan: {
       planVersion: PLAN_VERSION,
-      alg: bindings.length === 2 ? 'entity-join' : 'entity-select',
+      alg: bindings.length > 1 ? 'entity-join' : 'entity-select',
       bindings: bindings.map((binding) => ({ name: binding.name, entity: binding.entity })),
-      joinOn: joinOn === null ? null : {
-        left: { binding: joinOn.left.binding.name, column: joinOn.left.ref.column },
-        right: { binding: joinOn.right.binding.name, column: joinOn.right.ref.column },
-      },
+      // the FROM order and each binding's join conditions; `bindings`
+      // stays in the DOCUMENT's order, which is the nested-loop order
+      // the ORDER BY reproduces
+      joins: joins.map((join) => ({
+        binding: join.binding,
+        on: join.on.map((edge) => ({
+          op: edge.op ?? 'eq',
+          left: { binding: edge.left.binding.name, column: edge.left.ref.column },
+          right: { binding: edge.right.binding.name, column: edge.right.ref.column },
+        })),
+      })),
       filters: bindings.map((binding) => ({
         binding: binding.name,
         filter: filters.get(binding.slot),
@@ -2518,7 +3073,13 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       })),
       window,
       aggregate,
-      ret: retBinding.name,
+      ret: retBinding === undefined ? null : retBinding.name,
+      // the projected shape, when the return is one: leaves that name
+      // the binding they read from, and the tree the decoder rebuilds
+      project: projection === null ? null : {
+        tree: projection.tree,
+        leaves: projection.leaves.map((leaf) => ({ binding: leaf.binding, ref: leaf.ref })),
+      },
     },
   };
 }
@@ -2600,6 +3161,109 @@ function collectBindingSlots(node, byName, slots) {
     if (key === 'docPath') continue;
     collectBindingSlots(node[key], byName, slots);
   }
+}
+
+/**
+ * Every member of one root a document READS, and whether it reads a
+ * root item WHOLE. This walks the ANALYSIS — the normalized AST, where
+ * a path is already resolved to the binding slot it hangs off — not the
+ * document text, which cannot tell the path `$it.name` from a member
+ * literally called `$it.name`.
+ *
+ * A path that is not singular (a wildcard, a slice, a descendant) reads
+ * a SUBTREE, and its longest singular prefix is what a policy sees:
+ * allowing a member allows everything under it, so the prefix is the
+ * honest unit. A path with no singular prefix at all, and a bare
+ * reference to the binding itself, read the whole item — reported as
+ * `whole` with the construct that did it, because no member list can
+ * cover them and narrowing one silently would be the wrong answer.
+ *
+ * @param {any} root - the analysis root node
+ * @param {(expr: any) => boolean} isRootSource - whether one
+ *   `$for` binding ranges over the root being policed
+ * @returns {{ members: { canonical: string, member: string, docPath: string }[],
+ *   whole: { construct: string, docPath: string } | null }}
+ */
+export function collectMemberReads(root, isRootSource) {
+  /** @type {Set<number>} */
+  const slots = new Set();
+  const walk = (node, visit) => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, visit);
+      return;
+    }
+    visit(node);
+    for (const key of Object.keys(node)) {
+      if (key === 'docPath') continue;
+      walk(node[key], visit);
+    }
+  };
+  walk(root, (node) => {
+    if (node.kind !== 'flwor' || !Array.isArray(node.forBindings)) return;
+    for (const binding of node.forBindings) {
+      if (isRootSource(binding?.expr)) slots.add(binding.slot);
+    }
+  });
+
+  /** @type {Map<string, { canonical: string, member: string, docPath: string }>} */
+  const members = new Map();
+  /** @type {{ construct: string, docPath: string } | null} */
+  let whole = null;
+  const readsWhole = (construct, docPath) => {
+    if (whole === null) whole = { construct, docPath: docPath ?? '$' };
+  };
+  walk(root, (node) => {
+    if (node.external === true) return;
+    if (node.kind === 'var' && slots.has(node.slot)) {
+      readsWhole('$' + (node.name ?? ''), node.docPath);
+      return;
+    }
+    if (node.kind !== 'path' || !slots.has(node.rootSlot)) return;
+    /** @type {({ name: string } | { index: number })[]} */
+    const segments = [];
+    for (const segment of node.segments ?? []) {
+      if (segment.descendant === true || segment.selectors.length !== 1) break;
+      const selector = segment.selectors[0];
+      if (selector.kind === 'name') segments.push({ name: selector.name });
+      else if (selector.kind === 'index') segments.push({ index: selector.index });
+      else break;
+    }
+    if (segments.length === 0) {
+      readsWhole('$' + (node.name ?? ''), node.docPath);
+      return;
+    }
+    const canonical = canonicalOf(segments);
+    if (!members.has(canonical)) {
+      members.set(canonical, { canonical,
+        member: segments.map((segment) => ('name' in segment ? segment.name : segment.index))
+          .join('.'),
+        docPath: node.docPath ?? '$' });
+    }
+  });
+  return { members: [...members.values()], whole };
+}
+
+/**
+ * Whether one `$for` binding ranges over the whole collection — the one
+ * spelling `$[*]`, bare or packed, that {@link collectMemberReads}
+ * policies against on the collection side.
+ * @param {any} expr
+ * @returns {boolean}
+ */
+export function isRootScanSource(expr) {
+  return isCollectionSource(expr);
+}
+
+/**
+ * Whether one `$for` binding ranges over a named entity's array — the
+ * entity-side counterpart of {@link isRootScanSource}, reading the one
+ * spelling {@link entityRoot} publishes.
+ * @param {string} name - a declared entity name
+ * @returns {(expr: any) => boolean}
+ */
+export function isEntityRootSource(name) {
+  return (expr) => bindingEntity({ expr }, new Map([[name, true]])) === name;
 }
 
 /**

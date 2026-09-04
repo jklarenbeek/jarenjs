@@ -33,7 +33,7 @@ import { admitCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
-import { normalizeProfile } from './profile.js';
+import { normalizeProfile, assertProfileRoots } from './profile.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { entityCore } from './entity.js';
 import { createTracker, membershipKeys } from './tracker.js';
@@ -542,7 +542,8 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
  * @param {any} plan
  * @param {((doc: any) => any) | null} validate
  * @param {any} queryState - the store-wide statement cache and UDF set
- * @param {{ profile: any }} storeProfileRef - the store-level profile
+ * @param {{ profile: any, roots: readonly string[] }} storeProfileRef - the
+ *   store-level profile and every root a member allow-list may name
  * @returns {any}
  */
 function collectionCore(connection, collection, plan, validate, queryState, storeProfileRef, runtime) {
@@ -594,7 +595,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   const stats = { patchTranslated: 0, patchFallback: 0 };
   const engine = createQueryEngine({
     connection, state: queryState, collection, physicalPlan: plan,
-    profile: storeProfileRef.profile,
+    profile: storeProfileRef.profile, roots: storeProfileRef.roots,
   });
 
   const checkValid = (doc) => {
@@ -762,20 +763,6 @@ function asyncCollection(core, live) {
 }
 
 /**
- * Resolve the store's operator seam (Ring 2) to a single
- * `{ functions, extensions }` or `null`. Accepts `options.operators` (a
- * registry from `@jarenjs/json/jslt`'s `createJsltRegistry()`) and/or
- * raw `options.functions` / `options.extensions`. A registered operator
- * becomes engine vocabulary the query planner recognises and the
- * residual evaluates — it runs correctly in JavaScript over the fetched
- * rows, and is never pushed to SQL in this ring (that is Ring 3). Bad
- * input is API misuse (a synchronous `TypeError`), consistent with the
- * driver check. When no registry is threaded the return is `null`, and
- * the whole query engine is byte-identical to before.
- * @param {any} options
- * @returns {{ functions: any, extensions: any } | null}
- */
-/**
  * The schema a WRITE validates against. A store-allocated key (`default:
  * "auto"`) is absent from the document the injected hook sees — the
  * database allocates it after validation — so it cannot be required of a
@@ -795,6 +782,50 @@ function writeSchemaOf(entity) {
   return out;
 }
 
+/**
+ * Resolve the store's operator seam (Ring 2) to a single
+ * `{ functions, extensions }` or `null`. Accepts `options.operators` (a
+ * registry from `@jarenjs/json/jslt`'s `createJsltRegistry()`) and/or
+ * raw `options.functions` / `options.extensions`. A registered operator
+ * becomes engine vocabulary the query planner recognises and the
+ * residual evaluates — it runs correctly in JavaScript over the fetched
+ * rows, and is never pushed to SQL in this ring (that is Ring 3). Bad
+ * input is API misuse (a synchronous `TypeError`), consistent with the
+ * driver check. When no registry is threaded the return is `null`, and
+ * the whole query engine is byte-identical to before.
+ * @param {any} options
+ * @returns {{ functions: any, extensions: any } | null}
+ */
+/**
+ * The declaration rules a registry aggregate must satisfy to be lowered
+ * to a SQL aggregate, checked once at open: `kind: 'agg'`, ONE leading
+ * sequence operand (the fold's input) and nothing else, and a scalar
+ * result. The arity rule is not fussiness — a SQL aggregate's `result`
+ * step sees only what the row steps accumulated, so a second operand
+ * simply does not reach a fold over zero rows, and an aggregate that
+ * answered a different value for an empty input than the engine does
+ * would be worse than one that stays where it is. A pack that marks
+ * something else `pushable: 'aggregate'` is a host configuration
+ * error, loud here rather than a silent non-promotion.
+ * @param {string} name
+ * @param {any} meta - the registry's `forSql()` entry
+ * @returns {{ fn: Function }}
+ */
+function aggregateSpec(name, meta) {
+  const kinds = (Array.isArray(meta.signature) ? meta.signature : [])
+    .map((token) => (typeof token === 'string' && token.startsWith('seq') ? 'seq' : 'scalar'));
+  const wellFormed = meta.kind === 'agg'
+    && kinds.length === 1 && kinds[0] === 'seq'
+    && meta.signature[0] === 'seq<number>'
+    && meta.result === 'number'
+    && typeof meta.fn === 'function';
+  if (!wellFormed) {
+    throw new TypeError(`openStore: operator '${name}' declares pushable: 'aggregate', which `
+      + "needs kind: 'agg' with exactly one operand, 'seq<number>', and result: 'number'");
+  }
+  return { fn: meta.fn };
+}
+
 function resolveOperators(options) {
   const registry = options.operators;
   const hasRegistry = registry !== undefined && registry !== null;
@@ -807,6 +838,11 @@ function resolveOperators(options) {
   // UDFs where the driver supports them. Raw (registry-free) extensions
   // are never pushed — only a registry declares pushability.
   const pushableScalar = new Set();
+  // the SQL-pushable AGGREGATE subset (Ring 3): a registry `agg` entry
+  // marked `pushable: 'aggregate'`, which promises a fold over the
+  // multiset alone — a SQL aggregate visits rows in an order nothing
+  // specifies — and a finite-or-empty scalar result
+  const pushableAggregate = new Map();
   if (hasRegistry) {
     if (typeof registry.toOptions !== 'function') {
       throw new TypeError('openStore: operators must be a registry '
@@ -820,12 +856,13 @@ function resolveOperators(options) {
     if (typeof registry.forSql === 'function') {
       for (const [name, meta] of Object.entries(registry.forSql())) {
         if (meta.pushable === 'scalar') pushableScalar.add(name);
+        else if (meta.pushable === 'aggregate') pushableAggregate.set(name, aggregateSpec(name, meta));
       }
     }
   }
   if (options.functions !== undefined) functions = { ...functions, ...options.functions };
   if (options.extensions !== undefined) extensions = { ...extensions, ...options.extensions };
-  return Object.freeze({ functions, extensions, pushableScalar });
+  return Object.freeze({ functions, extensions, pushableScalar, pushableAggregate });
 }
 
 /**
@@ -911,6 +948,16 @@ export function openStore(model, options) {
   const storeProfile = options.profile === undefined
     ? null
     : normalizeProfile(options.profile);
+  // every root a profile's member allow-list may name — the model's own
+  // collections and entities — so a policy that names something the
+  // model does not declare is refused rather than applied to nothing
+  const declaredRoots = Object.freeze([...collections.keys(), ...entities.keys()]);
+  try {
+    assertProfileRoots(storeProfile, declaredRoots);
+  }
+  catch (error) {
+    return Promise.reject(error);
+  }
 
   /** A driver failure at or after `driver.open` as the open's own
    * refusal: `JD0002`, with the classifier's `class`/`retryable` and the
@@ -1030,6 +1077,9 @@ export function openStore(model, options) {
         registerFunction: opened.registerFunction === null ? null
           : (/** @type {string} */ name, /** @type {any} */ o, /** @type {Function} */ fn) =>
             opened.registerFunction(name, o, fn),
+        registerAggregate: opened.registerAggregate === null ? null
+          : (/** @type {string} */ name, /** @type {any} */ spec) =>
+            opened.registerAggregate(name, spec),
         session: opened.session === null ? null
           : (/** @type {any} */ table) => opened.session(table),
         // the online-backup primitives, when the binding has them
@@ -1324,7 +1374,7 @@ export function openStore(model, options) {
                 throw new TypeError('openStore: compileSchema must return a validation function');
               core = captureCollection(name, collectionCore(connection, collection,
                 plans.get(name), validate, queryState,
-                { profile: storeProfile }, runtime));
+                { profile: storeProfile, roots: declaredRoots }, runtime));
               cores.set(name, core);
             }
             return core;
@@ -1695,7 +1745,7 @@ export function openStore(model, options) {
             zoneProvider, runtime.now);
           const entityEngine = entities.size > 0
             ? createEntityQueryEngine({ connection, entities, mapping, state: queryState,
-              profile: storeProfile })
+              profile: storeProfile, roots: declaredRoots })
             : null;
           /** @type {Map<string, any>} */
           const loadEngines = new Map();
@@ -1709,7 +1759,7 @@ export function openStore(model, options) {
               }
               engine = createLoadEngine(
                 { connection, entities, mapping, state: queryState, coreFor: entityCoreFor,
-                  profile: storeProfile }, name);
+                  profile: storeProfile, roots: declaredRoots }, name);
               loadEngines.set(name, engine);
             }
             return engine;

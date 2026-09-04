@@ -115,7 +115,8 @@ describe('explainMapping — the hybrid rule as data (every §9.3 row)', () => {
     assert.deepStrictEqual(tables, {
       User: {
         posts: { to: 'Post', kind: 'oneToMany', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' },
-        labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' },
+        labels: { to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name',
+          ownColumn: 'User_key', ownKey: 'id', targetColumn: 'Label_key' },
       },
       Post: {},
       Label: {},

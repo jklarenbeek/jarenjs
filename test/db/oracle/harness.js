@@ -1,9 +1,10 @@
 //@ts-check
 /**
  * @file The differential-oracle harness. Each case runs the SAME query
- * document through two genuinely independent sides — the in-memory
- * engine over the raw documents, and the store's translator over the
- * same documents freshly inserted — and the results must be identical
+ * document through genuinely independent sides — the in-memory engine
+ * over the raw documents, and the store's translator over the same
+ * documents freshly inserted, both as the group declares its indexes
+ * and with every index removed — and the results must be identical
  * (deep equality: member order insignificant, array order
  * significant); when the engine THROWS, the store must throw the same
  * code. The harness never compiles the translator's output — both
@@ -59,11 +60,26 @@ export function loadGroups() {
 }
 
 /**
- * Open a fresh store seeded with a group's documents.
+ * The three sides every case is run through. `resident` is the
+ * in-memory engine over the raw documents — the reference answer.
+ * `indexed` is the store as the group declares it; `unindexed` is the
+ * same store with every declared index removed, so the same documents
+ * reach a plan that has no generated column to read and must translate
+ * over the stored document instead. Agreement across all three is what
+ * says a promotion is a promotion and not a change of meaning.
+ */
+export const ORACLE_SIDES = /** @type {const} */ (['indexed', 'unindexed']);
+
+/**
+ * Open a fresh store seeded with a group's documents. `side` chooses
+ * whether the group's declared indexes exist: an unindexed store plans
+ * the same documents with no generated column to read.
  * @param {any} group
+ * @param {any} [driver]
+ * @param {'indexed' | 'unindexed'} [side]
  * @returns {Promise<{ store: any, collection: any }>}
  */
-export async function storeForGroup(group, driver = nodeDriver()) {
+export async function storeForGroup(group, driver = nodeDriver(), side = 'indexed') {
   const model = {
     $model: '0.1',
     collections: {
@@ -71,7 +87,7 @@ export async function storeForGroup(group, driver = nodeDriver()) {
         schema: group.schema ?? DEFAULT_SCHEMA,
         key: null,
         identity: 'integer',
-        indexes: group.indexes ?? DEFAULT_INDEXES,
+        indexes: side === 'unindexed' ? [] : (group.indexes ?? DEFAULT_INDEXES),
       },
     },
   };
@@ -105,13 +121,71 @@ export function loadRelationGroups() {
  * @param {any} group
  * @returns {Promise<{ store: any }>}
  */
-export async function storeForEntityGroup(group) {
-  const store = await openStore(group.model, { driver: nodeDriver() });
+export async function storeForEntityGroup(group, side = 'indexed') {
+  const store = await openStore(side === 'unindexed' ? withoutIndexes(group.model) : group.model,
+    { driver: nodeDriver() });
   for (const name of Object.keys(group.documents)) {
     const set = store.entity(name);
     for (const document of group.documents[name]) await set.create(document);
   }
+  // a group may declare MEMBERSHIPS: join rows, written the one way a
+  // join table is written — through the unit of work, never as an
+  // entity, because a join-table root is read-only (§10.7)
+  for (const [table, rows] of Object.entries(group.memberships ?? {})) {
+    for (const row of rows) {
+      const [owner, member] = joinSidesOf(group.model, table);
+      store.entity(owner.entity).link(row[owner.column], owner.member, row[member.column]);
+    }
+    await store.saveChanges();
+  }
   return { store };
+}
+
+/**
+ * Which entity declares the many-to-many member a join table serves,
+ * and which column of a join row belongs to each side — read from the
+ * group's own model, so a corpus writes memberships by naming the two
+ * key columns and nothing else.
+ * @param {any} model
+ * @param {string} table
+ * @returns {[{ entity: string, member: string, column: string },
+ *   { entity: string, column: string }]}
+ */
+function joinSidesOf(model, table) {
+  for (const [name, entity] of Object.entries(model.entities ?? {})) {
+    for (const [member, property] of Object.entries(entity.schema?.properties ?? {})) {
+      const relation = /** @type {any} */ (property)['x-entity']?.relation;
+      if (relation === undefined || relation.many !== true || relation.via !== undefined) continue;
+      const [a, b] = [name, relation.to].sort();
+      if (`${a}_${b}` !== table) continue;
+      return [{ entity: name, member, column: `${name}_key` },
+        { entity: relation.to, column: `${relation.to}_key` }];
+    }
+  }
+  throw new Error(`oracle: no declared many-to-many member serves the join table '${table}'`);
+}
+
+/**
+ * The same model with every declared index dropped: an entity's
+ * `x-entity.index` and a collection's `indexes` list. A declared scalar
+ * property is a COLUMN whether or not it is indexed (MODEL-FORMAT
+ * §9.3), so this changes what the database can seek through, not what
+ * the planner can address — which is exactly the difference the third
+ * oracle side is there to prove immaterial to the answer.
+ * @param {any} model
+ * @returns {any}
+ */
+function withoutIndexes(model) {
+  const stripped = structuredClone(model);
+  for (const entity of Object.values(stripped.entities ?? {})) {
+    for (const property of Object.values(/** @type {any} */ (entity).schema?.properties ?? {})) {
+      const declared = /** @type {any} */ (property)['x-entity'];
+      if (declared?.index !== undefined) delete declared.index;
+    }
+  }
+  for (const collection of Object.values(stripped.collections ?? {}))
+    /** @type {any} */ (collection).indexes = [];
+  return stripped;
 }
 
 /**

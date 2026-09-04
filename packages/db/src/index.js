@@ -24,10 +24,14 @@ export {
 export {
   planQuery, assertDecidedKind, entityShape, entityPathRef,
   planEntityPredicate, planEntityQuery, collectEntityRoots, entityRoot,
+  PLANNER_REASONS, reasonId,
 } from './plan.js';
 export { emitPlan, createEntityPredicateEmitters, emitEntityPlan } from './emit.js';
 export { mergeEntityRow, parseGraphRow } from './graph.js';
-export { selectPlan, conjoin, assertNoSqlText, PLAN_VERSION } from './algebra.js';
+export {
+  selectPlan, conjoin, assertNoSqlText, effectiveOrder, planOrder, ordersByColumn,
+  PLAN_VERSION,
+} from './algebra.js';
 export { typeOfPath, isNumericType } from './types.js';
 export {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,

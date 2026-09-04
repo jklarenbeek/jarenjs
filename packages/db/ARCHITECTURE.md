@@ -141,9 +141,13 @@ composition; `$exists`/`$empty`; `$starts-with`/`$ends-with`/
 `$contains` on schema-typed string paths with literal patterns;
 `$orderby` over singular schema-typed paths (`$dir`, `$empty`, no
 collation); a top-level `$subsequence` window with literal bounds; the
-top-level aggregates `$count` (bare-binding return only) and
-`$sum`/`$avg`/`$min`/`$max` over a singular schema-typed path; and the
-whole-document projection that returns the bare binding.
+top-level aggregates `$count` and `$sum`/`$avg`/`$min`/`$max` over a
+singular schema-typed path; the whole-document projection that returns
+the bare binding; ONE member path, projected as its value beside its
+JSON type; and a nested SHAPE of objects, arrays, literals and member
+paths, projected as one value/type pair per distinct leaf and rebuilt
+by the decoder — never by parsing a JSON text the database assembled,
+which could not tell an absent member from a present `null`.
 
 Plus the spatial predicates a **derived** index makes decidable:
 `$bbox-intersects` against a literal or external region, a geohash
@@ -176,11 +180,14 @@ mode, `knn`, beside native, row and set.
 
 | construct | reason |
 |---|---|
-| `$let` bindings, `$fold`, `$groupby`, positional/window bindings | no equivalence proof exists yet; residual by default |
-| a second `$for` binding, joins, non-singular path expansion | one relation per plan in this version |
+| `$let` bindings, `$fold`, positional/window bindings | no equivalence proof exists yet; residual by default |
+| a `$groupby` whose key is untyped or nullable, whose `$return` reads the binding, or whose `$orderby` names anything but a key | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take |
+| a window over the GROUPS, or an aggregate of them | the plan groups whole; a `LIMIT` over the groups would cut a different set |
+| a `$for` binding nothing joins to — a cartesian product | the engine builds the product; a plan that emitted one by accident is the thing an equi-join graph exists to prevent |
+| non-singular path expansion | one relation per binding in this version |
 | `$match` and other unlisted operators, `$call` | no native spelling proven equivalent |
 | `$orderby` with a `$collation` | a collation the dialect cannot reproduce is refused, not approximated |
-| projections other than `'$it'` | run per row (the row residual) — pushed, ordered and windowed rows, projected by the engine |
+| a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path, a projection with no member path at all | the WHOLE projection runs per row (the row residual) — pushed, ordered and windowed rows, projected by the engine; promoting the part that composes would answer a shape nobody asked for |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
 | comparisons where both sides are paths | join territory |
 | array/object literals in comparisons | deep-equality has no guarded native form |
@@ -407,15 +414,19 @@ wants the engine's refusal for every row keeps `compileSchema` injected
 and nothing else, which is what makes the two agree on every row it
 does fetch.
 
-**The probe.** A literal vector must be the column's width at plan time
+**The probe.** A literal vector must be a DECLARED width at plan time
 (another width is not recognized, and the reason says both widths). An
-external probe is checked at call time by the binder's own rule: a
-bound value that is not a vector of the column's width — another width,
-a non-finite component, not an array at all — DIVERTS the call to the
-full-collection residual, where the engine answers what it answers
-everywhere (empty keys, so the secondary keys order every row; or its
-own `JQ2001` for a non-array). The plan never raises on the engine's
-behalf.
+external probe's width is only knowable when it is bound, so the plan
+carries one ALTERNATIVE per declared width over the member — one emitted
+statement each, prepared once and kept with the plan — and the bind
+picks the alternative whose width the probe has. A `CASE` across the
+columns would read every one of them per row, and a statement per call
+would give up the prepared cache; neither is emitted. A bound value no
+declared width takes — another width, a non-finite component, not an
+array at all — DIVERTS the call to the full-collection residual, where
+the engine answers what it answers everywhere (empty keys, so the
+secondary keys order every row; or its own `JQ2001` for a non-array).
+The plan never raises on the engine's behalf.
 
 That diversion is correct and it is expensive: the residual reads every
 document, and `explain()` still reports `knn`, because the plan is the

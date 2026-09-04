@@ -1,0 +1,1026 @@
+{
+ "group": "multi-binding relations",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Author": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "city": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      }
+     }
+    }
+   },
+   "Venue": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "vid"
+     ],
+     "properties": {
+      "vid": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "label": {
+       "type": "string"
+      },
+      "seats": {
+       "type": "integer"
+      }
+     }
+    }
+   },
+   "Talk": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "tid",
+      "authorId",
+      "venueId"
+     ],
+     "properties": {
+      "tid": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "title": {
+       "type": "string"
+      },
+      "stars": {
+       "type": "integer"
+      },
+      "authorId": {
+       "type": "string"
+      },
+      "venueId": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "Slot": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "sid",
+      "venueId"
+     ],
+     "properties": {
+      "sid": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "venueId": {
+       "type": "string"
+      },
+      "hour": {
+       "type": "integer"
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Author": [
+   {
+    "id": "a1",
+    "name": "ada",
+    "city": "delft"
+   },
+   {
+    "id": "a2",
+    "name": "lin",
+    "city": "delft"
+   },
+   {
+    "id": "a3",
+    "name": "mo",
+    "city": "utrecht"
+   },
+   {
+    "id": "a4",
+    "name": "nobody"
+   }
+  ],
+  "Venue": [
+   {
+    "vid": "v1",
+    "label": "hall",
+    "seats": 200
+   },
+   {
+    "vid": "v2",
+    "label": "room",
+    "seats": 40
+   },
+   {
+    "vid": "v3",
+    "label": "empty",
+    "seats": 0
+   }
+  ],
+  "Talk": [
+   {
+    "tid": "t1",
+    "title": "alpha",
+    "stars": 5,
+    "authorId": "a1",
+    "venueId": "v1"
+   },
+   {
+    "tid": "t2",
+    "title": "beta",
+    "stars": 1,
+    "authorId": "a1",
+    "venueId": "v2"
+   },
+   {
+    "tid": "t3",
+    "title": "gamma",
+    "stars": 4,
+    "authorId": "a2",
+    "venueId": "v1"
+   },
+   {
+    "tid": "t4",
+    "title": "delta",
+    "authorId": "a3",
+    "venueId": "v2"
+   }
+  ],
+  "Slot": [
+   {
+    "sid": "s1",
+    "venueId": "v1",
+    "hour": 9
+   },
+   {
+    "sid": "s2",
+    "venueId": "v1",
+    "hour": 11
+   },
+   {
+    "sid": "s3",
+    "venueId": "v2",
+    "hour": 9
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "three bindings chained, returning the middle",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "three bindings chained, returning the first",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$a.id"
+    ],
+    "$return": "$a"
+   }
+  },
+  {
+   "name": "three bindings, no ordering \u2014 the nested-loop order",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "three bindings with a filter on each",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$eq": [
+        "$a.city",
+        "delft"
+       ]
+      },
+      {
+       "$gt": [
+        "$v.seats",
+        100
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "four bindings",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]",
+     "s": "$.Slot[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$eq": [
+        "$s.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid",
+     "$s.sid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a cyclic graph \u2014 the repeated equality is one more conjunct",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$eq": [
+        "$v.vid",
+        "$t.venueId"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a disconnected binding is a cartesian product, and the engine answers it",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid",
+     "$v.vid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a conjunct spanning two bindings that is not an equality",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$gt": [
+        "$t.stars",
+        "$v.seats"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a count over three bindings",
+   "query": {
+    "$count": {
+     "$for": {
+      "a": "$.Author[*]",
+      "t": "$.Talk[*]",
+      "v": "$.Venue[*]"
+     },
+     "$where": {
+      "$and": [
+       {
+        "$eq": [
+         "$t.authorId",
+         "$a.id"
+        ]
+       },
+       {
+        "$eq": [
+         "$t.venueId",
+         "$v.vid"
+        ]
+       }
+      ]
+     },
+     "$return": "$t"
+    }
+   }
+  },
+  {
+   "name": "a window over three bindings",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "a": "$.Author[*]",
+       "t": "$.Talk[*]",
+       "v": "$.Venue[*]"
+      },
+      "$where": {
+       "$and": [
+        {
+         "$eq": [
+          "$t.authorId",
+          "$a.id"
+         ]
+        },
+        {
+         "$eq": [
+          "$t.venueId",
+          "$v.vid"
+         ]
+        }
+       ]
+      },
+      "$orderby": [
+       "$t.tid"
+      ],
+      "$return": "$t"
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "three bindings joined through the MIDDLE one only",
+   "query": {
+    "$for": {
+     "v": "$.Venue[*]",
+     "t": "$.Talk[*]",
+     "s": "$.Slot[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$eq": [
+        "$s.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid",
+     "$s.sid"
+    ],
+    "$return": "$s"
+   }
+  },
+  {
+   "name": "a join that matches nothing",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$eq": [
+        "$a.city",
+        "nowhere"
+       ]
+      }
+     ]
+    },
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a projected join is the declared residual",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "title": "$t.title",
+     "by": "$a.name"
+    }
+   }
+  },
+  {
+   "name": "an equality anchor refined by a range between two bindings",
+   "query": {
+    "$for": {
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$lt": [
+        "$t.stars",
+        "$v.seats"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "two refinements over one anchor",
+   "query": {
+    "$for": {
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$le": [
+        "$t.stars",
+        "$v.seats"
+       ]
+      },
+      {
+       "$ne": [
+        "$t.stars",
+        "$v.seats"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a range refinement across three bindings",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$ge": [
+        "$v.seats",
+        "$t.stars"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a range with NO equality anchor is a product, and the engine answers it",
+   "query": {
+    "$for": {
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$t.stars",
+      "$v.seats"
+     ]
+    },
+    "$orderby": [
+     "$t.tid",
+     "$v.vid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a comparison between columns of different families is engine work",
+   "query": {
+    "$for": {
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      },
+      {
+       "$lt": [
+        "$t.title",
+        "$v.seats"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a refinement over a key that some rows lack",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$ne": [
+        "$t.title",
+        "$a.name"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t"
+   }
+  },
+  {
+   "name": "a projected join, two bindings",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "title": "$t.title",
+     "by": "$a.name"
+    }
+   }
+  },
+  {
+   "name": "a nested projected join with a literal",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "t": "$t.title",
+     "who": {
+      "name": "$a.name",
+      "city": "$a.city"
+     },
+     "k": 7
+    }
+   }
+  },
+  {
+   "name": "a projected join as an array",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": [
+     "$t.title",
+     "$a.name"
+    ]
+   }
+  },
+  {
+   "name": "a projected join whose leaves are absent in some rows",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "c": "$a.city",
+     "s": "$t.stars"
+    }
+   }
+  },
+  {
+   "name": "a projected join asking one leaf twice",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "x": "$a.name",
+     "y": "$a.name"
+    }
+   }
+  },
+  {
+   "name": "one member path over one binding",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]"
+    },
+    "$orderby": [
+     "$a.id"
+    ],
+    "$return": "$a.city"
+   }
+  },
+  {
+   "name": "one member path over a join",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": "$t.title"
+   }
+  },
+  {
+   "name": "a projection an operator makes engine work",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.authorId",
+      "$a.id"
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "n": {
+      "$count": "$a.name"
+     }
+    }
+   }
+  },
+  {
+   "name": "a projected join over three bindings",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]",
+     "v": "$.Venue[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$t.venueId",
+        "$v.vid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$t.tid"
+    ],
+    "$return": {
+     "t": "$t.title",
+     "a": "$a.name",
+     "v": "$v.label"
+    }
+   }
+  },
+  {
+   "name": "a projected join with no matching rows",
+   "query": {
+    "$for": {
+     "a": "$.Author[*]",
+     "t": "$.Talk[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$t.authorId",
+        "$a.id"
+       ]
+      },
+      {
+       "$eq": [
+        "$a.city",
+        "nowhere"
+       ]
+      }
+     ]
+    },
+    "$return": {
+     "t": "$t.title"
+    }
+   }
+  }
+ ]
+}

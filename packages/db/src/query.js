@@ -38,9 +38,10 @@ import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } 
 import { chain, attempt, isThenable } from './driver.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
+  isRootScanSource, isEntityRootSource, BIND_REASONS,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath } from './emit.js';
-import { selectPlan, conjoin } from './algebra.js';
+import { selectPlan, conjoin, effectiveOrder, planOrder } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
 } from './residual.js';
@@ -48,10 +49,12 @@ import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } f
 import { deepFreeze } from '@jarenjs/core/object';
 import { derivedSlotValue, probeBox, probeVector, columnScore } from './derive.js';
 import { cutCandidates, identityBatches } from './knn.js';
-import { deterministicFragment, registerFragment } from './udf.js';
+import {
+  deterministicFragment, registerFragment, registerAggregateOperator,
+} from './udf.js';
 import { refuseCancelled } from './cancellation.js';
 import {
-  normalizeProfile, translateProfilePredicate,
+  normalizeProfile, translateProfilePredicate, assertProfileRoots, memberDenial,
   applyMandatoryPredicate, applyRowBound, SAFE_PROFILE,
 } from './profile.js';
 
@@ -76,6 +79,8 @@ export function createQueryState(bound = undefined, operators = null,
     counters: { hits: 0, misses: 0, evictions: 0 },
     /** Fragment identity → the SQL function name registered for it. */
     registered: new Map(),
+    /** Registry operator name → the SQL AGGREGATE registered for it. */
+    registeredAggregates: new Map(),
     operators: operators ?? null,
     // D7's injected clock: a named zone is host code a database does
     // not have, so a calendar ladder over one walks in the residual —
@@ -241,14 +246,71 @@ function budgetOf(profile, source, capabilities) {
  * @returns {any[]}
  */
 function projectedItems(row) {
-  const type = row.t;
+  return leafItems(row, '');
+}
+
+/**
+ * A plan ref's path as the explanation publishes it: member names and
+ * array indexes, in order.
+ * @param {any} ref
+ * @returns {(string | number)[]}
+ */
+function segmentsOf(ref) {
+  return ref.segments.map((segment) => ('name' in segment ? segment.name : segment.index));
+}
+
+/**
+ * One projected LEAF of a row, by the suffix its value/type pair was
+ * named under: the empty suffix for the single-path plan, `0`, `1`, …
+ * for a projection tree's leaves.
+ * @param {any} row
+ * @param {string} suffix
+ * @returns {any[]} the item, or nothing where the member is absent
+ */
+function leafItems(row, suffix) {
+  const type = row[`t${suffix}`];
   if (type === null || type === undefined) return [];
+  const value = row[`v${suffix}`];
   if (type === 'true') return [true];
   if (type === 'false') return [false];
   if (type === 'null') return [null];
-  if (type === 'object' || type === 'array') return [JSON.parse(row.v)];
-  if (type === 'text') return [String(row.v)];
-  return [Number(row.v)];
+  if (type === 'object' || type === 'array') return [JSON.parse(value)];
+  if (type === 'text') return [String(value)];
+  return [Number(value)];
+}
+
+/**
+ * The one item a projection TREE answers for one row, rebuilt from the
+ * leaves the statement fetched. The engine's own rules decide what an
+ * absent leaf does: a member whose value is the empty sequence is
+ * OMITTED from its object and SKIPPED in its array — which is why a
+ * literal `null` (present in every row) and a path that finds nothing
+ * (present in none) cannot share a representation here.
+ * @param {any} project - the plan's `{ tree, leaves }`
+ * @param {any} row
+ * @param {string} [prefix] - what the statement named its value/type
+ *   pairs: empty on a collection, `'p'` on an entity plan, whose own
+ *   binding aliases are `t0`, `t1`, … and would collide with a bare one
+ * @returns {any[]} exactly one item; a tree always constructs something
+ */
+function projectedTreeItems(project, row, prefix = '') {
+  const build = (node) => {
+    if (node.p === 'lit') return [node.value];
+    if (node.p === 'leaf') return leafItems(row, `${prefix}${node.index}`);
+    if (node.p === 'object') {
+      /** @type {any} */
+      const out = {};
+      for (const member of node.members) {
+        const items = build(member.node);
+        if (items.length > 0) out[member.name] = items[0];
+      }
+      return [out];
+    }
+    const items = [];
+    for (const item of node.items) items.push(...build(item));
+    return [items];
+  };
+  return build(project.tree);
 }
 
 /**
@@ -263,6 +325,10 @@ function projectedItems(row) {
 export function createQueryEngine(context) {
   const { connection, state, collection, physicalPlan } = context;
   const storeProfile = context.profile ?? null;
+  // every root a profile's member allow-list may name: the model's
+  // collections and entities, so a typo in the policy is refused rather
+  // than applied to nothing
+  const roots = context.roots ?? [collection.name];
   // the store's registered operators (Ring 2): recognised by the planner
   // as vocabulary, evaluated in the residual, threaded into every
   // residual compilation here. `null` when the store opened with no
@@ -343,6 +409,23 @@ export function createQueryEngine(context) {
         setResidualOf(entry, document)(rowsToDocs(checkRowBound(entry, rows)), externals)));
   };
 
+  /**
+   * Ring 3 for AGGREGATES: a registry `agg` operator the pack marked
+   * `pushable: 'aggregate'` becomes a SQL aggregate over the member's
+   * column, folded by the same pure function the residual would call.
+   * Two independent gates, never one inferred from the other: the
+   * DRIVER must have an aggregate API (bun:sqlite does not), and the
+   * pack must have declared the operator poolable that way.
+   */
+  const aggregateHook = connection.capabilities.aggregateFunctions === true
+    && operators !== null && operators.pushableAggregate?.size > 0
+    ? (/** @type {string} */ name) => {
+      const spec = operators.pushableAggregate.get(name);
+      if (spec === undefined) return null;
+      return { sql: registerAggregateOperator(connection, state.registeredAggregates, name, spec) };
+    }
+    : undefined;
+
   const udfHook = connection.capabilities.userFunctions
     ? (/** @type {any} */ fragment, /** @type {string} */ binding) => {
       // Ring 3: admit the registry's pushable:'scalar' operators too
@@ -388,16 +471,18 @@ export function createQueryEngine(context) {
         `the profile does not allow querying collection '${collection.name}'`);
     }
 
-    // no UDF registration under a profile: a foreign document must not
-    // cause host-side function registration
+    // no host-side registration under a profile: a foreign document must
+    // not cause one, for a predicate fragment or an aggregate alike
+    const registering = profile === null && pushdown;
     let planned = planQuery(document, shape,
-      { udf: profile === null && pushdown ? udfHook : undefined });
+      { udf: registering ? udfHook : undefined,
+        aggregate: registering ? aggregateHook : undefined });
     if (!pushdown) {
       planned = {
         ...planned,
         plan: null,
         mode: 'set',
-        reasons: [{ construct: 'pushdown', reason: 'disabled by the harness switch' }],
+        reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }],
         rowReturn: null,
         udfs: [],
         prefilters: [],
@@ -409,6 +494,12 @@ export function createQueryEngine(context) {
     }
 
     if (profile !== null) {
+      // the member allow-list: what the caller may OBTAIN, checked
+      // against every member path the document references, before a
+      // statement exists
+      const denied = memberDenial(profile, collection.name,
+        planned.analysis.root, isRootScanSource);
+      if (denied !== null) throw profileRefusal(denied);
       const deps = planned.analysis.dependencies;
       for (const name of deps.functions) {
         if (!profile.functions.includes(name))
@@ -475,7 +566,16 @@ export function createQueryEngine(context) {
       // a literal probe is normalized once, here; an external one per
       // call, from the bound value
       probe: plan.rank !== null && 'lit' in plan.rank.probe
-        ? probeVector(plan.rank.probe.lit, plan.rank.dims) : null,
+        ? probeVector(plan.rank.probe.lit, plan.rank.alternatives[0].dims) : null,
+      // one emitted statement per declared width, prepared on first use
+      // and cached with the plan: the bind picks the alternative the
+      // probe's own width names, and prepares nothing per call
+      rankAlternatives: plan.rank === null ? null
+        : plan.rank.alternatives.map((alternative) => {
+          const one = emitPlan({ ...plan, rank: { ...plan.rank, alternatives: [alternative] } },
+            dialect, physical);
+          return { ...alternative, sql: one.sql, slots: one.slots, statement: null };
+        }),
       dependencies: planned.analysis.dependencies,
       limits: planned.analysis.limits,
       residualLimits: limits,
@@ -586,6 +686,26 @@ export function createQueryEngine(context) {
       }));
   };
 
+  /**
+   * The declared width a probe names, as the emitted alternative that
+   * reads it — or `null` when no declared width takes this value, which
+   * is the diversion a wrong-width probe has always been. A `null`
+   * probe, a probe of the wrong shape and a probe of an undeclared
+   * width are one answer here: the database has no column for it.
+   * @param {any} entry
+   * @param {any} value - the bound probe
+   */
+  const rankAlternativeFor = (entry, value) =>
+    entry.rankAlternatives.find((alternative) =>
+      probeVector(value, alternative.dims) !== null) ?? null;
+
+  /** One alternative's statement, prepared once and kept with the plan. */
+  const alternativeStatement = (alternative) => {
+    if (alternative.statement === null)
+      alternative.statement = connection.prepare(alternative.sql);
+    return alternative.statement;
+  };
+
   /** Bind slots against the call's externals. */
   const bindParams = (entry, externals) =>
     entry.slots.map((slot) => slotValue(slot, externals));
@@ -597,7 +717,9 @@ export function createQueryEngine(context) {
     entry.externalNames.find((name) => {
       const kind = entry.externalSlotKinds.get(name);
       if (kind === 'derived') return probeBox(externals[name]) === null;
-      if (kind === 'probe') return probeVector(externals[name], entry.plan.rank.dims) === null;
+      // a probe binds when SOME declared width takes it; a width the
+      // model does not declare is the diversion it always was
+      if (kind === 'probe') return rankAlternativeFor(entry, externals[name]) === null;
       return !bindable(externals[name]);
     }) ?? null;
   /** Must this call divert to the residual? */
@@ -634,6 +756,46 @@ export function createQueryEngine(context) {
       items.push(item);
     }
     return items;
+  };
+
+  /**
+   * The items a GENERAL grouping answers: one per group row, built from
+   * the group's keys and aggregates through the plan's own tree. A key
+   * comes back with its JSON type beside it, so an absent key leaves
+   * its member out exactly as the object constructor does; an aggregate
+   * over no values follows the mapping the plan recorded — `0` for a
+   * count or a sum, the empty sequence for the other three, which is
+   * the ENGINE's answer, not SQL's `NULL`.
+   * @param {any} entry
+   * @param {any[]} rows
+   * @returns {any[]}
+   */
+  const groupItems = (entry, rows) => {
+    const group = entry.plan.group;
+    const aggregateItems = (row, index) => {
+      const value = row[`a${index}`] ?? null;
+      const empty = group.aggregates[index].empty;
+      if (value === null) return empty === 'omit' ? [] : [empty === 'zero' ? 0 : null];
+      return [value];
+    };
+    const build = (node, row) => {
+      if (node.p === 'lit') return [node.value];
+      if (node.p === 'key') return leafItems(row, `k${node.index}`);
+      if (node.p === 'agg') return aggregateItems(row, node.index);
+      if (node.p === 'object') {
+        /** @type {any} */
+        const out = {};
+        for (const member of node.members) {
+          const items = build(member.node, row);
+          if (items.length > 0) out[member.name] = items[0];
+        }
+        return [out];
+      }
+      const items = [];
+      for (const item of node.items) items.push(...build(item, row));
+      return [items];
+    };
+    return rows.flatMap((row) => build(group.tree, row));
   };
 
   /** How many ITEMS an engine result carries (its own shape rule). */
@@ -726,12 +888,15 @@ export function createQueryEngine(context) {
    */
   const knnCandidates = (entry, externals) => {
     const rank = entry.plan.rank;
-    const probe = entry.probe ?? probeVector(externals[rank.probe.ext], rank.dims);
-    return chain(statementOf(entry), (statement) =>
-      chain(statement.all(bindParams(entry, externals)), (rows) => {
+    const chosen = 'lit' in rank.probe
+      ? entry.rankAlternatives[0]
+      : rankAlternativeFor(entry, externals[rank.probe.ext]);
+    const probe = entry.probe ?? probeVector(externals[rank.probe.ext], chosen.dims);
+    return chain(alternativeStatement(chosen), (statement) =>
+      chain(statement.all(chosen.slots.map((slot) => slotValue(slot, externals))), (rows) => {
         checkRowBound(entry, rows);
         const scored = rows.map((row) =>
-          ({ identity: row.rid, score: columnScore(row.vec, rank.dims, probe) }));
+          ({ identity: row.rid, score: columnScore(row.vec, chosen.dims, probe) }));
         const cut = cutCandidates(scored, rank.offset + rank.limit, rank.margin);
         knnStats.queries++;
         knnStats.rows += rows.length;
@@ -779,15 +944,28 @@ export function createQueryEngine(context) {
   };
 
   /**
+   * The profile one call runs under, with its member allow-list checked
+   * against the model's declared roots — a policy naming a root the
+   * model does not have applies to nothing, which is a policy failing
+   * open, so it is refused here rather than at the first query that
+   * happens to name that root.
+   * @param {any} options
+   */
+  const resolveProfile = (options) => {
+    const resolved = options?.profile !== undefined
+      ? normalizeProfile(options.profile) : storeProfile;
+    assertProfileRoots(resolved, roots, collection.docPath);
+    return resolved;
+  };
+
+  /**
    * Resolve the profile and pushdown switches for one call.
    * @param {any} options
    */
   const callState = (options) => ({
     externals: options?.externals ?? {},
     strict: options?.strict === true,
-    profile: options?.profile !== undefined
-      ? normalizeProfile(options.profile)
-      : storeProfile,
+    profile: resolveProfile(options),
     profileSource: options?.profile !== undefined ? 'call' : (storeProfile === null ? null : 'store'),
     pushdown: options?.pushdown !== false,
   });
@@ -840,6 +1018,10 @@ export function createQueryEngine(context) {
             return wrapValue(entry, value);
           }), () => overflowResidual(entry, externals, document));
         }
+        if (entry.plan.group !== null) {
+          return chain(statement.all(bindParams(entry, externals)), (rows) =>
+            answerOf(entry, groupItems(entry, checkRowBound(entry, rows))));
+        }
         if (entry.plan.bucket !== null) {
           return chain(statement.all(bindParams(entry, externals)), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
@@ -851,7 +1033,10 @@ export function createQueryEngine(context) {
         return chain(statement.all(bindParams(entry, externals)), (rows) => {
           checkRowBound(entry, rows);
           const items = entry.plan.project === 'document'
-            ? rowsToDocs(rows) : rows.flatMap(projectedItems);
+            ? rowsToDocs(rows)
+            : 'path' in entry.plan.project
+              ? rows.flatMap(projectedItems)
+              : rows.flatMap((row) => projectedTreeItems(entry.plan.project, row));
           countSeries(entry, 1, rows.length, items.length);
           return answerOf(entry, items);
         });
@@ -872,14 +1057,13 @@ export function createQueryEngine(context) {
   const cursorClass = (entry, externals) => {
     const buffered = (construct, reason) => ({ streaming: 'buffered', barrier: { construct, reason } });
     if (entry.planned.wrapped === true) {
-      return buffered('window',
-        "a chain's element window is one item — the whole array — whatever the plan mode");
+      return buffered('window', BIND_REASONS.wrappedWindow);
     }
     // a plan that is a residual already buffers for its own reason,
     // whatever its externals bind to; that reason stays first
     if (entry.planned.mode === 'set' || entry.planned.mode === 'knn') {
       const forcing = entry.planned.reasons[0]
-        ?? { construct: 'residual', reason: 'the document did not translate' };
+        ?? { construct: 'residual', reason: BIND_REASONS.untranslated };
       return buffered(forcing.construct, forcing.reason);
     }
     // `null` externals is the ABSTRACT question — the plan as planned,
@@ -887,12 +1071,10 @@ export function createQueryEngine(context) {
     // is given no externals at all; a call always binds real ones
     const unbindable = externals === null ? null : divertingExternal(entry, externals);
     if (unbindable !== null) {
-      return buffered('external',
-        `the external '${unbindable}' is not a value the database binds; the call runs in the `
-        + 'residual over the whole collection');
+      return buffered('external', BIND_REASONS.external(unbindable, 'collection'));
     }
-    if (entry.plan.bucket !== null) {
-      return buffered('$groupby', 'a native bucket answers its groups whole: the groups are the result');
+    if (entry.plan.bucket !== null || entry.plan.group !== null) {
+      return buffered('$groupby', BIND_REASONS.bucketWhole);
     }
     return rowClassOf(connection);
   };
@@ -935,6 +1117,13 @@ export function createQueryEngine(context) {
             return items;
           })) });
     }
+    if (entry.plan.group !== null) {
+      // a native grouping is a barrier: the groups are the answer
+      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+        materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
+          chain(statement.all(bindParams(entry, externals)), (rows) =>
+            groupItems(entry, checkRowBound(entry, rows))))) });
+    }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
       return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
@@ -976,9 +1165,12 @@ export function createQueryEngine(context) {
             { docPath: collection.docPath, collection: collection.name });
         }
         checkByteBound(entry, row);
-        const items = entry.plan.project !== 'document' ? projectedItems(row)
-          : entry.rowResidual === null ? [JSON.parse(row.doc)]
-            : entry.rowResidual(JSON.parse(row.doc), externals);
+        const items = entry.plan.project === 'document'
+          ? (entry.rowResidual === null ? [JSON.parse(row.doc)]
+            : entry.rowResidual(JSON.parse(row.doc), externals))
+          : 'path' in entry.plan.project
+            ? projectedItems(row)
+            : projectedTreeItems(entry.plan.project, row);
         tally?.row(items.length);
         return items;
       },
@@ -1037,6 +1229,14 @@ export function createQueryEngine(context) {
         if (aggregate.ref?.column) touchedColumns.add(aggregate.ref.column);
       }
     }
+    if (entry.plan.group !== null) {
+      for (const key of entry.plan.group.keys) {
+        if (key.ref.column) touchedColumns.add(key.ref.column);
+      }
+      for (const aggregate of entry.plan.group.aggregates) {
+        if (aggregate.ref?.column) touchedColumns.add(aggregate.ref.column);
+      }
+    }
     const indexes = [
       ...physicalPlan.expected.indexes
         .filter((index) => index.columns.some((column) => touchedColumns.has(column)))
@@ -1057,11 +1257,8 @@ export function createQueryEngine(context) {
     // the plan's own: a residual stays a residual for its own reason,
     // and a native plan's only reason is the value that would not bind
     const reasons = diverted
-      ? [...entry.planned.reasons, {
-        construct: 'external',
-        reason: `the external '${divertingExternal(entry, externals)}' is not a value the database `
-          + 'binds; the call runs in the residual over the whole collection',
-      }]
+      ? [...entry.planned.reasons, { construct: 'external',
+        reason: BIND_REASONS.external(divertingExternal(entry, externals), 'collection') }]
       : entry.planned.reasons;
 
     const rank = entry.plan.rank;
@@ -1075,11 +1272,35 @@ export function createQueryEngine(context) {
         barrier: classified.barrier,
         // the profile that applied and every bound it imposed (D7)
         budget: budgetOf(profile, profileSource, connection.capabilities),
-        // the one member path the statement projects, when it does: the
-        // whole document is read otherwise
+        // the order the STATEMENT executes under — the plan's declared
+        // terms and the tie-breaker the emitter appends, in the same
+        // normalized form the emitter renders (D6: read from the plan,
+        // never parsed back out of SQL). `null` is the honest answer for
+        // a statement that orders nothing at all
+        order: planOrder(diverted ? entry.fullScanShape() : entry.plan),
+        // what the statement projects: `null` when it reads the whole
+        // document, one `path` when it projects a single member, and
+        // `paths` — one per DISTINCT leaf, in fetch order — when it
+        // projects a nested shape the decoder rebuilds
         projection: entry.plan.project === 'document' ? null
-          : { path: entry.plan.project.path.segments.map((segment) =>
-            ('name' in segment ? segment.name : segment.index)) },
+          : 'path' in entry.plan.project
+            ? { path: segmentsOf(entry.plan.project.path) }
+            : { paths: entry.plan.project.leaves.map(segmentsOf) },
+        // the projection that stayed behind, when one did: the one-row
+        // document the row residual runs per fetched row
+        residualProjection: entry.planned.rowReturn?.$return?.[0] ?? null,
+        // the GROUPING the statement performs, when it performs one:
+        // the key names with the member each reads, the aggregates with
+        // the function and the member each folds, and how the groups
+        // come out. `null` when nothing is grouped natively
+        group: entry.plan.group === null ? null : {
+          keys: entry.plan.group.keys.map((key) => ({ as: key.as, path: segmentsOf(key.ref) })),
+          aggregates: entry.plan.group.aggregates.map((entry2) => ({
+            fn: entry2.fn, path: entry2.ref === null ? null : segmentsOf(entry2.ref) })),
+          order: entry.plan.group.order === 'first-seen' ? 'first-seen'
+            : entry.plan.group.order.map((term) => ({
+              key: entry.plan.group.keys[term.index].as, desc: term.desc })),
+        },
         // a chain's element window (`[<phrase>]`): the phrase planned as
         // if bare, its rows answered as the one array item
         wrapped: entry.planned.wrapped === true,
@@ -1097,8 +1318,14 @@ export function createQueryEngine(context) {
         // reads, the window the cut serves, the margin it keeps, and
         // who decides the order — always the engine
         rank: rank === null ? null : {
-          column: rank.column,
-          dims: rank.dims,
+          // every declared width the plan can bind, and — when the call
+          // was given its externals — the one it selected. The probe is
+          // named, never printed
+          alternatives: entry.rankAlternatives.map((alternative) =>
+            ({ column: alternative.column, dims: alternative.dims })),
+          selected: !bound || 'lit' in rank.probe
+            ? (('lit' in rank.probe) ? rank.alternatives[0].dims : null)
+            : rankAlternativeFor(entry, externals[rank.probe.ext])?.dims ?? null,
           probe: 'lit' in rank.probe ? { literal: [...rank.probe.lit] } : { external: rank.probe.ext },
           limit: rank.limit,
           offset: rank.offset,
@@ -1117,7 +1344,7 @@ export function createQueryEngine(context) {
         fallback: entry.overflowRuns === undefined ? null : {
           construct: 'overflow',
           runs: entry.overflowRuns,
-          reason: 'the pushed aggregate overflowed int64; the engine answered the document over the fetched rows',
+          reason: BIND_REASONS.overflow,
         },
         // the temporal record: what the document asked, which declared
         // index the fetch seeks through, and which kernel finished it.
@@ -1155,7 +1382,7 @@ function refuseBuffered(options, classified, docPath) {
 // ————— The entity query surface (the second document kind) —————
 
 import { mergeEntityRow, parseGraphRow } from './graph.js';
-import { relationTables } from './model.js';
+import { relationTables, joinTableRoots } from './model.js';
 
 /** The default include depth bound (D14: printed, never silent). */
 export const INCLUDE_DEPTH_DEFAULT = 3;
@@ -1241,8 +1468,21 @@ const profileEntityRefusal = (reason, docPath) => new DbCompileError('JD0011', r
  * @returns {any}
  */
 export function createEntityQueryEngine(context) {
-  const { connection, entities, mapping, state } = context;
+  const { connection, state } = context;
+  // the query roots: the model's entities, plus the read-only
+  // pseudo-entity each declared join table contributes (§10.7). They
+  // are visible to the PLANNER and to `$.<Name>[*]`, and to nothing
+  // that writes — `store.entity(name)` reads the model's own map
+  const joinRoots = joinTableRoots(context.entities, context.mapping);
+  const entities = joinRoots.entities.size === 0
+    ? context.entities
+    : new Map([...context.entities, ...joinRoots.entities]);
+  const mapping = joinRoots.entities.size === 0
+    ? context.mapping
+    : { ...context.mapping,
+      entities: { ...context.mapping.entities, ...joinRoots.mappings } };
   const storeProfile = context.profile ?? null;
+  const roots = context.roots ?? [...entities.keys()];
   const operators = state.operators ?? null;
   const analyzeOpts = operators ?? undefined;
   const zoneProvider = state.zoneProvider ?? null;
@@ -1251,7 +1491,9 @@ export function createEntityQueryEngine(context) {
   const driverWrap = (/** @type {any} */ error) => wrapDriverError(error, { docPath: '/entities' });
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
-  const physicalOf = (name) => ({ table: mapping.entities[name].table });
+  const physicalOf = (name) => ({ table: mapping.entities[name].table,
+    // a join-table root has no document column of its own (§10.7)
+    document: mapping.entities[name].document !== false });
   // the relation tables of every root this engine serves (§10.1): the
   // engine is the scope every entity set of the store shares, so a
   // producer holding one set can follow a hop into another root
@@ -1259,13 +1501,19 @@ export function createEntityQueryEngine(context) {
 
   /** The switches one call resolves: the profile per call replaces the
    * store's, normalized over the safe defaults, as on a collection. */
-  const callState = (options) => ({
-    externals: options?.externals ?? {},
-    strict: options?.strict === true,
-    pushdown: options?.pushdown !== false,
-    profile: options?.profile !== undefined ? normalizeProfile(options.profile) : storeProfile,
-    profileSource: options?.profile !== undefined ? 'call' : (storeProfile === null ? null : 'store'),
-  });
+  const callState = (options) => {
+    const profile = options?.profile !== undefined
+      ? normalizeProfile(options.profile) : storeProfile;
+    assertProfileRoots(profile, roots, '/entities');
+    return {
+      externals: options?.externals ?? {},
+      strict: options?.strict === true,
+      pushdown: options?.pushdown !== false,
+      profile,
+      profileSource: options?.profile !== undefined ? 'call'
+        : (storeProfile === null ? null : 'store'),
+    };
+  };
 
   const entryFor = (document, pushdown, profile = null) => {
     const key = ['E', document, dialect.name, pushdown, profile];
@@ -1286,7 +1534,7 @@ export function createEntityQueryEngine(context) {
     }
     if (!pushdown) {
       planned = { ...planned, mode: 'set', plan: null,
-        reasons: [{ construct: 'pushdown', reason: 'disabled by the harness switch' }] };
+        reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
     }
     const docPath = entities.get(planned.referenced[0])?.docPath;
     // the profile, applied exactly as on a collection (MODEL-FORMAT §8):
@@ -1297,6 +1545,11 @@ export function createEntityQueryEngine(context) {
       for (const name of planned.referenced) {
         if (profile.collections !== null && !profile.collections.includes(name))
           throw profileEntityRefusal(`the profile does not allow querying entity '${name}'`, docPath);
+        // the member allow-list, per referenced root: every member path
+        // the document reads on a binding over that entity's array
+        const denied = memberDenial(profile, name,
+          planned.analysis.root, isEntityRootSource(name));
+        if (denied !== null) throw profileEntityRefusal(denied, entities.get(name)?.docPath);
       }
       const deps = planned.analysis.dependencies;
       for (const name of deps.functions) {
@@ -1434,7 +1687,9 @@ export function createEntityQueryEngine(context) {
         const limit = entry.rowBound === null ? '' : ` ${dialect.limitClause(entry.rowBound + 1, undefined)}`;
         return {
           name,
-          sql: `SELECT ${q('t')}.*, ${dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')} `
+          sql: `SELECT ${q('t')}.*, ${mapping.entities[name].document === false
+            ? dialect.stringLiteral('{}')
+            : dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')} `
             + `FROM ${q(mapping.entities[name].table)} AS ${q('t')}${where} `
             + `ORDER BY ${q('t')}.${dialect.rowIdentity()}${limit}`,
           params: slots.map((slot) => slot.literal),
@@ -1489,6 +1744,11 @@ export function createEntityQueryEngine(context) {
       if (entry.planned.plan.aggregate === 'count')
         return chain(statement.get(params), (row) => wrapValue(entry, row?.value ?? 0));
       return chain(statement.all(params), (rows) => {
+        const project = entry.planned.plan.project;
+        if (project != null) {
+          return answerOf(entry,
+            rows.flatMap((row) => projectedTreeItems(project, row, 'p')));
+        }
         const retEntity = entry.planned.plan.bindings
           .find((binding) => binding.name === entry.planned.plan.ret).entity;
         return answerOf(entry, checkRows(entry, rows, retEntity).map((row) =>
@@ -1517,11 +1777,7 @@ export function createEntityQueryEngine(context) {
       if (bindable(slotValue(slot, externals))) continue;
       const name = 'external' in slot ? slot.external
         : 'derived' in slot ? slot.derived.external : null;
-      return {
-        construct: 'external',
-        reason: `${name === null ? 'a literal' : `the external '${name}'`} is not a value the `
-          + 'database binds; the call runs in the residual over the fetched root',
-      };
+      return { construct: 'external', reason: BIND_REASONS.external(name, 'root') };
     }
     return null;
   };
@@ -1539,12 +1795,11 @@ export function createEntityQueryEngine(context) {
   const cursorClass = (entry, externals) => {
     const buffered = (barrier) => ({ streaming: 'buffered', barrier });
     if (entry.planned.wrapped === true) {
-      return buffered({ construct: 'window',
-        reason: "a chain's element window is one item — the whole array — whatever the plan mode" });
+      return buffered({ construct: 'window', reason: BIND_REASONS.wrappedWindow });
     }
     if (entry.planned.mode !== 'native') {
       const forcing = entry.planned.reasons[0]
-        ?? { construct: 'residual', reason: 'the document did not translate' };
+        ?? { construct: 'residual', reason: BIND_REASONS.untranslated };
       return buffered({ construct: forcing.construct, reason: forcing.reason });
     }
     // `null` externals is the abstract question: the plan as planned
@@ -1611,8 +1866,9 @@ export function createEntityQueryEngine(context) {
         materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
           chain(statement.get(params), (row) => [row?.value ?? 0]))) });
     }
-    const rowEntity = entry.planned.plan.bindings
-      .find((binding) => binding.name === entry.planned.plan.ret).entity;
+    const rowEntity = entry.planned.plan.ret === null ? null
+      : entry.planned.plan.bindings
+        .find((binding) => binding.name === entry.planned.plan.ret).entity;
     let pulledRows = 0;
     // a statement of its own per cursor: two live iterators over one
     // cached statement invalidate each other at the driver
@@ -1626,6 +1882,8 @@ export function createEntityQueryEngine(context) {
             `the fetch crossed the profile's maxRows bound of ${entry.rowBound}`,
             { docPath: entities.get(rowEntity)?.docPath, collection: rowEntity });
         }
+        const project = entry.planned.plan.project;
+        if (project != null) return projectedTreeItems(project, row, 'p');
         return [each(checkBytes(entry, mergeEntityRow(mapping.entities[rowEntity], row, '__doc'), rowEntity))];
       } });
   };
@@ -1651,6 +1909,9 @@ export function createEntityQueryEngine(context) {
       wrapped: entry.planned.wrapped === true,
       referenced: [...entry.planned.referenced],
       reasons,
+      // the same effective-order vocabulary the collection engine and
+      // the graph loader report; `null` when no statement answers
+      order: diverted ? null : planOrder(entry.planned.plan),
       sql: diverted ? null : entry.sql,
       residual: mode === 'native'
         ? null
@@ -1661,7 +1922,10 @@ export function createEntityQueryEngine(context) {
       chain(statement.all(entry.slots.map((slot) =>
         ('literal' in slot ? slot.literal : null))), (rows) => ({
         ...base,
-        join: entry.planned.plan.joinOn,
+        // the join graph, in the order the FROM clause builds it: the
+        // first binding, then each one and the equalities that attached
+        // it. Empty for a single-binding plan
+        joins: entry.planned.plan.joins,
         scanNarrative: rows.map((row) => String(row.detail)).join('; '),
       })));
   };
@@ -1687,6 +1951,7 @@ export function createEntityQueryEngine(context) {
 export function createLoadEngine(context, entityName) {
   const { connection, entities, mapping, state } = context;
   const storeProfile = context.profile ?? null;
+  const roots = context.roots ?? [...entities.keys()];
   /** Every driver failure this loader meets, classified under its entity. */
   const driverWrap = (/** @type {any} */ error) =>
     wrapDriverError(error, { docPath: '/entities', collection: entityName });
@@ -2197,6 +2462,13 @@ export function createLoadEngine(context, entityName) {
       byteBound: profile === null ? null : profile.maxBytes,
       profile,
       identity: identity === null ? null : deepFreeze(identity),
+      // the order the statement executes under, in the vocabulary both
+      // query engines report: the declared terms and the tie-breaker the
+      // ORDER BY above appends — the primary key in keyset mode, the row
+      // identity otherwise. Built from the same normalized terms, so the
+      // explanation cannot drift from the clause
+      effective: deepFreeze(effectiveOrder(order,
+        identity === null ? undefined : { keyColumns })),
       declared: order.map((term) => term.ref.column),
       keyColumns,
       // a page over this ordering is a snapshot only when every order key
@@ -2208,6 +2480,24 @@ export function createLoadEngine(context, entityName) {
     if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
       state.counters.evictions++;
     return entry;
+  };
+
+  /**
+   * A graph load answers whole entity documents, and a member
+   * allow-list cannot cover a whole document — so a policed root is
+   * refused here rather than answered past its policy. The refusal
+   * names the members that ARE allowed, because the document query
+   * engine can project exactly those.
+   * @param {any} profile
+   */
+  const refuseMemberPolicy = (profile) => {
+    const policy = profile === null || profile.members === null
+      ? undefined : profile.members[entityName];
+    if (policy === undefined) return;
+    throw new DbCompileError('JD0011',
+      `the profile allows only the members (${policy.declared.join(', ')}) of `
+      + `'${entityName}', and a graph load answers whole documents — query the members `
+      + 'the policy allows instead', entities.get(entityName)?.docPath);
   };
 
   /** One loaded root against the profile's row and byte bounds. */
@@ -2228,8 +2518,13 @@ export function createLoadEngine(context, entityName) {
     return doc;
   };
   /** The profile one call resolves, as on the query engines. */
-  const profileOf = (options) => (options?.profile !== undefined
-    ? normalizeProfile(options.profile) : storeProfile);
+  const profileOf = (options) => {
+    const resolved = options?.profile !== undefined
+      ? normalizeProfile(options.profile) : storeProfile;
+    assertProfileRoots(resolved, roots, entities.get(entityName)?.docPath);
+    refuseMemberPolicy(resolved);
+    return resolved;
+  };
   const profileSourceOf = (options) => (options?.profile !== undefined ? 'call'
     : (storeProfile === null ? null : 'store'));
 
@@ -2366,10 +2661,15 @@ export function createLoadEngine(context, entityName) {
         pagination: entry.pagination,
         includes: describe(entry.tree, []),
         bounds: bounds(entry.tree, []),
-        // the keyset's ordering identity and whether a page over it is a
-        // snapshot — `null` for a load that is not in keyset mode, whose
-        // tie-breaker is the row identity
-        order: entry.identity,
+        // the effective deterministic order the statement executes
+        // under, in every load mode — a load outside keyset mode orders
+        // by its declared terms and the row identity, and saying so is
+        // not the same as having no order at all
+        order: entry.effective,
+        // the keyset ordering's IDENTITY, the value a continuation
+        // carries and is checked against (`JD0035`) — `null` for a load
+        // that is not in keyset mode, which has no continuation to emit
+        identity: entry.identity,
         snapshot: entry.snapshot,
         // a graph load pulls one root row per statement row — where the
         // binding can hand rows over one at a time

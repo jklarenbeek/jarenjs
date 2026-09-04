@@ -153,8 +153,11 @@ describe('operational assertions', () => {
 
   it('a residual is always reported with its reasons; set mode is a barrier', async () => {
     const { store, users } = await freshStore();
+    // an operator over a member is what the projection tree cannot
+    // rebuild, so the whole projection runs per row
     const row = await users.explain(
-      { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 20] }, $return: { n: '$it.name' } });
+      { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 20] },
+        $return: { n: { $count: '$it.name' } } });
     assert.strictEqual(row.residual.mode, 'row');
     assert.match(row.residual.reasons[0].reason, /row residual/);
     assert.deepStrictEqual(row.barriers, [], 'the row residual streams');
@@ -170,7 +173,7 @@ describe('operational assertions', () => {
     const { store, users } = await freshStore();
     await assert.rejects(
       async () => users.execute(
-        { $for: { it: '$[*]' }, $return: { n: '$it.name' } }, { strict: true }),
+        { $for: { it: '$[*]' }, $return: { n: { $count: '$it.name' } } }, { strict: true }),
       (error) => {
         assert.strictEqual(error.code, 'JD0010');
         assert.match(error.message, /\$return/);
@@ -178,7 +181,7 @@ describe('operational assertions', () => {
       });
     // the same document without strict runs fine
     const relaxed = await Promise.resolve(users.execute(
-      { $for: { it: '$[*]' }, $return: { n: '$it.name' } }));
+      { $for: { it: '$[*]' }, $return: { n: { $count: '$it.name' } } }));
     assert.strictEqual(Array.isArray(relaxed), true);
     await store.close();
   });

@@ -180,6 +180,554 @@
      2
     ]
    }
+  },
+  {
+   "name": "nested object projection",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "who": "$it.id",
+     "inner": {
+      "k": "$it.o.k",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "array of paths and literals",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": [
+     "$it.id",
+     "$it.n",
+     7,
+     null,
+     true
+    ]
+   }
+  },
+  {
+   "name": "array inside an object",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "id": "$it.id",
+     "pair": [
+      "$it.n",
+      "$it.f"
+     ]
+    }
+   }
+  },
+  {
+   "name": "repeated leaf, absent and present",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "a": "$it.n",
+     "b": "$it.n",
+     "c": "$it.nope",
+     "d": "$it.u"
+    }
+   }
+  },
+  {
+   "name": "a compound member projects whole",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "o": "$it.o",
+     "id": "$it.id"
+    }
+   }
+  },
+  {
+   "name": "empty object and empty array beside a leaf",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "id": "$it.id",
+     "e": {},
+     "a": []
+    }
+   }
+  },
+  {
+   "name": "a projected shape under a window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "i": "$it.id",
+       "n": "$it.n"
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a projected shape narrowed by a predicate",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      5
+     ]
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "i": "$it.id",
+     "n": "$it.n",
+     "s": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "a projected shape that matches nothing",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      1000
+     ]
+    },
+    "$return": {
+     "i": "$it.id"
+    }
+   }
+  },
+  {
+   "name": "a projected shape over exactly one row",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.id",
+      "a"
+     ]
+    },
+    "$return": {
+     "i": "$it.id",
+     "k": "$it.o.k"
+    }
+   }
+  },
+  {
+   "name": "a count over a projected shape",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "i": "$it.id",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a count over a projected array",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": [
+      "$it.n"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a projected shape over an untyped member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "i": "$it.id",
+     "u": "$it.u"
+    }
+   }
+  },
+  {
+   "name": "a projection mixing a leaf and an operator",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": {
+     "i": "$it.id",
+     "twice": {
+      "$mul": [
+       "$it.n",
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "group by a string member, counted",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "group by a number member, summed",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.n"
+    },
+    "$return": {
+     "g": "$g",
+     "s": {
+      "$sum": "$it.f"
+     }
+    }
+   }
+  },
+  {
+   "name": "group with every aggregate",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     },
+     "s": {
+      "$sum": "$it.n"
+     },
+     "a": {
+      "$avg": "$it.n"
+     },
+     "lo": {
+      "$min": "$it.n"
+     },
+     "hi": {
+      "$max": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "group ordered by the key ascending",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$orderby": [
+     "$g"
+    ],
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "group ordered by the key descending",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$orderby": [
+     {
+      "$key": "$g",
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "group by two keys",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s",
+     "k": "$it.n"
+    },
+    "$return": {
+     "g": "$g",
+     "k": "$k"
+    }
+   }
+  },
+  {
+   "name": "group returning the bare key",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": "$g"
+   }
+  },
+  {
+   "name": "group returning an array",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": [
+     "$g",
+     {
+      "$count": "$it"
+     },
+     7
+    ]
+   }
+  },
+  {
+   "name": "group narrowed first",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$orderby": [
+     "$g"
+    ],
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "group over no rows",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      1000
+     ]
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "group whose aggregate sees no values",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "g": "$g",
+     "s": {
+      "$sum": "$it.nope"
+     },
+     "lo": {
+      "$min": "$it.nope"
+     }
+    }
+   }
+  },
+  {
+   "name": "group by a boolean member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.b"
+    },
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "group asking one aggregate twice",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "a": {
+      "$sum": "$it.n"
+     },
+     "b": {
+      "$sum": "$it.n"
+     },
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "group whose return reads the binding",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "g": "$g",
+     "all": "$it"
+    }
+   }
+  },
+  {
+   "name": "a window over the groups",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$groupby": {
+       "g": "$it.s"
+      },
+      "$orderby": [
+       "$g"
+      ],
+      "$return": {
+       "g": "$g"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a count of the groups",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$groupby": {
+      "g": "$it.s"
+     },
+     "$return": {
+      "g": "$g"
+     }
+    }
+   }
   }
  ]
 }

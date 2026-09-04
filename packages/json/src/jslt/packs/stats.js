@@ -20,7 +20,17 @@ function percentile(xs, p) {
   return quantile(xs, Math.max(0, Math.min(100, p)) / 100, { method: 'linear' });
 }
 
-const aggNum = (signature, fn) => ({ kind: 'agg', signature, result: 'number', fn, pushable: false });
+/**
+ * A summary over the whole sequence. `pushable: 'aggregate'` is a
+ * promise about the FOLD, not just about purity: a SQL aggregate visits
+ * the rows in an order nothing specifies, so only a summary whose value
+ * depends on the multiset alone may carry the token — every one here
+ * does. It also promises a finite number or `undefined` (the empty
+ * answer) as its result, since a database column carries neither NaN
+ * nor Infinity.
+ */
+const aggNum = (signature, fn) =>
+  ({ kind: 'agg', signature, result: 'number', fn, pushable: 'aggregate' });
 
 export const statsPack = {
   name: 'stats',
@@ -29,6 +39,10 @@ export const statsPack = {
     $median: aggNum(['seq<number>'], median),
     $variance: aggNum(['seq<number>'], variance),
     $stddev: aggNum(['seq<number>'], stddev),
-    $percentile: aggNum(['seq<number>', 'number'], percentile),
+    // two operands: the sequence and the percentile. A SQL aggregate
+    // cannot carry the second one into a fold over ZERO rows, so this
+    // entry stays engine work and says so through its own token
+    $percentile: { kind: 'agg', signature: ['seq<number>', 'number'], result: 'number',
+      fn: percentile, pushable: false },
   },
 };

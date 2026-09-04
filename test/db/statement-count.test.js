@@ -170,8 +170,11 @@ describe('exactly one statement per graph load', () => {
     const chain = from(posts).join(from(users), (p) => p.authorId, (u) => u.id, (p) => p);
     const explained = await store.explain(chain.toDocument());
     assert.strictEqual(explained.mode, 'native');
-    assert.deepStrictEqual(explained.join,
-      { left: { binding: 'it', column: 'authorId' }, right: { binding: 'it2', column: 'id' } });
+    assert.deepStrictEqual(explained.joins, [
+      { binding: 'it', on: [] },
+      { binding: 'it2', on: [{ op: 'eq', left: { binding: 'it', column: 'authorId' },
+        right: { binding: 'it2', column: 'id' } }] },
+    ]);
     counters.executed = 0;
     const rows = chain.toArray();
     assert.strictEqual(counters.executed, 1, `expected ONE statement, counted ${counters.executed}`);
@@ -181,13 +184,14 @@ describe('exactly one statement per graph load', () => {
       .join(fromAsync(store.entity('User')), (p) => p.authorId, (u) => u.id, (p) => p).toArray();
     assert.strictEqual(counters.executed, 1, 'the asynchronous provider receives the same one document');
     assert.strictEqual(streamed.length, 30);
-    // the contrast, declared: a PROJECTED join is the residual over both fetched roots
+    // a PROJECTED join is one statement too: the shape's leaves are
+    // fetched from their own bindings and the decoder rebuilds it
     counters.executed = 0;
     const projected = from(posts).join(from(users), (p) => p.authorId, (u) => u.id,
       (p, u) => ({ pid: p.pid, by: u.name })).toArray();
     assert.strictEqual(projected.length, 30);
-    assert.strictEqual(counters.executed, 2,
-      'the projection runs in the engine over the two fetched roots (MODEL-FORMAT §10.6)');
+    assert.strictEqual(counters.executed, 1,
+      'one statement, and no document blob in it');
   });
 
   it('a relation hop on the chain is the residual over the fetched roots: one fetch per root, never per row', async () => {

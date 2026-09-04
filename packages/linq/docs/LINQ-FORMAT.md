@@ -36,7 +36,7 @@ is the index of the ten, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 817 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,652 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,653 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,218 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,083 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
@@ -182,7 +182,7 @@ mirrored in QUERY-PEN §9 (one table, held equal by a test):
 | `JL0102` | a pen was asked for a construct the format cannot carry: a function `refine`/`transform` (cross-field rules are `check()`; transforms are application code), a coercion the normalizer would never run, closed objects under `allOf`, an annotation on `never()`, a draft the pen does not write; in the JSLT pen an `apply()` as a bare object member (the `[]` idiom, JSLT-FORMAT §6.3 — the engine would fail at run time on the second child), a `match` of `{}` (the compiler's `JT0003`, earlier), an `apply()` outside a body; in the contract pen a path template form CONTRACT-FORMAT §4.2 reserves (the compiler's `JC0008`, earlier, naming the same form), a member mapped to `path` the template does not declare, or a hand-written operation `kind` outside `read`/`command`/`subscribe`; in the flow pen a guard given as a plain STRING (FLOW-FORMAT §3 makes a non-`$` literal vacuously true, so a projected display annotation must not decide execution), or a state or node id no declaration carries (the compiler's `JF0004`/`JF0006`/`JF0013`, earlier, naming the id); in the app pen a patch path that is not a chain of member reads and subscripts (a JSON Pointer cannot be written for it), an `$event` field APP-FORMAT §3.1 excludes by construction (`target`, `files`, a touch list — `$event` must survive `JSON.stringify`), an initial state no `default()` describes, a subscription-member combination §5.3 calls `JA0008`, or a view binding an action `actions` does not declare (the loop's `JA2001`, earlier, naming the declared ones); in the forms pen `preview`, which the format registry DERIVES from the field's own `format` |
 | `JL0103` | a `$defs` name collision (two distinct builders under one name), a `ref()` no definition answers, or a `lazy()` that does not return a named builder |
 | `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare: a `check()` external other than `root`/`path`, a `compute()` external at all, a `body()` external other than `root`/`path` and its declared parameters — or `root`/`path` declared as one, since the engine binds them; a flow guard, effect `with`, node query or edge `select` external at all, since both flow engines evaluate with one `$` and nothing else; an app action naming anything but `$event` and `$payload` (APP-FORMAT §3.1's whole ambient vocabulary), a subscription member naming anything but `$item`, and that only under `for` (§5.3's closed world); a form rule naming anything but the context's `root`, `value` and `pointer` |
-| `JL0105` | a relation hop on the chain — the query pen (QUERY-PEN §4, relation navigation) — cannot lower: the member is a many-to-many relation, whose join table is not a queryable root in this version (`load({ include })` reads the memberships); the relation's key column or the key it references is composite or undeclared; or the provider's relation table holds something that is not a relation record |
+| `JL0105` | a relation hop on the chain — the query pen (QUERY-PEN §4, relation navigation) — cannot lower: the relation's key column or the key it references is composite or undeclared; a many-to-many entry does not name its join row's columns (`{ joinTable, ownColumn, ownKey, targetColumn, targetKey }`), so there is no join root to lower through; the relation kind is not one this surface lowers; or the provider's relation table holds something that is not a relation record |
 | `JL0106` | a migration step names an entity or collection the target model does not declare (`transform`, `assert`, `derive`); or a `transform` over a planned document finds no draft to replace, or two drafts for one name |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) was handed a member that is not the relation kind the operation needs: `include()` picks a declared relation member — a scalar member, or a name the model does not declare, is refused naming the declared ones; `link()`/`unlink()` attach many-to-many memberships only — a to-one or to-many relation is refused naming its kind |
 
@@ -202,17 +202,17 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 817 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,652 | 34 | 8 | 14 | 173,426 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 32,499 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 40,929 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,196 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 23,671 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 44,716 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,253 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 46,934 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 36,659 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 882 | 40 | 4 | 2 | 542,234 B |
-| **eleven documents** | | **11,718** | **290** | **67** | | |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,653 | 34 | 8 | 14 | 174,028 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 33,098 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 41,524 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,798 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 24,273 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 45,313 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,852 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 47,535 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 37,254 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 882 | 40 | 4 | 2 | 561,196 B |
+| **eleven documents** | | **11,719** | **290** | **67** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -254,16 +254,16 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 173,426 B | 173 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 32,499 B | 32 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 40,929 B | 41 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,196 B | 19 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 23,671 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 44,716 B | 45 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,253 B | 19 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 46,934 B | 47 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 36,659 B | 37 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 542,234 B | 542 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 174,028 B | 174 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 33,098 B | 33 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 41,524 B | 42 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,798 B | 20 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,273 B | 24 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 45,313 B | 45 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,852 B | 20 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 47,535 B | 48 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 37,254 B | 37 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 561,196 B | 561 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of

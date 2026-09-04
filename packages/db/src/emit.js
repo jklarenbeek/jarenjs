@@ -132,6 +132,13 @@ export function emitPlan(plan, dialect, physical) {
   };
   /** The presence/type discriminator, always over the document column. */
   const typeOf = (ref) => dialect.jsonTypeOf(docColumn, pathTextOf(ref));
+  /** One projected member: its value beside its JSON type, under a
+   * suffixed pair of names the decoder reads back. */
+  const projectedPair = (ref, suffix) =>
+    `CASE WHEN ${typeOf(ref)} IN ('object', 'array') `
+    + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathTextOf(ref)))} `
+    + `ELSE ${dialect.jsonExtract(docColumn, pathTextOf(ref))} END AS ${q(`v${suffix}`)}, `
+    + `${typeOf(ref)} AS ${q(`t${suffix}`)}`;
 
   const sl = dialect.stringLiteral;
   const NUMERIC = () => `(${sl('integer')}, ${sl('real')})`;
@@ -299,9 +306,17 @@ export function emitPlan(plan, dialect, physical) {
     // engine scores, cuts and ranks (measured: every SQL spelling of
     // the rank loses to fetching the column and ranking in the engine,
     // and none of them runs where no function can be registered)
-    ? `${dialect.rowIdentity()} AS ${q('rid')}, ${q(plan.rank.column)} AS ${q('vec')}`
-    : plan.bucket !== null
-      ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
+    // one alternative per emitted statement: the caller emits the plan
+    // once per declared width, and each carries its own column
+    ? `${dialect.rowIdentity()} AS ${q('rid')}, `
+      + `${q(plan.rank.alternatives[0].column)} AS ${q('vec')}`
+    : plan.group !== null
+      ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`)),
+        ...plan.group.aggregates.map((entry, i) =>
+          `${dialect.groupAggregate(entry.fn, entry.ref === null ? null : valueOf(entry.ref))} `
+          + `AS ${q(`a${i}`)}`)].join(', ')
+      : plan.bucket !== null
+        ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
         ...plan.bucket.aggregates.map((entry) =>
           `${dialect.groupAggregate(entry.fn,
             entry.ref === null ? null : valueOf(entry.ref))} AS ${q(entry.as)}`)].join(', ')
@@ -314,16 +329,33 @@ export function emitPlan(plan, dialect, physical) {
           // compound is a blob. `NULL` type is an absent member (no
           // item), 'null' a present null, 'true'/'false' a boolean the
           // integer rendering would otherwise lose
-          : `CASE WHEN ${typeOf(plan.project.path)} IN ('object', 'array') `
-            + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathTextOf(plan.project.path)))} `
-            + `ELSE ${dialect.jsonExtract(docColumn, pathTextOf(plan.project.path))} END AS ${q('v')}, `
-            + `${typeOf(plan.project.path)} AS ${q('t')}`)
+          : 'path' in plan.project
+            ? projectedPair(plan.project.path, '')
+            // a projection TREE: the same value/type pair per DISTINCT
+            // leaf, numbered, and nothing else — the document blob is
+            // never selected, and a leaf named twice is fetched once
+            : plan.project.leaves.map((ref, i) => projectedPair(ref, String(i))).join(', '))
         : plan.aggregate.fn === 'count'
           ? `COUNT(*) AS ${q('value')}`
-          : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
+          // a REGISTERED aggregate calls the function the store
+          // registered under the plan's name; the fold is the pack's own
+          : plan.aggregate.fn === 'registered'
+            ? `${plan.aggregate.sql}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`
+            : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
 
   let sql = `SELECT ${selection} FROM ${q(physical.table)}`;
   if (plan.filter !== null) sql += ` WHERE ${emitPred(plan.filter)}`;
+  if (plan.group !== null) {
+    sql += ` GROUP BY ${plan.group.keys
+      .map((key) => dialect.jsonExtract(docColumn, pathTextOf(key.ref))).join(', ')}`;
+    // the groups' order: the engine's own order of first appearance —
+    // over a collection, each group's earliest row identity — or the
+    // key ordering an `$orderby` declared
+    sql += ` ORDER BY ${plan.group.order === 'first-seen'
+      ? dialect.groupAggregate('min', dialect.rowIdentity())
+      : plan.group.order.map((term) => `${q(`vk${term.index}`)} `
+        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`).join(', ')}`;
+  }
   if (plan.bucket !== null) {
     // `first-seen` is the engine's own group order (§6.5, first
     // appearance), which over a collection is the group's earliest row
@@ -334,7 +366,8 @@ export function emitPlan(plan, dialect, physical) {
       : `${alias} ${plan.bucket.order === 'desc' ? 'DESC' : 'ASC'}`;
     sql += ` GROUP BY ${alias} ORDER BY ${order}`;
   }
-  if (plan.aggregate === null && plan.rank === null && plan.bucket === null) {
+  if (plan.aggregate === null && plan.rank === null && plan.bucket === null
+    && plan.group === null) {
     const terms = (plan.order ?? []).map((term) => {
       // Jaren's default sorts an empty key least: NULLS FIRST when
       // ascending, NULLS LAST when descending — and mirrored for
@@ -349,7 +382,7 @@ export function emitPlan(plan, dialect, physical) {
     terms.push(dialect.rowIdentity());
     sql += ` ORDER BY ${terms.join(', ')}`;
   }
-  if (plan.window !== null && plan.aggregate === null) {
+  if (plan.window !== null && plan.aggregate === null && plan.group === null) {
     sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
   return { sql, slots };
@@ -496,6 +529,7 @@ export function createEntityPredicateEmitters(dialect, param) {
  */
 export function emitEntityPlan(plan, dialect, physicalOf) {
   const q = dialect.quoteIdentifier;
+  const sl = dialect.stringLiteral;
   /** @type {ParamSlot[]} */
   const slots = [];
   const param = (slot) => {
@@ -516,25 +550,78 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     return text;
   };
 
+  const entityOf = new Map(plan.bindings.map((binding) => [binding.name, binding.entity]));
   const emitters = createEntityPredicateEmitters(dialect, param);
   const emitPred = (bindingName, pred) =>
     emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
 
+  /**
+   * One projected member of a binding: its value beside its JSON type,
+   * under a suffixed pair of names the decoder reads back.
+   *
+   * Which SOURCE the pair reads is the entity mapping's rule (§9.3),
+   * not a choice: a mapped scalar lives in its COLUMN and is absent
+   * from the document, so reading the document for it would answer
+   * nothing; an epoch column keeps its string IN the document, because
+   * the integer is derived; everything else is document only. The type
+   * of a column value is the column's declared storage — SQL has no
+   * `json_type` for it — with `NULL` meaning the member is absent,
+   * which is exactly what the merge reads back.
+   */
+  const projectedPair = (leaf, suffix) => {
+    const names = `${q(`v${suffix}`)}`;
+    const typeName = `${q(`t${suffix}`)}`;
+    if (leaf.ref.flavor === 'entity-column') {
+      const column = `${aliasOf(leaf.binding)}.${q(leaf.ref.column)}`;
+      const type = leaf.ref.storage === 'boolean'
+        ? `CASE WHEN ${column} IS NULL THEN NULL WHEN ${column} = 0 `
+          + `THEN ${sl('false')} ELSE ${sl('true')} END`
+        : `CASE WHEN ${column} IS NULL THEN NULL ELSE ${sl(
+          leaf.ref.storage === 'string' ? 'text'
+            : leaf.ref.storage === 'integer' ? 'integer' : 'real')} END`;
+      return `${column} AS ${names}, ${type} AS ${typeName}`;
+    }
+    const docSql = docOf(leaf.binding);
+    const text = pathTextOf(leaf.ref);
+    const type = dialect.jsonTypeOf(docSql, text);
+    const value = dialect.jsonExtract(docSql, text);
+    return `CASE WHEN ${type} IN ('object', 'array') `
+      + `THEN ${dialect.jsonText(value)} ELSE ${value} END AS ${names}, `
+      + `${type} AS ${typeName}`;
+  };
+
   const ret = plan.ret;
   // every returned column plus the document rendered to text; the
-  // caller merges them back into the entity shape
+  // caller merges them back into the entity shape — or, for a projected
+  // shape, one value/type pair per DISTINCT leaf and no document at all
   const selection = plan.aggregate === 'count'
     ? `COUNT(*) AS ${q('value')}`
-    : `${aliasOf(ret)}.*, ${dialect.jsonText(docOf(ret))} AS ${q('__doc')}`;
+    : plan.project != null
+      // `p`-prefixed, because a bare `t0` would collide with this
+      // plan's own binding aliases
+      ? plan.project.leaves.map((leaf, i) => projectedPair(leaf, `p${i}`)).join(', ')
+      // a join-table root IS its two key columns: it has no document
+      // column, so the merge is handed an empty one
+      : physicalOf(entityOf.get(ret)).document === false
+        ? `${aliasOf(ret)}.*, ${sl('{}')} AS ${q('__doc')}`
+        : `${aliasOf(ret)}.*, ${dialect.jsonText(docOf(ret))} AS ${q('__doc')}`;
+
+  const tableOf = (name) =>
+    `${q(physicalOf(entityOf.get(name)).table)} AS ${aliasOf(name)}`;
+  const JOIN_OPS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
+  const onSql = (edge) =>
+    `${aliasOf(edge.left.binding)}.${q(edge.left.column)}`
+    + ` ${JOIN_OPS[edge.op ?? 'eq']} ${aliasOf(edge.right.binding)}.${q(edge.right.column)}`;
 
   let sql = `SELECT ${selection} FROM `;
-  sql += plan.bindings
-    .map((binding) => `${q(physicalOf(binding.entity).table)} AS ${aliasOf(binding.name)}`)
-    .join(' JOIN ');
-  if (plan.joinOn !== null) {
-    sql += ` ON ${aliasOf(plan.joinOn.left.binding)}.${q(plan.joinOn.left.column)}`
-      + ` = ${aliasOf(plan.joinOn.right.binding)}.${q(plan.joinOn.right.column)}`;
-  }
+  // the JOIN order the planner settled: the first binding, then each
+  // one an edge attaches to what is already joined. A binding nothing
+  // attached never reaches here — that graph is the residual
+  sql += plan.joins.length === 0
+    ? tableOf(plan.bindings[0].name)
+    : plan.joins.map((join, i) => (i === 0
+      ? tableOf(join.binding)
+      : `${tableOf(join.binding)} ON ${join.on.map(onSql).join(' AND ')}`)).join(' JOIN ');
   const filterSql = plan.filters
     .filter((entry) => entry.filter !== null)
     .map((entry) => emitPred(entry.binding, entry.filter));

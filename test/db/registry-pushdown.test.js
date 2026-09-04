@@ -21,9 +21,11 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { openStore } from '@jarenjs/db';
-import { nodeDriver } from '@jarenjs/db/node';
+import { DatabaseSync } from 'node:sqlite';
+
+import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { createJsltRegistry, mathPack, financePack } from '@jarenjs/json/jslt';
+import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 
 const MODEL = {
   $model: '0.1',
@@ -190,5 +192,218 @@ describe('Ring 3 — the honest ceiling and profile safety', () => {
     await coll.execute(doc, { pushdown: false });
     assert.strictEqual(store.stats().udfRegistrations, 0, 'pushdown:false pushes nothing');
     await store.close();
+  });
+});
+
+// ————— Ring 3 for AGGREGATES —————
+
+/**
+ * A node:sqlite driver whose aggregate primitive is the caller's: a
+ * counting wrapper, or `null` for a handle that has none at all — which
+ * `adaptNodeDatabase` then reports as `aggregateFunctions: false`
+ * rather than declaring a capability the handle cannot honour.
+ * @param {((name: string, spec: any, db: any) => any) | null} aggregate
+ */
+function nodeAggregateDriver(aggregate) {
+  const db = new DatabaseSync(':memory:');
+  const handle = {
+    exec: (sql) => db.exec(sql),
+    prepare: (sql) => db.prepare(sql),
+    function: (name, options, fn) => db.function(name, options, fn),
+    createSession: (options) => (options === undefined
+      ? db.createSession() : db.createSession(options)),
+    close: () => db.close(),
+  };
+  if (aggregate !== null) handle.aggregate = (name, spec) => aggregate(name, spec, db);
+  return { open: (options) => adaptNodeDatabase(handle, { queueTimeout: options?.queueTimeout }) };
+}
+
+describe('a registered aggregate lowers to a SQL aggregate, or stays where it is', () => {
+  const AGG_MODEL = {
+    $model: '0.1',
+    collections: {
+      rows: {
+        schema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            n: { type: 'number' },
+            maybe: { type: ['number', 'null'] },
+            label: { type: 'string' },
+          },
+        },
+        key: '/id',
+        indexes: [{ name: 'by_n', path: '$.n' }],
+      },
+    },
+  };
+  const AGG_DATA = [
+    { id: 'r1', n: 2, label: 'a' },
+    { id: 'r2', n: 4, label: 'b' },
+    { id: 'r3', n: 9, label: 'c' },
+    { id: 'r4', n: 9, label: 'd' },
+  ];
+  const stats = () => createJsltRegistry().use(statsPack);
+  const OPERATORS = ['$mean', '$median', '$variance', '$stddev'];
+
+  const openAgg = async (rows = AGG_DATA, extra = {}, side = 'indexed') => {
+    const model = side === 'unindexed'
+      ? { ...AGG_MODEL, collections: { rows: { ...AGG_MODEL.collections.rows, indexes: [] } } }
+      : AGG_MODEL;
+    const store = await openStore(model,
+      { driver: nodeDriver(), operators: stats(), ...extra });
+    const coll = store.collection('rows');
+    for (const row of rows) await coll.insert(row);
+    return { store, coll, rows };
+  };
+  const resident = (document, rows) =>
+    compileJsonQuery(document, stats().toOptions())(structuredClone(rows));
+
+  it('every declared aggregate matches the engine at many, duplicate, one and zero rows, indexed and not', async () => {
+    // a row whose member is ABSENT contributes no item to the engine's
+    // sequence and a NULL the SQL fold skips: the same multiset
+    const ABSENT = [...AGG_DATA, { id: 'r5', label: 'e' }];
+    for (const side of /** @type {const} */ (['indexed', 'unindexed'])) {
+      for (const rows of [AGG_DATA, ABSENT, [AGG_DATA[2], AGG_DATA[3]], [AGG_DATA[0]], []]) {
+        const { store, coll } = await openAgg(rows, {}, side);
+        for (const operator of OPERATORS) {
+          const document = { [operator]: { $for: { it: '$[*]' }, $return: '$it.n' } };
+          const explained = await Promise.resolve(coll.explain(document));
+          assert.strictEqual(explained.mode, 'native',
+            `${operator} over ${rows.length} row(s), ${side}: ${JSON.stringify(explained.residual)}`);
+          assert.match(explained.sql, side === 'indexed'
+            ? /^SELECT jaren_a_[a-z0-9]+\("gx_n"\) AS "value" FROM "rows"$/
+            : /^SELECT jaren_a_[a-z0-9]+\(jsonb_extract\("doc", '\$\."n"'\)\) AS "value" FROM "rows"$/,
+          `${operator}, ${side}`);
+          assert.deepStrictEqual(
+            await Promise.resolve(coll.execute(document)),
+            resident(document, rows),
+            `${operator} over ${rows.length} row(s), ${side}`);
+        }
+        await store.close();
+      }
+    }
+  });
+
+  it('a grouping folds in the engine, and answers what the engine answers', async () => {
+    const { store, coll } = await openAgg();
+    const document = {
+      $for: { it: '$[*]' },
+      $groupby: { g: '$it.n' },
+      $orderby: ['$g'],
+      $return: { g: '$g', m: { $mean: '$it.n' } },
+    };
+    const explained = await Promise.resolve(coll.explain(document));
+    assert.strictEqual(explained.mode, 'set', 'a grouping is not the closed bucket shape');
+    assert.doesNotMatch(explained.sql, /jaren_a_/, 'no aggregate is registered for a grouped fold');
+    assert.deepStrictEqual(await Promise.resolve(coll.execute(document)),
+      resident(document, AGG_DATA));
+    await store.close();
+  });
+
+  it('a narrowed selection folds only the rows it kept, and an empty selection folds none', async () => {
+    const { store, coll } = await openAgg();
+    for (const bound of [3, 100]) {
+      const document = { $mean: {
+        $for: { it: '$[*]' }, $where: { $gt: ['$it.n', bound] }, $return: '$it.n' } };
+      const explained = await Promise.resolve(coll.explain(document));
+      assert.strictEqual(explained.mode, 'native');
+      assert.match(explained.sql, /WHERE/);
+      assert.deepStrictEqual(await Promise.resolve(coll.execute(document)),
+        resident(document, AGG_DATA));
+    }
+    await store.close();
+  });
+
+  it('one registration per store, whatever the run count', async () => {
+    let registrations = 0;
+    const { store, coll } = await openAgg(AGG_DATA, {
+      driver: nodeAggregateDriver((name, spec, db) => {
+        registrations++;
+        return db.aggregate(name, spec);
+      }) });
+    const document = { $mean: { $for: { it: '$[*]' }, $return: '$it.n' } };
+    for (let i = 0; i < 4; i++) await Promise.resolve(coll.execute(document));
+    await Promise.resolve(coll.execute({ $median: { $for: { it: '$[*]' }, $return: '$it.n' } }));
+    assert.strictEqual(registrations, 2, 'one per operator, not one per run');
+    await store.close();
+  });
+
+  it('a non-numeric or null-admitting path, and a scalar of the same name, stay in the engine', async () => {
+    const { store, coll } = await openAgg();
+    // a string member: the engine ERRORS, so the plan must not answer
+    const overString = { $mean: { $for: { it: '$[*]' }, $return: '$it.label' } };
+    const explainedString = await Promise.resolve(coll.explain(overString));
+    assert.strictEqual(explainedString.mode, 'set');
+    // the registry names itself first (Ring 2), the planner's own cause
+    // follows — both are reported, neither replaces the other
+    assert.match(explainedString.residual.reasons.map((r) => r.reason).join(' | '),
+      /singular schema-typed path/);
+    // a member the schema lets hold null: SQL cannot tell a stored null
+    // from an absent member, and the engine's sequence can
+    const overNullable = { $mean: { $for: { it: '$[*]' }, $return: '$it.maybe' } };
+    assert.strictEqual((await Promise.resolve(coll.explain(overNullable))).mode, 'set');
+    // a SCALAR operator of the same name is not interchangeable with the
+    // aggregate: a registry whose `$mean` is a scalar op never becomes a
+    // SQL aggregate
+    const scalarMean = {
+      name: 'shadow',
+      entries: { $mean: { kind: 'op', signature: ['number'], result: 'number',
+        fn: (value) => value, pushable: 'scalar' } },
+    };
+    const shadowed = await openStore(AGG_MODEL,
+      { driver: nodeDriver(), operators: createJsltRegistry().use(scalarMean) });
+    for (const row of AGG_DATA) await shadowed.collection('rows').insert(row);
+    const asScalar = { $for: { it: '$[*]' }, $return: { m: { $mean: '$it.n' } } };
+    const explainedScalar = await Promise.resolve(shadowed.collection('rows').explain(asScalar));
+    assert.strictEqual(explainedScalar.mode, 'row', 'a scalar operator projects per row');
+    assert.doesNotMatch(explainedScalar.sql, /jaren_a_/, 'no aggregate was registered for it');
+    await shadowed.close();
+    await store.close();
+  });
+
+  it('a driver without an aggregate API keeps the same answer in the residual', async () => {
+    const store = await openStore(AGG_MODEL,
+      { driver: nodeAggregateDriver(null), operators: stats() });
+    assert.strictEqual(store.capabilities.aggregateFunctions, false);
+    const coll = store.collection('rows');
+    for (const row of AGG_DATA) await coll.insert(row);
+    const document = { $mean: { $for: { it: '$[*]' }, $return: '$it.n' } };
+    const explained = await Promise.resolve(coll.explain(document));
+    assert.strictEqual(explained.mode, 'set', 'no aggregate API: the engine folds');
+    assert.deepStrictEqual(await Promise.resolve(coll.execute(document)),
+      resident(document, AGG_DATA), 'and answers the same value');
+    assert.throws(() => coll.query(document, { strict: true }), (error) =>
+      /** @type {any} */ (error).code === 'JD0010');
+    await store.close();
+  });
+
+  it('a profile forbids the registration, so the same document folds in the engine', async () => {
+    const { store, coll } = await openAgg();
+    const document = { $mean: { $for: { it: '$[*]' }, $return: '$it.n' } };
+    const profile = { maxRows: 100 };
+    const explained = await Promise.resolve(coll.explain(document, { profile }));
+    assert.strictEqual(explained.mode, 'set',
+      'a foreign document must not cause a host-side registration');
+    assert.deepStrictEqual(await Promise.resolve(coll.execute(document, { profile })),
+      resident(document, AGG_DATA));
+    await assert.rejects(async () => coll.execute(document, { profile, strict: true }),
+      (error) => /** @type {any} */ (error).code === 'JD0010');
+    // and without the profile the same store still promotes it
+    assert.strictEqual((await Promise.resolve(coll.explain(document))).mode, 'native');
+    await store.close();
+  });
+
+  it('a pack that declares the wrong shape pushable is refused at open, by name', async () => {
+    for (const entry of [
+      { kind: 'agg', signature: ['seq<number>', 'number'], result: 'number', fn: () => 1, pushable: 'aggregate' },
+      { kind: 'op', signature: ['number'], result: 'number', fn: () => 1, pushable: 'aggregate' },
+      { kind: 'agg', signature: ['seq<number>'], result: 'seq<number>', fn: () => [1], pushable: 'aggregate' },
+    ]) {
+      assert.throws(() => openStore(AGG_MODEL, { driver: nodeDriver(),
+        operators: createJsltRegistry().use({ name: 'bad', entries: { $bad: entry } }) }),
+      (error) => error instanceof TypeError && /'\$bad' declares pushable: 'aggregate'/.test(error.message),
+      JSON.stringify(entry.signature));
+    }
   });
 });

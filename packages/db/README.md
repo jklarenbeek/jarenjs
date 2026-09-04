@@ -159,7 +159,13 @@ and answers `{ items, continuation, hasMore, snapshot }`: the
 continuation is unsigned and structural (the host signs it), an item
 larger than `maxBytes` is `JD2074` without advancing it, and
 `snapshot` is true only over an immutable ordering; over a mutable one
-the page is live and says so (MODEL-FORMAT §10.5).
+the page is live and says so (MODEL-FORMAT §10.5). `explainLoad()`
+reports both facts separately: `order` is the deterministic order the
+statement executes under in EVERY load mode — the declared terms and the
+tie-breaker the clause appends, the primary key in keyset mode and the
+row identity otherwise — and `identity` is the ordering identity a
+continuation carries and is checked against, `null` for a load that has
+no continuation to emit.
 
 - **The pushdown planner with `explain()`.** A query compiles through
   the engine's published AST into a dialect-neutral plan and renders
@@ -176,20 +182,41 @@ the page is live and says so (MODEL-FORMAT §10.5).
   `streaming` (`'row'` or `'buffered'`) and `barrier` (the construct
   that forces a buffer, or `null`), the same classification the cursor
   itself carries; `strictStreaming: true` on a cursor declines a
-  buffering plan by name (`JD0037`) before any statement runs. A
+  buffering plan by name (`JD0037`) before any statement runs. Every
+  explanation also carries `order`: the deterministic order the
+  statement executes under, in one closed vocabulary — a mapped
+  `column`, a `document` path, a bucketed plan's `group` key, or the
+  row `identity` the plan appends so a sequence answers in insertion
+  order — read from the plan rather than parsed back out of SQL, and
+  `null` only for a statement that orders nothing at all (an aggregate
+  answers one row; a k-nearest fetch is unordered because the engine
+  ranks it). Each refusal reason is drawn from a closed vocabulary too,
+  so a reason a caller matched on stays the sentence it was. A
   `$return` that is ONE member path over the binding projects that
   path into the statement — its value beside its JSON type, so a
   present `null`, an absent member and a boolean read back exactly as
   the engine answers them — and `$count` over it counts the rows where
-  the member is present with a `COUNT(*)`; `explain().projection`
-  names the path, and reading or counting one member no longer reads
-  every document. Every `explain()` also carries `budget`: the profile
+  the member is present with a `COUNT(*)`. A `$return` that is a nested
+  SHAPE — objects, arrays, literals and member paths, to any depth —
+  projects the same way: the statement fetches one value/type pair per
+  DISTINCT leaf (a path named twice is fetched once) and the decoder
+  rebuilds the shape, so an absent member is omitted from its object
+  and skipped in its array exactly as the engine does it, and a literal
+  `null` stays present where a path that finds nothing does not.
+  `explain().projection` names the path or the leaf `paths`, and
+  reading a shape no longer reads every document. A shape the tree
+  cannot rebuild — an operator over a member, a reference to the
+  binding itself, a projection with no path at all — refuses WHOLE and
+  runs per row, with `explain().residualProjection` naming what stayed
+  behind: promoting the half that composes would answer a shape nobody
+  asked for. Every `explain()` also carries `budget`: the profile
   that applied, every bound it imposed, and the two driver slots
   (`time`, `estimatedRows`) reported `unavailable` on SQLite rather
   than estimated (MODEL-FORMAT §8). A differential
   oracle — a committed corpus and a seeded generator, every case run
-  in both modes — keeps both paths agreeing, with the one arithmetic
-  deviation declared rather than hidden (MODEL-FORMAT §10.6: SQLite's
+  resident, native, native again over a store with every declared index
+  removed, and forced-residual — keeps every path agreeing, with the one
+  arithmetic deviation declared rather than hidden (MODEL-FORMAT §10.6: SQLite's
   compensated `SUM` and the engine's naive one differ in the last
   bit). `strict: true` turns any residual into a compile error.
 - **Registered operators, correct in the residual, pushed where it
@@ -209,6 +236,44 @@ the page is live and says so (MODEL-FORMAT §10.5).
   registration for untrusted documents); the profile's `functions`
   allow-list still governs a `$call`-reached `fn`; the row bound still
   fires. Without a registry the store is unchanged — `$npv` is `JQ0002`.
+  A pack may also mark a whole-sequence summary `pushable: 'aggregate'`
+  (the statistics pack's `$mean`, `$median`, `$variance`, `$stddev`):
+  where the driver has an aggregate API it becomes a registered **SQL
+  aggregate** over the member's column, folded by the same pure
+  function, so the accumulation runs in SQLite rather than over fetched
+  rows. The token is a promise the store checks — one `seq<number>`
+  operand and a scalar result, or the declaration is refused at
+  `openStore` by name — and the promotion still needs a numeric member
+  the schema forbids `null` on, because SQL cannot tell a stored `null`
+  from an absent one and the engine can.
+- **Grouping and joins lower whole, or not at all.** A `$groupby` over
+  schema-typed member keys becomes a real `GROUP BY`: the keys come back
+  with their JSON types beside them, so a group whose key is ABSENT
+  leaves that member out exactly as the object constructor does, the
+  closed aggregate set (`$count`, `$sum`, `$avg`, `$min`, `$max`) folds
+  in SQL under the ENGINE's empty rules (`0` for a count or a sum, no
+  member at all for the other three), and the groups come out in the
+  engine's own order of first appearance unless an `$orderby` over the
+  keys says otherwise. Entity queries join any number of bindings: every
+  binding past the first must be attached by a column equality to one
+  already joined, which is what makes the plan a nested loop the engine
+  can be compared against — a binding nothing attaches would be a
+  cartesian product, so it is the residual, named, and `strict: true`
+  refuses it. `explain()` lists the join order with the equalities that
+  attached each binding, and the group's keys, aggregates and order.
+  A join predicate that is not an equality — a range between two mapped
+  columns of one family — refines a match it never makes: the anchor is
+  still an equality, so a range alone stays the residual. A projected
+  join lowers too, through the same leaf decoder a single-binding
+  projection uses, each leaf read from its own binding's alias.
+- **A declared join table is a read-only query root.** `$.<JoinTable>[*]`
+  answers rows carrying exactly its two key columns and joins to the
+  entities it relates, so `Person → Person_Tag → Tag` is one statement
+  over three roots — while `store.entity('<JoinTable>')` is still
+  `JD2004` and memberships are still written through `link`/`unlink`.
+  Because the root exists, a many-to-many hop on the chain lowers
+  through it (two links: the membership, then the row it names) instead
+  of refusing.
 - **Storage is declarative.** Indexed paths become generated columns
   plus real indexes, typed from the collection's schema. Opening an
   existing database verifies the declared shape and refuses to alter
@@ -257,8 +322,11 @@ the page is live and says so (MODEL-FORMAT §10.5).
 - **The safe profile.** Untrusted query documents run under composed
   bounds: engine limits on the residual, a mandatory row bound that
   refuses rather than truncates, reference allow-lists, optional
-  full-scan refusal, and per-collection mandatory predicates no
-  document shape can shed. Read-only stores refuse writes at the
+  full-scan refusal, per-collection mandatory predicates no document
+  shape can shed, and a per-root MEMBER allow-list — the members a
+  document may read, checked wherever it names one, where allowing a
+  member allows what is under it and reading the item whole is refused
+  rather than quietly narrowed. Read-only stores refuse writes at the
   driver.
 - **Writes validate** through an injected hook; without one,
   `store.capabilities.validated` is `false` and the docs say what that
@@ -511,6 +579,18 @@ wrong width is refused at plan time and `explain()` says why; an
 **external** one is only knowable when it is bound, so the plan stays
 `knn` and the fallback is counted instead — `stats().knn.diverted` is
 that count, and a consumer who binds probes from a model should watch it.
+
+**Several declared widths, one compiled query.** A member may carry more
+than one `derive: 'vector'` index — a 384-wide embedding beside a
+768-wide one — and an external probe then binds the column its OWN width
+names. The plan carries one alternative per declared width and emits one
+statement per alternative, prepared once and kept with the plan; the
+bind picks exactly one. No `CASE` across the columns (that would read
+every one of them per row) and no statement per call (that would give up
+the prepared cache). `explain().rank` names the `alternatives` and, when
+the call was given its externals, the `selected` width — the probe is
+named, never printed. A width the model does not declare is the same
+counted diversion any unbindable probe is.
 
 **The numbers, the losses included.** `benchmark/vector.js` measures one
 k-nearest query every physical way it can run — over <!--fact:vector.grid-->10,000 and 50,000 vectors at 384 and 768 dimensions, k = 10, the median of 10 probes<!--/fact--> —

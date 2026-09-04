@@ -45,12 +45,18 @@ describe('the chain reports its own streaming class', () => {
     assert.strictEqual(provider.streaming, 'row');
     assert.strictEqual(set.cursor(local.document, { externals: local.bindings }).streaming, provider.streaming);
 
+    // a projection of member paths is pushed on BOTH surfaces and
+    // streams; one an operator touches is the provider's barrier
     const projected = set.select((r) => r.n);
     const projectedLocal = projected.explain();
     assert.strictEqual(projectedLocal.streaming, 'row', 'the projection is pushed, not run here');
     const projectedProvider = await set.explain(projectedLocal.document, { externals: projectedLocal.bindings });
-    assert.deepStrictEqual([projectedProvider.streaming, projectedProvider.barrier?.construct], ['buffered', '$return']);
-    assert.deepStrictEqual(set.cursor(projectedLocal.document).barrier, projectedProvider.barrier);
+    assert.deepStrictEqual([projectedProvider.streaming, projectedProvider.barrier], ['row', null]);
+    const computed = set.select((r) => ({ c: r.n.add(1) })).explain();
+    const computedProvider = await set.explain(computed.document, { externals: computed.bindings });
+    assert.deepStrictEqual([computedProvider.streaming, computedProvider.barrier?.construct],
+      ['buffered', '$return']);
+    assert.deepStrictEqual(set.cursor(computed.document).barrier, computedProvider.barrier);
 
     const split = set.where((r) => r.n.gt(0)).mapAsync(async (r) => r, { concurrency: 1 }).orderBy((r) => r.n);
     const splitLocal = split.explain();

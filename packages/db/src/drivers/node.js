@@ -38,11 +38,17 @@ export function adaptNodeDatabase(db, options) {
       };
     },
     close: () => db.close(),
-    registerFunction: (name, options, fn) => db.function(name, options, fn),
-    registerAggregate: (name, spec) => db.aggregate(name, spec),
-    session: (table) => (table === undefined
-      ? db.createSession()
-      : db.createSession({ table })),
+    // each optional primitive is exposed only when the HANDLE has it, so
+    // a substitute that carries less than `node:sqlite` reports less —
+    // a declared capability the handle cannot honour is a TypeError at
+    // the first call instead of a `false` the planner can read
+    ...(typeof db.function === 'function'
+      ? { registerFunction: (name, options, fn) => db.function(name, options, fn) } : undefined),
+    ...(typeof db.aggregate === 'function'
+      ? { registerAggregate: (name, spec) => db.aggregate(name, spec) } : undefined),
+    ...(typeof db.createSession === 'function'
+      ? { session: (table) => (table === undefined
+        ? db.createSession() : db.createSession({ table })) } : undefined),
   };
   return openConnection(raw, {
     dialect: sqliteDialect,

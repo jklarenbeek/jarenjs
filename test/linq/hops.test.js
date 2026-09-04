@@ -26,7 +26,11 @@ import { queryJson } from '@jarenjs/json/query';
 const TABLES = Object.freeze({
   User: Object.freeze({
     posts: Object.freeze({ to: 'Post', kind: 'oneToMany', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' }),
-    labels: Object.freeze({ to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' }),
+    labels: Object.freeze({ to: 'Label', kind: 'manyToMany', joinTable: 'Label_User',
+      targetKey: 'name', ownColumn: 'User_key', ownKey: 'id', targetColumn: 'Label_key' }),
+    // the same member declared WITHOUT its join row's columns: nothing
+    // to lower through
+    partial: Object.freeze({ to: 'Label', kind: 'manyToMany', joinTable: 'Label_User', targetKey: 'name' }),
   }),
   Post: Object.freeze({
     author: Object.freeze({ to: 'User', kind: 'oneToOne', via: 'authorId', fkEntity: 'Post', fkTargets: 'User', targetKey: 'id' }),
@@ -268,12 +272,22 @@ describe('the seam: which providers navigate, and how the two surfaces agree', (
       /r1, r2, …/);
   });
 
-  it('JL0105: a many-to-many hop names the join table and load({ include }); a broken entry is refused', () => {
-    assert.throws(() => users().where((u) => u.labels.all().count().ge(1)),
-      codeIs('JL0105', /'Label_User'/));
-    assert.throws(() => users().select((u) => u.labels),
-      codeIs('JL0105', /load\(\{ include: \{ labels: true \} \}\)/));
-    assert.throws(() => fromAsync(entitySet('User', scope)).select((u) => u.labels), codeIs('JL0105'));
+  it('a declared many-to-many hop lowers through the join root; an incomplete entry is JL0105', () => {
+    // two links: the join row that names the membership, then the target
+    // row it names — the join table is a read-only query root (§10.7)
+    assert.deepStrictEqual(users().where((u) => u.labels.all().count().ge(1)).toDocument().$where,
+      { $ge: [{ $count: { $for: { r1: '$.Label_User[*]' },
+        $where: { $eq: ['$r1.User_key', '$it.id'] },
+        $return: { $for: { r2: '$.Label[*]' },
+          $where: { $eq: ['$r2.name', '$r1.Label_key'] }, $return: '$r2' } } }, 1] });
+    // read as a VALUE it is the array of related rows, as any to-many is
+    assert.deepStrictEqual(users().select((u) => u.labels).toDocument().$return,
+      [{ $for: { r1: '$.Label_User[*]' }, $where: { $eq: ['$r1.User_key', '$it.id'] },
+        $return: { $for: { r2: '$.Label[*]' },
+          $where: { $eq: ['$r2.name', '$r1.Label_key'] }, $return: '$r2' } }]);
+    assert.ok(fromAsync(entitySet('User', scope)).select((u) => u.labels).toDocument());
+    assert.throws(() => users().select((u) => u.partial),
+      codeIs('JL0105', /join row's columns/));
     const broken = (author) => from({ root: '$.Post[*]', relations: { author }, execute: () => [] })
       .select((p) => p.author.email);
     assert.throws(() => broken({ to: 'User', kind: 'oneToOne', via: 'authorId', fkEntity: 'Post', fkTargets: 'User' }),

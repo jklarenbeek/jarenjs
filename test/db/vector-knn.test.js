@@ -25,7 +25,10 @@ import {
   emitPlan, assertNoSqlText, PLAN_VERSION, cutCandidates, identityBatches, KNN_MARGIN,
   IDENTITY_CHUNK, probeVector, columnScore, classifyLiveQuery,
 } from '@jarenjs/db';
-import { nodeDriver } from '@jarenjs/db/node';
+import { DatabaseSync } from 'node:sqlite';
+
+import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
+import { compileJsonQuery } from '@jarenjs/json/query';
 import { packVector, l2Normalize } from '@jarenjs/core/vector';
 
 import { fullDoubleDialect } from './helpers.js';
@@ -108,8 +111,10 @@ describe('recognition — the k-nearest shape, and every reason it is not one', 
       filter: null,
       order: null,
       window: null,
-      rank: { column: COLUMN, dims: DIMS, probe: { ext: 'q' }, offset: 0, limit: 3, margin: KNN_MARGIN },
+      rank: { alternatives: [{ column: COLUMN, dims: DIMS }], probe: { ext: 'q' },
+        offset: 0, limit: 3, margin: KNN_MARGIN },
       bucket: null,
+      group: null,
       aggregate: null,
       project: 'document',
     });
@@ -180,13 +185,17 @@ describe('recognition — the k-nearest shape, and every reason it is not one', 
     assert.deepStrictEqual(report.filter((line) => line.includes('MISSING')), [], report.join('\n'));
   });
 
-  it('two widths over one path: a literal probe chooses, an external cannot', () => {
+  it('two widths over one path: a literal probe chooses at plan time, an external at BIND time', () => {
     const two = shapeOf(model([VECTOR_INDEX, { name: 'wide', path: '$.embedding', derive: 'vector', dims: 4 }]));
-    assert.strictEqual(planQuery(topK(1, {}, { $similarity: ['$r.embedding', [1, 0, 0, 0]] }), two.shape)
-      .plan.rank.column, 'gx_embedding_v4');
+    // a literal probe knows its own width, so the plan carries the one
+    // alternative that reads it
+    assert.deepStrictEqual(planQuery(topK(1, {}, { $similarity: ['$r.embedding', [1, 0, 0, 0]] }), two.shape)
+      .plan.rank.alternatives, [{ column: 'gx_embedding_v4', dims: 4 }]);
+    // an external probe carries every declared width, and the BIND picks
     const external = planQuery(topK(1), two.shape);
-    assert.strictEqual(external.mode, 'set');
-    assert.ok(external.reasons.some((r) => /several vector widths/.test(r.reason)), reasonsOf(external).join(';'));
+    assert.strictEqual(external.mode, 'knn');
+    assert.deepStrictEqual(external.plan.rank.alternatives.map((a) => a.dims).sort((a, b) => a - b),
+      [3, 4]);
   });
 
   it('$similarity outside the first ordering key is an ordinary residual, with the ordinary reasons', () => {
@@ -315,9 +324,10 @@ describe('execution — the column cuts, the engine decides', () => {
       const explained = await rows.explain(topK(2, { $where: { $eq: ['$r.tag', 'a'] } }), { externals: { q: Q } });
       assert.strictEqual(explained.mode, 'knn');
       assert.deepStrictEqual(explained.rank, {
-        column: COLUMN, dims: DIMS, probe: { external: 'q' }, limit: 2, offset: 0,
+        alternatives: [{ column: COLUMN, dims: DIMS }], selected: DIMS,
+        probe: { external: 'q' }, limit: 2, offset: 0,
         margin: KNN_MARGIN, decides: 'engine',
-      });
+      }, 'given the probe, the explanation names the width the bind selected');
       assert.deepStrictEqual(explained.prefilters, []);
       assert.strictEqual(explained.residual.mode, 'knn');
       assert.match(explained.residual.reasons[0].reason, /k-nearest rank is engine work/);
@@ -385,7 +395,9 @@ describe('execution — the column cuts, the engine decides', () => {
       // plan's rank is still reported as the shape it would have taken
       const explained = await rows.explain(topK(3), { externals: { q: [1, 0] } });
       assert.strictEqual(explained.mode, 'set', 'the run reads the whole collection');
-      assert.strictEqual(explained.rank.dims, DIMS, 'the k-nearest shape is still named');
+      assert.deepStrictEqual(explained.rank.alternatives, [{ column: COLUMN, dims: DIMS }],
+        'the k-nearest shape is still named');
+      assert.strictEqual(explained.rank.selected, null, 'no declared width takes this probe');
       assert.match(explained.residual.reasons.at(-1).reason, /the external 'q' is not a value the database binds/);
       assert.strictEqual((await rows.explain(topK(3))).mode, 'knn', 'without externals: the plan as planned');
     }
@@ -477,5 +489,107 @@ describe('execution — the column cuts, the engine decides', () => {
     finally {
       await store.close();
     }
+  });
+});
+
+// ————— One prepared query, several declared widths —————
+
+describe('a probe of any declared width binds the column that reads it', () => {
+  const WIDE = { name: 'by_vec4', path: '$.embedding', derive: 'vector', dims: 4 };
+  const TWO_WIDTHS = model([VECTOR_INDEX, WIDE]);
+  /** Three rows at width 3 and three at width 4, over one member. */
+  const MIXED = [
+    { id: 'a3', embedding: [1, 0, 0], tag: 'a' },
+    { id: 'b3', embedding: [0, 1, 0], tag: 'a' },
+    { id: 'c3', embedding: [0.5, 0.5, 0], tag: 'b' },
+    { id: 'a4', embedding: [1, 0, 0, 0], tag: 'a' },
+    { id: 'b4', embedding: [0, 1, 0, 0], tag: 'a' },
+    { id: 'c4', embedding: [0, 0, 0, 1], tag: 'b' },
+  ];
+
+  const openMixed = async (options = {}) => {
+    const store = await openStore(TWO_WIDTHS, { driver: nodeDriver(), ...options });
+    const rows = store.collection('rows');
+    for (const row of MIXED) await rows.insert(row);
+    return { store, rows };
+  };
+  /** The engine's own answer for the same document and probe. */
+  const resident = (document, externals) =>
+    compileJsonQuery(document)(structuredClone(MIXED), externals);
+
+  it('ONE compiled query answers each declared width, exactly as the engine does', async () => {
+    const { store, rows } = await openMixed();
+    const document = topK(2);
+    for (const probe of [[1, 0, 0], [0, 1, 0], [1, 0, 0, 0], [0, 0, 0, 1]]) {
+      const explained = await rows.explain(document, { externals: { q: probe } });
+      assert.strictEqual(explained.mode, 'knn', JSON.stringify(probe));
+      assert.strictEqual(explained.rank.selected, probe.length,
+        'the explanation names the width the bind selected');
+      assert.deepStrictEqual(explained.rank.alternatives.map((a) => a.dims).sort((a, b) => a - b),
+        [3, 4], 'and every alternative it could have selected');
+      assert.deepStrictEqual(await Promise.resolve(rows.execute(document, { externals: { q: probe } })),
+        resident(document, { q: probe }), JSON.stringify(probe));
+    }
+    // the vector itself never appears in the explanation
+    const explained = await rows.explain(document, { externals: { q: [1, 0, 0] } });
+    assert.deepStrictEqual(explained.rank.probe, { external: 'q' });
+    assert.doesNotMatch(JSON.stringify(explained), /\[1,0,0\]/, 'the probe is named, never printed');
+    await store.close();
+  });
+
+  it('an undeclared width diverts before the cut, is counted, and answers what the engine answers', async () => {
+    const { store, rows } = await openMixed();
+    const document = topK(2);
+    for (const probe of [[1, 0], [1, 0, 0, 0, 0], 'not a vector', null]) {
+      const explained = await rows.explain(document, { externals: { q: probe } });
+      assert.strictEqual(explained.mode, 'set', JSON.stringify(probe));
+      assert.strictEqual(explained.rank.selected, null, 'no declared width takes it');
+      assert.match(explained.residual.reasons.at(-1).reason, /the external 'q' is not a value/);
+      // whatever the engine says for that probe — a value, or its own
+      // refusal — the store says the same, because the engine answers
+      let want;
+      let wantCode = null;
+      try { want = resident(document, { q: probe }); }
+      catch (error) { wantCode = /** @type {any} */ (error).code; }
+      let got;
+      let gotCode = null;
+      try { got = await Promise.resolve(rows.execute(document, { externals: { q: probe } })); }
+      catch (error) { gotCode = /** @type {any} */ (error).code; }
+      assert.strictEqual(gotCode, wantCode, JSON.stringify(probe));
+      if (wantCode === null) assert.deepStrictEqual(got, want, JSON.stringify(probe));
+    }
+    assert.strictEqual(rows.stats().knn.diverted, 4,
+      'each undeclared width is counted, never silent');
+    await store.close();
+  });
+
+  it('one preparation per width per compiled plan, never one per run', async () => {
+    const prepared = [];
+    const db = new DatabaseSync(':memory:');
+    const counting = () => ({ open: (options) => adaptNodeDatabase({
+      exec: (sql) => db.exec(sql),
+      prepare: (sql) => {
+        prepared.push(sql);
+        return db.prepare(sql);
+      },
+      function: (name, o, fn) => db.function(name, o, fn),
+      aggregate: (name, spec) => db.aggregate(name, spec),
+      createSession: (o) => (o === undefined ? db.createSession() : db.createSession(o)),
+      close: () => db.close(),
+    }, { queueTimeout: options?.queueTimeout }) });
+    const { store, rows } = await openMixed({ driver: counting() });
+    prepared.length = 0;
+    const document = topK(2);
+    for (let i = 0; i < 3; i++) {
+      await Promise.resolve(rows.execute(document, { externals: { q: [1, 0, 0] } }));
+      await Promise.resolve(rows.execute(document, { externals: { q: [1, 0, 0, 0] } }));
+    }
+    const ranking = prepared.filter((sql) => /AS "vec"/.test(sql));
+    assert.deepStrictEqual(ranking.length, 2, `one per width: ${ranking.join(' | ')}`);
+    assert.deepStrictEqual([...new Set(ranking)].length, 2, 'and they are different statements');
+    assert.ok(ranking.some((sql) => sql.includes('gx_embedding_v3')));
+    assert.ok(ranking.some((sql) => sql.includes('gx_embedding_v4')));
+    assert.doesNotMatch(ranking.join(' '), /CASE/, 'no CASE across the vector columns');
+    await store.close();
   });
 });

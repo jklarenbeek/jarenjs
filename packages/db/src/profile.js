@@ -4,7 +4,7 @@
  * from a tenant, a remote client or a language model can reach a
  * database, and injection being structurally impossible (parameter
  * binding) says nothing about resource exhaustion or cross-tenant
- * reads. A profile composes four INDEPENDENT bounds:
+ * reads. A profile composes five INDEPENDENT bounds:
  *
  *  1. engine limits — `{sequenceItems, resultItems, steps, depth}`
  *     wired into every residual compilation, so the JavaScript
@@ -18,7 +18,15 @@
  *     database narrative shows a full-table SCAN is refused;
  *  4. mandatory predicates — a per-collection predicate conjoined into
  *     EVERY plan at its root, after translation, so no document shape
- *     can produce a fetch without it.
+ *     can produce a fetch without it;
+ *  5. the member allow-list — per ROOT (a collection or an entity), the
+ *     members a document may read. It is a policy over what the caller
+ *     may OBTAIN, so it is checked against every member path the
+ *     document references, and reading a root item whole (a bare
+ *     binding, a wildcard with no singular prefix) is refused rather
+ *     than narrowed: a list of allowed members cannot cover the whole
+ *     item, and answering a narrowed document nobody asked for would be
+ *     the wrong answer, not a safer one.
  *
  * The non-claims are part of the contract and live in
  * MODEL-FORMAT.md §8: no statement timeout exists on the SQLite
@@ -27,8 +35,10 @@
  * rows, not database-internal work.
  */
 
-import { planQuery } from './plan.js';
+import { planQuery, collectMemberReads } from './plan.js';
 import { conjoin } from './algebra.js';
+import { compileIndexPath } from './ddl.js';
+import { DbCompileError } from './errors.js';
 
 /** The `'safe'` profile: the documented defaults. */
 export const SAFE_PROFILE = Object.freeze({
@@ -52,6 +62,10 @@ export const SAFE_PROFILE = Object.freeze({
   maxIncludedRows: null,
   maxDepth: null,
   maxBytes: null,
+  // the member allow-list (§8): `null` is no member policy at all, the
+  // long-standing behaviour — every declared member of an allowed root
+  // is readable
+  members: null,
 });
 
 /**
@@ -93,11 +107,122 @@ export function normalizeProfile(profile) {
     maxIncludedRows: boundMember(profile.maxIncludedRows, 'maxIncludedRows'),
     maxDepth: boundMember(profile.maxDepth, 'maxDepth'),
     maxBytes: boundMember(profile.maxBytes, 'maxBytes'),
+    members: memberLists(profile.members),
   };
   if (typeof merged.maxRows !== 'number' || !Number.isInteger(merged.maxRows)
     || merged.maxRows < 1)
     throw new TypeError('profile.maxRows must be a positive integer');
   return Object.freeze(merged);
+}
+
+/**
+ * Normalize the member allow-list: `{ Root: ['$.a', '$.b.c'] }` into
+ * `{ Root: { declared, canonical } }`. The spelling is the model's own
+ * index-path spelling, compiled by the same function, so a profile
+ * member and a declared index name the same path — and the CANONICAL is
+ * injective, which a dotted string is not (a member literally named
+ * `a.b` and the nested path `a` → `b` spell alike). A malformed list is
+ * host configuration, so it is a `TypeError` like every other bound
+ * here, not a coded document failure.
+ * @param {any} members
+ * @returns {any}
+ */
+function memberLists(members) {
+  if (members === undefined || members === null) return SAFE_PROFILE.members;
+  if (typeof members !== 'object' || Array.isArray(members))
+    throw new TypeError('profile.members must be an object of root → member paths');
+  /** @type {any} */
+  const out = {};
+  for (const root of Object.keys(members)) {
+    const paths = members[root];
+    if (!Array.isArray(paths) || paths.length === 0) {
+      throw new TypeError(`profile.members['${root}'] must be a non-empty array of member `
+        + "paths ('$.name'); an empty list allows nothing, which is spelled by omitting the root "
+        + 'from profile.collections');
+    }
+    const canonical = [];
+    for (const path of paths) {
+      if (typeof path !== 'string')
+        throw new TypeError(`profile.members['${root}'] must contain member paths as strings`);
+      let compiled;
+      try {
+        compiled = compileIndexPath(path, `/profile/members/${root}`);
+      }
+      catch (cause) {
+        throw new TypeError(`profile.members['${root}'] path '${path}' must be a singular `
+          + `member path over the stored document ('$.name'): ${
+            /** @type {any} */ (cause).reason ?? /** @type {any} */ (cause).message}`);
+      }
+      canonical.push(compiled.canonical);
+    }
+    out[root] = Object.freeze({
+      declared: Object.freeze([...paths]),
+      canonical: Object.freeze(canonical),
+    });
+  }
+  return Object.freeze(out);
+}
+
+/**
+ * Refuse a profile whose member allow-list names a root the model does
+ * not declare — before any statement is prepared, because a typo in a
+ * policy that silently applies to nothing is the policy failing open.
+ * @param {any} profile - a normalized profile, or `null`
+ * @param {readonly string[]} roots - every declared root name
+ * @param {string} [docPath]
+ */
+export function assertProfileRoots(profile, roots, docPath = '/profile') {
+  if (profile === null || profile.members === null) return;
+  for (const root of Object.keys(profile.members)) {
+    if (!roots.includes(root)) {
+      throw new DbCompileError('JD0011',
+        `the profile's member allow-list names '${root}', which the model does not declare `
+        + `(declared roots: ${roots.join(', ')})`, docPath);
+    }
+  }
+}
+
+/**
+ * Whether a read canonical is inside an allowed one: the member itself,
+ * or anything under it. Allowing `a` allows `a.b`; allowing `a.b` does
+ * NOT allow `a`, which would expose its siblings.
+ * @param {string} read
+ * @param {string} allowed
+ * @returns {boolean}
+ */
+function inside(read, allowed) {
+  return read === allowed || read.startsWith(`${allowed}.`) || read.startsWith(`${allowed}[`);
+}
+
+/**
+ * The member allow-list's verdict on one document, as the refusal
+ * sentence or `null`. Names the root, the member and the place in the
+ * caller's document, because a policy refusal a caller cannot locate is
+ * a policy refusal they will disable.
+ * @param {any} profile - a normalized profile, or `null`
+ * @param {string} root - the collection or entity being read
+ * @param {any} analysisRoot - the document's analysis root node
+ * @param {(expr: any) => boolean} isRootSource
+ * @returns {string | null}
+ */
+export function memberDenial(profile, root, analysisRoot, isRootSource) {
+  const policy = profile === null || profile.members === null
+    ? undefined : profile.members[root];
+  if (policy === undefined) return null;
+  const reads = collectMemberReads(analysisRoot, isRootSource);
+  const allowed = policy.declared.join(', ');
+  if (reads.whole !== null) {
+    return `the profile allows only the members (${allowed}) of '${root}', and `
+      + `'${reads.whole.construct}' at ${reads.whole.docPath} reads the whole item — `
+      + 'project the members the policy allows';
+  }
+  for (const read of reads.members) {
+    if (!policy.canonical.some((entry) => inside(read.canonical, entry))) {
+      return `the profile does not allow the member '${read.member}' of '${root}' `
+        + `(allowed: ${allowed}) at ${read.docPath}`;
+    }
+  }
+  return null;
 }
 
 /**

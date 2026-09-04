@@ -512,10 +512,18 @@ function checkRelation(relation, member) {
       + '({ to, kind, via, fkEntity, fkTargets, targetKey } — MODEL-FORMAT §10.1)');
   }
   if (relation.kind === 'manyToMany') {
-    throw new LinqBuildError('JL0105',
-      `'${member}' is a many-to-many relation: the join table '${relation.joinTable}' is not a `
-      + 'queryable root in this version, so the hop has no phrase to lower to — read the '
-      + `memberships with load({ include: { ${member}: true } })`);
+    // the join table is a read-only query root (MODEL-FORMAT §10.7), so
+    // the hop lowers through it — provided the relation record names
+    // the row's two columns and the key each references
+    if (typeof relation.joinTable !== 'string' || typeof relation.ownColumn !== 'string'
+      || typeof relation.ownKey !== 'string' || typeof relation.targetColumn !== 'string'
+      || typeof relation.targetKey !== 'string') {
+      throw new LinqBuildError('JL0105',
+        `'${member}' is a many-to-many relation whose entry does not name its join row's `
+        + 'columns ({ joinTable, ownColumn, ownKey, targetColumn, targetKey } — '
+        + 'MODEL-FORMAT §10.1), so the hop has no phrase to lower to');
+    }
+    return;
   }
   if (relation.kind !== 'oneToOne' && relation.kind !== 'oneToMany') {
     throw new LinqBuildError('JL0105',
@@ -598,6 +606,24 @@ function startHop(target, member) {
     subject = '$' + binding;
     many = true;
     fan = true;
+  }
+  if (relation.kind === 'manyToMany') {
+    // TWO links, numbered in chain order: the join row that names the
+    // membership, then the target row it names. The join table is a
+    // query root of its own, carrying exactly the two key columns (§10.7)
+    const joinBinding = `r${sink.next++}`;
+    const binding = `r${sink.next++}`;
+    chain.push({ binding: joinBinding, source: entityRootOf(relation.joinTable),
+      where: { $eq: [`$${joinBinding}${memberSegment(relation.ownColumn)}`,
+        `${subject}${memberSegment(relation.ownKey)}`] } });
+    chain.push({ binding, source: entityRootOf(relation.to),
+      where: { $eq: [`$${binding}${memberSegment(relation.targetKey)}`,
+        `$${joinBinding}${memberSegment(relation.targetColumn)}`] } });
+    sink.hops.push({ member, kind: relation.kind, binding });
+    const manyTarget = resolve(relation.to);
+    return makeHop({ chain, ret: '$' + binding, many: true, fan },
+      target.epoch,
+      manyTarget === undefined ? undefined : { table: manyTarget, resolve, sink });
   }
   const binding = `r${sink.next++}`;
   const where = relation.kind === 'oneToMany'

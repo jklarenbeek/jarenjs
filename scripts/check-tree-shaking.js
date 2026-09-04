@@ -135,12 +135,15 @@ const engineLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (engineLeak.length > 0)
   throw new Error(`The schema pen pulled an engine into the bundle: ${engineLeak.map(([file]) => file).join(', ')}`);
-// The ceiling moved from 32,000 to 32,500 at the campaign's close-out: the
+// The ceiling moved from 32,000 to 32,500 at a campaign's close-out: the
 // shared JSON boundary gained `requireNameMap`, the one refusal that keeps
 // a `__proto__:` key in a spec literal from eating a member silently, and
-// `json-boundary.js` rides in EVERY pen bundle. Raising the ceiling with
-// the reason is the honest move; shaving the message is not.
-if (schemaBytes > 32500)
+// `json-boundary.js` rides in EVERY pen bundle. It moved again, to 33,500,
+// when a many-to-many relation hop learned to lower through the join
+// ROOT: `expression.js`'s hop machinery is the pen's own, so its second
+// link and the two refusals that guard it ride along. Raising the ceiling
+// with the reason is the honest move; shaving the message is not.
+if (schemaBytes > 33500)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -259,7 +262,10 @@ if (modelEngineLeak.length > 0)
 // a refusal that names the rule and the spelling that works is the point
 // of raising it at build rather than at `openStore`, so the honest move
 // is to raise the ceiling with the reason, never to shave the message.
-if (modelBytes > 41000)
+// It moved again, to 42,000, for the same cause as the schema pen's: the
+// hop machinery in `expression.js` gained the second link a many-to-many
+// relation lowers through, and both pens carry it.
+if (modelBytes > 42000)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -362,7 +368,10 @@ const migrationEngineLeak = Object.entries(migrationInputs)
     && info.bytesInOutput > 0);
 if (migrationEngineLeak.length > 0)
   throw new Error(`The migration pen pulled an engine or the store into the bundle: ${migrationEngineLeak.map(([file]) => file).join(', ')}`);
-if (migrationBytes > 24000)
+// Raised to 25,000 with the schema and model pens, and for the same
+// reason: the capture's hop machinery gained the second link a
+// many-to-many relation lowers through, and every pen carries it.
+if (migrationBytes > 25000)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -413,8 +422,11 @@ if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
 // the ceiling catches an ACCIDENTAL leak (another pen, an unrelated
 // package), not the store's own growth: it is moved deliberately, with
-// the measured size recorded, when the store gains capability
-if (clientBytes > 560000)
+// the measured size recorded, when the store gains capability. Moved to
+// 575,000 when the planner gained the projection tree, the general
+// GROUP BY, the N-way relation graph and the join-table root — measured
+// at 560,746 bytes with all four in.
+if (clientBytes > 575000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
