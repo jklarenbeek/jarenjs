@@ -15,8 +15,8 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import {
-  openStore, createQueryState, createEntityQueryEngine, normalizeEntities, explainMapping,
-  planEntityQuery,
+  openStore, createQueryState, createEntityQueryEngine, createQueryEngine,
+  normalizeEntities, explainMapping, planEntityQuery, normalizeModel, planCollection,
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
@@ -91,6 +91,80 @@ describe('every engine binds through slotValue (a derived slot through entity ex
       }
       finally {
         await connection.close();
+      }
+    }
+    finally {
+      temp.cleanup();
+    }
+  });
+});
+
+// ————— The fourth slot kind: a scalar the DATABASE answers —————
+
+const SERIES_MODEL = {
+  $model: '0.1',
+  collections: {
+    sample: {
+      schema: {
+        type: 'object',
+        properties: {
+          series: { type: 'string' }, at: { type: 'integer' }, value: { type: 'number' },
+        },
+      },
+      key: null,
+      identity: 'integer',
+      indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+    },
+  },
+};
+const ASOF = { $asof: [{ $const: [{ at: 50, series: 'a', value: 0 }] }, '$[*]', { by: '$.series' }] };
+
+describe('a TYPED slot binds what a seek answered, and only that', () => {
+  it("refuses an anchor of another type before the statement it would bind", async () => {
+    const temp = tempDbPath();
+    try {
+      const store = await openStore(SERIES_MODEL, { driver: nodeDriver(), path: temp.dbPath });
+      const sample = store.collection('sample');
+      for (let i = 0; i < 6; i++) await sample.insert({ series: 'a', at: i * 10, value: i });
+      await store.close();
+
+      const connection = await nodeDriver().open(temp.dbPath, {});
+      try {
+        const collection = normalizeModel(SERIES_MODEL).get('sample');
+        const physicalPlan = planCollection('sample', collection, connection.dialect);
+        const state = createQueryState();
+        const engine = createQueryEngine({ connection, state, collection, physicalPlan });
+        // the plan asks the database for its lower anchor, and answers
+        const first = await engine.execute(ASOF);
+        assert.strictEqual(first.right.at, 50);
+        const explained = await engine.explain(ASOF);
+        // the batch's own bounds, and the anchor between them
+        assert.deepStrictEqual(explained.params, [
+          { literal: 50 }, { typed: { seek: 'asof.lower', type: 'number' } }, { literal: 'a' }]);
+        assert.strictEqual(explained.series.counts.statements, 2);
+
+        // the same entry, with a seek that answers a STRING: the column
+        // it reads is declared integer, so this is a defect below the
+        // store — and a comparison of text against an epoch would
+        // answer wrong rather than fail
+        const key = ['C', ASOF, 'sample', connection.dialect.name, false, true, null];
+        const entry = state.cache.get(key);
+        assert.strictEqual(entry.seeks.length, 1);
+        entry.seeks[0] = { ...entry.seeks[0],
+          sql: 'SELECT \'nope\' AS "anchor"', slots: [], statement: null };
+        await assert.rejects(async () => engine.execute(ASOF),
+          (error) => /** @type {any} */ (error).code === 'JD2086'
+            && /declared number and the database answered string/.test(error.reason));
+
+        // and one that answers NOTHING binds the probe it seeked from,
+        // which excludes only rows it proved are not there
+        entry.seeks[0] = { ...entry.seeks[0],
+          sql: 'SELECT MAX("gx_at") AS "anchor" FROM "sample" WHERE 0',
+          slots: [], statement: null };
+        assert.deepStrictEqual(await engine.execute(ASOF), first);
+      }
+      finally {
+        connection.close();
       }
     }
     finally {

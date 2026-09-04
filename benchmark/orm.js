@@ -279,8 +279,11 @@ async function jarenEngine() {
           : (await import('@jarenjs/db/node')).nodeDriver(),
         path: fileOf(`jaren-ins-${Math.random().toString(36).slice(2)}.db`),
       });
-      const t = await timeOnceAsync(() => fresh.transaction(async () => {
-        for (const user of DATA.users) await fresh.entity('User').create(user);
+      // through the handle the callback RECEIVES: a transaction owns its
+      // connection, so the outer store's entity set would wait for the
+      // transaction it is inside (`JD0012`)
+      const t = await timeOnceAsync(() => fresh.transaction(async (tx) => {
+        for (const user of DATA.users) await tx.entity('User').create(user);
       }));
       await fresh.close();
       return t / USERS;
@@ -424,8 +427,10 @@ async function clientEngine() {
     jsonbLabel: 'entity doc path through the chain (guarded scan, no index declared)',
     insertSingle: async () => {
       const target = await fresh(`jaren-client-ins-${Math.random().toString(36).slice(2)}.db`, null);
-      const t = await timeOnceAsync(() => target.transaction(async () => {
-        for (const user of DATA.users) await target.entities.User.create(user);
+      // the client the callback receives, for the same reason the store
+      // path above takes the transaction's own handle
+      const t = await timeOnceAsync(() => target.transaction(async (tx) => {
+        for (const user of DATA.users) await tx.entities.User.create(user);
       }));
       await target.close();
       return t / USERS;

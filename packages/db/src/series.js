@@ -187,6 +187,11 @@ export function seekingIndexFor(shape, column, facts, minColumns = 1) {
  *     to: any, toOp: string | null }> }}
  */
 export function filterFacts(filter) {
+  // one comparison, two spellings: the guarded form over a member, and
+  // the bare one over a declared column that a refinement pushes. A
+  // seek reads the same column either way, so the facts must too
+  const columnOf = (pred) => (pred.p === 'colCmp' ? pred.column
+    : pred.p === 'cmp' ? pred.ref.column : null);
   /** @type {Set<string>} */
   const pinned = new Set();
   /** @type {Map<string, any>} */
@@ -212,14 +217,15 @@ export function filterFacts(filter) {
     if (pred.p === 'or') {
       const columns = new Set();
       for (const item of pred.items) {
-        if (item.p !== 'cmp' || item.op !== 'eq' || item.ref.column === null) return;
-        columns.add(item.ref.column);
+        const named = columnOf(item);
+        if (named === null || item.op !== 'eq') return;
+        columns.add(named);
       }
       if (columns.size === 1) pinned.add([...columns][0]);
       return;
     }
-    if (pred.p !== 'cmp' || pred.ref.column === null) return;
-    const column = pred.ref.column;
+    const column = columnOf(pred);
+    if (column === null) return;
     const operand = 'lit' in pred.operand ? pred.operand.lit : undefined;
     if (pred.op === 'eq') {
       pinned.add(column);
@@ -341,6 +347,8 @@ export function seriesRecord(facts) {
       to: range.to ?? null,
       toOp: range.toOp ?? null,
     },
+    seeks: (facts.seeks ?? []).map((s) =>
+      ({ side: s.side, column: s.column, probe: s.probe, op: s.op })),
     ladder: facts.ladder ?? null,
     aggregates: [...(facts.aggregates ?? [])],
     refinement: facts.refinement ?? null,

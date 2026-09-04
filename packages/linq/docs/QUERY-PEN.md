@@ -565,6 +565,7 @@ Runtime errors (`LinqRuntimeError`):
 | `JL2005` | a push queue was fed after it ended |
 | `JL2006` | a provider answered an element terminal with something other than one array |
 | `JL2007` | a ledger settlement named a ref that settles no started record — `createDbLedger`'s fence ([DB-CLIENT.md §2.6](DB-CLIENT.md#26-the-ledger)) |
+| `JL2008` | a federated fetch reached its row or byte budget (§12.1) |
 
 Engine errors (`JQ…`) from a hand-written `fromDocument` document pass
 through unwrapped — they already carry their own code and `docPath` —
@@ -701,6 +702,72 @@ What this surface does NOT do, by design: it does not make the query
 engine async (`packages/json` is untouched and strictly synchronous),
 it does not add a second operator table, and it does not add
 `selectAwait`/`whereAwait` variants.
+
+### 12.1 The federation boundary (`federate`)
+
+A query document reads ONE input, and a join whose sides come from two
+unrelated sources is `JL0005` (§8). That refusal stands: nothing in a
+chain relaxes it. What `federate()` adds is the one place to opt OUT of
+it explicitly, by naming the sources and the bounds together:
+
+```js
+const fed = federate({
+  sources: { orders: shop.entity('Order'), events: analytics },
+  maxRows: 50_000,
+  maxBytes: 32 * 1024 * 1024,
+});
+
+const rows = await fromAsync(fed.source('orders'))
+  .where((o) => o.placedAt.gt(cutoff))
+  .join(fromAsync(fed.source('events')), (o) => o.id, (e) => e.orderId,
+    (o, e) => ({ id: o.id, at: e.at }))
+  .toArray();
+```
+
+`fed.source(name)` is an ordinary provider source (§8) with the root
+`$.<name>[*]`, and all of a federation's sources share one scope — which
+is exactly what admits the join. The federation is what executes it:
+
+1. each side's own document — the filters and the projection the chain
+   already packed per side — runs against ITS source, over that
+   source's own root;
+2. the smaller side (by declared `estimatedRows`, else the first named)
+   is streamed into a hash table keyed by the join key, counting rows
+   and serialized bytes against the budget as it fills;
+3. the other side is streamed and PROBED: a row whose key no build row
+   carries cannot pair, so it is dropped before it costs anything;
+4. the caller's own document runs in the engine over the two reduced
+   sets — the **resident join**, which is what decides.
+
+Step 4 is the contract. This boundary spells no join semantics of its
+own: the engine's `$eq` decides which rows pair, its ordering orders
+them, its projection shapes them. The hash table bounds the FETCH and
+nothing else, so a reduction that cannot key a value (a compound join
+key) keeps the row rather than guessing at it.
+
+`fed.source(name).explain(document)` answers the plan without running
+any of it: the `strategy`, the `budget`, the `build` and `probe` sides
+with their estimates, their own documents and whether each streams, and
+the `resident` document the engine answers.
+
+**A budget is a refusal, not a spill.** A side that reaches `maxRows` or
+`maxBytes` stops at the row that WOULD have broken it and raises
+`JL2008`; every cursor the call opened is closed exactly once, whether
+it answered, refused, failed or was aborted. A `signal` on the call is
+read at the ROW boundary — where a cursor can be let go without
+abandoning a pull the source is still inside — and a declared
+`estimatedRows` decides only which side BUILDS, never how much is held:
+a source that under-reports is refused by the budget all the same. A source offering a
+cursor (§12) is pulled row by row, so the bound is enforced before the
+memory is spent; one offering only `execute` answers whole, and
+`explain()` says `buffered` rather than pretending otherwise.
+
+Refused, by name: more than two sides in one federated document, a
+binding over a root the federation does not carry, and a join with no
+equality between one member of each side — without one the fetch is the
+cross product of two sources, which is what the budget exists to
+refuse. Non-goals: no spill, no distributed transaction, no
+cross-source write.
 
 ## 13. Worked examples
 
@@ -1124,6 +1191,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL2004` | a provider's `execute()` answered a promise on the synchronous surface |
 | `JL2005` | a push queue was fed after `end()` |
 | `JL2006` | a provider answered an element terminal with something other than one array |
+| `JL2008` | a federated fetch reached one side's row or byte budget (§12.1) |
 
 `JL2007` is the client door's, not the chain's: `createDbLedger`'s stale
 settlement ([DB-CLIENT.md §2.6](DB-CLIENT.md#26-the-ledger)); it is
@@ -1600,14 +1668,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->174,028<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->174,086<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->39,973<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->40,031<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
 is the query ENGINE and the core it stands on: a chain's document has to
@@ -1634,7 +1702,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->174<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->561<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->567<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -1643,7 +1711,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->195,103<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,023<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->195,161<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,081<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

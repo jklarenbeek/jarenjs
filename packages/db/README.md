@@ -596,24 +596,24 @@ counted diversion any unbindable probe is.
 k-nearest query every physical way it can run — over <!--fact:vector.grid-->10,000 and 50,000 vectors at 384 and 768 dimensions, k = 10, the median of 10 probes<!--/fact--> —
 and asserts that every path returns the identical top-k, ids and order,
 on every probe before a single timing prints. The flagship row is the
-plan a consumer's own document runs, which measures <!--fact:vector.plan-->206 ms at 50,000 × 768<!--/fact-->:
+plan a consumer's own document runs, which measures <!--fact:vector.plan-->191 ms at 50,000 × 768<!--/fact-->:
 <!--fact:vector.table-->
 | path (ms) | 10,000 × 384 | 10,000 × 768 | 50,000 × 384 | 50,000 × 768 |
 |---|---:|---:|---:|---:|
-| engine resident sweep (no database) | 3.3 | 6.7 | 17 | 32 |
-| **the k-nearest plan (the store's own)** | 22 | 33 | 139 | 206 |
-| raw fetch + engine sweep (the plan's statement) | 20 | 31 | 130 | 202 |
-| `ORDER BY` over a registered function | 18 | 31 | 121 | 180 |
-| JSON-doc sweep (no vector column) | 249 | 501 | — | — |
-| sqlite-vec | 3.6 | 7.5 | 18 | 38 |
+| engine resident sweep (no database) | 3 | 5.8 | 15 | 28 |
+| **the k-nearest plan (the store's own)** | 21 | 30 | 127 | 191 |
+| raw fetch + engine sweep (the plan's statement) | 19 | 28 | 118 | 182 |
+| `ORDER BY` over a registered function | 17 | 26 | 113 | 158 |
+| JSON-doc sweep (no vector column) | 232 | 468 | — | — |
+| sqlite-vec | 3.3 | 6.9 | 17 | 35 |
 <!--/fact-->
 
 The row the column exists to beat is the last one that has no column: the
 same query document over a collection that stores the embedding only
-inside the document costs <!--fact:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/fact-->,
+inside the document costs <!--fact:vector.jsonDoc-->15.6× the plan at 10,000 × 768<!--/fact-->,
 because every row's vector is parsed out of JSON before it can be
 compared. The row the store **cannot** beat is the one with no database
-in it: the same top-k over a resident `Float32Array` is <!--fact:vector.resident-->32 ms, which the plan is 6.4× slower than<!--/fact-->.
+in it: the same top-k over a resident `Float32Array` is <!--fact:vector.resident-->28 ms, which the plan is 6.8× slower than<!--/fact-->.
 That comparison is not an even one and the direction is the point — the
 sweep starts from decoded floats in RAM and pays nothing for durability,
 for filters that compose with the ranking, or for a process that can
@@ -622,7 +622,7 @@ price should be able to say what the price is.
 
 **Both halves of the price.** The column costs on the way in as well as
 saving on the way out: writing the same documents with
-the index costs <!--fact:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->,
+the index costs <!--fact:vector.write-->10.2 s against 4.9 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->,
 because every write pays a JSON round trip of the member plus a
 normalize and a pack. On disk one vector is <!--fact:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/fact--> —
 smaller, but *added*, since the document still carries the member the
@@ -631,7 +631,7 @@ column is derived from.
 **Pushing the rank into SQL, re-measured.** A registered similarity
 function inside an `ORDER BY … LIMIT k` is the obvious alternative, and
 the suite measures it against the real column with the probe hoisted out
-of the per-row call: <!--fact:vector.udf-->180 ms against 202 ms at 50,000 × 768, and 0.87–1.00× the fetch-and-rank across the grid — rough parity on speed<!--/fact-->.
+of the per-row call: <!--fact:vector.udf-->158 ms against 182 ms at 50,000 × 768, and 0.87–0.95× the fetch-and-rank across the grid — rough parity on speed<!--/fact-->.
 The plan does not emit it, and after that measurement the reasons are not
 speed: `bun` has no user-function API, so a plan that needed one would
 exclude an executor outright; and an ordering decided in SQL cannot break
@@ -640,7 +640,7 @@ executors have to agree on.
 
 **The rival, and the ceiling.** `sqlite-vec` is the extension built for
 exactly this, and it is measured rather than described: it answers the
-same probes in <!--fact:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->,
+same probes in <!--fact:vector.rival-->35 ms against 191 ms at 50,000 × 768 — 5.5× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->,
 over <!--fact:vector.agreement-->40 probes, no disagreements<!--/fact-->. It is a
 loadable native extension, which is the one thing this store will not
 require — it would exclude the wasm tab and stock `bun`, half the
@@ -648,7 +648,7 @@ execution story — so the comparison is published as what it is: a faster
 engine you may prefer, and a dependency this one does not take. What
 neither of them is, is an approximate index. Exact brute force is linear
 in `n · d`, and the suite states the envelope as arithmetic rather than
-opinion: <!--fact:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/fact-->.
+opinion: <!--fact:vector.ceiling-->5.142 ns per vector component — one query reaches 100 ms at about 24,000 vectors of 768 dimensions and one second at about 252,000<!--/fact-->.
 Past that this design is the wrong tool and no margin changes it; what
 lies beyond is an approximate index, and this store does not have one.
 
@@ -706,12 +706,12 @@ as-of join over one seeded corpus by plain references, by the temporal
 kernel, by a generic query document, by hand-written SQL and by the
 store — every route checked against the others before a timing is
 taken. At <!--fact:series.corpus-->100,000 samples at 1-second spacing, Node v24.19.0<!--/fact-->,
-the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.0× the hand-written statement and 1416.4× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.7× FASTER than the generic query route, and 128.0× the one-pass loop<!--/fact-->.
+the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.3× the hand-written statement and 1435.1× the resident cut, and the pushed bucket ladder 2.1× the hand-written GROUP BY, 1.8× FASTER than the generic query route, and 146.6× the one-pass loop<!--/fact-->.
 The range row is not the planner's price: the statement selects two
 COLUMNS where the store renders and parses a whole JSON document per
 row, which is what storing documents costs.
 
-And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 17.8× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 99,129 rows in 1 statement and costs 1835.4× fifty-one separate index reads — a bound is what it buys, not a speed-up, and without a tolerance a backward join can only be bounded above.<!--/fact-->
+And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 17.7× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1477.0× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
 
 **A refinement is named, never quiet.** `explain().series` reports
 `mode` — `native`, `hybrid` or `engine` — the declared index the fetch
@@ -736,15 +736,37 @@ strength of an index alone.
 **The as-of join is bounded, and the bound is the claim.** `$asof` with
 the collection on the right reads the probes it was given, bounds the
 fetch by their own span and by a membership test over their `by` keys,
-and issues exactly ONE statement whatever the probes number — the
-failure mode a batch exists to refuse is one seek per left row, and
-`test/db/statement-count.test.js` pins it at 1, 10 and 200 probes.
-Without a `tolerance` a backward join can only be bounded ABOVE, so
-that one statement can read most of a long history: the benchmark
+and issues a FIXED number of statements whatever the probes number —
+the failure mode a batch exists to refuse is one seek per left row, and
+`test/db/statement-count.test.js` pins the count at 1, 10 and 200
+probes. Without a `tolerance` the open side has no bound the probes
+imply — the row that answers the earliest probe may lie arbitrarily far
+before it — so the plan asks the database for the data's own: per
+series, the last instant at or before that probe, folded to the least
+of them. That anchor is one aggregate read through the same declared
+index, bound through a typed slot, and it is the second statement.
+
+What it saves depends on where the probes sit, so the benchmark
 publishes the candidate count beside the timing rather than netting it
-out, and at fifty-one probes over a hundred thousand rows the batch
-LOSES to fifty-one separate index reads. Few questions of a large
-series belong to a batch; a join of two series does.
+out, over probes spread evenly across the whole span — which is the
+anchor at its worst, since the earliest of them has almost nothing
+below it to skip. At fifty-one such probes over a hundred thousand rows
+the batch still LOSES to fifty-one separate index reads. Few questions
+of a large series belong to a batch; a join of two series does.
+
+**`$overlaps` narrows through a declared interval.** Type a member as an
+object whose `start` and `end` are both required and both numeric, map
+each bound to a column, and the half-open test pushes: two comparisons
+over the declared columns, with the engine's own operator deciding over
+what comes back. It stays a pre-filter rather than an exact translation
+because §8.16 RAISES on a span whose end is at or before its start, and
+no schema keyword forbids storing one — so the statement keeps every
+inverted row and the operator raises over it exactly as it would have.
+That disjunct compares two columns, which no index bounds, so the fetch
+scans; what it buys is that the pruned rows never reach the engine at
+all. An unmapped pair, a schema that admits a textual bound, or a probe
+that is not itself a half-open span pushes nothing and names why —
+`strict: true` answers `JD0010`.
 
 **One corpus, five executors, proven to agree.** The committed temporal
 corpus (`test/json/fixtures/series-corpus.json`) runs through the plain

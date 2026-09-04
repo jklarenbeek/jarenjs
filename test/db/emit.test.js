@@ -245,6 +245,69 @@ describe('the spatial forms (over derived columns)', () => {
   });
 });
 
+describe('the interval form, and the seek that binds a typed scalar', () => {
+  const plan = (filter, seeks = []) => ({
+    planVersion: 2, alg: 'select', collection: 'users', filter,
+    order: null, window: null, rank: null, bucket: null, group: null,
+    seeks, aggregate: null, project: 'document',
+  });
+  const emit = (value) => emitPlan(value, sqliteDialect, PHYSICAL);
+  const at = { segments: [{ name: 'at' }], type: 'integer', column: 'gx_at' };
+
+  it('an interval reads the two declared columns and keeps the rows §8.16 raises on', () => {
+    const { sql, slots } = emit(plan({ p: 'interval',
+      columns: { start: 'gx_s', end: 'gx_e' }, probe: { from: 200, to: 300 } }));
+    assert.match(sql, /WHERE \("gx_s" IS NOT NULL AND "gx_e" IS NOT NULL AND /);
+    assert.match(sql, /\(\("gx_s" < \? AND "gx_e" > \?\) OR "gx_s" >= "gx_e"\)\)/);
+    assert.strictEqual(sql.includes('json_type('), false,
+      'the declared bounds ARE the values: no document is read to answer the bound');
+    // text order, so the far bound binds first
+    assert.deepStrictEqual(slots.map((slot) => slot.literal), [300, 200]);
+  });
+
+  it('a numeric seek folds the groups and binds ONE guarded comparison', () => {
+    const seek = { name: 'asof.lower', kind: 'number', ref: at,
+      bound: { op: 'le', lit: 1000 }, inner: 'max', outer: 'min',
+      group: { segments: [{ name: 'series' }], type: 'string', column: 'gx_series' },
+      keys: ['a', 'b'] };
+    const emitted = emit(plan(
+      { p: 'cmp', op: 'ge', ref: at, operand: { seek: 'asof.lower' } }, [seek]));
+    // the statement: one branch, no text-or-number OR, and a TYPED slot
+    assert.match(emitted.sql, new RegExp('WHERE \\(json_type\\("doc", \'\\$\\."at"\'\\) '
+      + 'IS NOT NULL AND json_type\\("doc", \'\\$\\."at"\'\\) IN \\(\'integer\', \'real\'\\) '
+      + 'AND "gx_at" >= \\?\\)'));
+    assert.deepStrictEqual(emitted.slots, [{ typed: { seek: 'asof.lower', type: 'number' } }]);
+    // the seek: the least of the groups' own last instants, at or below
+    // the earliest probe, over the keys the probes name
+    const [first] = emitted.seeks;
+    assert.strictEqual(first.name, 'asof.lower');
+    assert.strictEqual(first.fallback, 1000);
+    assert.match(first.sql,
+      /^SELECT MIN\("a"\) AS "anchor" FROM \(SELECT MAX\("gx_at"\) AS "a" FROM "users" WHERE /);
+    assert.match(first.sql, /GROUP BY "gx_series"\)$/);
+    // its own slots are its own: a positional dialect numbers by the
+    // TEXT order of the statement being emitted, and the seek is one
+    assert.deepStrictEqual(first.slots.map((slot) => slot.literal), [1000, 'a', 'b']);
+    assert.strictEqual(emitted.slots.length, 1);
+  });
+
+  it('an ungrouped seek IS the inner fold, and a text seek guards on text', () => {
+    const stamp = { segments: [{ name: 'stamp' }], type: 'string', column: 'gx_stamp' };
+    const seek = { name: 'asof.upper', kind: 'text', ref: stamp,
+      bound: { op: 'ge', lit: '2026-01-01T00:00:00Z' }, inner: 'min', outer: 'max',
+      group: null, keys: null };
+    const emitted = emit(plan(
+      { p: 'cmp', op: 'le', ref: stamp, operand: { seek: 'asof.upper' } }, [seek]));
+    assert.match(emitted.sql, /json_type\("doc", '\$\."stamp"'\) = 'text' AND "gx_stamp" <= \?/);
+    assert.deepStrictEqual(emitted.slots, [{ typed: { seek: 'asof.upper', type: 'text' } }]);
+    const [first] = emitted.seeks;
+    assert.strictEqual(first.kind, 'text');
+    assert.match(first.sql, /^SELECT MIN\("gx_stamp"\) AS "anchor" FROM "users" WHERE /);
+    assert.strictEqual(first.sql.includes('GROUP BY'), false);
+    assert.deepStrictEqual(first.slots.map((slot) => slot.literal), ['2026-01-01T00:00:00Z']);
+  });
+});
+
 describe('injection is structurally impossible', () => {
   it('a hostile literal value never reaches the SQL text', () => {
     const hostile = "x'; DROP TABLE users; --";

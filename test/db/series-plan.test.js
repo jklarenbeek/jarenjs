@@ -129,6 +129,7 @@ describe('the three closed shapes seek the composite index', () => {
       index: 'sample_by_series_at',
       prefix: ['gx_series'],
       range: { column: 'gx_at', from: ORIGIN, fromOp: 'ge', to: ORIGIN + 3600000, toOp: 'lt' },
+      seeks: [],
       ladder: null,
       aggregates: [],
       refinement: null,
@@ -378,11 +379,41 @@ describe('a narrowing is implied, never decided', () => {
       { column: 'gx_at', from: 750, fromOp: 'ge', to: 5250, toOp: 'le' });
   });
 
-  it('nearest without a tolerance bounds nothing, and does not pretend to', () => {
+  it('nearest without a tolerance has no ARITHMETIC bound, and seeks both anchors', () => {
     const probes = [{ at: 1000, value: 1 }];
     const planned = plan({ $asof: [{ $const: probes }, '$[*]', { direction: 'nearest' }] });
-    assert.strictEqual(planned.series.mode, 'engine');
+    // no range: neither side is a number the probes imply. The bounds
+    // it does carry are the data's own, one statement each
     assert.strictEqual(planned.series.range, null);
+    assert.strictEqual(planned.series.mode, 'hybrid');
+    assert.deepStrictEqual(planned.series.seeks, [
+      { side: 'lower', column: 'gx_at', probe: 1000, op: 'ge' },
+      { side: 'upper', column: 'gx_at', probe: 1000, op: 'le' },
+    ]);
+    const emitted = sqlOf(planned);
+    assert.strictEqual(emitted.seeks.length, 2);
+    assert.match(emitted.seeks[0].sql, /SELECT MAX\("gx_at"\).*WHERE.*<= \?/s);
+    assert.match(emitted.seeks[1].sql, /SELECT MIN\("gx_at"\).*WHERE.*>= \?/s);
+  });
+
+  it('a tolerance answers both sides by arithmetic, so it asks for no anchor', () => {
+    const probes = [{ at: 1000, value: 1 }];
+    const planned = plan({ $asof: [{ $const: probes }, '$[*]',
+      { direction: 'nearest', tolerance: 250 }] });
+    assert.deepStrictEqual(planned.series.seeks, []);
+    assert.strictEqual(sqlOf(planned).seeks.length, 0);
+  });
+
+  it('a keyed anchor folds the groups: the LEAST of their own last instants', () => {
+    const probes = [{ at: 1000, value: 1, series: 'a' }, { at: 5000, value: 2, series: 'b' }];
+    const planned = plan({ $asof: [{ $const: probes }, '$[*]', { by: '$.series' }] });
+    assert.deepStrictEqual(planned.series.seeks,
+      [{ side: 'lower', column: 'gx_at', probe: 1000, op: 'ge' }]);
+    const seek = sqlOf(planned).seeks[0];
+    // a single global MAX would be unsound — it can come from one group
+    // and drop another's only candidate — so the fold is per group
+    assert.match(seek.sql, /SELECT MIN\("a"\) AS "anchor" FROM \(SELECT MAX\("gx_at"\)/);
+    assert.match(seek.sql, /GROUP BY "gx_series"\)$/);
   });
 
   it('the collection on the LEFT is never narrowed: every left row is answered', () => {

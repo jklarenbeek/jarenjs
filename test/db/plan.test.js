@@ -66,6 +66,7 @@ describe('golden plans (algebra, no SQL anywhere)', () => {
       rank: null,
       bucket: null,
       group: null,
+      seeks: [],
       aggregate: null,
       project: 'document',
     });
@@ -641,6 +642,12 @@ describe('the planner\'s reason vocabulary', () => {
     'entity.projection': [entity,
       { $for: { p: '$.Person[*]' }, $return: { n: { $count: '$p.name' } } }],
     'entity.order': [entity, E({ $orderby: ['$p.ok'] })],
+    'interval.operands': [collection, F({ $where: { $overlaps: ['$it.o', '$it.o'] } })],
+    'interval.probe': [collection,
+      F({ $where: { $overlaps: ['$it.o', { $const: { start: 2, end: 1 } }] } })],
+    // `o` is an object the schema does not type as a half-open span
+    'interval.notInterval': [collection,
+      F({ $where: { $overlaps: ['$it.o', { $const: { start: 1, end: 2 } }] } })],
   };
 
   /**
@@ -667,6 +674,9 @@ describe('the planner\'s reason vocabulary', () => {
     'bind.bucketWhole': 'a native temporal bucket (the series suites)',
     'bind.overflow': 'an int64 overflow at run time (the aggregate suites)',
     'bind.path': 'a member name the dialect cannot spell (the hostile suite)',
+    'interval.overlap': 'the promotion itself needs a declared interval (the interval suite)',
+    'interval.noColumns': 'an interval the schema declares and the model does not map '
+      + '(the interval suite)',
     ...Object.fromEntries(Object.keys(PLANNER_REASONS)
       .filter((id) => id.startsWith('spatial.'))
       .map((id) => [id, 'the spatial suites own the geographic models'])),

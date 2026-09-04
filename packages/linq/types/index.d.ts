@@ -784,6 +784,57 @@ export function fromAsync<T>(
   options?: LinqOptions,
 ): AsyncSequence<T, {}>;
 
+/** One side of a federation, as `explain()` reports it (§12.1). */
+export interface FederatedSide {
+  readonly source: string;
+  readonly root: string;
+  readonly estimatedRows: number | null;
+  /** The join key on this side, as the document spells it. */
+  readonly key: string;
+  /** The document this side's own source is asked. */
+  readonly document: unknown;
+  /** Whether this side is pulled row by row, or answered whole. */
+  readonly streaming: 'row' | 'buffered';
+}
+
+/** What a federated document will do, without doing any of it (§12.1). */
+export interface FederationPlan {
+  readonly strategy: 'hash';
+  readonly budget: { readonly maxRows: number; readonly maxBytes: number };
+  readonly build: FederatedSide;
+  readonly probe: FederatedSide;
+  /** The join itself is the engine's, over the two reduced sides. */
+  readonly resident: { readonly document: unknown };
+}
+
+/** One named source of a federation: an ordinary provider source whose
+ * root is `$.<name>[*]`, sharing one scope with its siblings — which is
+ * what admits the join the federation then executes. */
+export interface FederatedSource<T = unknown> extends AsyncProvider<T> {
+  explain(document: unknown): FederationPlan;
+  readonly root: string;
+}
+
+/** The explicit cross-source boundary (§12.1).
+ *
+ * A query document reads one input, and an ordinary join across two
+ * unrelated sources stays `JL0005`. `federate()` is the one way to opt
+ * out of that, by naming the sources and the bounds together: each
+ * side's own filters and projection run at its source, the smaller side
+ * fills a bounded hash table, the other is probed against it, and the
+ * caller's own document decides over the two reduced sets. A side that
+ * reaches `maxRows` or `maxBytes` raises `JL2008` at the row that would
+ * have broken the bound. */
+export function federate(spec: {
+  sources: Record<string, AsyncProvider | { provider: AsyncProvider; estimatedRows?: number }>;
+  maxRows: number;
+  maxBytes: number;
+  strategy?: 'hash';
+}): {
+  source<T = unknown>(name: string): FederatedSource<T>;
+  readonly names: readonly string[];
+};
+
 /** The push→pull adapter for feed/end readers (§12). */
 export function createPushQueue<T = unknown>(options?: { highWaterMark?: number }): {
   feed(value: T): boolean;

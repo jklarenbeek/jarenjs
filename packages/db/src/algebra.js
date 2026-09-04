@@ -27,7 +27,23 @@ export const PLAN_VERSION = 2;
  *   schema-declared type or `'unknown'`; `column` is the generated
  *   column name when the collection indexes this path.
  *
- * @typedef {{ lit: unknown } | { ext: string }} PlanOperand
+ * @typedef {{ lit: unknown } | { ext: string } | { seek: string }} PlanOperand
+ *   A SEEK operand names one of the plan's own seeks: a scalar the
+ *   database itself supplies before the statement runs (`PlanSeek`).
+ *
+ * @typedef {{ name: string, kind: 'number' | 'text', ref: PlanRef,
+ *   bound: { op: 'le' | 'ge', lit: number | string },
+ *   inner: 'max' | 'min', outer: 'min' | 'max',
+ *   group: PlanRef | null, keys: (string | number)[] | null }} PlanSeek
+ *   One anchor the plan asks the database for before it binds. An
+ *   as-of batch cannot bound its far side by arithmetic on the probes:
+ *   the row that answers the EARLIEST probe may lie arbitrarily far
+ *   before it. The tight bound is the data's own — per group, the last
+ *   instant at or before that probe — and the least of those over the
+ *   groups is a scalar every group's answer is at or above. It is one
+ *   aggregate read through the same declared index, and it binds
+ *   through a TYPED slot: its type is the instant column's declared
+ *   type, so the comparison needs no bind-time type branch.
  *
  * @typedef {(
  *   { p: 'and' | 'or', items: PlanPredicate[] } |
@@ -42,7 +58,11 @@ export const PLAN_VERSION = 2;
  *   { p: 'bboxOverlap', columns: { w: string, s: string, e: string,
  *     n: string }, probe: { box: number[] } | { ext: string } } |
  *   { p: 'cellIn', column: string, cells: string[] } |
- *   { p: 'cellPrefix', column: string, prefix: string }
+ *   { p: 'cellPrefix', column: string, prefix: string } |
+ *   { p: 'interval', columns: { start: string, end: string },
+ *     probe: { from: number, to: number } } |
+ *   { p: 'colCmp', op: 'eq' | 'lt' | 'le' | 'gt' | 'ge',
+ *     column: string, operand: { lit: unknown } | { seek: string } }
  * )} PlanPredicate
  *   The last three are the SPATIAL forms: predicates over the derived
  *   index columns a model declares, which a spatial conjunct either
@@ -55,6 +75,27 @@ export const PLAN_VERSION = 2;
  *   — but each is TOTAL through its own `IS NOT NULL`, so a row with no
  *   box or no cell answers FALSE rather than SQL's NULL and negation
  *   still composes classically.
+ *
+ *   `colCmp` is the same idea one comparison wide: a bound over a
+ *   DECLARED column, with no `json_type` beside it. The planner builds
+ *   it only where the comparison NARROWS and something else decides —
+ *   the temporal refinements, whose residual re-runs the caller's own
+ *   operator — because without the guard the column's own type rules
+ *   decide a cross-type row rather than the engine's. Narrowing is what
+ *   makes that safe: SQL's ordering keeps a row the guard would have
+ *   dropped, never the other way about, and the kernel then answers for
+ *   it. In exchange the statement stops reading the document once per
+ *   row to discriminate a member the model already declared.
+ *
+ *   `interval` is the temporal one and carries no guard for the same
+ *   kind of reason: the planner admits it only over a member the schema
+ *   types as an object of two REQUIRED numeric bounds, so a stored
+ *   bound that is absent or textual is a row the collection cannot
+ *   hold. It is true where the row's half-open span meets the probe's
+ *   — and ALSO where the row's own span is empty or reversed, which is
+ *   not an overlap but a row §8.16 RAISES on: a pre-filter narrows, and
+ *   a narrowing that swallowed an error would answer where the engine
+ *   does not.
  *
  * @typedef {(
  *   { p: 'leaf', index: number } |
@@ -135,6 +176,7 @@ export const PLAN_VERSION = 2;
  *   rank: PlanRank | null,
  *   bucket: PlanBucket | null,
  *   group: PlanGroup | null,
+ *   seeks: PlanSeek[],
  *   aggregate: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null }
  *     | { fn: 'registered', ref: PlanRef, operator: string, sql: string }
@@ -168,6 +210,7 @@ export function selectPlan(collection) {
     rank: null,
     bucket: null,
     group: null,
+    seeks: [],
     aggregate: null,
     project: 'document',
   };

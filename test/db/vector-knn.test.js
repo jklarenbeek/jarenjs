@@ -115,6 +115,7 @@ describe('recognition — the k-nearest shape, and every reason it is not one', 
         offset: 0, limit: 3, margin: KNN_MARGIN },
       bucket: null,
       group: null,
+      seeks: [],
       aggregate: null,
       project: 'document',
     });

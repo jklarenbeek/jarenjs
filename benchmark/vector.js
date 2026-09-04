@@ -470,9 +470,13 @@ async function runLeg(n, d, rival) {
     if (jsonDocRow) await plain.store.close();
     return leg;
   }
-  leg.column = explained.rank.column;
+  // one declared width here, so the plan's one alternative IS the
+  // column it binds; a model declaring two would report both, and the
+  // `selected` width says which the call took (QUERYREACH 06)
+  const [alternative] = explained.rank.alternatives;
+  leg.column = alternative.column;
   leg.fetchSql = explained.sql;
-  leg.storage.columnPayload = payloadBytes(indexed.db, 'docs', explained.rank.column);
+  leg.storage.columnPayload = payloadBytes(indexed.db, 'docs', alternative.column);
 
   // -- the column is what the kernels pack, byte for byte, in row order,
   // which is also what makes a fetched identity nameable as a document

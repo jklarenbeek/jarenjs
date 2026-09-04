@@ -92,8 +92,11 @@ const PLANS = {
   'asof/backward-unkeyed':
     ['set', 'hybrid', ['asof-refinement', 'missing-series-prefix'], false],
   'asof/forward': ['set', 'hybrid', ['asof-refinement', 'missing-series-prefix'], false],
+  // nearest without a tolerance had no arithmetic bound at all and
+  // fetched the table; both of its anchors are the data's own, so it
+  // now narrows through the same two seeks the one-sided cases use
   'asof/nearest-ties-backward':
-    ['set', 'engine', ['asof-refinement', 'missing-series-prefix'], false],
+    ['set', 'hybrid', ['asof-refinement', 'missing-series-prefix'], false],
   'asof/tolerance-refuses-a-distant-match':
     ['set', 'hybrid', ['asof-refinement', 'missing-series-prefix'], false],
   'asof/keyed': ['set', 'hybrid', ['asof-refinement'], true],
@@ -506,5 +509,113 @@ describe('reopening a file-backed store does not change an answer', () => {
     finally {
       cleanup();
     }
+  });
+});
+
+// ————— The anchor: the bound an untoleranced batch has to ASK for —————
+
+describe('the as-of anchor', () => {
+  const MODEL = {
+    $model: '0.1',
+    collections: {
+      sample: {
+        schema: {
+          type: 'object',
+          properties: {
+            series: { type: 'string' }, at: { type: 'integer' }, value: { type: 'number' },
+          },
+        },
+        key: null,
+        identity: 'integer',
+        indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+      },
+    },
+  };
+  /** Two series whose histories run long before the probes. */
+  const ROWS = [];
+  for (let i = 0; i < 40; i++) ROWS.push({ series: 'a', at: i * 10, value: i });
+  for (let i = 0; i < 40; i++) ROWS.push({ series: 'b', at: i * 10 + 5, value: -i });
+  const probes = (instants) => instants.map((at) => ({ at, series: 'a', value: 0 }))
+    .concat(instants.map((at) => ({ at, series: 'b', value: 0 })));
+  const asof = (instants) =>
+    ({ $asof: [{ $const: probes(instants) }, '$[*]', { by: '$.series' }] });
+
+  const seeded = async (driver = nodeDriver(), rows = ROWS) => {
+    const store = await openStore(MODEL, { driver });
+    const collection = store.collection('sample');
+    await store.transaction(async (tx) => {
+      const inside = tx.collection('sample');
+      for (const row of rows) await inside.insert(row);
+    });
+    return { store, collection };
+  };
+
+  it('late probes read a fraction of the history; early ones cannot', async () => {
+    const { store, collection } = await seeded();
+    const late = await collection.explain(asof([380, 390]));
+    await collection.execute(asof([380, 390]));
+    const lateCounts = (await collection.explain(asof([380, 390]))).series.counts;
+    assert.strictEqual(late.series.seeks.length, 1);
+    assert.deepStrictEqual(late.series.seeks[0],
+      { side: 'lower', column: 'gx_at', probe: 380, op: 'ge' });
+    // the anchor is the LEAST of the two series' own last instants at
+    // or before 380, so almost the whole history is below it
+    assert.ok(lateCounts.candidates <= 8,
+      `late probes read ${lateCounts.candidates} of ${ROWS.length}`);
+    assert.strictEqual(lateCounts.statements, 2, 'the seek, then the fetch');
+
+    await collection.execute(asof([10, 390]));
+    const wide = (await collection.explain(asof([10, 390]))).series.counts;
+    assert.ok(wide.candidates > lateCounts.candidates,
+      'a probe near the start has nothing below it to skip: that is the worst case');
+    await store.close();
+  });
+
+  it('the bound is inclusive, so rows sharing the anchor instant all survive', async () => {
+    // three rows at one instant, and the answer the engine gives for
+    // duplicates is the answer the store gives
+    const rows = [...ROWS, { series: 'a', at: 200, value: 99 }, { series: 'a', at: 200, value: 98 }];
+    const { store, collection } = await seeded(nodeDriver(), rows);
+    const document = asof([200, 205]);
+    const engine = await collection.execute(document, { pushdown: false });
+    assert.deepStrictEqual(await collection.execute(document), engine);
+    await store.close();
+  });
+
+  it('forward and nearest ask for the anchor on the side that is open', async () => {
+    const { store, collection } = await seeded();
+    const forward = await collection.explain(
+      { $asof: [{ $const: probes([100]) }, '$[*]', { by: '$.series', direction: 'forward' }] });
+    assert.deepStrictEqual(forward.series.seeks,
+      [{ side: 'upper', column: 'gx_at', probe: 100, op: 'le' }]);
+    const nearest = await collection.explain(
+      { $asof: [{ $const: probes([100]) }, '$[*]', { by: '$.series', direction: 'nearest' }] });
+    assert.deepStrictEqual(nearest.series.seeks.map((seek) => seek.side), ['lower', 'upper']);
+    // a tolerance closes both sides by arithmetic, so it asks for none
+    const toleranced = await collection.explain({ $asof: [{ $const: probes([100]) }, '$[*]',
+      { by: '$.series', direction: 'nearest', tolerance: 20 }] });
+    assert.deepStrictEqual(toleranced.series.seeks, []);
+    await store.close();
+  });
+
+  it('nothing of another type can reach the slot, and JD2086 is the backstop', async () => {
+    // A union-typed instant reads as its FIRST non-null type, so the
+    // plan calls this column integer and binds the anchor as a number.
+    // Nothing else can arrive: comparing text against an epoch would
+    // answer WRONG rather than fail, and a wrong answer is the one
+    // outcome a bind may not have.
+    const model = structuredClone(MODEL);
+    model.collections.sample.schema.properties.at = { type: ['integer', 'string'] };
+    const store = await openStore(model, { driver: nodeDriver() });
+    const collection = store.collection('sample');
+    await collection.insert({ series: 'a', at: 10, value: 1 });
+    // the generated column carries the declared type, and the database
+    // itself refuses the write that would make the anchor a string —
+    // which is why `JD2086` is a backstop for a driver that answers a
+    // type its own column cannot hold, not a case a caller can reach
+    await assert.rejects(async () => collection.insert(
+      { series: 'a', at: '2026-01-01T00:00:00Z', value: 1 }),
+    (error) => /** @type {any} */ (error).code === 'JD2005');
+    await store.close();
   });
 });

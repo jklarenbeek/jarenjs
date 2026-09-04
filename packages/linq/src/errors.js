@@ -37,6 +37,7 @@ export const LINQ_CODES = Object.freeze({
   JL2005: 'a push queue was fed after it ended',
   JL2006: 'a provider answered an element terminal with something other than one array',
   JL2007: 'a ledger settlement named a ref that settles no started record',
+  JL2008: 'a federated fetch reached its row or byte budget',
 });
 
 /**
@@ -144,6 +145,10 @@ export class LinqBuildError extends CodedError {
  *    `first`, …) with something other than exactly one array; the
  *    emitted document is an array constructor, so a conforming
  *    `execute()` never answers `undefined` there
+ *  - `JL2008` — a `federate()` fetch reached one side's row or byte
+ *    budget. A budget is a REFUSAL, not a spill: the fetch stops at the
+ *    row that would have broken it, every cursor it opened is closed,
+ *    and the reason names the side and the bound (QUERY-PEN.md §13)
  */
 export class LinqRuntimeError extends CodedError {
   /**

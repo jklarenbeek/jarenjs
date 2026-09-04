@@ -940,14 +940,18 @@ const FACTS = {
   },
   'series.storeRefinement': () => {
     const { figures } = data('series').meta;
+    const statements = figures.storeAsOfStatements;
     return `A window measured in time is not pushed: the store answers it at `
       + `${ratio(figures.storeRollingVsResident)}× the kernel over an array already in memory, `
       + `over ${thousands(figures.storeRollingCandidates)} candidates the index bounded. The `
       + `batched as-of join reads ${thousands(figures.storeAsOfCandidates)} rows in `
-      + `${figures.storeAsOfStatements} statement and costs `
+      + `${statements} statement${statements === 1 ? '' : 's'} and costs `
       + `${ratio(figures.storeAsOfVsIndexReads)}× fifty-one separate index reads — a bound is `
-      + 'what it buys, not a speed-up, and without a tolerance a backward join can only be '
-      + 'bounded above.';
+      + 'what it buys, not a speed-up. Without a tolerance the open side has no bound the probes '
+      + "imply, so the plan reads the data's own: the last instant each series carries at or "
+      + 'before the earliest probe, folded to the least of them. That anchor is the extra '
+      + 'statement, and what it saves depends on where the probes sit — evenly spread ones, as '
+      + 'here, leave the least below them to skip.';
   },
   'series.zoneCost': () => {
     const { figures } = data('series').meta;

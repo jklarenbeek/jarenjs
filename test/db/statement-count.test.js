@@ -304,6 +304,23 @@ describe('an as-of join costs one statement, whatever the probes number', () => 
     });
   }
 
+  for (const count of [1, 200]) {
+    it(`${count} probes with no tolerance: the anchor, then the fetch — and no more`, async () => {
+      counters.executed = 0;
+      const left = probes(count);
+      const document = { $asof: [{ $const: left }, '$[*]', { by: '$.series' }] };
+      const answer = await samples.execute(document);
+      // the open side has no bound the probes imply, so the plan asks
+      // the database for one: a fixed two, whatever the probes number
+      assert.strictEqual(counters.executed, 2);
+      const items = Array.isArray(answer) ? answer : [answer];
+      assert.strictEqual(items.length, count, 'every left row stays in the answer');
+      const explained = await samples.explain(document);
+      assert.strictEqual(explained.series.counts.statements, 2);
+      assert.match(explained.scanNarrative, /USING INDEX sample_by_series_at/);
+    });
+  }
+
   it('the contrast: one indexed lookup per probe is the N+1 the batch collapses', async () => {
     counters.executed = 0;
     const left = probes(10);

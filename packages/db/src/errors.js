@@ -83,6 +83,7 @@ export const DB_CODES = Object.freeze({
   JD2083: 'the database is read-only',
   JD2084: 'a disk I/O error',
   JD2085: 'the database file is corrupt or not a database',
+  JD2086: 'a seek anchor came back with a type the plan did not declare',
 });
 
 /**
@@ -217,6 +218,11 @@ export class DbCompileError extends CodedError {
  *    position
  *  - `JD2081` — a maintenance operation was cancelled through its signal
  *    before its statement ran
+ *  - `JD2086` — a seek anchor came back from the database with a type
+ *    the plan did not declare: the plan reads an anchor from a column
+ *    of declared type and binds it through a TYPED slot, so a value of
+ *    another type is a defect below the store, refused before the
+ *    statement it would have bound runs
  *  - `JD2082`/`JD2083`/`JD2084`/`JD2085` — the driver reported a full
  *    disk, a read-only database, an I/O error, a corrupt file: one
  *    classifier (`classifyDriverError`) assigns them, whichever path met

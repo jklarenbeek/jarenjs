@@ -513,58 +513,47 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **Pushdown promotions.** Two-binding equijoins shipped in phase
-  B; the deliberate-residual table still holds `$groupby` (the
-  post-group cardinality rebinding deserves its own order —
-  MODEL-FORMAT §10.6), three-plus bindings, non-equi joins,
-  projections over joins, and `$match` beyond the UDF hatch. Each
-  promotion needs its oracle proof first; the forced-residual mode is
-  the regression net that makes promotion safe.
-- [ ] **Aggregate-UDF pushdown for registered operators.** The
-  `pushable:'scalar'` subset already pushes into SQLite as deterministic
-  UDFs (MODEL-FORMAT §8.2, node:sqlite; bun stays residual). What remains
-  is `pushable:'aggregate'` — `db.aggregate` step/final over `GROUP BY` —
-  which no shipped pack yet marks (the finance/stats aggregators fold a
-  per-document sequence, a per-row scalar to SQL, not a cross-row column)
-  and which additionally waits on `$groupby` pushdown, itself a
-  deliberate residual above. The `aggregateFunctions` capability is
-  already probed and reported, so the driver gate is in place; whole-
-  series functions like `$irr` are never index-eligible — the ceiling is
-  stated, not hidden.
-- [ ] **Projection pushdown beyond one member path.** A collection
-  FLWOR whose `$return` is ONE member path over the binding now projects
-  that path into the statement (its value beside its JSON type,
-  `explain().projection` naming it), and `$count` over it is a
-  `COUNT(*)` with the member's presence in the WHERE — the case the
-  durable ledger adapter (`packages/ai`'s README) paid a full document
-  read for. What remains residual, deliberately: object and array
-  projections (`$return: { … }`), which run per row over the whole
-  document; every projection on the ENTITY engine (one binding or across
-  a join, MODEL-FORMAT §10.6); a `$distinct` over a projected path,
-  which the engine still folds over the projected items; and anything
-  that waits on `$groupby` pushdown. The rule that governs each
-  promotion stays the same: project only when no residual conjunct still
-  needs a member the projection would drop — a projection that dropped
-  one is a wrong answer, not a slow one — and every promotion is proved
-  against the oracle corpus in both modes first.
-- [ ] **A k-nearest probe cannot pick its column at bind time.** Two
-  `derive: 'vector'` widths over one member path are two columns, and a
-  plan carries one of them; an external probe of the other width
-  diverts to the engine with the reason named rather than selecting the
-  column that would fit it. Choosing from the probe's width at bind time
-  is possible and unbuilt — the plan would have to carry both columns
-  and the diversion reason would have to name which widths were on
-  offer. A single-width collection, which is what an embedding model
-  gives you, never meets it.
-- [ ] **A profile member allow-list.** The safe execution profile
-  applies one allow-list of names (`collections`, over collections and
-  entity roots alike), operators, externals and collations to every
-  engine, plus mandatory predicates and the counted bounds
-  (MODEL-FORMAT §8). A per-root MEMBER allow-list — which paths a
-  document may read — is not built: being honest about it needs an
-  analysis walk on every engine that also accounts for what a residual
-  may read over a whole fetched document, and that walk is its own
-  order.
+- [ ] **Pushdown promotions.** A general `$groupby` over a collection,
+  a projection TREE (`$return` objects and arrays of member paths) and
+  an N-way equi-join graph all lower now, each proved against the
+  differential oracle first. What the deliberate-residual table still
+  holds, and why, is unchanged in kind: a `$groupby` whose key is
+  untyped or nullable, whose `$return` reads the binding (after a
+  grouping it holds the group's ROWS), or whose `$orderby` names
+  anything but a key; a window over the GROUPS or an aggregate of them;
+  a comparison whose two sides are both paths (join territory) and a
+  disjunction spanning bindings; a `$for` binding nothing joins to — the
+  cartesian product an equi-join graph exists to prevent; a projection
+  ACROSS a join on the entity engine; and `$match`, `$call` and the
+  other unlisted operators, which reach the deterministic-function
+  hatch or nothing. Each remaining promotion needs its oracle proof
+  first; the forced-residual mode is the regression net that makes one
+  safe.
+- [ ] **No shipped pack marks an aggregate operator.** Both halves of
+  the registered-operator ring now exist: `pushable:'scalar'` pushes as
+  a deterministic UDF, and `pushable:'aggregate'` registers a
+  `db.aggregate` step/final pair and lowers into a `GROUP BY` (a plan
+  whose `aggregate.fn` is `'registered'` carries the registered NAME,
+  never a fragment of SQL), on the drivers whose `aggregateFunctions`
+  capability is probed and reported. What is missing is a pack that
+  declares one: the finance and stats aggregators fold a per-document
+  sequence — a per-row scalar to SQL — rather than a cross-row column,
+  and whole-series functions like `$irr` are never index-eligible. The
+  ceiling is stated, not hidden.
+- [ ] **Projection pushdown on the entity engine.** A collection FLWOR
+  projects one member path, and now a whole TREE of them — `$return`
+  objects and arrays rebuilt from the distinct leaves the statement
+  fetched, each leaf's value beside its JSON type, with
+  `explain().projection.paths` naming them and `$count` over one a
+  `COUNT(*)`. What stays residual, deliberately: a projection the tree
+  cannot rebuild (an operator over a member, a reference to the binding
+  itself, a non-singular path, no member path at all), every projection
+  on the ENTITY engine — one binding or across a join (MODEL-FORMAT
+  §10.6) — and a `$distinct` over a projected path, which the engine
+  still folds over the projected items. The rule that governs each
+  promotion stays: project only when no residual conjunct still needs a
+  member the projection would drop, because a projection that dropped
+  one is a wrong answer rather than a slow one.
 - [ ] **The synchronous entity set has no cursor.** A cursor is
   asynchronous by contract (`next()` answers a promise); `from(
   store.sync.entity('X'))` pushes one whole window as it always did.
@@ -588,13 +577,32 @@ what each does is its own documentation's job
   over UDF-indexed tables are tested; what remains is the model-level
   vocabulary to DECLARE such an index rather than hand-creating it as
   drift.
-- [ ] **Cross-source linq joins beyond one store.** Two entity sets of
-  one store join in one document now (a shared provider `scope`,
-  QUERY-PEN §8; one statement for a bare-binding equijoin). What stays
-  open is a join across two different sources — two stores, a store and
-  an array — which one query document cannot spell (one input), and
-  three or more bindings, which the entity translator names a residual
-  (MODEL-FORMAT §10.6).
+- [ ] **A federation joins two sides, not three.** Two entity sets of
+  one store join in one document (a shared provider `scope`, QUERY-PEN
+  §8; one statement for a bare-binding equijoin), and a join across two
+  DIFFERENT sources now has its explicit door: `federate({ sources,
+  maxRows, maxBytes })` (QUERY-PEN §12.1) hands back one provider source
+  per name, pushes each side's own filters and projection to its own
+  source, reduces the probe side by the build side's keys and lets the
+  engine decide over the two bounded sets. An ordinary `join()` across
+  unrelated sources stays `JL0005` — that is the design, not a gap. What
+  is unbuilt: a federation of THREE or more sides, which needs a join
+  order this boundary deliberately does not invent; a merge strategy,
+  which needs sources that declare an ordering; and the same door on the
+  entity translator's own three-plus-binding residual (MODEL-FORMAT
+  §10.6).
+- [ ] **A re-run live view is read before it has re-run.**
+  `benchmark/live.js`'s event-time leg compares `live.result.rows`
+  against the kernel's own answer immediately after a write. The
+  MAINTAINED view passes it — the patch is applied with the write — and
+  the `rerun` view does not, because its re-execution is scheduled and
+  `LiveQuery` exposes no settle point to await, only `subscribe`. The
+  suite has failed this way for at least four releases, so
+  `benchmark:generate` omits the live rows rather than publishing wrong
+  ones. Two ways to close it, and the choice is the live contract's: the
+  harness awaits an emission before it compares, or a re-run view
+  settles before `result` is readable. Found by QUERYREACH's close-out;
+  it belongs to whoever owns live maintenance.
 - [ ] **Replication.** Change capture (LIVE-FORMAT) is an ordered log
   of RFC 6902 patches with a monotonic sequence, and SQLite's
   changeset/conflict primitives are available — the raw material a
@@ -666,38 +674,19 @@ what each does is its own documentation's job
   changed resumes happily from checkpoints computed by the old one.
   Hashing a closure is not a version; a real task version would have to
   be declared, which is a format change.
-- [ ] **An as-of join with no tolerance is bounded above and not below.**
-  The batched fetch is one statement whatever the probes number, which is the
-  bound it was built for — but a backward join with no `tolerance` can only
-  cap the far side, and at the benchmark's largest shape it reads nearly the
-  whole far side and loses badly to separate index reads (the current measured
-  ratio is published beside the win in the `@jarenjs/db` README). The tight
-  lower limit is a BIND-time scalar, and the plan algebra's external operand
-  emits the guarded
-  two-branch text-OR-number comparison, which is not a seek: paying an OR to
-  save a range is the wrong trade. Closing it means a fourth `ParamSlot` kind
-  that binds a scalar of known type without the guard — a real change to a
-  documented closed set, and its own decision.
-- [ ] **`$overlaps` is not planned.** Two half-open spans over four declared
-  columns is a conjunction of four comparisons the emitter already spells,
-  and `createIntervalIndex` is the resident shape it would serve. It sits
-  outside the three temporal shapes the planner closes over (range, as-of,
-  fixed bucket), so adding it is a fourth recognizer rather than a widening
-  of one.
+- [ ] **A stored interval cannot be declared well-formed, so `$overlaps`
+  narrows but never seeks.** The promotion pushes the half-open conjunction
+  over the two declared bound columns and the engine's own operator decides,
+  which is the fetch it was built for — but §8.16 RAISES on a span whose end
+  is at or before its start, and no JSON Schema keyword compares two members,
+  so such a row is storable. The statement therefore keeps every one of them
+  (`start >= end`, a comparison of two columns), and no index bounds that
+  disjunct: the fetch scans. Closing it means declaring the pair AS an
+  interval — a `CHECK` the DDL carries, so an inverted span is unwritable and
+  the conjunction alone is exact — which is a model-format change with its own
+  migration parity, plus `createIntervalIndex` as the resident shape it would
+  then serve.
 
-- [ ] **Join tables are not queryable roots.** A many-to-many membership
-  lives in a join table the store creates, plans and syncs, but the entity
-  engine exposes only entity roots (`$.User[*]`), so nothing can bind
-  `$.Label_User[*]` and its two key columns. Three things wait on the same
-  change: the chain's many-to-many hop (`u.labels`, refused `JL0105`
-  above), a query that asks about the membership itself ("which pairs were
-  attached since Friday" — reachable today only through `load({ include })`
-  and then in JavaScript), and a migration step that transforms a join
-  table's rows. The change is to plan and fetch a join table exactly as an
-  entity — a declared root with two key columns and no document column —
-  under the oracle corpus that already governs entity roots. What it must
-  not become is a document dialect: the lowered shape stays two
-  equalities over ordinary roots.
 - [ ] **A store-less document migration runner.** `migrate()` needs a
   store, because every step it runs is SQL or a data pass over tables. A
   `$migration` document's `jslt` and `query` steps, though, describe a
@@ -869,14 +858,14 @@ theirs.
   a cut the store performs and the ledger re-scores; `benchmark/retrieval.js
   --store=db` runs both and asserts their quality columns equal, so only
   latency moves. Both are linear in candidates times dimensions, and the
-  constant is fitted rather than guessed: <!--fact:vector.ceiling-->5.546 ns per vector component — one query reaches 100 ms at about 22,000 vectors of 768 dimensions and one second at about 234,000<!--/fact-->.
+  constant is fitted rather than guessed: <!--fact:vector.ceiling-->5.142 ns per vector component — one query reaches 100 ms at about 24,000 vectors of 768 dimensions and one second at about 252,000<!--/fact-->.
   Past that ceiling the answer is an approximate index, and it is deliberately
   not built: approximation trades the exactness that lets one query document
   answer identically in the JavaScript engine, in SQLite through the Node
   driver and in a real wasm build for a recall number nobody here has
   measured. If it is ever built, the terms are the ones
   already on the table — it starts by benchmarking against the extension this
-  design already publishes itself against (<!--fact:vector.rival-->38 ms against 206 ms at 50,000 × 768 — 5.4× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->),
+  design already publishes itself against (<!--fact:vector.rival-->35 ms against 191 ms at 50,000 × 768 — 5.5× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->),
   it publishes the RECALL it loses against exact top-k and not only the
   latency it wins, and the committed instrument above is what scores it.
 

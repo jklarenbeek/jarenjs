@@ -481,6 +481,25 @@ function isGeographicSchema(node) {
 /** `$geohash`'s default precision (QUERY-FORMAT §8.14). */
 const GEOHASH_DEFAULT_PRECISION = 9;
 
+/**
+ * The interval promotion's reasons. `$overlaps` is §8.16's half-open
+ * interval test, and the same rule the spatial promotions live under
+ * applies to it: a pre-filter narrows, it never decides, and it may
+ * never exclude a row the engine would have RAISED on.
+ */
+const INTERVAL_REASONS = {
+  overlap: 'a half-open bound pre-filter is pushed over the declared interval columns; '
+    + 'the exact overlap refines in the engine',
+  operands: '$overlaps translates only with one member path and one literal interval',
+  probe: 'the literal interval is not a half-open span of two instants '
+    + '(the engine ERRORS on an empty or reversed one, whatever the row holds)',
+  notInterval: 'the schema does not type the member as an object whose start and end are '
+    + 'both REQUIRED and both numeric (a bound the engine ERRORS on must not be '
+    + 'silently filtered away)',
+  noColumns: 'the interval bounds are not both declared columns (declare an index over '
+    + 'each of them)',
+};
+
 const SPATIAL_REASONS = {
   within: 'a bounding-box pre-filter is pushed; exact containment refines in the engine',
   distance: 'a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine',
@@ -955,6 +974,8 @@ export const PLANNER_REASONS = Object.freeze({
     .map(([key, text]) => [`entity.${key}`, { text }])),
   ...Object.fromEntries(Object.entries(SPATIAL_REASONS)
     .map(([key, text]) => [`spatial.${key}`, { text }])),
+  ...Object.fromEntries(Object.entries(INTERVAL_REASONS)
+    .map(([key, text]) => [`interval.${key}`, { text }])),
   ...Object.fromEntries(Object.entries(KNN_REASONS)
     .filter(([, text]) => typeof text === 'string')
     .map(([key, text]) => [`knn.${key}`, { text }])),
@@ -1088,6 +1109,108 @@ function planSpatial(node, itSlot, shape) {
 }
 
 /**
+ * P4 — `$overlaps` over a declared interval.
+ *
+ * The engine's rule (`overlapsInterval`) is one conjunction: two
+ * half-open spans share an instant when each starts before the other
+ * ends. Over a row whose bounds are declared columns that is two
+ * ordinary comparisons, which is why the promotion exists at all.
+ *
+ * What makes it a PRE-FILTER rather than an exact translation is the
+ * kernel's other half: a span that is empty or reversed is not `false`,
+ * it RAISES (`JQ2001`, through `requireInterval`). A conjunction alone
+ * would drop `[500, 100)` for a probe of `[100, 200)` — answering where
+ * the engine errors, the one thing a pushdown may never do. JSON Schema
+ * has no keyword that compares two members, so the store cannot make an
+ * inverted span unstorable the way it makes a missing or mistyped bound
+ * unstorable; the fetch therefore keeps every inverted row, and the
+ * engine raises over the candidates exactly as it would have.
+ *
+ * That disjunct is a comparison between two COLUMNS, which no index
+ * bounds, so the statement scans. What it still buys is the decode: the
+ * rows that come back are the ones the operator can be true for, plus
+ * the ones it must raise on, rather than the whole collection. A store
+ * that could declare the pair as an interval — a `CHECK` on the two
+ * columns — would make the conjunction exact and the fetch a seek;
+ * ROADMAP carries that as open work.
+ *
+ * The rest of the malformed cases ARE schema ones, exactly as the
+ * spatial promotions' precondition is: a bound the engine errors on
+ * (absent, textual, null) cannot be written to a collection whose
+ * schema requires two numeric bounds, because a write is validated
+ * against that schema (`JD2003`).
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planIntervalOverlap(node, itSlot, shape) {
+  if (node.args.length !== 2)
+    return { refusal: refusal('$overlaps', INTERVAL_REASONS.operands) };
+  // the operator is symmetric, so either side may be the row's
+  let [subject, probeNode] = node.args;
+  if (pathRef(subject, itSlot, shape) === null) [subject, probeNode] = [probeNode, subject];
+  const spanRef = pathRef(subject, itSlot, shape);
+  const probe = constantOf(probeNode);
+  if (spanRef === null || probe === null || pathRef(probeNode, itSlot, shape) !== null)
+    return { refusal: refusal('$overlaps', INTERVAL_REASONS.operands) };
+
+  const span = probe.value;
+  const from = span === null || typeof span !== 'object' || Array.isArray(span)
+    ? null : safeEpoch(span.start);
+  const to = span === null || typeof span !== 'object' || Array.isArray(span)
+    ? null : safeEpoch(span.end);
+  // the probe is the caller's own literal: an empty or reversed one
+  // raises for every row, and a plan that answered would hide it
+  if (from === null || to === null || !(from < to))
+    return { refusal: refusal('$overlaps', INTERVAL_REASONS.probe) };
+
+  const bounds = intervalBounds(spanRef, shape);
+  if (bounds === null) return { refusal: refusal('$overlaps', INTERVAL_REASONS.notInterval) };
+  if (bounds.start.column === null || bounds.end.column === null)
+    return { refusal: refusal('$overlaps', INTERVAL_REASONS.noColumns) };
+
+  const pred = { p: 'interval',
+    columns: { start: bounds.start.column, end: bounds.end.column },
+    probe: { from, to } };
+  return { ...promotion(pred,
+    { construct: '$overlaps', via: 'columns',
+      columns: [bounds.start.column, bounds.end.column], exact: false },
+    [refusal('$overlaps', INTERVAL_REASONS.overlap)]), composable: true };
+}
+
+/**
+ * The two bound refs of a member the schema types as a half-open
+ * interval, or `null` when it does not type it as one.
+ *
+ * "Types it as one" is the whole precondition: an object and only an
+ * object, carrying `start` and `end`, both REQUIRED and both typed
+ * numeric and only numeric. A union with `null` or `string` is not an
+ * interval here — an RFC 3339 bound is a perfectly good instant to the
+ * engine and no epoch column can compare against it.
+ * @param {any} spanRef
+ * @param {any} shape
+ * @returns {{ start: any, end: any } | null}
+ */
+function intervalBounds(spanRef, shape) {
+  const node = schemaNodeAt(shape.schema, spanRef.segments);
+  if (node === undefined || node.type !== 'object') return null;
+  const required = Array.isArray(node.required) ? node.required : [];
+  if (!required.includes('start') || !required.includes('end')) return null;
+  const boundRef = (name) => {
+    const bound = node.properties?.[name];
+    const type = bound?.type;
+    if (typeof type !== 'string' || !isNumericType(type)) return null;
+    const segments = [...spanRef.segments, { name }];
+    return { segments, type,
+      column: shape.columnByCanonical.get(canonicalOf(segments)) ?? null };
+  };
+  const start = boundRef('start');
+  const end = boundRef('end');
+  return start === null || end === null ? null : { start, end };
+}
+
+/**
  * Translate one predicate node, or explain why not.
  *
  * A translated predicate is EXACT unless it carries `refinements`: an
@@ -1138,6 +1261,8 @@ function planPredicate(node, itSlot, shape) {
 
   const spatial = planSpatial(node, itSlot, shape);
   if (spatial !== null) return spatial;
+
+  if (node.name === '$overlaps') return planIntervalOverlap(node, itSlot, shape);
 
   if (node.name === '$exists' || node.name === '$empty') {
     const ref = pathRef(node.args[0], itSlot, shape);
@@ -1613,9 +1738,30 @@ function safeEpoch(value) {
   }
 }
 
-/** An instant bound as a pushable conjunct over the instant column. */
+/**
+ * An instant bound as a pushable conjunct over the instant column.
+ *
+ * Every caller is a REFINEMENT — the bound narrows and the kernel
+ * decides over what comes back — and the member is one the model
+ * declared a column for, so the bound reads that column and nothing
+ * else. Without the guard the statement stops parsing every row's
+ * document to discriminate a member whose column already carries it,
+ * which is the whole cost of the fetch on a large series.
+ */
 function instantBound(ref, op, value) {
-  return { p: 'cmp', op, ref, operand: { lit: value } };
+  return ref.column !== null
+    ? { p: 'colCmp', op, column: ref.column, operand: { lit: value } }
+    : { p: 'cmp', op, ref, operand: { lit: value } };
+}
+
+/** The same, for a bound whose value the database itself answers. */
+function seekBound(ref, op, name) {
+  return { p: 'colCmp', op, column: ref.column, operand: { seek: name } };
+}
+
+/** One key of the probes' own membership test, over the key column. */
+function keyBound(ref, key) {
+  return { p: 'colCmp', op: 'eq', column: ref.column, operand: { lit: key } };
 }
 
 /**
@@ -1631,6 +1777,56 @@ function impliedInstantBounds(ref, from, to) {
   if (to !== null) preds.push(instantBound(ref, 'le', to));
   return { preds, range: { column: ref.column, from, fromOp: from === null ? null : 'ge',
     to, toOp: to === null ? null : 'le' } };
+}
+
+/**
+ * The anchors an UNTOLERANCED as-of batch can ask the store for.
+ *
+ * A tolerance already closes both sides by arithmetic — `probes.min -
+ * tolerance` is a real instant bound — so a seek would buy nothing and
+ * none is built. Without one, the open side has no arithmetic bound at
+ * all: the row that answers the earliest probe is the last row at or
+ * before it, however far back that lies, and today the whole history
+ * below the probes is fetched.
+ *
+ * The tight bound is the data's own. Per group, the row answering the
+ * earliest probe sits at `MAX(at) WHERE at <= probes.min`; matches only
+ * move FORWARD as the probe does, so no row below that group's anchor
+ * can answer any probe. A single global `MAX` would be unsound — it can
+ * come from a group whose anchor is later than another's, dropping that
+ * other group's only candidate — so the fold is the LEAST of the
+ * groups' anchors, which every group's answer is at or above. The
+ * comparison stays inclusive, so rows sharing the anchor instant reach
+ * the kernel and its duplicate rule decides among them.
+ *
+ * Ungrouped (no `by`), there is one group and the inner fold is the
+ * answer. A keyed batch whose key names no column of its own gets no
+ * seek: grouping by an extracted member would read the very rows the
+ * anchor exists to skip.
+ * @param {any} at - the instant ref, known to carry a column
+ * @param {any} byRef - the key ref, or null when the batch has no key
+ * @param {{ min: number, max: number, keys: any[] | null }} probes
+ * @param {number | null} tolerance
+ * @param {string} direction
+ * @returns {any[]}
+ */
+function anchorSeeks(at, byRef, probes, tolerance, direction) {
+  if (tolerance !== null) return [];
+  if (byRef !== null && byRef.column === null) return [];
+  const group = byRef === null ? null : byRef;
+  const keys = byRef === null ? null : probes.keys;
+  const kind = at.type === 'string' ? 'text' : 'number';
+  /** @type {any[]} */
+  const found = [];
+  if (direction === 'backward' || direction === 'nearest') {
+    found.push({ name: 'asof.lower', kind, ref: at,
+      bound: { op: 'le', lit: probes.min }, inner: 'max', outer: 'min', group, keys });
+  }
+  if (direction === 'forward' || direction === 'nearest') {
+    found.push({ name: 'asof.upper', kind, ref: at,
+      bound: { op: 'ge', lit: probes.max }, inner: 'min', outer: 'max', group, keys });
+  }
+  return found;
 }
 
 /**
@@ -1737,6 +1933,8 @@ function planSeriesOperator(root, shape) {
   // the refinement: narrow through the index by whatever the spec makes
   // provable, and let the engine's own kernel decide over what comes back
   let range = null;
+  /** @type {any[]} the anchors the plan asks the store for, for explain */
+  const seeks = [];
   if (name === '$resample' && at.column !== null) {
     const from = safeEpoch(spec.start);
     const to = safeEpoch(spec.end);
@@ -1750,6 +1948,8 @@ function planSeriesOperator(root, shape) {
   }
   else if (name === '$asof' && probesNode !== null) {
     const probes = literalInstants(probesNode, spec.leftAt, spec.by);
+    const byRef = probes === null || spec.by === undefined ? null
+      : memberRef(shape, /** @type {string} */ (singularSelector(spec.by)));
     if (probes !== null && at.column !== null) {
       const tolerance = toleranceMs(spec.tolerance);
       const direction = spec.direction ?? 'backward';
@@ -1773,17 +1973,26 @@ function planSeriesOperator(root, shape) {
         range = bounds.range;
         prefilters.push({ construct: name, via: 'columns', columns: [at.column], exact: false });
       }
+      // the OPEN side, which no arithmetic over the probes can close:
+      // the row answering the earliest probe may lie arbitrarily far
+      // before it, so the tight bound is the data's own anchor
+      for (const seek of anchorSeeks(at, byRef, probes, tolerance, direction)) {
+        plan.seeks.push(seek);
+        plan.filter = conjoin(plan.filter,
+          seekBound(at, seek.bound.op === 'le' ? 'ge' : 'le', seek.name));
+        seeks.push({ side: seek.bound.op === 'le' ? 'lower' : 'upper',
+          column: at.column, probe: seek.bound.lit, op: seek.bound.op === 'le' ? 'ge' : 'le' });
+        prefilters.push({ construct: name, via: 'columns', columns: [at.column], exact: false });
+      }
     }
     // and the keys, whether or not the instant has a column of its own:
     // a right row whose group no left row names can match nothing, so a
     // membership test over the probes' own keys narrows and never drops
     if (probes !== null && probes.keys !== null && probes.keys.length > 0) {
-      const byRef = memberRef(shape, /** @type {string} */ (singularSelector(spec.by)));
-      if (byRef.column !== null) {
+      if (byRef !== null && byRef.column !== null) {
         plan.filter = conjoin(plan.filter, probes.keys.length === 1
-          ? { p: 'cmp', op: 'eq', ref: byRef, operand: { lit: probes.keys[0] } }
-          : { p: 'or', items: probes.keys.map((key) =>
-            ({ p: 'cmp', op: 'eq', ref: byRef, operand: { lit: key } })) });
+          ? keyBound(byRef, probes.keys[0])
+          : { p: 'or', items: probes.keys.map((key) => keyBound(byRef, key)) });
         prefilters.push({ construct: name, via: 'columns',
           columns: [byRef.column], exact: false });
       }
@@ -1808,6 +2017,7 @@ function planSeriesOperator(root, shape) {
       index: narrowed && index !== null ? index.name : null,
       prefix: narrowed && index !== null ? index.prefix : [],
       range,
+      seeks,
       refinement: { $resample: 'resampleSeries', $rolling: 'rollingSeries',
         $asof: 'asOfJoin' }[name],
       reasons,
@@ -2129,7 +2339,24 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
         plan.filter = conjoin(plan.filter, outcome.pred);
         prefilters.push(...outcome.prefilters);
         // an IMPLIED conjunct narrows and leaves the original predicate
-        // for the residual, which is why it is reported as forcing one
+        // to be decided — by the residual, or, when the hatch takes the
+        // same fragment, by the engine's own operator IN the statement.
+        // The composition is the ordinary index-friendly one: the cheap
+        // conjunct prunes, the exact one decides, and every row the
+        // exact one would RAISE on is still handed to it. Only the
+        // interval promotion asks for it today; the spatial ones have
+        // not been proven under the hatch and keep their residual
+        const composed = outcome.refinements.length > 0 && outcome.composable === true
+          && udfHook !== undefined && rawConjuncts[i] !== undefined
+          ? udfHook(rawConjuncts[i], itName)
+          : null;
+        if (composed !== null) {
+          plan.filter = conjoin(plan.filter,
+            { p: 'udf', name: composed.name, key: composed.key,
+              mount: split ? `/$where/$and/${i}` : '/$where' });
+          udfs.push(composed.name);
+          continue;
+        }
         for (const refinement of outcome.refinements) {
           reasons.push(refinement);
           whereFullyPushed = false;

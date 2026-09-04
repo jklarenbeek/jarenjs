@@ -29,8 +29,9 @@ export class UnrepresentablePath extends Error {}
 /**
  * @typedef {{ external: string } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
- *     axis: 'w' | 's' | 'e' | 'n' } }} ParamSlot
- *   Three kinds, closed. A DERIVED slot is the escape for a value SQL
+ *     axis: 'w' | 's' | 'e' | 'n' } } |
+ *   { typed: { seek: string, type: 'number' | 'text' } }} ParamSlot
+ *   Four kinds, closed. A DERIVED slot is the escape for a value SQL
  *   cannot bind at all: a GeoJSON region arrives as an external object,
  *   and what the statement needs is one edge of its bounding box, so
  *   the binder computes that edge from the bound value. It is the same
@@ -38,6 +39,14 @@ export class UnrepresentablePath extends Error {}
  *   cannot, bind an ordinary parameter — and it stays closed on
  *   purpose: a general expression slot would be a second query language
  *   living in the emitter.
+ *
+ *   A TYPED slot is the other direction: a scalar whose JSON type is
+ *   PROVEN before the statement binds — the database's own answer to
+ *   one of the plan's seeks, read from a column of declared type. An
+ *   external's type is only knowable at bind time, so its comparison
+ *   carries a text branch beside a number branch; a typed slot carries
+ *   one guarded comparison, the same shape a literal gets, and the
+ *   binder refuses a value of the wrong type before any SQL runs.
  */
 
 /**
@@ -77,6 +86,7 @@ function stropForm(dialect, param, valueSql, pred) {
 function slotName(slot) {
   if ('external' in slot) return slot.external;
   if ('derived' in slot) return slot.derived.external;
+  if ('typed' in slot) return slot.typed.seek;
   return 'value';
 }
 
@@ -114,9 +124,13 @@ export function emitPlan(plan, dialect, physical) {
   const docColumn = q(physical.docColumn);
   /** @type {ParamSlot[]} */
   const slots = [];
+  // the statement being emitted owns its slots: a positional dialect
+  // numbers by that statement's own text order, so a SEEK emitted
+  // beside the main statement numbers from one again
+  let sink = slots;
   const param = (slot) => {
-    slots.push(slot);
-    return dialect.parameterRef(slots.length, slotName(slot));
+    sink.push(slot);
+    return dialect.parameterRef(sink.length, slotName(slot));
   };
 
   /** SQL for a ref's VALUE: the generated column when one exists. */
@@ -142,6 +156,16 @@ export function emitPlan(plan, dialect, physical) {
 
   const sl = dialect.stringLiteral;
   const NUMERIC = () => `(${sl('integer')}, ${sl('real')})`;
+
+  /** The slot a bare column comparison binds through: a plan-time
+   * literal, or the scalar one of the plan's own seeks answers. An
+   * external is not among them — its type is unknowable at plan time,
+   * which is exactly what the guarded form exists for. */
+  const slotFor = (operand) => {
+    if ('lit' in operand) return { literal: operand.lit };
+    const seek = (plan.seeks ?? []).find((entry) => entry.name === operand.seek);
+    return { typed: { seek: seek.name, type: seek.kind } };
+  };
 
   /**
    * The guarded, total comparison forms of the truth table.
@@ -169,6 +193,16 @@ export function emitPlan(plan, dialect, physical) {
       // the presence prefix keeps the form TOTAL: `NULL IN (...)` is
       // NULL, and a NULL escaping through a NOT flips a row's fate
       return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} ${param({ literal: lit })})`;
+    }
+    if ('seek' in pred.operand) {
+      // a seek's scalar comes from a column of DECLARED type, so its
+      // JSON type is known here: one guarded comparison, no branch
+      const seek = (plan.seeks ?? []).find((entry) => entry.name === pred.operand.seek);
+      const typeGuard = seek.kind === 'number'
+        ? `${jt} IN ${NUMERIC()}`
+        : `${jt} = ${sl('text')}`;
+      return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} `
+        + `${param({ typed: { seek: seek.name, type: seek.kind } })})`;
     }
     // external operand: its JSON type is only knowable at bind time —
     // guard BOTH sides per branch (text with text, number with number)
@@ -201,6 +235,23 @@ export function emitPlan(plan, dialect, physical) {
         return pred.value ? dialect.booleanLiteral(true) : dialect.booleanLiteral(false);
       case 'cmp':
         return emitCmp(pred);
+      case 'colCmp': {
+        const column = q(pred.column);
+        const symbol = { eq: '=', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+        return `(${column} IS NOT NULL AND ${column} ${symbol} `
+          + `${param(slotFor(pred.operand))})`;
+      }
+      case 'interval': {
+        // the declared bounds ARE the values (§8.16's precondition is a
+        // schema one), so no `json_type` guard reads the document per
+        // row; `IS NOT NULL` keeps the form total for a row with no span
+        const start = q(pred.columns.start);
+        const end = q(pred.columns.end);
+        return `(${start} IS NOT NULL AND ${end} IS NOT NULL AND `
+          + `((${start} < ${param({ literal: pred.probe.to })} `
+          + `AND ${end} > ${param({ literal: pred.probe.from })}) `
+          + `OR ${start} >= ${end}))`;
+      }
       case 'typeIs': {
         const jt = typeOf(pred.ref);
         if (pred.types.length === 0) {
@@ -385,7 +436,49 @@ export function emitPlan(plan, dialect, physical) {
   if (plan.window !== null && plan.aggregate === null && plan.group === null) {
     sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
-  return { sql, slots };
+  return { sql, slots, seeks: (plan.seeks ?? []).map((seek) => emitSeek(seek)) };
+
+  /**
+   * One seek statement: the extreme instant each group carries on the
+   * near side of the probe, folded to the one scalar every group's
+   * answer is beyond. Ungrouped, the inner fold IS the answer.
+   * @param {import('./algebra.js').PlanSeek} seek
+   * @returns {{ name: string, kind: 'number' | 'text',
+   *   sql: string, slots: ParamSlot[] }}
+   */
+  function emitSeek(seek) {
+    /** @type {ParamSlot[]} */
+    const own = [];
+    const outer = sink;
+    sink = own;
+    try {
+      // the seek reads the same declared columns the bound it fills does
+      const colCmp = (column, op, lit) =>
+        ({ p: 'colCmp', op, column, operand: { lit } });
+      /** @type {import('./algebra.js').PlanPredicate} */
+      let filter = colCmp(seek.ref.column, seek.bound.op, seek.bound.lit);
+      if (seek.group !== null && seek.keys !== null && seek.keys.length > 0) {
+        filter = { p: 'and', items: [filter, seek.keys.length === 1
+          ? colCmp(seek.group.column, 'eq', seek.keys[0])
+          : { p: 'or', items: seek.keys.map((key) =>
+            colCmp(seek.group.column, 'eq', key)) }] };
+      }
+      const inner = `${seek.inner.toUpperCase()}(${valueOf(seek.ref)})`;
+      const where = ` FROM ${q(physical.table)} WHERE ${emitPred(filter)}`;
+      const text = seek.group === null
+        ? `SELECT ${inner} AS ${q('anchor')}${where}`
+        : `SELECT ${seek.outer.toUpperCase()}(${q('a')}) AS ${q('anchor')} FROM `
+          + `(SELECT ${inner} AS ${q('a')}${where} `
+          + `GROUP BY ${valueOf(seek.group)})`;
+      // a seek that finds nothing binds its own probe: it proved there
+      // is no row on that side, so the bound excludes only what is absent
+      return { name: seek.name, kind: seek.kind, fallback: seek.bound.lit,
+        sql: text, slots: own };
+    }
+    finally {
+      sink = outer;
+    }
+  }
 }
 
 // ————— The entity document kind (one emitter layer, two kinds) —————

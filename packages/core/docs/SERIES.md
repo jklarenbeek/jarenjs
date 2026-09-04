@@ -331,20 +331,20 @@ unless the kernel answered the identical rows the references did.
 
 The kernel is not the ceiling and does not claim to be. A one-pass loop
 written for one question validates nothing, normalizes nothing and
-returns a bare pair. Against those loops the kernel costs <!--fact:series.kernelVsCeiling-->3.0× the one-pass bucket loop and 6.2× the one-pass ring sum<!--/fact-->,
-and against the vocabulary a consumer had instead it is <!--fact:series.kernelVsQuery-->74.0× faster than the generic query bucket and 78.3× faster than the labelled count window<!--/fact-->.
+returns a bare pair. Against those loops the kernel costs <!--fact:series.kernelVsCeiling-->3.3× the one-pass bucket loop and 6.0× the one-pass ring sum<!--/fact-->,
+and against the vocabulary a consumer had instead it is <!--fact:series.kernelVsQuery-->76.7× faster than the generic query bucket and 78.5× faster than the labelled count window<!--/fact-->.
 
 <!--fact:series.kernelTable-->
 | operation | median | rows | against | what that is | ratio |
 |---|---:|---:|---:|---|---:|
-| `resampleSeries`, 60 s buckets | 1.6 ms | 1,667 | 0.53 ms | one-pass loop | 3.0× |
-| `resampleSeries`, + linear fill | 1 ms | 1,657 | 1 ms | the same buckets, omitting | 1.0× |
-| `rollingSeries`, 60 s window | 7.5 ms | 100,000 | 1.2 ms | one-pass ring sum | 6.2× |
-| `asOfJoin`, one left row per 100 | 1.7 ms | 1,000 | 1.6 ms | one index read per row | 1.1× |
-| `downsampleSeries`, lttb, gap corpus | 1.7 ms | 2,000 | 1.8 ms | the same line with no holes in it | 0.9× |
+| `resampleSeries`, 60 s buckets | 1.6 ms | 1,667 | 0.47 ms | one-pass loop | 3.3× |
+| `resampleSeries`, + linear fill | 1.1 ms | 1,657 | 1 ms | the same buckets, omitting | 1.1× |
+| `rollingSeries`, 60 s window | 7.6 ms | 100,000 | 1.3 ms | one-pass ring sum | 6.0× |
+| `asOfJoin`, one left row per 100 | 1.7 ms | 1,000 | 1.7 ms | one index read per row | 1.0× |
+| `downsampleSeries`, lttb, gap corpus | 1.7 ms | 2,000 | 1.9 ms | the same line with no holes in it | 0.9× |
 <!--/fact-->
 
-A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--fact:series.asofShape-->The as-of join costs 19.5× a handful of index reads, and narrows to 1.1× the same join once there is one left row per hundred right ones — still the statement's win, published as one. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/fact-->
+A row that loses stays in, and the two shapes of the same join are published side by side rather than the flattering one alone. <!--fact:series.asofShape-->The as-of join costs 19.7× a handful of index reads, and narrows to 1.0× the same join once there is one left row per hundred right ones — still the statement's win, published as one. The reason is the shape rather than the engine: a b-tree pays per probe, and a sorted walk pays for the whole right side whether it was asked one question or a thousand.<!--/fact-->
 
 And the seam has a price that this corpus cannot charge it. <!--fact:series.zoneCost-->Walking every boundary through the shipped Intl zone provider costs 1.1× the integer ladder over an identical answer — a handful of ICU reads against the whole ladder, since the benchmark corpus spans 28 hours and holds two daily boundaries. What the suite gates is that the provider is consulted per boundary rather than per sample.<!--/fact-->
 

@@ -136,10 +136,18 @@ function bindable(value) {
  * @param {any} externals
  * @returns {any}
  */
-function slotValue(slot, externals) {
+function slotValue(slot, externals, anchors = null) {
   if ('literal' in slot) return slot.literal;
   if ('derived' in slot)
     return derivedSlotValue(slot.derived, externals[slot.derived.external]);
+  if ('typed' in slot) {
+    // a typed slot is only ever emitted beside the seek that fills it,
+    // so a bind that never resolved the seeks is a defect in the
+    // engine, not a value the caller could have got wrong
+    if (anchors === null || !(slot.typed.seek in anchors))
+      throw new Error(`the seek '${slot.typed.seek}' was not resolved before the bind`);
+    return anchors[slot.typed.seek];
+  }
   return externals[slot.external];
 }
 
@@ -561,6 +569,9 @@ export function createQueryEngine(context) {
       plan,
       sql: emitted.sql,
       slots: emitted.slots,
+      // the plan's own anchor reads, prepared on first use and kept
+      // with it: each one binds a TYPED slot in the statement above
+      seeks: (emitted.seeks ?? []).map((seek) => ({ ...seek, statement: null })),
       externalNames,
       externalSlotKinds: externalSlotKinds(emitted.slots, plan.rank),
       // a literal probe is normalized once, here; an external one per
@@ -706,9 +717,68 @@ export function createQueryEngine(context) {
     return alternative.statement;
   };
 
-  /** Bind slots against the call's externals. */
+  /**
+   * The anchors this entry's seeks answer, read before the statement
+   * that binds them. Each seek is one aggregate read through the same
+   * declared index, prepared once and kept with the plan; a seek that
+   * finds nothing binds its own probe, which excludes exactly the rows
+   * it proved are not there.
+   * @param {any} entry
+   * @returns {any} value-or-promise of the name → anchor map
+   */
+  const seekAnchors = (entry) => {
+    /** @type {Record<string, any>} */
+    const anchors = Object.create(null);
+    const next = (i) => {
+      if (i >= entry.seeks.length) return anchors;
+      const seek = entry.seeks[i];
+      if (seek.statement === null) seek.statement = connection.prepare(seek.sql);
+      return chain(seek.statement, (prepared) =>
+        chain(prepared.get(seek.slots.map((slot) => slotValue(slot, {}))), (row) => {
+          anchors[seek.name] = anchorValue(seek, row);
+          return next(i + 1);
+        }));
+    };
+    return next(0);
+  };
+
+  /**
+   * One seek's answer, type-checked before it can reach a statement.
+   * The column is of declared type, so the only way a value of another
+   * type arrives is a defect below the store (a driver handing back a
+   * BigInt, a column written past the declaration) — and a bind that
+   * silently compared a number against text would answer WRONG rather
+   * than fail, so it is refused here, before the SQL it would bind.
+   * @param {any} seek
+   * @param {any} row
+   */
+  const anchorValue = (seek, row) => {
+    const value = row === undefined || row === null ? null : row.anchor;
+    if (value === null || value === undefined) return seek.fallback;
+    const kind = typeof value === 'number' && Number.isFinite(value) ? 'number'
+      : typeof value === 'string' ? 'text' : null;
+    if (kind !== seek.kind) {
+      throw new DbRuntimeError('JD2086',
+        `the seek '${seek.name}' declared ${seek.kind} and the database answered `
+        + `${typeof value}`, collection.name);
+    }
+    return value;
+  };
+
+  /** Bind slots against the call's externals, and the seeks' anchors. */
   const bindParams = (entry, externals) =>
-    entry.slots.map((slot) => slotValue(slot, externals));
+    (entry.seeks.length === 0
+      ? entry.slots.map((slot) => slotValue(slot, externals))
+      : chain(seekAnchors(entry), (anchors) =>
+        entry.slots.map((slot) => slotValue(slot, externals, anchors))));
+
+  /** Run a bound statement: the bind itself may have to READ first. */
+  const runAll = (entry, externals, statement) =>
+    chain(bindParams(entry, externals), (params) => statement.all(params));
+  const runGet = (entry, externals, statement) =>
+    chain(bindParams(entry, externals), (params) => statement.get(params));
+  /** How many statements one execution of this entry costs. */
+  const statementCost = (entry) => 1 + entry.seeks.length;
 
   /** The external whose bound value sends this call to the residual —
    * a value the database cannot take, a region with no box, a probe of
@@ -836,7 +906,7 @@ export function createQueryEngine(context) {
    * says so (`partial: true`). */
   const seriesTally = (entry) => {
     if (entry.planned.series === null) return null;
-    const live = { statements: 1, candidates: 0, results: 0, partial: true };
+    const live = { statements: statementCost(entry), candidates: 0, results: 0, partial: true };
     entry.seriesCounts = live;
     return {
       row: (items) => {
@@ -845,7 +915,7 @@ export function createQueryEngine(context) {
       },
       settle: (opened) => {
         if (entry.seriesCounts === live) entry.seriesCounts = { ...live, partial: false };
-        if (opened) countSeries(entry, 1, live.candidates, live.results);
+        if (opened) countSeries(entry, statementCost(entry), live.candidates, live.results);
       },
     };
   };
@@ -931,7 +1001,7 @@ export function createQueryEngine(context) {
     }
     if (entry.planned.mode === 'knn') return knnCandidates(entry, externals);
     return chain(statementOf(entry), (statement) =>
-      chain(statement.all(bindParams(entry, externals)), (rows) =>
+      chain(runAll(entry, externals, statement), (rows) =>
         rowsToDocs(checkRowBound(entry, rows))));
   };
 
@@ -996,48 +1066,48 @@ export function createQueryEngine(context) {
         // narrowing: the fetch decided nothing)
         return chain(candidatesOf(entry, externals, diverted), (docs) => {
           const answer = setResidualOf(entry, document)(docs, externals);
-          countSeries(entry, 1, docs.length, itemCount(answer));
+          countSeries(entry, diverted ? 1 : statementCost(entry), docs.length, itemCount(answer));
           return answer;
         });
       }
       if (entry.planned.mode === 'row') {
         return chain(statementOf(entry), (statement) =>
-          chain(statement.all(bindParams(entry, externals)), (rows) => {
+          chain(runAll(entry, externals, statement), (rows) => {
             const items = [];
             for (const row of checkRowBound(entry, rows))
               items.push(...entry.rowResidual(JSON.parse(row.doc), externals));
-            countSeries(entry, 1, rows.length, items.length);
+            countSeries(entry, statementCost(entry), rows.length, items.length);
             return answerOf(entry, items);
           }));
       }
       return chain(statementOf(entry), (statement) => {
         if (entry.plan.aggregate !== null) {
-          return recoverOverflow(() => chain(statement.get(bindParams(entry, externals)), (row) => {
+          return recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
             const value = aggregateResult(entry, row);
-            countSeries(entry, 1, null, value === undefined ? 0 : 1);
+            countSeries(entry, statementCost(entry), null, value === undefined ? 0 : 1);
             return wrapValue(entry, value);
           }), () => overflowResidual(entry, externals, document));
         }
         if (entry.plan.group !== null) {
-          return chain(statement.all(bindParams(entry, externals)), (rows) =>
+          return chain(runAll(entry, externals, statement), (rows) =>
             answerOf(entry, groupItems(entry, checkRowBound(entry, rows))));
         }
         if (entry.plan.bucket !== null) {
-          return chain(statement.all(bindParams(entry, externals)), (rows) => {
+          return chain(runAll(entry, externals, statement), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
             if (items === null) return divertBucket(entry, document, externals);
-            countSeries(entry, 1, rows.length, items.length);
+            countSeries(entry, statementCost(entry), rows.length, items.length);
             return answerOf(entry, items);
           });
         }
-        return chain(statement.all(bindParams(entry, externals)), (rows) => {
+        return chain(runAll(entry, externals, statement), (rows) => {
           checkRowBound(entry, rows);
           const items = entry.plan.project === 'document'
             ? rowsToDocs(rows)
             : 'path' in entry.plan.project
               ? rows.flatMap(projectedItems)
               : rows.flatMap((row) => projectedTreeItems(entry.plan.project, row));
-          countSeries(entry, 1, rows.length, items.length);
+          countSeries(entry, statementCost(entry), rows.length, items.length);
           return answerOf(entry, items);
         });
       });
@@ -1113,7 +1183,7 @@ export function createQueryEngine(context) {
         materialize: () => chain(guardScan(entry), () =>
           chain(candidatesOf(entry, externals, diverted), (docs) => {
             const items = packedResidualOf(entry, document)(docs, externals);
-            countSeries(entry, 1, docs.length, items.length);
+            countSeries(entry, diverted ? 1 : statementCost(entry), docs.length, items.length);
             return items;
           })) });
     }
@@ -1121,20 +1191,20 @@ export function createQueryEngine(context) {
       // a native grouping is a barrier: the groups are the answer
       return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
-          chain(statement.all(bindParams(entry, externals)), (rows) =>
+          chain(runAll(entry, externals, statement), (rows) =>
             groupItems(entry, checkRowBound(entry, rows))))) });
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
       return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
-          chain(statement.all(bindParams(entry, externals)), (rows) => {
+          chain(runAll(entry, externals, statement), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
             if (items === null) {
               return chain(divertBucket(entry, document, externals), (value) =>
                 (value === undefined ? [] : Array.isArray(value) ? value : [value]));
             }
-            countSeries(entry, 1, rows.length, items.length);
+            countSeries(entry, statementCost(entry), rows.length, items.length);
             return items;
           }))) });
     }
@@ -1143,9 +1213,9 @@ export function createQueryEngine(context) {
       // answers the engine's item instead
       return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
-          recoverOverflow(() => chain(statement.get(bindParams(entry, externals)), (row) => {
+          recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
             const value = aggregateResult(entry, row);
-            countSeries(entry, 1, null, value === undefined ? 0 : 1);
+            countSeries(entry, statementCost(entry), null, value === undefined ? 0 : 1);
             return value === undefined ? [] : [value];
           }), () => chain(overflowResidual(entry, externals, document), (answer) =>
             (answer === undefined ? [] : Array.isArray(answer) ? answer : [answer]))))) });
@@ -1155,8 +1225,11 @@ export function createQueryEngine(context) {
     // a cursor iterates a statement of its OWN: two cursors over one
     // cached statement invalidate each other's iterator at the driver
     return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-      open: () => chain(guardScan(entry), () => chain(connection.prepare(entry.sql),
-        (statement) => statement.iterate(bindParams(entry, externals)))),
+      // the bind may have to READ first (a seek's anchor), so it settles
+      // before the statement it binds is prepared
+      open: () => chain(guardScan(entry), () => chain(bindParams(entry, externals),
+        (params) => chain(connection.prepare(entry.sql),
+          (statement) => statement.iterate(params)))),
       items: (row) => {
         pulledRows++;
         if (entry.rowBound !== null && pulledRows > entry.rowBound) {
@@ -1247,9 +1320,14 @@ export function createQueryEngine(context) {
     const params = chosen.slots.map((slot) => {
       if ('external' in slot) return { external: slot.external };
       if ('derived' in slot) return { derived: { ...slot.derived } };
+      if ('typed' in slot) return { typed: { ...slot.typed } };
       return { literal: slot.literal };
     });
+    // EXPLAIN reads the statement's SHAPE: a seek's anchor is a value
+    // the database would answer for a run, and explaining a plan runs
+    // nothing, so the slot it fills is described and left unbound
     const eqpParams = chosen.slots.map((slot) => {
+      if ('typed' in slot) return null;
       const value = slotValue(slot, externals);
       return bindable(value) ? value : null;
     });

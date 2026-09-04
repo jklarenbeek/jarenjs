@@ -485,17 +485,66 @@ is the ENGINE running the caller's own document, decides:
 
 | operator | what bounds the fetch |
 |---|---|
+| `$overlaps` over a declared interval | the half-open conjunction over the two bound columns, plus every row the operator RAISES on (below) |
 | `$resample` (fill, calendar, `first`/`last`) | the spec's own `start`/`end`, plus the operand's `$where` |
 | `$rolling` | the operand's `$where` alone — a window measured in time answers once per input instant |
-| `$asof` with the collection on the RIGHT | the probes' own span (`at <= max` backward, `at >= min` forward, both sides under a `tolerance`) and a membership test over the probes' `by` keys |
+| `$asof` with the collection on the RIGHT | the probes' own span (`at <= max` backward, `at >= min` forward, both sides under a `tolerance`) and a membership test over the probes' `by` keys, plus the ANCHOR below |
 | `$asof` with the collection on the LEFT | nothing — a join answers once per LEFT row, so every left row is needed |
 
-The as-of bound is one STATEMENT, whatever the probes number, which is
-what `test/db/statement-count.test.js` pins: the failure mode a batch
-exists to refuse is one seek per left row. Without a `tolerance` a
-backward join can only be bounded ABOVE, so that one statement can read
-most of a long history — `benchmark/series.js` publishes the candidate
-count beside the timing rather than netting it out.
+The as-of bound is a FIXED number of statements, whatever the probes
+number, which is what `test/db/statement-count.test.js` pins: the
+failure mode a batch exists to refuse is one seek per left row.
+
+**The anchor.** Without a `tolerance` the open side has no bound the
+probes imply: the row that answers the earliest probe is the last one at
+or before it, however far back that lies. The tight bound is the data's
+own, so the plan ASKS for it — `plan.seeks` carries one aggregate read
+through the same declared index, and the statement binds its answer
+through the typed slot (`emit.js`'s fourth `ParamSlot` kind), which
+needs no bind-time type branch because the column's type is declared.
+
+Per group the anchor is `MAX(at) WHERE at <= min(probes)`; the scalar is
+the LEAST of those over the groups. A single global `MAX` would be
+unsound — it can come from one group and drop another group's only
+candidate — and matches only move forward as the probe does, so no row
+below the fold can answer any probe. The comparison stays inclusive, so
+rows sharing the anchor instant reach the kernel and its duplicate rule
+decides among them. A seek that finds nothing binds its own probe: it
+proved there is no row on that side. `forward` anchors the other end,
+`nearest` both, and a `tolerance` asks for none — arithmetic already
+closed both sides. What the anchor saves depends on where the probes
+sit; `benchmark/series.js` publishes the candidate count beside the
+timing rather than netting it out, over probes spread evenly across the
+whole span, which is the anchor at its worst.
+
+**`$overlaps` and the row that raises.** Two half-open spans share an
+instant when each starts before the other ends, which over declared
+bound columns is two comparisons the emitter already spells. What makes
+it a pre-filter rather than an exact translation is the kernel's other
+half: a span that is empty or reversed is not `false`, it RAISES
+(`JQ2001`). A conjunction alone would drop `[500, 100)` for a probe of
+`[100, 200)` — answering where the engine errors, which no pushdown may
+do — so the statement keeps every row whose own span is inverted
+(`start >= end`) and the operator decides over the candidates. That
+disjunct compares two COLUMNS, which no index bounds, so the fetch
+scans; what it still buys is that the pruned rows never reach the
+engine at all. The other malformed cases are SCHEMA ones, exactly as the
+spatial promotions' precondition is: the member must be typed as an
+object whose `start` and `end` are both REQUIRED and both numeric, and a
+write is validated against that schema, so a bound that is absent,
+textual or null is a row the collection cannot hold. An unmapped pair,
+an untyped one, or a probe that is not itself a half-open span pushes
+nothing and names why. ROADMAP carries the declared-interval `CHECK`
+that would make the conjunction exact and the fetch a seek.
+
+**Reading a declared column without its guard.** A temporal refinement's
+own bounds (`p: 'colCmp'`) carry no `json_type` beside them: the model
+declared the column, the comparison only NARROWS, and the kernel decides
+over what comes back. Without that, the statement parsed every scanned
+row's document to discriminate a member the column already carried — at
+the benchmark's largest shape that guard was most of the fetch's cost.
+Narrowing is what makes it safe: SQL's own ordering keeps a row the
+guard would have dropped, never the other way about.
 
 **A group with no instant.** A row whose instant member is missing or
 is not a number groups under SQL `NULL`; the kernel REFUSES such a row

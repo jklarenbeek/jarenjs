@@ -36,7 +36,7 @@ is the index of the ten, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 817 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,653 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,721 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,218 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,083 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
@@ -202,17 +202,17 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 817 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,653 | 34 | 8 | 14 | 174,028 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 33,098 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 41,524 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,798 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 24,273 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 45,313 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,852 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 47,535 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 37,254 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 882 | 40 | 4 | 2 | 561,196 B |
-| **eleven documents** | | **11,719** | **290** | **67** | | |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,721 | 34 | 8 | 15 | 174,086 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 33,156 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,083 | 28 | 6 | 3 | 41,582 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,856 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 24,331 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 45,371 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,026 | 16 | 7 | 3 | 19,910 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 47,593 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 37,312 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 882 | 40 | 4 | 2 | 567,123 B |
+| **eleven documents** | | **11,787** | **290** | **67** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -254,16 +254,16 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 174,028 B | 174 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 33,098 B | 33 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 41,524 B | 42 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,798 B | 20 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,273 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 45,313 B | 45 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,852 B | 20 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 47,535 B | 48 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 37,254 B | 37 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 561,196 B | 561 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 174,086 B | 174 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 33,156 B | 33 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 41,582 B | 42 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,856 B | 20 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,331 B | 24 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 45,371 B | 45 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,910 B | 20 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 47,593 B | 48 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 37,312 B | 37 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 567,123 B | 567 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of

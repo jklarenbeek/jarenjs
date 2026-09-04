@@ -824,10 +824,12 @@ async function runLeg(n) {
     storePlans[key] = `${explained.series.mode}: ${explained.scanNarrative}`;
     storeCounts[key] = explained.series.counts;
   }
-  // the whole point of the batched join, as a number: one statement,
-  // whatever the probes number, and a fetch the index bounded
-  check(`${label}: the batched join costs ONE statement for ${probes.length} probes`,
-    storeCounts.storeAsOfJoin.statements === 1,
+  // the whole point of the batched join, as a number: a FIXED cost,
+  // whatever the probes number, and a fetch the index bounded. Two
+  // statements now — the anchor seek that closes the open side, then
+  // the join's own fetch — and two is as flat in the probes as one was
+  check(`${label}: the batched join costs a FIXED two statements for ${probes.length} probes`,
+    storeCounts.storeAsOfJoin.statements === 2,
     `${storeCounts.storeAsOfJoin.statements} statement(s), `
       + `${storeCounts.storeAsOfJoin.candidates} candidates of ${n} rows`);
 
@@ -1167,12 +1169,17 @@ const notes = [
     + ' The database contributes the fetch; `rollingSeries` contributes the answer, and'
     + " `explain()` says so rather than calling the result native.",
   `The batched as-of join costs ${times(figures.storeAsOfVsIndexReads)} ${ROUNDS.asof} separate`
-    + ` index reads, in ${figures.storeAsOfStatements} statement rather than ${ROUNDS.asof} — and`
+    + ` index reads, in ${figures.storeAsOfStatements} statements rather than ${ROUNDS.asof} — and`
     + ` it read ${figures.storeAsOfCandidates?.toLocaleString('en-US')} of ${largest.label}. That`
-    + ' is the trade stated plainly: with no tolerance a backward join can only be bounded ABOVE,'
-    + ' so the fetch is one seek over most of the history where fifty-one seeks each touch a page.'
-    + ' What the batch buys is the bound — one statement whatever the probes number — and a'
-    + ' tolerance, or a key with few rows behind it, is what makes the candidate set small.',
+    + ' is the trade stated plainly. With no tolerance the open side has no bound the probes'
+    + ' imply — the row answering the earliest probe may lie arbitrarily far before it — so the'
+    + " plan asks the database for the data's own: per series, the last instant at or before that"
+    + ' probe, folded to the least of them. It is one aggregate through the same index, and it is'
+    + ' the second statement. What it saves depends on where the probes sit, and these fifty-one'
+    + ' are spread evenly across the whole span: the earliest sits near the beginning, so there is'
+    + ' little below it to skip, and this is the anchor at its WORST. What the batch buys is the'
+    + ' bound — a fixed two statements whatever the probes number — and a tolerance, or a key with'
+    + ' few rows behind it, is what makes the candidate set small.',
   `Downsampling ${largest.label} to ${RENDER_TARGET} points is a ${figures.renderReduction}x`
     + ` reduction, and doing it over the gap corpus costs ${times(figures.gapRenderCost)} the dense`
     + ' one: the holes are segment boundaries, and each segment is sampled on its own budget so'

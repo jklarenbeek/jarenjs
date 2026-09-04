@@ -198,8 +198,8 @@ Three things follow:
 
 **What it buys, and what it costs.** Measured against the same query
 over a collection with no such column — the whole embedding parsed out
-of the stored JSON per row — the column is worth <!--fact:vector.jsonDoc-->15.0× the plan at 10,000 × 768<!--/fact-->
-on the read, and costs <!--fact:vector.write-->10.6 s against 5.0 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->
+of the stored JSON per row — the column is worth <!--fact:vector.jsonDoc-->15.6× the plan at 10,000 × 768<!--/fact-->
+on the read, and costs <!--fact:vector.write-->10.2 s against 4.9 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->
 on the way in, because every write pays a JSON round trip of the member
 plus the normalize and the pack. On
 disk it is <!--fact:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/fact-->
@@ -464,6 +464,19 @@ stored `null`), and a row the pushed filter never fetched cannot
 raise. The promotion therefore requires the schema to type the member
 as an array or an object and nothing else; a store that wants the
 engine's refusal instead keeps `compileSchema` injected.
+
+**The same rule, for an interval.** `$overlaps` (§8.16) promotes over a
+member the schema types as an object whose `start` and `end` are both
+REQUIRED and both numeric — and only numeric, since an RFC 3339 bound
+is a good instant to the engine and no epoch column compares against
+it. Under that declaration a bound that is absent, textual or `null` is
+a row the collection cannot hold, so the pushed comparison cannot swallow
+a refusal the engine would have raised. One malformed case remains
+declarable by no schema keyword — a span whose `end` is at or before its
+`start` — so the statement keeps every one of those rows and the operator
+raises over them, exactly as it would have. Both bounds must map to
+declared columns; an unmapped pair pushes nothing and `strict: true`
+names it (`JD0010`).
 
 Under `physical: 'rtree'` the same rule is enforced in SQL, by the
 `WHEN <stem>_w IS NOT NULL` guard on the sync triggers: **a document
@@ -1046,6 +1059,7 @@ error.
 | `JD2083` | the database is read-only |
 | `JD2084` | a disk I/O error |
 | `JD2085` | the database file is corrupt or not a database |
+| `JD2086` | a seek anchor came back with a type the plan did not declare |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.

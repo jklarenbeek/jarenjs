@@ -198,6 +198,16 @@ residual runs locally, and `explain()` reports the split.
   (`JL0005`) rather than silently materialised — except two providers
   sharing a `scope` (one store's entity sets), whose roots are two
   bindings of one multi-entity input.
+- **Federation is a door, not a default.** `federate({ sources,
+  maxRows, maxBytes })` (`src/federate.js`, QUERY-PEN §12.1) hands back
+  one provider source per name, sharing one scope, so the ordinary join
+  is admitted and the federation executes it: each side's own packed
+  document at its own source, the smaller side into a bounded hash
+  table, the other probed against it, and the caller's document decided
+  in the engine over the two reduced sets. It spells no join semantics
+  of its own — the reduction bounds the FETCH, and a value it cannot
+  key is kept rather than guessed at — and a budget is a refusal
+  (`JL2008`), never a spill.
 - **The engine result shape leaks nowhere.** Every surface — sync,
   async, provider — reproduces `undefined | item | items` exactly,
   which is why the window-wrapper trick exists at all.
