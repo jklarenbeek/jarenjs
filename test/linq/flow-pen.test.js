@@ -306,7 +306,7 @@ describe('the dag pen beyond §6', () => {
       floor: constant({ min: 18 }),
       adults: query((v) => v.all()),
       shaped: jslt(stylesheet([rule('$', (v) => ({ n: v.all().count() }))])),
-      asked: task('llm', (v) => ({ prompt: v.get('n') })).checkpoint(),
+      asked: task('llm', (v) => ({ prompt: v.get('n') }), { version: '1' }).checkpoint(),
       out: output(),
     },
     edges: [
@@ -327,9 +327,10 @@ describe('the dag pen beyond §6', () => {
     assert.deepStrictEqual(doc.nodes.adults, { kind: 'query', query: '$[*]' });
     assert.deepStrictEqual(doc.nodes.shaped,
       { kind: 'jslt', stylesheet: { $jslt: '0.1', rules: [{ match: '$', body: { n: { $count: '$[*]' } } }] } });
-    assert.deepStrictEqual(Object.keys(doc.nodes.asked), ['kind', 'run', 'with', 'checkpoint']);
+    assert.deepStrictEqual(Object.keys(doc.nodes.asked),
+      ['kind', 'run', 'version', 'with', 'checkpoint']);
     assert.deepStrictEqual(doc.nodes.asked,
-      { kind: 'task', run: 'llm', with: { prompt: "$['n']" }, checkpoint: true });
+      { kind: 'task', run: 'llm', version: '1', with: { prompt: "$['n']" }, checkpoint: true });
     assert.deepStrictEqual(doc.edges[4], { from: 'asked', to: 'out', port: 'answer', select: "$['text']" });
     assert.strictEqual(bytes(build()), bytes(doc), 'two runs, one document');
     assert.strictEqual(validateDag(doc), true, 'valid under jaren-dag 0.1');
@@ -342,7 +343,7 @@ describe('the dag pen beyond §6', () => {
     /** @type {any[]} */
     const seen = [];
     const compiled = compileDag(graph, {
-      tasks: typedTasks(graph, { llm: async ({ with: w }) => ({ text: `n=${w.prompt}` }) }),
+      tasks: typedTasks(graph, { llm: { version: '1', run: async ({ with: w }) => ({ text: `n=${w.prompt}` }) } }),
       checkpoint: {
         load: () => null,
         save: (runId, nodeId, value) => seen.push([runId, nodeId, value]),
@@ -403,15 +404,16 @@ describe('the dag pen beyond §6', () => {
   });
 
   it('a checkpoint declaration is a new node; the one it came from is unchanged', () => {
-    const plain = task('llm');
+    const plain = task('llm', undefined, { version: '1' });
     const durable = plain.checkpoint();
     assert.notStrictEqual(plain, durable);
     const doc = /** @type {any} */ (defineDag({
       nodes: { i: input(), a: plain, b: durable, out: output() },
       edges: [edge('i', 'a'), edge('i', 'b'), edge('a', 'out', { port: 'a' }), edge('b', 'out', { port: 'b' })],
     }));
-    assert.deepStrictEqual(doc.nodes.a, { kind: 'task', run: 'llm' });
-    assert.deepStrictEqual(doc.nodes.b, { kind: 'task', run: 'llm', checkpoint: true });
+    assert.deepStrictEqual(doc.nodes.a, { kind: 'task', run: 'llm', version: '1' });
+    assert.deepStrictEqual(doc.nodes.b,
+      { kind: 'task', run: 'llm', version: '1', checkpoint: true });
   });
 });
 

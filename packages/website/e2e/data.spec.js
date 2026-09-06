@@ -32,6 +32,16 @@ import { test, expect } from '@playwright/test';
 // Whatever a second tab must observe, a test opens deliberately.
 test.describe.configure({ mode: 'serial' });
 
+// These cases click controls on freshly routed pages. Under
+// `no-preference` a card is still rising on its staggered reveal while
+// the page glides on `scroll-behavior: smooth`, so mousedown and mouseup
+// land on different elements and the click is never delivered — the
+// control is right there and nothing happens. `emulateMedia` is what
+// reaches the page; `test.use({ reducedMotion })` does not.
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 // the wasm build + first store open is real work; give it room
 const READY = { timeout: 30_000 };
 

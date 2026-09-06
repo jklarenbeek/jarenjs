@@ -319,6 +319,34 @@ no continuation to emit.
   from the committed `model.snapshot.json`, refuses a module that is
   not pure, and `jaren-db check` fails CI on a model that moved without
   a plan (MIGRATION-FORMAT §11).
+- **A document migration does not need the database.** Its `jslt` and
+  `query` steps act on documents, so `migrateDocuments` runs them over
+  arrays and `streamDocuments` over a source it may walk only once,
+  writing each document out as it finishes and holding one batch. Both
+  share ONE implementation of what a step means with the store runner,
+  so the array answer equals the store answer — on the same step, in the
+  same words, down to the refusal. A step that needs tables (`ddl`,
+  `sql`, `rebuild`, `derive`) is refused by name before the first
+  document is read, never skipped (MIGRATION-FORMAT §6.1). `jaren-db
+  documents` is the same thing at the command line, over a JSON array,
+  JSONL or stdio:
+
+  ```sh
+  # rewrite a file in place — a sibling temporary is renamed over it
+  # only once every document has survived every step
+  jaren-db documents --migrations ./migrations --in users.jsonl --in-place --yes
+
+  # the CI shape: transform and validate everything, write nothing
+  jaren-db documents --migrations ./migrations --in users.json --check
+  # 0 the chain applies, 1 the run failed, 2 the command line was wrong
+
+  # also the converter: the input and output encodings are independent
+  jaren-db documents --migrations ./migrations --in users.json --out users.jsonl
+  ```
+
+  A JSON array is scanned structurally rather than parsed whole, so both
+  encodings hold one batch and not the file: the live set is flat in the
+  size of the input, and a file larger than memory still migrates.
 - **The safe profile.** Untrusted query documents run under composed
   bounds: engine limits on the residual, a mandatory row bound that
   refuses rather than truncates, reference allow-lists, optional

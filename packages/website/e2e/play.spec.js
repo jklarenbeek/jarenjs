@@ -12,6 +12,17 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+// Several of these cases click a link on a freshly routed page. Under
+// `no-preference` the cards are still rising on their staggered reveal
+// while the page glides on `scroll-behavior: smooth`, so mousedown and
+// mouseup land on different elements and the click is never delivered —
+// the href is right and the navigation simply does not happen.
+// `emulateMedia` is what reaches the page; `test.use({ reducedMotion })`
+// does not.
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 const noOverflow = async (page, label) => {
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,

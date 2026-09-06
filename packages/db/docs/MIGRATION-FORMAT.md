@@ -225,6 +225,36 @@ hash of the `baseline` model when no migration has run.
   from the recorded position. The shadow replay is cancellable at the
   same boundaries. `migrationStatus` refuses a call already cancelled
   or past its deadline before it opens anything.
+- **An assertion is classified before it runs, and the classification
+  decides what it costs.** One classifier answers for every host — a
+  Store, an array, a file — so they cannot disagree about the price:
+
+  | strategy | which assertions | what it costs |
+  |---|---|---|
+  | per-document | a FLWOR over `$[*]` whose `$where`/`$return` read only the binding | one keyset batch at a time; fails fast at the first batch that violates |
+  | fold | exactly one of `$count`, `$sum`, `$min`, `$max` over the root | one batch at a time; each batch is answered by the ENGINE and the partial answers combine |
+  | materialize | everything else (`$let`, `$distinct`, a nested `$for`, two aggregates) | every document at once, under `assertionBounds` |
+
+  A fold is sound because the operator is associative: the answer over a
+  collection is the combination of the answers over any partition of it.
+  Nothing reimplements an operator — each batch is evaluated by the same
+  compiled query the whole-collection path would use, and only the
+  COMBINE step is written here, so null handling, empty-sequence answers
+  and type coercions are the engine's. A suite runs every fold shape both
+  ways, over ten corpora and six partitions, and requires the value and
+  the verdict to be indistinguishable; a shape that cannot pass it is not
+  in the set.
+
+  **A materializing assertion is bounded.** `options.assertionBounds`
+  defaults to `{ maxRows: 100000, maxBytes: 67108864 }` and is crossed
+  BEFORE the excess is held — the walk stops at the row that would break
+  it, refusing `JD2007` (rows) or `JD2076` (bytes) and naming the two
+  assertion shapes that are answered in batches instead. `null` on either
+  member removes that bound, which a caller must ask for: an unbounded
+  read nobody declared is exactly what this classification removes. This
+  is a deliberate behavior change — a migration that used to read a very
+  large collection whole now refuses until its bound is raised or its
+  assertion is rewritten.
 - JSLT steps walk the collection in bounded batches
   (`options.batchSize`, default 500) ordered by row identity, report
   progress through `options.onProgress` (`{ migration, collection,
@@ -236,9 +266,52 @@ hash of the `baseline` model when no migration has run.
   whole. A cross-document assertion (one that reads the root: `$count:
   '$[*]'`, a `$let`, a `$distinct`, a nested `$for`) reads the whole
   collection into one array — a stated cost; keep such assertions
-  early, before the data grows.
+  early, before the data grows. A cross-document assertion that is one
+  associative aggregate no longer costs that read at all — see the
+  classification table above.
 - A transform MUST NOT change a caller-keyed document's key member —
   the key column would go stale; the run refuses (`JD0023`).
+
+### 6.1 Running without a database
+
+A migration's `jslt` and `query` steps act on DOCUMENTS, so they do not
+need tables. Two surfaces run them against documents a caller already
+holds, sharing one implementation of what a step means with the Store —
+the same transform rule, the same key rule, the same classification of
+an assertion, the same refusals in the same words.
+
+- `migrateDocuments({ collection: [...] }, migrations, options)` answers
+  `{ documents, report }`. The source is REWINDABLE, so every step runs
+  over the whole collection before the next begins, exactly as a Store
+  runs it. This is what makes its answer — and its refusal, on the same
+  step — identical to the Store's for the same documents.
+- `streamDocuments({ collection: iterable }, migrations, { write })`
+  walks a source that can be read only once, writing each document out
+  as it finishes. The input is consumed exactly once and nothing beyond
+  one batch is held, so a collection larger than memory still migrates.
+
+Both refuse, BEFORE asking for the first document, any step this host
+cannot honour (`JD0023`):
+
+| Step kind | Without a database |
+|---|---|
+| `jslt`, `query` | runs |
+| `ddl`, `sql`, `rebuild`, `derive` | refused by name — no tables to change |
+
+A step naming a collection the caller did not supply is refused the same
+way. Nothing is half-applied: a runner without a transaction cannot take
+a partial write back, so the whole refusal happens before the first read.
+
+Two limits are the single pass's, and are stated rather than hidden:
+
+- A CROSS-DOCUMENT assertion needs every document at once, which one
+  pass does not hold. `streamDocuments` refuses it by name; run that
+  collection through `migrateDocuments`, whose source it can re-read.
+- When two different steps would each refuse, `migrateDocuments` and the
+  Store name the EARLIER step, because each step finishes before the
+  next begins. `streamDocuments` carries a batch through every step, so
+  it can name the later one. Both refuse, with the same code and the
+  same words; only which step is named can differ.
 
 ## 7. Non-goals
 
@@ -263,6 +336,7 @@ hash of the `baseline` model when no migration has run.
 | `JD0021` | the migration is missing a required data transform |
 | `JD0022` | an applied migration disagrees with the history record |
 | `JD0023` | a migration step failed |
+| `JD0024` | a document source or target could not be read or written |
 
 These live in the same runtime `DB_CODES` table as the storage codes
 (MODEL-FORMAT §7); the union of both documents is proven in sync with
@@ -367,6 +441,9 @@ jaren-db status   --model <model> --store <db> --baseline <model> [--migrations 
 jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
 jaren-db check    --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
 jaren-db shape    --model <model>
+jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
+                   [--format json|jsonl] [--out-format json|jsonl] [--collection <name>]
+                   [--batch-size <n>]
 ```
 
 - **A model or a migration is a `.json` file or a MODULE.** `--model`,
@@ -423,6 +500,34 @@ jaren-db shape    --model <model>
 - `status` lists applied/pending and reports drift (§12); on a
   database without a history table it creates nothing (§6).
 - `shape` prints the physical mapping a model produces.
+- `documents` runs a migration's DOCUMENT steps over a file instead of a
+  database — §6.1's runners, given a path or stdio. `--in`/`--out` take
+  a file or `-`; the encoding follows the extension (`.jsonl`/`.ndjson`
+  line-delimited, everything else one JSON array) unless `--format` /
+  `--out-format` says otherwise, and stdio defaults to JSONL. Input and
+  output encodings are independent, so this is also the converter.
+  - **A file holds ONE collection.** The migrations name it; a chain
+    whose document steps touch more than one cannot be applied to a
+    file, and is refused rather than partly run. `--collection` asserts
+    which collection the file holds and refuses a mismatch.
+  - **`--out` writes elsewhere; `--in-place` replaces the input and
+    needs `--yes`.** Either way the documents land in a sibling
+    temporary that is renamed over the target only once every document
+    has survived every step. A failure — a step, a malformed source, a
+    cancelled run — removes the temporary and leaves the target byte for
+    byte as it was.
+  - **`--check` transforms and validates everything and writes nothing**,
+    which is the CI shape: it answers whether this chain still applies
+    to this data.
+  - **Three exit codes, three meanings:** `0` the chain applies and every
+    assertion holds; `1` the run failed (a step refused, the source was
+    malformed, the file was missing, a step needs a database); `2` the
+    command line itself was wrong (a missing or contradictory flag, an
+    unknown format). A script can tell "you asked for the wrong thing"
+    from "what you asked for does not hold".
+  - The report names the strategy §6.1 chose — `streamed`, or
+    `materialized` when a cross-document assertion needs the collection
+    at once.
 
 ## 12. Drift
 

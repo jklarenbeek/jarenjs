@@ -10,6 +10,16 @@
  */
 import { test, expect } from '@playwright/test';
 
+// These cases click controls on freshly routed pages. Under
+// `no-preference` a card is still rising on its staggered reveal while
+// the page glides on `scroll-behavior: smooth`, so mousedown and mouseup
+// land on different elements and the click is never delivered — the
+// control is right there and nothing happens. `emulateMedia` is what
+// reaches the page; `test.use({ reducedMotion })` does not.
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 /** Collect page errors for the whole test; assert empty at the end. */
 function trackPageErrors(page) {
   const errors = [];

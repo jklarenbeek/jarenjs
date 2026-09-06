@@ -657,23 +657,33 @@ what each does is its own documentation's job
   `db → contract` edge (the transport lives in `@jarenjs/db`). It
   builds on the cancellation surface (`capabilities.cancellation`) and
   the driver-failure classes the store now has.
-- [ ] **A cross-document migration assertion still reads the whole
-  collection.** A per-document assertion (a FLWOR over `$[*]` whose
-  body reads only its binding) walks the collection in batches and
-  fails fast; an assertion that reads the root — `$count: '$[*]'`, a
-  `$let`, a `$distinct`, a nested `$for` — must see every document at
-  once and is read into one array, stated as the cost it is
-  (MIGRATION-FORMAT §6). Removing that cost means evaluating such an
-  assertion in SQL (an aggregate the planner pushes) or as a streaming
-  fold; either is a promotion with its own oracle proof.
-- [ ] **A resumed run checks its workflow, not its tasks.** A DAG job's
-  checkpoints carry the workflow document's revision and a hash of the
-  input, and a resume that disagrees with either is `JD2069`
-  (JOBS-FORMAT §7). A task's *implementation* is an injected JavaScript
-  function, so a workflow whose document is unchanged but whose task
-  changed resumes happily from checkpoints computed by the old one.
-  Hashing a closure is not a version; a real task version would have to
-  be declared, which is a format change.
+- [ ] **A migration assertion cannot be pushed into SQL.** Every
+  assertion is now classified before it runs and none reads a collection
+  whole: an associative aggregate over the root (`$count`, `$sum`,
+  `$min`, `$max`) folds one batch at a time, and anything else gathers
+  through the same paged walk under declared row and byte bounds
+  (MIGRATION-FORMAT §6). What remains unavailable is D3's FIRST choice —
+  letting the provider execute the aggregate. A migration assertion runs
+  BETWEEN models: the documents are in whatever shape the preceding steps
+  left, which is neither the baseline's nor the target's, so the planner
+  has no settled shape to bind a profile to. Closing it means giving a
+  migration a per-step declared shape, at which point the promotion is
+  one branch in the classifier and a provider probe. `$distinct` and
+  `$avg` also still materialize: neither combines from the engine's own
+  per-batch answer alone, which is the property that makes the current
+  folds provably equal to it.
+- [ ] **A declared task version is only as honest as the host that bumps
+  it.** A checkpointed task node now declares the identity of the
+  implementation it depends on, the registry must supply the same token,
+  and a DAG job fingerprints the canonical version map beside the
+  workflow revision and the input — so a handler reimplemented under an
+  unchanged document is `JD2069` before a checkpoint is loaded
+  (FLOW-FORMAT §7.8, JOBS-FORMAT §7). What no format can check is whether
+  the host actually moved the token when it changed the code; that is the
+  same limit the workflow revision has always had, now inherited by
+  tasks. A run whose version legitimately moved also has no path but a new
+  id or a dropped run — deliberate, but an operator-driven reset is the
+  obvious follow-up if the need appears.
 - [ ] **A stored interval cannot be declared well-formed, so `$overlaps`
   narrows but never seeks.** The promotion pushes the half-open conjunction
   over the two declared bound columns and the engine's own operator decides,
@@ -687,19 +697,17 @@ what each does is its own documentation's job
   migration parity, plus `createIntervalIndex` as the resident shape it would
   then serve.
 
-- [ ] **A store-less document migration runner.** `migrate()` needs a
-  store, because every step it runs is SQL or a data pass over tables. A
-  `$migration` document's `jslt` and `query` steps, though, describe a
-  transformation of DOCUMENTS, and nothing but the runner's shape stops
-  them from being applied to an array in memory, to a JSON file, or to a
-  collection of another engine — which is what a consumer wants when
-  migrating fixtures, seed data or an export alongside a database. The
-  work is a second runner over the same document, sharing the step
-  vocabulary and refusing (rather than silently skipping) the step kinds
-  that are physical: `ddl`, `sql` and `rebuild`. Its value is that a
-  fixture and a database stop drifting apart; its risk is a second
-  implementation of the same semantics, so it wants the migration
-  oracle's cases run through both.
+- [ ] **A document migration file holds ONE collection.** `migrateDocuments`,
+  `streamDocuments` and `jaren-db documents` run a migration's document
+  steps over arrays, JSON, JSONL and stdio, sharing one implementation of
+  what a step MEANS with the store runner — so the array answer equals the
+  store answer, on the same step, in the same words (MIGRATION-FORMAT
+  §6.1, §11). What is not covered is a chain whose document steps touch
+  more than one collection: a file is one collection, so such a chain is
+  refused rather than partly applied. Closing it means a multi-source
+  invocation (`--in users=…  --in events=…`) and deciding what atomicity
+  means across several files, since the whole-or-nothing rename that makes
+  one file safe does not compose across two.
 - [ ] **The remaining authored documents have no pen.** Nine formats are
   written by code today, under one contract stated in
   [LINQ-FORMAT §1](../packages/linq/docs/LINQ-FORMAT.md) — the emitted

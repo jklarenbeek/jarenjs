@@ -210,6 +210,7 @@ tables there and here MUST stay in sync.
 | JF0016 | the graph has a cycle (member ids in the message, `docPath` at the first edge inside it) |
 | JF0017 | not exactly one `output` node |
 | JF0018 | a `task` node names no registered handler |
+| JF0019 | a `task` node and its registered handler disagree about the handler version |
 
 ### §5.2 Runtime: thrown vs recorded
 
@@ -428,6 +429,50 @@ await dag.run(input, { runId: 'run-42' });
   `@jarenjs/db` queue stores it on the job row for exactly this
   reason). Values recorded for node ids the current document does not
   declare (or no longer declares `checkpoint`) are ignored.
+
+### §7.8 Declared task versions
+
+A checkpointed node's value is REPLAYED on a later run instead of being
+recomputed. That is sound only while the handler that produced it is the
+same handler. So a `task` node that declares `checkpoint: true` must also
+declare `version`: a non-empty string naming the identity of the
+implementation it depends on.
+
+```jsonc
+{ "kind": "task", "run": "summarise", "version": "2026-09-05", "checkpoint": true }
+```
+
+**The identity is declared, never derived.** Hashing the handler's source
+would call a reformat a new task and a changed dependency the same one;
+neither is what a caller means. The host states it, and the host is the
+only party that knows when its implementation actually changed.
+
+**The registry must agree.** A registered handler is either a bare
+function — the shorthand, which carries no version — or
+`{ run, version }`. A node that declares a version against a bare handler,
+or against a different version, is `JF0019` at COMPILE time, before any
+node runs. The shorthand therefore serves exactly the workflows that
+checkpoint nothing, and a checkpointed node cannot use it.
+
+`version` is allowed on a node that does not checkpoint, so a workflow can
+carry one identity vocabulary throughout.
+
+**The canonical map.** A compiled workflow answers `taskVersions`: every
+declared identity it depends on, keyed by node id and SORTED, so two
+compiles of the same document produce the same map — byte for byte —
+whatever order the declarations were written in. A handler that is itself
+a compiled workflow may expose its own `taskVersions`; those compose under
+the node's path (`outer`, `outer/inner`), so a composed run has one
+identity rather than two.
+
+```js
+compileDag(doc, { tasks: { summarise: { version: '2026-09-05', run: handler } } })
+  .taskVersions; // → { "draft": "2026-09-05", "draft/tidy": "1" }
+```
+
+That map is what a durable queue fingerprints alongside the workflow
+revision and the input, so a run cannot resume onto checkpoints written by
+an implementation nobody is running any more.
 
 ### §7.7 FSM persistence
 

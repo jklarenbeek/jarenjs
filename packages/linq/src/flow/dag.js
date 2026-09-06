@@ -75,7 +75,15 @@ function node(members) {
      * The value must be JSON — `JF2008` at save time otherwise, never
      * a silent skip.
      */
-    checkpoint() { return node({ ...members, checkpoint: true }); },
+    checkpoint() {
+      if (members.kind === 'task' && members.version === undefined) {
+        throw new LinqBuildError('JL0101',
+          `checkpoint() on task('${members.run}') needs the handler's declared version — `
+          + "write task(run, props, { version }); a recorded value is replayed only while "
+          + 'the handler that produced it is the same one', '/version');
+      }
+      return node({ ...members, checkpoint: true });
+    },
   };
   Object.defineProperty(out, NODE, { value: members, enumerable: false });
   return Object.freeze(out);
@@ -151,16 +159,27 @@ export function jslt(document) {
  * cannot).
  * @param {string} run - the registry handler name
  * @param {any} [props] - `(v) => ({ … })` over the input scope, or a query document
+ * @param {{ version?: string }} [options] - the declared identity of the
+ *   handler implementation (§7.8), which the registry must supply too.
+ *   REQUIRED on a `.checkpoint()` node: a recorded value is replayed only
+ *   while the handler that produced it is the same one.
  * @returns {any} the node declaration
  * @example
- * task('llm', (v) => ({ prompt: v.instruction }));
+ * task('llm', (v) => ({ prompt: v.instruction }), { version: '2026-09-05' });
  */
-export function task(run, props = undefined) {
+export function task(run, props = undefined, options = undefined) {
   if (typeof run !== 'string' || run === '') {
     throw new LinqBuildError('JL0101',
       `task() takes the handler name as a non-empty string, got ${describeValue(run)}`, '/run');
   }
+  const version = options?.version;
+  if (version !== undefined && (typeof version !== 'string' || version === '')) {
+    throw new LinqBuildError('JL0101',
+      `task() takes the handler version as a non-empty string, got ${describeValue(version)}`,
+      '/version');
+  }
   const members = { kind: 'task', run };
+  if (version !== undefined) members.version = version;
   if (props !== undefined) members.with = queryMember('task() with', SCOPE, props);
   return node(members);
 }

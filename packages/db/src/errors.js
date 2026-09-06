@@ -47,6 +47,7 @@ export const DB_CODES = Object.freeze({
   JD0021: 'the migration is missing a required data transform',
   JD0022: 'an applied migration disagrees with the history record',
   JD0023: 'a migration step failed',
+  JD0024: 'a document source or target could not be read or written',
   JD2001: 'insert found the key already present',
   JD2002: 'a usable key could not be resolved for the write',
   JD2003: 'the write failed schema validation',

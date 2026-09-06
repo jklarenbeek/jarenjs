@@ -1219,7 +1219,31 @@ export interface MigrateOptions {
   signal?: AbortSignal;
   /** An epoch-millisecond deadline on `runtime`'s clock (`JD2075`). */
   deadline?: number;
+  /** What a MATERIALIZING assertion may hold. A per-document predicate
+   * and a single associative aggregate over the root are answered in
+   * batches and are never bounded by this; anything else must hold the
+   * collection at once and crosses these bounds before the excess is
+   * held (`JD2007` rows, `JD2076` bytes). Defaults to
+   * {@link ASSERTION_BOUNDS_DEFAULT}; `null` on either member removes
+   * that bound, deliberately. */
+  assertionBounds?: { maxRows?: number | null; maxBytes?: number | null };
 }
+
+/** The finite defaults a materializing assertion runs under when the
+ * caller declares none: 100,000 rows and 64 MiB. */
+export declare const ASSERTION_BOUNDS_DEFAULT: {
+  readonly maxRows: number;
+  readonly maxBytes: number;
+};
+
+/** How a host must run an assertion, and why. `perDocument` walks in
+ * batches; `fold` is one associative aggregate whose batch answers
+ * combine; `materialize` needs every document at once and is bounded. */
+export declare function classifyAssertion(query: unknown): {
+  strategy: 'perDocument' | 'fold' | 'materialize';
+  shape: string | null;
+  reason: string;
+};
 
 export declare function migrate(
   target: MigrationTarget, migrations: readonly unknown[], options: MigrateOptions,
@@ -1263,6 +1287,97 @@ export declare function shapeHash(model: unknown): string;
 export declare function migrationChecksum(migration: unknown): string;
 export declare const MIGRATION_VERSION: string;
 export declare const HISTORY_TABLE: string;
+
+/** The counters a storeless run reports for one collection. */
+export interface DocumentMigrationCounts {
+  readonly read: number;
+  readonly transformed: number;
+  readonly asserted: number;
+}
+
+/** What a storeless run did, per collection: `materialized` held the
+ * documents and ran the steps as a Store does; `streamed` carried each
+ * batch through every step in one pass. */
+export type DocumentMigrationStrategy = 'materialized' | 'streamed';
+
+export interface DocumentMigrationReport {
+  /** The migration ids this run applied, in order. */
+  readonly applied: string[];
+  /** Always empty: a storeless run has no history to skip against. */
+  readonly skipped: string[];
+  /** The last migration's target shape hash, or null for no migrations. */
+  readonly shape: string | null;
+  readonly counts: Record<string, DocumentMigrationCounts>;
+  readonly strategy: Record<string, DocumentMigrationStrategy>;
+}
+
+export interface DocumentMigrationOptions {
+  /** What a MATERIALIZING assertion may hold; the same bounds, and the
+   * same refusals, a Store applies. Defaults to
+   * {@link ASSERTION_BOUNDS_DEFAULT}. */
+  assertionBounds?: { maxRows?: number | null; maxBytes?: number | null };
+  /** Documents per assertion batch and per progress event (default 500). */
+  batchSize?: number;
+  onProgress?: (progress: MigrationProgress) => void;
+  /** The key members of a collection's documents, which a transform may
+   * keep but never move; a Store reads these from its model. */
+  keys?: Record<string, readonly string[]>;
+  /** The JSLT compiler a `jslt` step is compiled with (the suite's own
+   * when absent). */
+  compileJslt?: (stylesheet: unknown) => (document: unknown) => unknown;
+  /** The query compiler a `query` step is compiled with. */
+  compileQuery?: (query: unknown) => unknown;
+  runtime?: Partial<Runtime>;
+  /** Cancels between steps and batches (`JD2080`). */
+  signal?: AbortSignal;
+  /** An epoch-millisecond deadline on `runtime`'s clock (`JD2075`). */
+  deadline?: number;
+}
+
+/** Apply a migration's document steps to documents held in memory. The
+ * source is rewindable, so the steps run exactly as a Store runs them —
+ * every step over the whole collection, in step order — which is what
+ * makes the answer, and the refusal, identical to the Store's. A step
+ * that needs tables (`ddl`, `sql`, `rebuild`, `derive`) is refused
+ * (`JD0023`) before the first document is read. */
+export declare function migrateDocuments(
+  collections: Record<string, readonly unknown[]>,
+  migrations: readonly unknown[],
+  options?: DocumentMigrationOptions,
+): Promise<{ documents: Record<string, unknown[]>; report: DocumentMigrationReport }>;
+
+/** Apply a migration's document steps to a source that can be walked
+ * only once, writing each document out as it finishes: the input is
+ * consumed exactly once and nothing beyond one batch is held. A
+ * cross-document assertion, which needs every document at once, is
+ * refused by name rather than silently buffering the collection. */
+export declare function streamDocuments(
+  sources: Record<string, Iterable<unknown> | AsyncIterable<unknown>>,
+  migrations: readonly unknown[],
+  options: DocumentMigrationOptions & {
+    write: (collection: string, document: unknown) => unknown;
+  },
+): Promise<DocumentMigrationReport>;
+
+/** The step kinds that act on documents, and so run on any host. */
+export declare const DOCUMENT_STEP_KINDS: ReadonlySet<string>;
+/** The step kinds that need a physical database and are refused without one. */
+export declare const PHYSICAL_STEP_KINDS: ReadonlySet<string>;
+/** Compile one document step into the operation every host runs. */
+export declare function compileDocumentStep(
+  step: unknown, index: number, context: {
+    migrationId: string;
+    compileJslt: (stylesheet: unknown) => (document: unknown) => unknown;
+    compileQuery: (query: unknown) => unknown;
+    keys?: readonly string[];
+  },
+): unknown;
+/** Structural validation of one migration document (`JD0023`/`JD0021`). */
+export declare function checkMigrationDocument(migration: unknown): void;
+/** The refusal a failing step raises, spelled the one way every host spells it. */
+export declare function stepFailure(
+  migrationId: string, index: number, kind: string, reason: string, cause?: Error,
+): DbCompileError;
 
 // ————— the machinery exports —————
 // The planner/emitter/residual/profile internals are public for tools

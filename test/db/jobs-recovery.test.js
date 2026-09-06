@@ -30,7 +30,7 @@ const DAG = {
   $dag: '0.1',
   nodes: {
     in: { kind: 'input' },
-    expensive: { kind: 'task', run: 'expensive', checkpoint: true },
+    expensive: { kind: 'task', run: 'expensive', checkpoint: true, version: '1' },
     fragile: { kind: 'task', run: 'fragile' },
     out: { kind: 'output' },
   },
@@ -58,10 +58,10 @@ describe('recovery: the reclaimed job RESUMES from its checkpoint', () => {
     const dag = (job) => compileDag(DAG, {
       checkpoint: store.jobs.checkpointsFor(job),
       tasks: {
-        expensive: ({ input }) => {
+        expensive: { version: '1', run: ({ input }) => {
           counts.expensive += 1;
           return { loaded: input.day };
-        },
+        } },
         fragile: ({ input }) => {
           counts.fragile += 1;
           if (crash) throw new Error('the process died here');

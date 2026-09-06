@@ -39,6 +39,12 @@ import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
+import {
+  MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument,
+  normalizeAssertionBounds, ASSERTION_BOUNDS_DEFAULT, createAssertionBoundGuard,
+} from './document-steps.js';
+
+export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
 
 /**
  * The physical mapping a connection's driver imposes on derived index
@@ -57,9 +63,6 @@ function mappingFor(connection) {
     rtree: connection.capabilities?.rtree === true,
   };
 }
-
-/** The migration format version. */
-export const MIGRATION_VERSION = '0.1';
 
 /** The history table name (outside the model's identifier namespace
  * conventions on purpose — a collection cannot collide with it). */
@@ -983,54 +986,6 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
     }));
 }
 
-const STEP_KINDS = new Set(['ddl', 'jslt', 'query', 'sql', 'rebuild', 'derive']);
-
-/**
- * Structural validation of one migration document, including the
- * draft refusal (`JD0021`).
- * @param {any} migration
- */
-function checkMigrationDocument(migration) {
-  if (migration === null || typeof migration !== 'object'
-    || migration.$migration !== MIGRATION_VERSION
-    || typeof migration.id !== 'string' || migration.id === ''
-    || typeof migration.from !== 'string' || typeof migration.to !== 'string'
-    || !Array.isArray(migration.steps)) {
-    throw refuse('JD0023',
-      `migration '${migration?.id ?? '<unknown>'}' is not a valid ${MIGRATION_VERSION} migration document`);
-  }
-  for (let i = 0; i < migration.steps.length; i++) {
-    const step = migration.steps[i];
-    if (step === null || typeof step !== 'object' || !STEP_KINDS.has(step.kind)) {
-      throw refuse('JD0023',
-        `migration '${migration.id}' step ${i} has no recognised kind`);
-    }
-    if (step.kind === 'rebuild'
-      && (typeof step.table !== 'string' || !Array.isArray(step.create)
-        || typeof step.copy !== 'string' || !Array.isArray(step.indexes))) {
-      throw refuse('JD0023',
-        `migration '${migration.id}' step ${i} is a rebuild without its rendered `
-        + 'table/create/copy/indexes');
-    }
-    if (step.kind === 'sql' && typeof step.sql !== 'string') {
-      throw refuse('JD0023',
-        `migration '${migration.id}' step ${i} is a sql step without sql text`);
-    }
-    if (step.kind === 'derive'
-      && (typeof step.collection !== 'string' || !Array.isArray(step.columns)
-        || step.columns.length === 0)) {
-      throw refuse('JD0023',
-        `migration '${migration.id}' step ${i} is a derive backfill without its columns`);
-    }
-    if (step.kind === 'jslt' && step.draft === true) {
-      throw refuse('JD0021',
-        `migration '${migration.id}' step ${i} is a DRAFT transform for collection `
-        + `'${step.collection}' — the planner cannot infer a data transform; fill in `
-        + 'the stylesheet (or delete the step for a pure widening) and remove "draft"');
-    }
-  }
-}
-
 /**
  * The batched row walk shared by transforms and post-validation:
  * `SELECT rowid, json(doc) ... WHERE rowid > ? ORDER BY rowid LIMIT ?`
@@ -1098,47 +1053,6 @@ function entityStepMapping(options, table) {
   const entity = entities.get(table);
   if (entity === undefined) return null;
   return { entity, mapping: explainMapping(options.model).entities[table] };
-}
-
-/**
- * Whether an assertion is a PER-DOCUMENT predicate — a FLWOR over the
- * collection's documents whose `$where` and `$return` read only the
- * binding — so evaluating it over each batch of documents answers
- * exactly what evaluating it over the whole collection would. Anything
- * that reads the root (`$count: '$[*]'`, a `$let`, a `$distinct`, a
- * nested `$for`) is cross-document and keeps its whole-collection read.
- * @param {any} query
- * @returns {boolean}
- */
-export function isPerDocumentAssertion(query) {
-  if (query === null || typeof query !== 'object' || Array.isArray(query)) return false;
-  const keys = Object.keys(query);
-  if (!keys.includes('$for') || !keys.includes('$return')
-    || keys.some((key) => !['$for', '$where', '$return'].includes(key))) return false;
-  const bindings = query.$for;
-  if (bindings === null || typeof bindings !== 'object' || Array.isArray(bindings)) return false;
-  const names = Object.keys(bindings);
-  if (names.length !== 1 || bindings[names[0]] !== '$[*]') return false;
-  // a root reference anywhere in the body is a cross-document read
-  const body = JSON.stringify({ $where: query.$where ?? null, $return: query.$return });
-  return !/"\$(?:[[.]|")/.test(body.replace(/"\$[A-Za-z_][A-Za-z0-9_]*/g, '"'));
-}
-
-/** All documents of a collection or entity — the working set of a
- * CROSS-DOCUMENT assertion, whose answer needs every document at once;
- * a stated cost, and the reason a per-document assertion walks in
- * batches instead. Entities read WHOLE. */
-function allDocs(connection, table, entityMapping = null) {
-  const dialect = connection.dialect;
-  const q = dialect.quoteIdentifier;
-  const columnSelect = entityMapping === null ? '' : entityColumnsOf(entityMapping)
-    .map((column) => `, ${q(column)}`).join('');
-  const sql = `SELECT ${dialect.jsonText(q('doc'))} AS ${q('doc')}${columnSelect} FROM ${q(table)} `
-    + `ORDER BY ${dialect.rowIdentity()}`;
-  return chain(connection.prepare(sql), (statement) =>
-    chain(statement.all([]), (rows) => rows.map((row) => (entityMapping === null
-      ? JSON.parse(row.doc)
-      : mergeEntityRow(entityMapping, row, 'doc')))));
 }
 
 /**
@@ -1238,15 +1152,13 @@ function runSteps(connection, migration, options) {
           }, false, null, options.check), () => derivedRows));
       }
       if (current.kind === 'jslt') {
-        let transform;
-        try {
-          transform = compileJsltStylesheet(current.stylesheet);
-        }
-        catch (cause) {
-          return fail(`the stylesheet does not compile: ${/** @type {Error} */ (cause).message}`,
-            /** @type {Error} */ (cause));
-        }
         const stepEntity = entityStepMapping(options, current.collection);
+        const operation = compileDocumentStep(current, i, {
+          migrationId: migration.id,
+          compileJslt: compileJsltStylesheet,
+          compileQuery: compileJsonQuery,
+          keys: stepEntity === null ? [] : stepEntity.mapping.keys,
+        });
         if (stepEntity !== null) {
           // an entity row is transformed WHOLE: the mapped columns fold in
           // before the stylesheet and split out after it, through the
@@ -1266,19 +1178,7 @@ function runSteps(connection, migration, options) {
             chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
               for (const row of rows) {
                 const whole = mergeEntityRow(stepEntity.mapping, row, 'doc');
-                const next = transform(whole);
-                if (next === null || typeof next !== 'object' || Array.isArray(next))
-                  fail(`the transform produced a non-document for row ${row.rid}`);
-                // the key is the row's identity, not the document's to
-                // change: a body that leaves it out keeps it, a body
-                // that rewrites it is refused, as a collection's key is
-                for (const key of stepEntity.mapping.keys) {
-                  if (next[key] === undefined) next[key] = whole[key];
-                  else if (next[key] !== whole[key]) {
-                    fail(`the transform changed the key member '${key}' of row ${row.rid} — `
-                      + `key changes are not supported in ${MIGRATION_VERSION}`);
-                  }
-                }
+                const next = operation.apply(whole, row.rid);
                 const { values, rest } = core.plan.split(next);
                 const byName = new Map(values.map((value) => [value.name, value.value]));
                 update.run([...columns.map((column) => byName.get(column) ?? null),
@@ -1300,9 +1200,7 @@ function runSteps(connection, migration, options) {
         return chain(connection.prepare(updateSql), (update) =>
           chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
             for (const row of rows) {
-              const next = transform(JSON.parse(row.doc));
-              if (next === null || typeof next !== 'object' || Array.isArray(next))
-                fail(`the transform produced a non-document for row ${row.rid}`);
+              const next = operation.apply(JSON.parse(row.doc), row.rid);
               update.run([JSON.stringify(next), row.rid]);
               transformed++;
             }
@@ -1314,38 +1212,55 @@ function runSteps(connection, migration, options) {
           }, keyed, null, options.check), () => transformed));
       }
       // kind === 'query': the assertion step
-      let compiled;
-      try {
-        compiled = compileJsonQuery(current.assert);
-      }
-      catch (cause) {
-        return fail(`the assertion does not compile: ${/** @type {Error} */ (cause).message}`,
-          /** @type {Error} */ (cause));
-      }
       const assertionMapping = entityStepMapping(options, current.collection)?.mapping ?? null;
-      const assertOver = (docs) => {
-        if (current.expect === 'ebv') {
-          if (!compiled.ebv(docs)) fail('the EBV assertion answered false');
-          return null;
-        }
-        const result = compiled(docs);
-        if (result !== undefined) {
-          const count = Array.isArray(result) ? result.length : 1;
-          fail(`the assertion expected an empty sequence, got ${count} item(s)`);
-        }
-        return null;
-      };
-      if (!isPerDocumentAssertion(current.assert)) {
-        // cross-document: the answer needs every document at once
-        return chain(allDocs(connection, current.collection, assertionMapping), assertOver);
+      const operation = compileDocumentStep(current, i, {
+        migrationId: migration.id,
+        compileJslt: compileJsltStylesheet,
+        compileQuery: compileJsonQuery,
+      });
+      const assertOver = operation.assert;
+      const readDoc = (row) => (assertionMapping === null
+        ? JSON.parse(row.doc)
+        : mergeEntityRow(assertionMapping, row, 'doc'));
+
+      if (operation.fold !== null) {
+        // an associative aggregate: each batch is answered by the engine
+        // and the partial answers combine, so the collection is never
+        // held. The whole-collection read this replaces is the one
+        // statement a cross-document assertion used to cost.
+        let accumulated = operation.fold.start();
+        let folded = 0;
+        return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
+          accumulated = operation.fold.combine(accumulated, rows.map(readDoc));
+          folded += rows.length;
+          options.onProgress?.({
+            migration: migration.id,
+            collection: current.collection,
+            asserted: folded,
+          });
+        }, false, assertionMapping, options.check), () => operation.fold.finish(accumulated));
+      }
+
+      if (!operation.perDocument) {
+        // materializing: the answer needs every document at once. That is
+        // a cost, so it is bounded and the bound is crossed BEFORE the
+        // excess is held — the walk stops at the row that would break it
+        const guard = createAssertionBoundGuard(options.assertionBounds, current.collection,
+          `the assertion of migration '${migration.id}' step ${i}`);
+        const gathered = [];
+        return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
+          for (const row of rows) {
+            const doc = readDoc(row);
+            guard.admit(doc, typeof row.doc === 'string' ? row.doc : undefined);
+            gathered.push(doc);
+          }
+        }, false, assertionMapping, options.check), () => assertOver(gathered));
       }
       // per-document: walk in keyset batches like every other step,
       // failing fast at the first batch that violates
       let asserted = 0;
       return walkRows(connection, current.collection, options.batchSize, (rows) => {
-        const docs = rows.map((row) => (assertionMapping === null
-          ? JSON.parse(row.doc)
-          : mergeEntityRow(assertionMapping, row, 'doc')));
+        const docs = rows.map(readDoc);
         assertOver(docs);
         asserted += docs.length;
         options.onProgress?.({
@@ -1680,6 +1595,7 @@ export function migrate(target, migrations, options) {
   });
   const runOptions = {
     batchSize,
+    assertionBounds: normalizeAssertionBounds(options.assertionBounds),
     onProgress: options.onProgress,
     registerFunctions: options.registerFunctions,
     model: options.model,

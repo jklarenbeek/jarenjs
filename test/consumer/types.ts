@@ -1041,6 +1041,10 @@ import {
   DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR, PRAGMA_NAMES,
   CHECKPOINT_MODES, MAINTENANCE_OPERATIONS, migrate, migrationStatus, type MigrationStatusReport,
   isPerDocumentAssertion, type MigrationTarget, type MigrationProgress,
+  migrateDocuments, streamDocuments, checkMigrationDocument, compileDocumentStep, stepFailure,
+  DOCUMENT_STEP_KINDS, PHYSICAL_STEP_KINDS,
+  type DocumentMigrationReport, type DocumentMigrationOptions, type DocumentMigrationCounts,
+  type DocumentMigrationStrategy,
   classifyDriverError, wrapDriverError, isDriverError, type DriverErrorClass,
   type JobRecord, type JobState,
 } from '@jarenjs/db';
@@ -1245,6 +1249,29 @@ const migrationTarget: MigrationTarget = { driver: dbDriver, path: ':memory:', b
 const perDocument: boolean = isPerDocumentAssertion({ $for: { it: '$[*]' }, $return: '$it.id' });
 const progressShape: MigrationProgress = { migration: 'm', collection: 'c', asserted: 1 };
 void [migrationTarget, perDocument, progressShape];
+const documentOptions: DocumentMigrationOptions = {
+  batchSize: 100, keys: { users: ['id'] }, onProgress: (p: MigrationProgress) => void p,
+};
+const migratedDocuments: Promise<{
+  documents: Record<string, unknown[]>; report: DocumentMigrationReport;
+}> = migrateDocuments({ users: [{ id: 'u1' }] }, [], documentOptions);
+const streamedReport: Promise<DocumentMigrationReport> = streamDocuments(
+  { users: [{ id: 'u1' }] }, [], { ...documentOptions, write: (c: string, d: unknown) => void [c, d] });
+const documentCounts: Promise<DocumentMigrationCounts | undefined> =
+  migratedDocuments.then((out) => out.report.counts.users);
+const documentStrategy: Promise<DocumentMigrationStrategy | undefined> =
+  streamedReport.then((report) => report.strategy.users);
+const documentKinds: ReadonlySet<string> = DOCUMENT_STEP_KINDS;
+const physicalKinds: ReadonlySet<string> = PHYSICAL_STEP_KINDS;
+const stepRefusal: DbCompileError = stepFailure('m', 0, 'jslt', 'why');
+const compiledStep: unknown = compileDocumentStep({ kind: 'query', collection: 'users' }, 0, {
+  migrationId: 'm',
+  compileJslt: (sheet: unknown) => (doc: unknown) => [sheet, doc],
+  compileQuery: (query: unknown) => query,
+});
+checkMigrationDocument({ $migration: '0.1', id: 'm', from: 'a', to: 'b', steps: [] });
+void [migratedDocuments, streamedReport, documentCounts, documentStrategy,
+  documentKinds, physicalKinds, stepRefusal, compiledStep];
 const dbCodes: Readonly<Record<string, string>> = DB_CODES;
 void dbCodes.JD0005;
 const dbCompileErr = new DbCompileError('JD0005', 'reason', '/collections');

@@ -36,6 +36,7 @@ export const FLOW_CODES = Object.freeze({
   JF0016: 'the graph has a cycle',
   JF0017: 'the document does not declare exactly one output node',
   JF0018: 'a task node names a handler the registry does not provide',
+  JF0019: 'a task node and its registered handler disagree about the handler version',
   JF2001: 'a state id the machine does not declare',
   JF2002: 'step was called with a non-string event',
   JF2003: 'a guard threw while evaluating',

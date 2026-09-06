@@ -169,7 +169,7 @@ describe('batched assertions', () => {
     }
   });
 
-  it('a cross-document assertion (count, distinct, groupby) reads the collection whole, and says so in the plan', async () => {
+  it('an aggregate assertion FOLDS: paged reads only, never a whole-collection one', async () => {
     const { dbPath, cleanup } = await seeded(3);
     try {
       const { driver, prepared } = tracingDriver();
@@ -177,13 +177,17 @@ describe('batched assertions', () => {
       const done = await migrate({ driver, path: dbPath }, [migration],
         { baseline: M0, model: M1, batchSize: 1, shadow: false });
       assert.deepStrictEqual(done.applied, ['0001-with-assertion']);
-      // the assertion's own read is the one unbounded statement; the
-      // target-state validation that follows walks in pages as before
-      const whole = prepared.filter((sql) => /FROM "users"/.test(sql) && !/LIMIT/.test(sql));
-      assert.strictEqual(whole.length, 1);
-      assert.match(whole[0], /ORDER BY "rowid"$/);
+      // `$count` over the root is associative, so each batch is answered
+      // by the engine and the partial answers combine: the collection is
+      // never held, and the unbounded statement this assertion used to
+      // cost is gone
+      const reads = prepared.filter((sql) => /FROM "users"/.test(sql));
+      const whole = reads.filter((sql) => !/LIMIT/.test(sql));
+      assert.deepStrictEqual(whole, [], 'no whole-collection read remains');
+      assert.ok(reads.length > 0);
+      for (const sql of reads) assert.match(sql, /LIMIT 1\b/, sql);
       // and on an EMPTY collection the count assertion still fails, as
-      // it always did — the whole read is what makes that true
+      // it always did — the fold answers 0 and its EBV is false
       const empty = tempDbPath();
       try {
         const store = await openStore(M0, { driver: nodeDriver(), path: empty.dbPath });
@@ -199,6 +203,57 @@ describe('batched assertions', () => {
     finally {
       cleanup();
     }
+  });
+
+  it('a MATERIALIZING assertion still reads whole — bounded, and refusing before the excess', async () => {
+    // a nested $for reads the root twice: it decomposes into no batching,
+    // so it holds the collection — under a declared bound
+    const migration = assertionMigration({
+      assert: {
+        $for: { a: '$[*]', b: '$[*]' },
+        $where: { $and: [{ $eq: ['$a.n', '$b.n'] }, { $ne: ['$a.id', '$b.id'] }] },
+        $return: '$a.id',
+      },
+    });
+    // every run needs its own database: an applied migration is history,
+    // and a second attempt on the same file has nothing pending to run
+    const run = async (bounds, use) => {
+      const { dbPath, cleanup } = await seeded(50);
+      try {
+        const { driver, prepared } = tracingDriver();
+        const outcome = await use(driver, dbPath, bounds);
+        return { outcome, prepared };
+      }
+      finally { cleanup(); }
+    };
+
+    const applied = await run(undefined, (driver, dbPath) =>
+      migrate({ driver, path: dbPath }, [migration],
+        { baseline: M0, model: M1, batchSize: 10, shadow: false }));
+    assert.deepStrictEqual(applied.outcome.applied, ['0001-with-assertion']);
+    // it gathers through the same paged walk — the bound is checked per
+    // row, so it can refuse before holding the excess
+    const reads = applied.prepared.filter((sql) => /FROM "users"/.test(sql));
+    assert.deepStrictEqual(reads.filter((sql) => !/LIMIT/.test(sql)), []);
+
+    // and the bounds refuse, each naming itself
+    const rows = await seeded(50);
+    try {
+      await assert.rejects(async () => migrate({ driver: nodeDriver(), path: rows.dbPath }, [migration],
+        { baseline: M0, model: M1, batchSize: 10, shadow: false,
+          assertionBounds: { maxRows: 20 } }),
+      (error) => error.code === 'JD2007' && /maxRows bound of 20/.test(error.message));
+    }
+    finally { rows.cleanup(); }
+
+    const bytes = await seeded(50);
+    try {
+      await assert.rejects(async () => migrate({ driver: nodeDriver(), path: bytes.dbPath }, [migration],
+        { baseline: M0, model: M1, batchSize: 10, shadow: false,
+          assertionBounds: { maxBytes: 200 } }),
+      (error) => error.code === 'JD2076' && /maxBytes bound of 200/.test(error.message));
+    }
+    finally { bytes.cleanup(); }
   });
 
   it('a batched assertion is cancellable at its batch boundary (JD2080)', async () => {

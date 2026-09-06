@@ -32,7 +32,7 @@ const REPORT_DAG = {
   $dag: '0.1',
   nodes: {
     in: { kind: 'input' },
-    gather: { kind: 'task', run: 'gather', checkpoint: true },
+    gather: { kind: 'task', run: 'gather', checkpoint: true, version: '1' },
     render: { kind: 'jslt',
       stylesheet: [{ match: '$', body: { report: '$.rows' } }] },
     out: { kind: 'output' },
@@ -90,10 +90,10 @@ describe('the composition end to end', () => {
       compileDag,
       documents: { 'sync-report': REPORT_DAG },
       tasks: {
-        gather: ({ input }) => {
+        gather: { version: '1', run: ({ input }) => {
           gathered.push(input.day);
           return { rows: [input.day, 'x'] };
-        },
+        } },
       },
       pollInterval: 10,
     });
@@ -132,7 +132,7 @@ describe('the composition end to end', () => {
         $dag: '0.1',
         nodes: {
           in: { kind: 'input' },
-          a: { kind: 'task', run: 'a', checkpoint: true },
+          a: { kind: 'task', run: 'a', checkpoint: true, version: '1' },
           b: { kind: 'task', run: 'b' },
           out: { kind: 'output' },
         },
@@ -140,7 +140,7 @@ describe('the composition end to end', () => {
           { from: 'in', to: 'a' }, { from: 'a', to: 'b' }, { from: 'b', to: 'out' }],
       } },
       tasks: {
-        a: () => ({ step: 'a done' }),
+        a: { version: '1', run: () => ({ step: 'a done' }) },
         b: ({ input }) => {
           if (crash) throw new Error('downstream down');
           return input;
@@ -185,7 +185,7 @@ describe('the composition end to end', () => {
       const claimed = await store.jobs.claim({ kinds: ['r'], owner: 'w' });
       const dag = compileDag(REPORT_DAG, {
         checkpoint: store.jobs.checkpointsFor(claimed),
-        tasks: { gather: ({ input }) => ({ rows: [input.n] }) },
+        tasks: { gather: { version: '1', run: ({ input }) => ({ rows: [input.n] }) } },
       });
       await dag.run(claimed.payload.input, { runId: claimed.id });
       const raw = new DatabaseSync(dbPath);
@@ -220,8 +220,8 @@ const TWO_STEP_DAG = {
   $dag: '0.1',
   nodes: {
     in: { kind: 'input' },
-    first: { kind: 'task', run: 'first', checkpoint: true },
-    second: { kind: 'task', run: 'second', checkpoint: true },
+    first: { kind: 'task', run: 'first', checkpoint: true, version: '1' },
+    second: { kind: 'task', run: 'second', checkpoint: true, version: '1' },
     out: { kind: 'output' },
   },
   edges: [
@@ -253,7 +253,7 @@ describe('the DAG runner over the fence', () => {
         // the DAG hands a task its signal as the second argument; it is
         // the run's, which is the handler's, which is the worker's
         // shutdown and this attempt's lease
-        gather: async (props, signal) => {
+        gather: { version: '1', run: async (props, signal) => {
           seen.push('started');
           reached();
           await new Promise((resolve) => {
@@ -261,7 +261,7 @@ describe('the DAG runner over the fence', () => {
           });
           seen.push('aborted');
           throw new Error('wound up');
-        },
+        } },
       },
       pollInterval: 5,
     });
@@ -289,8 +289,8 @@ describe('the DAG runner over the fence', () => {
         compileDag,
         documents: { two: TWO_STEP_DAG },
         tasks: {
-          first: () => ({ n: 1 }),
-          second: () => { if (crash) throw new Error('mid-run'); return { n: 2 }; },
+          first: { version: '1', run: () => ({ n: 1 }) },
+          second: { version: '1', run: () => { if (crash) throw new Error('mid-run'); return { n: 2 }; } },
         },
         pollInterval: 5,
         onOutcome: (event) => outcomesA.push(event),
@@ -308,11 +308,11 @@ describe('the DAG runner over the fence', () => {
       const storeB = await open();
       const failures = [];
       const edited = { ...TWO_STEP_DAG,
-        nodes: { ...TWO_STEP_DAG.nodes, first: { kind: 'task', run: 'first' } } };
+        nodes: { ...TWO_STEP_DAG.nodes, first: { kind: 'task', run: 'first', version: '1' } } };
       const runnerB = createDagJobRunner(storeB, {
         compileDag,
         documents: { two: edited },
-        tasks: { first: () => ({ n: 1 }), second: () => ({ n: 2 }) },
+        tasks: { first: { version: '1', run: () => ({ n: 1 }) }, second: { version: '1', run: () => ({ n: 2 }) } },
         pollInterval: 5,
         onOutcome: (event) => { if (event.outcome === 'failed') failures.push(event); },
       });
@@ -340,8 +340,8 @@ describe('the DAG runner over the fence', () => {
         compileDag,
         documents: { two: TWO_STEP_DAG },
         tasks: {
-          first: () => ({ n: 1 }),
-          second: () => { if (crash) throw new Error('mid-run'); return { n: 2 }; },
+          first: { version: '1', run: () => ({ n: 1 }) },
+          second: { version: '1', run: () => { if (crash) throw new Error('mid-run'); return { n: 2 }; } },
         },
         pollInterval: 5,
         onOutcome: (event) => sink.push(event),
@@ -386,12 +386,12 @@ describe('the DAG runner over the fence', () => {
         compileDag,
         documents: { two: TWO_STEP_DAG },
         tasks: {
-          first: () => { ran.push('first'); return { n: 1 }; },
-          second: () => {
+          first: { version: '1', run: () => { ran.push('first'); return { n: 1 }; } },
+          second: { version: '1', run: () => {
             ran.push('second');
             if (crash) throw new Error('mid-run');
             return { n: 2 };
-          },
+          } },
         },
         pollInterval: 5,
         onOutcome: (event) => sink.push(event),

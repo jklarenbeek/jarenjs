@@ -67,9 +67,48 @@ function compileEmbedded(compile, embedded, docPath) {
  * @typedef {Object} CompiledDag
  * @property {readonly string[]} nodes - Declared node ids, document order.
  * @property {string} output - The output node's id.
+ * @property {Readonly<Record<string, string>>} taskVersions - Every
+ *   declared task identity this workflow depends on, keyed by node id and
+ *   SORTED (§7.8); a nested workflow's map composes under its node's
+ *   path. Empty when no node declares a version.
  * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void, runId?: string }) => Promise<any>} run -
  *   Execute the graph for one input (`undefined` reads as `null`).
  */
+
+/**
+ * One registry entry, in either accepted spelling.
+ *
+ * `{ run, version }` is the full one. A bare function is the shorthand,
+ * and it carries no version — which is why a checkpointed node, whose
+ * declared version has nothing to be compared against, cannot use it.
+ * An entry may also expose a `taskVersions` map of its own: a handler
+ * that is itself a compiled workflow contributes its versions under this
+ * node's path, so a composed run has one identity, not two.
+ * @param {any} entry
+ * @param {string} name
+ * @returns {{ run: Function, version: string | null, taskVersions: Record<string, string> | null }}
+ */
+function normalizeTaskEntry(entry, name) {
+  if (typeof entry === 'function') return { run: entry, version: null, taskVersions: null };
+  if (!isJsonObject(entry) || typeof entry.run !== 'function') {
+    throw new TypeError(
+      `compileDag: the registered handler '${name}' is not a function, nor { run, version }`);
+  }
+  if (entry.version !== undefined
+    && (typeof entry.version !== 'string' || entry.version === '')) {
+    throw new TypeError(
+      `compileDag: the registered handler '${name}' has a version that is not a non-empty string`);
+  }
+  if (entry.taskVersions !== undefined && !isJsonObject(entry.taskVersions)) {
+    throw new TypeError(
+      `compileDag: the registered handler '${name}' has a taskVersions that is not an object`);
+  }
+  return {
+    run: entry.run,
+    version: entry.version ?? null,
+    taskVersions: entry.taskVersions ?? null,
+  };
+}
 
 /**
  * Compile a jaren-dag document (docs/FLOW-FORMAT.md §6–§7) against a
@@ -78,7 +117,9 @@ function compileEmbedded(compile, embedded, docPath) {
  * registry resolution — `run` only executes closures.
  *
  * @param {any} doc - the jaren-dag document
- * @param {{ tasks?: Record<string, (props: { with: any, input: any }, signal: AbortSignal) => any>,
+ * @param {{ tasks?: Record<string, ((props: { with: any, input: any }, signal: AbortSignal) => any)
+ *     | { run: (props: { with: any, input: any }, signal: AbortSignal) => any, version?: string,
+ *         taskVersions?: Record<string, string> }>,
  *   checkpoint?: DagCheckpointStore }} [options]
  * @returns {CompiledDag}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
@@ -160,16 +201,45 @@ export function compileDag(doc, options) {
           throw new FlowCompileError('JF0011',
             `task node '${id}' must carry a non-empty string "run"`, `${base}/run`);
         }
+        if (decl.version !== undefined
+          && (typeof decl.version !== 'string' || decl.version === '')) {
+          throw new FlowCompileError('JF0011',
+            `task node '${id}' has a "version" member that is not a non-empty string`,
+            `${base}/version`);
+        }
+        // a checkpointed node's output is REPLAYED on a later run, which
+        // is only sound while the implementation that produced it is the
+        // same implementation. That identity is declared, never derived:
+        // hashing a closure's source would call a reformat a new task and
+        // a changed dependency the same one
+        if (node.checkpoint && decl.version === undefined) {
+          throw new FlowCompileError('JF0011',
+            `task node '${id}' declares checkpoint, so it must also declare a "version" — `
+            + 'a checkpointed result is replayed only while the handler that produced it is '
+            + 'the same one, and that identity has to be stated', `${base}/version`);
+        }
         if (!Object.hasOwn(tasks, decl.run)) {
           throw new FlowCompileError('JF0018',
             `task node '${id}' names the handler '${decl.run}', which the registry does not provide`,
             `${base}/run`);
         }
-        if (typeof tasks[decl.run] !== 'function') {
-          throw new TypeError(
-            `compileDag: the registered handler '${decl.run}' is not a function`);
+        const entry = normalizeTaskEntry(tasks[decl.run], decl.run);
+        if (decl.version !== undefined) {
+          if (entry.version === null) {
+            throw new FlowCompileError('JF0019',
+              `task node '${id}' declares version '${decl.version}', but the registry provides `
+              + `'${decl.run}' as a bare handler with no version — register it as `
+              + '{ run, version } so the two can be compared', `${base}/version`);
+          }
+          if (entry.version !== decl.version) {
+            throw new FlowCompileError('JF0019',
+              `task node '${id}' declares version '${decl.version}', but the registry provides `
+              + `'${decl.run}' at version '${entry.version}'`, `${base}/version`);
+          }
         }
-        node.handler = tasks[decl.run];
+        node.handler = entry.run;
+        node.version = decl.version ?? null;
+        node.nestedVersions = entry.taskVersions;
         node.with = decl.with === undefined
           ? null
           : compileEmbedded(compileJsonQuery, decl.with, `${base}/with`);
@@ -552,9 +622,28 @@ export function compileDag(doc, options) {
     return result;
   }
 
+  // The canonical version map: every declared task identity this
+  // workflow depends on, keyed by node path and SORTED, so two compiles
+  // of the same document answer the same map whatever order the
+  // declarations were written in. A handler that is itself a workflow
+  // contributes its own map under this node's path.
+  /** @type {Record<string, string>} */
+  const versions = {};
+  for (const node of nodes.values()) {
+    if (node.kind !== 'task' || node.version === null) continue;
+    versions[node.id] = node.version;
+    if (node.nestedVersions === null) continue;
+    for (const [path, version] of Object.entries(node.nestedVersions)) {
+      versions[`${node.id}/${path}`] = version;
+    }
+  }
+  const taskVersions = Object.freeze(Object.fromEntries(
+    Object.keys(versions).sort().map((key) => [key, versions[key]])));
+
   return Object.freeze({
     nodes: Object.freeze(order.slice()),
     output: outputId,
+    taskVersions,
     run,
   });
 }

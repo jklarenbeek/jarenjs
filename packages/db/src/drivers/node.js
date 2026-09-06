@@ -119,3 +119,9 @@ export function nodeDriver() {
       fromNodeModule, [path, options]),
   });
 }
+
+export {
+  readDocuments, readJsonDocuments, readJsonlDocuments,
+  openAtomicTarget, openStreamTarget, openNullTarget,
+  formatOf, DOCUMENT_FORMATS,
+} from '../document-files.js';

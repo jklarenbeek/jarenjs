@@ -68,8 +68,13 @@ export {
 export {
   planMigration, planModelMigration, migrate, migrationStatus, shapeHash, isPerDocumentAssertion,
   migrationChecksum, createModelShape, schemaShapeOf, compareShapeToModel,
-  MIGRATION_VERSION, HISTORY_TABLE,
+  MIGRATION_VERSION, HISTORY_TABLE, ASSERTION_BOUNDS_DEFAULT,
 } from './migrate.js';
+export { migrateDocuments, streamDocuments } from './documents.js';
+export {
+  compileDocumentStep, checkMigrationDocument, stepFailure, classifyAssertion,
+  DOCUMENT_STEP_KINDS, PHYSICAL_STEP_KINDS,
+} from './document-steps.js';
 export {
   DbCompileError, DbRuntimeError, DB_CODES, classifyDriverError, wrapDriverError, isDriverError,
 } from './errors.js';

@@ -18,8 +18,13 @@ import {
   planModelMigration, migrate, migrationStatus, shapeHash, compareShapeToModel,
   sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
+  migrateDocuments, streamDocuments, classifyAssertion,
 } from './index.js';
 import { nodeDriver } from './drivers/node.js';
+import {
+  readDocuments, openAtomicTarget, openStreamTarget, openNullTarget,
+  formatOf, DOCUMENT_FORMATS,
+} from './document-files.js';
 
 const USAGE = `jaren-db — model-driven SQLite migrations
 
@@ -31,6 +36,8 @@ Usage:
   jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
   jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db shape    --model <model>
+  jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
+                     [--format json|jsonl] [--out-format json|jsonl] [--collection <name>] [--batch-size <n>]
 
 A <model> or a migration is a .json file, or a MODULE (.js, .mjs, .cjs —
 or .ts where Node strips types) whose default export, or its 'model' /
@@ -56,6 +63,16 @@ apply     Print every statement, then apply. Destructive steps (drop
 check     The CI command: exit 1 on an unplanned model change, pending
           migrations or drift.
 shape     Print the physical mapping a model produces.
+documents Run a migration's DOCUMENT steps (jslt, query) over a file of
+          documents instead of a database — a JSON array or JSONL, a
+          path or stdio. A step that needs tables (ddl, sql, rebuild,
+          derive) is refused by name before the first document is read.
+          --out writes a new file, --in-place replaces the input (a
+          sibling temporary is renamed over it only once every document
+          has survived every step; any failure leaves the original byte
+          for byte), and --check transforms and validates everything
+          while writing nothing. Exit: 0 applicable and valid, 1 a
+          migration or source failure, 2 a misuse of this command line.
 `;
 
 function fail(message) {
@@ -63,11 +80,24 @@ function fail(message) {
   process.exit(1);
 }
 
+/**
+ * A command line that cannot be obeyed — a missing flag, two flags that
+ * contradict, a value that names nothing. Distinct from `fail`, because
+ * a caller scripting this command has to tell "you asked for the wrong
+ * thing" (2) from "what you asked for did not hold" (1).
+ */
+function misuse(message) {
+  console.error(`jaren-db: ${message}`);
+  process.exit(2);
+}
+
 function parseArgs(argv) {
   const options = {
     command: argv[2], from: null, to: null, model: null, store: null,
     baseline: null, migrations: null, id: null, out: null,
     snapshot: null, types: null,
+    in: null, format: null, outFormat: null, collection: null,
+    batchSize: null, inPlace: false, check: false,
     dryRun: false, yes: false, help: false,
   };
   for (let i = 3; i < argv.length; i++) {
@@ -82,10 +112,20 @@ function parseArgs(argv) {
       case '--out': options.out = argv[++i]; break;
       case '--snapshot': options.snapshot = argv[++i]; break;
       case '--types': options.types = argv[++i]; break;
+      case '--in': options.in = argv[++i]; break;
+      case '--out-format': options.outFormat = argv[++i]; break;
+      case '--format': options.format = argv[++i]; break;
+      case '--collection': options.collection = argv[++i]; break;
+      case '--batch-size': options.batchSize = argv[++i]; break;
+      case '--in-place': options.inPlace = true; break;
+      case '--check': options.check = true; break;
       case '--dry-run': options.dryRun = true; break;
       case '--yes': options.yes = true; break;
       case '--help': case '-h': options.help = true; break;
-      default: fail(`unknown option: ${argv[i]}`);
+      // an unrecognised flag is a misuse of the command line, which is
+      // what `documents` promises exit 2 for; the five older commands
+      // keep the exit 1 their published contract has always used
+      default: (options.command === 'documents' ? misuse : fail)(`unknown option: ${argv[i]}`);
     }
   }
   return options;
@@ -384,6 +424,109 @@ async function commandShape(options) {
   console.log(`-- history rides in '${HISTORY_TABLE}'`);
 }
 
+/**
+ * Run a migration's document steps over a file of documents.
+ *
+ * The runner is chosen by what the migration asks for, and named in the
+ * report: a cross-document assertion needs every document at once, so
+ * its collection is read into memory; anything else streams, holding one
+ * batch. Reading a rewindable FILE for the first is not a compromise —
+ * it is the same source, read twice.
+ */
+async function commandDocuments(options) {
+  if (options.migrations === null) misuse('documents needs --migrations <dir>');
+  if (options.in === null) misuse('documents needs --in <file> (or - for standard input)');
+  const sinks = [options.out !== null, options.inPlace, options.check].filter(Boolean).length;
+  if (sinks === 0)
+    misuse('documents needs one of --out <file>, --in-place or --check');
+  if (sinks > 1)
+    misuse('documents takes exactly one of --out, --in-place and --check');
+  if (options.inPlace && options.in === '-')
+    misuse('--in-place needs a file to replace, not standard input');
+  if (options.inPlace && !options.yes)
+    misuse('--in-place rewrites the input file — pass --yes to confirm, or --out to write elsewhere');
+  const batchSize = options.batchSize === null ? 500 : Number(options.batchSize);
+  if (!Number.isInteger(batchSize) || batchSize < 1)
+    misuse(`--batch-size must be a positive integer, not '${options.batchSize}'`);
+
+  const fromStdin = options.in === '-';
+  const inFormat = options.format ?? (fromStdin ? 'jsonl' : formatOf(options.in));
+  if (!DOCUMENT_FORMATS.includes(inFormat))
+    misuse(`--format must be one of ${DOCUMENT_FORMATS.join(', ')}, not '${inFormat}'`);
+  const target = options.inPlace ? options.in : options.out;
+  const toStdout = target === '-';
+  const outFormat = options.outFormat
+    ?? (options.check || toStdout ? inFormat : formatOf(/** @type {string} */ (target)));
+  if (!DOCUMENT_FORMATS.includes(outFormat))
+    misuse(`--out-format must be one of ${DOCUMENT_FORMATS.join(', ')}, not '${outFormat}'`);
+  if (!fromStdin && !fs.existsSync(options.in)) fail(`no such file: '${options.in}'`);
+
+  const migrations = await loadMigrationsDir(options.migrations);
+  if (migrations.length === 0) fail(`no migration documents in '${options.migrations}'`);
+
+  // A document file holds ONE collection. The migrations say which:
+  // every document step must name it, or this chain cannot be applied to
+  // a file at all — running only the steps that match would leave the
+  // rest silently unapplied, which is the one outcome a migration runner
+  // may never produce.
+  const documentSteps = migrations.flatMap((migration) => migration.steps)
+    .filter((step) => step.kind === 'jslt' || step.kind === 'query');
+  const named = [...new Set(documentSteps.map((step) => step.collection))];
+  if (named.length > 1) {
+    fail(`a document file holds one collection, and these migrations touch ${named.length} `
+      + `(${named.join(', ')}) — run them against a store, or split the chain so each `
+      + 'migration touches the collection its file holds');
+  }
+  if (options.collection !== null && named.length === 1 && options.collection !== named[0]) {
+    misuse(`--collection names '${options.collection}', but these migrations touch `
+      + `'${named[0]}' — is this the right file for them?`);
+  }
+  // with no document step at all there is no collection to infer; the
+  // run still proceeds, because a physical step must be REFUSED by name
+  // rather than reported as a missing collection
+  const collection = named[0] ?? options.collection ?? 'documents';
+
+  // only a MATERIALIZING assertion needs the collection at once; a
+  // per-document predicate and an associative aggregate are both
+  // answered one batch at a time, so they stream
+  const materializes = documentSteps.some((step) => step.collection === collection
+    && step.kind === 'query' && classifyAssertion(step.assert).strategy === 'materialize');
+
+  const source = () => (fromStdin ? process.stdin : options.in);
+  let sink;
+  if (options.check) sink = openNullTarget();
+  else if (toStdout) sink = openStreamTarget(process.stdout, outFormat);
+  else sink = await openAtomicTarget(/** @type {string} */ (target), outFormat);
+
+  try {
+    let report;
+    if (materializes) {
+      const documents = [];
+      for await (const document of readDocuments(source(), inFormat)) documents.push(document);
+      const out = await migrateDocuments({ [collection]: documents }, migrations, { batchSize });
+      report = out.report;
+      for (const document of out.documents[collection]) await sink.write(document);
+    }
+    else {
+      report = await streamDocuments({ [collection]: readDocuments(source(), inFormat) },
+        migrations, { batchSize, write: (name, document) => sink.write(document) });
+    }
+    const written = await sink.commit();
+    const counts = report.counts[collection] ?? { read: 0, transformed: 0, asserted: 0 };
+    console.log(`${options.check ? 'checked' : 'migrated'} '${collection}': `
+      + `${counts.read} read, ${counts.transformed} transformed, ${counts.asserted} asserted `
+      + `(${report.strategy[collection]})`);
+    console.log(`applied: ${report.applied.join(', ')}`);
+    if (options.check) console.log('checked only — nothing was written');
+    else if (toStdout) console.log(`wrote ${written.documents} document(s) to standard output`);
+    else console.log(`wrote ${written.documents} document(s) to ${target} (${written.bytes} bytes)`);
+  }
+  catch (error) {
+    await sink.abort();
+    return fail(error.message);
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv);
   if (options.help || options.command === '--help' || options.command === '-h'
@@ -398,6 +541,7 @@ async function main() {
     case 'check': return commandStatus(options, { asCheck: true });
     case 'apply': return commandApply(options);
     case 'shape': return commandShape(options);
+    case 'documents': return commandDocuments(options);
     default: return fail(`unknown command '${options.command}' — try --help`);
   }
 }

@@ -105,16 +105,36 @@ export function createDagJobRunner(store, options) {
       bound(runKey).checkpoints.complete(jobIdOf(runKey), result),
   };
 
+  /** Which declared task identities moved between two version maps. */
+  const describeVersionDrift = (before, after) => {
+    const names = [...new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])].sort();
+    const moved = [];
+    for (const name of names) {
+      const was = before?.[name];
+      const now = after?.[name];
+      if (was === now) continue;
+      if (was === undefined) moved.push(`'${name}' is new at version ${now}`);
+      else if (now === undefined) moved.push(`'${name}' is gone (was version ${was})`);
+      else moved.push(`'${name}' moved from version ${was} to ${now}`);
+    }
+    return moved;
+  };
+
   /**
-   * The identity a resumed run must agree with. A workflow edited under
-   * a run's feet, or the same run id handed a different input, both
-   * produce checkpoints that describe a computation nobody asked for.
+   * The identity a resumed run must agree with: the workflow document,
+   * the input, and the DECLARED versions of the task implementations
+   * (FLOW-FORMAT §7.8). The third closes the gap the first two cannot
+   * see — a handler reimplemented while its document stayed byte-equal
+   * produces checkpoints that describe a computation nobody asked for
+   * just as surely as an edited document does.
    */
-  const requireSameRun = async (context, jobId, revision, inputHash) => {
+  const requireSameRun = async (context, jobId, revision, inputHash, taskVersions) => {
     const loaded = await context.checkpoints.load(jobId);
     const stored = loaded?.values?.[RUN_IDENTITY_NODE];
+    const taskVersionsHash = fingerprint(taskVersions);
+    const identity = { revision, inputHash, taskVersionsHash, taskVersions };
     if (stored === undefined) {
-      await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, { revision, inputHash });
+      await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
       return;
     }
     const differs = [];
@@ -125,6 +145,28 @@ export function createDagJobRunner(store, options) {
     if (stored.inputHash !== inputHash) {
       differs.push(`the input (checkpointed under ${stored.inputHash}, `
         + `this attempt was given ${inputHash})`);
+    }
+    if (stored.taskVersionsHash === undefined) {
+      // A row written before task identity was recorded. Unknown is not
+      // equal: the upgrade is allowed only where nothing can be replayed
+      // wrongly — when no node value has been recorded yet, so the run has
+      // nothing to inherit from an implementation nobody can name.
+      const recorded = Object.keys(loaded?.values ?? {})
+        .filter((nodeId) => nodeId !== RUN_IDENTITY_NODE);
+      if (recorded.length === 0) {
+        await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
+      }
+      else {
+        differs.push(`the task versions (this run recorded ${recorded.length} node value(s) `
+          + 'before task identity was persisted, so the implementation that produced them '
+          + 'cannot be confirmed)');
+      }
+    }
+    else if (stored.taskVersionsHash !== taskVersionsHash) {
+      const moved = describeVersionDrift(stored.taskVersions, taskVersions);
+      differs.push(`the task versions (${moved.length > 0 ? moved.join(', ')
+        : `checkpointed under ${stored.taskVersionsHash}, this runner compiles `
+          + `${taskVersionsHash}`})`);
     }
     if (differs.length === 0) return;
     throw new DbRuntimeError('JD2069',
@@ -147,7 +189,8 @@ export function createDagJobRunner(store, options) {
       const runKey = runKeyOf(context.job.id, context.job.lease.token);
       active.set(runKey, context);
       try {
-        await requireSameRun(context, context.job.id, revision, fingerprint(input));
+        await requireSameRun(context, context.job.id, revision, fingerprint(input),
+          compiled.taskVersions);
         // the handler's signal reaches every task: a worker winding down
         // inside its grace period, or a lease this attempt has lost
         return await compiled.run(input, { runId: runKey, signal: context.signal });

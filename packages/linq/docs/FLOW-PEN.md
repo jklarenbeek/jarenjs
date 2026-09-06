@@ -325,7 +325,7 @@ export const writing = defineDag({
   nodes: {
     brief: input(),
     draft: task('llm', (v) => ({ prompt: v.topic })),
-    review: task('critic', (v) => ({ text: v })).checkpoint(),
+    review: task('critic', (v) => ({ text: v }), { version: '1' }).checkpoint(),
     out: output(),
   },
   edges: [
@@ -342,7 +342,7 @@ export const writing = defineDag({
   "nodes": {
     "brief": { "kind": "input" },
     "draft": { "kind": "task", "run": "llm", "with": { "prompt": "$.topic" } },
-    "review": { "kind": "task", "run": "critic", "with": { "text": "$" }, "checkpoint": true },
+    "review": { "kind": "task", "run": "critic", "version": "1", "with": { "text": "$" }, "checkpoint": true },
     "out": { "kind": "output" }
   },
   "edges": [
@@ -352,6 +352,13 @@ export const writing = defineDag({
   ]
 }
 ```
+
+`review` carries a `version` because it is checkpointed: a recorded value
+is replayed on a later run only while the handler that produced it is the
+same one, so that identity is DECLARED — the registry must hand
+`compileDag` the same token as `{ run, version }`, and a disagreement is
+`JF0019` before any node runs. `.checkpoint()` refuses a task that has
+not declared one.
 
 `review`'s `with` is `{ "text": "$" }`: the callback returned the scope
 value itself, and the scope value of a node with one unported inbound

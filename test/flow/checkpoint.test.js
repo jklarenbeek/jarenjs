@@ -51,7 +51,9 @@ const DOC = {
   $dag: '0.1',
   nodes: {
     in: { kind: 'input' },
-    fetch: { kind: 'task', run: 'fetch', checkpoint: true },
+    // a checkpointed node declares the handler identity its recorded
+    // value belongs to; the registry must agree
+    fetch: { kind: 'task', run: 'fetch', checkpoint: true, version: '1' },
     shape: { kind: 'jslt', checkpoint: true,
       stylesheet: [{ match: '$', body: { doubled: { $mul: ['$.n', 2] } } }] },
     verify: { kind: 'task', run: 'verify' },
@@ -72,7 +74,7 @@ describe('the checkpoint contract (§7.6)', () => {
     const dag = compileDag(DOC, {
       checkpoint: store,
       tasks: {
-        fetch: ({ input }) => { counts.fetch++; return { n: input.n }; },
+        fetch: { version: '1', run: ({ input }) => { counts.fetch++; return { n: input.n }; } },
         verify: ({ input }) => { counts.verify++; return input; },
       },
     });
@@ -93,7 +95,7 @@ describe('the checkpoint contract (§7.6)', () => {
     const dag = compileDag(DOC, {
       checkpoint: store,
       tasks: {
-        fetch: ({ input }) => { counts.fetch++; return { n: input.n }; },
+        fetch: { version: '1', run: ({ input }) => { counts.fetch++; return { n: input.n }; } },
         verify: ({ input }) => {
           counts.verify++;
           if (failVerify) throw new Error('flaky downstream');
@@ -127,13 +129,13 @@ describe('the checkpoint contract (§7.6)', () => {
       $dag: '0.1',
       nodes: {
         in: { kind: 'input' },
-        bad: { kind: 'task', run: 'bad', checkpoint: true },
+        bad: { kind: 'task', run: 'bad', checkpoint: true, version: '1' },
         out: { kind: 'output' },
       },
       edges: [{ from: 'in', to: 'bad' }, { from: 'bad', to: 'out' }],
     }, {
       checkpoint: store,
-      tasks: { bad: () => ({ f: () => {} }) },
+      tasks: { bad: { version: '1', run: () => ({ f: () => {} }) } },
     });
     await assert.rejects(() => dag.run(null, { runId: 'r3' }),
       (error) => /** @type {any} */ (error).code === 'JF2008'
@@ -150,7 +152,7 @@ describe('the checkpoint contract (§7.6)', () => {
     for (const member of ['load', 'save', 'complete']) {
       const dag = compileDag(DOC, {
         checkpoint: failing(member),
-        tasks: { fetch: ({ input }) => input, verify: ({ input }) => input },
+        tasks: { fetch: { version: '1', run: ({ input }) => input }, verify: ({ input }) => input },
       });
       await assert.rejects(() => dag.run({ n: 1 }, { runId: 'r4' }),
         (error) => /** @type {any} */ (error).code === 'JF2009',
@@ -169,7 +171,7 @@ describe('the checkpoint contract (§7.6)', () => {
     const dag = compileDag(DOC, {
       checkpoint: store,
       tasks: {
-        fetch: () => { throw new Error('must not run'); },
+        fetch: { version: '1', run: () => { throw new Error('must not run'); } },
         verify: ({ input }) => { counts.verify++; return input; },
       },
     });
@@ -181,14 +183,14 @@ describe('the checkpoint contract (§7.6)', () => {
   it('misuse guards: a partial store, a runId without a store, a store without a runId', () => {
     assert.throws(() => compileDag(DOC, {
       checkpoint: /** @type {any} */ ({ load: () => null }),
-      tasks: { fetch: () => 0, verify: () => 0 },
+      tasks: { fetch: { version: '1', run: () => 0 }, verify: () => 0 },
     }), TypeError);
     const plain = compileDag(DOC, {
-      tasks: { fetch: ({ input }) => input, verify: ({ input }) => input } });
+      tasks: { fetch: { version: '1', run: ({ input }) => input }, verify: ({ input }) => input } });
     assert.throws(() => plain.run({}, { runId: 'r' }), TypeError);
     const stored = compileDag(DOC, {
       checkpoint: memoryStore(),
-      tasks: { fetch: ({ input }) => input, verify: ({ input }) => input } });
+      tasks: { fetch: { version: '1', run: ({ input }) => input }, verify: ({ input }) => input } });
     assert.throws(() => stored.run({}), TypeError,
       'a checkpointed dag needs a run identity');
   });

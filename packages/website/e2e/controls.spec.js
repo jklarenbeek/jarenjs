@@ -28,6 +28,16 @@
  */
 import { test, expect } from '@playwright/test';
 
+// This spec clicks a Load button on a freshly routed card. Under
+// `no-preference` the card is still rising on its staggered reveal while
+// the page glides on `scroll-behavior: smooth`, so mousedown and mouseup
+// land on different elements and no click ever reaches the button — the
+// field under test then never appears. `emulateMedia` is what reaches the
+// page; `test.use({ reducedMotion })` does not.
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 /**
  * Force one render of the whole tree without touching focus: a DISPATCHED
  * click carries no focus change, unlike a user click.

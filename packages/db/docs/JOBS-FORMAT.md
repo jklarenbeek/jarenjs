@@ -373,15 +373,28 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   pair and `stopGraceMs`. A `runner.stop()` with no override observes
   the runner's declared `stopGraceMs` default; an explicit
   `stop({ graceMs })` still wins.
-- **A resume must be the same run.** The workflow document's revision and
-  a hash of the run's input are persisted beside its checkpoints, under a
-  reserved node id, and pruned with them. A resume that disagrees with
-  either is `JD2069` naming what changed — the workflow, the input, or
-  both — rather than answering from checkpoints written for a different
-  computation. A deploy that edits a dag document therefore no longer has
-  to drain old jobs to be safe: the in-flight ones refuse by name. What
-  is NOT covered is a task whose injected implementation changed while
-  its document did not; a document revision cannot see that.
+- **A resume must be the same run.** THREE things are persisted beside a
+  run's checkpoints, under a reserved node id, and pruned with them: the
+  workflow document's revision, a hash of the run's input, and the
+  canonical map of DECLARED task versions (FLOW-FORMAT §7.8) with its
+  hash. A resume that disagrees with any of them is `JD2069` naming what
+  changed — each is identified separately, and a moved task version names
+  the task and both versions (`'draft' moved from version 1 to 2`).
+  A deploy that edits a dag document therefore does not have to drain old
+  jobs to be safe: the in-flight ones refuse by name.
+
+  The third component is what a document revision cannot see: a handler
+  reimplemented while its document stayed byte-equal. The host declares
+  that identity and the registry supplies it, so the queue can tell a
+  redeployed implementation from the one that wrote the checkpoints.
+
+  **The legacy rule is deterministic, and never reads unknown as equal.**
+  A run checkpointed by a release that did not record task identity has
+  no `taskVersionsHash`. If it recorded no node value yet, there is
+  nothing that could be replayed wrongly, so the identity is upgraded in
+  place and the run proceeds. If it DID record values, the implementation
+  that produced them cannot be confirmed and the resume is refused,
+  saying exactly that.
 - A resume that DOES agree changes nothing: the recorded nodes are
   restored rather than re-run, no checkpoint row is written, and none is
   pruned.
@@ -414,7 +427,7 @@ The fence adds five, all in the package's single runtime table
 | `JD2066` | the lease was superseded by a newer claim or renewal |
 | `JD2067` | the lease expired before the call |
 | `JD2068` | a settling call used the pre-fence `(id, owner)` spelling instead of the lease |
-| `JD2069` | a resumed run disagrees with the workflow revision or input hash its checkpoints were written under (§7) |
+| `JD2069` | a resumed run disagrees with the workflow revision, the input hash or the declared task versions its checkpoints were written under (§7) |
 
 Otherwise: API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the
