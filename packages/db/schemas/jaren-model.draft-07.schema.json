@@ -1,176 +1,238 @@
 {
- "$schema": "http://json-schema.org/draft-07/schema#",
- "$id": "https://jarenjs.dev/schemas/jaren-model/draft-07",
- "title": "Jaren model document",
- "description": "A jaren-model document declares the collections of a store: each collection is a JSON Schema for its documents, a key declaration (an RFC 6901 pointer for caller-supplied keys, or null with a declared identity for store-allocated ones), and the indexes over singular JSONPath expressions. A model declares collections (the storage subset: every property JSONB, no relations), entities (the relational subset: keys, typed columns, relations via the x-entity vocabulary), or both; vocabulary is added to THIS format, never as a second format.",
- "type": "object",
- "properties": {
-  "$model": {
-   "description": "The model format version.",
-   "const": "0.1"
-  },
-  "collections": {
-   "description": "Collection name (an identifier) to collection declaration.",
-   "type": "object",
-   "minProperties": 1,
-   "propertyNames": {
-    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-   },
-   "additionalProperties": {
-    "$ref": "#/definitions/collection"
-   }
-  },
-  "entities": {
-   "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md §9; stripping it leaves a plain JSON Schema.",
-   "type": "object",
-   "minProperties": 1,
-   "propertyNames": {
-    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-   },
-   "additionalProperties": {
-    "$ref": "#/definitions/entity"
-   }
-  }
- },
- "required": [
-  "$model"
- ],
- "additionalProperties": false,
- "definitions": {
-  "collection": {
-   "description": "One collection: a document schema, the key declaration, and the declared indexes. A collection without a key pointer MUST declare how keys are allocated; allocation is declared, never guessed.",
-   "type": "object",
-   "properties": {
-    "schema": {
-     "description": "The JSON Schema every stored document validates against (through the injected hook). Also the type source for indexed paths.",
-     "type": "object"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-model/draft-07",
+  "title": "Jaren model document",
+  "description": "A jaren-model document declares the collections of a store: each collection is a JSON Schema for its documents, a key declaration (an RFC 6901 pointer for caller-supplied keys, or null with a declared identity for store-allocated ones), and the indexes over singular JSONPath expressions. A model declares collections (the storage subset: every property JSONB, no relations), entities (the relational subset: keys, typed columns, relations via the x-entity vocabulary), or both; vocabulary is added to THIS format, never as a second format.",
+  "type": "object",
+  "properties": {
+    "$model": {
+      "description": "The model format version.",
+      "const": "0.1"
     },
-    "key": {
-     "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member — or null when the store allocates.",
-     "type": [
-      "string",
-      "null"
-     ],
-     "pattern": "^/"
-    },
-    "identity": {
-     "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or — only with \"key\": null — 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
-     "enum": [
-      "caller",
-      "uuid",
-      "integer"
-     ]
-    },
-    "indexes": {
-     "description": "Declared indexes; each singular path becomes a generated column plus an index.",
-     "type": "array",
-     "items": {
-      "$ref": "#/definitions/index"
-     }
-    },
-    "x-rename": {
-     "description": "Migration hint: this collection was previously named the given identifier. Read by the migration planner (a rename cannot be inferred from a diff); ignored by the store.",
-     "type": "string",
-     "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-    }
-   },
-   "required": [
-    "schema"
-   ],
-   "additionalProperties": false
-  },
-  "index": {
-   "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004). A derived index computes indexable scalars from the selected member instead of indexing it directly.",
-   "type": "object",
-   "properties": {
-    "name": {
-     "description": "The index name, unique within its collection.",
-     "type": "string",
-     "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-    },
-    "path": {
-     "description": "A singular JSONPath expression into the stored document ($.email), or a non-empty array of them for a composite index.",
-     "oneOf": [
-      {
-       "type": "string",
-       "minLength": 1
+    "collections": {
+      "description": "Collection name (an identifier) to collection declaration.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
       },
-      {
-       "type": "array",
-       "items": {
-        "type": "string",
-        "minLength": 1
-       },
-       "minItems": 1
+      "additionalProperties": {
+        "$ref": "#/definitions/collection"
       }
-     ]
     },
-    "unique": {
-     "description": "Whether the index enforces uniqueness. Defaults to false.",
-     "type": "boolean"
-    },
-    "derive": {
-     "description": "Derive columns from the selected member instead of indexing it: 'geohash' (one TEXT cell column, precision required), 'bbox' (four REAL columns — west, south, east, north), or 'vector' (one packed BLOB column holding the l2-normalized Float32 form of an array of numbers, dims required; stored on every driver, with no B-tree over it — a fetch-and-rank plan reads it whole). A derived index is never unique.",
-     "enum": [
-      "geohash",
-      "bbox",
-      "vector"
-     ]
-    },
-    "precision": {
-     "description": "Geohash cell length in characters, 1-12. Required beside derive: 'geohash' and refused anywhere else — there is no safe default, because the right cell size depends on the query radius, which the model cannot know.",
-     "type": "integer",
-     "minimum": 1,
-     "maximum": 12
-    },
-    "dims": {
-     "description": "The width of a derive: 'vector' column in components, 1-8192. Required beside derive: 'vector' and refused anywhere else: the width is the column's identity — two widths over one path are two columns — and a member that is not an array of exactly this many finite numbers stores NULL in the column (the document itself still stores). Constrain the member with minItems/maxItems equal to dims in the collection's schema so a wrong-width vector is refused at the write instead.",
-     "type": "integer",
-     "minimum": 1,
-     "maximum": 8192
-    },
-    "physical": {
-     "description": "The shape a derive: 'bbox' index takes on disk: 'columns' (the default) is four generated columns under one B-tree; 'rtree' keeps the same four columns and adds a SQLite R*Tree virtual table beside the collection, kept in sync by declared triggers, with no B-tree over the columns. The logical meaning of derive: 'bbox' is identical either way. Refused on any other index kind, and on a driver without the module it falls back to 'columns' and says so through explain().prefilters[].via.",
-     "enum": [
-      "columns",
-      "rtree"
-     ]
+    "entities": {
+      "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md \u00a79; stripping it leaves a plain JSON Schema.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/entity"
+      }
     }
-   },
-   "required": [
-    "name",
-    "path"
-   ],
-   "additionalProperties": false
   },
-  "entity": {
-   "description": "One entity: an object schema whose top-level properties map to columns per the hybrid rule (scalars become typed columns, nested shapes stay JSONB); keys, indexes, defaults and relations are declared with x-entity inside the schema.",
-   "type": "object",
-   "properties": {
-    "schema": {
-     "type": "object"
+  "required": [
+    "$model"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "collection": {
+      "description": "One collection: a document schema, the key declaration, and the declared indexes. A collection without a key pointer MUST declare how keys are allocated; allocation is declared, never guessed.",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "description": "The JSON Schema every stored document validates against (through the injected hook). Also the type source for indexed paths.",
+          "type": "object"
+        },
+        "key": {
+          "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member \u2014 or null when the store allocates.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^/"
+        },
+        "identity": {
+          "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or \u2014 only with \"key\": null \u2014 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
+          "enum": [
+            "caller",
+            "uuid",
+            "integer"
+          ]
+        },
+        "indexes": {
+          "description": "Declared indexes; each singular path becomes a generated column plus an index.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/index"
+          }
+        },
+        "x-rename": {
+          "description": "Migration hint: this collection was previously named the given identifier. Read by the migration planner (a rename cannot be inferred from a diff); ignored by the store.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "additionalProperties": false
     },
-    "x-rename": {
-     "type": "string",
-     "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT §9): a rename is declared, never inferred."
+    "index": {
+      "description": "One index over a singular JSONPath expression (or a composite over several). A non-singular path is rejected at open (JD0004). A derived index computes indexable scalars from the selected member instead of indexing it directly. An index may instead declare an expression: a closed computation over members, scalars and host-declared deterministic functions.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The index name, unique within its collection.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "path": {
+          "description": "A singular JSONPath expression into the stored document ($.email), or a non-empty array of them for a composite index.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "expression": {
+          "description": "Index a computed value rather than a member: a closed expression over declared members, JSON scalars and functions the host declared deterministic. Mutually exclusive with path and derive (JD0004) \u2014 an expression names the members it reads itself.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/expression"
+            }
+          ]
+        },
+        "unique": {
+          "description": "Whether the index enforces uniqueness. Defaults to false.",
+          "type": "boolean"
+        },
+        "derive": {
+          "description": "Derive columns from the selected member instead of indexing it: 'geohash' (one TEXT cell column, precision required), 'bbox' (four REAL columns \u2014 west, south, east, north), or 'vector' (one packed BLOB column holding the l2-normalized Float32 form of an array of numbers, dims required; stored on every driver, with no B-tree over it \u2014 a fetch-and-rank plan reads it whole). A derived index is never unique.",
+          "enum": [
+            "geohash",
+            "bbox",
+            "vector"
+          ]
+        },
+        "precision": {
+          "description": "Geohash cell length in characters, 1-12. Required beside derive: 'geohash' and refused anywhere else \u2014 there is no safe default, because the right cell size depends on the query radius, which the model cannot know.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "dims": {
+          "description": "The width of a derive: 'vector' column in components, 1-8192. Required beside derive: 'vector' and refused anywhere else: the width is the column's identity \u2014 two widths over one path are two columns \u2014 and a member that is not an array of exactly this many finite numbers stores NULL in the column (the document itself still stores). Constrain the member with minItems/maxItems equal to dims in the collection's schema so a wrong-width vector is refused at the write instead.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "physical": {
+          "description": "The shape a derive: 'bbox' index takes on disk: 'columns' (the default) is four generated columns under one B-tree; 'rtree' keeps the same four columns and adds a SQLite R*Tree virtual table beside the collection, kept in sync by declared triggers, with no B-tree over the columns. The logical meaning of derive: 'bbox' is identical either way. Refused on any other index kind, and on a driver without the module it falls back to 'columns' and says so through explain().prefilters[].via.",
+          "enum": [
+            "columns",
+            "rtree"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "entity": {
+      "description": "One entity: an object schema whose top-level properties map to columns per the hybrid rule (scalars become typed columns, nested shapes stay JSONB); keys, indexes, defaults and relations are declared with x-entity inside the schema.",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "object"
+        },
+        "x-rename": {
+          "type": "string",
+          "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT \u00a79): a rename is declared, never inferred."
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "additionalProperties": false
+    },
+    "expression": {
+      "description": "One node of an index expression: a member path, a JSON scalar, or a call to a function the host declared. Exactly one of the three, and nothing else \u2014 an index expression is never SQL text, and the function it names is resolved for arity and determinism at open (JD0004).",
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "member"
+          ],
+          "properties": {
+            "member": {
+              "description": "A singular JSONPath expression into the stored document ($.email).",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {
+              "description": "A JSON scalar. A null or a compound has no place in an index expression.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "call"
+          ],
+          "properties": {
+            "call": {
+              "description": "The name of a function the host declared through openStore({ expressions }). The store refuses a name it was not given, a wrong arity, and one not declared deterministic \u2014 before any DDL.",
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "args": {
+              "description": "The arguments, in order. Order is significant: sub(a, b) and sub(b, a) are different expressions and different columns.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/expression"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
-   },
-   "required": [
-    "schema"
-   ],
-   "additionalProperties": false
-  }
- },
- "anyOf": [
-  {
-   "required": [
-    "collections"
-   ]
   },
-  {
-   "required": [
-    "entities"
-   ]
-  }
- ]
+  "anyOf": [
+    {
+      "required": [
+        "collections"
+      ]
+    },
+    {
+      "required": [
+        "entities"
+      ]
+    }
+  ]
 }

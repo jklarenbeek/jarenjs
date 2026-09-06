@@ -119,11 +119,13 @@ export function loadRelationGroups() {
  * document, parents before children (the corpus lists entities in
  * dependency order — real foreign keys refuse orphans).
  * @param {any} group
+ * @param {any} [driver]
+ * @param {'indexed' | 'unindexed'} [side]
  * @returns {Promise<{ store: any }>}
  */
-export async function storeForEntityGroup(group, side = 'indexed') {
+export async function storeForEntityGroup(group, driver = nodeDriver(), side = 'indexed') {
   const store = await openStore(side === 'unindexed' ? withoutIndexes(group.model) : group.model,
-    { driver: nodeDriver() });
+    { driver });
   for (const name of Object.keys(group.documents)) {
     const set = store.entity(name);
     for (const document of group.documents[name]) await set.create(document);

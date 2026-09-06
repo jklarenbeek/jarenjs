@@ -41,11 +41,15 @@ import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine } from './jobs.js';
+import { introspectModel } from './introspect.js';
 import { collectEntityRoots, entityRoot } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
   derivedValue, memberAt, storedMemberForm, registerDeriveFunctions,
 } from './derive.js';
+import {
+  normalizeExpression, canonicalExpression, expressionMembers, registerExpressionFunctions,
+} from './expression.js';
 
 /** The model format version this store implements. */
 export const MODEL_VERSION = '0.1';
@@ -199,9 +203,13 @@ function normalizeDerive(index, paths, docPath) {
  * Normalize and check a model document. Every failure is `JD0005` with
  * a `docPath` into the model.
  * @param {any} model
+ * @param {Record<string, any>} [expressions] - the host's declared
+ *   index-expression functions, by name: a model that names one is
+ *   resolved against them here, so an unknown, wrong-arity or
+ *   non-deterministic function is `JD0004` before any DDL
  * @returns {Map<string, any>} collection name -> normalized collection
  */
-export function normalizeModel(model) {
+export function normalizeModel(model, expressions = undefined) {
   if (model === null || typeof model !== 'object' || Array.isArray(model))
     throw modelError('JD0005', 'the model document must be an object', '');
   if (model.$model !== MODEL_VERSION) {
@@ -290,6 +298,38 @@ export function normalizeModel(model) {
           `duplicate index name '${index.name}'`, `${indexDocPath}/name`);
       }
       indexNames.add(index.name);
+      // an EXPRESSION index names what it computes, not which member it
+      // reads, so it is mutually exclusive with both of the other two
+      // ways an index is declared: an index cannot be over a member AND
+      // over a function of one, and a derived spatial column is already
+      // an expression this format spells for you
+      if (index.expression !== undefined) {
+        if (index.path !== undefined) {
+          throw modelError('JD0004',
+            'an index declares a path OR an expression: an expression names the members it '
+            + 'reads itself', `${indexDocPath}/path`);
+        }
+        if (index.derive !== undefined) {
+          throw modelError('JD0004',
+            'a derived index IS an expression this format spells; declare one or the other',
+            `${indexDocPath}/derive`);
+        }
+        const expression = normalizeExpression(index.expression,
+          `${indexDocPath}/expression`, expressions);
+        indexes.push({
+          name: index.name,
+          paths: expressionMembers(expression),
+          expression,
+          canonical: canonicalExpression(expression),
+          unique: index.unique === true,
+          derive: null,
+          precision: undefined,
+          physical: undefined,
+          dims: undefined,
+          docPath: indexDocPath,
+        });
+        continue;
+      }
       const paths = Array.isArray(index.path) ? index.path : [index.path];
       if (paths.length === 0
         || paths.some((p) => typeof p !== 'string' || p === '')) {
@@ -918,7 +958,7 @@ export function openStore(model, options) {
   let entities;
   let mapping;
   try {
-    collections = normalizeModel(model);
+    collections = normalizeModel(model, options.expressions);
     entities = normalizeEntities(model);
     mapping = entities.size > 0 ? explainMapping(model) : null;
     if (collections.size === 0 && entities.size === 0) {
@@ -1286,8 +1326,9 @@ export function openStore(model, options) {
       // property of the driver that created the file, so a database
       // built under one and opened under the other legitimately reports
       // drift — that is a migration, not an open.
-      const derivedMapping = connection.capabilities.deterministicIndexableFunctions === true
-        ? 'virtual' : 'stored';
+      const registersFunctions =
+        connection.capabilities.deterministicIndexableFunctions === true;
+      const derivedMapping = registersFunctions ? 'virtual' : 'stored';
       // the SECOND physical branch, and the same posture: a build
       // without the R*Tree module maps `physical: 'rtree'` back onto
       // the B-tree over the four columns and SAYS so through
@@ -1307,7 +1348,8 @@ export function openStore(model, options) {
       try {
         for (const [name, collection] of collections)
           plans.set(name, planCollection(name, collection, dialect,
-            { derived: derivedMapping, rtree: rtreeCapable }));
+            { derived: derivedMapping, rtree: rtreeCapable,
+              expressions: options.expressions, registered: registersFunctions }));
         if (mapping !== null) {
           for (const name of Object.keys(mapping.entities))
             entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect));
@@ -1328,6 +1370,16 @@ export function openStore(model, options) {
       const needsDeriveFunctions = derivedMapping === 'virtual'
         && [...plans.values()].some((plan) => plan.generated.some(
           (column) => column.derive !== undefined && column.stored !== true));
+      // A table whose column expression calls a declared function cannot
+      // be SELECTed from — let alone written to — by a connection that
+      // has not registered it, so the registration precedes every
+      // statement over it. Only where this connection COMPUTES the
+      // expression: where the engine calls its own immutable function
+      // there is nothing to register.
+      const expressionNames = registersFunctions
+        ? [...new Set([...plans.values()].flatMap((plan) =>
+          plan.expressions.flatMap((entry) => entry.functions)))].sort()
+        : [];
 
       /** The effective connection pragmas, read back after the open
        * sequence applied them — what the capability report carries.
@@ -1341,6 +1393,10 @@ export function openStore(model, options) {
       // inside `opening` so a synchronous refusal reaches `failClosed`
       const pragmas = () => chain(configurePragmas(connection, pragmaRequests), (effective) => {
         effectivePragmas = effective;
+        // an engine that always enforces referential integrity has no
+        // switch to set and nothing to read back; SQLite's defaults OFF,
+        // so there it is set AND verified per connection
+        if (dialect.capabilities.foreignKeysAlwaysOn === true) return null;
         return chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
           chain(connection.prepare(dialect.introspect.foreignKeysOn()), (statement) =>
             chain(statement.get([]), (row) => {
@@ -1353,6 +1409,8 @@ export function openStore(model, options) {
       });
 
       const opening = () => chain(pragmas(), () =>
+        chain(registerExpressionFunctions(connection, expressionNames,
+          options.expressions ?? {}), () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, readOnly), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, readOnly), () => {
@@ -1388,6 +1446,16 @@ export function openStore(model, options) {
           let captureMode = 'none';
           if (captureRequested !== null) {
             const wanted = captureRequested.mode ?? 'auto';
+            // the ledger and its journal are SQLite spellings; a
+            // connection that says it has no change capture is refused
+            // by name rather than at the first statement over a table
+            // this store would never have created there
+            if (connection.capabilities.changeCapture !== true) {
+              throw new DbCompileError('JD0051',
+                'change capture is unavailable on this driver: it declares no change '
+                + 'ledger, so neither a changeset journal nor a live query can be built '
+                + 'on it');
+            }
             const hasSessions = connection.capabilities.sessions === true
               && typeof connection.session === 'function';
             if (wanted === 'session' && !hasSessions) {
@@ -1501,6 +1569,11 @@ export function openStore(model, options) {
           // the durable job queue (JOBS-FORMAT), opt-in per store
           const jobsRequested = options.jobs === true
             || (options.jobs !== undefined && options.jobs !== false);
+          if (jobsRequested && connection.capabilities.jobs !== true) {
+            throw new DbCompileError('JD0003',
+              'the durable job queue is unavailable on this driver: it declares no job '
+              + 'queue, and the queue writes its own SQLite statements');
+          }
           const jobsEngine = !jobsRequested ? null : createJobEngine({
             connection,
             bracket: firstOpen,
@@ -2057,11 +2130,21 @@ export function openStore(model, options) {
             return handle;
           }
 
-          /** PRAGMA data_version, read wherever the caller is: the store
-           * wraps it in the gate, a transaction view in its scope check. */
-          const readDataVersion = () => chain(
-            connection.prepare(dialect.introspect.dataVersion()),
-            (statement) => chain(statement.get([]), (row) => Number(row.v)));
+          /** The engine's own commit counter, read wherever the caller
+           * is: the store wraps it in the gate, a transaction view in
+           * its scope check. An engine that keeps no such counter — one
+           * where "another connection has written since you last looked"
+           * is not a question a single number answers — refuses by name
+           * rather than by a TypeError on a statement it cannot spell. */
+          const readDataVersion = () => {
+            if (typeof dialect.introspect.dataVersion !== 'function') {
+              throw new DbRuntimeError('JD2077',
+                'this store has no data version: the dialect keeps no commit counter, so '
+                + 'there is no single number that changes when another connection writes');
+            }
+            return chain(connection.prepare(dialect.introspect.dataVersion()),
+              (statement) => chain(statement.get([]), (row) => Number(row.v)));
+          };
 
           /** Register an entity-root live query (LIVE-FORMAT §7) — the
            * store's `live` and a transaction view's share one body. */
@@ -2267,6 +2350,14 @@ export function openStore(model, options) {
               page: lift((pageOptions) => gated(() => capture.page(pageOptions))),
             }),
             dataVersion: lift(() => gated(() => readDataVersion())),
+            // Database → model, read-only: what this database's shape
+            // says the model is, beside a report of everything it
+            // cannot say. It holds the store gate for its extent, like
+            // every other read, and it issues no DDL and no DML — the
+            // derived model is an ANSWER, and applying it is the
+            // migration planner's job and the operator's decision
+            introspect: lift((introspectOptions) =>
+              gated(() => introspectModel(connection, introspectOptions))),
             // the maintenance surface: each operation holds the store
             // gate for its own extent, so a checkpoint can never
             // interleave an in-flight write; none takes a transaction
@@ -2898,7 +2989,7 @@ export function openStore(model, options) {
           return chain(capture === null ? null : capture.ready,
             () => chain(jobsEngine === null ? null : jobsEngine.ready,
               () => Object.freeze(store)));
-        }))));
+        })))));
 
       /**
        * The open sequence, with ONE retry when it fails classed busy: the

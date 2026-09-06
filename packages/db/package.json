@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/db",
   "private": false,
-  "version": "0.64.0",
+  "version": "0.65.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -14,6 +14,10 @@
     "./node": {
       "types": "./types/node.d.ts",
       "default": "./src/drivers/node.js"
+    },
+    "./postgres": {
+      "types": "./types/postgres.d.ts",
+      "default": "./src/drivers/postgres.js"
     },
     "./bun": {
       "types": "./types/bun.d.ts",
@@ -41,7 +45,7 @@
     "docs/",
     "ARCHITECTURE.md"
   ],
-  "description": "Document storage for the Jaren suite: a model document declares collections as JSON Schemas with indexes; openStore applies DDL through a dialect and gives transactional, schema-validated reads and writes over SQLite on Node, Bun, or an injected wasm handle",
+  "description": "Document storage for the Jaren suite: a model document declares collections as JSON Schemas with indexes; openStore applies DDL through a dialect and gives transactional, schema-validated reads and writes over SQLite (Node, Bun, or an injected wasm handle) or PostgreSQL 16+ through an injected client",
   "author": "joham",
   "repository": {
     "type": "git",
@@ -62,7 +66,9 @@
     "sqlite",
     "document-store",
     "json-schema",
-    "database"
+    "database",
+    "postgres",
+    "postgresql"
   ],
   "scripts": {
     "build": "npm run build:types",
@@ -70,9 +76,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.64.0",
-    "@jarenjs/json": "^0.64.0",
-    "@jarenjs/validate": "^0.64.0"
+    "@jarenjs/core": "^0.65.0",
+    "@jarenjs/json": "^0.65.0",
+    "@jarenjs/validate": "^0.65.0"
   },
   "bin": {
     "jaren-db": "./src/cli.js"

@@ -564,19 +564,28 @@ what each does is its own documentation's job
   measurement below the root stringifies the parsed child. Projecting
   nested includes as text would make it a length, at the price of a
   projection change.
-- [ ] **Other SQL dialects.** The dialect seam is real (proven by a
-  test double) and the capability slots for statement timeouts and
-  row estimates are deliberately empty on SQLite; a second dialect is
-  the day they fill. The constraint: a dialect must reproduce the
-  truth table's guarded semantics, not merely parse.
-- [ ] **Introspection of an existing database.** `jaren-db` plans from
-  model FILES (a database stores shape hashes, not models); deriving a
-  first model from a live schema is unwritten.
-- [ ] **Model-declared UDF-expression indexes.** The migration engine
-  re-registers declared functions (`registerFunctions`) and data steps
-  over UDF-indexed tables are tested; what remains is the model-level
-  vocabulary to DECLARE such an index rather than hand-creating it as
-  drift.
+- [ ] **A third SQL dialect, and the two capability slots still empty.**
+  PostgreSQL 16+ ships (`@jarenjs/db/postgres`): the same model, the
+  same query documents and the same differential oracle run on both
+  engines, and what differs is declared in the portability matrix rather
+  than discovered. What is still open is narrower than it was.
+  `statementTimeout` and `rowEstimates` are empty on BOTH engines —
+  PostgreSQL has a server-side `statement_timeout`, but the store's
+  cancellation is an `AbortSignal` and a server timeout is not the same
+  promise, so filling that slot honestly needs a cancellation hook the
+  injected client contract does not yet name. A third dialect would also
+  want the two SQLite-only subsystems (the durable job queue, the change
+  ledger) to have a portable form; today they are declared absent
+  (`capabilities.jobs`, `capabilities.changeCapture`) and refuse at open.
+- [ ] **Introspection that recovers what a CHECK or a partial index
+  meant.** `store.introspect()` derives a `jaren-model` from a live
+  database on both engines, read-only, with a sorted loss report; the
+  same logical model comes back from equivalent SQLite and PostgreSQL
+  databases. What it cannot derive it REPORTS, and two of those rows are
+  worth closing: an entity's `enum` becomes a CHECK on the way out and
+  is not read back into one, and a partial or expression index the model
+  has no vocabulary for is `unmapped-index` rather than a narrowed
+  declaration.
 - [ ] **A federation joins two sides, not three.** Two entity sets of
   one store join in one document (a shared provider `scope`, QUERY-PEN
   §8; one statement for a bare-binding equijoin), and a join across two

@@ -19,13 +19,17 @@
  * specifiers. `open()` is where "this driver does not exist here"
  * becomes the coded `JD0003` instead of a module-load crash.
  *
- * `capabilities` is read once at open — from the library's version
- * report, its compile options and the binding's declaration — and is
- * the single source of truth for feature gating; never a `typeof`
- * sniff at a call site. Two slots are deliberately EMPTY on every
- * SQLite driver: `statementTimeout` (no interrupt or progress handler
- * exists to build one on) and `rowEstimates` (the query plan is prose,
- * not numbers). They exist so a driver that has the facts can fill
+ * `capabilities` is read once at open by a PROBE — the SQLite one by
+ * default, another engine's through `options.probe` — and is the single
+ * source of truth for feature gating; never a `typeof` sniff at a call
+ * site. {@link baseCapabilities} gives every slot the conservative
+ * answer, so a probe that says nothing about a feature says `false`
+ * rather than `undefined`. Two slots are deliberately EMPTY on every
+ * driver this package ships: `statementTimeout` (SQLite has no
+ * interrupt or progress handler to build one on, and a PostgreSQL
+ * server-side timeout is not the same promise as the store's
+ * `AbortSignal`) and `rowEstimates` (SQLite's query plan is prose, not
+ * numbers). They exist so a driver that has the facts can fill
  * them without a contract change; pretending SQLite has them is the
  * silent degradation this suite refuses. A third, `lazyIteration`, is
  * probed rather than declared: whether the binding's statements carry
@@ -166,6 +170,7 @@ export function attempt(call, wrap) {
  *
  * @param {any} raw
  * @param {{ dialect: any, synchronous?: boolean, queueTimeout?: number,
+ *   probe?: (raw: any, dialect: any, declared: any) => any,
  *   declared?: { sessions?: boolean, userFunctions?: boolean,
  *     deterministicIndexableFunctions?: boolean,
  *     aggregateFunctions?: boolean,
@@ -183,7 +188,63 @@ export function attempt(call, wrap) {
 export function openConnection(raw, options) {
   const { dialect } = options;
   const synchronous = options.synchronous === true;
-  const declared = options.declared ?? {};
+  const probe = options.probe ?? sqliteProbe;
+  return chain(probe(raw, dialect, options.declared ?? {}), (capabilities) =>
+    finishConnection(raw, dialect, synchronous, capabilities,
+      options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT));
+}
+
+/**
+ * The capability answers every connection carries, each defaulted to
+ * the conservative one. A probe fills in what its engine and binding
+ * actually supply; a slot it says nothing about reads `false` rather
+ * than `undefined`, so a feature gate is never a `typeof` sniff at a
+ * call site.
+ * @returns {Record<string, any>}
+ */
+export function baseCapabilities() {
+  return {
+    version: '',
+    jsonb: false,
+    generatedColumns: false,
+    returning: false,
+    upsert: false,
+    savepoints: false,
+    rtree: false,
+    fts: false,
+    sessions: false,
+    userFunctions: false,
+    deterministicIndexableFunctions: false,
+    aggregateFunctions: false,
+    configurablePragmas: Object.freeze([]),
+    backup: false,
+    maintenance: Object.freeze({
+      checkpoint: false, integrityCheck: false, foreignKeyCheck: false, optimize: false,
+    }),
+    alterTableFull: false,
+    statementTimeout: false,
+    rowEstimates: false,
+    lazyIteration: false,
+    // the job queue, the change ledger and the live registry are built
+    // on SQLite's own spellings; a store on another engine reports them
+    // absent by name rather than failing at the first statement
+    jobs: false,
+    changeCapture: false,
+  };
+}
+
+/**
+ * The SQLite probe: the library's version report and compile options,
+ * plus what the binding declares it can do. It is the DEFAULT probe
+ * because every binding this package ships is a SQLite one; a driver
+ * for another engine passes its own through `options.probe`, and the
+ * version floor asserted here goes with it.
+ * @param {any} raw
+ * @param {any} dialect
+ * @param {Record<string, any>} declared
+ * @returns {any} value-or-promise of the frozen capability table
+ */
+export function sqliteProbe(raw, dialect, declared) {
   return chain(raw.prepare(dialect.introspect.version()), (versionStatement) =>
     chain(versionStatement.get([]), (versionRow) => {
       const version = String(versionRow.version);
@@ -197,7 +258,8 @@ export function openConnection(raw, options) {
       return chain(raw.prepare(dialect.introspect.compileOptions()), (optionsStatement) =>
         chain(optionsStatement.all([]), (rows) => {
           const compiled = new Set(rows.map((row) => String(row.name)));
-          const capabilities = Object.freeze({
+          return Object.freeze({
+            ...baseCapabilities(),
             version,
             // guaranteed by the version floor
             jsonb: true,
@@ -253,9 +315,11 @@ export function openConnection(raw, options) {
             // materialises the result on the first pull (declared, so
             // the cursor's own report is honest about it)
             lazyIteration,
+            // the job queue and the change ledger are SQLite spellings,
+            // and every SQLite binding runs them
+            jobs: true,
+            changeCapture: true,
           });
-          return finishConnection(raw, dialect, synchronous, capabilities,
-            options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT);
         }));
     }));
 }
@@ -284,14 +348,25 @@ export function openConnection(raw, options) {
  * @param {any} dialect
  * @param {boolean} synchronous
  * @param {Readonly<Record<string, any>>} capabilities
+ * @param {number} queueTimeout
  * @returns {any}
  */
-function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout) {
+export function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout) {
   /** Savepoint names are never reused, so a stale name can never be
    * mistaken for a live one in an error or a log. */
   let savepointSeq = 0;
   /** Whether a top-level transaction currently owns the connection. */
   let owned = false;
+  /**
+   * Whether a transaction BLOCK is open on this connection right now.
+   *
+   * Only an engine whose `SAVEPOINT` does not start a transaction needs
+   * the answer, and it needs it for one decision: a checkpoint asked
+   * for outside a block has to open the block first, because there is
+   * nothing for it to be a checkpoint OF. On SQLite a bare `SAVEPOINT`
+   * IS the block, and the flag is never read.
+   */
+  let inBlock = false;
   /**
    * Whether an owning callback is on the stack RIGHT NOW — set around the
    * synchronous extent of every transaction body, cleared the moment it
@@ -458,11 +533,55 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
   const releaseCheckpoint = (checkpoint) =>
     raw.exec(dialect.tx.release(checkpoint.name));
 
+  /**
+   * Own the connection inside a transaction BLOCK: `BEGIN` (or `BEGIN
+   * IMMEDIATE`) around `fn`, committed or rolled back as a whole.
+   *
+   * The `immediate` mode takes the write lock up front. A body
+   * that reads before it writes — a claim: read the record, decide,
+   * insert — otherwise meets the read→write upgrade `SQLITE_BUSY` the
+   * busy handler cannot retry when another connection commits in
+   * between; taking the lock first makes that wait an ordinary busy
+   * wait the timeout covers. Nesting inside it is savepoints, as always.
+   * @param {(scope: any) => any} fn
+   */
+  const blockAround = (fn, mode) => {
+    const succeed = (result) => chain(raw.exec(dialect.tx.commit), () => result);
+    const fail = (error) => chain(raw.exec(dialect.tx.rollback), () => {
+      throw error;
+    });
+    const begin = mode === 'immediate' ? dialect.tx.beginImmediate : dialect.tx.begin;
+    return chain(raw.exec(begin), () => {
+      let out;
+      const wasOnStack = onStack;
+      const wasInBlock = inBlock;
+      onStack = true;
+      inBlock = true;
+      const settle = (settling) => { inBlock = wasInBlock; return settling; };
+      try {
+        out = fn(scopeFor());
+      }
+      catch (error) {
+        onStack = wasOnStack;
+        return settle(fail(error));
+      }
+      onStack = wasOnStack; // the body has returned or awaited
+      return isThenable(out)
+        ? out.then((value) => settle(succeed(value)), (error) => settle(fail(error)))
+        : settle(succeed(out));
+    });
+  };
+
   /** Open one savepoint around `fn`, at whatever depth we are. `fn`
    * receives the scope so nested work can name itself.
    * @param {(scope: any) => any} fn
    */
   const savepointAround = (fn) => {
+    // an engine that refuses a savepoint outside a transaction gets the
+    // block it needs; on every other one this is the same statement it
+    // always was
+    if (!inBlock && dialect.capabilities.savepointStartsTransaction !== true)
+      return blockAround(fn, 'deferred');
     /** @type {any} */
     let checkpoint;
     const succeed = (result) => chain(releaseCheckpoint(checkpoint), () => result);
@@ -472,37 +591,6 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
       }));
     return chain(openCheckpoint(), (opened_) => {
       checkpoint = opened_;
-      let out;
-      const wasOnStack = onStack;
-      onStack = true;
-      try {
-        out = fn(scopeFor());
-      }
-      catch (error) {
-        onStack = wasOnStack;
-        return fail(error);
-      }
-      onStack = wasOnStack; // the body has returned or awaited
-      return isThenable(out) ? out.then(succeed, fail) : succeed(out);
-    });
-  };
-
-  /**
-   * Own the connection with the write lock taken up front: `BEGIN
-   * IMMEDIATE` around `fn`, committed or rolled back as a whole. A body
-   * that reads before it writes — a claim: read the record, decide,
-   * insert — otherwise meets the read→write upgrade `SQLITE_BUSY` the
-   * busy handler cannot retry when another connection commits in
-   * between; taking the lock first makes that wait an ordinary busy
-   * wait the timeout covers. Nesting inside it is savepoints, as always.
-   * @param {(scope: any) => any} fn
-   */
-  const immediateAround = (fn) => {
-    const succeed = (result) => chain(raw.exec(dialect.tx.commit), () => result);
-    const fail = (error) => chain(raw.exec(dialect.tx.rollback), () => {
-      throw error;
-    });
-    return chain(raw.exec(dialect.tx.beginImmediate), () => {
       let out;
       const wasOnStack = onStack;
       onStack = true;
@@ -604,7 +692,13 @@ function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout)
         owned = true;
         let out;
         try {
-          out = mode === 'immediate' ? immediateAround(fn) : savepointAround(fn);
+          // A top-level transaction is one CHECKPOINT where a savepoint
+          // opens a transaction of its own, and a BLOCK where it does
+          // not: an engine that refuses `SAVEPOINT` outside a
+          // transaction has to be told one is starting.
+          out = mode === 'immediate' || dialect.capabilities.savepointStartsTransaction !== true
+            ? blockAround(fn, mode)
+            : savepointAround(fn);
         }
         catch (error) {
           release();

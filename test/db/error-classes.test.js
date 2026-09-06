@@ -17,7 +17,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { openStore, classifyDriverError, wrapDriverError, DbRuntimeError, sqliteDialect } from '@jarenjs/db';
+import {
+  openStore, classifyDriverError, wrapDriverError, isDriverError, DbRuntimeError, sqliteDialect,
+} from '@jarenjs/db';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { queryJson } from '@jarenjs/json/query';
 
@@ -372,5 +374,130 @@ describe('the paths beside the query engines (the close-out quirk hunt)', () => 
       source.cleanup();
       copy.cleanup();
     }
+  });
+});
+
+describe('one classifier, two engines: a SQLSTATE lands in the same classes', () => {
+  /**
+   * A PostgreSQL driver error as the wire reports it: a five-character
+   * SQLSTATE on `code`, and — for an integrity violation — the name of
+   * the constraint the server rejected against.
+   * @param {string} state
+   * @param {Record<string, any>} [extra]
+   */
+  const pgError = (state, extra = {}) =>
+    Object.assign(new Error(`postgres refused: ${state}`), { code: state, ...extra });
+
+  it('a SQLSTATE-carrying error IS a driver error', () => {
+    assert.strictEqual(isDriverError(pgError('23505')), true);
+    assert.strictEqual(isDriverError(pgError('40P01')), true);
+    // and a coded refusal of this package still is not one, whatever it
+    // looks like: its code is not a SQLSTATE
+    assert.strictEqual(isDriverError(new DbRuntimeError('JD2005', 'no')), false);
+    assert.strictEqual(isDriverError(new Error('plain')), false);
+    assert.strictEqual(isDriverError({ code: 'ENOENT' }), false);
+  });
+
+  it('the key\'s own collision is the constraint the server names', () => {
+    const unique = { table: 'users', column: 'key' };
+    assert.deepStrictEqual(
+      classifyDriverError(pgError('23505', { constraint: 'users_pkey' }), unique),
+      { class: 'duplicate', code: 'JD2001', retryable: false,
+        reason: 'the key is already present' });
+    // a unique INDEX over another column is a constraint failure, not a
+    // duplicate key — exactly as it is on SQLite
+    const other = classifyDriverError(pgError('23505', { constraint: 'users_by_email' }), unique);
+    assert.strictEqual(other.class, 'constraint');
+    assert.strictEqual(other.code, 'JD2005');
+    // and with no key in play at all it is a plain constraint failure
+    assert.strictEqual(
+      classifyDriverError(pgError('23505', { constraint: 'users_pkey' })).class, 'constraint');
+  });
+
+  it('contention is busy and retryable, whichever engine reported it', () => {
+    for (const state of ['40001', '40P01', '55P03', '55006', '53300', '40003']) {
+      const classified = classifyDriverError(pgError(state));
+      assert.strictEqual(classified.class, 'busy', state);
+      assert.strictEqual(classified.retryable, true, state);
+      assert.strictEqual(classified.code, 'JD2005', state);
+    }
+    // the same verdict a locked SQLite file gets, so a caller that
+    // already retries on `busy` needs no new branch
+    const sqlite = classifyDriverError(Object.assign(new Error('locked'), { errcode: 5 }));
+    assert.strictEqual(sqlite.class, 'busy');
+    assert.strictEqual(sqlite.retryable, true);
+  });
+
+  it('the conditions a single-writer file database does not have get their own codes', () => {
+    assert.deepStrictEqual(classifyDriverError(pgError('57014')),
+      { class: 'cancelled', code: 'JD2089', retryable: false,
+        reason: 'the statement was cancelled by the server' });
+    assert.deepStrictEqual(classifyDriverError(pgError('25P02')),
+      { class: 'aborted', code: 'JD2088', retryable: false,
+        reason: 'the transaction was aborted by an earlier failure in it' });
+    for (const state of ['08006', '08003', '08P01', '57P01', '57P02', '57P03']) {
+      const classified = classifyDriverError(pgError(state));
+      assert.strictEqual(classified.class, 'connection', state);
+      assert.strictEqual(classified.code, 'JD2087', state);
+      assert.strictEqual(classified.retryable, true, state);
+    }
+  });
+
+  it('resource, permission and corruption states reuse the SQLite classes', () => {
+    const rows = [
+      ['53100', 'full', 'JD2082'],
+      ['58030', 'io', 'JD2084'],
+      ['25006', 'readonly', 'JD2083'],
+      ['42501', 'readonly', 'JD2083'],
+      ['3D000', 'cantopen', 'JD2005'],
+      ['3F000', 'cantopen', 'JD2005'],
+      ['XX001', 'corrupt', 'JD2085'],
+      ['XX002', 'corrupt', 'JD2085'],
+      ['XX000', 'corrupt', 'JD2085'],
+      ['58P01', 'io', 'JD2084'],
+      ['23503', 'constraint', 'JD2005'],
+      ['23514', 'constraint', 'JD2005'],
+    ];
+    for (const [state, expectedClass, expectedCode] of rows) {
+      const classified = classifyDriverError(pgError(state));
+      assert.strictEqual(classified.class, expectedClass, state);
+      assert.strictEqual(classified.code, expectedCode, state);
+    }
+  });
+
+  it('an out-of-range number is the overflow row the query path re-runs', () => {
+    const classified = classifyDriverError(pgError('22003'));
+    assert.strictEqual(classified.class, 'overflow');
+    assert.strictEqual(classified.code, null,
+      'the overflow row is never raised: the query path answers the double');
+  });
+
+  it('a SQLSTATE nobody enumerated still lands somewhere honest', () => {
+    // an unknown member of a known family takes the family's verdict
+    assert.strictEqual(classifyDriverError(pgError('23999')).class, 'constraint');
+    // and one outside every family is the fallback, never a silent pass
+    const unknown = classifyDriverError(pgError('22P02'));
+    assert.strictEqual(unknown.class, 'error');
+    assert.strictEqual(unknown.code, 'JD2005');
+    assert.strictEqual(unknown.retryable, false);
+  });
+
+  it('the wrap carries class, retryability and the cause, and leaks no credential', () => {
+    const cause = pgError('40P01', {
+      message: 'deadlock detected while connecting to postgres://jaren:hunter2@host/db',
+    });
+    const wrapped = wrapDriverError(cause, { collection: 'rows' });
+    assert.strictEqual(wrapped.code, 'JD2005');
+    assert.strictEqual(wrapped.class, 'busy');
+    assert.strictEqual(wrapped.retryable, true);
+    assert.strictEqual(wrapped.cause, cause);
+    assert.strictEqual(wrapped.collection, 'rows');
+    // the wrap composes the DRIVER's message; a driver that puts a
+    // password in one is the driver's problem, and the store's own
+    // sentences never carry a connection string
+    assert.ok(!wrapped.message.startsWith('postgres://'));
+    const own = wrapDriverError(pgError('57014'), { code: 'JD2078', reason: 'maintenance failed' });
+    assert.strictEqual(own.code, 'JD2078', 'a lifecycle keeps its own code');
+    assert.strictEqual(own.class, 'cancelled', 'and still takes the class from the one table');
   });
 });

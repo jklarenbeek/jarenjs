@@ -130,6 +130,33 @@ describe('SQLite dialect goldens', () => {
       'instr("gx_name", ?) > 0', 'unchanged: no sargable form exists');
   });
 
+  // The plan is PROSE on SQLite, one `detail` column per row, and only
+  // the dialect that asked for it can read it: the profile's scan
+  // refusal and a "does this predicate reach its index" check are both
+  // questions about that narrative.
+  it('the plan narrative: a full scan, and a seek through a named index', () => {
+    assert.strictEqual(sqliteDialect.explainQuery('SELECT 1'), 'EXPLAIN QUERY PLAN SELECT 1');
+    const rows = [{ detail: 'SCAN users' },
+      { detail: 'SEARCH users USING INDEX users_by_age (gx_age=?)' },
+      { detail: 'SCAN t0' },
+      { detail: 'SEARCH t1 USING COVERING INDEX orders_by_at (gx_at>?)' }];
+    const lines = sqliteDialect.explainLines(rows);
+    assert.deepStrictEqual(lines, rows.map((row) => row.detail));
+    assert.strictEqual(sqliteDialect.isFullScan(lines[0], ['users']), true);
+    assert.strictEqual(sqliteDialect.isFullScan(lines[0], ['orders']), false);
+    assert.strictEqual(sqliteDialect.isFullScan(lines[1], ['users']), false,
+      'a search through an index is not a full read');
+    // a join statement's narrative names the ALIAS the emitter gave the
+    // table, which is why an alias shape counts as a scan of its own
+    assert.strictEqual(sqliteDialect.isFullScan(lines[2], ['users']), true);
+    assert.strictEqual(sqliteDialect.isFullScan(lines[3], ['orders']), false);
+    assert.strictEqual(sqliteDialect.usesIndex(lines[1], 'users_by_age'), true);
+    assert.strictEqual(sqliteDialect.usesIndex(lines[1], 'users_by_email'), false);
+    assert.strictEqual(sqliteDialect.usesIndex(lines[3], 'orders_by_at'), true,
+      'a covering index is the index');
+    assert.strictEqual(sqliteDialect.usesIndex(lines[0], 'users_by_age'), false);
+  });
+
   it('transaction, pragma and introspection phrases', () => {
     assert.strictEqual(sqliteDialect.tx.savepoint('sp_1'), 'SAVEPOINT "sp_1"');
     assert.strictEqual(sqliteDialect.tx.release('sp_1'), 'RELEASE SAVEPOINT "sp_1"');
@@ -178,8 +205,8 @@ describe('the test-double dialect proves the seam (D21)', () => {
       'CREATE TABLE [users] ('
       + '[key] KEYTYPE PRIMARY KEY, '
       + '[doc] JSONDOC NOT NULL, '
-      + "[gx_email] VALTYPE GENERATED ALWAYS AS (JX([doc], '/email')) VIRTUAL, "
-      + "[gx_age] VALTYPE GENERATED ALWAYS AS (JX([doc], '/age')) VIRTUAL"
+      + "[gx_email] VALTYPE GENERATED ALWAYS AS (JX([doc], '/email')) LAZY, "
+      + "[gx_age] VALTYPE GENERATED ALWAYS AS (JX([doc], '/age')) LAZY"
       + ')',
       'CREATE UNIQUE INDEX [users_by_email] ON [users] ([gx_email])',
       'CREATE INDEX [users_by_age] ON [users] ([gx_age])',
@@ -202,6 +229,6 @@ describe('the test-double dialect proves the seam (D21)', () => {
       'DELETE FROM [users] WHERE [key] = @p1');
     assert.strictEqual(doubleDialect.limitClause(5, 10), 'FETCH 5 SKIP 10');
     assert.strictEqual(doubleDialect.booleanLiteral(true), 'TRUE');
-    assert.strictEqual(doubleDialect.tx.savepoint('s'), 'MARK s');
+    assert.strictEqual(doubleDialect.tx.savepoint('s'), 'MARK [s]');
   });
 });

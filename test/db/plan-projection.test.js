@@ -301,7 +301,10 @@ describe('a grouping answers its groups whole, through execute and through a cur
     const { store, rows } = await fresh();
     const explained = await rows.explain(grouped);
     assert.strictEqual(explained.mode, 'native');
-    assert.match(explained.sql, /GROUP BY jsonb_extract\("doc", '\$\."s"'\) ORDER BY "vk0" ASC/);
+    // the grouping is BY THE ALIASES the selection named — the key's
+    // value and its type discriminator, which are one key: a JSON `1`
+    // and a JSON `"1"` render the same text and are different groups
+    assert.match(explained.sql, /GROUP BY "vk0", "tk0" ORDER BY "vk0" ASC/);
     assert.deepStrictEqual(explained.group, {
       keys: [{ as: 'g', path: ['s'] }],
       aggregates: [{ fn: 'rows', path: null }],

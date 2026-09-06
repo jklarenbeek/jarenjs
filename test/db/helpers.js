@@ -10,7 +10,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
-import { chain } from '@jarenjs/db';
+import { chain, rtreeDdl } from '@jarenjs/db';
 import { adaptNodeDatabase } from '@jarenjs/db/node';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -189,15 +189,59 @@ export function tempDbPath() {
  * @param {any} createDialect - `createDialect` from @jarenjs/db
  * @returns {any}
  */
+/** The foreign spelling's own R*Tree shape: a different module name and
+ * a different column order, so a mapping that reached for SQLite's
+ * would show up as the wrong SQL rather than as the same SQL. */
+/** The foreign spelling's own identifier quoting: brackets, with the
+ * closing one doubled — an identifier that could close its own quoting
+ * is the hole every dialect has to be proved not to have. */
+const quoteIdentifier = (name) => `[${String(name).replace(/]/g, ']]')}]`;
+
+/** The foreign spelling's guard on its configuration vocabulary: a
+ * closed word, never interpolated caller text. */
+const pragmaWord = (word) => {
+  if (!/^[a-z_0-9-]+$/i.test(String(word)))
+    throw new TypeError(`not a configuration keyword: '${word}'`);
+  return String(word);
+};
+
+const DOUBLE_RTREE = Object.freeze({
+  module: 'BOXTREE',
+  columns: Object.freeze(['rid', 'x0', 'x1', 'y0', 'y1']),
+});
+
 export function fullDoubleDialect(createDialect) {
   return createDialect({
     name: 'double',
-    capabilities: { jsonb: false },
+    // the foreign spelling has everything SQLite has except a binary
+    // JSON type and an in-place ALTER — declared in full, because a
+    // dialect that answers half the set is what the conformance kit
+    // exists to catch
+    capabilities: {
+      jsonb: false,
+      generatedColumns: true,
+      indexableGeneratedColumns: true,
+      untypedColumns: true,
+      returning: true,
+      upsert: true,
+      savepoints: true,
+      savepointStartsTransaction: true,
+      immediateTransactions: true,
+      groupByAlias: true,
+      alterTableFull: false,
+      virtualTables: true,
+      triggers: true,
+      pragmas: true,
+      declaredSqlText: true,
+      foreignKeysAlwaysOn: false,
+      rowIdentity: true,
+    },
     tableSuffix: '',
+    generatedStorage: 'LAZY',
     epochFromRfc3339: (v) => `EPOCHMS(${v})`,
     docColumnType: 'JSONDOC',
     packedVectorType: 'VECBYTES',
-    quoteIdentifier: (s) => `[${s}]`,
+    quoteIdentifier,
     parameterRef: (i) => `@p${i}`,
     stringLiteral: (s) => `'${String(s).replace(/'/g, "''")}'`,
     booleanLiteral: (b) => (b ? 'TRUE' : 'FALSE'),
@@ -233,6 +277,22 @@ export function fullDoubleDialect(createDialect) {
     jsonText: (column) => `JTEXT(${column})`,
     jsonAgg: (expr) => `JAGG(${expr})`,
     jsonTypeOf: (column, pathText) => `JTYPE(${column}, '${pathText}')`,
+    numericTypeNames: ['integer', 'real'],
+    jsonObject: (pairs) => `JOBJ(${pairs})`,
+    schemaTypeOf: (declaredType) => (declaredType === 'KEYTYPE' ? 'string' : undefined),
+    expressionOf: () => null,
+    memberPathOf: (expression) => {
+      const match = /JX\([^,]*,\s*'([^']*)'\)/.exec(String(expression));
+      return match === null
+        ? null
+        : match[1].split('/').filter((part) => part.length > 0)
+          .map((part) => (part.startsWith('#')
+            ? { index: Number(part.slice(1)) } : { name: part }));
+    },
+    readGenerated: (rows) => rows.map((row) => ({
+      name: String(row.name), expression: String(row.expression ?? ''),
+    })),
+    jsonEmbed: (column) => `JEMBED(${column})`,
     valueTypeOf: (param) => `VTYPE(${param})`,
     strStartsWith: (value, lower, upper) => `SW(${value}, ${lower}, ${upper})`,
     strStartsWithExact: (value, a, b) => `SWX(${value}, ${a}, ${b})`,
@@ -245,17 +305,25 @@ export function fullDoubleDialect(createDialect) {
       ? 'TALLY(*)' : `ROLLUP_${fn.toUpperCase()}(${value})`),
     rowIdentity: () => '[rid]',
     identityIn: (identity, params) => `${identity} AMONG (${params.join(', ')})`,
-    rtree: { module: 'BOXTREE', columns: ['rid', 'x0', 'x1', 'y0', 'y1'] },
+    rtree: DOUBLE_RTREE,
+    rtreeDdl: rtreeDdl({
+      quoteIdentifier,
+      rowIdentity: () => '[rid]',
+      rtree: DOUBLE_RTREE,
+    }),
     explainQuery: (sql) => `PLANFOR ${sql}`,
+    explainLines: (rows) => rows.map((row) => String(row.detail)),
+    isFullScan: (line, tables) => tables.some((table) => line === `READALL ${table}`),
+    usesIndex: (line, index) => line.includes(`VIA ${index}`),
     excludedRef: (column) => `NEW.${column}`,
     tx: {
       begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK',
-      savepoint: (n) => `MARK ${n}`,
-      release: (n) => `UNMARK ${n}`,
-      rollbackTo: (n) => `BACKTO ${n}`,
+      savepoint: (n) => `MARK ${quoteIdentifier(n)}`,
+      release: (n) => `UNMARK ${quoteIdentifier(n)}`,
+      rollbackTo: (n) => `BACKTO ${quoteIdentifier(n)}`,
     },
     pragma: {
-      set: (name, value) => `SET ${name} ${value}`,
+      set: (name, value) => `SET ${pragmaWord(name)} ${pragmaWord(String(value))}`,
       foreignKeys: (on) => `SET fk ${on ? 'on' : 'off'}`,
       foreignKeyCheck: () => 'CHECK fk',
       walCheckpoint: (mode) => `FLUSH ${mode}`,
@@ -265,7 +333,7 @@ export function fullDoubleDialect(createDialect) {
     introspect: {
       version: () => 'GET version',
       compileOptions: () => 'GET options',
-      pragma: (name) => `GET pragma ${name}`,
+      pragma: (name) => `GET pragma ${pragmaWord(name)}`,
       tableExists: () => 'GET table @p1',
       columns: (t) => `GET columns ${t}`,
       indexes: (t) => `GET indexes ${t}`,
@@ -273,6 +341,8 @@ export function fullDoubleDialect(createDialect) {
       foreignKeysOn: () => 'GET fkon',
       foreignKeyList: (t) => `GET fklist ${t}`,
       declaredSql: (t) => `GET declared ${t}`,
+      tables: () => 'GET tables',
+      generated: (t) => `GET generated ${t}`,
       dataVersion: () => 'GET data-version',
       schemaDump: () => 'GET schema-dump',
     },

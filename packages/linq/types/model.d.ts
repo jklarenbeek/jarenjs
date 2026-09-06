@@ -328,11 +328,44 @@ export type IndexPath<D> = ((doc: Expr<D>) => unknown) | string | readonly (((do
  * a composite, or a JSONPath string; default name `by_<segments>`. */
 export function index<D = unknown>(path: IndexPath<D>, options?: IndexOptions): IndexSpec<D>;
 
+/** One node of an index expression: a member (a lambda or a JSONPath
+ * string), a JSON scalar, or a call to a function the HOST declares. */
+export type ExpressionNode<D = unknown> =
+  | ((doc: Expr<D>) => unknown)
+  | string
+  | number
+  | boolean
+  | { member: ((doc: Expr<D>) => unknown) | string }
+  | { value: string | number | boolean }
+  | { call: string; args?: readonly ExpressionNode<D>[] };
+
+/** One index over a COMPUTED value. */
+export interface ExpressionIndexSpec<D = unknown> {
+  readonly __doc?: D;
+  readonly name: string;
+  readonly expression: unknown;
+  readonly unique?: boolean;
+}
+
+/**
+ * An index over a computed value: a closed expression over declared
+ * members, JSON scalars and functions the host declares deterministic.
+ *
+ * The function is resolved where the declarations are —
+ * `openStore({ expressions })` — so a name this pen has never heard of
+ * is not an error here; a wrong arity and a missing declaration are
+ * `JD0004` at open, before any DDL. Default name `by_<call>_<members>`.
+ */
+export function expressionIndex<D = unknown>(
+  expression: ExpressionNode<D>,
+  options?: { name?: string; unique?: boolean },
+): ExpressionIndexSpec<D>;
+
 export interface CollectionOptions<D> {
   /** An RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`), or `null` (the store allocates). */
   key?: string | ((doc: Expr<D>) => unknown) | null;
   identity?: 'caller' | 'uuid' | 'integer';
-  indexes?: readonly IndexSpec<D>[];
+  indexes?: readonly (IndexSpec<D> | ExpressionIndexSpec<D>)[];
   renamedFrom?: string;
 }
 

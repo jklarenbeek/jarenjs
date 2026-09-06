@@ -1,24 +1,31 @@
 //@ts-check
 /**
- * @file @jarenjs/db — document storage over SQLite through two seams:
- * a driver (how a connection is made: `@jarenjs/db/node`, `/bun`, or
- * `/wasm` with an injected handle) and a dialect (how SQL is spelled).
- * This root subpath never touches a runtime builtin — a browser
- * bundler resolves it clean; the bindings live behind their own
- * subpaths and load their builtin lazily inside `open()`.
+ * @file @jarenjs/db — document storage through two seams: a driver (how
+ * a connection is made: `@jarenjs/db/node`, `/bun`, `/wasm` with an
+ * injected handle, or `/postgres` with an injected client) and a
+ * dialect (how SQL is spelled). Two engines satisfy both — SQLite and
+ * PostgreSQL 16+ — and what differs between them is a declared
+ * capability rather than a discovered surprise.
+ *
+ * This root subpath never touches a runtime builtin and imports no
+ * third-party client — a browser bundler resolves it clean; the
+ * bindings live behind their own subpaths and load their builtin
+ * lazily inside `open()`.
  */
 
 export { openStore, normalizeModel, MODEL_VERSION } from './store.js';
-export { createDialect } from './dialect.js';
+export { createDialect, DIALECT_CAPABILITIES } from './dialect.js';
+export { rtreeDdl } from './dialects/rtree-ddl.js';
 export { sqliteDialect } from './dialects/sqlite.js';
 export { PRAGMA_NAMES } from './pragmas.js';
 export { CHECKPOINT_MODES, MAINTENANCE_OPERATIONS } from './maintenance.js';
 export {
   SQLITE_FLOOR, chain, toPromise, isThenable, compareVersions,
-  openConnection, wrapStatement, lazyOpen,
+  openConnection, finishConnection, sqliteProbe, baseCapabilities,
+  wrapStatement, lazyOpen,
 } from './driver.js';
 export {
-  planCollection, compileIndexPath, schemaTypeAt, KEY_COLUMN, DOC_COLUMN,
+  planCollection, compileIndexPath, schemaTypeAt, columnKindFor, KEY_COLUMN, DOC_COLUMN,
   normalizeDeclaredSql, comparableDeclaredSql,
 } from './ddl.js';
 export {
@@ -38,6 +45,11 @@ export {
 } from './residual.js';
 export { createCursor, PAGE_LIMIT_DEFAULT } from './cursor.js';
 export { deterministicFragment, registerFragment } from './udf.js';
+export {
+  normalizeExpression, canonicalExpression, expressionMembers, expressionFunctions,
+  expressionSql, expressionStem, registeredName, registerExpressionFunctions,
+  EXPRESSION_KINDS, EXPRESSION_DEPTH,
+} from './expression.js';
 export {
   DERIVE_KINDS, DERIVE_MAPPING, PHYSICAL_KINDS, BBOX_COMPONENTS, BBOX_INDEX_ORDER,
   PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
@@ -70,6 +82,7 @@ export {
   migrationChecksum, createModelShape, schemaShapeOf, compareShapeToModel,
   MIGRATION_VERSION, HISTORY_TABLE, ASSERTION_BOUNDS_DEFAULT,
 } from './migrate.js';
+export { introspectModel, readSchema, INTROSPECT_CODES } from './introspect.js';
 export { migrateDocuments, streamDocuments } from './documents.js';
 export {
   compileDocumentStep, checkMigrationDocument, stepFailure, classifyAssertion,

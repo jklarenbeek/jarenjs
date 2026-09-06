@@ -197,10 +197,19 @@ no relations (MODEL-FORMAT §9.1); one physical engine sits under both.
 | `collection(schema, { key?, identity?, indexes?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the four, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, all `JL0101` |
 | `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; the rest ride verbatim for the store's model walk to judge (§2.1) | `IndexPath<D>` over the collection's shape: a member the shape lacks does not compile | native; an option outside the six is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102` |
 
-The option set is exactly `name`, `unique`, `derive`, `precision`,
-`dims`, `physical` (`src/model/collection.js:18`); the default name is
-`by_` plus the path's member segments, identifier-safe
+| `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, and anything that looks like SQL text are all `JL0101` |
+
+The option set for `index()` is exactly `name`, `unique`, `derive`,
+`precision`, `dims`, `physical` (`src/model/collection.js:18`); the
+default name is `by_` plus the path's member segments, identifier-safe
 (`collection.js:76-80`) — `by_series_t`, `by_x_y`.
+
+`expressionIndex()` takes only `name` and `unique`, because an
+expression names the members it reads itself — nothing that describes a
+member's storage belongs beside one. The pen resolves NO function name:
+arity and determinism are the store's to check against the declarations
+`openStore({ expressions })` was given, and a name this pen has never
+heard of is not an error here. What it decides is the shape.
 
 ### 2.4 The model document
 

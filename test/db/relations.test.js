@@ -40,7 +40,7 @@ for (const [mode, side] of /** @type {const} */ ([
         /** @type {any} */
         let opened = null;
         const openOnce = async () => {
-          if (opened === null) opened = await storeForEntityGroup(group, side);
+          if (opened === null) opened = await storeForEntityGroup(group, undefined, side);
           return opened;
         };
         for (const kase of group.cases) {

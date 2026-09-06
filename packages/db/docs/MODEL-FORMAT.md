@@ -1060,13 +1060,16 @@ error.
 | `JD2084` | a disk I/O error |
 | `JD2085` | the database file is corrupt or not a database |
 | `JD2086` | a seek anchor came back with a type the plan did not declare |
+| `JD2087` | the connection to the database was lost |
+| `JD2088` | the transaction was aborted by an earlier failure in it |
+| `JD2089` | the statement was cancelled by the server |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
 
 **One classification of driver failures.** Every path that meets a
-SQLite driver error — a collection or entity write, the job queue, the
-query path, a maintenance operation, the backup, the open sequence —
+driver error — a collection or entity write, the job queue, the query
+path, a maintenance operation, the backup, the open sequence —
 consults one table (`classifyDriverError`), so the same failure arrives
 under the same code with the same `class` and `retryable` verdict
 whichever path met it: `busy` (SQLITE_BUSY/LOCKED → `JD2005`,
@@ -1079,9 +1082,96 @@ records it), and the fallback `error` (`JD2005`). A classified error
 carries `class`, `retryable` and the driver's error as `cause`; a
 lifecycle that owns its failure code (`JD2078` for maintenance and
 backup, `JD0002` at open) keeps the code and still carries the class.
+
+The ENGINE is discriminated by the evidence the error itself carries,
+never by a table threaded down from the caller: a SQLite binding
+attaches a numeric result code, a PostgreSQL one attaches a
+five-character SQLSTATE. Both land in the classes above, and three
+conditions a single-writer file database does not have get their own:
+`connection` (`JD2087`, retryable — SQLSTATE class 08 and the
+administrator's own terminations), `aborted` (`JD2088` — SQLSTATE
+`25P02`, a statement issued after an earlier failure inside the same
+transaction) and `cancelled` (`JD2089` — SQLSTATE `57014`). A
+serialization failure or a deadlock (`40001`, `40P01`) is `busy` and
+retryable, which is the same verdict, and the same caller branch, a
+locked SQLite file gets.
 An engine error thrown inside a pushed user function (`JQ…`) is not a
 driver error: it passes through untouched, relocated onto the caller's
 document path (`/$where/…`, never the hatch's `/$return/…`).
+
+## 7A. Model-declared index expressions
+
+An index may name a computation instead of a member:
+
+```json
+{
+  "name": "by_lower_email",
+  "expression": { "call": "lower", "args": [{ "member": "$.email" }] },
+  "unique": true
+}
+```
+
+`expression` is mutually exclusive with `path` and with `derive`
+(`JD0004`): an expression names the members it reads itself, and a
+derived spatial column IS an expression this format spells for you.
+
+**The vocabulary is closed — three node kinds and no fourth**, and none
+of them is SQL text:
+
+| node | meaning |
+|---|---|
+| `{ "member": "$.a.b" }` | a singular JSONPath expression into the stored document |
+| `{ "value": 1 }` | a JSON string, number or boolean. A `null` or a compound has no place in an index expression |
+| `{ "call": "lower", "args": [ … ] }` | a function the HOST declared, applied to its arguments in order |
+
+Argument order is significant: `sub(a, b)` and `sub(b, a)` are
+different expressions and different columns. An expression nests at
+most eight deep.
+
+**A function is DECLARED by the host, never created by the store.**
+`openStore(model, { expressions })` takes one declaration per name:
+
+```jsonc
+{
+  "lower": {
+    "arity": 1,
+    "deterministic": true,           // required, and never inferred
+    "apply": (value) => …,           // an engine that registers functions calls this
+    "sql": "lower"                   // one that cannot calls this IMMUTABLE function
+  }
+}
+```
+
+Why a declaration rather than an escape hatch: **an index over a
+function is a schema dependency.** A database whose column is computed
+by `lower(…)` cannot be written from a connection that has no `lower`,
+and a raw-SQL index would have had exactly that hazard with none of the
+checking. Here the model names the function, every store that opens the
+model is handed the same declaration, and a store that cannot honour
+one refuses at open — `JD0004`, before a single statement:
+
+- a name this store was not given
+- an arity the expression does not match
+- a function not declared `deterministic`
+- no `apply` where the engine computes the value itself
+- no `sql` name where the engine calls its own — and that name is an
+  identifier, never SQL text
+
+**How each engine computes it.** SQLite registers `apply` as a
+deterministic function under a namespaced name (`jaren_x_lower`) — so a
+model's `lower` never shadows the engine's own — and the column is
+`GENERATED ALWAYS AS (jaren_x_lower(<member>)) VIRTUAL`. PostgreSQL
+registers nothing: the column is `GENERATED ALWAYS AS (lower(<member>))
+STORED` over the immutable function the host promised the server has.
+Both read the member as its own SCALAR, so `lower` of a string is the
+same answer on both.
+
+One column serves every index that declares the same canonical
+expression, and the canonical form — order-preserving — is what the
+shape hash and the migration diff read. `store.introspect()` reads the
+expression back out of the SQL the dialect wrote (each dialect reads its
+own), so a declared expression index survives the round trip; without
+the declarations the column is REPORTED as unmapped rather than guessed.
 
 ## 8. The safe execution profile
 

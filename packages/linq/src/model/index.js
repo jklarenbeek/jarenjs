@@ -41,7 +41,7 @@ export const {
 /** The relation members: `rel.hasMany`, `rel.hasOne`, `rel.belongsToMany`. */
 export const rel = createRelations(EntityBuilder);
 
-export { collection, index } from './collection.js';
+export { collection, index, expressionIndex } from './collection.js';
 export { defineModel } from './define.js';
 export { withEntity } from './entity.js';
 export { isSchemaBuilder, schemaOf, SCHEMA_BUILDER } from '../schema/brand.js';

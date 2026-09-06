@@ -46,16 +46,229 @@ test-double dialect whose quoting, parameter style and type names all
 differ: the same model produces correspondingly different SQL.
 
 Deliberately *not* dialect concerns, because they are behavioural
-rather than syntactic, and live in the capability table instead:
-whether functions register per connection, whether change capture
-exists and in what form, and whether tables can be restructured in
-place.
+rather than syntactic, and live in the CONNECTION capability table
+instead: whether functions register per connection, whether change
+capture exists and in what form, and whether tables can be
+restructured in place.
+
+The dialect has a capability table of its own, and it is a closed set
+(`DIALECT_CAPABILITIES`): `createDialect` refuses a name outside it, so
+a misspelled capability cannot read as a quiet `false` on the engine
+that has the feature. Every entry answers a SYNTACTIC question — does
+this engine have a binary JSON type, indexable generated columns, a
+column with no scalar type, `RETURNING`, upsert, savepoints, an
+up-front write lock, a result alias in `GROUP BY`, in-place `ALTER`,
+virtual tables, triggers, a configuration vocabulary, a stored CREATE
+text, always-on referential integrity, an insertion-ordered row
+identity. What the store does where the answer is `false` is a
+FALLBACK or a coded refusal on the common path, never a skip:
+
+| Capability off | What the common path does instead |
+|---|---|
+| `pragmas` | no configuration statement is issued; an explicitly requested pragma is `JD0007`, a defaulted one is dropped, and the effective record reads `null` throughout |
+| `declaredSqlText` | the drift check is the structural one — columns and their types, indexes and their covered columns in order, foreign-key tuples — and an object the model never declared is no longer detectable |
+| `foreignKeysAlwaysOn` (on) | the open path neither sets nor reads back the referential-integrity switch |
+| `virtualTables` / `triggers` | a `physical: 'rtree'` column set maps back onto the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
+| `untypedColumns` | a comparison against a member the schema does not type reads the member out of the document instead of the column: same answer, unindexed |
+| `indexableGeneratedColumns` | the derived-column mapping is the STORED one — the store writes the values and the columns are ordinary |
+| `rowIdentity` (with a declared identity column) | the dialect adds that column to every table it creates, and it IS `rowIdentity()` |
+| `immediateTransactions` | `tx.beginImmediate` is `tx.begin`, and a read-then-write body takes its lock when it writes |
+
+Two subsystems are SQLite's own in 0.1 and say so on the connection
+rather than in the dialect: the durable job queue (`capabilities.jobs`)
+and the change ledger (`capabilities.changeCapture`) write their own
+statements. Opening a store that asks for either on a connection that
+declares it absent is a coded refusal at open — `JD0003` and `JD0051` —
+not a failure at the first statement.
+
+`test/db/dialect-conformance.js` is the kit every dialect passes: it
+asserts behaviour rather than text, because a second dialect that
+passed a golden-SQL comparison would have to spell PostgreSQL the way
+SQLite spells it. A quoted identifier cannot close its own quoting; a
+write statement binds through the dialect's own parameter form; a
+generated column carries the storage word its engine has; an optional
+feature is absent in BOTH halves or present in both.
+`test/db/dialect-census.test.js` is the other side of the same claim: a
+character scanner reads every string and template literal of every
+module, keeps the ones that begin as SQL, and fails on a SQLite
+spelling outside `src/dialects/` and `src/drivers/` unless the module
+is named — with the capability that makes it honest — in a short
+approved list.
 
 The SQLite dialect stores documents as JSONB in a `BLOB` column of a
 `STRICT` table, projects each indexed path into a virtual generated
 column over `jsonb_extract`, and renders reads back to text through
 `json()`. Parameters are positional because every shipped binding
 binds arrays.
+
+### The PostgreSQL dialect (`src/dialects/postgres.js`)
+
+`postgresDialect()` is the second spelling, and the reason the contract
+above exists. It imports no client and no runtime builtin, so
+`@jarenjs/db/postgres` resolves in a browser bundle and type-checks with
+nothing installed; transport is the injected driver's business.
+
+Documents are `jsonb`. An indexed path becomes a **STORED** generated
+column — PostgreSQL has no indexable virtual one — typed from the
+schema, and its expression guards the member with `jsonb_typeof` inside
+a `CASE`, because a generated column's expression must be IMMUTABLE and
+a cast that can raise is not one: a document whose member is the wrong
+JSON type stores `NULL` rather than failing its INSERT. Text columns and
+text comparisons carry `COLLATE "C"`, which is byte order, which is what
+SQLite's default `BINARY` collation is — without it the same half-open
+prefix range would hold different rows on a server initialised in
+another locale. Every table the dialect creates carries `rid bigserial`,
+because a collection is a SEQUENCE and PostgreSQL has no per-row
+identity that survives an UPDATE (`ctid` moves).
+
+Three mapping decisions cost something, and each is stated rather than
+worked around:
+
+| Decision | Why | What it costs |
+|---|---|---|
+| `integer` and `number` are both `numeric` | `bigint` would reject a document the model accepts — `3.5` in a member the schema types `integer` — inside a generated column's cast, and a storage decision that can refuse a valid document is not one | introspection cannot tell the two apart on the way back |
+| a `boolean` member is `smallint` holding 1 or 0 | the shared forms compare a boolean against those integers (a type test, a projected pair's type name); a `boolean` column would make each an operator-resolution error rather than a row | introspection reads the column back as a number |
+| a path the schema does not type is `jsonb` | there is no honest scalar type for it, and `capabilities.untypedColumns: false` says so | a comparison against such a member reads the document rather than the column: the same answer, unindexed |
+
+Two engine differences the emitter had to be taught, rather than the
+dialect papering over:
+
+- **The type discriminator's vocabulary.** `jsonb_typeof` answers six
+  names; the row decoder reads SQLite's in JavaScript. The dialect maps
+  the two that differ (`string` → `text`, `boolean` → `true`/`false`)
+  and declares `numericTypeNames: ['number']`, which is what the
+  emitter's numeric guard reads instead of `('integer', 'real')`.
+- **An external operand's parameter.** A PostgreSQL parameter's type is
+  resolved once for the whole statement, so one placeholder cannot be a
+  text member's operand in one branch and a numeric member's in
+  another — and the guard that keeps a row out of the wrong branch does
+  not stop the COERCION, because `AND` does not short-circuit. The
+  dialect declares `externalEncoding: 'json'`: the store binds the
+  value's JSON text, and the two branches compare in a space that holds
+  every scalar (text against text under `C`, number against number in
+  `jsonb`'s own numeric order).
+
+An identifier longer than 63 bytes is REFUSED rather than emitted:
+PostgreSQL truncates one silently, and two generated column names that
+share a prefix would become one, which is an index quietly serving
+another path.
+
+### Database → model (`src/introspect.js`)
+
+`store.introspect(options)` — and `introspectModel(connection, options)`
+under it — reads a live database's catalog and derives the
+`jaren-model` document that would produce it, beside a report of
+everything it could not.
+
+It is **read-only**, and a statement trace is what says so: every
+statement it issues begins `SELECT` (or `PRAGMA`, on SQLite). A derived
+model is an ANSWER; applying it is the migration planner's job and the
+operator's decision, and the two are deliberately not one act.
+
+It **never claims a byte-perfect round trip**. A physical shape carries
+less than the model that made it, and each gap is a report row with a
+stable code, an object and a detail, sorted, once:
+
+| code | what the shape does not carry |
+|---|---|
+| `document-members` | a document's unindexed members leave no trace, so the derived schema holds only what an index or the key names |
+| `key-source` | a text key column cannot say which document member filled it; `identity: 'uuid'` is derived and `options.keys` supplies the pointer |
+| `unmapped-view` | a view is not a shape a model can declare |
+| `unmapped-table` | a table with neither a document column nor a key |
+| `unmapped-column` | a generated column whose expression is not a member path this dialect wrote |
+| `unmapped-index` | an index over an expression, a predicate, or a column no member path explains |
+| `unmapped-type` | a column type no schema type maps back from — the member is derived untyped |
+| `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, and whether the other holds many, is not in the shape |
+
+`strict: true` refuses instead of returning a partial model, because a
+caller about to diff the result against a declared model needs to know
+the difference is real.
+
+What IS exact: every index, by name and by covered member paths in
+order; the type of every member an index covers, placed at the DEPTH
+the path names it at (so `$.nested.deep` rebuilds
+`nested.properties.deep`, and the column type round-trips); a
+database-allocated integer key; an entity's primary key, its unique and
+indexed columns, and its foreign keys with their on-delete behaviour.
+
+Two things make the two engines answer the same question. The dialect's
+catalog statements hand back tables, columns, indexes and foreign keys
+in ONE row shape — so the IR in the middle is engine-neutral — and only
+the dialect reads its own generated-column expression back into a member
+path (`memberPathOf`), because only the dialect wrote it. Indexes come
+back sorted by name on both, because a physical shape carries no record
+of the order a model declared them in and a derivation that inherited
+one engine's listing order would not be a derivation.
+
+### The portability matrix
+
+Everything a dialect may decline, and what the store does instead. A
+`—` is a feature the engine does not have; the store's behaviour is the
+common fallback, never a skip.
+
+| Capability | SQLite | PostgreSQL |
+|---|---|---|
+| `jsonb` | yes (`BLOB` + the JSONB family) | yes (`jsonb`) |
+| `generatedColumns` / `indexableGeneratedColumns` | yes, `VIRTUAL` | yes, `STORED` |
+| `untypedColumns` | yes (`ANY`) | — (the member is read from the document) |
+| `returning`, `upsert`, `savepoints` | yes | yes |
+| `immediateTransactions` | yes (`BEGIN IMMEDIATE`) | — (`tx.beginImmediate` is `BEGIN`) |
+| `groupByAlias` | yes | yes |
+| `alterTableFull` | — | yes |
+| `virtualTables` / `triggers` | yes (the R\*Tree mapping) | — (`physical: 'rtree'` maps back onto the four edge columns) |
+| `pragmas` | yes (the closed set) | — (a server is configured by its operator) |
+| `declaredSqlText` | yes | — (the drift check is the structural one) |
+| `foreignKeysAlwaysOn` | — (set and verified per connection) | yes |
+| `rowIdentity` | yes (`rowid`) | yes (the declared `rid` column) |
+| `savepointStartsTransaction` | yes | — (a top-level transaction is `BEGIN`/`COMMIT`) |
+
+And the two subsystems that are SQLite's own, declared on the
+CONNECTION rather than the dialect because they are a library's
+capability and not a syntax: the durable job queue (`jobs`) and the
+change ledger (`changeCapture`). A store asked for either on a
+connection that declares it absent is refused at open by name.
+
+One behavioural difference is neither a capability nor a fallback,
+because nothing can paper over it: **PostgreSQL aborts a transaction a
+statement failed in**, and every later statement in it is `25P02` until
+it ends. SQLite carries on. A body that means to catch a write's failure
+and continue has to say so — `scope.transaction()` opens a savepoint the
+failure rolls back to — and where it does not, the store reports the
+engine's own condition under `JD2088` (`class: 'aborted'`, not
+retryable) rather than a confusing failure of the next statement.
+
+### The injected driver (`src/drivers/postgres.js`)
+
+The driver imports nothing either. It takes a connection SOURCE —
+`{ connect() }` answering `{ query(text, values), release?() }`, which a
+`pg.Pool` is verbatim — acquires ONE client at open, holds it for the
+store's life and releases it exactly once at `close()`. Holding one is
+not a simplification: a connection owns one savepoint stack, and a store
+that took a different pooled client per statement would have `BEGIN` on
+one and `COMMIT` on another.
+
+Statements are prepared by name, from a counter that is monotonic across
+the PROCESS rather than across one adapter — a prepared statement
+belongs to the session, and a pooled client's session outlives the store
+that borrowed it, so a per-adapter counter would re-use a name for
+different SQL and the server refuses that. The names are deallocated at
+`close()`, so the session goes back to the pool clean. A cached plan
+whose result type changed under it (`0A000`, after a migration) is
+re-run unnamed rather than raised.
+
+Three normalizations, each forced by the wire rather than chosen:
+`int8` and `numeric` arrive as strings (they can exceed a double) and
+become JavaScript numbers, which is the same ceiling SQLite's INTEGER
+has; `json`/`jsonb` arrive parsed, because the client's type parsers are
+the host's configuration, and the row decoder reads text; and a
+JavaScript boolean is bound as 1 or 0, because a boolean member is 1 or
+0 in this mapping.
+
+`schema` is where the store lives. It is set on the acquired connection
+AND given to the dialect, so the DDL and the catalog reads agree — one
+value, two consumers. A migration's SHADOW replay is a second database,
+which on a file engine is `:memory:` and on a server has to be another
+schema: `migrate(..., { shadowDriver })` is where the host names one.
 
 ## What sits on top
 

@@ -16,10 +16,16 @@
  * fingerprint clash between DIFFERENT identities is disambiguated with
  * a suffix rather than collapsed.
  *
- * WHERE-clause use only: an INDEX over a registered function would
- * make the database unwritable from any connection that has not
- * registered the identical function — that schema-dependency hazard is
- * why the model format declares no UDF-expression indexes.
+ * WHERE-clause use only, and that is the difference between this hatch
+ * and a DECLARED index expression (MODEL-FORMAT §7A). An index over a
+ * registered function makes the database unwritable from a connection
+ * that has not registered the identical function; a fragment registered
+ * here is a QUERY's, discovered from the caller's document at run time,
+ * and indexing one would make a passing query a permanent schema
+ * dependency nobody declared. A model's `indexes[].expression` carries
+ * exactly that dependency in the model, where every store that opens it
+ * is handed the same declaration and one that cannot honour it refuses
+ * at open.
  *
  * Ring 3 extends the hatch to registry `pushable:'scalar'`
  * operators: a predicate fragment that uses a registered scalar operator

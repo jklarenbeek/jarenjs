@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.64.0",
+  "version": "0.65.0",
   "packageManager": "npm@11.12.1",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
@@ -92,6 +92,9 @@
     "commit:linux": "git commit -am v$npm_package_version && git tag v$npm_package_version",
     "commit:win32": "git commit -am v%npm_package_version% && git tag v%npm_package_version%",
     "push": "git push && git push --tags",
+    "benchmark:postgres": "node ./benchmark/postgres.js",
+    "postgres:up": "docker compose -f docker/postgres/compose.yaml up -d --build --wait",
+    "postgres:down": "docker compose -f docker/postgres/compose.yaml down -v",
     "benchmark": "node ./benchmark/index.js",
     "benchmark:jsonpath": "node ./benchmark/jsonpath.js",
     "benchmark:toml": "node ./benchmark/toml.js",
@@ -163,20 +166,21 @@
     "eslint-plugin-json": "^4.0.1",
     "globals": "^15.9.0",
     "lefthook": "^1.7.14",
+    "pg": "8.23.0",
     "rimraf": "^6.0.1",
     "turbo": "^2.1.1",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/app": "^0.64.0",
-    "@jarenjs/core": "^0.64.0",
-    "@jarenjs/formats": "^0.64.0",
-    "@jarenjs/forms": "^0.64.0",
-    "@jarenjs/json": "^0.64.0",
-    "@jarenjs/md": "^0.64.0",
-    "@jarenjs/refs": "^0.64.0",
-    "@jarenjs/validate": "^0.64.0",
-    "@jarenjs/view": "^0.64.0"
+    "@jarenjs/app": "^0.65.0",
+    "@jarenjs/core": "^0.65.0",
+    "@jarenjs/formats": "^0.65.0",
+    "@jarenjs/forms": "^0.65.0",
+    "@jarenjs/json": "^0.65.0",
+    "@jarenjs/md": "^0.65.0",
+    "@jarenjs/refs": "^0.65.0",
+    "@jarenjs/validate": "^0.65.0",
+    "@jarenjs/view": "^0.65.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

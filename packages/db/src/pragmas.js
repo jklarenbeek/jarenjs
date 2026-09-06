@@ -268,12 +268,18 @@ const firstValue = (row) => {
 export function configurePragmas(connection, requests) {
   const declared = new Set(connection.capabilities.configurablePragmas ?? []);
   const dialect = connection.dialect;
-  for (const name of requests.keys()) {
-    if (!declared.has(name)) {
-      throw new DbCompileError('JD0007',
-        `the driver cannot apply pragma '${name}': its binding declares ${
-          declared.size === 0 ? 'no configurable pragma' : [...declared].map((n) => `'${n}'`).join(', ')}`);
-    }
+  for (const [name, request] of requests) {
+    if (declared.has(name)) continue;
+    // Only an EXPLICIT request refuses. A default is the store's own
+    // preference — a busy timeout, WAL where the engine has one — and a
+    // connection whose vocabulary does not include it (another engine
+    // entirely, or a build that compiled the pragma out) opens with the
+    // effective record saying `null` rather than failing on a value
+    // nobody asked for.
+    if (!request.explicit) continue;
+    throw new DbCompileError('JD0007',
+      `the driver cannot apply pragma '${name}': its binding declares ${
+        declared.size === 0 ? 'no configurable pragma' : [...declared].map((n) => `'${n}'`).join(', ')}`);
   }
   const names = PRAGMA_NAMES.filter((name) => declared.has(name));
   const apply = (i) => {

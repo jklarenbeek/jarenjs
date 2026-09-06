@@ -54,13 +54,17 @@ export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
  * @param {any} connection
  * @returns {{ derived: 'virtual' | 'stored', rtree: boolean }}
  */
-function mappingFor(connection) {
+function mappingFor(connection, expressions = undefined) {
+  const registered = connection.capabilities?.deterministicIndexableFunctions === true;
   return {
-    derived: connection.capabilities?.deterministicIndexableFunctions === true
-      ? 'virtual' : 'stored',
+    derived: registered ? 'virtual' : 'stored',
     // the same reasoning for the R*Tree mapping: a build without the
     // module plans (and verifies) the B-tree shape
     rtree: connection.capabilities?.rtree === true,
+    // and the same for a declared index expression: this connection
+    // either computes it or calls the engine's own immutable function
+    expressions,
+    registered,
   };
 }
 
@@ -68,7 +72,12 @@ function mappingFor(connection) {
  * conventions on purpose — a collection cannot collide with it). */
 export const HISTORY_TABLE = '_jaren_migrations';
 /** The tables the engine owns beside a model's: never a shape-drift finding. */
-const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE, JOBS_TABLE, JOB_CHECKPOINTS_TABLE]);
+/** The tables this package owns. A model never declared one, so one
+ * found in a database is the engine's own bookkeeping rather than
+ * anybody's drift — the drift check skips them and the introspector
+ * does not derive them. */
+export const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE,
+  JOBS_TABLE, JOB_CHECKPOINTS_TABLE]);
 
 /**
  * The signature-grade identity of a model SHAPE.
@@ -171,7 +180,8 @@ function deriveStep(collection, plan, columnNames, note) {
  * @param {any} fromModel
  * @param {any} toModel
  * @param {{ id?: string, dialect?: any,
- *   derived?: 'virtual' | 'stored', rtree?: boolean }} [options]
+ *   derived?: 'virtual' | 'stored', rtree?: boolean,
+ *   expressions?: Record<string, any> }} [options]
  * @returns {{ migration: any, report: {
  *   renamed: { from: string, to: string }[],
  *   added: string[], removed: string[],
@@ -182,9 +192,13 @@ export function planMigration(fromModel, toModel, options = undefined) {
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
-  const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false };
-  const fromCollections = normalizeModel(fromModel);
-  const toCollections = normalizeModel(toModel);
+  const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false,
+    // a model that declares an index EXPRESSION resolves its functions
+    // here too: a plan is DDL, and DDL over a function this planner was
+    // not told about is DDL nobody can apply
+    expressions: options?.expressions, registered: options?.derived !== 'stored' };
+  const fromCollections = normalizeModel(fromModel, options?.expressions);
+  const toCollections = normalizeModel(toModel, options?.expressions);
 
   const steps = [];
   const report = {
@@ -838,15 +852,19 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
  * equality compares against, and the tests.
  * @param {any} connection
  * @param {any} model
+ * @param {Record<string, any>} [expressions] - the host's declared
+ *   index-expression functions, resolved into the DDL the same way the
+ *   open path resolves them
  * @returns {any} value-or-promise
  */
-export function createModelShape(connection, model) {
+export function createModelShape(connection, model, expressions = undefined) {
   const dialect = connection.dialect;
   /** @type {string[]} */
   const statements = [];
-  for (const collection of normalizeModel(model).values()) {
+  for (const collection of normalizeModel(model, expressions).values()) {
     statements.push(
-      ...planCollection(collection.name, collection, dialect, mappingFor(connection)).createSql);
+      ...planCollection(collection.name, collection, dialect,
+        mappingFor(connection, expressions)).createSql);
   }
   const entities = normalizeEntities(model);
   if (entities.size > 0) {
@@ -946,14 +964,22 @@ function normalizeSchemaSql(sql) {
  * @param {((connection: any) => any) | undefined} registerFunctions
  * @returns {any} value-or-promise of `string | null`
  */
-export function compareShapeToModel(driver, connection, model, registerFunctions) {
+export function compareShapeToModel(driver, connection, model, registerFunctions, expressions) {
+  // The comparison IS a text comparison: it builds the model's shape in
+  // a reference database and compares the two engines' stored CREATE
+  // statements. An engine that keeps none has nothing to compare, and
+  // says so here rather than reading an undefined statement — the
+  // structural drift check (columns, indexes, foreign-key tuples) runs
+  // per collection and per entity either way, and `declaredSqlText` is
+  // what tells a reader which half they got.
+  if (connection.dialect.capabilities.declaredSqlText !== true) return null;
   return chain(driver.open(':memory:', {}), (reference) =>
     chain(chain(registerDeriveFunctions(reference),
       () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () => {
       const finish = (result) => chain(reference.close(), () => result);
       let outcome;
       try {
-        outcome = chain(createModelShape(reference, model), () =>
+        outcome = chain(createModelShape(reference, model, expressions), () =>
           chain(schemaShapeOf(reference), (wanted) =>
             chain(schemaShapeOf(connection), (actual) => {
               const wantedText = JSON.stringify(wanted);
@@ -1104,6 +1130,7 @@ function runSteps(connection, migration, options) {
         ];
         const runNext = (j) => {
           if (j >= statements.length) {
+            if (dialect.capabilities.foreignKeysAlwaysOn === true) return null;
             return chain(connection.prepare(dialect.pragma.foreignKeyCheck()),
               (checkStatement) => chain(checkStatement.all([]), (violations) => {
                 if (violations.length > 0) {
@@ -1286,7 +1313,7 @@ function runSteps(connection, migration, options) {
  * @returns {any} value-or-promise
  */
 function validateTargetState(connection, model, options) {
-  const collections = [...normalizeModel(model).values()];
+  const collections = [...normalizeModel(model, options.expressions).values()];
   const entities = [...normalizeEntities(model).values()];
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -1329,7 +1356,8 @@ function validateTargetState(connection, model, options) {
   const verifyNext = (i) => {
     if (i >= collections.length) return null;
     const collection = collections[i];
-    const plan = planCollection(collection.name, collection, dialect, mappingFor(connection));
+    const plan = planCollection(collection.name, collection, dialect,
+      mappingFor(connection, options.expressions));
     const validate = options.compileSchema !== undefined
       ? options.compileSchema(collection.schema)
       : null;
@@ -1387,8 +1415,13 @@ function replayOnShadow(driver, shadowPath, baseline, migrations, model, options
       (options.registerFunctions !== undefined ? options.registerFunctions(shadow) : null));
     const apply = (i) => {
       if (i >= migrations.length) return null;
+      // a rebuild moves rows between tables while their keys point at
+      // the old one, so the switch comes off around it — on an engine
+      // that HAS a switch. One that always enforces cannot rebuild that
+      // way, and `alterTableFull` is why it never has to
       const bracket = migrations[i].steps.some(
-        (candidate) => candidate.kind === 'rebuild');
+        (candidate) => candidate.kind === 'rebuild')
+        && shadow.dialect.capabilities.foreignKeysAlwaysOn !== true;
       return chain(
         bracket ? shadow.exec(shadow.dialect.pragma.foreignKeys(false)) : null,
         () => chain(runSteps(shadow, migrations[i], options), () =>
@@ -1396,13 +1429,13 @@ function replayOnShadow(driver, shadowPath, baseline, migrations, model, options
             () => apply(i + 1))));
     };
     const run = () => chain(registered, () =>
-      chain(createModelShape(shadow, baseline), () => chain(apply(0), () => {
+      chain(createModelShape(shadow, baseline, options.expressions), () => chain(apply(0), () => {
         if (model === undefined) return null;
-        const target = [...normalizeModel(model).values()];
+        const target = [...normalizeModel(model, options.expressions).values()];
         const verifyNext = (i) => {
           if (i >= target.length) return null;
           const plan = planCollection(target[i].name, target[i], shadow.dialect,
-            mappingFor(shadow));
+            mappingFor(shadow, options.expressions));
           return chain(
             verifyShape(shadow, plan, target[i].name, target[i].docPath),
             () => verifyNext(i + 1));
@@ -1555,7 +1588,7 @@ export function migrationStatus(target, migrations, options = {}) {
  * @param {any[]} migrations
  * @param {{ baseline: any, model?: any, compileSchema?: Function,
  *   dryRun?: boolean, batchSize?: number, onProgress?: Function,
- *   shadow?: boolean, shadowPath?: string,
+ *   shadow?: boolean, shadowPath?: string, shadowDriver?: any,
  *   signal?: AbortSignal, deadline?: number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
  *   `signal` and `deadline` cancel between migrations, steps and
@@ -1598,6 +1631,12 @@ export function migrate(target, migrations, options) {
     assertionBounds: normalizeAssertionBounds(options.assertionBounds),
     onProgress: options.onProgress,
     registerFunctions: options.registerFunctions,
+    // the host's declared index-expression functions ride to every
+    // planner and every connection this run opens — the shadow's
+    // baseline, the reference database and the real store all resolve a
+    // declared expression against the same declarations the open path
+    // was given, or they would plan DDL nobody can apply
+    expressions: options.expressions,
     model: options.model,
     runtime,
     check,
@@ -1681,7 +1720,8 @@ export function migrate(target, migrations, options) {
 
           const shadowRun = options.shadow === false
             ? null
-            : replayOnShadow(target.driver, options.shadowPath ?? ':memory:',
+            : replayOnShadow(options.shadowDriver ?? target.driver,
+              options.shadowPath ?? ':memory:',
               options.baseline, migrations, options.model, runOptions);
 
           return chain(shadowRun, () => {
@@ -1703,8 +1743,9 @@ export function migrate(target, migrations, options) {
                       dialect.ddl.dropTable(migrationStep.table),
                       dialect.ddl.renameTable(`${migrationStep.table}__rebuild`,
                         migrationStep.table),
-                      ...migrationStep.indexes,
-                      dialect.pragma.foreignKeyCheck());
+                      ...migrationStep.indexes);
+                    if (dialect.capabilities.foreignKeysAlwaysOn !== true)
+                      rendered.push(dialect.pragma.foreignKeyCheck());
                   }
                   else if (migrationStep.kind === 'jslt')
                     rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
@@ -1749,7 +1790,8 @@ export function migrate(target, migrations, options) {
               const bracket = migration.steps.some(
                 (candidate) => candidate.kind === 'rebuild');
               return chain(
-                bracket ? connection.exec(dialect.pragma.foreignKeys(false)) : null,
+                bracket && dialect.capabilities.foreignKeysAlwaysOn !== true
+                  ? connection.exec(dialect.pragma.foreignKeys(false)) : null,
                 () => chain(connection.exec(dialect.tx.beginImmediate), () => {
                 const body = () => chain(runSteps(connection, migration, runOptions), () =>
                   chain(last && options.model !== undefined
@@ -1770,6 +1812,7 @@ export function migrate(target, migrations, options) {
                       migration.to, migrationChecksum(migration),
                       migration.steps.length]))));
                 const restore = () => (bracket
+                  && dialect.capabilities.foreignKeysAlwaysOn !== true
                   ? connection.exec(dialect.pragma.foreignKeys(true)) : null);
                 const commit = () => chain(connection.exec(dialect.tx.commit), () =>
                   chain(restore(), () => {

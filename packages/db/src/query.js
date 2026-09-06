@@ -138,6 +138,16 @@ function bindable(value) {
  */
 function slotValue(slot, externals, anchors = null) {
   if ('literal' in slot) return slot.literal;
+  // a JSON-encoded external: the dialect asked for the value's JSON
+  // text because one placeholder has to hold whatever type the member
+  // turns out to be, and a statically typed parameter cannot. An
+  // ABSENT external stays absent — encoding it as `null` would answer
+  // a query the caller never bound instead of raising the engine's own
+  // missing-external error
+  if ('external' in slot && slot.json === true) {
+    const value = externals[slot.external];
+    return value === undefined ? undefined : JSON.stringify(value);
+  }
   if ('derived' in slot)
     return derivedSlotValue(slot.derived, externals[slot.derived.external]);
   if ('typed' in slot) {
@@ -682,15 +692,11 @@ export function createQueryEngine(context) {
     const eqpParams = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
     return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
       chain(statement.all(eqpParams), (rows) => {
-        const fullScan = rows.some((row) => {
-          const detail = String(row.detail);
-          return detail.startsWith(`SCAN ${physical.table}`)
-            && !detail.includes('USING INDEX');
-        });
-        if (fullScan) {
+        const lines = dialect.explainLines(rows);
+        if (lines.some((line) => dialect.isFullScan(line, [physical.table]))) {
           throw profileRefusal(
             `the profile refuses a full-table scan of '${collection.name}' `
-            + `(${rows.map((row) => String(row.detail)).join('; ')})`);
+            + `(${lines.join('; ')})`);
         }
         entry.scanChecked = true;
         return null;
@@ -1433,7 +1439,7 @@ export function createQueryEngine(context) {
           ...entry.planned.series,
           counts: entry.seriesCounts === null ? null : { ...entry.seriesCounts },
         },
-        scanNarrative: rows.map((row) => String(row.detail)).join('; '),
+        scanNarrative: dialect.explainLines(rows).join('; '),
       })));
   };
 
@@ -1730,14 +1736,10 @@ export function createEntityQueryEngine(context) {
         // database's narrative names the alias; a bare table name is
         // the residual fetcher's spelling
         const tables = entry.planned.referenced.map((name) => mapping.entities[name].table);
-        const scanned = rows.find((row) => {
-          const detail = String(row.detail);
-          return (/^SCAN t\d+\b/.test(detail) || tables.some((table) => detail.startsWith(`SCAN ${table}`)))
-            && !detail.includes('USING INDEX');
-        });
-        if (scanned !== undefined) {
+        const lines = dialect.explainLines(rows);
+        if (lines.some((line) => dialect.isFullScan(line, tables))) {
           throw profileEntityRefusal('the profile refuses a full-table scan of '
-            + `${entry.planned.referenced.join(', ')} (${rows.map((row) => String(row.detail)).join('; ')})`,
+            + `${entry.planned.referenced.join(', ')} (${lines.join('; ')})`,
           entities.get(entry.planned.referenced[0])?.docPath);
         }
         entry.scanChecked = true;
@@ -2004,7 +2006,7 @@ export function createEntityQueryEngine(context) {
         // first binding, then each one and the equalities that attached
         // it. Empty for a single-binding plan
         joins: entry.planned.plan.joins,
-        scanNarrative: rows.map((row) => String(row.detail)).join('; '),
+        scanNarrative: dialect.explainLines(rows).join('; '),
       })));
   };
 
@@ -2239,7 +2241,10 @@ export function createLoadEngine(context, entityName) {
         if (named.has(fk.column)) continue; // a declared via property
         parts.push(`${slText(fk.column)}, ${aliasSql}.${q(fk.column)}`);
       }
-      parts.push(`${slText('__doc')}, ${dialect.jsonText(docSql)}`);
+      // EMBEDDED, not rendered: the enclosing object carries the
+      // document as a nested JSON value, which on an engine with one
+      // JSON type is the column itself and on SQLite is `json()`
+      parts.push(`${slText('__doc')}, ${dialect.jsonEmbed(docSql)}`);
       for (const include of node.includes)
         parts.push(`${slText(include.field)}, ${renderInclude(node, include, alias, param, emitters)}`);
       return parts.join(', ');
@@ -2286,7 +2291,7 @@ export function createLoadEngine(context, entityName) {
       // engine's order); only plain mapped columns order natively
       const value = term.ref.flavor === 'entity-column'
         ? `${rendered.aliasSql}.${q(term.ref.column)}`
-        : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments));
+        : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments), 'text');
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
@@ -2304,10 +2309,10 @@ export function createLoadEngine(context, entityName) {
         + `WHERE ${conditions.join(' AND ')} ORDER BY ${orderSql.join(', ')}`
         + windowClause(child);
     if (relation.kind === 'oneToOne') {
-      return `(SELECT json_object(${rendered.projection()}) FROM `
+      return `(SELECT ${dialect.jsonObject(rendered.projection())} FROM `
         + `(${inner} ${dialect.limitClause(1, undefined)}) AS ${q(childAlias)})`;
     }
-    return `(SELECT ${dialect.jsonAgg(`json_object(${rendered.projection()})`)} `
+    return `(SELECT ${dialect.jsonAgg(dialect.jsonObject(rendered.projection()))} `
       + `FROM (${inner}) AS ${q(childAlias)})`;
   };
 

@@ -803,16 +803,93 @@ both drivers again with pushdown forced off — indexed and unindexed —
 and every case must answer identically, plan mode and reason codes
 included.
 
-## What SQLite-only means, frankly
+## Two backends, frankly
 
-SQLite is the supported backend — 3.45 or newer, on `node:sqlite`,
-`bun:sqlite`, or your injected wasm build — and nothing else is
-promised. The dialect seam exists and is tested against a double, but
-no second dialect ships. Concretely: there is **no statement timeout**
-(the drivers expose no interrupt; the capability slot is honestly
-`false`), no server, no replication, and cross-process concurrency is
-SQLite's own story (WAL plus a busy timeout, both set and visible on
-`store.capabilities`).
+SQLite is the primary backend — 3.45 or newer, on `node:sqlite`,
+`bun:sqlite`, or your injected wasm build — and **PostgreSQL 16+** is
+the second, through `@jarenjs/db/postgres`:
+
+```js
+import { openStore } from '@jarenjs/db';
+import { postgresDriver } from '@jarenjs/db/postgres';
+import { Pool } from 'pg';                    // yours, not ours
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const store = await openStore(model, {
+  driver: postgresDriver(pool, { schema: 'app' }),
+});
+```
+
+The client is INJECTED. `@jarenjs/db` depends on nothing outside
+`@jarenjs/*` and imports no PostgreSQL package; anything with
+`connect()` answering `{ query(text, values), release?() }` will do, and
+a `pg.Pool` is one as it stands. One client is acquired at open, held
+for the store's life (a connection owns one savepoint stack) and
+released exactly once at `close()`.
+
+The same model, the same query documents and the same differential
+oracle run on both. What differs is declared rather than discovered:
+
+| | SQLite | PostgreSQL |
+|---|---|---|
+| documents | JSONB in a `BLOB` of a `STRICT` table | `jsonb` |
+| an indexed path | a `VIRTUAL` generated column | a `STORED` one, guarded by `jsonb_typeof` |
+| text ordering | the default `BINARY` collation | `COLLATE "C"`, which is the same bytes |
+| a collection's order | the implicit `rowid` | a declared `rid bigserial` |
+| `integer` and `number` | `INTEGER` and `REAL` | both `numeric` |
+| a `boolean` member | `INTEGER` 1/0 | `smallint` 1/0 |
+| an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
+| configuration | the closed pragma set, read back at open | the operator's; `store.capabilities.pragmas` is all `null` |
+| drift detection | the stored `CREATE` text, exactly | the structural check: columns, indexes, foreign keys |
+| the job queue, the change ledger and live queries | yes | no — `capabilities.jobs` and `capabilities.changeCapture` are `false`, and asking for one is a coded refusal at open |
+| maintenance (checkpoint, integrity, optimize) | yes | no — every one of them IS a pragma |
+| a spatial `physical: 'rtree'` | an R\*Tree virtual table | the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
+| a transaction a statement failed in | continues | is aborted until it ends (`JD2088`); catch-and-continue needs a nested `transaction()` |
+| `ALTER TABLE` | additive only | full, so a rebuild is never needed |
+
+Neither backend has a **statement timeout** (`capabilities.statementTimeout`
+is `false` on both) or **row estimates**. There is no replication.
+Cross-process concurrency on SQLite is its own story — WAL plus a busy
+timeout, both set and visible on `store.capabilities`; on PostgreSQL it
+is the server's, and a serialization failure or a deadlock arrives as
+`class: 'busy'`, `retryable: true` — the same verdict, and the same
+caller branch, a locked SQLite file gets.
+
+### What PostgreSQL costs
+
+`npm run benchmark:postgres` runs the same model, the same documents and
+the same query documents through the same store on both engines, checks
+that they answered identically, and prints the difference. It is **not**
+a rival comparison and reading it as one would be reading it wrong: an
+in-process database against a server over a socket loses every row that
+pays a round trip, and the shape of the loss is the point.
+
+Measured here at 500 documents — PostgreSQL 17.5 in a container on the
+same host, SQLite in memory, Node 24.19.0 — every row a loss except the
+first, and every one expected:
+
+| operation | ratio, PostgreSQL over SQLite |
+|---|---|
+| open the store (create or verify the shape) | 0.9× |
+| insert one document | 14.5× |
+| get one document by key | 12.8× |
+| an indexed equality over 500 documents | 1.6× |
+| an indexed range over 500 documents | 1.6× |
+| an unindexed equality over 500 documents | 1.5× |
+| one transaction with one write | 4.7× |
+| apply one migration (one new index) | 4.3× |
+
+The reading: a per-ROW operation pays about thirteen to fifteen times,
+because each one is a round trip that SQLite makes as a function call. A
+whole-collection query pays about one and a half, because the round trip
+is amortized over five hundred rows and the rest is the server doing the
+same work SQLite did. Two consequences worth stating: a loop of
+`insert()` is the wrong shape on PostgreSQL in a way it is not on SQLite,
+and pushdown matters MORE there — an unindexed scan that comes back as
+five hundred rows for the engine to filter would pay the per-row price,
+not the per-query one.
+
+Your numbers will differ; the command is the point, not the table.
 
 ## The relational half (phase B)
 
@@ -981,6 +1058,86 @@ is over §12's default `maxMaintained` at ten thousand readings — the
 bound errors rather than degrading, and raising it is a decision
 somebody makes.
 
+## Indexing a computed value
+
+An index may name a computation instead of a member:
+
+```js
+const model = {
+  $model: '0.1',
+  collections: {
+    users: {
+      schema: { type: 'object', properties: { id: { type: 'string' }, email: { type: 'string' } } },
+      key: '/id',
+      indexes: [{
+        name: 'by_lower_email',
+        expression: { call: 'lower', args: [{ member: '$.email' }] },
+        unique: true,
+      }],
+    },
+  },
+};
+
+const store = await openStore(model, {
+  driver: nodeDriver(),
+  expressions: {
+    lower: {
+      arity: 1,
+      deterministic: true,
+      apply: (value) => String(value).toLowerCase(),  // SQLite registers this
+      sql: 'lower',                                   // PostgreSQL calls its own
+    },
+  },
+});
+
+await store.collection('users').insert({ id: 'a', email: 'ANN@Example.COM' });
+await store.collection('users').insert({ id: 'b', email: 'ann@example.com' });
+// JD2001 — the unique index is over the LOWERED value
+```
+
+The expression is a closed AST — a member, a JSON scalar, or a call —
+and **never SQL text**. The function is DECLARED by you and resolved at
+open: an unknown name, a wrong arity, one not declared `deterministic`,
+or a declaration missing the half this engine needs is `JD0004` before a
+single statement runs. That is not ceremony: an index over a function is
+a schema dependency, and a database whose column is computed by
+`lower(…)` cannot be written from a connection that has no `lower`.
+
+`@jarenjs/linq/model`'s `expressionIndex()` writes the same document
+from a lambda: `expressionIndex({ call: 'lower', args: [(d) => d.email] },
+{ unique: true })`.
+
+## Reading a database back into a model
+
+`store.introspect()` answers the `jaren-model` document a live
+database's shape says it is, and a report of everything the shape
+cannot carry:
+
+```js
+const { model, report } = await store.introspect({ keys: { users: '/id' } });
+// model  — a valid jaren-model: collections, keys, indexes with their paths,
+//          entities with their keys, unique/indexed columns and foreign keys
+// report — [{ code, object, detail }], sorted, one row per gap
+```
+
+It issues no DDL and no DML — every statement it runs begins `SELECT` —
+so reading a production database is a read. What comes back is exact
+where the shape carries the fact and REPORTED where it does not: a
+document's unindexed members are not in the physical shape
+(`document-members`), a text key column cannot say which member filled
+it (`key-source` — `options.keys` supplies the pointer), a view cannot
+be declared (`unmapped-view`), a foreign key cannot say which side
+declared the edge (`ambiguous-relation`). `strict: true` refuses rather
+than answering a partial model.
+
+The derived model is usable as a migration's `from`: read a database,
+plan against your declared model, and an unchanged shape plans nothing.
+SQLite and PostgreSQL derive the same logical model from equivalent
+databases — same collections, same keys, same index names and paths,
+same report rows — with the one difference the PostgreSQL mapping
+states: `numeric` carries both JSON number types, so an `integer`
+member reads back as `number`.
+
 ## Sync-readiness — what exists and what does not
 
 The change stream is an ordered log of RFC 6902 patches with a
@@ -1129,6 +1286,7 @@ Every subpath a consumer can import, derived from the manifest by
 |---|---|---|
 | `@jarenjs/db` | JavaScript | declared |
 | `@jarenjs/db/node` | JavaScript | declared |
+| `@jarenjs/db/postgres` | JavaScript | declared |
 | `@jarenjs/db/bun` | JavaScript | declared |
 | `@jarenjs/db/wasm` | JavaScript | declared |
 | `@jarenjs/db/typed` | JavaScript | declared |

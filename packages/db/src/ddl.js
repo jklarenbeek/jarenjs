@@ -18,6 +18,7 @@ import { analyzeQuery } from '@jarenjs/json/query';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
+import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
 
 /** The fixed physical column names of the 0.1 mapping. */
 export const KEY_COLUMN = 'key';
@@ -137,6 +138,39 @@ export function schemaTypeAt(schema, segments) {
 
 /** The scalar schema types a derived index cannot be declared over. */
 const SCALAR_TYPES = new Set(['string', 'integer', 'number', 'boolean']);
+
+/**
+ * The comparison KIND a declared schema type implies — what a column
+ * over that member holds, and therefore how its expression has to read
+ * the member out of the document. On a dynamically typed engine the
+ * kind changes nothing; on one whose columns carry a real SQL type it
+ * is the difference between a `text` column and a type error.
+ * @param {string | undefined} schemaType
+ * @returns {'text' | 'number' | 'boolean' | undefined}
+ */
+export function columnKindFor(schemaType) {
+  switch (schemaType) {
+    case 'string': return 'text';
+    case 'integer': case 'number': return 'number';
+    case 'boolean': return 'boolean';
+    default: return undefined;
+  }
+}
+
+/**
+ * The shape row for the identity column a dialect adds to every table
+ * it creates, or none. It is an ORDINARY column as far as the catalog
+ * is concerned — the engine fills it, but nothing generates it from
+ * another column — so the drift check sees it exactly as it sees the
+ * key and the document.
+ * @param {any} dialect
+ * @returns {{ name: string, type: string, generated: boolean }[]}
+ */
+function identityColumnExpected(dialect) {
+  return dialect.identityColumn === undefined
+    ? []
+    : [{ name: dialect.identityColumn.name, type: dialect.identityColumn.type, generated: false }];
+}
 
 /**
  * Whether a schema node types its value as `array` and nothing else —
@@ -402,7 +436,10 @@ export function planCollection(name, collection, dialect, options = undefined) {
   const mapping = options?.derived === 'stored' ? 'stored' : 'virtual';
   const rtreeCapable = options?.rtree !== false;
   const keyType = collection.identity === 'integer'
-    ? dialect.typeFor('integer', 'key')
+    // a DATABASE-allocated key: on an engine whose auto-allocation is a
+    // column property rather than a consequence of the integer type,
+    // that property IS the declared type
+    ? (dialect.autoKeyType ?? dialect.typeFor('integer', 'key'))
     : collection.identity === 'uuid'
       ? dialect.typeFor('string', 'key')
       : dialect.typeFor(
@@ -422,8 +459,45 @@ export function planCollection(name, collection, dialect, options = undefined) {
   const virtualTables = [];
   /** @type {Map<string, string>} */
   const physicalByKey = new Map();
+  /** @type {{ column: string, canonical: string, functions: string[] }[]} */
+  const expressions = [];
 
   for (const index of collection.indexes) {
+    // an EXPRESSION index: one column over the declared computation,
+    // shared by every index that declares the same canonical expression
+    if (index.expression !== undefined) {
+      const known = columnByCanonical.has(index.canonical);
+      const columnName = generatedColumnName(expressionStem(index.expression),
+        columnByCanonical, taken, { key: index.canonical, suffix: 'x' });
+      if (!known) {
+        const sql = expressionSql(index.expression, dialect, {
+          docColumnSql: dialect.quoteIdentifier(DOC_COLUMN),
+          declarations: options?.expressions ?? {},
+          registered: options?.registered !== false,
+          docPath: `${index.docPath}/expression`,
+          segmentsOf: (member) =>
+            compileIndexPath(member, `${index.docPath}/expression`).segments,
+        });
+        generated.push({
+          name: columnName,
+          // an expression's value is TEXT: one declared function, one
+          // spelling of its answer, on every engine that computes it
+          type: dialect.typeFor('string', 'generated'),
+          kind: 'text',
+          pathText: null,
+          expression: sql,
+          canonical: index.canonical,
+        });
+        expressions.push({ column: columnName, canonical: index.canonical,
+          functions: expressionFunctions(index.expression) });
+      }
+      indexes.push({
+        name: `${name}_${index.name}`,
+        unique: index.unique,
+        columns: [columnName],
+      });
+      continue;
+    }
     const columns = [];
     let noBtree = false;
     for (let i = 0; i < index.paths.length; i++) {
@@ -448,9 +522,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
       const known = columnByCanonical.has(canonical);
       const columnName = generatedColumnName(canonical, columnByCanonical, taken);
       if (!known) {
+        const schemaType = schemaTypeAt(collection.schema, segments);
         generated.push({
           name: columnName,
-          type: dialect.typeFor(schemaTypeAt(collection.schema, segments), 'generated'),
+          type: dialect.typeFor(schemaType, 'generated'),
+          kind: columnKindFor(schemaType),
           pathText,
           canonical,
         });
@@ -511,6 +587,10 @@ export function planCollection(name, collection, dialect, options = undefined) {
     keyType,
     generated,
     derived,
+    /** The declared-expression columns, with the functions each calls:
+     * what a store registers before it can so much as SELECT from the
+     * table it created. */
+    expressions,
     columnByCanonical,
     virtualTables,
     createSql,
@@ -518,6 +598,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
       columns: [
         { name: KEY_COLUMN, type: keyType, generated: false },
         { name: DOC_COLUMN, type: dialect.docColumnType, generated: false },
+        ...identityColumnExpected(dialect),
         // a STORED derived column is an ordinary one: the flag is what
         // `pragma_table_xinfo` reports, and it is the difference a file
         // moved between the two physical mappings shows up as
@@ -639,6 +720,13 @@ export function comparableDeclaredSql(sql) {
  */
 function verifyDeclaredSql(connection, plan, disagree) {
   const dialect = connection.dialect;
+  // An engine that does not keep each object's CREATE text has nothing
+  // to compare: the structural check above (columns, their types and
+  // generatedness, the indexes and their covered columns in order, and
+  // for an entity its foreign-key tuples) is the whole of the drift
+  // check there, and `capabilities.declaredSqlText` is what says so
+  // rather than a silent pass.
+  if (dialect.capabilities.declaredSqlText !== true) return null;
   const planned = new Map();
   // an R*Tree virtual table is NOT owned by the collection table —
   // `declaredSql` is scoped to `tbl_name`, and a virtual table's is
@@ -716,15 +804,19 @@ export function verifyShape(connection, plan, collection, docPath) {
   };
   return chain(connection.prepare(dialect.introspect.columns(plan.table)), (columnsStatement) =>
     chain(columnsStatement.all([]), (columnRows) => {
+      // both sides through the dialect's own reduction, so a declared
+      // type the catalog reports differently (an auto-key's allocation
+      // clause, a width the engine normalizes) compares as itself
+      const comparableType = dialect.comparableColumnType;
       const actual = columnRows
         .map((row) => ({
           name: String(row.name),
-          type: String(row.type).toUpperCase(),
+          type: comparableType(String(row.type)),
           generated: Number(row.hidden) !== 0,
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       const expected = [...plan.expected.columns]
-        .map((c) => ({ ...c, type: c.type.toUpperCase() }))
+        .map((c) => ({ ...c, type: comparableType(c.type) }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       if (actual.length !== expected.length) {
         // name what is missing or extra: a count alone sends the reader
@@ -887,8 +979,9 @@ export function planEntity(name, entityMapping, entities, dialect) {
         targetColumn: column.references.column ?? null,
       })),
     expected: {
-      columns: columns
-        .map((column) => ({ name: column.name, type: column.type, generated: false }))
+      columns: [...columns
+        .map((column) => ({ name: column.name, type: column.type, generated: false })),
+      ...identityColumnExpected(dialect)]
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
       indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
@@ -936,8 +1029,9 @@ export function planJoinTable(tableName, join, entities, dialect) {
       targetColumn: column.references.column ?? null,
     })),
     expected: {
-      columns: columns
-        .map((column) => ({ name: column.name, type: column.type, generated: false }))
+      columns: [...columns
+        .map((column) => ({ name: column.name, type: column.type, generated: false })),
+      ...identityColumnExpected(dialect)]
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
       indexes: [],
     },

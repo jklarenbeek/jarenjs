@@ -133,9 +133,20 @@ export function emitPlan(plan, dialect, physical) {
     return dialect.parameterRef(sink.length, slotName(slot));
   };
 
-  /** SQL for a ref's VALUE: the generated column when one exists. */
-  const valueOf = (ref) =>
-    (ref.column !== null ? q(ref.column) : dialect.jsonExtract(docColumn, pathTextOf(ref)));
+  /**
+   * SQL for a ref's VALUE: the generated column when one exists AND
+   * this dialect can compare that column's declared type against a
+   * value of `kind`. Where it cannot — an engine whose columns carry a
+   * real SQL type, asked to compare a text column with a number — the
+   * member is read out of the document instead. Same answer, unindexed,
+   * and never a type error the row's own type guard already excludes.
+   * @param {any} ref
+   * @param {'any' | 'text' | 'number' | 'boolean'} [kind]
+   */
+  const valueOf = (ref, kind = 'any') =>
+    (ref.column !== null && dialect.columnUsableFor(ref.type, kind)
+      ? q(ref.column)
+      : dialect.jsonExtract(docColumn, pathTextOf(ref), kind));
   const pathTextOf = (ref) => {
     const text = dialect.jsonPathText(ref.segments);
     if (text === null) {
@@ -149,13 +160,66 @@ export function emitPlan(plan, dialect, physical) {
   /** One projected member: its value beside its JSON type, under a
    * suffixed pair of names the decoder reads back. */
   const projectedPair = (ref, suffix) =>
-    `CASE WHEN ${typeOf(ref)} IN ('object', 'array') `
+    `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
     + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathTextOf(ref)))} `
-    + `ELSE ${dialect.jsonExtract(docColumn, pathTextOf(ref))} END AS ${q(`v${suffix}`)}, `
-    + `${typeOf(ref)} AS ${q(`t${suffix}`)}`;
+    // a SCALAR leaf comes back as the value the decoder reads: the
+    // engine's own scalar where it has one, its text where every
+    // member is one JSON type and a CASE could not answer two
+    + `ELSE ${dialect.jsonExtract(docColumn, pathTextOf(ref), 'scalar')} `
+    + `END AS ${q(`v${suffix}`)}, ${typeOf(ref)} AS ${q(`t${suffix}`)}`;
 
   const sl = dialect.stringLiteral;
-  const NUMERIC = () => `(${sl('integer')}, ${sl('real')})`;
+  /** The discriminator's spellings for a JSON NUMBER, as this engine
+   * answers them: SQLite keeps `integer` and `real` apart, an engine
+   * with one JSON number type answers one name. */
+  const NUMERIC = () => `(${dialect.numericTypeNames.map(sl).join(', ')})`;
+
+  /** The comparison kind a member's DECLARED schema type implies —
+   * what a fold or an ordering over it reads the member as. An
+   * undeclared type has none, and the member is read whole. */
+  const kindOf = (ref) => {
+    switch (ref?.type) {
+      case 'integer': case 'number': return 'number';
+      case 'string': return 'text';
+      case 'boolean': return 'boolean';
+      default: return 'any';
+    }
+  };
+
+  /**
+   * One aggregate's argument, read at the kind the FOLD needs rather
+   * than at the member's own: a sum or an average is arithmetic
+   * whatever the schema says, an extreme is the member's own ordering.
+   *
+   * An engine whose columns carry a real SQL type has no fold over a
+   * member with no declared type — there is no `SUM` of a JSON value —
+   * so the whole document runs in the set residual, named, rather than
+   * reaching the database as SQL it will refuse.
+   * @param {string} fn
+   * @param {any} ref
+   * @returns {string | null}
+   */
+  const foldValue = (fn, ref) => {
+    if (ref === null || ref === undefined) return null;
+    const kind = fn === 'sum' || fn === 'avg' ? 'number' : kindOf(ref);
+    if (kind === 'any' && dialect.capabilities.untypedColumns !== true) {
+      throw new UnrepresentablePath(
+        `a ${fn} over a member the schema does not type has no fold on this engine`);
+    }
+    return valueOf(ref, kind);
+  };
+
+  /**
+   * One reference to an EXTERNAL's bound value. The slot carries the
+   * dialect's encoding with it, because the binder has no dialect: a
+   * `json` slot binds the value's JSON text, which is the one encoding
+   * a placeholder can hold whatever the member's type turns out to be.
+   * @param {string} name
+   * @returns {string}
+   */
+  const externalSlot = (name) => param(dialect.externalEncoding === 'json'
+    ? { external: name, json: true }
+    : { external: name });
 
   /** The slot a bare column comparison binds through: a plan-time
    * literal, or the scalar one of the plan's own seeks answers. An
@@ -174,11 +238,11 @@ export function emitPlan(plan, dialect, physical) {
    */
   const emitCmp = (pred) => {
     const jt = typeOf(pred.ref);
-    const value = valueOf(pred.ref);
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     if ('lit' in pred.operand) {
       const lit = pred.operand.lit;
-      const kind = typeof lit === 'number' ? 'number' : 'string';
+      const kind = typeof lit === 'number' ? 'number' : 'text';
+      const value = valueOf(pred.ref, kind);
       const typeGuard = kind === 'number'
         ? `${jt} IN ${NUMERIC()}`
         : `${jt} = ${sl('text')}`;
@@ -198,6 +262,7 @@ export function emitPlan(plan, dialect, physical) {
       // a seek's scalar comes from a column of DECLARED type, so its
       // JSON type is known here: one guarded comparison, no branch
       const seek = (plan.seeks ?? []).find((entry) => entry.name === pred.operand.seek);
+      const value = valueOf(pred.ref, seek.kind);
       const typeGuard = seek.kind === 'number'
         ? `${jt} IN ${NUMERIC()}`
         : `${jt} = ${sl('text')}`;
@@ -205,14 +270,21 @@ export function emitPlan(plan, dialect, physical) {
         + `${param({ typed: { seek: seek.name, type: seek.kind } })})`;
     }
     // external operand: its JSON type is only knowable at bind time —
-    // guard BOTH sides per branch (text with text, number with number)
+    // guard BOTH sides per branch (text with text, number with number),
+    // and read the member at the branch's own kind. Both sides go
+    // through the dialect's external forms, because on an engine whose
+    // parameters carry a type the guard does not stop the coercion: the
+    // value is bound as JSON there and compared in JSON space
     const name = pred.operand.ext;
+    const external = () => externalSlot(name);
+    const compare = (kind) => dialect.externalCompare(valueOf(pred.ref, kind), kind);
+    const against = (kind) => dialect.externalRef(external(), kind);
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
-      + `${dialect.valueTypeOf(param({ external: name }))} = ${sl('text')} AND `
-      + `${value} ${pred.op === 'ne' ? '=' : symbol} ${param({ external: name })})`;
+      + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `
+      + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${against('text')})`;
     const numberBranch = `(${jt} IS NOT NULL AND ${jt} IN ${NUMERIC()} AND `
-      + `${dialect.valueTypeOf(param({ external: name }))} IN ${NUMERIC()} AND `
-      + `${value} ${pred.op === 'ne' ? '=' : symbol} ${param({ external: name })})`;
+      + `${dialect.valueTypeOf(external())} IN ${NUMERIC()} AND `
+      + `${compare('number')} ${pred.op === 'ne' ? '=' : symbol} ${against('number')})`;
     const equalInSomeBranch = `(${textBranch} OR ${numberBranch})`;
     return pred.op === 'ne'
       ? `(${jt} IS NOT NULL AND NOT ${equalInSomeBranch})`
@@ -273,7 +345,7 @@ export function emitPlan(plan, dialect, physical) {
         return `${pred.name}(${dialect.jsonText(docColumn)}, ${sl(pred.mount ?? '/$where')})`;
       case 'strop': {
         const jt = typeOf(pred.ref);
-        const form = stropForm(dialect, param, valueOf(pred.ref), pred);
+        const form = stropForm(dialect, param, valueOf(pred.ref, 'text'), pred);
         return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
       }
       case 'bboxOverlap': {
@@ -364,13 +436,13 @@ export function emitPlan(plan, dialect, physical) {
     : plan.group !== null
       ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`)),
         ...plan.group.aggregates.map((entry, i) =>
-          `${dialect.groupAggregate(entry.fn, entry.ref === null ? null : valueOf(entry.ref))} `
+          `${dialect.groupAggregate(entry.fn, foldValue(entry.fn, entry.ref))} `
           + `AS ${q(`a${i}`)}`)].join(', ')
       : plan.bucket !== null
         ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
         ...plan.bucket.aggregates.map((entry) =>
-          `${dialect.groupAggregate(entry.fn,
-            entry.ref === null ? null : valueOf(entry.ref))} AS ${q(entry.as)}`)].join(', ')
+          `${dialect.groupAggregate(entry.fn, foldValue(entry.fn, entry.ref))} `
+          + `AS ${q(entry.as)}`)].join(', ')
       : plan.aggregate === null
         ? (plan.project === 'document'
           ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
@@ -391,14 +463,22 @@ export function emitPlan(plan, dialect, physical) {
           // a REGISTERED aggregate calls the function the store
           // registered under the plan's name; the fold is the pack's own
           : plan.aggregate.fn === 'registered'
-            ? `${plan.aggregate.sql}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`
-            : `${plan.aggregate.fn.toUpperCase()}(${valueOf(plan.aggregate.ref)}) AS ${q('value')}`;
+            ? `${plan.aggregate.sql}(${valueOf(plan.aggregate.ref,
+              kindOf(plan.aggregate.ref))}) AS ${q('value')}`
+            : `${plan.aggregate.fn.toUpperCase()}(`
+              + `${foldValue(plan.aggregate.fn, plan.aggregate.ref)}) AS ${q('value')}`;
 
   let sql = `SELECT ${selection} FROM ${q(physical.table)}`;
   if (plan.filter !== null) sql += ` WHERE ${emitPred(plan.filter)}`;
   if (plan.group !== null) {
+    // BY THE ALIASES the selection named, not by a second spelling of
+    // the same member. Two reasons, and the second is the load-bearing
+    // one: a key is a value/type PAIR (a JSON `1` and a JSON `"1"` are
+    // different keys and render the same text), and an engine that
+    // checks its grouping refuses a selected expression the GROUP BY
+    // does not cover — which every key's type discriminator would be.
     sql += ` GROUP BY ${plan.group.keys
-      .map((key) => dialect.jsonExtract(docColumn, pathTextOf(key.ref))).join(', ')}`;
+      .map((key, i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', ')}`;
     // the groups' order: the engine's own order of first appearance —
     // over a collection, each group's earliest row identity — or the
     // key ordering an `$orderby` declared
@@ -424,7 +504,8 @@ export function emitPlan(plan, dialect, physical) {
       // ascending, NULLS LAST when descending — and mirrored for
       // $empty: 'greatest' (probed against the engine)
       const nullsFirst = term.emptyGreatest === term.desc;
-      return `${valueOf(term.ref)} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+      return `${valueOf(term.ref, kindOf(term.ref))} `
+        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
     // the collection is a SEQUENCE: its order is insertion (row
     // identity) order, and the engine's sort is stable — the identity
@@ -463,13 +544,13 @@ export function emitPlan(plan, dialect, physical) {
           : { p: 'or', items: seek.keys.map((key) =>
             colCmp(seek.group.column, 'eq', key)) }] };
       }
-      const inner = `${seek.inner.toUpperCase()}(${valueOf(seek.ref)})`;
+      const inner = `${seek.inner.toUpperCase()}(${valueOf(seek.ref, seek.kind)})`;
       const where = ` FROM ${q(physical.table)} WHERE ${emitPred(filter)}`;
       const text = seek.group === null
         ? `SELECT ${inner} AS ${q('anchor')}${where}`
         : `SELECT ${seek.outer.toUpperCase()}(${q('a')}) AS ${q('anchor')} FROM `
           + `(SELECT ${inner} AS ${q('a')}${where} `
-          + `GROUP BY ${valueOf(seek.group)})`;
+          + `GROUP BY ${valueOf(seek.group, kindOf(seek.group))})`;
       // a seek that finds nothing binds its own probe: it proved there
       // is no row on that side, so the bound excludes only what is absent
       return { name: seek.name, kind: seek.kind, fallback: seek.bound.lit,
@@ -494,7 +575,11 @@ export function emitPlan(plan, dialect, physical) {
 export function createEntityPredicateEmitters(dialect, param) {
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
-  const NUMERIC = () => `(${sl('integer')}, ${sl('real')})`;
+  const NUMERIC = () => `(${dialect.numericTypeNames.map(sl).join(', ')})`;
+  const externalSlot = (name) => param(dialect.externalEncoding === 'json'
+    ? { external: name, json: true }
+    : { external: name });
+
   const pathTextOf = (ref) => {
     const text = dialect.jsonPathText(ref.segments);
     if (text === null)
@@ -502,9 +587,14 @@ export function createEntityPredicateEmitters(dialect, param) {
     return text;
   };
 
+  /** The member at a ref, read as the SQL a comparison of that KIND
+   * needs. On a dynamically typed engine every kind is the same read;
+   * on one whose columns carry a real type they are four. */
+  const memberAt = (docSql, ref, kind) =>
+    dialect.jsonExtract(docSql, pathTextOf(ref), kind);
+
   const emitDocPred = (docSql, pred) => {
     const jt = dialect.jsonTypeOf(docSql, pathTextOf(pred.ref));
-    const value = dialect.jsonExtract(docSql, pathTextOf(pred.ref));
     if (pred.p === 'typeIs') {
       if (pred.types.length === 0)
         return pred.positive ? `${jt} IS NOT NULL` : `${jt} IS NULL`;
@@ -515,12 +605,13 @@ export function createEntityPredicateEmitters(dialect, param) {
         : `(${jt} IS NOT NULL AND ${jt} NOT IN (${list}))`;
     }
     if (pred.p === 'strop') {
-      const form = stropForm(dialect, param, value, pred);
+      const form = stropForm(dialect, param, memberAt(docSql, pred.ref, 'text'), pred);
       return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
     }
     const lit = pred.operand.lit;
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
-    const kind = typeof lit === 'number' ? 'number' : 'string';
+    const kind = typeof lit === 'number' ? 'number' : 'text';
+    const value = memberAt(docSql, pred.ref, kind);
     if (pred.op === 'ne') {
       const notType = kind === 'number'
         ? `${jt} NOT IN ${NUMERIC()}` : `${jt} <> ${sl('text')}`;
@@ -549,10 +640,13 @@ export function createEntityPredicateEmitters(dialect, param) {
     }
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     if ('ext' in pred.operand) {
-      const guard = pred.ref.storage === 'string'
-        ? `${dialect.valueTypeOf(param({ external: pred.operand.ext }))} = ${sl('text')}`
-        : `${dialect.valueTypeOf(param({ external: pred.operand.ext }))} IN ${NUMERIC()}`;
-      return `(${column} IS NOT NULL AND ${guard} AND ${column} ${pred.op === 'ne' ? '<>' : symbol} ${param({ external: pred.operand.ext })})`;
+      const kind = pred.ref.storage === 'string' ? 'text' : 'number';
+      const guard = kind === 'text'
+        ? `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} = ${sl('text')}`
+        : `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} IN ${NUMERIC()}`;
+      return `(${column} IS NOT NULL AND ${guard} AND `
+        + `${dialect.externalCompare(column, kind)} ${pred.op === 'ne' ? '<>' : symbol} `
+        + `${dialect.externalRef(externalSlot(pred.operand.ext), kind)})`;
     }
     const lit = pred.operand.lit;
     const litKind = typeof lit === 'number' ? 'number' : typeof lit === 'string' ? 'string' : 'other';
@@ -571,7 +665,9 @@ export function createEntityPredicateEmitters(dialect, param) {
   // stored values carry
   const emitEpochPred = (aliasSql, docSql, pred) => {
     const column = `${aliasSql}.${q(pred.ref.column)}`;
-    const value = dialect.jsonExtract(docSql, pathTextOf(pred.ref));
+    // the stored TEXT decides: an instant's codepoint comparison is
+    // exactly the engine's, whatever precision the value carries
+    const value = memberAt(docSql, pred.ref, 'text');
     const symbol = { eq: '=', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     const range = pred.op === 'gt' || pred.op === 'ge'
       ? `${column} >= ${param({ literal: pred.epoch - 1000 })}`
@@ -671,15 +767,17 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
           + `THEN ${sl('false')} ELSE ${sl('true')} END`
         : `CASE WHEN ${column} IS NULL THEN NULL ELSE ${sl(
           leaf.ref.storage === 'string' ? 'text'
-            : leaf.ref.storage === 'integer' ? 'integer' : 'real')} END`;
+            : leaf.ref.storage === 'integer'
+              ? dialect.numericTypeNames[0]
+              : dialect.numericTypeNames[dialect.numericTypeNames.length - 1])} END`;
       return `${column} AS ${names}, ${type} AS ${typeName}`;
     }
     const docSql = docOf(leaf.binding);
     const text = pathTextOf(leaf.ref);
     const type = dialect.jsonTypeOf(docSql, text);
-    const value = dialect.jsonExtract(docSql, text);
-    return `CASE WHEN ${type} IN ('object', 'array') `
-      + `THEN ${dialect.jsonText(value)} ELSE ${value} END AS ${names}, `
+    return `CASE WHEN ${type} IN (${sl('object')}, ${sl('array')}) `
+      + `THEN ${dialect.jsonText(dialect.jsonExtract(docSql, text))} `
+      + `ELSE ${dialect.jsonExtract(docSql, text, 'scalar')} END AS ${names}, `
       + `${type} AS ${typeName}`;
   };
 
@@ -728,7 +826,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // integer column sort differently
       const value = term.ref.flavor === 'entity-column'
         ? `${aliasOf(term.binding)}.${q(term.ref.column)}`
-        : dialect.jsonExtract(docOf(term.binding), pathTextOf(term.ref));
+        : dialect.jsonExtract(docOf(term.binding), pathTextOf(term.ref), 'text');
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });

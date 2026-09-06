@@ -1123,7 +1123,29 @@ export interface Driver {
 
 export declare const sqliteDialect: Dialect;
 export declare function createDialect(spec: unknown): Dialect;
+/** The closed set of dialect capabilities, each with the answer a
+ * spelling spec that says nothing gets. `createDialect` refuses a name
+ * outside it, so a misspelling cannot read as a quiet `false`. */
+export declare const DIALECT_CAPABILITIES: Readonly<Record<string, boolean>>;
+/** The R*Tree mapping's DDL group for one spelling spec — the virtual
+ * table and the three row triggers that keep it in sync. Composed into
+ * a dialect whose `capabilities.virtualTables` is true. */
+export declare function rtreeDdl(spec: unknown): Record<string, Function>;
 export declare const SQLITE_FLOOR: string;
+/** Assemble the connection contract around a raw binding whose
+ * capabilities a probe has already answered. */
+export declare function finishConnection(
+  raw: unknown, dialect: Dialect, synchronous: boolean,
+  capabilities: Readonly<Record<string, unknown>>, queueTimeout: number,
+): unknown;
+/** The default probe: SQLite's version report, its compile options and
+ * what the binding declares. */
+export declare function sqliteProbe(
+  raw: unknown, dialect: Dialect, declared: unknown,
+): unknown;
+/** The capability answers every connection carries, each defaulted to
+ * the conservative one — what a probe for another engine fills in. */
+export declare function baseCapabilities(): Record<string, unknown>;
 /** The option names of the closed configurable-pragma set, in the
  * order the open sequence applies them (MODEL-FORMAT §4). */
 export declare const PRAGMA_NAMES: readonly string[];
@@ -1195,6 +1217,38 @@ export interface MigrationProgress {
   readonly asserted?: number;
 }
 
+/** One row of an introspection's loss report: what the physical shape
+ * does not carry, by a stable code, once, sorted. */
+export interface IntrospectReportRow {
+  readonly code: string;
+  /** The physical object it is about (`users`, `users.gx_age`). */
+  readonly object: string;
+  readonly detail: string;
+}
+
+/** Every code the loss report uses, with what it means. */
+export declare const INTROSPECT_CODES: Readonly<Record<string, string>>;
+
+/**
+ * Database → model, read-only. Answers the `jaren-model` document this
+ * database's shape says it is, beside a report of everything the shape
+ * cannot carry. `strict` refuses instead of returning a partial model.
+ */
+export declare function introspectModel(connection: unknown, options?: {
+  strict?: boolean;
+  /** Narrow the read to a named set of tables. */
+  tables?: readonly string[];
+  /** The document pointer a text key column cannot record, per table. */
+  keys?: Record<string, string>;
+}): unknown;
+
+/** The neutral IR one read produces: tables with their columns,
+ * generated expressions, indexes and foreign keys, plus the views a
+ * model cannot declare. */
+export declare function readSchema(connection: unknown, options?: {
+  tables?: readonly string[];
+}): unknown;
+
 export interface MigrateOptions {
   baseline: unknown;
   model?: unknown;
@@ -1204,6 +1258,14 @@ export interface MigrateOptions {
   shadow?: boolean;
   /** Where the shadow replay runs (default `':memory:'`). */
   shadowPath?: string;
+  /** The host's declared index-expression functions, by name — the same
+   * declarations `openStore` is given, resolved into the planned DDL. */
+  expressions?: Record<string, ExpressionFunction>;
+  /** The driver the shadow replay opens through (default the target's).
+   * A file engine's shadow is another file; a SERVER engine's is another
+   * schema, and only the host can name one — the baseline shape the
+   * replay creates would otherwise collide with the real store's. */
+  shadowDriver?: unknown;
   /** Called once per batch a data step walks (transform, derive, or a
    * per-document assertion). */
   onProgress?: (progress: MigrationProgress) => void;
@@ -1388,6 +1450,11 @@ export declare function planCollection(name: string, collection: unknown, dialec
 export declare function compileIndexPath(expression: string, docPath: string): unknown;
 export declare function normalizeDeclaredSql(sql: string): string;
 export declare function comparableDeclaredSql(sql: string): string;
+/** The comparison kind a declared schema type implies — what a column
+ * over that member holds, and how its expression must read it. */
+export declare function columnKindFor(
+  schemaType: string | undefined,
+): 'text' | 'number' | 'boolean' | undefined;
 export declare function schemaTypeAt(schema: unknown, segments: unknown): unknown;
 export declare const KEY_COLUMN: string;
 export declare const DOC_COLUMN: string;
@@ -1445,6 +1512,49 @@ export declare function createCursor<T = unknown>(spec: {
   items?: (row: unknown) => T[];
 }): QueryCursor<T>;
 export declare function sequenceResult(items: unknown[]): unknown;
+// ————— model-declared index expressions —————
+
+/** The three node kinds, closed: `member`, `value`, `call`. */
+export declare const EXPRESSION_KINDS: readonly string[];
+/** How deep a declared expression may nest. */
+export declare const EXPRESSION_DEPTH: number;
+/** One host declaration for a function a model's index expression may
+ * name. An engine that registers functions needs `apply`; one that
+ * cannot needs the `sql` name of an IMMUTABLE function it already has. */
+export interface ExpressionFunction {
+  arity: number;
+  /** Required, and never inferred: an index over a function that may
+   * answer differently for one row is an index that lies. */
+  deterministic: true;
+  apply?: (...args: any[]) => unknown;
+  sql?: string;
+}
+/** Resolve one expression against the host's declarations, refusing an
+ * unknown, wrong-arity or non-deterministic function with `JD0004`. */
+export declare function normalizeExpression(
+  node: unknown, docPath: string, declarations: Record<string, ExpressionFunction>,
+  depth?: number,
+): unknown;
+/** The identity two declarations of one expression share. */
+export declare function canonicalExpression(node: unknown): string;
+/** Every member path an expression reads, in order. */
+export declare function expressionMembers(node: unknown, out?: string[]): string[];
+/** Every function an expression calls, sorted. */
+export declare function expressionFunctions(node: unknown, out?: Set<string>): string[];
+/** The SQL an expression compiles to on one dialect. */
+export declare function expressionSql(
+  node: unknown, dialect: Dialect, context: unknown,
+): string;
+/** A short, stable column stem for one expression. */
+export declare function expressionStem(node: unknown): string;
+/** The SQL name a declared function is registered under. */
+export declare function registeredName(name: string): string;
+/** Register every function a set of expressions calls, on one connection. */
+export declare function registerExpressionFunctions(
+  connection: unknown, names: readonly string[],
+  declarations: Record<string, ExpressionFunction>,
+): unknown;
+
 export declare function deterministicFragment(fragment: unknown): unknown;
 export declare function registerFragment(connection: unknown, registered: Set<string>, fragment: unknown): void;
 export declare function createQueryEngine(context: unknown): unknown;

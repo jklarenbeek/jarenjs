@@ -1,0 +1,47 @@
+# A disposable PostgreSQL endpoint for the @jarenjs/db portability suite.
+#
+#   npm run postgres:up      # build, start, wait for the health check
+#   npm run postgres:down    # stop and remove, data and all
+#
+# Deliberately volume-less: the data directory lives in the container's own
+# writable layer and dies with it, so every `up` after a `down` is a fresh
+# server. The live corpus creates and drops its own schemas anyway; nothing
+# here is meant to survive a reboot.
+#
+# The suite reads JAREN_PG_URL. With the defaults below that is
+#   postgres://jaren:jaren@127.0.0.1:55432/jaren
+# and it is opt-in: with the variable unset the live cases skip by name and
+# the deterministic ones still run.
+name: jaren-postgres
+
+services:
+  postgres:
+    build:
+      context: .
+      args:
+        # The tag the portability matrix is measured against. `latest` today
+        # is PostgreSQL 17 with PostGIS 3.5; the router's floor is 16.
+        POSTGIS_TAG: ${POSTGIS_TAG:-latest}
+    image: jaren-postgis-pgvector:${POSTGIS_TAG:-latest}
+    environment:
+      POSTGRES_USER: ${JAREN_PG_USER:-jaren}
+      POSTGRES_PASSWORD: ${JAREN_PG_PASSWORD:-jaren}
+      POSTGRES_DB: ${JAREN_PG_DATABASE:-jaren}
+      # deterministic collation and time zone: the prefix-range predicate and
+      # every instant the corpus round-trips must not depend on the host's
+      # locale for the comparison to mean anything
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - '${JAREN_PG_PORT:-55432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    # a disposable server holding one suite's schemas needs no shared memory
+    # beyond the default, but the parallel corpus does want more connections
+    command: ['postgres', '-c', 'max_connections=100', '-c', 'fsync=off',
+      '-c', 'synchronous_commit=off', '-c', 'full_page_writes=off']

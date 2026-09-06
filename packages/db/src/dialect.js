@@ -8,11 +8,13 @@
  * concatenates SQL; that costs one indirection now, and without it a
  * second backend is a rewrite.
  *
- * Deliberately NOT in the dialect, because they are behavioural rather
- * than syntactic: whether functions can be registered per connection,
- * whether change capture exists and in what form, and whether tables
- * can be restructured in place. Those are capabilities on the
- * connection.
+ * A dialect answers a CLOSED capability set of its own
+ * ({@link DIALECT_CAPABILITIES}), and every one of those answers is
+ * SYNTACTIC — what SQL this engine will accept. Deliberately NOT here,
+ * because they are behavioural rather than syntactic: whether functions
+ * can be registered on THIS connection, whether the library was built
+ * with the R\*Tree module, whether change capture exists and in what
+ * form. Those are the connection's, probed once at open.
  */
 
 /**
@@ -22,6 +24,92 @@
  * (from pointers discriminated against the live document).
  * @typedef {{ name: string } | { index: number }} JsonPathSegment
  */
+
+/**
+ * The closed set of dialect capabilities, each with the answer a
+ * spelling spec that says nothing gets. They are SYNTACTIC — what SQL
+ * this engine will accept — as opposed to the connection capabilities
+ * {@link module:driver}'s probe reports, which are what a particular
+ * library and build can DO.
+ *
+ * Closed, and defaulted to the conservative answer, for one reason: a
+ * misspelled capability must not read as a quiet `false` on the dialect
+ * that has the feature, nor as a quiet `true` on the one that does not.
+ * {@link createDialect} refuses a name outside this set.
+ */
+export const DIALECT_CAPABILITIES = Object.freeze({
+  /** A binary JSON storage type distinct from text. */
+  jsonb: false,
+  /** Columns whose value is an expression over another column. */
+  generatedColumns: false,
+  /** A generated column may be indexed. PostgreSQL 18's VIRTUAL ones
+   * may not, which is why storage and indexability are two answers. */
+  indexableGeneratedColumns: false,
+  /** A column may be declared with no scalar type — SQLite's `ANY`.
+   * Where this is false, an indexed path the schema does not type has
+   * no honest column type and the planner keeps it in the residual. */
+  untypedColumns: false,
+  /** `INSERT ... RETURNING`. */
+  returning: false,
+  /** `INSERT ... ON CONFLICT (key) DO UPDATE`. */
+  upsert: false,
+  /** `SAVEPOINT` / `RELEASE` / `ROLLBACK TO`. */
+  savepoints: false,
+  /** A `SAVEPOINT` outside a transaction STARTS one. SQLite's does,
+   * which is why a top-level transaction there can be one checkpoint;
+   * PostgreSQL refuses a savepoint outside a transaction block, so a
+   * top-level transaction has to be `BEGIN` and `COMMIT` there. */
+  savepointStartsTransaction: false,
+  /** A transaction can take the write lock up front (`tx.beginImmediate`
+   * is a distinct statement rather than a synonym for `tx.begin`). */
+  immediateTransactions: false,
+  /** A `GROUP BY` / `ORDER BY` term may name a result alias, so a
+   * bucket ladder is written once rather than three times. */
+  groupByAlias: false,
+  /** `ALTER TABLE` can restructure in place (drop a constraint, retype
+   * a column) rather than only add and drop columns. */
+  alterTableFull: false,
+  /** `CREATE VIRTUAL TABLE` — the second physical realization of a
+   * `derive: 'bbox'` column set. */
+  virtualTables: false,
+  /** Row triggers, which the virtual-table mapping is kept in sync by. */
+  triggers: false,
+  /** A closed configuration vocabulary applied per connection — the
+   * `pragma` group. Where this is false the store applies none and the
+   * effective record is empty. */
+  pragmas: false,
+  /** The engine stores each schema object's CREATE text verbatim, so a
+   * declared-text comparison is available to the drift check. Where it
+   * is false the drift check is the structural one (columns, indexes,
+   * foreign keys) and says so. */
+  declaredSqlText: false,
+  /** Referential integrity is always enforced, so no per-connection
+   * switch is set or verified at open. */
+  foreignKeysAlwaysOn: false,
+  /** A per-row identity that reproduces INSERTION order — SQLite's
+   * `rowid`, or a declared identity column this dialect adds to every
+   * table it creates. A collection is a sequence; without one, its
+   * order is whatever the engine answers in. */
+  rowIdentity: false,
+});
+
+/**
+ * Merge a spec's declared capabilities onto the closed defaults,
+ * refusing a name outside the set.
+ * @param {Record<string, any>} declared
+ * @returns {Readonly<Record<string, boolean>>}
+ */
+function normalizeCapabilities(declared) {
+  const out = { ...DIALECT_CAPABILITIES };
+  for (const [name, value] of Object.entries(declared ?? {})) {
+    if (!Object.hasOwn(DIALECT_CAPABILITIES, name)) {
+      throw new TypeError(`createDialect: '${name}' is not a dialect capability; the set is `
+        + Object.keys(DIALECT_CAPABILITIES).map((n) => `'${n}'`).join(', '));
+    }
+    out[name] = value === true;
+  }
+  return Object.freeze(out);
+}
 
 /**
  * Compose a dialect from its spelling spec. Every statement the store
@@ -40,9 +128,15 @@
  *   stringLiteral: (s: string) => string,
  *   booleanLiteral: (b: boolean) => string,
  *   typeFor: (schemaType: string | undefined, hint: string) => string,
+ *   autoKeyType?: string,
+ *   comparableColumnType?: (declaredType: string) => string,
+ *   columnUsableFor?: (declaredType: string | undefined, kind: string) => boolean,
+ *   generatedStorage: string,
+ *   identityColumn?: { name: string, type: string },
+ *   epochFromRfc3339: (valueSql: string) => string,
  *   limitClause: (limit: number, offset?: number) => string,
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
- *   jsonExtract: (columnSql: string, pathText: string) => string,
+ *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
  *   derivedExpression?: (memberSql: string, column: { derive: string,
  *     precision?: number, component?: string, dims?: number }) => string,
  *   jsonSet: (exprSql: string, pathText: string, valueSql: string) => string,
@@ -52,6 +146,12 @@
  *   jsonText: (columnSql: string) => string,
  *   jsonAgg: (exprSql: string) => string,
  *   jsonTypeOf: (columnSql: string, pathText: string) => string,
+ *   numericTypeNames: readonly string[],
+ *   jsonObject: (pairsSql: string) => string,
+ *   jsonEmbed: (columnSql: string) => string,
+ *   externalEncoding?: 'value' | 'json',
+ *   externalCompare?: (valueSql: string, kind: string) => string,
+ *   externalRef?: (paramSql: string, kind: string) => string,
  *   valueTypeOf: (paramSql: string) => string,
  *   strStartsWith: (valueSql: string, lowerParamSql: string, upperParamSql: string) => string,
  *   strStartsWithExact: (valueSql: string, patternA: string, patternB: string) => string,
@@ -64,18 +164,26 @@
  *   rowIdentity: () => string,
  *   identityIn: (identitySql: string, paramSqls: string[]) => string,
  *   rtree?: { module: string, columns: readonly string[] },
+ *   rtreeDdl?: Record<string, Function>,
  *   explainQuery: (sql: string) => string,
+ *   explainLines: (rows: any[]) => string[],
+ *   isFullScan: (line: string, tables: readonly string[]) => boolean,
+ *   usesIndex: (line: string, index: string) => boolean,
  *   excludedRef: (columnSql: string) => string,
  *   tx: { begin: string, beginImmediate: string, commit: string,
  *     rollback: string,
  *     savepoint: (n: string) => string, release: (n: string) => string,
  *     rollbackTo: (n: string) => string },
- *   pragma: { set: (name: string, value: number | string) => string,
+ *   pragma?: { set: (name: string, value: number | string) => string,
  *     foreignKeys: (on: boolean) => string,
  *     foreignKeyCheck: () => string,
  *     walCheckpoint: (mode: string) => string,
  *     integrityCheck: (limit?: number) => string,
  *     optimize: () => string },
+ *   schemaTypeOf?: (declaredType: string) => string | undefined,
+ *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
+ *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
+ *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -106,11 +214,30 @@ export function createDialect(spec) {
   const generatedColumnSql = (docColumn, column) => {
     if (column.stored === true) return `${q(column.name)} ${column.type}`;
     const expression = column.expression
-      ?? spec.jsonExtract(q(docColumn), column.pathText);
-    return `${q(column.name)} ${column.type} GENERATED ALWAYS AS (${expression}) VIRTUAL`;
+      ?? spec.jsonExtract(q(docColumn), column.pathText, column.kind);
+    return `${q(column.name)} ${column.type} GENERATED ALWAYS AS (${expression}) `
+      + spec.generatedStorage;
   };
 
+  /**
+   * The identity column this dialect adds to every table it creates, or
+   * `null`. An engine with no per-row identity of its own declares one
+   * here rather than losing the collection's INSERTION order: the store
+   * orders by `rowIdentity()` wherever the model says "the sequence",
+   * and an engine that answers rows in whatever order an index scan
+   * produced is not answering the same question. Declared, so the shape
+   * check sees it and introspection can tell it from a model member.
+   * @returns {string[]} zero or one column definition
+   */
+  const identityColumnSql = () => (spec.identityColumn === undefined
+    ? []
+    : [`${q(spec.identityColumn.name)} ${spec.identityColumn.type}`]);
+
   const ddl = Object.freeze({
+    // the R*Tree mapping's own statements, when this spelling spec
+    // carries one; a dialect without `capabilities.virtualTables`
+    // composes none of them and the planner never asks
+    ...(spec.rtreeDdl ?? {}),
     /**
      * The idempotent form of a CREATE statement this dialect emitted —
      * what the open path runs: two processes racing to create one fresh
@@ -138,6 +265,7 @@ export function createDialect(spec) {
       const columns = [
         `${q(keyColumn)} ${keyType} PRIMARY KEY`,
         `${q(docColumn)} ${spec.docColumnType} NOT NULL`,
+        ...identityColumnSql(),
         ...generated.map((g) => generatedColumnSql(docColumn, g)),
       ];
       return `CREATE TABLE ${q(table)} (${columns.join(', ')})${spec.tableSuffix}`;
@@ -195,104 +323,6 @@ export function createDialect(spec) {
       return `DROP INDEX ${q(name)}`;
     },
     /**
-     * The second physical realization of a `derive: 'bbox'` column set
-     * (MODEL-FORMAT §2.1, `physical: 'rtree'`): an R\*Tree virtual
-     * table beside the collection, keyed by the collection's row id and
-     * carrying the four box edges as `(minx, maxx, miny, maxy)`.
-     *
-     * The coordinates are 32-bit floats rounded OUTWARD, so the stored
-     * box is a superset of the row's — no false negatives, which is
-     * what an implied conjunct needs, and the reason `$bbox-intersects`
-     * stops being exact under this mapping.
-     * @param {{ name: string }} shape
-     * @returns {string}
-     */
-    createVirtualTable({ name }) {
-      return `CREATE VIRTUAL TABLE ${q(name)} USING ${spec.rtree.module}(`
-        + `${spec.rtree.columns.map(q).join(', ')})`;
-    },
-    /**
-     * @param {string} name
-     * @returns {string}
-     */
-    dropVirtualTable(name) {
-      return `DROP TABLE ${q(name)}`;
-    },
-    /**
-     * @param {string} name
-     * @returns {string}
-     */
-    dropTrigger(name) {
-      return `DROP TRIGGER ${q(name)}`;
-    },
-    /**
-     * Fill an R\*Tree from the documents already stored — the migration
-     * step that turns a `columns` collection into an `rtree` one. The
-     * `IS NOT NULL` is §3.2's rule in SQL: a row with no bounded
-     * position is ABSENT from the index, not at `[0, 0]`.
-     * @param {{ table: string, virtualTable: string,
-     *   edges: { name: string }[] }} shape
-     * @returns {string}
-     */
-    fillVirtualTable({ table, virtualTable, edges }) {
-      const columns = spec.rtree.columns;
-      const sources = [spec.rowIdentity(), ...edges.map((edge) => q(edge.name))];
-      return `INSERT INTO ${q(virtualTable)} (${columns.map(q).join(', ')}) `
-        + `SELECT ${sources.join(', ')} FROM ${q(table)} `
-        + `WHERE ${q(edges[0].name)} IS NOT NULL`;
-    },
-    /**
-     * The three triggers that keep an R\*Tree in sync with its
-     * collection — insert, update, delete — as DECLARED objects of the
-     * collection table.
-     *
-     * Declared, and not a second write path in JavaScript: a trigger is
-     * inside the writing transaction by construction (SQLite cannot
-     * separate them), no write path can bypass it (`insert`,
-     * `insertAllocated`, `upsert`, a translated patch, the patch
-     * fallback, a delete and a migration backfill all fire it), and it
-     * belongs to the collection table, so the existing declared-text
-     * drift check sees it for free.
-     *
-     * The body reads the DERIVED COLUMNS through `NEW` rather than
-     * restating the box expression, so the columns stay the box's one
-     * definition — and that text works unchanged on the stored-column
-     * branch, where those columns are ordinary ones.
-     *
-     * The `IS NOT NULL` guard is load-bearing: an R\*Tree coerces a
-     * `NULL` coordinate to `0.0` without complaint, so without it every
-     * unbounded document would land on Null Island instead of being
-     * absent (MODEL-FORMAT §3.2).
-     * @param {{ table: string, virtualTable: string, prefix: string,
-     *   edges: { name: string }[] }} shape - `edges` are the four
-     *   derived columns in `(w, e, s, n)` order, which is the order the
-     *   virtual table's `(minx, maxx, miny, maxy)` carry
-     * @returns {{ name: string, sql: string }[]}
-     */
-    createSyncTriggers({ table, virtualTable, prefix, edges }) {
-      const rid = spec.rowIdentity();
-      const target = `${q(virtualTable)} (${spec.rtree.columns.map(q).join(', ')})`;
-      const guard = `${q(edges[0].name)} IS NOT NULL`;
-      const values = (row) => [`${row}.${rid}`,
-        ...edges.map((edge) => `${row}.${q(edge.name)}`)].join(', ');
-      return [
-        { name: `${prefix}_ai`,
-          sql: `CREATE TRIGGER ${q(`${prefix}_ai`)} AFTER INSERT ON ${q(table)} `
-            + `WHEN NEW.${guard} BEGIN `
-            + `INSERT INTO ${target} VALUES (${values('NEW')}); END` },
-        // one trigger, not two: the old id leaves and the new box
-        // arrives only when it exists, so a document that loses its
-        // geometry leaves the index rather than keeping a stale box
-        { name: `${prefix}_au`,
-          sql: `CREATE TRIGGER ${q(`${prefix}_au`)} AFTER UPDATE ON ${q(table)} BEGIN `
-            + `DELETE FROM ${q(virtualTable)} WHERE ${q(spec.rtree.columns[0])} = OLD.${rid}; `
-            + `INSERT INTO ${target} SELECT ${values('NEW')} WHERE NEW.${guard}; END` },
-        { name: `${prefix}_ad`,
-          sql: `CREATE TRIGGER ${q(`${prefix}_ad`)} AFTER DELETE ON ${q(table)} BEGIN `
-            + `DELETE FROM ${q(virtualTable)} WHERE ${q(spec.rtree.columns[0])} = OLD.${rid}; END` },
-      ];
-    },
-    /**
      * @param {string} table
      * @returns {string}
      */
@@ -342,6 +372,7 @@ export function createDialect(spec) {
         }
         return sql;
       });
+      rendered.push(...identityColumnSql());
       if (compositeKey !== undefined && compositeKey.length > 0)
         rendered.push(`PRIMARY KEY (${compositeKey.map(q).join(', ')})`);
       return `CREATE TABLE ${q(table)} (${rendered.join(', ')})${spec.tableSuffix}`;
@@ -353,8 +384,9 @@ export function createDialect(spec) {
      * @returns {string}
      */
     createPlainTable({ table, columns }) {
-      const rendered = columns.map((column) =>
-        `${q(column.name)} ${column.type}${column.primaryKey === true ? ' PRIMARY KEY' : ''}`);
+      const rendered = [...columns.map((column) =>
+        `${q(column.name)} ${column.type}${column.primaryKey === true ? ' PRIMARY KEY' : ''}`),
+      ...identityColumnSql()];
       return `CREATE TABLE IF NOT EXISTS ${q(table)} (${rendered.join(', ')})${spec.tableSuffix}`;
     },
   });
@@ -458,7 +490,7 @@ export function createDialect(spec) {
 
   return Object.freeze({
     name: spec.name,
-    capabilities: Object.freeze({ ...spec.capabilities }),
+    capabilities: normalizeCapabilities(spec.capabilities),
     docColumnType: spec.docColumnType,
     // the declared type of a `derive: 'vector'` column — the bytes of
     // the packed form, spelled by the dialect like every other type
@@ -468,6 +500,35 @@ export function createDialect(spec) {
     stringLiteral: spec.stringLiteral,
     booleanLiteral: spec.booleanLiteral,
     typeFor: spec.typeFor,
+    /**
+     * The declared type of a key the DATABASE allocates
+     * (`identity: 'integer'`), when that is not simply the integer type
+     * — an engine whose auto-allocation is a column property rather
+     * than a consequence of the key's type spells it here.
+     */
+    autoKeyType: spec.autoKeyType,
+    /**
+     * One declared column type reduced to the form the catalog reports
+     * it as, so the shape check compares like with like: an auto-key's
+     * clause, a collation, a width the engine normalizes away. Applied
+     * to BOTH sides of the comparison.
+     */
+    comparableColumnType: spec.comparableColumnType
+      ?? ((declaredType) => String(declaredType).toUpperCase()),
+    /**
+     * Whether a generated column over a member the schema types
+     * `declaredType` can be compared against a value of `kind`
+     * (`'text'`, `'number'`, `'boolean'`). On an engine whose columns
+     * carry a real SQL type, comparing a `text` column to a number is a
+     * type error rather than a false row, so the emitter reads the
+     * member out of the document instead — the same answer, unindexed.
+     */
+    columnUsableFor: spec.columnUsableFor ?? (() => true),
+    /** The storage word a generated column is declared with. */
+    generatedStorage: spec.generatedStorage,
+    /** The identity column added to every created table, or undefined. */
+    identityColumn: spec.identityColumn === undefined
+      ? undefined : Object.freeze({ ...spec.identityColumn }),
     limitClause: spec.limitClause,
     jsonPathText: spec.jsonPathText,
     jsonExtract: spec.jsonExtract,
@@ -489,6 +550,35 @@ export function createDialect(spec) {
     jsonText: spec.jsonText,
     jsonAgg: spec.jsonAgg,
     jsonTypeOf: spec.jsonTypeOf,
+    /**
+     * The spellings {@link jsonTypeOf} answers for a JSON NUMBER. SQLite
+     * discriminates the two it stores (`integer`, `real`); an engine with
+     * one JSON number type answers one name. Everything else in the
+     * vocabulary is shared — `text`, `true`, `false`, `null`, `object`,
+     * `array` — because the row decoder reads those names in JavaScript.
+     */
+    numericTypeNames: Object.freeze([...spec.numericTypeNames]),
+    /** An object built from alternating name/value SQL — the shape a
+     * graph load's nested include answers. */
+    jsonObject: spec.jsonObject,
+    /** The document column as a NESTED JSON value rather than as text:
+     * what an enclosing object embeds, as opposed to what a caller
+     * reads back. On an engine with one JSON type the two differ. */
+    jsonEmbed: spec.jsonEmbed,
+    /**
+     * How an EXTERNAL operand's value reaches a statement. `'value'`
+     * binds it as itself — a dynamically typed engine compares it with
+     * whatever the member holds. `'json'` binds its JSON encoding,
+     * because a statically typed engine cannot bind one placeholder
+     * against a text member in one branch and a numeric member in
+     * another: the parameter's own type is fixed when it is bound, and
+     * a guard the row would fail does not stop the coercion.
+     */
+    externalEncoding: spec.externalEncoding ?? 'value',
+    /** The MEMBER side of an external comparison, at the branch's kind. */
+    externalCompare: spec.externalCompare ?? ((valueSql) => valueSql),
+    /** The PARAMETER side of an external comparison, at the same kind. */
+    externalRef: spec.externalRef ?? ((paramSql) => paramSql),
     valueTypeOf: spec.valueTypeOf,
     strStartsWith: spec.strStartsWith,
     strStartsWithExact: spec.strStartsWithExact,
@@ -506,6 +596,9 @@ export function createDialect(spec) {
     /** One grouped aggregate; `null` counts ROWS rather than values. */
     groupAggregate: spec.groupAggregate,
     rowIdentity: spec.rowIdentity,
+    /** Membership of the row identity in a bound list — the fetch of a
+     * k-nearest plan's candidates after the engine's cut. */
+    identityIn: spec.identityIn,
     /**
      * The R\*Tree spelling: the module name and the virtual table's own
      * column list, in `(id, minx, maxx, miny, maxy)` order. Read only
@@ -513,7 +606,50 @@ export function createDialect(spec) {
      * spec that omits it simply cannot carry that mapping.
      */
     rtree: Object.freeze({ ...spec.rtree }),
+    /**
+     * The schema type a declared column type came from — the inverse of
+     * {@link typeFor}, as far as one exists. `undefined` where the
+     * column carries no scalar type, and where a mapping is lossy the
+     * introspector says so rather than guessing: two schema types that
+     * share a column type cannot be told apart on the way back.
+     */
+    schemaTypeOf: spec.schemaTypeOf,
+    /**
+     * The member path a GENERATED column's expression reads, recovered
+     * from the dialect's own spelling of it. `null` for an expression
+     * this dialect did not write — which is a loss the introspector
+     * reports rather than a path it invents.
+     */
+    memberPathOf: spec.memberPathOf,
+    /**
+     * The declared index EXPRESSION a generated column's SQL computes,
+     * recovered from the dialect's own spelling of it. `byName` maps the
+     * engine's function name back to the model's — the same name where
+     * the store registered it, the host's `sql` name where the engine
+     * has its own. `null` for anything this dialect did not write, which
+     * the introspector reports rather than guesses.
+     */
+    expressionOf: spec.expressionOf,
+    /**
+     * The `{ name, expression }` pairs behind `introspect.generated`'s
+     * rows. Two engines answer that question with different row shapes
+     * — one hands back a catalog column, the other the table's whole
+     * CREATE text — and the dialect that wrote the expression is the
+     * one that can read it.
+     */
+    readGenerated: spec.readGenerated,
     explainQuery: spec.explainQuery,
+    /** The plan narrative, one line per row the engine answered. */
+    explainLines: spec.explainLines,
+    /**
+     * Whether one narrative line reports a FULL TABLE SCAN of one of
+     * the named tables (or of an alias a join statement gave one). The
+     * safe profile's scan refusal is verified against the database's own
+     * plan, and only the dialect can read that engine's words.
+     */
+    isFullScan: spec.isFullScan,
+    /** Whether one narrative line reports a seek through the named index. */
+    usesIndex: spec.usesIndex,
     excludedRef: spec.excludedRef,
     epochFromRfc3339: spec.epochFromRfc3339,
     tx: Object.freeze({ ...spec.tx }),
