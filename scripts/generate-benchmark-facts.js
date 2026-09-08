@@ -319,6 +319,20 @@ function geoTable(keep) {
   return ['', '| scenario | Jaren | rival | ratio |', '|---|---|---|---|', ...rows, ''].join('\n');
 }
 const FACTS = {
+  'db.changeflow': () => {
+    const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/changeflow-results.json'), 'utf8'));
+    const fixed = (value) => value.toFixed(3);
+    return '\n\n' + [
+      `Measured ${report.measuredAt.slice(0, 10)}, ${report.runtime}, ${report.host.cpu}; ${report.samples} mutations per case.`,
+      '', '| Shape | Strategy | Initialize ms | Mutation p50 ms | Mutation p95 ms | Initialization heap bytes |',
+      '|---|---|---:|---:|---:|---:|',
+      ...report.live.map((row) => `| ${row.shape} | ${row.strategy.strategy} | ${fixed(row.initializationMs)} | ${fixed(row.mutationMs.p50)} | ${fixed(row.mutationMs.p95)} | ${row.retainedHeapBytes} |`),
+      '', '| Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |',
+      '|---|---:|---:|---:|---:|---:|---:|---:|',
+      ...report.replication.map((row) => `| ${row.capture} | ${row.envelopes} | ${row.operations} | ${row.bytes} | ${fixed(row.applyMs.p50)} | ${fixed(row.replayMs.p50)} | ${fixed(row.conflictMs.p50)} |`),
+      '', 'Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.',
+    ].join('\n') + '\n\n';
+  },
   'db.hosts': () => {
     const baseline = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-baseline.json'), 'utf8'));
     const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-results.json'), 'utf8'));
@@ -1365,6 +1379,7 @@ const DOCS = [
   'packages/ai/README.md',
   'packages/db/README.md',
   'packages/db/docs/HOSTS.md',
+  'packages/db/docs/REPLICATION-FORMAT.md',
   'packages/linq/README.md',
   'packages/db/docs/MODEL-FORMAT.md',
   'packages/core/README.md',

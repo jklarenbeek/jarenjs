@@ -171,7 +171,7 @@ function normalizeCapabilities(declared) {
  *   usesIndex: (line: string, index: string) => boolean,
  *   excludedRef: (columnSql: string) => string,
  *   tx: { begin: string, beginImmediate: string, commit: string,
- *     rollback: string,
+ *     rollback: string, deferForeignKeys?: string,
  *     savepoint: (n: string) => string, release: (n: string) => string,
  *     rollbackTo: (n: string) => string },
  *   pragma?: { set: (name: string, value: number | string) => string,

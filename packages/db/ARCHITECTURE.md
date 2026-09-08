@@ -1095,3 +1095,22 @@ processes creating one fresh file never meet the deferred-upgrade
 `SQLITE_BUSY` the busy handler cannot retry. The job queue's
 administration (`page`, `cancel`, `requeue`, `sweep`) lives in
 `src/jobs.js` beside the fence it authorises through (JOBS-FORMAT §10).
+
+
+## Replication and bounded dependency maintenance
+
+`replication-format.js` owns JSON normalization; `replication.js` persists replica
+identity, frontiers, canonical receipts, before-images, outbox and conflict
+evidence through the capture transaction's `beforeCommit` seam. `logical-rows.js`
+shares mapped, validated row access between replication and live dependencies.
+Remote application suppresses only local envelope allocation: its data still
+invalidates capture subscribers after commit. Snapshot reset carries complete
+receipt evidence and refuses histories beyond its explicit credits.
+
+`live-join.js` compiles indexed dependency descriptors from the entity planner
+and mapping. The same cache strategy maintains inner/left joins and eligible
+nested graph projections. `live-nested.js` maintains explicit two-level groups
+by refreshing affected parents from bounded leaves. Source and result payloads
+consume row and byte credits; unsupported shapes keep named reruns. See
+[the replication contract](docs/REPLICATION-FORMAT.md) and
+[the strategy matrix](docs/LIVE-FORMAT.md).

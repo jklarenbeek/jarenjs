@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.66.1",
+  "version": "0.67.0",
   "packageManager": "npm@11.12.1",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
@@ -132,7 +132,8 @@
     "benchmark:generate": "npm run benchmark:generate --workspace=@jarenjs/website",
     "website:dev": "npm run dev --workspace=@jarenjs/website",
     "website:build": "npm run build --workspace=@jarenjs/website",
-    "website:deploy": "npm run deploy --workspace=@jarenjs/website"
+    "website:deploy": "npm run deploy --workspace=@jarenjs/website",
+    "benchmark:changeflow": "node --expose-gc ./benchmark/changeflow.js"
   },
   "keywords": [
     "JSON",
@@ -172,15 +173,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/app": "^0.66.1",
-    "@jarenjs/core": "^0.66.1",
-    "@jarenjs/formats": "^0.66.1",
-    "@jarenjs/forms": "^0.66.1",
-    "@jarenjs/json": "^0.66.1",
-    "@jarenjs/md": "^0.66.1",
-    "@jarenjs/refs": "^0.66.1",
-    "@jarenjs/validate": "^0.66.1",
-    "@jarenjs/view": "^0.66.1"
+    "@jarenjs/app": "^0.67.0",
+    "@jarenjs/core": "^0.67.0",
+    "@jarenjs/formats": "^0.67.0",
+    "@jarenjs/forms": "^0.67.0",
+    "@jarenjs/json": "^0.67.0",
+    "@jarenjs/md": "^0.67.0",
+    "@jarenjs/refs": "^0.67.0",
+    "@jarenjs/validate": "^0.67.0",
+    "@jarenjs/view": "^0.67.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

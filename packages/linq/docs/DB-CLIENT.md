@@ -83,10 +83,9 @@ invent one. §2 keeps its D3 slot and its meaning — this is where every
 name a caller writes is named — under the title that describes what it
 holds.
 
-The vocabulary is small and the surface is not. Two exported names, and
-then whatever those two hand back: a client of frozen handles, each of
+The exports include the store door and its helpers. The door hands back a client of frozen handles, each of
 which is the store's own set plus the chain plus three additions. §2.1
-divides the two; §2.2 to §2.5 enumerate them.
+divides the responsibilities; §2.2 to §2.7 enumerate the surface.
 
 ### 2.1 What is the store's and what is the client's
 
@@ -105,14 +104,15 @@ decides which document answers a question about behaviour.
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
-### 2.2 The three exported names
+### 2.2 The exported names
 
 The whole export surface: a door, a type-level reader for what it hands
-back, and the durable ledger over what it opened.
+back, the durable ledger over what it opened, and replication document authoring.
 
 | Name | Answers | Type reading |
 |---|---|---|
 | `open(model, options)` | a promise of the frozen client — `store`, `capabilities`, `entities`, `collections`, `transaction`, `close`, and `saveChanges`/`live` when the model declares entities | `Client<InferMeta<typeof model>>` for a pen model; `Client<E>` for `open<E>(json, …)`; the wide map for a bare JSON model |
+| `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
 
@@ -297,6 +297,17 @@ await db.transaction(async (tx) => {                          // a settlement in
   await createDbLedger(tx).commit(ref, response);             // commits with the order, or not at all
 });
 ```
+
+### 2.7 Replication documents
+
+The DB client forwards `replication` open options to its Store. Access committed
+pages, frontiers, conflicts and resets through `client.store.replication`.
+`defineReplication({ replica, seq, frontier, model })` authors a logical envelope:
+chain `.change(table, key, before, after)`, then `.toDocument()` or `.toJSON()`.
+It shares the Store's normalization authority and preserves operation order.
+See the [replication format](../../db/docs/REPLICATION-FORMAT.md) for causality,
+conflict policy and bounded reset contracts. Authoring does not allocate a
+committed sequence; normal replication exports the Store's committed pages.
 
 ## 3. Worked examples
 
@@ -815,10 +826,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->591,917<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->623,994<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->592<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->624<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather

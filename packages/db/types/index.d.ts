@@ -709,6 +709,7 @@ export interface SyncStore {
 }
 
 export interface Store {
+  readonly replication?: Replication;
   readonly capabilities: StoreCapabilities;
   readonly dialect: Dialect;
   stats(): StoreStats;
@@ -867,7 +868,7 @@ export interface TransactionSyncStore extends SyncStore {
  */
 export interface TransactionStore extends Omit<Store,
   'close' | 'transaction' | 'sync' | 'checkpoint' | 'integrityCheck' | 'foreignKeyCheck' | 'optimize' | 'backupTo'
-  | 'jobs'> {
+  | 'jobs' | 'replication'> {
   /** The transactional outbox (JOBS-FORMAT §3): no administration here —
    * an admin operation is a root call. */
   readonly jobs?: JobsApi;
@@ -978,7 +979,7 @@ export interface LiveEventTime {
 
 export interface LiveMode {
   readonly strategy: 'rows' | 'window' | 'accumulator' | 'group'
-    | 'bucket' | 'rolling' | 'rerun';
+    | 'bucket' | 'rolling' | 'join' | 'graph' | 'nested-group' | 'rerun';
   readonly mode: 'incremental' | 'rerun';
   /** Present exactly when the strategy is 'rerun': the named reason. */
   readonly reason?: string;
@@ -1004,6 +1005,9 @@ export interface LiveEvent {
 }
 
 export interface LiveStats {
+  dependencyReads?: number;
+  refreshedRoots?: number;
+  refreshedGroups?: number;
   records: number;
   matched: number;
   emissions: number;
@@ -1037,6 +1041,8 @@ export interface LiveQuery {
 }
 
 export interface LiveBounds {
+  /** Serialized input/output cache credit for join, graph and nested-group strategies. */
+  maxBytes?: number;
   /** Registrations beyond it are JD0052 (default 64). */
   maxQueries?: number;
   /** Per-query ceiling on maintained entries — rows, window entries
@@ -1045,6 +1051,7 @@ export interface LiveBounds {
 }
 
 export interface OpenStoreOptions {
+  replication?: ReplicationOptions;
   driver: Driver;
   path?: string;
   /**
@@ -1605,7 +1612,7 @@ export declare function createLiveRegistry(
   bounds: { maxQueries: number; maxMaintained: number }): unknown;
 export declare function diffRows(oldRows: readonly unknown[], newRows: readonly unknown[]):
   Array<{ op: string; path: string; value?: unknown }>;
-export declare const LIVE_DEFAULTS: { maxQueries: number; maxMaintained: number };
+export declare const LIVE_DEFAULTS: { maxQueries: number; maxMaintained: number; maxBytes: number };
 export declare function createSortedWindow(
   terms: unknown[], limit: number | null): unknown;
 export declare function compareCodepoint(a: string, b: string): number;
@@ -1898,3 +1905,55 @@ export declare const JOB_DEFAULTS: Readonly<{
 export declare function describeValue(value: unknown): string;
 /** A job result as the queue stores it: JSON text, or the reason it could not be. */
 export declare function serializeResult(value: unknown): unknown;
+
+/** Transport-neutral, net logical operations in a single transaction. */
+export interface ReplicationOperation {
+  table: string;
+  key: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+}
+export type ReplicationFrontier = Record<string, number>;
+export interface ReplicationEnvelope {
+  $replication: '0.1'; replica: string; seq: number; model: string;
+  frontier: ReplicationFrontier; operations: ReplicationOperation[];
+}
+export interface ReplicationConflict {
+  envelope: string; table: string; key: string;
+  base: Record<string, unknown> | null;
+  local: { value: Record<string, unknown> | null; frontier: ReplicationFrontier };
+  remote: { value: Record<string, unknown> | null; replica: string; seq: number; frontier: ReplicationFrontier };
+  resolver: string | null;
+  resolution: { action: 'local' | 'remote' | 'merged'; value: Record<string, unknown> | null } | null;
+}
+export interface ReplicationOptions {
+  replica: string; retention?: number; maxOperations?: number; maxBytes?: number;
+  resolver?: { id: string; resolve(conflict: Readonly<ReplicationConflict>):
+    { action: 'local' | 'remote' } | { action: 'merged'; value: Record<string, unknown> | null } };
+}
+export interface ReplicationRequest { signal?: AbortSignal; deadline?: number }
+export interface Replication {
+  snapshot(request?: ReplicationRequest): Promise<ReplicationSnapshot>;
+  reset(snapshot: ReplicationSnapshot, request?: ReplicationRequest): Promise<{ status: 'reset'; frontier: ReplicationFrontier }>;
+  frontier(): Promise<ReplicationFrontier>;
+  apply(envelope: ReplicationEnvelope, request?: ReplicationRequest): Promise<{
+    status: 'applied' | 'duplicate' | 'conflict'; frontier: ReplicationFrontier; conflicts: ReplicationConflict[];
+  }>;
+  page(request?: ReplicationRequest & { after?: number; limit?: number; maxBytes?: number }): Promise<{
+    items: ReplicationEnvelope[]; earliestAvailable: number | null; highWatermark: number;
+    next?: number; bytes?: number; hasMore: boolean; resetRequired: boolean;
+  }>;
+  conflicts(request?: ReplicationRequest & { limit?: number; maxBytes?: number }): Promise<ReplicationConflict[]>;
+}
+export declare const REPLICATION_VERSION: '0.1';
+export declare const REPLICATION_DEFAULTS: Readonly<{ retention: number; maxOperations: number; maxBytes: number }>;
+export declare function normalizeFrontier(value: unknown): ReplicationFrontier;
+export declare function replicationIdentity(replica: string, seq: number): string;
+export declare function normalizeReplication(document: unknown): ReplicationEnvelope;
+export declare function encodeReplication(document: unknown): string;
+export interface ReplicationSnapshot {
+  $replicationSnapshot: '0.1'; model: string; frontier: ReplicationFrontier;
+  rows: { table: string; key: string; value: Record<string, unknown> | null; frontier: ReplicationFrontier }[];
+  receipts: ReplicationEnvelope[];
+}
+export declare function normalizeReplicationSnapshot(document: unknown): ReplicationSnapshot;

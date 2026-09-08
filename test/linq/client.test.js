@@ -390,7 +390,7 @@ describe('link() and unlink(): the store\'s membership API, typed by the relatio
 });
 
 describe('live(): the store\'s registration with the chain\'s document and bindings', () => {
-  it('an entity chain registers in re-run mode and follows writes; JD0050 without capture', async () => {
+  it('an indexed entity chain registers in incremental mode and follows writes; JD0050 without capture', async () => {
     const { client } = await seeded();
     await assert.rejects(client.live(client.entities.Post.where((p) => p.stars.ge(3))), codeIs('JD0050'));
     await client.close();
@@ -399,12 +399,12 @@ describe('live(): the store\'s registration with the chain\'s document and bindi
     const query = await live.live(live.entities.Post.where((p) => p.stars.ge(3)));
     assert.deepStrictEqual(Object.keys(query).sort(),
       ['close', 'error', 'mode', 'result', 'state', 'stats', 'subscribe'].sort());
-    assert.deepStrictEqual(query.mode, { strategy: 'rerun', mode: 'rerun', reason: 'entity queries re-run in this version' });
+    assert.deepStrictEqual(query.mode, { strategy: 'join', mode: 'incremental' });
     assert.strictEqual(query.result.rows.length, 3);
     const emissions = [];
     const stop = query.subscribe((event) => emissions.push(event));
     await live.entities.Post.create({ title: 'p5', stars: 9, authorId: ada.id });
-    assert.strictEqual(query.result.rows.length, 4, 'the re-run saw the write');
+    assert.strictEqual(query.result.rows.length, 4, 'maintenance saw the write');
     assert.ok(emissions.length >= 1 && Array.isArray(emissions[0].patch));
     stop();
     query.close();

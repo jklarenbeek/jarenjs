@@ -17,7 +17,7 @@ import type {
   StoreStats, Collection, ExecuteOptions, SequenceResult, ValueOrPromise,
   Dialect, ChangeRecord, LiveOptions, LiveQuery, JobsApi, SyncStore,
   EntityScope, RelationEntry, RelationTable, EntityCursorOptions, QueryCursor,
-  LoadContinuation, PageOptions, Page, ChangesReader,
+  LoadContinuation, PageOptions, Page, ChangesReader, Replication, TransactionStore,
 } from '@jarenjs/db';
 
 /** The self-referential constraint an interface can satisfy: generated
@@ -164,7 +164,7 @@ export interface TypedStore<E extends MetaMap<E>> {
   /** The relation tables of every entity, keyed by entity name. */
   readonly relations?: Readonly<Record<keyof E & string, RelationTable>>;
   saveChanges?(): Promise<SaveReport>;
-  transaction<R>(fn: (store: Store) => R | Promise<R>): Promise<Awaited<R>>;
+  transaction<R>(fn: (store: TransactionStore) => R | Promise<R>): Promise<Awaited<R>>;
   observe(fn: (record: ChangeRecord) => void): () => void;
   /** Unbounded, and unsafe for a reconnecting consumer: `changes.page()`
    * is the supported path (LIVE-FORMAT §5). */
@@ -174,6 +174,7 @@ export interface TypedStore<E extends MetaMap<E>> {
   live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
   close(options?: { graceMs?: number }): Promise<void>;
   readonly jobs?: JobsApi;
+  readonly replication?: Replication;
   readonly sync?: SyncStore;
 }
 

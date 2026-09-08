@@ -584,10 +584,14 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   try {
     const store = await openStore({ $model: '0.1', collections: {
       notes: { key: '/id', schema: { type: 'object' } }
-    } }, { driver });
+    } }, { driver, replication: { replica: 'packed-worker' } });
     try {
       await store.collection('notes').insert({ id: 'packed', value: 7 });
       if ((await store.collection('notes').get('packed')).value !== 7) throw new Error('packed worker data mismatch');
+      const page = await store.replication.page();
+      if (page.items.length !== 1 || page.items[0].replica !== 'packed-worker') throw new Error('packed replication mismatch');
+      const snapshot = await store.replication.snapshot();
+      if (snapshot.receipts.length !== 1) throw new Error('packed snapshot receipt mismatch');
     } finally { await store.close(); }
   } catch (error) {
     if (!(typeof Bun !== 'undefined' && error.code === 'JD0003')) throw error;

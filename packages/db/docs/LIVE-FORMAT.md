@@ -273,7 +273,10 @@ what the pushdown planner already means by it.
 | a spatial predicate the planner **refused** (no `derive` index on the member, an untyped member, an unbounded probe) | **re-run on invalidation**, the refusal named — it never translated, so nothing narrows the fetch | the previous result, for diffing |
 | a `$resample` or `$rolling` document over the collection, with an explicit `eventTime` and a fixed width (§13) | **event-time bucket / rolling state**: rows kept by bucket, or in instant order; only what a write can reach is folded again, through `@jarenjs/core/series` itself | the contributing rows, plus one fold per bucket |
 | the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, or a retention that does not cover the window | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
-| joins, multi-entity roots, graph loads, every entity query | **re-run on invalidation — declared, not attempted** in this version | the previous result, for diffing |
+| indexed inner equi-joins and canonical allowing-empty left joins over mapped entity roots | **join dependency maintenance**; point-read changed keys and reevaluate their bounded outer owners | source rows, key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
+| nested entity graph projections with indexed equality edges and unique binding names | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
+| explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
+| unindexed/non-equi joins, self joins, explicit entity ordering/windows, object-root documents and load-spec graphs | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
@@ -310,8 +313,8 @@ refuses at registration (`JD0051`), the same shape as capture's
 demanded session — an application that needs the property can refuse
 to start.
 
-The **canonical group form** the classifier recognises (and the only
-one — the linq chain's nested emission re-runs, stated plainly):
+The **canonical group form** the classifier recognises (the linq chain's group-of-groups emission still re-runs; explicit
+nested groups have a separate bounded strategy below):
 
 ```json
 { "$for": { "it": "$[*]" },
@@ -502,13 +505,14 @@ ERRORING rather than degrading (the D14 rule — the bound is printed):
   delete-correctness, and a count over a table larger than the bound
   is a conscious `maxMaintained` raise, not a silent one.
 
-Non-claims, in one place: no incremental joins (re-run is the declared
-strategy), no cross-connection invalidation (§6's `data_version` is
+Non-claims, in one place: no maintenance of unindexed or non-equality joins,
+no cross-connection invalidation (§6's `data_version` is
 the signal), no maintenance over asynchronous connections —
 `capabilities.live` is `false` there and a registration is `JD0051`
 naming the reason, because maintenance point-reads rows synchronously
 inside delivery (the wasm driver's oo1 API is synchronous, which is
-why the browser has live queries at all) — no replication, and no ordering guarantee for
+why the browser has live queries at all). Replication is specified separately in
+[REPLICATION-FORMAT](REPLICATION-FORMAT.md). There is no ordering guarantee for
 unordered queries beyond §9's determinism.
 
 ## 13. Event time
@@ -616,3 +620,40 @@ holds a shuffled stream of inserts, in-place updates, instant moves and
 deletes against `resampleSeries` / `rollingSeries` over the whole
 collection after each one, which is the only oracle that cannot drift
 with the implementation.
+
+
+## Bounded joins, graph projections and nested groups
+
+`join`, `graph` and `nested-group` strategies charge their source rows and
+result entries to `live.maxMaintained`, and serialized input/output payloads to
+`live.maxBytes` (default 4 MiB). These credits bound cached payloads rather than
+claiming to measure JavaScript heap overhead. Initialization uses a limited
+source read; updates read changed keys, then visit cached indexed dependencies.
+Bounds are checked while caches grow. Overflow is `JD2060`, emits one error,
+closes the subscription and releases dependency caches. It never relabels an
+unbounded query as incremental.
+
+Entity equality columns need a primary-key prefix, declared index or mapped
+foreign-key index. Every binding needs a key and a distinct root. The projected
+identity is the tuple of source identities, so duplicate projected values remain
+distinct. Default entity result order follows physical row insertion order;
+point reads preserve that order even when a key is deleted and reinserted. A
+left join uses a canonical `$allowing-empty` binding over an equality-filtered
+inner subquery. Its absent child can be defaulted to null. Graph projections
+embed equality-filtered child queries in a single outer row's return object.
+Global-root reads outside those bindings re-run because changing one row can
+change every projected graph.
+
+`dependencyReads`, `refreshedRoots` and `refreshedGroups` expose the work done.
+`dependencyReads` counts logical changed-row reads; a row-position lookup is an
+additional statement. No full query reruns occur under these strategy labels.
+Materializing and diffing the final bounded output still costs work proportional
+to its size. See the equal-correctness [measurements](REPLICATION-FORMAT.md#measurements)
+for startup and high-fan-out losses beside selective wins.
+
+Two-level grouping currently accepts an explicit parent `$groupby` over a
+singular member, with one nested group over that parent's bound row sequence.
+Count, sum, average, minimum and maximum recompute from only the affected
+parent's bounded leaves. An offset, an unsupported operator, a global input to
+the nested group, or a group-of-groups LINQ emission remains a named rerun.
+Replicated writes enter the same committed capture stream as local writes.

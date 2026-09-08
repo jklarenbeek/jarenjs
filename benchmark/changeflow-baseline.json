@@ -1,0 +1,30 @@
+{
+  "sourceRevision": "38bd730da099aff22b13944f85b691b0bd399bec",
+  "observedAt": "2026-09-08",
+  "historicalBaseline": "The authored 2026-09-03 baseline is preserved; this is the pre-implementation source census, not remeasured timings.",
+  "capture": [
+    "bounded pages",
+    "durable high-watermark",
+    "reset-required on retention gaps",
+    "native sessions",
+    "wasm sessions",
+    "journal fallback"
+  ],
+  "incremental": [
+    "rows",
+    "projections",
+    "ordered windows",
+    "aggregate accumulators",
+    "single canonical group",
+    "event-time bucket",
+    "event-time rolling"
+  ],
+  "rerun": [
+    "entity queries",
+    "joins",
+    "graph projections",
+    "offset windows",
+    "nested grouping"
+  ],
+  "replicationMetadata": false
+}

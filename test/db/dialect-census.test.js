@@ -175,6 +175,9 @@ const SQLITE_SPELLINGS = Object.freeze([
  * assumption is DECLARED rather than discovered at the first statement.
  */
 const SQLITE_ONLY_MODULES = Object.freeze({
+  'replication.js': 'the durable replication ledger shares the SQLite capture transaction; '
+    + 'capabilities.changeCapture gates it at open. Its JSON envelopes are host-neutral; '
+    + 'PostgreSQL capture and ledger persistence remain unavailable by capability',
   'jobs.js': 'the durable job queue writes its own statements; it is a SQLite-only '
     + "subsystem in 0.1, and `capabilities.jobs` is false on a connection that cannot run "
     + "it, so the store's job surface is absent there rather than failing at the first "

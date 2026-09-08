@@ -1078,6 +1078,14 @@ error.
 | `JD2092` | a worker row, compatibility result or remote identity count exceeds its declared bound |
 | `JD2093` | malformed worker protocol request |
 | `JD2094` | invalid or uncommitted durable snapshot; reopen the last committed version |
+| `JD0060` | a replication envelope or snapshot is invalid |
+| `JD2100` | a replica sequence or causal dependency has a gap |
+| `JD2101` | an envelope identity names different content or an unknown local origin |
+| `JD2102` | the replica identity or model revision disagrees |
+| `JD2103` | a resolver fails its synchronous decision contract |
+| `JD2104` | a logical row or snapshot disagrees with its causal history |
+| `JD2105` | an explicit snapshot reset is required, or reset would discard acknowledged history |
+| `JD2106` | a replication operation or snapshot exceeds its configured bound |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.

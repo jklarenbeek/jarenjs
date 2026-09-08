@@ -357,3 +357,10 @@ export type Client<E extends MetaMap<E>, C = Record<string, unknown>> = {
     options?: TransactionOptions): Promise<Awaited<R>>;
   close(options?: { graceMs?: number }): Promise<void>;
 } & ([keyof E] extends [never] ? {} : EntityClientMembers);
+
+/** Author a logical envelope using the DB's canonical format validator. */
+export function defineReplication(header: Omit<import('@jarenjs/db').ReplicationEnvelope, '$replication' | 'operations'>): {
+  change(table: string, key: string, before: Record<string, unknown> | null, after: Record<string, unknown> | null): ReturnType<typeof defineReplication>;
+  toDocument(): import('@jarenjs/db').ReplicationEnvelope;
+  toJSON(): import('@jarenjs/db').ReplicationEnvelope;
+};

@@ -384,11 +384,7 @@ export function drainPage(cursor, options) {
     if (maxBytes !== null && bytes + size > maxBytes) {
       if (items.length === 0) {
         return chain(cursor.return(), () => {
-          throw new DbRuntimeError('JD2074',
-            `the next item is ${size} serialised bytes, more than the page's maxBytes bound of `
-            + `${maxBytes}; the continuation was not advanced — raise the bound, or bound the `
-            + "item itself (an include's maxBytes, a narrower document)",
-            { errors: [{ bytes: size, maxBytes, at: continuationOf(item) }] });
+          assertItemBytes(size, maxBytes, continuationOf(item));
         });
       }
       hasMore = true;
@@ -408,4 +404,14 @@ export function drainPage(cursor, options) {
     }
   };
   return settling(step, () => cursor.return());
+}
+
+/** The shared refusal for an indivisible item, including a replicated transaction.
+ * @param {number} size @param {number} maxBytes @param {any} [at] */
+export function assertItemBytes(size, maxBytes, at) {
+  if (size > maxBytes) throw new DbRuntimeError('JD2074',
+    `the next item is ${size} serialised bytes, more than the page's maxBytes bound of `
+    + `${maxBytes}; the continuation was not advanced — raise the bound, or bound the `
+    + "item itself (an include's maxBytes, a narrower document)",
+    { errors: [{ bytes: size, maxBytes, at }] });
 }

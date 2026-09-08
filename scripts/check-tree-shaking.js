@@ -409,19 +409,11 @@ const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
-// the ceiling catches an ACCIDENTAL leak (another pen, an unrelated
-// package), not the store's own growth: it is moved deliberately, with
-// the measured size recorded, when the store gains capability. Moved to
-// 575,000 when the planner gained the projection tree, the general
-// GROUP BY, the N-way relation graph and the join-table root — measured
-// at 560,746 bytes with all four in. Moved to 600,000 when the store
-// gained the second-dialect contract (a closed capability table, the
-// kind-aware emitter, one classifier over two engines' failures) and
-// database-to-model introspection — measured at 581,502 bytes with both
-// in. The PostgreSQL dialect and its driver are NOT in this figure:
-// they live behind their own subpath, and a client that does not import
-// it does not carry them.
-if (clientBytes > 600000)
+// The client carries the store's replication ledger and bounded live
+// dependency strategies. The measured fixture is 623,994 bytes; this
+// ceiling leaves room for local changes while the import-edge assertions
+// above continue to prohibit unrelated packages and transport clients.
+if (clientBytes > 635000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

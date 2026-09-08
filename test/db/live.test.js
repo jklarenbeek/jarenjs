@@ -376,7 +376,7 @@ describe('entity live queries re-run (declared, not attempted)', () => {
     const live = await store.live({ User: [{ $for: { u: '$.User[*]' }, $return: '$u.name' }] });
     assert.deepStrictEqual(live.mode, {
       strategy: 'rerun', mode: 'rerun',
-      reason: 'entity queries re-run in this version',
+      reason: 'entity dependency plan: only a FLWOR over entity arrays is translated',
     });
     assert.deepStrictEqual(live.result.rows, [{ User: ['ada'] }]);
     await store.entity('User').create({ id: 'u2', name: 'bob' });

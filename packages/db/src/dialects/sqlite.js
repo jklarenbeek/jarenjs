@@ -401,6 +401,7 @@ export const sqliteDialect = createDialect({
   tx: {
     begin: 'BEGIN',
     beginImmediate: 'BEGIN IMMEDIATE',
+    deferForeignKeys: 'PRAGMA defer_foreign_keys = ON',
     commit: 'COMMIT',
     rollback: 'ROLLBACK',
     savepoint: (n) => `SAVEPOINT ${quoteIdentifier(n)}`,

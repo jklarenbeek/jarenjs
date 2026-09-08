@@ -19,6 +19,7 @@
     "linq-jslt.ts",
     "linq-migration.ts",
     "linq-db.ts",
+    "db-replication.ts",
     "linq-contract.ts",
     "linq-flow.ts",
     "linq-app.ts"

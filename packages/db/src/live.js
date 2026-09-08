@@ -27,10 +27,12 @@ import { chain } from './driver.js';
 import { planQuery } from './plan.js';
 import { createSortedWindow } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
+import { joinStrategy } from './live-join.js';
+import { classifyNestedGroup, nestedGroupStrategy } from './live-nested.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
  * never silent). */
-export const LIVE_DEFAULTS = Object.freeze({ maxQueries: 64, maxMaintained: 10_000 });
+export const LIVE_DEFAULTS = Object.freeze({ maxQueries: 64, maxMaintained: 10_000, maxBytes: 4194304 });
 
 const AGGREGATE_MEMBERS = new Map([
   ['$count', 'count'], ['$sum', 'sum'], ['$avg', 'avg'],
@@ -263,6 +265,8 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     return `'${forcing.construct}' — ${forcing.reason}`;
   };
   const { inner, whole, windowed, offset, limit, aggregate } = unwrapDocument(document);
+  const nested = classifyNestedGroup(inner);
+  if (nested !== null && !windowed && keyed && aggregate === null) return nested;
 
   // §13: a document that IS a temporal operator over the collection
   // answers to event time or re-runs, and never to the §7 table — the
@@ -855,9 +859,11 @@ function rerunStrategy(description, context) {
 /**
  * The store-level live-query registry: registration against the §12
  * bounds, capture-record delivery in commit order, lifecycle.
- * @param {{ maxQueries: number, maxMaintained: number }} bounds
+ * @param {{ maxQueries: number, maxMaintained: number, maxBytes?: number }} bounds
  */
 export function createLiveRegistry(bounds) {
+  if (bounds.maxBytes !== undefined && (!Number.isSafeInteger(bounds.maxBytes) || bounds.maxBytes < 1))
+    throw new TypeError('live.maxBytes must be a positive safe integer');
   /** @type {Set<any>} */
   const queries = new Set();
 
@@ -884,6 +890,12 @@ export function createLiveRegistry(bounds) {
       execute: definition.execute,
       readRow: definition.readRow,
       keyOf: definition.keyOf,
+      readDependency: definition.readDependency,
+      dependencyPosition: definition.dependencyPosition,
+      rowPosition: definition.rowPosition,
+      maxMaintained: bounds.maxMaintained,
+      maxBytes: bounds.maxBytes ?? LIVE_DEFAULTS.maxBytes,
+      diff: diffAgainst,
       // §8's touched-key reader, handed to the strategies rather than
       // imported by them: `live-time.js` maintains its own state and
       // must not become a second implementation of the pointer walk
@@ -891,7 +903,8 @@ export function createLiveRegistry(bounds) {
     };
     const STRATEGIES = {
       rows: rowsStrategy, window: windowStrategy, accumulator: accumulatorStrategy,
-      group: groupStrategy, bucket: bucketStrategy, rolling: rollingStrategy,
+      group: groupStrategy, bucket: bucketStrategy, rolling: rollingStrategy, join: joinStrategy, graph: joinStrategy,
+      'nested-group': nestedGroupStrategy,
     };
     const strategy = (STRATEGIES[classification.strategy] ?? rerunStrategy)(
       classification, context);
@@ -948,6 +961,7 @@ export function createLiveRegistry(bounds) {
           state.status = 'errored';
           state.error = error;
           queries.delete(query);
+          strategy.close?.();
           const failure = { error };
           for (const observer of observers) {
             try {
@@ -972,7 +986,7 @@ export function createLiveRegistry(bounds) {
         }
       },
       close() {
-        if (state.status === 'live') state.status = 'closed';
+        if (state.status === 'live') { state.status = 'closed'; strategy.close?.(); }
         queries.delete(query);
         observers.clear();
       },

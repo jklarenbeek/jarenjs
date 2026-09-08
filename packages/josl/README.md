@@ -457,12 +457,12 @@ acceptance corpus, and on a scorecard of damaged documents.
 <!--fact:csv.table-->
 | engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |
 | --- | --- | --- | --- | --- |
-| **jaren** | **11/11** | 2.0 ms | 3.6 ms | 1.4 ms |
-| udsv | 11/11 | **1.5 ms** | **3.0 ms** | **1.0 ms** |
-| papaparse | 11/11 | 5.5 ms | 8.0 ms | 2.2 ms |
-| csv-parse | 11/11 | 20.2 ms | 14.0 ms | 12.4 ms |
-| d3-dsv | 11/11 | 4.3 ms | 6.3 ms | 2.6 ms |
-| @vanillaes/csv | n/a | 7.5 ms | 9.6 ms | 6.1 ms |
+| **jaren** | **11/11** | 2.3 ms | 3.4 ms | 1.4 ms |
+| udsv | 11/11 | **1.9 ms** | **3.1 ms** | **1.0 ms** |
+| papaparse | 11/11 | 6.8 ms | 8.0 ms | 2.1 ms |
+| csv-parse | 11/11 | 18.8 ms | 12.1 ms | 11.0 ms |
+| d3-dsv | 11/11 | 2.8 ms | 4.3 ms | 1.7 ms |
+| @vanillaes/csv | n/a | 7.9 ms | 7.9 ms | 4.8 ms |
 <!--/fact-->
 
 (The suite's twelfth fixture, `location_coordinates`, is excluded: its

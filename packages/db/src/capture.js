@@ -328,7 +328,8 @@ export function translateOperations(connection, shapes, operations) {
  *   mode: 'session' | 'journal',
  *   log: boolean, retention: number,
  *   now?: () => number,
- *   bracket?: (fn: () => any) => any }} options - `now` is the clock a
+ *   bracket?: (fn: () => any) => any,
+ *   beforeCommit?: (patch: any[], context: any) => any }} options - `now` is the clock a
  *   delivery is stamped with (the store's runtime record); the platform's
  *   when absent. `bracket` runs the first-open DDL (the store's immediate
  *   transaction on a writable store); bare when absent
@@ -353,6 +354,7 @@ export function createCaptureEngine(options) {
   // from the durable row — never an answer to a watermark question
   let seq = 0;
   let depth = 0;
+  let context = null;
   /** @type {any} */
   let session = null;
   /** @type {any[]} */
@@ -572,6 +574,7 @@ export function createCaptureEngine(options) {
     depth = 1;
     const cleanupFailure = () => {
       depth = 0;
+      context = null;
       if (session !== null) {
         session.close();
         session = null;
@@ -584,7 +587,7 @@ export function createCaptureEngine(options) {
       else journal = [];
       outcome = connection.transaction((...scopeArgs) =>
         chain(fn(...scopeArgs), (result) =>
-          chain(collect(), (patch) => {
+          chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
             if (patch.length === 0) return { result, delivery: null };
             const at = clock();
             return chain(persist(patch, at), () => ({
@@ -597,7 +600,7 @@ export function createCaptureEngine(options) {
                 patch,
               },
             }));
-          })));
+          }))));
     }
     catch (error) {
       cleanupFailure();
@@ -605,6 +608,7 @@ export function createCaptureEngine(options) {
     }
     const finish = (bundle) => {
       depth = 0;
+      context = null;
       if (bundle.delivery !== null) pendingDeliveries.push(bundle.delivery);
       deliver();
       return bundle.result;
@@ -669,6 +673,12 @@ export function createCaptureEngine(options) {
     mark,
     truncate,
     record,
+    // Metadata belongs to this capture transaction and is cleared on every
+    // settlement, including a failure while collecting or persisting changes.
+    setContext(value) {
+      if (depth === 0) throw new TypeError('capture context needs an active transaction');
+      context = value;
+    },
     observe(fn) {
       if (typeof fn !== 'function')
         throw new TypeError('observe needs a function');

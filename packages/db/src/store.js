@@ -29,16 +29,21 @@ import { chain, toPromise, isThenable, attempt } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
-import { admitCursor, admitSyncCursor } from './cursor.js';
+import { admitCursor, admitSyncCursor, createCursor, drainPage, utf8Length } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots } from './profile.js';
-import { normalizeEntities, explainMapping } from './model.js';
+import { normalizeEntities, explainMapping, joinTableRoots } from './model.js';
 import { entityCore } from './entity.js';
 import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
+import { createReplicationEngine } from './replication.js';
+import { REPLICATION_DEFAULTS } from './replication-format.js';
+import { createLogicalRows } from './logical-rows.js';
+import { shapeHash } from './migrate.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
+import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine } from './jobs.js';
 import { introspectModel } from './introspect.js';
@@ -961,6 +966,9 @@ export function openStore(model, options) {
     collections = normalizeModel(model, options.expressions);
     entities = normalizeEntities(model);
     mapping = entities.size > 0 ? explainMapping(model) : null;
+    if (options.replication !== undefined && [...collections.keys(), ...entities.keys()]
+      .some((name) => name.toLowerCase().startsWith('_jaren_replica')))
+      throw new DbCompileError('JD0060', 'replication reserves table names beginning with _jaren_replica');
     if (collections.size === 0 && entities.size === 0) {
       throw modelError('JD0005',
         'the model must declare at least one collection or entity', '');
@@ -1439,10 +1447,13 @@ export function openStore(model, options) {
           };
 
           // ————— change capture (LIVE-FORMAT §§1–6) —————
-          const captureRequested = options.capture === true
+          const captureOption = options.capture ?? (options.replication === undefined ? undefined : true);
+          const captureRequested = captureOption === true
             ? {}
-            : (options.capture === undefined || options.capture === false
-              ? null : options.capture);
+            : (captureOption === undefined || captureOption === false
+              ? null : captureOption);
+          if (options.replication !== undefined && (captureRequested === null || readOnly))
+            throw new TypeError('replication requires a writable store with capture enabled');
           let captureMode = 'none';
           if (captureRequested !== null) {
             const wanted = captureRequested.mode ?? 'auto';
@@ -1468,6 +1479,9 @@ export function openStore(model, options) {
               ? (hasSessions ? 'session' : 'journal')
               : wanted;
           }
+          if (options.replication !== undefined && captureMode === 'journal'
+            && Object.values(mapping?.entities ?? {}).some((entity) => entity.foreignKeys.some((fk) => fk.onDelete !== 'restrict')))
+            throw new DbCompileError('JD0051', 'journal replication cannot capture cascading or set-null child relations; use session capture');
           const captureShapes = new Map();
           if (captureMode !== 'none') {
             for (const [collectionName, plan] of plans) {
@@ -1525,6 +1539,7 @@ export function openStore(model, options) {
           // a column upgrade; a read-only store creates nothing and takes
           // no lock
           const firstOpen = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
+          let replicationEngine = null;
           const capture = captureMode === 'none' ? null : createCaptureEngine({
             connection,
             bracket: firstOpen,
@@ -1534,6 +1549,7 @@ export function openStore(model, options) {
               || (captureRequested.log !== undefined && captureRequested.log !== false),
             retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
             now: runtime.now,
+            beforeCommit: (patch, context) => replicationEngine?.commit(patch, context),
           });
           // the capture scope around a write runs statements of its own
           // (a session's changeset read, the journal's old-row read, the
@@ -1562,6 +1578,7 @@ export function openStore(model, options) {
           const liveRegistry = capture === null ? null : createLiveRegistry({
             maxQueries: options.live?.maxQueries ?? LIVE_DEFAULTS.maxQueries,
             maxMaintained: options.live?.maxMaintained ?? LIVE_DEFAULTS.maxMaintained,
+            maxBytes: options.live?.maxBytes ?? LIVE_DEFAULTS.maxBytes,
           });
           if (capture !== null) {
             capture.observe((record) => /** @type {any} */ (liveRegistry).deliver(record));
@@ -1613,6 +1630,8 @@ export function openStore(model, options) {
               classification,
               execute: (doc, executeOptions) => core.execute(doc, executeOptions),
               readRow: (token) => core.get(token),
+              rowPosition: (token) => createLogicalRows({ connection, shapes: captureShapes, capture,
+                collectionCore: coreFor, entityCore: entityCoreFor }).position(core.model.name, token),
               keyOf: (doc) => String(extractKey(doc, core.model.keySegments,
                 core.model.key, core.model.name, core.model.docPath)),
             }));
@@ -1655,13 +1674,24 @@ export function openStore(model, options) {
                 const sql = `SELECT ${columns.map(dialect.quoteIdentifier).join(', ')} `
                   + `FROM ${dialect.quoteIdentifier(joinName)} `
                   + `WHERE ${dialect.quoteIdentifier(own.column)} = ${dialect.parameterRef(1, 'v')}`;
-                return chain(connection.prepare(sql), (statement) =>
-                  chain(statement.all([keyParts[0]]), (rows) => {
+                const boundedRows = () => {
+                  const { maxOperations = REPLICATION_DEFAULTS.maxOperations, maxBytes = REPLICATION_DEFAULTS.maxBytes } = options.replication;
+                  const cursor = createCursor({ streaming: 'row', barrier: null,
+                    open: () => chain(connection.prepare(`${sql} LIMIT ?`), (statement) => statement.iterate([keyParts[0], maxOperations + 1])),
+                    items: (row) => [row] });
+                  return chain(drainPage(cursor, { limit: maxOperations, maxBytes,
+                    sizeOf: (row) => utf8Length(JSON.stringify(row)), continuationOf: () => null }), (page) => {
+                    if (page.hasMore) throw new DbRuntimeError('JD2106', 'membership cascade exceeds replication capacity');
+                    return page.items;
+                  });
+                };
+                return chain(options.replication === undefined
+                  ? chain(connection.prepare(sql), (statement) => statement.all([keyParts[0]])) : boundedRows(), (rows) => {
                     for (const row of rows) {
                       capture.record(joinName, columns.map((column) => row[column]), undefined, null);
                     }
                     return nextJoin(i + 1);
-                  }));
+                  });
               };
               return nextJoin(0);
             };
@@ -2170,23 +2200,27 @@ export function openStore(model, options) {
                 'live eventTime maintains a collection view — an entity document re-runs, '
                 + 'so a watermark would describe nothing (LIVE-FORMAT §13)');
             }
-            const roots = collectEntityRoots(document, entities);
+            const roots = collectEntityRoots(document, new Map([...entities, ...joinTableRoots(entities, mapping).entities]));
             if (roots.size === 0) {
               throw new TypeError(
                 'store.live takes an entity-root document — for a collection, '
                 + 'use store.collection(name).live');
             }
+            const logicalRows = createLogicalRows({ connection, shapes: captureShapes, capture,
+              collectionCore: coreFor, entityCore: entityCoreFor });
             return closeOnRollback(liveRegistry.register({
               name: [...roots].join('+'),
               tables: roots,
               document,
               externals: liveOptions?.externals ?? {},
               demanded: liveOptions?.mode,
-              classification: {
+              classification: liveOptions?.mode === 'rerun' ? {
                 strategy: 'rerun',
-                reason: 'entity queries re-run in this version',
-              },
+                reason: 're-run mode was explicitly requested',
+              } : classifyEntityLive(document, entities, mapping, operators),
               execute: (doc, executeOptions) => entityEngine.execute(doc, executeOptions),
+              readDependency: logicalRows.read,
+              dependencyPosition: logicalRows.position,
               readRow: null,
               keyOf: null,
             }));
@@ -2754,6 +2788,7 @@ export function openStore(model, options) {
               // member is ABSENT rather than a second way to close the
               // raw connection under its own savepoint
               close: override(undefined),
+              replication: override(undefined),
               // nor does it run maintenance: a checkpoint inside an open
               // transaction is a no-op the engine answers quietly, and
               // the other three are store-level operations — ABSENT here
@@ -3010,8 +3045,26 @@ export function openStore(model, options) {
             });
           }
           return chain(capture === null ? null : capture.ready,
-            () => chain(jobsEngine === null ? null : jobsEngine.ready,
-              () => Object.freeze(store)));
+            () => chain(jobsEngine === null ? null : jobsEngine.ready, () => {
+          if (options.replication !== undefined) {
+            replicationEngine = createReplicationEngine({ connection, capture,
+              config: options.replication, model: shapeHash(model), now: runtime.now, bracket: firstOpen,
+              rows: createLogicalRows({ connection, shapes: captureShapes, capture,
+                collectionCore: coreFor, entityCore: entityCoreFor, captureJoinDelete }),
+            });
+            store.replication = Object.freeze({
+              frontier: lift(() => gated(() => replicationEngine.frontier())),
+              page: lift((request) => topLevelTransaction(() => replicationEngine.page(request), request?.signal, undefined, 'immediate')),
+              conflicts: lift((request) => gated(() => replicationEngine.conflicts(request), 'replication conflict read', request?.signal)),
+              snapshot: lift((request) => topLevelTransaction(() => replicationEngine.snapshot(request), request?.signal, undefined, 'immediate')),
+              reset: lift((snapshot, request) => replicationEngine.reset(snapshot, request,
+                (fn) => topLevelTransaction(fn, request?.signal, createUnitOfWork(), 'immediate'))),
+              apply: lift((envelope, request) => replicationEngine.apply(envelope, request,
+                (fn) => topLevelTransaction(fn, request?.signal, createUnitOfWork(), 'immediate'))),
+            });
+          }
+          return chain(replicationEngine === null ? null : replicationEngine.ready, () => Object.freeze(store));
+          }));
         })))));
 
       /**

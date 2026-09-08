@@ -317,7 +317,7 @@ export function fullDoubleDialect(createDialect) {
     usesIndex: (line, index) => line.includes(`VIA ${index}`),
     excludedRef: (column) => `NEW.${column}`,
     tx: {
-      begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK',
+      begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK', deferForeignKeys: 'DEFER CHECKS',
       savepoint: (n) => `MARK ${quoteIdentifier(n)}`,
       release: (n) => `UNMARK ${quoteIdentifier(n)}`,
       rollbackTo: (n) => `BACKTO ${quoteIdentifier(n)}`,

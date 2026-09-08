@@ -1,0 +1,357 @@
+{
+  "$changeflowBenchmark": "0.1",
+  "recipe": "node --expose-gc benchmark/changeflow.js",
+  "measuredAt": "2026-09-08T19:21:05.157Z",
+  "runtime": "v24.19.0",
+  "host": {
+    "platform": "linux",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "samples": 15,
+  "correctness": "Every mutation checked against fresh SQL and a patch-only consumer; every replication delivery checked against complete state.",
+  "memory": {
+    "rssBytes": 114118656
+  },
+  "live": [
+    {
+      "shape": "selective join",
+      "mode": "incremental",
+      "strategy": {
+        "strategy": "join",
+        "mode": "incremental"
+      },
+      "rows": 200,
+      "fanout": 1,
+      "initializationMs": 16.66266999999999,
+      "retainedHeapBytes": 4878848,
+      "mutationMs": {
+        "p50": 0.32294099999998593,
+        "p95": 2.118949999999984,
+        "max": 2.118949999999984
+      },
+      "oracleMs": {
+        "p50": 0.35876899999999523,
+        "p95": 1.2104699999999866,
+        "max": 1.2104699999999866
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "dependencyReads": 15,
+        "refreshedRoots": 215,
+        "reruns": 0
+      }
+    },
+    {
+      "shape": "selective join",
+      "mode": "rerun",
+      "strategy": {
+        "strategy": "rerun",
+        "mode": "rerun",
+        "reason": "re-run mode was explicitly requested"
+      },
+      "rows": 200,
+      "fanout": 1,
+      "initializationMs": 0.8985630000000242,
+      "retainedHeapBytes": 347160,
+      "mutationMs": {
+        "p50": 0.7455439999999953,
+        "p95": 1.6216190000000097,
+        "max": 1.6216190000000097
+      },
+      "oracleMs": {
+        "p50": 0.3934099999999887,
+        "p95": 0.5678010000000029,
+        "max": 0.5678010000000029
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "reruns": 15
+      }
+    },
+    {
+      "shape": "high fan-out join",
+      "mode": "incremental",
+      "strategy": {
+        "strategy": "join",
+        "mode": "incremental"
+      },
+      "rows": 200,
+      "fanout": 200,
+      "initializationMs": 7.313800000000015,
+      "retainedHeapBytes": 4851232,
+      "mutationMs": {
+        "p50": 1.9006300000000067,
+        "p95": 3.178913999999992,
+        "max": 3.178913999999992
+      },
+      "oracleMs": {
+        "p50": 0.36379800000000273,
+        "p95": 0.6107520000000477,
+        "max": 0.6107520000000477
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "dependencyReads": 15,
+        "refreshedRoots": 3200,
+        "reruns": 0
+      }
+    },
+    {
+      "shape": "high fan-out join",
+      "mode": "rerun",
+      "strategy": {
+        "strategy": "rerun",
+        "mode": "rerun",
+        "reason": "re-run mode was explicitly requested"
+      },
+      "rows": 200,
+      "fanout": 200,
+      "initializationMs": 0.8598019999999451,
+      "retainedHeapBytes": 340328,
+      "mutationMs": {
+        "p50": 0.8495360000000005,
+        "p95": 1.1879810000000361,
+        "max": 1.1879810000000361
+      },
+      "oracleMs": {
+        "p50": 0.28767100000004575,
+        "p95": 0.5348359999999843,
+        "max": 0.5348359999999843
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "reruns": 15
+      }
+    },
+    {
+      "shape": "graph",
+      "mode": "incremental",
+      "strategy": {
+        "strategy": "graph",
+        "mode": "incremental"
+      },
+      "rows": 200,
+      "fanout": 1,
+      "initializationMs": 7.461651000000018,
+      "retainedHeapBytes": 4811712,
+      "mutationMs": {
+        "p50": 0.4585700000000088,
+        "p95": 0.7504329999999868,
+        "max": 0.7504329999999868
+      },
+      "oracleMs": {
+        "p50": 3.721152000000018,
+        "p95": 5.479937000000007,
+        "max": 5.479937000000007
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "dependencyReads": 15,
+        "refreshedRoots": 215,
+        "reruns": 0
+      }
+    },
+    {
+      "shape": "graph",
+      "mode": "rerun",
+      "strategy": {
+        "strategy": "rerun",
+        "mode": "rerun",
+        "reason": "re-run mode was explicitly requested"
+      },
+      "rows": 200,
+      "fanout": 1,
+      "initializationMs": 4.538560999999959,
+      "retainedHeapBytes": 1417928,
+      "mutationMs": {
+        "p50": 4.042486999999994,
+        "p95": 4.978972999999996,
+        "max": 4.978972999999996
+      },
+      "oracleMs": {
+        "p50": 3.568343000000027,
+        "p95": 4.491907999999967,
+        "max": 4.491907999999967
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "reruns": 15
+      }
+    },
+    {
+      "shape": "nested groups",
+      "mode": "incremental",
+      "strategy": {
+        "strategy": "nested-group",
+        "mode": "incremental"
+      },
+      "rows": 200,
+      "fanout": 10,
+      "initializationMs": 6.775261999999998,
+      "retainedHeapBytes": 2057832,
+      "mutationMs": {
+        "p50": 0.25163499999996475,
+        "p95": 0.7954799999999977,
+        "max": 0.7954799999999977
+      },
+      "oracleMs": {
+        "p50": 0.3772760000000517,
+        "p95": 0.6268850000000157,
+        "max": 0.6268850000000157
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "refreshedGroups": 35,
+        "dependencyReads": 15,
+        "reruns": 0
+      }
+    },
+    {
+      "shape": "nested groups",
+      "mode": "rerun",
+      "strategy": {
+        "strategy": "rerun",
+        "mode": "rerun",
+        "reason": "rerun was requested"
+      },
+      "rows": 200,
+      "fanout": 10,
+      "initializationMs": 0.8971670000000813,
+      "retainedHeapBytes": 295808,
+      "mutationMs": {
+        "p50": 0.4717000000000553,
+        "p95": 0.6852010000000064,
+        "max": 0.6852010000000064
+      },
+      "oracleMs": {
+        "p50": 0.3394230000000107,
+        "p95": 0.4678589999999758,
+        "max": 0.4678589999999758
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "reruns": 15
+      }
+    },
+    {
+      "shape": "offset groups",
+      "mode": "rerun",
+      "strategy": {
+        "strategy": "rerun",
+        "mode": "rerun",
+        "reason": "'$groupby' — nonnative-grouping: the grouping key or the projection is not the closed bucket shape"
+      },
+      "rows": 200,
+      "fanout": 10,
+      "initializationMs": 1.5187439999999697,
+      "retainedHeapBytes": 383648,
+      "mutationMs": {
+        "p50": 0.4591289999999617,
+        "p95": 0.5466380000000299,
+        "max": 0.5466380000000299
+      },
+      "oracleMs": {
+        "p50": 0.3720389999999725,
+        "p95": 0.397111000000109,
+        "max": 0.397111000000109
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "reruns": 15
+      }
+    },
+    {
+      "shape": "offset groups",
+      "mode": "rerun",
+      "strategy": {
+        "strategy": "rerun",
+        "mode": "rerun",
+        "reason": "rerun was requested"
+      },
+      "rows": 200,
+      "fanout": 10,
+      "initializationMs": 0.8842459999999619,
+      "retainedHeapBytes": 282280,
+      "mutationMs": {
+        "p50": 0.4256759999999531,
+        "p95": 0.5845620000000054,
+        "max": 0.5845620000000054
+      },
+      "oracleMs": {
+        "p50": 0.32440699999995104,
+        "p95": 0.3820259999999962,
+        "max": 0.3820259999999962
+      },
+      "stats": {
+        "records": 15,
+        "matched": 15,
+        "emissions": 15,
+        "reruns": 15
+      }
+    }
+  ],
+  "replication": [
+    {
+      "capture": "session",
+      "envelopes": 15,
+      "operations": 15,
+      "bytes": 3169,
+      "applyMs": {
+        "p50": 0.4577320000000782,
+        "p95": 1.6039489999999432,
+        "max": 1.6039489999999432
+      },
+      "replayMs": {
+        "p50": 0.1180299999999761,
+        "p95": 0.1840990000000602,
+        "max": 0.1840990000000602
+      },
+      "conflictAttempts": 15,
+      "conflictMs": {
+        "p50": 0.203583999999978,
+        "p95": 0.41966999999999643,
+        "max": 0.41966999999999643
+      }
+    },
+    {
+      "capture": "journal",
+      "envelopes": 15,
+      "operations": 15,
+      "bytes": 3169,
+      "applyMs": {
+        "p50": 0.29388700000004064,
+        "p95": 1.0269300000001067,
+        "max": 1.0269300000001067
+      },
+      "replayMs": {
+        "p50": 0.0917699999999968,
+        "p95": 0.10294499999997697,
+        "max": 0.10294499999997697
+      },
+      "conflictAttempts": 15,
+      "conflictMs": {
+        "p50": 0.16077200000006542,
+        "p95": 0.1904540000000452,
+        "max": 0.1904540000000452
+      }
+    }
+  ]
+}

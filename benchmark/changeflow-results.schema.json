@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Change-flow benchmark result",
+  "type": "object",
+  "required": [
+    "$changeflowBenchmark",
+    "recipe",
+    "measuredAt",
+    "runtime",
+    "host",
+    "samples",
+    "correctness",
+    "memory",
+    "live",
+    "replication"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$changeflowBenchmark": {
+      "const": "0.1"
+    },
+    "recipe": {
+      "const": "node --expose-gc benchmark/changeflow.js"
+    },
+    "measuredAt": {
+      "type": "string"
+    },
+    "runtime": {
+      "type": "string"
+    },
+    "host": {
+      "type": "object"
+    },
+    "samples": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "correctness": {
+      "type": "string"
+    },
+    "memory": {
+      "type": "object"
+    },
+    "live": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "shape",
+          "mode",
+          "strategy",
+          "rows",
+          "fanout",
+          "initializationMs",
+          "retainedHeapBytes",
+          "mutationMs",
+          "oracleMs",
+          "stats"
+        ]
+      }
+    },
+    "replication": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "capture",
+          "envelopes",
+          "operations",
+          "bytes",
+          "applyMs",
+          "replayMs",
+          "conflictAttempts",
+          "conflictMs"
+        ]
+      }
+    }
+  }
+}

@@ -98,3 +98,5 @@ export {
   describeValue, serializeResult,
 } from './jobs.js';
 export { createDagJobRunner, RUN_IDENTITY_NODE } from './dag-job.js';
+export { REPLICATION_VERSION, REPLICATION_DEFAULTS, normalizeFrontier,
+  normalizeReplication, normalizeReplicationSnapshot, encodeReplication, replicationIdentity } from './replication-format.js';

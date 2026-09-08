@@ -990,11 +990,17 @@ shutdown limits, the browser persistence matrix and measured latency/memory loss
   `sessionReason`. One diff
   format runs store → patch → live query → O(k) render. Capture is
   opt-in; the overhead is published, not waved away.
+- **Portable replication** ([REPLICATION-FORMAT](docs/REPLICATION-FORMAT.md)):
+  opt-in replica identities, causal frontiers, bounded logical envelopes,
+  durable replay receipts, explicit conflict evidence and snapshot resets.
+  Data and acknowledgements commit together. Hosts supply transport and any
+  conflict resolver; the default preserves both contenders and rejects the write.
 - **Live queries** (LIVE-FORMAT §§7–13): `collection.live(document)`
   maintains a result as writes arrive and emits patches — incremental
   for `where`/`select`/`orderBy`+`limit`/aggregates/single-level
   `groupBy` and a spatial `where` over a derived index (the geofence;
-  the normative maintenance table), re-run for everything else,
+  the normative maintenance table), indexed inner/left entity joins, bounded
+  graph projections and explicit two-level groups; re-run for other shapes,
   **declared, never silent** (`live.mode` names the reason).
   Unaffected rows stay reference-identical; a seeded oracle holds the
   maintained result equal to a fresh re-query after every mutation.
@@ -1276,7 +1282,8 @@ its side-effect-free status read are in
   there. Same-host processes over WAL are the supported topology. No
   priority classes, no cron, no workflow compensation.
 - **Live-query maintenance is limited to the declared table** (§7);
-  joins, entity queries and non-canonical shapes re-run, reported.
+  indexed joins and graph projections require bounded dependencies. Offset
+  windows, unindexed joins, load-spec graphs and non-canonical shapes re-run, reported.
 - **`eventTime.retention` bounds repair work, not memory.** It is the
   horizon a view claims and is checked against the window it maintains;
   the maintained state is still bounded by `live.maxMaintained`, and no
@@ -1287,8 +1294,8 @@ its side-effect-free status read are in
   durability differences; see [execution hosts](docs/HOSTS.md).
 - **Named future work, not silent gaps**: `$groupby` pushdown beyond
   the `$time-bucket` ladder, a many-to-many hop on the chain, membership
-  on an auto-keyed pending insert, incremental joins, other SQL dialects,
-  replication, database introspection (MODEL-FORMAT §10.6, the roadmap).
+  on an auto-keyed pending insert, additional join/group shapes, other SQL dialects,
+  transport policy, database introspection (MODEL-FORMAT §10.6, the roadmap).
 
 The normative formats are
 [docs/MODEL-FORMAT.md](docs/MODEL-FORMAT.md) (storage §§1–7, safe
@@ -1320,6 +1327,10 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/schemas/jaren-migration.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-model.draft-07.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-model.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-replication-snapshot.draft-07.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-replication-snapshot.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-replication.draft-07.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-replication.schema.json` | schema | — |
 | `@jarenjs/db/package.json` | metadata | — |
 | `@jarenjs/db/node-worker` | JavaScript | declared |
 | `@jarenjs/db/node-pool` | JavaScript | declared |

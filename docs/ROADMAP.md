@@ -615,26 +615,24 @@ what each does is its own documentation's job
   harness awaits an emission before it compares, or a re-run view
   settles before `result` is readable. Found by QUERYREACH's close-out;
   it belongs to whoever owns live maintenance.
-- [ ] **Replication.** Change capture (LIVE-FORMAT) is an ordered log
-  of RFC 6902 patches with a monotonic sequence, and SQLite's
-  changeset/conflict primitives are available — the raw material a
-  replication protocol is built from. The log now has a bounded reader
-  (`store.changes.bounds()` / `changes.page()`, LIVE-FORMAT §5) with
-  two watermarks and an explicit retention gap — `resetRequired`, with
-  no partial suffix beside it — which is the precondition a replication
-  protocol would build on: a consumer can know when its cursor is
-  usable and when it must re-seed. That is the precondition, not the
-  protocol. None of the protocol is shipped: there is no conflict
-  resolution, no site identity, no causal ordering across writers. This
-  is the design constraint written down as an open item, not a hint
-  that it is nearly there.
-- [ ] **Richer incremental live maintenance.** The maintenance table
-  (LIVE-FORMAT §7) covers `where`/`select`, the ordered window,
-  whole-query aggregates and single-level `groupBy`; joins,
-  multi-entity roots, offset windows and the linq chain's nested
-  two-level `groupBy` emission all RE-RUN on invalidation (declared,
-  reported through `live.mode`). Incremental joins in particular are
-  the open research half this program deliberately did not open-end.
+- [ ] **Replication beyond bounded SQLite histories.** Portable JSON envelopes,
+  replica identities, causal frontiers, durable replay receipts, transactional
+  apply, explicit conflicts and bounded snapshot resets are implemented in
+  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md). Session and
+  journal capture agree on Node and wasm; transport and resolver policy are
+  host-injected. Remaining work: PostgreSQL capture/persistence, paged snapshots
+  and causally safe receipt/tombstone compaction for histories beyond the
+  configured reset credits, and journal capture of child cascade/set-null effects. Whole-row conflicts remain conservative; independent
+  field merges require a declared resolver policy.
+- [ ] **Remaining incremental live shapes.** Indexed inner/left entity joins,
+  multi-entity tuple projections, bounded nested graph projections and explicit
+  two-level collection groups are maintained through changed-key dependencies.
+  [The matrix](../packages/db/docs/LIVE-FORMAT.md) names the residuals:
+  self joins, non-equality and unindexed joins, reverse many-to-many edges with
+  no declared index, ordered/windowed entity joins, load-spec graphs, global-root
+  graph projections and LINQ group-of-groups emission. Offset windows remain
+  rerun. [Equal-correctness measurements](../packages/db/docs/REPLICATION-FORMAT.md#measurements)
+  publish initialization and high-fan-out losses beside selective maintenance.
 - [x] **The session extension in the wasm build.** A disposable live probe
   gates session capture; failed/missing bindings name journal fallback.
   Transfer, rollback and close cleanup are covered by the shared host corpus.
