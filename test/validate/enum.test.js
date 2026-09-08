@@ -8,6 +8,15 @@ import {
 const compiler = new JarenValidator();
 
 describe('Schema Generics', function () {
+  it('accepts structurally equal const and enum objects with own constructor members', () => {
+    const expected = JSON.parse('{"constructor":{"name":"record"}}');
+    for (const schema of [{ const: expected }, { enum: [expected] }]) {
+      const validate = compiler.compile(schema);
+      assert.isTrue(validate(JSON.parse(JSON.stringify(expected))));
+      assert.isFalse(validate({ constructor: { name: 'other' } }));
+    }
+  });
+
   // https://json-schema.org/understanding-json-schema/reference/generic.html
   describe('#enums()', function () {
     it('should validate a string enum type', function () {

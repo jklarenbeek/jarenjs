@@ -1,18 +1,11 @@
 #!/usr/bin/env node
 //@ts-check
 /**
- * The full gate, as one command with an exit code — now shaped by what the
- * stages actually cost instead of run as a flat serial chain.
+ * The full gate, as one command with an exit code. The independent read-only
+ * stages — lint, the test suite, the dead-code audit, the derived-text check
+ * and the document check — can run together. This runner:
  *
- * Measured on the reference host, the serial chain spent ~85% of its wall
- * clock in the browser matrix and built the website twice (once as its own
- * stage, once again inside `test:browser`). The independent read-only
- * stages — lint, the test suite, the dead-code audit, the derived-text
- * check and the document check — ran one after another although nothing
- * orders them. So this runner:
- *
- *   1. runs those five stages CONCURRENTLY (wall clock: the slowest one,
- *      the ~30s dead-code audit, instead of their sum),
+ *   1. runs those five stages CONCURRENTLY,
  *   2. then builds the website ONCE,
  *   3. then runs `test:design` (it reads the built `dist/`),
  *   4. then runs the Playwright matrix against that same build.
@@ -47,6 +40,7 @@
 
 import { spawn } from 'node:child_process';
 import process from 'node:process';
+import { npmCliPath } from './lib/portable.js';
 
 /** @typedef {{ name: string, args: string[] }} Stage */
 
@@ -70,60 +64,63 @@ const running = new Map();
 let failed = false;
 
 /**
- * Run one npm script (or raw command) with buffered output.
+ * Run one command with buffered output and a labeled result, including
+ * launch failures that happen before a child can produce output.
  * @param {string} label
- * @param {string[]} args - passed to `npm`
+ * @param {string} command
+ * @param {string[]} args
+ * @param {boolean} [shell]
  * @returns {Promise<{ label: string, code: number, output: string, seconds: string }>}
  */
-function stage(label, args) {
+function commandStage(label, command, args, shell = false) {
   return new Promise((resolve) => {
     const started = Date.now();
-    // npm is npm.cmd on Windows, and Node only spawns a .cmd through a
-    // shell; every argument this runner passes is space-free
-    const child = process.platform === 'win32'
-      ? spawn('npm.cmd', args, { env: process.env, shell: true })
-      : spawn('npm', args, { env: process.env });
-    running.set(label, child);
     let output = '';
-    child.stdout.on('data', (chunk) => { output += chunk; });
-    child.stderr.on('data', (chunk) => { output += chunk; });
-    child.on('close', (code) => {
+    let finished = false;
+    /** @param {number} code */
+    function finish(code) {
+      if (finished) return;
+      finished = true;
       running.delete(label);
       resolve({
         label,
-        code: code === null ? 1 : code,
+        code,
         output,
         seconds: ((Date.now() - started) / 1000).toFixed(1),
       });
-    });
+    }
+    /** @param {unknown} error */
+    function fail(error) {
+      output += `${error instanceof Error ? error.message : String(error)}\n`;
+      finish(1);
+    }
+    try {
+      const child = spawn(command, args, { env: process.env, shell });
+      running.set(label, child);
+      child.stdout?.on('data', (chunk) => { output += chunk; });
+      child.stderr?.on('data', (chunk) => { output += chunk; });
+      child.on('error', fail);
+      child.on('close', (code) => finish(code === null ? 1 : code));
+    }
+    catch (error) {
+      fail(error);
+    }
   });
 }
 
 /**
- * Run one complete shell command with buffered output (the
- * SITE_GATE_BROWSER_SHELL escape hatch).
+ * Run npm's JavaScript entry point directly when npm run supplied it, so
+ * forwarded arguments stay intact on Windows too. Direct node invocation
+ * keeps the npm executable/shim fallback shared with the release scripts.
  * @param {string} label
- * @param {string} command
+ * @param {string[]} args
  * @returns {Promise<{ label: string, code: number, output: string, seconds: string }>}
  */
-function shellStage(label, command) {
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const child = spawn('bash', ['-c', command], { env: process.env });
-    running.set(label, child);
-    let output = '';
-    child.stdout.on('data', (chunk) => { output += chunk; });
-    child.stderr.on('data', (chunk) => { output += chunk; });
-    child.on('close', (code) => {
-      running.delete(label);
-      resolve({
-        label,
-        code: code === null ? 1 : code,
-        output,
-        seconds: ((Date.now() - started) / 1000).toFixed(1),
-      });
-    });
-  });
+function stage(label, args) {
+  const cli = npmCliPath();
+  if (cli !== null) return commandStage(label, process.execPath, [cli, ...args]);
+  const windows = process.platform === 'win32';
+  return commandStage(label, windows ? 'npm.cmd' : 'npm', args, windows);
 }
 
 /** @param {{ label: string, code: number, output: string, seconds: string }} result */
@@ -176,7 +173,7 @@ else {
     if (playwrightArgs.length > 0) {
       console.log(`\n⚠ SITE_GATE_BROWSER_SHELL is set — forwarded arguments (${playwrightArgs.join(' ')}) do NOT apply; bake them into the command`);
     }
-    report(await shellStage('test:browser (full matrix, via SITE_GATE_BROWSER_SHELL)', shell));
+    report(await commandStage('test:browser (full matrix, via SITE_GATE_BROWSER_SHELL)', 'bash', ['-c', shell]));
   }
   else {
     const args = ['run', 'test:browser:prebuilt', '--'];

@@ -71,6 +71,7 @@ import { STREAM_ERRORS } from './sse.js';
 export function createStreamConsumer(options) {
   const { route, catalog, meta, callbacks, finish } = options;
   let lastSeq = options.lastSeq;
+  let delivered = false;
   let done = false;
 
   /**
@@ -145,12 +146,16 @@ export function createStreamConsumer(options) {
       const reset = envelope.reset === true;
       // a mid-stream snapshot (a maxPatchBytes replacement) must still
       // advance; a reset snapshot may land AT the resume cursor — the
-      // server's watermark had not moved past what the consumer held
-      if (at !== null && lastSeq !== null && at !== 0 && (reset ? at < lastSeq : at <= lastSeq)) {
+      // server's watermark had not moved past what the consumer held.
+      // A zero seed may replace the resume cursor only before this
+      // attempt delivers anything, when replay falls back to a fresh source.
+      const initialSeed = !delivered && at === 0;
+      if (at !== null && lastSeq !== null && !initialSeed && (reset ? at < lastSeq : at <= lastSeq)) {
         if (terminate()) call(callbacks.onError, streamOutcome('JC2092', {}));
         return;
       }
       if (at !== null) lastSeq = at;
+      delivered = true;
       const watermark = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
       call(callbacks.onSnapshot, envelope.value, {
         seq: at === null ? 0 : at,
@@ -175,6 +180,7 @@ export function createStreamConsumer(options) {
         return;
       }
       lastSeq = at;
+      delivered = true;
       call(callbacks.onPatch, { patch, seq: at });
     },
     error(data) {

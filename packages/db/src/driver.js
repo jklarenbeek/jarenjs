@@ -40,7 +40,7 @@
 
 import { isThenable, chain, toPromise } from '@jarenjs/core/function';
 
-import { DbCompileError, DbRuntimeError } from './errors.js';
+import { DbCompileError, DbRuntimeError, TransactionFailure } from './errors.js';
 
 /** The minimum SQLite the store accepts, asserted at open. */
 export const SQLITE_FLOOR = '3.45.0';
@@ -152,6 +152,38 @@ export function attempt(call, wrap) {
   return isThenable(out)
     ? /** @type {Promise<T>} */ (out).then(undefined, (error) => { throw wrap(error); })
     : out;
+}
+
+/**
+ * Settle a transaction only after its commit succeeds. Deferred constraints
+ * can refuse COMMIT or RELEASE after the body returned successfully; that
+ * failure owes the same rollback as a failing body.
+ * @param {() => any} body
+ * @param {() => any} commit
+ * @param {() => any} rollback
+ * @returns {any}
+ */
+function settleTransaction(body, commit, rollback) {
+  const fail = (error) => chain(attempt(rollback, (cleanupError) =>
+    new TransactionFailure(error, cleanupError)), () => { throw error; });
+  const succeed = (value) => {
+    let committed;
+    try {
+      committed = commit();
+    }
+    catch (error) {
+      return fail(error);
+    }
+    return isThenable(committed) ? committed.then(() => value, fail) : value;
+  };
+  let out;
+  try {
+    out = body();
+  }
+  catch (error) {
+    return fail(error);
+  }
+  return isThenable(out) ? out.then(succeed, fail) : succeed(out);
 }
 
 /**
@@ -550,6 +582,18 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   const releaseCheckpoint = (checkpoint) =>
     raw.exec(dialect.tx.release(checkpoint.name));
 
+  /** Only the synchronous extent of the callback may implicitly nest. */
+  const callBody = (fn) => {
+    const wasOnStack = onStack;
+    onStack = true;
+    try {
+      return fn(scopeFor());
+    }
+    finally {
+      onStack = wasOnStack;
+    }
+  };
+
   /**
    * Own the connection inside a transaction BLOCK: `BEGIN` (or `BEGIN
    * IMMEDIATE`) around `fn`, committed or rolled back as a whole.
@@ -563,29 +607,23 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * @param {(scope: any) => any} fn
    */
   const blockAround = (fn, mode) => {
-    const succeed = (result) => chain(raw.exec(dialect.tx.commit), () => result);
-    const fail = (error) => chain(raw.exec(dialect.tx.rollback), () => {
-      throw error;
-    });
     const begin = mode === 'immediate' ? dialect.tx.beginImmediate : dialect.tx.begin;
     return chain(raw.exec(begin), () => {
       let out;
-      const wasOnStack = onStack;
       const wasInBlock = inBlock;
-      onStack = true;
       inBlock = true;
-      const settle = (settling) => { inBlock = wasInBlock; return settling; };
+      const restore = (value) => { inBlock = wasInBlock; return value; };
       try {
-        out = fn(scopeFor());
+        out = settleTransaction(() => callBody(fn),
+          () => raw.exec(dialect.tx.commit), () => raw.exec(dialect.tx.rollback));
       }
       catch (error) {
-        onStack = wasOnStack;
-        return settle(fail(error));
+        restore(undefined);
+        throw error;
       }
-      onStack = wasOnStack; // the body has returned or awaited
       return isThenable(out)
-        ? out.then((value) => settle(succeed(value)), (error) => settle(fail(error)))
-        : settle(succeed(out));
+        ? out.then(restore, (error) => { restore(undefined); throw error; })
+        : restore(out);
     });
   };
 
@@ -599,28 +637,9 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // always was
     if (!inBlock && dialect.capabilities.savepointStartsTransaction !== true)
       return blockAround(fn, 'deferred');
-    /** @type {any} */
-    let checkpoint;
-    const succeed = (result) => chain(releaseCheckpoint(checkpoint), () => result);
-    const fail = (error) => chain(rollbackToCheckpoint(checkpoint), () =>
-      chain(releaseCheckpoint(checkpoint), () => {
-        throw error;
-      }));
-    return chain(openCheckpoint(), (opened_) => {
-      checkpoint = opened_;
-      let out;
-      const wasOnStack = onStack;
-      onStack = true;
-      try {
-        out = fn(scopeFor());
-      }
-      catch (error) {
-        onStack = wasOnStack;
-        return fail(error);
-      }
-      onStack = wasOnStack; // the body has returned or awaited
-      return isThenable(out) ? out.then(succeed, fail) : succeed(out);
-    });
+    return chain(openCheckpoint(), (checkpoint) => settleTransaction(() => callBody(fn),
+      () => releaseCheckpoint(checkpoint),
+      () => chain(rollbackToCheckpoint(checkpoint), () => releaseCheckpoint(checkpoint))));
   };
 
   /** The scope handed to a transaction callback: the owner's direct
@@ -678,7 +697,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     get mustQueue() { return owned && !onStack; },
     /**
      * A transaction. `fn`'s value is returned; a throw rolls back exactly
-     * this level and rethrows. No implicit retry.
+     * this level and rethrows. A refused COMMIT or RELEASE also rolls
+     * back before the next owner runs. No implicit retry.
      *
      * Two shapes, decided here rather than by the caller:
      *

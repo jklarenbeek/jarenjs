@@ -24,6 +24,7 @@ import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { queryJson } from '@jarenjs/json/query';
 
 import { tempDbPath } from './helpers.js';
+import { TransactionFailure } from '../../packages/db/src/errors.js';
 
 const MODEL = {
   $model: '0.1',
@@ -46,6 +47,43 @@ const MODEL = {
 const sharedDriver = (db) => ({ name: 'node-sqlite', dialect: sqliteDialect, open: () => adaptNodeDatabase(db) });
 
 describe('the table', () => {
+  for (const alreadyWrapped of [false, true]) {
+    it(`preserves a ${alreadyWrapped ? 'coded' : 'raw'} transaction failure's class and cause beside its cleanup error`, () => {
+      const raw = Object.assign(new Error('database disk image is malformed'), { errcode: 11 });
+      const details = { docPath: '/collections/m', collection: 'm', key: 'k' };
+      const primary = alreadyWrapped ? wrapDriverError(raw, details) : raw;
+      const cleanup = new Error('release failed');
+      const failure = new TransactionFailure(primary, cleanup);
+      const wrapped = wrapDriverError(failure, details);
+      assert.strictEqual(wrapped, failure);
+      assert.ok(wrapped instanceof AggregateError);
+      assert.strictEqual(wrapped.code, 'JD2085');
+      assert.strictEqual(wrapped.class, 'corrupt');
+      assert.strictEqual(wrapped.retryable, false);
+      assert.strictEqual(wrapped.cause, raw);
+      assert.strictEqual(wrapped.docPath, details.docPath);
+      assert.strictEqual(wrapped.collection, 'm');
+      assert.strictEqual(wrapped.key, 'k');
+      assert.deepStrictEqual(wrapped.errors, [primary, cleanup]);
+    });
+  }
+
+  it('does not reinterpret aggregates supplied by a caller', () => {
+    const failure = new AggregateError([
+      Object.assign(new Error('malformed'), { errcode: 11 }), new Error('another failure'),
+    ], 'the caller controls this failure');
+    assert.strictEqual(wrapDriverError(failure), failure);
+    assert.strictEqual(Object.hasOwn(failure, 'code'), false);
+    assert.strictEqual(Object.hasOwn(failure, 'cause'), false);
+  });
+
+  it('does not recurse through a cyclic settlement error supplied back by a caller', () => {
+    const failure = new TransactionFailure(new Error('first'), new Error('cleanup'));
+    failure.errors[0] = failure;
+    assert.strictEqual(wrapDriverError(failure), failure);
+    assert.strictEqual(Object.hasOwn(failure, 'code'), false);
+  });
+
   it('classes every primary result code the store meets, extended codes by their low byte', () => {
     const cases = [
       [{ errcode: 5, message: 'database is locked' }, 'busy', 'JD2005', true],
@@ -323,9 +361,10 @@ describe('the paths beside the query engines (the close-out quirk hunt)', () => 
 
   it('a point read and every captured write arrive classed, never raw', async () => {
     const { source, copy } = await corruptCopy({ capture: { log: true } });
+    let store;
     try {
       corruptPage(copy.dbPath, rootPageOf(copy.dbPath, 'm'));
-      const store = await openStore(ENTITIES, { driver: nodeDriver(), path: copy.dbPath, capture: { log: true } });
+      store = await openStore(ENTITIES, { driver: nodeDriver(), path: copy.dbPath, capture: { log: true } });
       const m = store.collection('m');
       const corrupt = (error) => error.code === 'JD2085' && error.class === 'corrupt' && error.cause?.errcode === 11;
       await assert.rejects(m.get('k1'), (error) => corrupt(error) && error.collection === 'm' && error.key === 'k1');
@@ -335,9 +374,9 @@ describe('the paths beside the query engines (the close-out quirk hunt)', () => 
       await assert.rejects(m.delete('k1'), corrupt);
       // the change reader over an intact log still answers
       assert.strictEqual(typeof (await store.changes.bounds()).highWatermark, 'number');
-      await store.close();
     }
     finally {
+      await store?.close();
       source.cleanup();
       copy.cleanup();
     }

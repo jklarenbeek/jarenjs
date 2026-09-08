@@ -15,11 +15,15 @@ const JSON_WHITESPACE = new Set([0x20, 0x09, 0x0A, 0x0D]);
 
 export function isValidJSONCheap(data) {
   const len = data.length;
-  // Too short to be valid JSON (minimum is 2 for {} or [])
-  if (len < 2) return true; // Definitely NOT valid JSON
+  // A single digit is JSON; whitespace alone is not. Only the four JSON
+  // whitespace characters may precede the value.
+  let firstIdx = 0;
+  while (firstIdx < len && JSON_WHITESPACE.has(data.charCodeAt(firstIdx)))
+    firstIdx++;
+  if (firstIdx === len) return true;
 
   // Check first char
-  const first = data.charCodeAt(0);
+  const first = data.charCodeAt(firstIdx);
 
   // Objects and arrays - check matching brackets
   if (first === 0x7B || first === 0x5B) { // '{' or '['

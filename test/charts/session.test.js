@@ -107,6 +107,34 @@ describe('chart session — byte-equality property', function () {
 });
 
 describe('chart session — modes and reference reuse', function () {
+  it('rebuilds filtered source series so append and eviction keep their source identity', function () {
+    const config = { type: 'line', markers: true, sampling: false, domain: { y: { min: 0, max: 100 } } };
+    const data = { series: [
+      { name: 'skipped' },
+      { name: 'alpha', points: [{ x: 0, y: 20 }] },
+      { name: 'beta', points: [{ x: 10, y: 80 }] },
+    ] };
+    const changes = [];
+    const session = createChartSession(config, {
+      getData: () => data, takeChanges: () => changes.splice(0),
+    });
+    session.tick();
+    const point = { x: 1, y: 30 };
+    data.series[1].points.push(point);
+    changes.push({ op: 'add', path: '/series/1/points/-', value: point });
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode), renderToString(compileChart(config, data).toVnode()));
+    const groups = next.vnode.filter((n) => Array.isArray(n) && n[1]?.class === 'chart-series');
+    assert.deepEqual(groups.map((g) => g.filter((n) => Array.isArray(n) && n[0] === 'circle').length), [2, 1]);
+    data.series[1].points.shift();
+    changes.push({ op: 'remove', path: '/series/1/points/0' });
+    const evicted = session.tick();
+    assert.equal(evicted.mode, 'rebuilt');
+    assert.equal(renderToString(evicted.vnode), renderToString(compileChart(config, data).toVnode()));
+    assert.equal(session.tick().vnode, evicted.vnode, 'quiet filtered sources keep their vnode reference');
+  });
+
   function seeded() {
     const adapter = createStreamAdapter('line', { ...ADAPTER_SPEC, maxPoints: 100 });
     const config = {

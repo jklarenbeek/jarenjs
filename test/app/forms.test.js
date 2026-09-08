@@ -268,6 +268,62 @@ describe('the standard forms stylesheet', function () {
     assert.deepStrictEqual(app.getState().data.tags, ['json']);
   });
 
+  it('removes object and nested-array elements through their own fieldset buttons', function () {
+    for (const items of [
+      { type: 'object', properties: { name: { type: 'string' } } },
+      { type: 'array', items: { type: 'string' } },
+    ]) {
+      const values = items.type === 'object' ? [{ name: 'A' }, { name: 'B' }] : [['A'], ['B']];
+      const { app, container } = mountForm({ schema: {
+        type: 'object', properties: { rows: { type: 'array', default: values, items } },
+      } });
+      const item = find(container, (n) => n.attributes?.get('data-pointer') === '/rows/0');
+      const remove = item.childNodes.find((n) => n.attributes?.get('class') === 'jaren-form-remove');
+      assert.notStrictEqual(remove, undefined);
+      assert.strictEqual(remove.attributes.get('aria-label'), 'Remove item');
+      fire(remove, 'click');
+      assert.deepStrictEqual(app.getState().data.rows, [values[1]]);
+      app.destroy();
+    }
+  });
+
+  it('disables collection element removal for readOnly and disabled fields', function () {
+    for (const type of ['object', 'array']) {
+      for (const annotation of [{ readOnly: true }, { 'x-form': { enabled: false } }, {}]) {
+        const items = type === 'object'
+          ? { type, properties: { name: { type: 'string' } }, ...annotation }
+          : { type, items: { type: 'string' }, ...annotation };
+        const { app, container } = mountForm({ schema: {
+          type: 'object', properties: {
+            rows: { type: 'array', default: [type === 'object' ? { name: 'A' } : ['A']], items },
+          },
+        } });
+        const item = find(container, (n) => n.attributes?.get('data-pointer') === '/rows/0');
+        const remove = item.childNodes.find((n) => n.attributes?.get('class') === 'jaren-form-remove');
+        assert.notStrictEqual(remove, undefined);
+        assert.strictEqual(remove.attributes.has('disabled'), Object.keys(annotation).length > 0);
+        app.destroy();
+      }
+    }
+  });
+
+  it('reports minItems after collection removal just as after scalar removal', function () {
+    const { app, container } = mountForm({ validateFields: true, schema: {
+      type: 'object', properties: {
+        rows: { type: 'array', minItems: 1, default: [{}], items: { type: 'object' } },
+      },
+    } });
+    const item = find(container, (n) => n.attributes?.get('data-pointer') === '/rows/0');
+    const remove = item.childNodes.find((n) => n.attributes?.get('class') === 'jaren-form-remove');
+    assert.strictEqual(remove.attributes.has('disabled'), false);
+    fire(remove, 'click');
+    assert.deepStrictEqual(app.getState().data.rows, []);
+    const rows = find(container, (n) => n.attributes?.get('data-pointer') === '/rows');
+    const error = find(rows, (n) => n.attributes?.get('class') === 'jaren-form-error');
+    assert.strictEqual(error.childNodes[0].nodeValue, 'Must have at least 1 item');
+    app.destroy();
+  });
+
   it('renders field errors when the view model validates', function () {
     const { container } = mountForm({ validateFields: true });
     fire(fieldControl(container, '/name'), 'input', { target: { value: 'J' } });

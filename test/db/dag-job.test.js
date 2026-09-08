@@ -83,6 +83,37 @@ describe('the injection boundary', () => {
 });
 
 describe('the composition end to end', () => {
+  it('runs job kinds that match Object prototype member names', async () => {
+    const kinds = ['__proto__', 'constructor', 'toString'];
+    const store = await openStore(MODEL, { driver: nodeDriver(), jobs: true });
+    const finished = Promise.withResolvers();
+    let completions = 0;
+    let runner;
+    try {
+      runner = createDagJobRunner(store, {
+        compileDag,
+        documents: Object.fromEntries(kinds.map((kind) => [kind, REPORT_DAG])),
+        tasks: { gather: { version: '1', run: ({ input }) => ({ rows: [input.kind] }) } },
+        onOutcome(event) {
+          if (event.outcome === 'completed' && ++completions === kinds.length) finished.resolve(undefined);
+        },
+      });
+      for (const kind of kinds) await store.jobs.enqueue(kind, { input: { kind } }, { id: kind });
+      runner.start();
+      await finished.promise;
+      for (const kind of kinds) {
+        const job = await store.jobs.get(kind);
+        assert.strictEqual(job.state, 'done');
+        assert.deepStrictEqual(job.result, { report: [kind] });
+      }
+      assert.strictEqual(runner.stats().completions, 3);
+    }
+    finally {
+      await runner?.stop();
+      await store.close();
+    }
+  });
+
   it('enqueue → worker → checkpointed run → transactional done with the result', async () => {
     const store = await openStore(MODEL, { driver: nodeDriver(), jobs: true });
     const gathered = [];

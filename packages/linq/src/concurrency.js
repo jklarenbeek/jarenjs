@@ -54,6 +54,18 @@ export async function* applyMapAsync(items, fn, opts) {
   /** The pipeline's own failure, so source cleanup cannot displace it.
    * @type {{ reason: any } | null} */
   let failure = null;
+  /** A callback failure may close while a pull is pending; finally awaits
+   * that same close, so cancellation reaches the producer exactly once.
+   * @type {Promise<any> | null} */
+  let closing = null;
+  const closeSource = () => {
+    if (closing === null) {
+      closing = Promise.resolve().then(() => typeof items.return === 'function'
+        ? items.return(undefined) : undefined);
+      closing.catch(() => {}); // the finally block reports cleanup failures
+    }
+    return closing;
+  };
 
   try {
     if (opts.mode === 'concat' || (opts.mode === 'parallel' && opts.concurrency === 1)) {
@@ -122,14 +134,29 @@ export async function* applyMapAsync(items, fn, opts) {
     // and stops the pull, at once — not when it reaches the head of the
     // ordered window: the rejection itself still surfaces in order
     let rejected = false;
+    let stopPull;
+    /** @type {Promise<IteratorResult<any>>} */
+    const stoppedPull = new Promise((resolve) => {
+      stopPull = () => resolve({ done: true, value: undefined });
+    });
+    const taskFailed = () => {
+      if (rejected) return;
+      rejected = true;
+      stopPull();
+      controller.abort();
+      closeSource();
+    };
+    // An idle producer must not hide a callback's failure. The race also
+    // observes a pending next() that rejects after cancellation won.
+    const next = () => Promise.race([items.next(), stoppedPull]);
     const pull = async () => {
-      const step = await items.next();
+      const step = await next();
       if (step.done) { sourceDone = true; return null; }
       if (rejected) return null; // a sibling failed while this pull awaited
       const promise = Promise.resolve(fn(step.value, signal));
       // a rejection must wait its turn in the ordered window without
       // firing unhandledRejection while an earlier task is in flight
-      promise.catch(() => { rejected = true; controller.abort(); });
+      promise.catch(taskFailed);
       return { promise };
     };
     if (opts.ordered) {
@@ -153,7 +180,7 @@ export async function* applyMapAsync(items, fn, opts) {
     let nextId = 0;
     const inflight = new Map();
     const start = async () => {
-      const step = await items.next();
+      const step = await next();
       if (step.done) { sourceDone = true; return; }
       if (rejected) return; // a task failed while this source pull awaited
       const id = nextId++;
@@ -167,7 +194,7 @@ export async function* applyMapAsync(items, fn, opts) {
         (error) => { throw new TaskFailure(id, error); });
       // Observe failures immediately, including while the next source
       // pull is pending or downstream has stopped consuming the window.
-      promise.catch(() => { rejected = true; controller.abort(); });
+      promise.catch(taskFailed);
       inflight.set(id, promise);
     };
     while (!sourceDone && !rejected && inflight.size < opts.concurrency) await start();
@@ -201,7 +228,7 @@ export async function* applyMapAsync(items, fn, opts) {
       // itself succeeded. Composed as a rejection the `await` adopts,
       // because a `throw` here would be the very substitution this
       // avoids: it discards whatever completion the block was carrying.
-      await Promise.resolve().then(() => items.return(undefined)).then(undefined,
+      await closeSource().then(undefined,
         (cleanupError) => Promise.reject(failure === null
           ? cleanupError
           : new AggregateError([failure.reason, cleanupError],

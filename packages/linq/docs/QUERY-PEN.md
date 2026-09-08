@@ -655,8 +655,11 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   completion.
 - An `AbortSignal` is threaded to every callback and aborted on early
   termination and on failure. A rejected callback FAILS CLOSED: the
-  first failure wins, every in-flight sibling aborts, the source
-  closes (the `compileDag` discipline).
+  first rejection aborts every in-flight sibling and closes the source,
+  including while its next pull is pending. Ordered mode still delivers
+  preceding values and reports callback failures in source order. The
+  producer is closed once; a failed close accompanies the callback's
+  original failure in an `AggregateError`.
 - `mapAsync` is NOT translatable to a provider. A provider-backed
   chain that reaches it SPLITS: everything before is pushed to the
   provider whole, everything after runs locally, and `explain()`
@@ -1668,14 +1671,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->174,091<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->174,264<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->40,097<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->40,280<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
 is the query ENGINE and the core it stands on: a chain's document has to
@@ -1711,7 +1714,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->195,166<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,081<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->195,342<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,078<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

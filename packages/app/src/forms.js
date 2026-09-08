@@ -23,9 +23,11 @@
  * JavaScript at the DOM boundary (APP-FORMAT §5.4). A host that renders
  * these controls MUST register them.
  *
- * Remaining limitation, documented rather than hidden: a cleared number
- * input writes `null` (which surfaces as a validation error, not a
- * dispatch error).
+ * Remaining limitations: a cleared number input writes `null` (which
+ * surfaces as a validation error, not a dispatch error), and standard
+ * actions require intermediate object/array containers to exist in the
+ * data. `createInitialData` supplies those containers for a new form;
+ * loaded documents must supply them too.
  */
 
 /** The default action names shared by both factories. */
@@ -115,6 +117,18 @@ export function createFormView(options = {}) {
   // Disabling their fieldset also prevents edits through child controls.
   const writeDisabled = { $or: [disabled, '$.readOnly'] };
 
+  /** One removal control for scalar and collection array elements. */
+  const remove = { $if: ['$.removable',
+    ['button', {
+      type: 'button',
+      class: `${cls}-remove`,
+      // the glyph is decoration; the accessible name is the label
+      'aria-label': labels.removeItem,
+      title: labels.removeItem,
+      disabled: writeDisabled,
+      on: { click: { action: act.remove, with: { pointer: '$.pointer' } } },
+    }, options.removeLabel ?? '×']] };
+
   /** The shared field chrome around one control vnode. */
   const field = (control) => ['div', { class: `${cls}-field`, 'data-pointer': '$.pointer' },
     ['label', {},
@@ -124,16 +138,7 @@ export function createFormView(options = {}) {
     ],
     { $if: ['$.description', ['p', { class: `${cls}-description` }, '$.description']] },
     [{ $apply: '$.errors[*]' }],
-    { $if: ['$.removable',
-      ['button', {
-        type: 'button',
-        class: `${cls}-remove`,
-        // the glyph is decoration; the accessible name is the label
-        'aria-label': labels.removeItem,
-        title: labels.removeItem,
-        disabled: writeDisabled,
-        on: { click: { action: act.remove, with: { pointer: '$.pointer' } } },
-      }, options.removeLabel ?? '×']] },
+    remove,
   ];
 
   // every write binding carries the element flag: the standard actions
@@ -187,6 +192,7 @@ export function createFormView(options = {}) {
         { $if: ['$.label', ['legend', {}, '$.label']] },
         [{ $apply: '$.children[*]' }],
         [{ $apply: '$.errors[*]' }],
+        remove,
       ],
     },
     // arrays: expanded items plus the add-item button
@@ -205,6 +211,7 @@ export function createFormView(options = {}) {
             on: { click: { action: act.add, with: { pointer: '$.pointer', value: '$.addValue' } } },
           }, options.addLabel ?? '+']] },
         [{ $apply: '$.errors[*]' }],
+        remove,
       ],
     },
     // one error line per message

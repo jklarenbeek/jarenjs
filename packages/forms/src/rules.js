@@ -737,7 +737,8 @@ function extendChunks(chunks, selector) {
  * absent location arrives as `null`, exactly as the keystroke path
  * binds it.
  *
- * A field that also declares `visible` has its assert guarded by it:
+ * A field's own and ancestor `visible` rules guard its assert, each
+ * with the value/pointer bindings of the field that owns the rule:
  * the assert holds vacuously while the field is hidden. That is what
  * the keystroke path already does — `buildFormViewModel` drops hidden
  * nodes, so their assert errors never render and never count — and an
@@ -747,9 +748,11 @@ function extendChunks(chunks, selector) {
  * @param {any} assert - The authored rule document
  * @param {string} pointer - The field's data pointer
  * @param {any} [visible] - The field's `visible` rule, when it has one
+ * @param {Array<{chunks: string[], pointer: string, visible: any}>} [ancestors]
+ *   Visibility rules of ancestor fields, in root-to-parent order
  * @returns {any} The wrapped query document
  */
-function assertQuery(chunks, assert, pointer, visible) {
+function assertQuery(chunks, assert, pointer, visible, ancestors = []) {
   const depth = chunks.length - 1;
   const at = (k) => k === 0 ? chunks[0] : `$${ITEM_VAR}${k - 1}${chunks[k]}`;
   const body = visible === undefined
@@ -759,6 +762,22 @@ function assertQuery(chunks, assert, pointer, visible) {
     $let: { value: { $default: [at(depth), { $const: null }] }, pointer: { $const: pointer } },
     $return: body,
   };
+  // Every enclosing item variable is in scope here. Bind an ancestor
+  // from its own path chunks, never from the descendant's value; a
+  // nested array's visibility must read its own row at each depth.
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const ancestor = ancestors[i];
+    const level = ancestor.chunks.length - 1;
+    const path = level === 0 ? ancestor.chunks[0]
+      : `$${ITEM_VAR}${level - 1}${ancestor.chunks[level]}`;
+    query = { $or: [{ $not: {
+      $let: {
+        value: { $default: [path, { $const: null }] },
+        pointer: { $const: ancestor.pointer },
+      },
+      $return: ancestor.visible,
+    } }, query] };
+  }
   for (let k = depth - 1; k >= 0; k--)
     query = { $every: { [`${ITEM_VAR}${k}`]: at(k) }, $satisfies: query };
   return query;
@@ -768,7 +787,7 @@ function assertQuery(chunks, assert, pointer, visible) {
  * Depth-first collection of `x-form.assert` documents with the pointer
  * and the path chunks of their data location.
  */
-function collectAsserts(schema, pointer, chunks, out) {
+function collectAsserts(schema, pointer, chunks, out, ancestors = []) {
   if (schema == null || typeof schema !== 'object' || Array.isArray(schema))
     return;
 
@@ -776,27 +795,31 @@ function collectAsserts(schema, pointer, chunks, out) {
   if (rules != null && typeof rules === 'object' && !Array.isArray(rules)
       && rules.assert !== undefined) {
     out.push({
-      query: assertQuery(chunks, rules.assert, pointer, rules.visible),
+      query: assertQuery(chunks, rules.assert, pointer, rules.visible, ancestors),
       pointer,
       message: rules.message,
     });
   }
+  const parents = rules != null && typeof rules === 'object' && !Array.isArray(rules)
+      && rules.visible !== undefined
+    ? [...ancestors, { chunks, pointer, visible: rules.visible }]
+    : ancestors;
 
   if (schema.properties != null && typeof schema.properties === 'object') {
     for (const [key, sub] of Object.entries(schema.properties)) {
       collectAsserts(sub, `${pointer}/${escapePointerKey(key)}`,
-        extendChunks(chunks, pathNameSelector(key)), out);
+        extendChunks(chunks, pathNameSelector(key)), out, parents);
     }
   }
   if (Array.isArray(schema.prefixItems)) {
     for (let i = 0; i < schema.prefixItems.length; i++)
-      collectAsserts(schema.prefixItems[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), out);
+      collectAsserts(schema.prefixItems[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), out, parents);
   }
   if (schema.items != null && typeof schema.items === 'object' && !Array.isArray(schema.items))
-    collectAsserts(schema.items, `${pointer}/-`, [...extendChunks(chunks, '[*]'), ''], out);
+    collectAsserts(schema.items, `${pointer}/-`, [...extendChunks(chunks, '[*]'), ''], out, parents);
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf)
-      collectAsserts(branch, pointer, chunks, out);
+      collectAsserts(branch, pointer, chunks, out, parents);
   }
 }
 

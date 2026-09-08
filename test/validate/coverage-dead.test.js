@@ -48,6 +48,18 @@ describe('Conditional schema whose branch carries a dynamic anchor', function ()
 });
 
 describe('Content assertion keywords (draft-07 default)', function () {
+  it('accepts single digits and leading whitespace in plain and base64 JSON content', () => {
+    const compiler = new JarenValidator({ contentValidation: true });
+    const plain = compiler.compile({ contentMediaType: 'application/json' });
+    const encoded = compiler.compile({ contentMediaType: 'application/json', contentEncoding: 'base64' });
+    for (const value of ['0', '9', ' {}', '\t\r\n[1]']) {
+      assert.isTrue(plain(value), JSON.stringify(value));
+      assert.isTrue(encoded(Buffer.from(value).toString('base64')), JSON.stringify(value));
+    }
+    assert.isFalse(plain(' 01 '));
+    assert.isFalse(encoded(Buffer.from(' 01 ').toString('base64')));
+  });
+
   // For draft-07 schemas contentValidation defaults ON, so the content
   // keywords assert rather than annotate.
   const compiler = new JarenValidator();

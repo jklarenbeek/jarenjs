@@ -31,12 +31,23 @@ import { PRAGMA_NAMES } from '../pragmas.js';
  * @returns {any} a Connection, or a promise of one
  */
 export function adaptBunDatabase(db, options) {
+  // Bun closes its query cache, but prepare() creates uncached statements
+  // that keep the SQLite file open until finalized. Track only weak
+  // references: a long-lived connection must not retain every past query.
+  /** @type {Set<WeakRef<any>>} */
+  const statements = new Set();
+  const collected = new FinalizationRegistry((ref) => statements.delete(ref));
   const raw = {
     /** @param {string} sql */
     exec: (sql) => db.run(sql),
     /** @param {string} sql */
     prepare: (sql) => {
       const statement = db.prepare(sql);
+      if (typeof statement.finalize === 'function') {
+        const ref = new WeakRef(statement);
+        statements.add(ref);
+        collected.register(statement, ref, ref);
+      }
       return {
         run: (params = []) => statement.run(...params),
         // the driver contract says a missing row reads UNDEFINED;
@@ -52,7 +63,28 @@ export function adaptBunDatabase(db, options) {
           : undefined),
       };
     },
-    close: () => db.close(),
+    close: () => {
+      const errors = [];
+      for (const ref of statements) {
+        collected.unregister(ref);
+        try {
+          ref.deref()?.finalize();
+        }
+        catch (error) {
+          errors.push(error);
+        }
+      }
+      statements.clear();
+      try {
+        db.close();
+      }
+      catch (error) {
+        errors.push(error);
+      }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1)
+        throw new AggregateError(errors, 'finalizing Bun statements and closing the database failed');
+    },
   };
   return openConnection(raw, {
     dialect: sqliteDialect,

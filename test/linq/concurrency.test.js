@@ -14,6 +14,80 @@ import { fromAsync } from '@jarenjs/linq';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
 
 describe('mapAsync', () => {
+  for (const ordered of [true, false]) {
+    for (const cleanupFails of [false, true]) {
+      it(`${ordered ? 'ordered' : 'unordered'} failure cancels an idle producer once${cleanupFails ? ' and preserves cleanup failure' : ''}`, async () => {
+        const failure = Object.freeze(new Error('callback failed'));
+        const cleanupError = new Error('close failed');
+        const task = Promise.withResolvers();
+        const waiting = Promise.withResolvers();
+        const pending = Promise.withResolvers();
+        let reads = 0;
+        let closes = 0;
+        const source = {
+          next() {
+            if (++reads === 1) return Promise.resolve({ done: false, value: 1 });
+            waiting.resolve(undefined);
+            return pending.promise;
+          },
+          return() {
+            closes++;
+            pending.reject(new Error('pull rejected after cancellation'));
+            if (cleanupFails) throw cleanupError;
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+        const result = fromAsync(source).mapAsync(() => task.promise,
+          { concurrency: 2, ordered }).toArray();
+        const refused = assert.rejects(result, (error) => {
+          if (cleanupFails) {
+            assert.ok(error instanceof AggregateError);
+            assert.deepStrictEqual(error.errors, [failure, cleanupError]);
+          }
+          else assert.strictEqual(error, failure);
+          return true;
+        });
+        await waiting.promise;
+        task.reject(failure);
+        await refused;
+        assert.strictEqual(reads, 2);
+        assert.strictEqual(closes, 1);
+      });
+    }
+  }
+
+  it('an idle source cancellation preserves ordered values before the failing callback', async () => {
+    const first = Promise.withResolvers();
+    const second = Promise.withResolvers();
+    const waiting = Promise.withResolvers();
+    const closed = Promise.withResolvers();
+    let reads = 0;
+    let closes = 0;
+    const source = {
+      next() {
+        if (++reads <= 2) return Promise.resolve({ done: false, value: reads });
+        waiting.resolve(undefined);
+        return new Promise(() => {});
+      },
+      return() {
+        closes++;
+        closed.resolve(undefined);
+        return Promise.resolve({ done: true, value: undefined });
+      },
+    };
+    const iterator = fromAsync(source).mapAsync((n) => n === 1 ? first.promise : second.promise,
+      { concurrency: 3 })[Symbol.asyncIterator]();
+    const head = iterator.next();
+    await waiting.promise;
+    const failure = 'second callback failed';
+    second.reject(failure);
+    await closed.promise;
+    first.resolve(11);
+    assert.deepStrictEqual(await head, { done: false, value: 11 });
+    await assert.rejects(iterator.next(), (error) => error === failure);
+    assert.strictEqual(closes, 1);
+  });
+
   it('never exceeds its concurrency limit (counting callback)', async () => {
     let inflight = 0;
     let peak = 0;

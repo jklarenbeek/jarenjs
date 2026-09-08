@@ -293,6 +293,9 @@ frame whose scales moved. `mode` reports which path ran. The
 correctness contract is byte equality: every tick's vnode serializes
 identically to a wholesale `compileChart()` of the same data, which is
 property-tested over thousands of random frames rather than assumed.
+Line sources containing series without an array of `points` also rebuild
+on changes: compilation filters those series, so source change indices
+no longer match the rendered series indices.
 
 Measured (`npm run benchmark:charts`, one appended point):
 

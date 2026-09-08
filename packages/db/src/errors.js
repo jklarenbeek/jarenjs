@@ -13,6 +13,14 @@
 
 import { CodedError } from '@jarenjs/core/errors';
 
+/** The driver's own settlement envelope; arbitrary caller aggregates stay opaque. */
+export class TransactionFailure extends AggregateError {
+  /** @param {any} error @param {any} cleanupError */
+  constructor(error, cleanupError) {
+    super([error, cleanupError], 'the transaction failed, and rolling it back failed too');
+  }
+}
+
 /**
  * The runtime code table (the `CSV_CODES` shape): one entry per code
  * this package can raise, proven in sync with MODEL-FORMAT.md §7's
@@ -506,6 +514,24 @@ function classifySqlState(state, error, unique) {
  * @returns {Error}
  */
 export function wrapDriverError(error, details = {}) {
+  if (error instanceof TransactionFailure) {
+    let first = error;
+    const seen = new Set();
+    while (first instanceof TransactionFailure) {
+      if (seen.has(first)) return error;
+      seen.add(first);
+      first = first.errors[0];
+    }
+    const primary = wrapDriverError(first, details);
+    if (typeof primary?.code === 'string' && /^J[A-Z]\d{4}$/.test(primary.code)) {
+      // Keep the original and the cleanup failure together, while callers
+      // continue to branch on the original classified failure and its cause.
+      for (const member of ['code', 'reason', 'class', 'retryable', 'docPath', 'collection', 'key', 'cause']) {
+        if (Object.hasOwn(primary, member)) error[member] = primary[member];
+      }
+    }
+    return error;
+  }
   if (typeof error?.code === 'string' && /^J[A-Z]\d{4}$/.test(error.code)) return error;
   if (!isDriverError(error)) {
     if (details.always !== true) return error;

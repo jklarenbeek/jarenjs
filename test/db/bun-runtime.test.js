@@ -63,6 +63,86 @@ function driverOver(db) {
   return { name: 'bun-shaped', dialect: /** @type {any} */ (undefined), open: () => adaptBunDatabase(db) };
 }
 
+describe('the Bun binding releases uncached prepared statements', () => {
+  it('finalizes reachable statements and removes collected weak entries without retaining their targets', (t) => {
+    const refs = [];
+    const entries = [];
+    const unregistered = [];
+    let collected;
+    t.mock.method(globalThis, 'WeakRef', function (target) {
+      const ref = { target, deref() { return this.target; } };
+      refs.push(ref);
+      return ref;
+    });
+    t.mock.method(globalThis, 'FinalizationRegistry', function (callback) {
+      collected = callback;
+      return {
+        register(target, held, token) { entries.push({ target, held, token }); },
+        unregister(token) { unregistered.push(token); return true; },
+      };
+    });
+    const finalized = [];
+    const db = new BunShapedDatabase(':memory:');
+    const prepare = db.prepare.bind(db);
+    t.mock.method(db, 'prepare', (sql) => ({ ...prepare(sql), finalize() { finalized.push(sql); } }));
+    const close = t.mock.method(db, 'close');
+    const connection = adaptBunDatabase(db);
+    connection.prepare('SELECT 1 AS n');
+    connection.prepare('SELECT 2 AS n');
+    assert.strictEqual(refs.length, 4);
+    for (const entry of entries) {
+      assert.strictEqual(entry.held, entry.token);
+      assert.strictEqual(entry.held.deref(), entry.target);
+    }
+    // Collection can precede its finalizer; both states must close safely.
+    refs[0].target = undefined;
+    collected(refs[0]);
+    refs[1].target = undefined;
+    connection.close();
+    connection.close();
+    assert.deepStrictEqual(finalized, ['SELECT 1 AS n', 'SELECT 2 AS n']);
+    assert.deepStrictEqual(unregistered, refs.slice(1));
+    assert.strictEqual(close.mock.callCount(), 1);
+  });
+
+  for (const failureMode of ['statement', 'database', 'both']) {
+    it(`closes every resource when ${failureMode} cleanup fails`, (t) => {
+      const statementError = new Error('statement finalization failed');
+      const databaseError = new Error('database close failed');
+      const finalized = [];
+      const db = new BunShapedDatabase(':memory:');
+      const prepare = db.prepare.bind(db);
+      t.mock.method(db, 'prepare', (sql) => ({
+        ...prepare(sql),
+        finalize() {
+          finalized.push(sql);
+          if (sql === 'SELECT 1' && failureMode !== 'database') throw statementError;
+        },
+      }));
+      const close = db.close.bind(db);
+      const closed = t.mock.method(db, 'close', () => {
+        close();
+        if (failureMode !== 'statement') throw databaseError;
+      });
+      const connection = adaptBunDatabase(db);
+      connection.prepare('SELECT 1');
+      connection.prepare('SELECT 2');
+      assert.throws(() => connection.close(), (error) => {
+        if (failureMode === 'both') {
+          assert.ok(error instanceof AggregateError);
+          assert.deepStrictEqual(error.errors, [statementError, databaseError]);
+        }
+        else assert.strictEqual(error, failureMode === 'statement' ? statementError : databaseError);
+        return true;
+      });
+      assert.ok(finalized.includes('SELECT 2'), 'a failed finalizer does not skip later statements');
+      assert.strictEqual(closed.mock.callCount(), 1);
+      connection.close();
+      assert.strictEqual(closed.mock.callCount(), 1);
+    });
+  }
+});
+
 describe('the Bun binding declares its iterator honestly', () => {
   it('a statement API with iterate: lazyIteration true, one row per pull, and an inert probe', async () => {
     const db = new LazyBunShapedDatabase(':memory:');
@@ -126,6 +206,9 @@ describe('the Bun binding declares its iterator honestly', () => {
     assert.strictEqual(report.explainStreaming, 'row');
     assert.strictEqual(report.strict, 'accepted');
     assert.deepStrictEqual(report.rows, ['a', 'b']);
+    assert.strictEqual(report.closedFileRemoved, true);
+    assert.strictEqual(report.reopenedFileRemoved, true);
+    assert.deepStrictEqual(report.failedTransactionRows, { deferred: [], immediate: [] });
   });
 });
 

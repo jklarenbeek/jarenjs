@@ -1434,6 +1434,9 @@ Concurrent writes and releases are serialized across clients sharing the
 same storage adapter object, so each mutation sees the previous write.
 A failed mutation does not block later ones. Separate adapter objects,
 tabs and processes need coordination in the storage implementation.
+`pending()` has no ordering guarantee: concurrent requests can finish hashing
+in either order before entering the storage queue. Callers that need a display
+order sort the returned records themselves.
 
 ### §10.4 Retry
 

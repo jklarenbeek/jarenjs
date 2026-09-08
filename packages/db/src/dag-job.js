@@ -25,6 +25,7 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
+import { setObjectMember } from '@jarenjs/core/object';
 
 import { DbRuntimeError } from './errors.js';
 
@@ -184,7 +185,7 @@ export function createDagJobRunner(store, options) {
     // one revision per compiled document, so every attempt of every run
     // of this kind compares against the same number
     const revision = fingerprint(documents[kind]);
-    handlers[kind] = async (payload, context) => {
+    setObjectMember(handlers, kind, async (payload, context) => {
       const input = payload?.input ?? null;
       const runKey = runKeyOf(context.job.id, context.job.lease.token);
       active.set(runKey, context);
@@ -198,7 +199,7 @@ export function createDagJobRunner(store, options) {
       finally {
         active.delete(runKey);
       }
-    };
+    });
   }
 
   return store.jobs.createWorker({

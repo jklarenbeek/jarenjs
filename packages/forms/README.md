@@ -247,10 +247,11 @@ wrong:
 - an **item-template assert quantifies over the ELEMENTS**, not over the
   selected leaf values — quantifying over leaves silently skips an element
   that lacks the member, where the keystroke path evaluates it with `null`;
-- an assert on a field with a `visible` rule is **guarded by it**, holding
-  vacuously while the field is hidden — which is what the keystroke path
-  already does, since `buildFormViewModel` drops hidden nodes and their
-  errors never render or count.
+- an assert is **guarded by the field's own and ancestor `visible` rules**,
+  each with its own value/pointer bindings, holding vacuously while the
+  field is hidden — which is what the keystroke path already does, since
+  `buildFormViewModel` drops hidden subtrees and their errors never render
+  or count. Ordinary schema constraints still apply to retained values.
 
 One divergence remains, and is inherent: `$pointer` for template elements
 stays the template pointer, because element indexes are a render-time notion.

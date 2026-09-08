@@ -9,6 +9,13 @@ import {
 const compiler = new JarenValidator();
 
 describe('Schema Array Type', function () {
+  it('rejects duplicate objects with own constructor members', () => {
+    const validate = compiler.compile({ type: 'array', uniqueItems: true });
+    const value = JSON.parse('{"constructor":{"name":"record"}}');
+    assert.isFalse(validate([value, JSON.parse(JSON.stringify(value))]));
+    assert.isTrue(validate([value, { constructor: { name: 'other' } }]));
+  });
+
   describe('#arrayBasic()', function () {
     it('enforces an explicit maxItems of zero', function () {
       const validate = compiler.compile({ type: 'array', maxItems: 0 });

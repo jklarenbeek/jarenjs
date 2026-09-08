@@ -3,7 +3,7 @@ import * as assert from 'node:assert';
 
 import { JarenValidator } from '@jarenjs/validate';
 import {
-  formRulesToQueryAssertions, buildFormModel, compileFormRules, evaluateFormRules,
+  formRulesToQueryAssertions, buildFormModel, compileFormRules, evaluateFormRules, buildFormViewModel,
 } from '@jarenjs/forms';
 
 // The validate-side round trip of the forms rules synergy: a rule
@@ -127,5 +127,71 @@ describe("forms x-form.assert -> '$query' round trip", () => {
     assert.strictEqual(validate({ approved: true, a: 1 }), true);
     assert.strictEqual(validate({ approved: false, a: 1 }), false, 'original $query still asserts');
     assert.strictEqual(validate({ approved: true, a: 0 }), false, 'copied assert asserts');
+  });
+
+  it('guards descendant assertions with the hidden ancestor value and pointer bindings', () => {
+    const schema = {
+      type: 'object', properties: {
+        group: {
+          type: 'object',
+          'x-form': { visible: { $and: ['$value.show', { $eq: ['$pointer', '/group'] }] } },
+          properties: {
+            show: { type: 'boolean' },
+            name: { type: 'string', 'x-form': { assert: { $ne: ['$value', ''] } } },
+          },
+        },
+      },
+    };
+    const model = buildFormModel(schema);
+    const rules = compileFormRules(model);
+    const validate = new JarenValidator().compile(formRulesToQueryAssertions(schema));
+    for (const show of [false, true]) {
+      const data = { group: { show, name: '' } };
+      const tree = buildFormViewModel(model, data, { rules, session: { initial: data } });
+      assert.strictEqual(tree.session.errorCount, show ? 1 : 0);
+      assert.strictEqual(validate(data), !show);
+    }
+    assert.strictEqual(validate({ group: { show: true, name: 'A' } }), true);
+    assert.strictEqual(validate({ group: { show: false, name: 7 } }), false,
+      'visibility does not suppress the ordinary schema type constraint');
+  });
+
+  it('keeps each ancestor visibility bound to its own row in nested arrays', () => {
+    const schema = {
+      type: 'object', properties: {
+        groups: {
+          type: 'array', items: {
+            type: 'object', 'x-form': { visible: '$value.show' },
+            properties: {
+              show: { type: 'boolean' },
+              rows: {
+                type: 'array', items: {
+                  type: 'object', 'x-form': { visible: '$value.show' },
+                  properties: {
+                    show: { type: 'boolean' },
+                    name: { type: 'string', 'x-form': { assert: { $ne: ['$value', ''] } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const model = buildFormModel(schema);
+    const rules = compileFormRules(model);
+    const validate = new JarenValidator().compile(formRulesToQueryAssertions(schema));
+    for (const groupShown of [false, true]) {
+      for (const rowShown of [false, true]) {
+        const data = { groups: [
+          { show: false, rows: [{ show: true, name: '' }] },
+          { show: groupShown, rows: [{ show: rowShown, name: '' }, { show: true, name: 'A' }] },
+        ] };
+        const tree = buildFormViewModel(model, data, { rules, session: { initial: data } });
+        const invalid = groupShown && rowShown;
+        assert.strictEqual(tree.session.errorCount, invalid ? 1 : 0);
+        assert.strictEqual(validate(data), !invalid);
+      }
+    }
   });
 });

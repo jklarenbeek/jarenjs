@@ -57,6 +57,14 @@ describe('contentKey', () => {
 });
 
 describe('semanticKey', () => {
+  it('refuses numeric-looking extra array members that are not element indices', () => {
+    for (const key of ['01', '1.0', '1e0', '+1', '-0', '0x1', ' 1', '']) {
+      const value = Object.assign([1, 2], { [key]: 'extra' });
+      assert.throws(() => semanticKey(value), TypeError, JSON.stringify(key));
+    }
+    assert.strictEqual(semanticKey([1, 2]), '[1,2]');
+  });
+
   it('separates the documents contentKey collides', () => {
     assert.notStrictEqual(semanticKey(COLLIDING[0]), semanticKey(COLLIDING[1]));
   });
@@ -130,6 +138,15 @@ describe('semanticKey', () => {
 });
 
 describe('createSemanticCache', () => {
+  it('never reuses an entry for an array with a numeric-looking extra member', () => {
+    const cache = createSemanticCache(2);
+    const value = Object.assign([1, 2], { '01': 'extra' });
+    assert.strictEqual(cache.getOrCreate([1, 2], () => 'plain'), 'plain');
+    assert.strictEqual(cache.getOrCreate(value, () => 'extra'), 'extra');
+    assert.strictEqual(cache.getOrCreate(value, () => 'recomputed'), 'recomputed');
+    assert.strictEqual(cache.size(), 1);
+  });
+
   it('shares an entry across structurally equal values only', () => {
     const cache = createSemanticCache(8);
     let built = 0;

@@ -8,6 +8,27 @@ import {
 
 describe('equalsDeep', () => {
 
+  it('compares own constructor members as data', () => {
+    const value = JSON.parse('{"constructor":{"name":"record"},"value":1}');
+    assert.isTrue(equalsDeep(value, JSON.parse(JSON.stringify(value))));
+    assert.isFalse(equalsDeep(value, { constructor: { name: 'other' }, value: 1 }));
+  });
+
+  it('uses prototype constructors to distinguish classes with own constructor members', () => {
+    class First { constructor() { this.constructor = { value: 1 }; } }
+    class Second { constructor() { this.constructor = { value: 1 }; } }
+    assert.isTrue(equalsDeep(new First(), new First()));
+    assert.isFalse(equalsDeep(new First(), new Second()));
+    assert.isFalse(equalsDeep(new First(), { constructor: { value: 1 } }));
+  });
+
+  it('requires matching own keys even when values are undefined', () => {
+    assert.isFalse(equalsDeep({ x: undefined }, { y: undefined }));
+    class Record { constructor(key) { this[key] = undefined; } }
+    assert.isFalse(equalsDeep(new Record('x'), new Record('y')));
+    assert.isTrue(equalsDeep(new Record('x'), new Record('x')));
+  });
+
   // correctly identifies two identical primitive values as equal
   assert.isTrue(equalsDeep(42, 42),
     'should return true when comparing two identical primitive values');

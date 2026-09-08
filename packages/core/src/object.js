@@ -14,8 +14,9 @@ const hasOwn = Object.hasOwn;
  * Deep equality comparison for arbitrary values.
  *
  * Generic JavaScript equality: understands Maps, Sets, RegExps,
- * functions, typed arrays and class instances (constructors must
- * match). Not the same as `equalsJson`, which compares JSON values
+ * functions, typed arrays and class instances (prototype constructors
+ * must match; an own `constructor` member is data). Not the same as
+ * `equalsJson`, which compares JSON values
  * only and is the hot-path variant — keep both.
  * @param {any} target
  * @param {any} source
@@ -34,23 +35,24 @@ export function equalsDeep(target, source) {
   if (isScalarType(target))
     return false;
 
-  if (target.constructor !== source.constructor)
+  const constructor = Object.getPrototypeOf(target)?.constructor;
+  if (constructor !== Object.getPrototypeOf(source)?.constructor)
     return false;
 
-  if (target.constructor === Object) {
+  if (constructor === Object) {
     const tks = Object.keys(target);
     const sks = Object.keys(source);
     if (tks.length !== sks.length)
       return false;
     for (let i = 0; i < tks.length; ++i) {
       const key = tks[i];
-      if (!equalsDeep(target[key], source[key]))
+      if (!hasOwn(source, key) || !equalsDeep(target[key], source[key]))
         return false;
     }
     return true;
   }
 
-  if (target.constructor === Map) {
+  if (constructor === Map) {
     if (target.size !== source.size)
       return false;
     for (const [key, value] of target) {
@@ -62,7 +64,7 @@ export function equalsDeep(target, source) {
     return true;
   }
 
-  if (target.constructor === Array) {
+  if (constructor === Array) {
     if (target.length !== source.length)
       return false;
     for (let i = 0; i < target.length; ++i) {
@@ -72,7 +74,7 @@ export function equalsDeep(target, source) {
     return true;
   }
 
-  if (target.constructor === Set) {
+  if (constructor === Set) {
     if (target.size !== source.size)
       return false;
     for (const value of target) {
@@ -82,7 +84,7 @@ export function equalsDeep(target, source) {
     return true;
   }
 
-  if (target.constructor === RegExp) {
+  if (constructor === RegExp) {
     return target.toString() === source.toString();
   }
 
@@ -104,7 +106,7 @@ export function equalsDeep(target, source) {
   if (tkeys.length === 0) return true;
   for (let i = 0; i < tkeys.length; ++i) {
     const key = tkeys[i];
-    if (!equalsDeep(target[key], source[key]))
+    if (!hasOwn(source, key) || !equalsDeep(target[key], source[key]))
       return false;
   }
   return true;
@@ -375,7 +377,7 @@ function semanticToken(value, path, open) {
     // an own property beyond the elements would vanish positionally
     for (const key of Object.keys(items)) {
       const index = Number(key);
-      if (!Number.isInteger(index) || index < 0 || index >= items.length)
+      if (!Number.isInteger(index) || index < 0 || index >= items.length || String(index) !== key)
         refuse(`the extra array property ${JSON.stringify(key)}`);
     }
     out = '[';
@@ -422,7 +424,7 @@ function semanticToken(value, path, open) {
  * functions, symbols, cycles, and non-plain objects (a `Date`, `Map`,
  * `RegExp` or class instance, all of which serialize to `{}`), plus the
  * two members a serialization cannot show — a symbol key, and an own
- * array property past the last element. A caller that may hold such a
+ * array property that is not an element index. A caller that may hold such a
  * value must treat the refusal as "not cacheable" and compute afresh —
  * never as "reuse whatever shares the key".
  *

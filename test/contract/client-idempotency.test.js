@@ -167,8 +167,21 @@ describe('the client half of idempotency', () => {
     if (!o.ok) assert.deepStrictEqual([o.error.code, /** @type {any} */ (o.error.details)[0].keyword], ['JC2050', 'canonical']);
   });
 
-  it('serializes concurrent durable records across clients sharing one storage adapter', async () => {
-    for (const shared of [false, true]) {
+  it('serializes concurrent durable records across clients sharing one storage adapter', async (t) => {
+    const digest = Uint8Array.from(Buffer.from(await canonicalSha256(SAVE), 'hex')).buffer;
+    for (const [shared, reverse] of [[false, false], [false, true], [true, false], [true, true]]) {
+      // Either digest can finish first, independently of invocation order.
+      const digests = [Promise.withResolvers(), Promise.withResolvers()];
+      let hashing = 0;
+      t.mock.method(globalThis.crypto.subtle, 'digest', () => {
+        const pendingDigest = digests[hashing++].promise;
+        if (hashing === 2) {
+          queueMicrotask(() => {
+            for (const index of reverse ? [1, 0] : [0, 1]) digests[index].resolve(digest);
+          });
+        }
+        return pendingDigest;
+      });
       const mem = memoryStorage();
       const firstRead = Promise.withResolvers();
       let reads = 0;
@@ -193,10 +206,10 @@ describe('the client half of idempotency', () => {
           second.invoke('product.save', SAVE, { idempotencyKey: 'b' }),
         ]);
         assert.deepStrictEqual(outcomes.map((outcome) => outcome.kind), ['network', 'network']);
-        assert.deepStrictEqual(await first.pending(),
+        assert.deepStrictEqual((await first.pending()).sort((a, b) => a.key.localeCompare(b.key)),
           [{ op: 'product.save', key: 'a' }, { op: 'product.save', key: 'b' }]);
       }
-      finally { first.close(); second.close(); }
+      finally { first.close(); second.close(); t.mock.restoreAll(); }
     }
   });
 

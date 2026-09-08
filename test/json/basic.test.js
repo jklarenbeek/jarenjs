@@ -11,6 +11,14 @@ import {
 } from '@jarenjs/json';
 
 describe('isValidJSONCheap', () => {
+  it('allows single digits and JSON whitespace before a value', () => {
+    for (const value of ['0', '1', '9', ' {}', '\t\r\n[1]', ' false', ' 0 ']) {
+      assert.isFalse(isValidJSONCheap(value), JSON.stringify(value));
+    }
+    assert.isTrue(isValidJSONCheap(' \t\r\n'));
+    assert.isTrue(isValidJSONCheap('\u00a0{}'));
+  });
+
   it('should return true for strings too short to be JSON', () => {
     assert.isTrue(isValidJSONCheap(''));
     assert.isTrue(isValidJSONCheap('a'));
@@ -39,6 +47,15 @@ describe('isValidJSONCheap', () => {
 });
 
 describe('isValidJSON', () => {
+  it('accepts single digits and JSON whitespace without accepting malformed numbers', () => {
+    for (const value of ['0', '1', '9', ' {}', '\t\r\n[1]', ' false', ' 0 ']) {
+      assert.isTrue(isValidJSON(value), JSON.stringify(value));
+    }
+    for (const value of ['01', ' 01 ', ' \t\r\n', '\u00a0{}', ' \u00a0{}']) {
+      assert.isFalse(isValidJSON(value), JSON.stringify(value));
+    }
+  });
+
   it('should return true for valid JSON strings', () => {
     assert.isTrue(isValidJSON('{}'));
     assert.isTrue(isValidJSON('[]'));

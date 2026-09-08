@@ -566,6 +566,11 @@ the derived-column mapping branches on (§3.1), so a model that declares
 a spatial index is portable across all three drivers and the physical
 shape it produces is not.
 
+Closing a Bun connection finalizes its live prepared statements before
+closing the database, so releasing a file does not wait for garbage
+collection. Statement tracking uses weak references and does not retain
+past queries for the connection's lifetime.
+
 `rtree` is read from the library's compile options (`ENABLE_RTREE`) and
 is the second mapping branch: a `derive: 'bbox'` index that declares
 `physical: 'rtree'` (§2.1) opens on a build without the module as the
@@ -745,6 +750,11 @@ and may itself call `transaction`; each level is one savepoint. A
 throw rolls back exactly its own level and rethrows — an outer
 transaction that catches the error continues and its own work
 commits. There is no implicit retry.
+If `COMMIT` or `RELEASE` itself fails, for example on a deferred foreign
+key constraint, that level rolls back before another caller acquires
+the connection. A rollback failure accompanies the original failure in
+an `AggregateError`, retaining the primary failure's code, class and
+driver cause when the store classifies it.
 
 **On an asynchronous driver a refused write rejects.** Every write —
 `insert`, `put`, `patch`, `delete`, the entity set's `create`/`update`/
