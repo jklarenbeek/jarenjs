@@ -144,6 +144,24 @@ describe('ai — the embeddings client', function () {
       (err) => err instanceof AiError && err.code === 'AI0003' && /input 0 .* at 2/.test(err.message));
   });
 
+  it('refuses finite numbers that overflow Float32 without settling dims or caching them', async function () {
+    for (const component of [1e39, -1e39]) {
+      const writes = [];
+      const { client } = scripted([reply([[0, [0, component]]])], {
+        retry: { attempts: 1 },
+        cache: { get: () => undefined, set: (...args) => { writes.push(args); } },
+      });
+      await assert.rejects(client.embed(['a']),
+        (err) => err instanceof AiError && err.code === 'AI0003'
+          && /input 0 received a component outside the finite Float32 range at 1/.test(err.message));
+      assert.strictEqual(client.dims, undefined);
+      assert.deepStrictEqual(writes, []);
+    }
+    const largest = 3.4028234663852886e38;
+    const { client } = scripted([reply([[0, [largest, -largest]]])]);
+    assert.deepStrictEqual(Array.from((await client.embed(['a']))[0]), [largest, -largest]);
+  });
+
   it('holds every vector to one width: configured up front, or settled by the first reply', async function () {
     // configured: the reply must match, from the first vector on
     const { client: pinned } = scripted([reply([[0, V0], [1, [0, 1, 0]]])], { dims: 4, retry: { attempts: 1 } });

@@ -511,23 +511,55 @@ function scanNormalizedSteps(path) {
   return { names, indexes, len: names.length };
 }
 
-// The shared apply loop of the query-selected writers: run the compiled
-// query in nodes mode, then rewrite the matched locations in reverse
-// document order (dedupe first - RFC 9535 nodelists may repeat a node).
+// Rank selected locations against the original document. Selector order
+// is not document order: a union or negative-step slice can visit array
+// indexes backwards. Object members follow Object.keys order, and a
+// descendant sorts before its ancestor so the ancestor's rewrite wins.
+function orderedWriteTargets(paths, root) {
+  const targets = Array.from(new Set(paths), (path) => ({ path, steps: scanNormalizedSteps(path), order: [] }));
+  if (targets.length < 2) return targets;
+  const members = new WeakMap();
+  for (const target of targets) {
+    let value = root;
+    const { names, indexes, len } = target.steps;
+    for (let i = 0; i < len; i++) {
+      const name = names[i];
+      if (name === null) {
+        target.order.push(indexes[i]);
+        value = value[indexes[i]];
+      }
+      else {
+        let ranks = members.get(value);
+        if (ranks === undefined) {
+          ranks = new Map(Object.keys(value).map((key, index) => [key, index]));
+          members.set(value, ranks);
+        }
+        target.order.push(ranks.get(name));
+        value = value[name];
+      }
+    }
+  }
+  targets.sort((a, b) => {
+    const len = Math.min(a.order.length, b.order.length);
+    for (let i = 0; i < len; i++) {
+      const delta = b.order[i] - a.order[i];
+      if (delta !== 0) return delta;
+    }
+    return b.order.length - a.order.length;
+  });
+  return targets;
+}
+
+// The shared apply loop of the query-selected writers: dedupe and order
+// the selected locations before any write can shift an array index.
 function applyAtNodes(query, root, mutate, leaf) {
   const paths = query.paths(root);
   if (paths.length === 0)
     return root;
+  const targets = orderedWriteTargets(paths, root);
   const state = makeState(root, mutate ? null : new Set());
-  const seen = paths.length > 1 ? new Set() : null;
-  for (let i = paths.length - 1; i >= 0; i--) {
-    const path = paths[i];
-    if (seen !== null) {
-      if (seen.has(path))
-        continue;
-      seen.add(path);
-    }
-    leaf(state, path);
+  for (const target of targets) {
+    leaf(state, target.path, target.steps);
   }
   return state.root;
 }
@@ -551,12 +583,11 @@ export function compileJSONPathSetter(path, options = undefined) {
   const query = compileJSONPath(path, options);
   const mutate = parseMutate(options);
   return function setAtMatches(root, value) {
-    return applyAtNodes(query, root, mutate, (state, p) => {
+    return applyAtNodes(query, root, mutate, (state, p, t) => {
       if (p === '$') {
         state.root = resolveValue(value, state.root, p);
         return;
       }
-      const t = scanNormalizedSteps(p);
       const parent = walkOwnedParent(state, t.names, t.indexes, t.len - 1, p);
       leafSet(parent, t.names[t.len - 1], t.indexes[t.len - 1], value, p);
     });
@@ -578,12 +609,11 @@ export function compileJSONPathInserter(path, options = undefined) {
   const query = compileJSONPath(path, options);
   const mutate = parseMutate(options);
   return function insertAtMatches(root, value) {
-    return applyAtNodes(query, root, mutate, (state, p) => {
+    return applyAtNodes(query, root, mutate, (state, p, t) => {
       if (p === '$') {
         state.root = value;
         return;
       }
-      const t = scanNormalizedSteps(p);
       const parent = walkOwnedParent(state, t.names, t.indexes, t.len - 1, p);
       leafInsert(parent, t.names[t.len - 1], t.indexes[t.len - 1], value, p);
     });
@@ -609,10 +639,9 @@ export function compileJSONPathRemover(path, options = undefined) {
   const query = compileJSONPath(path, options);
   const mutate = parseMutate(options);
   return function removeMatches(root) {
-    return applyAtNodes(query, root, mutate, (state, p) => {
+    return applyAtNodes(query, root, mutate, (state, p, t) => {
       if (p === '$')
         throw writeError('JW2003', 'the root of the document cannot be removed', p);
-      const t = scanNormalizedSteps(p);
       const parent = walkOwnedParent(state, t.names, t.indexes, t.len - 1, p);
       leafRemove(parent, t.names[t.len - 1], t.indexes[t.len - 1], p, true);
     });

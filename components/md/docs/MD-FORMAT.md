@@ -295,8 +295,9 @@ GitHub, in an editor preview and in this renderer:
 The result MAY be empty (`## ***`); an emitter MUST then substitute
 `section`, because a heading with no landing place cannot be linked.
 Within one document, the **second** heading yielding a given identifier
-MUST get `-1` appended, the third `-2`, and so on, counted over the
-substituted value so `***` twice yields `section` and `section-1`. The
+MUST get `-1` appended, the third `-2`, and so on, skipping any identifier
+already emitted (including numbered identifiers from another heading).
+Count over the substituted value so `***` twice yields `section` and `section-1`. The
 counter is per emission and MUST NOT be shared with any other numbering
 in the emitter.
 

@@ -62,6 +62,17 @@ describe('mdToVnode: heading ids and anchors', function () {
       ['doc', 'setup', 'setup-1', 'setup-2']);
   });
 
+  it('keeps literal suffixes distinct from numbered heading ids in either order', function () {
+    for (const [source, expected] of [
+      ['# Foo\n\n# Foo\n\n# Foo-1\n', ['foo', 'foo-1', 'foo-1-1']],
+      ['# Foo-1\n\n# Foo\n\n# Foo\n', ['foo-1', 'foo', 'foo-2']],
+    ]) {
+      const markup = html(source, { headingIds: true, headingAnchors: true });
+      assert.deepEqual(ids(markup), expected);
+      assert.deepEqual([...markup.matchAll(/ href="#([^"]*)"/g)].map((m) => m[1]), expected);
+    }
+  });
+
   it('gives a heading with no slug-worthy text a landing place', function () {
     assert.deepEqual(ids(html('## ***\n\n## !!!\n', { headingIds: true })),
       ['section', 'section-1']);

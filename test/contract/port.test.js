@@ -171,7 +171,7 @@ describe('servePort + openPortClient over a MessageChannel', () => {
     assert.strictEqual(emitted.length, 3);
   });
 
-  it('a handler fault answers JC2070 (kind contract on the client, onError sees the cause server-side); a foreign request with an unknown op answers JC2071', async () => {
+  it('a handler fault answers JC2070 (kind contract on the client, onError sees the cause server-side); a foreign request with an unknown op answers JC2071', { timeout: 5_000 }, async () => {
     const { server, client } = pair();
     /** @type {any[]} */
     const seen = [];
@@ -185,11 +185,16 @@ describe('servePort + openPortClient over a MessageChannel', () => {
     // a hand client (no contract) asks for an operation this channel does not serve
     /** @type {any[]} */
     const answers = [];
-    client.addEventListener('message', (event) => answers.push(event.data));
+    const received = new Promise((resolve) => {
+      client.addEventListener('message', (event) => {
+        answers.push(event.data);
+        if (answers.length === 3) resolve(undefined);
+      });
+    });
     client.postMessage({ jaren: FRAME_MARKER, id: 'hand:1', op: 'no.such', input: null });
     client.postMessage({ jaren: FRAME_MARKER, id: 'hand:2', op: 'image.bytes', input: { id: 1 } });
     client.postMessage({ jaren: FRAME_MARKER, id: 'hand:3', op: 'product.save', input: { id: 'x' } });
-    await drain();
+    await received;
     assert.strictEqual(answers.length, 3);
     assert.deepStrictEqual(answers.map((a) => a.error.code), ['JC2071', 'JC2071', 'JC2006'], 'unknown and opaque are JC2071; an invalid foreign input is JC2006');
     assert.doesNotMatch(answers[0].error.message, /no\.such/, 'the unknown op name is never echoed');

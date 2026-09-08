@@ -299,7 +299,8 @@ and **canonicalized to `{name}`**, which is what `describe()` and every
 projection show — with `name` matching `[A-Za-z_][A-Za-z0-9_]*` and
 declared once per template. A static segment is any run of characters
 except `/ { } : * ? #`, whitespace and control characters; a `%` in it
-MUST open a well-formed escape.
+MUST open a well-formed escape, and escaped bytes MUST decode as UTF-8
+(`JC0008` at the path when they do not).
 
 Reserved and refused by name (`JC0008` says which): the RFC 6570 operator
 forms `{+name}` `{#name}` `{.name}` `{/name}` `{;name}` `{?name}` `{&name}`
@@ -322,7 +323,10 @@ The **shape** of a binding is its method plus its template with every
 variable normalized to `{}`: `GET /api/products/{}`. Two operations MUST
 NOT share a shape (`JC0010` at the second one, in document order); the
 canonical binding takes part (`POST /<id>` may collide with a declared
-`POST /<id>`).
+`POST /<id>`). Static segments compare in decoded space, so `/a` and
+`/%61` share a shape, as do differently cased percent-escapes. An escaped
+slash stays inside its segment, and escaped braces stay static text:
+`/a%2Fb` differs from `/a/b`, and `/%7B%7D` differs from `/{id}`.
 
 ### §4.5 Opaque operations
 

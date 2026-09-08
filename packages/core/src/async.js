@@ -27,6 +27,8 @@
  * about what the worker does; those are the caller's policies around it.
  */
 
+import { isThenable } from './function.js';
+
 /**
  * @template T, R
  * @param {readonly T[]} items
@@ -131,7 +133,8 @@ export async function mapConcurrent(items, limit, worker, options = {}) {
  *    before it; `abort(reason)` runs the underlying `abort` once, at once
  *    (an abort is urgent — the pending underlying write is not waited
  *    for), and every write still queued rejects with the reason;
- *  - a write that throws or rejects fails the sink: its own promise
+ *  - a write that throws or rejects (including a throwing `then` getter
+ *    on its answer) fails the sink: its own promise
  *    rejects, every write queued behind it rejects with the same reason
  *    without reaching the underlying sink, later writes reject at once,
  *    and `end()` rejects too — the stream did not end cleanly;
@@ -171,13 +174,6 @@ export function createAwaitedSink(sink) {
     failure = reason;
   };
 
-  /**
-   * Whether an answer is a thenable — the shape that opens the queue.
-   * @param {unknown} answer
-   * @returns {answer is PromiseLike<unknown>}
-   */
-  const thenable = (answer) => answer !== null && typeof answer === 'object' && typeof (/** @type {any} */ (answer)).then === 'function';
-
   /** Run what is queued, one at a time, until one answers a thenable. */
   const next = () => {
     while (!running && queued.length > 0) {
@@ -189,14 +185,14 @@ export function createAwaitedSink(sink) {
       let answer;
       try {
         answer = item.op();
+        if (!isThenable(answer)) {
+          item.resolve();
+          continue;
+        }
       }
       catch (err) {
         fail(err);
         item.reject(err);
-        continue;
-      }
-      if (!thenable(answer)) {
-        item.resolve();
         continue;
       }
       running = true;
@@ -225,12 +221,12 @@ export function createAwaitedSink(sink) {
     let answer;
     try {
       answer = op();
+      if (!isThenable(answer)) return undefined;
     }
     catch (err) {
       fail(err);
       return Promise.reject(err);
     }
-    if (!thenable(answer)) return undefined;
     running = true;
     return new Promise((resolve, reject) => {
       Promise.resolve(answer).then(() => {

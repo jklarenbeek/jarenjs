@@ -234,6 +234,20 @@ describe('ai — the replay seam on the embeddings client', function () {
     await assert.rejects(() => client.embed(['a']), (err) => err instanceof AiError && err.code === 'AI0003');
   });
 
+  it('refuses a replay that overflows Float32 before settling dims or making a wire call', async function () {
+    for (const component of [1e39, -1e39]) {
+      const { client, calls } = embedClient({
+        get: () => ({ vector: [0, component], ms: 1 }),
+        set: () => { throw new Error('a refused replay must not write'); },
+      });
+      await assert.rejects(client.embed(['a']),
+        (err) => err instanceof AiError && err.code === 'AI0003'
+          && /replay entry carries a component outside the finite Float32 range at 1/.test(err.message));
+      assert.strictEqual(client.dims, undefined);
+      assert.deepStrictEqual(calls, []);
+    }
+  });
+
   it('the model is in every key: two models never share a vector', async function () {
     const cache = mapCache();
     const one = embedClient(cache);

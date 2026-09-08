@@ -70,6 +70,20 @@ describe('toHtml — the direct AST → HTML string emitter', function () {
       + ' aria-label="Permalink to Setup">#</a></h2>');
     assert.equal(html('## Setup\n', { headingAnchors: true }), '<h2>Setup</h2>');
   });
+
+  it('reserves numbered heading ids before a literal suffix can reuse them', function () {
+    for (const [source, expected] of [
+      ['# Foo\n\n# Foo\n\n# Foo-1\n', ['foo', 'foo-1', 'foo-1-1']],
+      ['# Foo-1\n\n# Foo\n\n# Foo\n', ['foo-1', 'foo', 'foo-2']],
+    ]) {
+      const markup = html(source, {
+        headingIds: true, headingAnchors: true, slugPrefix: 'user-content-',
+      });
+      const prefixed = expected.map((id) => 'user-content-' + id);
+      assert.deepEqual([...markup.matchAll(/ id="([^"]*)"/g)].map((m) => m[1]), prefixed);
+      assert.deepEqual([...markup.matchAll(/ href="#([^"]*)"/g)].map((m) => m[1]), prefixed);
+    }
+  });
 });
 
 describe('toHtml — plugins', function () {

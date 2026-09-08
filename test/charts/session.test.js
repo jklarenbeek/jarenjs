@@ -381,6 +381,39 @@ describe('candlestick session', function () {
     assert.equal(session.tick().mode, 'rebuilt');
   });
 
+  it('rebuilds when a replacement makes an invalid candle drawable under the same domain', function () {
+    const config = { type: 'candlestick' };
+    const candles = [k(0, 20, 25), { ...k(1000, 20, 25), close: null }, k(2000, 20, 25)];
+    const changes = [];
+    const session = createChartSession(config, {
+      getData: () => ({ candles }), takeChanges: () => changes.splice(0),
+    });
+    session.tick();
+    candles[1] = k(1000, 20, 25);
+    changes.push({ op: 'replace', path: '/candles/1', value: candles[1] });
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    const actual = renderToString(next.vnode);
+    assert.equal((actual.match(/class="chart-candle"/g) ?? []).length, 3);
+    assert.equal(actual, renderToString(compileChart(config, { candles }).toVnode()));
+  });
+
+  it('rebuilds when a replacement changes an interior candle identity under the same domain', function () {
+    const config = { type: 'candlestick' };
+    const candles = [k(0, 20, 25), k(1000, 20, 25), k(2000, 20, 25)];
+    const changes = [];
+    const session = createChartSession(config, {
+      getData: () => ({ candles }), takeChanges: () => changes.splice(0),
+    });
+    session.tick();
+    candles[1] = k(1500, 20, 25);
+    changes.push({ op: 'replace', path: '/candles/1', value: candles[1] });
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode),
+      renderToString(compileChart(config, { candles }).toVnode()));
+  });
+
   it('an upsert behind the window patches nothing but stays byte-equal', function () {
     const config = {
       type: 'candlestick',

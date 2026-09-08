@@ -414,6 +414,21 @@ describe('compileContract — every rule has its code and docPath', () => {
     refuses(one({ kind: 'read', output: true, http: { method: 'GET', path: 7 } }), 'JC0008', '/operations/a/http/path');
   });
 
+  it('JC0008 — malformed UTF-8 escapes retain the path error code and document location', () => {
+    for (const path of ['/%FF', '/%C3', '/%ED%A0%80']) {
+      refuses(one({ ...READ, http: { method: 'GET', path } }), 'JC0008', '/operations/a/http/path', /malformed percent-escape/);
+    }
+  });
+
+  it('JC0010 — percent-equivalent routes retain the duplicate code and document location', () => {
+    for (const paths of [['/a', '/%61'], ['/caf%C3%A9', '/caf%c3%a9'], ['/caf\u00e9', '/caf%C3%A9']]) {
+      refuses({ $contract: '0.1', operations: {
+        first: { ...READ, http: { method: 'GET', path: paths[0] } },
+        second: { ...READ, http: { method: 'GET', path: paths[1] } },
+      } }, 'JC0010', '/operations/second/http/path');
+    }
+  });
+
   it('JC0009 — locations', () => {
     const input = { type: 'object', properties: { id: { type: 'integer' }, x: { type: 'string' } } };
     refuses(one({ kind: 'read', output: true, http: { method: 'GET', path: '/a/{id}' } }), 'JC0009', '/operations/a/http/path', /input\.properties/);

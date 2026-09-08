@@ -39,6 +39,15 @@ describe('contract path — the template parser', () => {
     assert.strictEqual(parsePathTemplate('/caf%C3%A9').path, '/caf%C3%A9');
   });
 
+  it('normalizes escaped static shapes without merging segment boundaries or variable markers', () => {
+    assert.strictEqual(pathShape(parsePathTemplate('/%61')), pathShape(parsePathTemplate('/a')));
+    assert.strictEqual(pathShape(parsePathTemplate('/caf%c3%a9')), pathShape(parsePathTemplate('/caf%C3%A9')));
+    assert.notStrictEqual(pathShape(parsePathTemplate('/a%2Fb')), pathShape(parsePathTemplate('/a/b')));
+    assert.notStrictEqual(pathShape(parsePathTemplate('/%7B%7D')), pathShape(parsePathTemplate('/{id}')));
+    assert.notStrictEqual(pathShape(parsePathTemplate('/%2561')), pathShape(parsePathTemplate('/a')));
+    assert.strictEqual(pathShape(parsePathTemplate('/\uD800')), '/\uD800', 'literal strings do not pass through a URI encoder');
+  });
+
   const refused = /** @type {[string, RegExp][]} */ ([
     ['api', /start with "\/"/],
     ['/a//b', /empty segment/],

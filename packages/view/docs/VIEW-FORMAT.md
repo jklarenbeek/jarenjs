@@ -225,6 +225,11 @@ patching renderer would build: text and attribute values escaped (`&`,
 no output, boolean and style props serialized per §3. Serialization is
 pure: no state, no DOM, safe in any runtime.
 
+In trusted mode, a `textarea` carrying a `value` prop serializes that
+value as escaped text content, overriding its children; nullish values
+produce empty text. A leading newline is preserved through HTML parsing.
+Safe mode keeps its attribute-only policy (§8).
+
 Hydration in 0.1 is a client-side first render into the same container
 (empty and rebuild). Adopting existing server-rendered DOM is a
 roadmap item, not part of this contract.

@@ -18,7 +18,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
-import { isJsonObject } from '@jarenjs/core/object';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 const KINDS = ['input', 'output', 'const', 'query', 'jslt', 'task'];
@@ -519,7 +519,7 @@ export function compileDag(doc, options) {
         if (node.ports) {
           scope = {};
           for (let i = 0; i < node.inbound.length; i++) {
-            scope[node.inbound[i].port] = delivered[i];
+            setObjectMember(scope, node.inbound[i].port, delivered[i]);
           }
         }
         else if (node.inbound.length === 1) {
@@ -631,10 +631,10 @@ export function compileDag(doc, options) {
   const versions = {};
   for (const node of nodes.values()) {
     if (node.kind !== 'task' || node.version === null) continue;
-    versions[node.id] = node.version;
+    setObjectMember(versions, node.id, node.version);
     if (node.nestedVersions === null) continue;
     for (const [path, version] of Object.entries(node.nestedVersions)) {
-      versions[`${node.id}/${path}`] = version;
+      setObjectMember(versions, `${node.id}/${path}`, version);
     }
   }
   const taskVersions = Object.freeze(Object.fromEntries(

@@ -135,14 +135,10 @@ const engineLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (engineLeak.length > 0)
   throw new Error(`The schema pen pulled an engine into the bundle: ${engineLeak.map(([file]) => file).join(', ')}`);
-// The ceiling moved from 32,000 to 32,500 at a campaign's close-out: the
-// shared JSON boundary gained `requireNameMap`, the one refusal that keeps
-// a `__proto__:` key in a spec literal from eating a member silently, and
-// `json-boundary.js` rides in EVERY pen bundle. It moved again, to 33,500,
-// when a many-to-many relation hop learned to lower through the join
-// ROOT: `expression.js`'s hop machinery is the pen's own, so its second
-// link and the two refusals that guard it ride along. Raising the ceiling
-// with the reason is the honest move; shaving the message is not.
+// The budget includes the shared JSON boundary's name-map validation and
+// the pen's many-to-many relation lowering through the join root. Their
+// diagnostics belong in this bundle: keep useful refusals within the
+// budget rather than shortening messages to hide unrelated growth.
 if (schemaBytes > 33500)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
@@ -254,17 +250,10 @@ const modelEngineLeak = Object.entries(modelInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (modelEngineLeak.length > 0)
   throw new Error(`The model pen pulled an engine or the store into the bundle: ${modelEngineLeak.map(([file]) => file).join(', ')}`);
-// The ceiling moved from 40,000 to 41,000 when the pen started mirroring
-// four more of the store's member rules — `key()`/`unique()`/`index()`
-// off a kind that can hold no column, `version()` off an integer, an
-// `x-entity` member outside the closed vocabulary, and a `renamedFrom()`
-// hint the document has no place for. Almost all of it is message text:
-// a refusal that names the rule and the spelling that works is the point
-// of raising it at build rather than at `openStore`, so the honest move
-// is to raise the ceiling with the reason, never to shave the message.
-// It moved again, to 42,000, for the same cause as the schema pen's: the
-// hop machinery in `expression.js` gained the second link a many-to-many
-// relation lowers through, and both pens carry it.
+// The budget includes member validation (column-bearing kinds, integer
+// versions, the closed entity vocabulary, and valid rename hints), with
+// diagnostics that explain the accepted spelling at build time. It also
+// includes the same many-to-many relation lowering as the schema pen.
 if (modelBytes > 42000)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)

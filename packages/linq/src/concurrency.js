@@ -201,7 +201,7 @@ export async function* applyMapAsync(items, fn, opts) {
       // itself succeeded. Composed as a rejection the `await` adopts,
       // because a `throw` here would be the very substitution this
       // avoids: it discards whatever completion the block was carrying.
-      await Promise.resolve(items.return(undefined)).then(undefined,
+      await Promise.resolve().then(() => items.return(undefined)).then(undefined,
         (cleanupError) => Promise.reject(failure === null
           ? cleanupError
           : new AggregateError([failure.reason, cleanupError],

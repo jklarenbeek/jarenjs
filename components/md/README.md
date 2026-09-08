@@ -139,7 +139,9 @@ mdToVnode(doc, { headingIds: true, slugPrefix: 'user-content-' });
 
 Repeated headings are numbered the way GitHub numbers them (`setup`,
 `setup-1`, `setup-2`), and a heading with no slug-worthy text (`## ***`)
-lands on `section`. Ids are **off by default on purpose**: CommonMark
+lands on `section`. Numbered ids are reserved too: headings `Foo`, `Foo`,
+`Foo-1` receive `foo`, `foo-1`, `foo-1-1`, so every permalink remains unique.
+Ids are **off by default on purpose**: CommonMark
 renders a heading as `<h1>Foo</h1>`, so emitting one by default would put
 the conformance score below at odds with what the package produces. The
 rules are normative in [MD-FORMAT.md](docs/MD-FORMAT.md) §4.5; the slug

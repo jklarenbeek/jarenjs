@@ -211,6 +211,9 @@ export function parsePathTemplate(source) {
     else {
       checkStaticSegment(source, pos, end);
       const text = source.slice(pos, end);
+      if (decodeSegment(text) === null) {
+        throw new TypeError(`a malformed percent-escape in segment "${text}"`);
+      }
       segments.push({ variable: false, text });
       canonical += `/${text}`;
     }
@@ -221,8 +224,10 @@ export function parsePathTemplate(source) {
 }
 
 /**
- * The shape of a template with every variable normalized to `{}` — the
- * identity `JC0010` is decided on.
+ * The shape of a template with every variable normalized to `{}` and
+ * static delimiters re-escaped from decoded text — the identity `JC0010`
+ * is decided on. Escaped separators and braces stay inside their static
+ * segment, distinct from path boundaries and variable markers.
  * @param {ParsedPathTemplate} parsed
  * @returns {string}
  */
@@ -231,7 +236,8 @@ export function pathShape(parsed) {
   let out = '';
   for (let i = 0; i < parsed.segments.length; i++) {
     const s = parsed.segments[i];
-    out += s.variable ? '/{}' : `/${s.text}`;
+    out += s.variable ? '/{}' : '/' + decodeURIComponent(s.text).replace(/[%/{}]/g,
+      (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
   }
   return out;
 }

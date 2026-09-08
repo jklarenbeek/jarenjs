@@ -25,8 +25,10 @@ export { hashContent, fnv1a, FNV1A_OFFSET_BASIS, slugify } from '@jarenjs/core/s
  *
  * Both emitters mint ids, so the rule lives here once: slug the text,
  * substitute `section` when nothing slug-worthy survives, number
- * repeats the way GitHub numbers them (`setup`, `setup-1`, `setup-2`)
- * and prefix the result. The COUNTER belongs to the caller — one map per
+ * repeats the way GitHub numbers them (`setup`, `setup-1`, `setup-2`),
+ * reserving every emitted slug so a literal `setup-1` cannot collide
+ * with a numbered `setup`, and prefix the result. The COUNTER belongs
+ * to the caller — one map per
  * emission, never shared with another numbering (a block key's hash and
  * a slug share a namespace only by accident, and a collision there would
  * shift an unrelated heading's number).
@@ -38,9 +40,12 @@ export { hashContent, fnv1a, FNV1A_OFFSET_BASIS, slugify } from '@jarenjs/core/s
  */
 export function headingId(text, seen, prefix) {
   const base = slugify(text) || 'section';
-  const count = seen.get(base) ?? 0;
+  let count = seen.get(base) ?? 0;
+  let slug = count === 0 ? base : base + '-' + count;
+  while (seen.has(slug)) slug = base + '-' + ++count;
   seen.set(base, count + 1);
-  return prefix + (count === 0 ? base : base + '-' + count);
+  if (slug !== base) seen.set(slug, 1);
+  return prefix + slug;
 }
 
 /**

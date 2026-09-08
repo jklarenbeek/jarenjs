@@ -40,6 +40,32 @@ describe('renderToString', function () {
       '<div><br><img src="x.png"></div>');
   });
 
+  it('serializes a controlled textarea value as escaped text instead of its children', function () {
+    assert.strictEqual(renderToString(['textarea', { value: 'a < b & </textarea>', rows: 3 }, 'stale']),
+      '<textarea rows="3">a &lt; b &amp; &lt;/textarea&gt;</textarea>');
+    assert.strictEqual(renderToString(['textarea', {}, 'uncontrolled']),
+      '<textarea>uncontrolled</textarea>');
+  });
+
+  it('uses the DOM controlled-value coercion for nullish, numeric and boolean text', function () {
+    for (const [value, expected] of [[null, ''], [undefined, ''], [0, '0'], [false, 'false']]) {
+      assert.strictEqual(renderToString(['textarea', { value }, 'stale']),
+        '<textarea>' + expected + '</textarea>');
+    }
+  });
+
+  it('preserves a controlled textarea leading newline through HTML parsing', function () {
+    for (const value of ['\nfirst line', '\rfirst line', '\r\nfirst line']) {
+      assert.strictEqual(renderToString(['textarea', { value }]),
+        '<textarea>\n' + value + '</textarea>');
+    }
+  });
+
+  it('keeps safe textarea rendering attribute-only', function () {
+    assert.strictEqual(renderToString(['textarea', { value: 'attribute' }, 'visible'], { safe: true }),
+      '<textarea value="attribute">visible</textarea>');
+  });
+
   it('serializes style objects, camelCase to kebab-case', function () {
     assert.strictEqual(
       styleToString({ fontSize: '12px', '--gap': '1rem', color: 'red', display: null }),

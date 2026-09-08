@@ -306,7 +306,8 @@ A node's `$` is decided by its inbound edges:
   inbound edge MUST name one, ports MUST be unique, and `$` is the
   object of port-named values, members in **edge document order**. A
   single ported edge therefore yields `{ port: value }` — the way to
-  force the object shape.
+  force the object shape. Each port is an own object member, including
+  names that also occur on `Object.prototype`.
 - Two or more unported inbound edges are a compile error (JF0015).
 
 A delivery whose `select` yields the empty sequence delivers `null`; a
@@ -463,7 +464,8 @@ compiles of the same document produce the same map — byte for byte —
 whatever order the declarations were written in. A handler that is itself
 a compiled workflow may expose its own `taskVersions`; those compose under
 the node's path (`outer`, `outer/inner`), so a composed run has one
-identity rather than two.
+identity rather than two. Every task id is retained as an own member,
+including names inherited by ordinary JavaScript objects.
 
 ```js
 compileDag(doc, { tasks: { summarise: { version: '2026-09-05', run: handler } } })

@@ -207,6 +207,24 @@ describe('compileJSONPathSetter', () => {
     deepStrictEqual(out, { a: 'flat' });
   });
 
+  it('orders reordered selectors by the document and visits duplicate locations once', () => {
+    const seen = [];
+    const doc = { a: { b: 1 }, b: 2 };
+    deepStrictEqual(setAtJSONPath(doc, "$..['b', 'a', 'b']", (_old, path) => {
+      seen.push(path);
+      return 'flat';
+    }), { a: 'flat', b: 'flat' });
+    deepStrictEqual(seen, ["$['b']", "$['a']['b']", "$['a']"]);
+    deepStrictEqual(doc, { a: { b: 1 }, b: 2 });
+
+    seen.length = 0;
+    setAtJSONPath(Array.from({ length: 12 }, (_, i) => i), '$[2,10,0,2]', (old, path) => {
+      seen.push(path);
+      return old;
+    });
+    deepStrictEqual(seen, ['$[10]', '$[2]', '$[0]']);
+  });
+
   it('sets the root when the query is $', () => {
     strictEqual(setAtJSONPath({ a: 1 }, '$', 9), 9);
   });
@@ -226,6 +244,15 @@ describe('compileJSONPathSetter', () => {
 });
 
 describe('compileJSONPathInserter', () => {
+  it('inserts at original indexes for reversed unions and slices, deduplicating matches', () => {
+    for (const mutate of [false, true]) {
+      deepStrictEqual(insertAtJSONPath(['a', 'b', 'c', 'd'], '$[2,0,2]', 'X', { mutate }),
+        ['X', 'a', 'b', 'X', 'c', 'd']);
+      deepStrictEqual(insertAtJSONPath(['a', 'b', 'c'], '$[::-1]', 'X', { mutate }),
+        ['X', 'a', 'X', 'b', 'X', 'c']);
+    }
+  });
+
   it('inserts before every matched array element, shifts composing', () => {
     const doc = { list: ['a', 'b', 'c'] };
     // match elements 0 and 2; reverse order keeps both positions valid
@@ -242,6 +269,15 @@ describe('compileJSONPathInserter', () => {
 });
 
 describe('compileJSONPathRemover', () => {
+  it('removes original indexes for reversed unions and slices, deduplicating matches', () => {
+    for (const mutate of [false, true]) {
+      deepStrictEqual(removeAtJSONPath(['a', 'b', 'c', 'd'], '$[2,0,2]', { mutate }), ['b', 'd']);
+      deepStrictEqual(removeAtJSONPath(['a', 'b', 'c', 'd'], '$[::-1]', { mutate }), []);
+      deepStrictEqual(removeAtJSONPath(Array.from({ length: 12 }, (_, i) => i), '$[2,10,0]', { mutate }),
+        [1, 3, 4, 5, 6, 7, 8, 9, 11]);
+    }
+  });
+
   it('removes every matched node; multiple removals from one array compose', () => {
     const doc = makeStore();
     const out = removeAtJSONPath(doc, '$.store.book[?@.price > 15]');

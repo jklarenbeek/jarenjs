@@ -307,11 +307,11 @@ describe('a concurrent task failure keeps its own identity', () => {
 
   it('an extensible error gains no private property', async () => {
     const error = new Error('plain');
+    const originalKeys = Reflect.ownKeys(error);
     const outcome = await settle(fromAsync([1, 2]).mapAsync(
       (n) => (n === 1 ? Promise.reject(error) : 2), { concurrency: 2, ordered: false }));
     assert.strictEqual(outcome.error, error);
-    assert.deepStrictEqual(Reflect.ownKeys(error).filter((k) => typeof k === 'string')
-      .filter((k) => k !== 'message' && k !== 'stack'), []);
+    assert.deepStrictEqual(Reflect.ownKeys(error), originalKeys);
   });
 
   it('a failing source close does not replace the task failure', async () => {
@@ -331,5 +331,22 @@ describe('a concurrent task failure keeps its own identity', () => {
       'both failures travel, neither is dropped');
     assert.strictEqual(outcome.error.errors[0], taskError, 'the task failure is first');
     assert.strictEqual(outcome.error.errors[1].message, 'close boom');
+  });
+
+  it('a synchronously throwing source close preserves both failures', async () => {
+    const taskError = new Error('task boom');
+    const closeError = new Error('close boom');
+    const source = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => ({ value: 1, done: false }),
+          return: () => { throw closeError; },
+        };
+      },
+    };
+    const outcome = await settle(fromAsync(source).mapAsync(
+      () => { throw taskError; }, { concurrency: 1, mode: 'concat' }));
+    assert.ok(outcome.error instanceof AggregateError);
+    assert.deepStrictEqual(outcome.error.errors, [taskError, closeError]);
   });
 });

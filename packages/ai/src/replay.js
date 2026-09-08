@@ -43,6 +43,7 @@
 import { semanticKey } from '@jarenjs/core/object';
 
 import { AiError } from './errors.js';
+import { verifyEmbeddingComponents } from './embedding-vector.js';
 
 /**
  * The replay cache seam a host implements.
@@ -120,14 +121,7 @@ export function verifyEmbeddingEntry(entry, dims) {
     throw new AiError('AI0003', 'malformed replay entry for the embeddings wire: expected { vector: number[], ms }');
   if (dims !== undefined && vector.length !== dims)
     throw new AiError('AI0003', `replay entry carries ${vector.length} dimensions, expected ${dims}`);
-  const out = new Float32Array(vector.length);
-  for (let i = 0; i < vector.length; i++) {
-    const x = vector[i];
-    if (typeof x !== 'number' || !Number.isFinite(x))
-      throw new AiError('AI0003', `replay entry carries a component that is not a finite number at ${i}`);
-    out[i] = x;
-  }
-  return out;
+  return verifyEmbeddingComponents(vector, 'replay entry carries');
 }
 
 /**

@@ -235,6 +235,11 @@ delete it or fix it.
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
 - [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§8: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
+- [ ] **Controlled select SSR** — a trusted `select` vnode with `value: 'b'`
+  currently emits a `value` attribute without selecting its matching option,
+  so a browser initially selects the first option. Carry selection context
+  through options and optgroups, including multiple selections and options
+  whose value comes from their text, to satisfy VIEW-FORMAT §6.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
 - [ ] **Safe-mode composition/IME and a real-browser adversarial suite** — the
   safe render profile (VIEW-FORMAT §8) and the controlled-input registry are

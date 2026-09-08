@@ -173,7 +173,7 @@ addVat(doc, (price) => price * 1.21);
 removeAtJSONPath(doc, '$.store.book[?@.price > 20]');
 ```
 
-Set replaces (creating a missing final member; `/arr/-` appends), insert has RFC 6902 `add` semantics (array elements shift right), remove deletes with shift. The query-selected writers apply matched locations in **reverse document order**, so multiple removals or inserts in one array — and nested matches — compose without index bookkeeping, and matching nothing is a no-op that returns the input. Everything is copy-on-write with an in-place `{ mutate: true }` escape hatch; failures (`JsonWriteError`, `JW0001`/`JW2xxx` with the target as `dataPath`) leave the input untouched.
+Set replaces (creating a missing final member; `/arr/-` appends), insert has RFC 6902 `add` semantics (array elements shift right), remove deletes with shift. The query-selected writers deduplicate matched locations and apply them in **reverse document order**, independent of selector order (including reversed unions and negative-step slices), so multiple removals or inserts in one array — and nested matches — compose without index bookkeeping, and matching nothing is a no-op that returns the input. Everything is copy-on-write with an in-place `{ mutate: true }` escape hatch; failures (`JsonWriteError`, `JW0001`/`JW2xxx` with the target as `dataPath`) leave the input untouched.
 
 The addressing bridge rounds this out: `jsonPointerFromJSONPath(singularQuery)` and `jsonPathFromJSONPointer(pointer)` convert between the two location languages (digit tokens become index selectors — RFC 6901's one-token-two-forms ambiguity, resolved by convention), so pointers, normalized paths and query results compose freely.
 

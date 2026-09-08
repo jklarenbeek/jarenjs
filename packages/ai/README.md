@@ -142,7 +142,9 @@ embedder.dims;                       // the width, settled by the first reply (o
 `data: [{ index, embedding }]`, and providers do answer a batch out of order. The client
 reassembles the items by `index` into input order and refuses the reply — `AI0003`, naming
 the input — unless exactly one non-empty vector of finite numbers, of the expected width,
-arrived per input. An embedding attached to the wrong text is worse than an error, and this
+arrived per input. Components must stay finite after Float32 conversion, on the wire and
+from replay; numbers that overflow that range are refused with `AI0003`.
+An embedding attached to the wrong text is worse than an error, and this
 is the one place in the suite that rule is enforced.
 
 **A vector never travels without its identity.** Vectors from two models are pairwise

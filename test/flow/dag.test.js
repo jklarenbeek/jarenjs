@@ -215,6 +215,24 @@ describe('compileDag — THE PROGRAM THESIS', function () {
 });
 
 describe('compileDag — the run', function () {
+  it('preserves every named port as an own member on repeated runs', async function () {
+    const ports = ['__proto__', 'constructor', 'toString'];
+    const dag = compileDag({
+      $dag: '0.1',
+      nodes: { i: { kind: 'input' }, o: { kind: 'output' } },
+      edges: ports.map((port) => ({ from: 'i', to: 'o', port })),
+    });
+    for (const value of [{ n: 1 }, { n: 2 }]) {
+      const result = await dag.run(value);
+      assert.deepStrictEqual(Object.keys(result), ports);
+      assert.strictEqual(Object.getPrototypeOf(result), Object.prototype);
+      for (const port of ports) {
+        assert.strictEqual(Object.hasOwn(result, port), true);
+        assert.strictEqual(result[port], value);
+      }
+    }
+  });
+
   it('fan-in: completion order cannot change the value or the port member order', async function () {
     const doc = {
       $dag: '0.1',

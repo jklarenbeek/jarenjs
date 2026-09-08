@@ -33,6 +33,7 @@ import { fnv1a } from '@jarenjs/core/string';
 import { l2Normalize } from '@jarenjs/core/vector';
 
 import { AiError } from './errors.js';
+import { verifyEmbeddingComponents } from './embedding-vector.js';
 import { resolveEndpoint } from './providers.js';
 import {
   normalizeRetry, withRetry, isTransientFailure, httpFailure, transportFailure, abortError,
@@ -266,14 +267,7 @@ function reassemble(payload, count, dims) {
     if (dims === undefined) dims = embedding.length;
     if (embedding.length !== dims)
       throw new AiError('AI0003', `input ${i} received ${embedding.length} dimensions, expected ${dims}`);
-    const vector = new Float32Array(dims);
-    for (let j = 0; j < dims; j++) {
-      const x = embedding[j];
-      if (typeof x !== 'number' || !Number.isFinite(x))
-        throw new AiError('AI0003', `input ${i} received a component that is not a finite number at ${j}`);
-      vector[j] = x;
-    }
-    out[i] = vector;
+    out[i] = verifyEmbeddingComponents(embedding, `input ${i} received`);
   }
   return out;
 }

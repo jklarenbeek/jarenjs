@@ -113,6 +113,27 @@ describe('a checkpointed task declares its handler version', () => {
 });
 
 describe('the canonical version map', () => {
+  it('retains task identities that match inherited object member names', () => {
+    const names = ['__proto__', 'constructor', 'toString'];
+    const dag = compileDag({
+      $dag: '0.1',
+      nodes: {
+        i: { kind: 'input' },
+        ...Object.fromEntries(names.map((name) => [name, { kind: 'task', run: 'task', version: '1' }])),
+        o: { kind: 'output' },
+      },
+      edges: [
+        { from: 'i', to: names[0] },
+        { from: names[0], to: names[1] },
+        { from: names[1], to: names[2] },
+        { from: names[2], to: 'o' },
+      ],
+    }, { tasks: { task: { version: '1', run: () => null } } });
+    assert.deepStrictEqual(dag.taskVersions, Object.fromEntries(names.map((name) => [name, '1'])));
+    assert.strictEqual(Object.getPrototypeOf(dag.taskVersions), Object.prototype);
+    assert.strictEqual(Object.isFrozen(dag.taskVersions), true);
+  });
+
   it('is sorted, and stable under the declaration order', () => {
     const forward = compileDag({
       $dag: '0.1',

@@ -29,6 +29,9 @@ const VOID_ELEMENTS = new Set([
 /** Props that never serialize to markup. */
 const SKIP_PROPS = new Set(['key', 'on', 'memo']);
 
+/** A controlled textarea's value is its text content in HTML markup. */
+const TEXTAREA_SKIP_PROPS = new Set([...SKIP_PROPS, 'value']);
+
 /** Widget-vnode props that configure the widget, not the host element. */
 const WIDGET_SKIP_PROPS = new Set(['key', 'on', 'memo', 'name', 'props', 'tag']);
 
@@ -184,11 +187,19 @@ function renderNode(vnode, widgets, policy, onUnsafe) {
   if (policy !== null && onUnsafe !== null && props.on !== undefined) {
     onUnsafe({ kind: 'event', name: 'on' });
   }
-  let out = '<' + tag + serializeProps(props, SKIP_PROPS, policy, onUnsafe);
+  const controlledTextarea = policy === null && tag === 'textarea' && 'value' in props;
+  let out = '<' + tag + serializeProps(props,
+    controlledTextarea ? TEXTAREA_SKIP_PROPS : SKIP_PROPS, policy, onUnsafe);
   if (VOID_ELEMENTS.has(tag)) {
     return out + '>';
   }
   out += '>';
+  if (controlledTextarea) {
+    const value = props.value == null ? '' : String(props.value);
+    // HTML normalizes CR/CRLF to LF and consumes one leading LF in a
+    // textarea. Protect an authored newline with an extra LF.
+    return out + (/^[\r\n]/.test(value) ? '\n' : '') + escapeText(value) + '</' + tag + '>';
+  }
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
     out += renderNode(children[i], widgets, policy, onUnsafe);

@@ -253,6 +253,54 @@ describe('core/async — createAwaitedSink', function () {
     await assert.rejects(sink.end(), (e) => e === boom);
   });
 
+  it('a throwing then getter rejects an idle write and fails later writes and end', async function () {
+    const boom = new Error('then getter');
+    const reached = [];
+    const sink = createAwaitedSink({ write: (chunk) => {
+      reached.push(chunk);
+      return { get then() { throw boom; } };
+    } });
+    const first = sink.write('a');
+    assert.ok(first instanceof Promise, 'write must not throw synchronously');
+    await assert.rejects(first, (err) => err === boom);
+    assert.strictEqual(sink.failed(), true);
+    await assert.rejects(/** @type {Promise<void>} */ (sink.write('b')), (err) => err === boom);
+    await assert.rejects(sink.end(), (err) => err === boom);
+    assert.deepStrictEqual(reached, ['a']);
+  });
+
+  it('a throwing then getter in a queued write settles the whole queue with the same failure', async function () {
+    const gate = deferred();
+    const boom = new Error('queued then getter');
+    const reached = [];
+    const sink = createAwaitedSink({
+      write: (chunk) => {
+        reached.push(chunk);
+        return chunk === 'a' ? gate.promise : { get then() { throw boom; } };
+      },
+      end: () => { reached.push('end'); },
+    });
+    const results = Promise.allSettled([sink.write('a'), sink.write('b'), sink.write('c'), sink.end()]);
+    gate.resolve();
+    assert.deepStrictEqual(await results, [
+      { status: 'fulfilled', value: undefined },
+      { status: 'rejected', reason: boom },
+      { status: 'rejected', reason: boom },
+      { status: 'rejected', reason: boom },
+    ]);
+    assert.strictEqual(sink.failed(), true);
+    assert.deepStrictEqual(reached, ['a', 'b']);
+  });
+
+  it('a throwing then getter from end rejects its repeatable terminal promise', async function () {
+    const boom = new Error('end then getter');
+    const sink = createAwaitedSink({ write: () => undefined, end: () => ({ get then() { throw boom; } }) });
+    const end = sink.end();
+    await assert.rejects(end, (err) => err === boom);
+    assert.strictEqual(sink.end(), end);
+    assert.strictEqual(sink.failed(), true);
+  });
+
   it('abort runs the underlying abort once, at once, rejects the queued writes with the reason, and is terminal with end', async function () {
     const reached = [];
     const aborts = [];
