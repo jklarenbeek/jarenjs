@@ -572,11 +572,23 @@ export function createDataRuntime(env = {}) {
   /** @type {any} */
   let liveDoc = null;
   let liveAvailable = true;
+  let topology = 'boot';
+  let activeModel = DATA_MODEL;
   /** The collection every effect works on: the model pane is EDITABLE,
    * so naming one literally makes editing the model produce a studio
    * that queries a collection the model no longer declares. It is the
    * first collection the open model declares, and it moves with it. */
   let collection = firstCollection(DATA_MODEL);
+
+  /** A reopen notice and an attach response describe the same store. */
+  const acceptStore = (opened = {}, dispatch) => {
+    activeModel = opened.model ?? activeModel;
+    collection = opened.collection ?? firstCollection(activeModel);
+    liveAvailable = opened?.capabilities?.live !== false;
+    dispatch('data/opened', {
+      ...opened, collection, keyPointer: opened.keyPointer ?? keyPointerOf(activeModel, collection),
+    });
+  };
 
   const parse = (text, what) => {
     try {
@@ -617,7 +629,7 @@ export function createDataRuntime(env = {}) {
           refreshRegistrations();
         },
         onError: (/** @type {any} */ outcome) =>
-          dispatch('data/error', { message: outcome.error.message }),
+          dispatch('data/error', { message: outcome.error.details?.message ?? outcome.error.message }),
         onEnd: (/** @type {{ reason: string }} */ info) =>
           dispatch('data/error', { message: `live stream ended (${info.reason})` }),
       });
@@ -629,6 +641,14 @@ export function createDataRuntime(env = {}) {
   const withStore = (dispatch) => {
     if (transport !== null) return true;
     dispatch('data/error', { message: 'the store is not booted — retry the boot first' });
+    return false;
+  };
+
+  /** Destructive model changes belong to the tab holding the database. */
+  const withOwner = (dispatch) => {
+    if (!withStore(dispatch)) return false;
+    if (topology === 'owner') return true;
+    dispatch('data/error', { message: 'Only the owning tab can recreate or migrate the store.' });
     return false;
   };
 
@@ -646,7 +666,7 @@ export function createDataRuntime(env = {}) {
   // registration forever there — the count never comes back down and
   // the store keeps feeding a subscription nobody reads. `stop()` is
   // idempotent on both sides (the client marks the stream stopped, the
-  // owner's wrapper decrements once), so being told twice costs
+  // owner's wrapper releases once), so being told twice costs
   // nothing. The listener never calls `preventDefault`, so it cannot
   // raise the browser's "leave site?" prompt.
   if (typeof addEventListener === 'function') {
@@ -671,6 +691,8 @@ export function createDataRuntime(env = {}) {
     // the boot opens the SEED model: whatever a reopen moved the studio
     // onto, this attempt works on the seed model's first collection
     collection = firstCollection(DATA_MODEL);
+    activeModel = DATA_MODEL;
+    topology = 'boot';
     const booting = buildTransport();
     transport = booting;
     /** A later boot took over: this attempt is over and says nothing. */
@@ -678,6 +700,7 @@ export function createDataRuntime(env = {}) {
     try {
       const status = await booting.boot();
       if (superseded()) return;
+      topology = status.topology;
       liveAvailable = status.vfs !== 'indexeddb-snapshot';
       dispatch('data/status', status);
       // an owner (OPFS) and a standalone memory tab each hold their
@@ -687,17 +710,19 @@ export function createDataRuntime(env = {}) {
         const opened = await booting.bounded('store-open',
           () => booting.request('data.open', { model: DATA_MODEL }));
         if (superseded()) return;
-        liveAvailable = opened?.capabilities?.live !== false;
-        dispatch('data/opened', { ...opened, collection, keyPointer: keyPointerOf(DATA_MODEL, collection) });
+        acceptStore(opened, dispatch);
         for (const seedDoc of SEEDS) {
           await booting.request('data.insert',
             { collection, doc: seedDoc }).catch(() => {});
         }
       }
       else {
-        // the owner's store is the one already open; attaching is this
-        // tab's whole boot
-        dispatch('data/ready');
+        // On the channel, open without reset only reads the owner's
+        // current model and capabilities; it never reopens the store.
+        const opened = await booting.bounded('store-open',
+          () => booting.request('data.open', { model: DATA_MODEL }));
+        if (superseded()) return;
+        acceptStore(opened, dispatch);
       }
     }
     catch (error) {
@@ -716,7 +741,8 @@ export function createDataRuntime(env = {}) {
     // it and the pane takes its subscription out again. Without
     // this, a live pane keeps its last rows and goes on looking
     // live while nothing reaches it.
-    booting.notices(() => {
+    booting.notices((notice) => {
+      acceptStore(notice, dispatch);
       subscribeLive(dispatch);
       refreshRows(dispatch);
     });
@@ -738,18 +764,15 @@ export function createDataRuntime(env = {}) {
     // clean start — the failed transport was already released
     'data-retry': (_props, dispatch) => bootStore(dispatch),
     'data-open': (props, dispatch) => {
-      if (!withStore(dispatch)) return;
+      if (!withOwner(dispatch)) return;
       const model = parse(props.text, 'model');
       if (!model.ok) {
         dispatch('data/error', { message: model.message });
         return;
       }
-      transport?.request('data.open', { model: model.value, reset: true })
+      return transport?.request('data.open', { model: model.value, reset: true })
         .then((opened) => {
-          collection = firstCollection(model.value);
-          dispatch('data/opened', {
-            ...opened, collection, keyPointer: keyPointerOf(model.value, collection),
-          });
+          acceptStore({ model: model.value, ...opened }, dispatch);
           subscribeLive(dispatch);
           return refreshRows(dispatch);
         })
@@ -911,14 +934,18 @@ export function createDataRuntime(env = {}) {
           { status: 'error', ...counts, message: String(error.message ?? error) }));
     },
     'data-migrate': (_props, dispatch) => {
-      if (!withStore(dispatch)) return;
+      if (!withOwner(dispatch)) return;
       // the worked migration: index the title member, shadow-verified.
       // The reopen it ends with drops every live registration, and the
       // owner's notice is what puts the pane's subscription back.
-      const to = JSON.parse(JSON.stringify(DATA_MODEL));
-      to.collections.notes.indexes.push({ name: 'by_title', path: '$.title' });
-      transport?.request('data.migrate', { to, id: 'add-title-index' })
-        .then((report) => dispatch('data/migrated', { report }))
+      const to = JSON.parse(JSON.stringify(activeModel));
+      const indexes = to.collections[collection].indexes ??= [];
+      if (!indexes.some((index) => index.name === 'by_title')) indexes.push({ name: 'by_title', path: '$.title' });
+      return transport?.request('data.migrate', { to, id: 'add-title-index' })
+        .then((report) => {
+          activeModel = to;
+          dispatch('data/migrated', { report });
+        })
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
     },
   };
@@ -1011,11 +1038,9 @@ export function dataViewModel(state) {
     capture: data.capture,
     operators: data.operators,
     pushableOperators: data.pushableOperators,
-    // a client tab attaches to the owner's store and is told nothing about
-    // its operators: say so, rather than "none" about a store that has them
     operatorSummary: data.operators.length > 0
       ? `${data.operators.length} registered · ${data.pushableOperators.length} pushed to SQLite as UDFs`
-      : data.topology === 'client' ? 'the owner\'s (not reported to a client tab)'
+      : data.topology === 'client' && data.capture === '—' ? 'the owner\'s (awaiting capabilities)'
         : data.status === 'ready' ? 'none registered' : '—',
     operatorList: data.operators.join(' ') || '—',
     // a copyable query that exercises both paths: $sqrt is a pushable

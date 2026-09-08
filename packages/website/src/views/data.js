@@ -18,6 +18,10 @@
  */
 import { editorTextarea, errorLine, paneSwitcher } from './studio-kit.js';
 
+const ownerDisabled = { $or: [{ $ne: ['$.topology', 'owner'] }, { $ne: ['$.status', 'ready'] }] };
+const ownerReason = { $if: [{ $ne: ['$.topology', 'owner'] },
+  ['p', { class: 'muted data-owner-reason' }, 'Only the owning tab can recreate or migrate the store.']] };
+
 const statusCard =
   ['div', { class: 'card pg-card data-status' },
     ['h3', {}, 'Store'],
@@ -59,8 +63,9 @@ const statusCard =
     ['details', { class: 'details-card', open: true },
       ['summary', {}, 'Model (jaren-model JSON)'],
       editorTextarea({ value: '$.modelText', action: 'data/model-text', rows: 14 }),
-      ['button', { class: 'btn small', type: 'button', on: { click: 'data/open' } },
+      ['button', { class: 'btn small', type: 'button', disabled: ownerDisabled, on: { click: 'data/open' } },
         'Recreate store from model'],
+      ownerReason,
       ['p', { class: 'muted' },
         'Recreating unlinks the database the owning tab holds, so only that tab can do it: a client tab is refused, with the store\u2019s own coded message.'],
     ],
@@ -136,8 +141,9 @@ const liveCard =
     ['h3', {}, 'Migration'],
     ['p', { class: 'muted' },
       'Plan a model change, verify it on a SHADOW database, apply it — in the browser.'],
-    ['button', { class: 'btn small', type: 'button', on: { click: 'data/migrate' } },
+    ['button', { class: 'btn small', type: 'button', disabled: ownerDisabled, on: { click: 'data/migrate' } },
       'Add a title index (plan → shadow → apply)'],
+    ownerReason,
     { $if: ['$.migration',
       ['div', { class: 'data-migration' },
         ['p', {}, 'planned steps:'],

@@ -35,7 +35,7 @@
 
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { wasmDriver, sqlite3Handle, indexedDbSnapshotHandle, openSnapshotStorage } from '@jarenjs/db/wasm';
-import { selectBrowserStorage } from './lib/db-storage.js';
+import { selectBrowserStorage, discoverStorageOwner } from './lib/db-storage.js';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 import { compileContract } from '@jarenjs/contract';
 import { servePort } from '@jarenjs/contract/port';
@@ -84,20 +84,22 @@ const enter = (stage) => globalThis.postMessage({ boot: stage });
 
 /** Ask the channel whether an OPFS owner already exists — the fallback
  * for a host with no `LockManager`. A running owner answers its pong;
- * silence within the window means no owner, which is a guess: an owner
- * whose event loop is blocked cannot answer either. */
+ * silence means only that no owner answered in this window. Without Web
+ * Locks the storage-acquisition refusal and a longer retry decide the
+ * next step; a busy owner cannot answer while SQLite runs synchronously. */
 function pingForOwner(ms = 600) {
   return new Promise((resolve) => {
-    const token = `ping-${context.sqlite3.version.libVersion}-${Math.floor(ms)}`;
+    const token = `ping-${crypto.randomUUID()}`;
     const onPong = (event) => {
       if (event.data?.pong === token) {
+        clearTimeout(timer);
         channel.removeEventListener('message', onPong);
         resolve({ vfs: event.data.vfs });
       }
     };
     channel.addEventListener('message', onPong);
     channel.postMessage({ ping: token });
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       channel.removeEventListener('message', onPong);
       resolve(false);
     }, ms);
@@ -106,28 +108,6 @@ function pingForOwner(ms = 600) {
 
 /** The host's lock manager, where it has one. */
 const locks = () => /** @type {any} */ (globalThis).navigator?.locks;
-
-/**
- * Whether another context already owns the database.
- *
- * A blocked owner used to read as no owner at all: `pingForOwner` treats
- * silence as absence, and an owner running a large migration or a long
- * query cannot answer inside the window. The second tab then concluded it
- * could take ownership, failed to install a pool that was already held,
- * and ran a private in-memory store — a studio that looks live and shares
- * nothing. A Web Lock is held by the browser rather than answered by the
- * page, so a busy owner still holds it, and `ifAvailable` reports that
- * without waiting for anyone.
- * @returns {Promise<boolean>}
- */
-async function ownerExists() {
-  const manager = locks();
-  if (manager === undefined) return pingForOwner();
-  let held = false;
-  await manager.request(OWNER_LOCK, { ifAvailable: true },
-    (/** @type {any} */ lock) => { held = lock === null; });
-  return held;
-}
 
 /** Acquire the browser-owned lock before selecting any durable storage. */
 function holdOwnerLock() {
@@ -218,9 +198,14 @@ async function init() {
     },
   });
   enter('topology');
-  if (!selected.durable && !context.locked && await ownerExists()) {
-    context.releaseOwner?.();
-    return { topology: 'client', vfs: 'owner-selected', version: sqlite3.version.libVersion };
+  if (selected.held || (!selected.durable && !context.locked)) {
+    const owner = await discoverStorageOwner(selected, pingForOwner);
+    if (owner) {
+      context.releaseOwner?.();
+      context.locked = false;
+      return { topology: 'client', vfs: owner.vfs, version: sqlite3.version.libVersion,
+        refusal: { code: 'JD2061', message: 'another context answered as the database owner; this tab uses its connection over a BroadcastChannel' } };
+    }
   }
   context.vfs = selected.vfs;
   context.handle = selected.handle ?? sqlite3Handle(sqlite3);

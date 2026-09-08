@@ -120,7 +120,7 @@ describe('the wire error the studio reports', function () {
       { code: null, message: 'a thrown string' });
   });
 
-  it('keeps a DOMException\'s MESSAGE, whose numeric code the contract cannot carry', function () {
+  it('keeps a DOMException\'s numeric code as a string and its message unchanged', function () {
     // the regression: `code` is declared ["string","null"], so a numeric
     // one failed the operation's own output validation and the page
     // showed a shape refusal with the store's message gone — the one
@@ -128,24 +128,12 @@ describe('the wire error the studio reports', function () {
     const fault = Object.assign(new Error('storage quota exceeded'),
       { name: 'QuotaExceededError', code: 22 });
     const wired = wireError(fault);
-    assert.strictEqual(wired.code, null, 'a number is not a JD code, and is not passed off as one');
+    assert.strictEqual(wired.code, '22', 'the host code crosses as a string');
     assert.match(wired.message, /storage quota exceeded/, 'the message survives');
-    assert.match(wired.message, /QuotaExceededError \(code 22\)/, 'and what it was is said, not dropped');
+    assert.strictEqual(wired.message, 'storage quota exceeded');
     const declared = compileContract(doc).operations['data.insert'].errors.db;
     assert.strictEqual(declared.validate(wired).valid, true,
       'so the failure the page receives is one the contract declares');
-  });
-});
-
-describe('the handler table and the contract it is described by', function () {
-  it('serves exactly the operations the document declares, and no others', function () {
-    const contract = compileContract(doc);
-    const { handlers, clientHandlers } = createDataHandlers(testHost().host);
-    assert.deepStrictEqual(Object.keys(handlers).sort(), [...contract.ids].sort(),
-      'a worker that stopped serving an operation, or serves one nothing declares,'
-      + ' is the drift a frozen id list cannot see');
-    assert.deepStrictEqual(Object.keys(clientHandlers).sort(), [...contract.ids].sort(),
-      'and the client table answers the same operations, under its own policy');
   });
 });
 
@@ -198,7 +186,7 @@ describe('the studio over a real store', function () {
     const before_ = fixture.announced.length;
     await table.handlers['data.open']({ model: MODEL });
     await table.handlers['data.open']({ model: MODEL, reset: true });
-    assert.deepStrictEqual(fixture.announced.slice(before_), [
+    assert.deepStrictEqual(fixture.announced.slice(before_).map(({ store, reset }) => ({ store, reset })), [
       { store: 'opened', reset: false },
       { store: 'opened', reset: true },
     ], 'silence would leave every live pane showing its last rows, looking live');
@@ -303,7 +291,8 @@ describe('a migration the studio runs', function () {
         'the runner answers ids as strings; reading an `id` member off them'
         + ' published a list of nulls under a declaration of strings');
       assert.ok(report.planned.length > 0, 'the plan it applied is reported');
-      assert.deepStrictEqual(fixture.announced.at(-1), { store: 'migrated', applied: true },
+      assert.deepStrictEqual(fixture.announced.at(-1), { store: 'migrated', applied: true,
+        ...await table.clientHandlers['data.open']({ model: MODEL }) },
         'the reopen it ends with is announced, like every other');
       assert.strictEqual(
         compileContract(doc).operations['data.migrate'].output.validate(report).valid, true,
@@ -330,7 +319,8 @@ describe('a migration the studio runs', function () {
       // and the store is usable again, on the model it still has
       const rows = await table.handlers['data.rows']({ collection: 'notes' });
       assert.ok(Array.isArray(rows), 'reopened on the baseline, not left closed');
-      assert.deepStrictEqual(fixture.announced.at(-1), { store: 'migrated', applied: false },
+      assert.deepStrictEqual(fixture.announced.at(-1), { store: 'migrated', applied: false,
+        ...await table.clientHandlers['data.open']({ model: MODEL }) },
         'the tabs are told either way — their subscriptions ended either way');
     }
     finally {

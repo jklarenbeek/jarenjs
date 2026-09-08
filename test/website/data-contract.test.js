@@ -9,11 +9,8 @@
  * surface, and `data.oracle` the throwaway-store read that holds a
  * second executor to the spatial corpus from any tab.
  *
- * This file reads the DOCUMENT. That the worker serves exactly what it
- * declares is a different claim, and a frozen id list here could never
- * make it: `data-handlers.test.js` pairs the two by importing the table
- * itself, which is why the table lives apart from the browser-only host
- * that runs it.
+ * The Node pairing gate compares the actual owner and client tables in
+ * both directions, so a missing or undeclared handler fails here.
  */
 
 import { describe, it } from 'node:test';
@@ -21,11 +18,20 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
 import { compileContract } from '@jarenjs/contract';
+import { createDataHandlers } from '../../packages/website/src/db-handlers.js';
 
 const doc = JSON.parse(readFileSync(
   new URL('../../packages/website/src/contracts/data.contract.json', import.meta.url), 'utf8'));
 
 describe('the data studio contract document', () => {
+  it('pairs the document with both actual handler tables in both directions', () => {
+    // Constructing the tables does not acquire storage or call the host.
+    const { handlers, clientHandlers } = createDataHandlers(/** @type {any} */ ({}));
+    const ids = [...compileContract(doc).ids].sort();
+    assert.deepStrictEqual(Object.keys(handlers).sort(), ids);
+    assert.deepStrictEqual(Object.keys(clientHandlers).sort(), ids);
+  });
+
   it('compiles, with the operations it declares and the db failure on every one', () => {
     const contract = compileContract(doc);
     assert.strictEqual(contract.id, 'jaren-data-studio');

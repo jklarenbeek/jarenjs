@@ -8,7 +8,7 @@
       "required": ["code", "message"],
       "properties": {
         "code": {
-          "description": "The store's own coded refusal (a JD code) when it had one, null for an uncoded fault.",
+          "description": "The store or host code as a string (including numeric DOMException codes), null for an uncoded fault.",
           "type": ["string", "null"]
         },
         "message": { "type": "string" }
@@ -52,11 +52,14 @@
         "required": ["vfs", "capabilities"],
         "properties": {
           "vfs": { "type": "string" },
-          "capabilities": { "type": "object" }
+          "capabilities": { "type": "object" },
+          "model": { "type": "object" },
+          "collection": { "$ref": "#/$defs/Collection" },
+          "keyPointer": { "type": "string" }
         }
       },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Open (or recreate, with reset) the store from a jaren-model document. capabilities is the store's own capabilities table, passed through. reset unlinks the database the owning context holds, so it is answered only in that context: a client tab asking for it is refused with the db failure rather than served."
+      "doc": "Open (or recreate, with reset) the store from a jaren-model document. Return its active model, collection, key pointer and capabilities. On the client channel, a non-reset open only attaches to the existing store and ignores the supplied model; reset is refused with the db failure."
     },
     "data.insert": {
       "kind": "command",
@@ -234,7 +237,7 @@
         }
       },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Plan a migration to a new model, shadow-verify and apply it (memory stores recreate instead — note says so), and reopen the store on the new model."
+      "doc": "From the owning context, plan a migration to a new model, shadow-verify and apply it (memory stores recreate instead — note says so), and reopen the store on the new model. A refused migration reopens the baseline. Both paths announce the active model so every tab resubscribes. Client-channel migrations are refused with the db failure."
     }
   }
 }

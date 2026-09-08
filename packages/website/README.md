@@ -78,16 +78,16 @@ the wins: the contract benchmark's honest 2.4–7.5× band against a harness-fre
 the JSONPath README figure that fell from 23.1× to 8.8× under one derivation, and a
 conformance score of 1164 of 1166 rather than the clean sweep the old counting showed.
 
-Production build: `npm run build` (Vite, no plugins), two chunks. `jaren-*.js` is exactly the twelve packages `vite.config.js` names — core, json, validate, formats, refs, forms, locales, view, app, md, mermaid, calc — and NOT "the whole suite": the seven the site also depends on (ai, charts, contract, flow, josl, play, studio) are unlisted, so they land in `index-*.js` beside the site's own source. The sqlite worker is a lazy chunk of its own and is in neither. Measure, never estimate:
+Production build: `npm run build` (Vite, no plugins), with two main chunks. `jaren-*.js` is exactly the twelve packages `vite.config.js` names — core, json, validate, formats, refs, forms, locales, view, app, md, mermaid, calc — and NOT "the whole suite": the seven the site also depends on (ai, charts, contract, flow, josl, play, studio) are unlisted, so they land in `index-*.js` beside the site's own source. The sqlite worker is a lazy chunk of its own and is in neither. Measure, never estimate:
 
 ```bash
 npm run build
-gzip -c dist/assets/index-*.js  | wc -c   # 206,597 — the site + its unchunked packages
-gzip -c dist/assets/jaren-*.js  | wc -c   # 204,357 — the twelve chunked packages
-gzip -c dist/assets/index-*.css | wc -c   #  12,911
+gzip -c dist/assets/index-*.js  | wc -c   # the site + its unchunked packages
+gzip -c dist/assets/jaren-*.js  | wc -c   # the twelve chunked packages
+gzip -c dist/assets/index-*.css | wc -c
 ```
 
-Those three figures are the output of those three lines on the commit that last touched this file; a change to the bundle re-runs them rather than adjusting them.
+These commands measure the current build; release records carry their output rather than preserving stale sizes here.
 
 ## Browser tests
 
@@ -149,3 +149,10 @@ probes. IndexedDB writes await durable acknowledgement and explicitly disable li
 maintenance. The isolated Playwright preview sets COOP/COEP on a second server;
 production headers remain host-controlled. See the [database host matrix](../db/docs/HOSTS.md)
 for evidence, failure behavior and measurement recipes.
+
+Only the owning tab can recreate or migrate the studio's store. Client tabs
+attach to its active model; reopening announces that model and renews each tab's
+live subscription. Store and host failures retain their message and stringify
+numeric error codes. Web Locks identify an owner even while its worker is busy;
+without them, a held OPFS access handle triggers a longer discovery retry and a
+specific refusal if no owner answers, instead of selecting private memory.

@@ -71,12 +71,8 @@ import { ContractFailure } from '@jarenjs/contract';
  * The details of the declared `db` failure: the store's own coded refusal
  * and its message.
  *
- * `code` is `["string", "null"]` in the contract — a `JD` code or nothing
- * — and a `DOMException` carries a NUMBER there. Passing that through
- * failed the operation's own output validation, so a real storage fault
- * reached the page as a shape refusal with the store's message gone: the
- * one case where the message mattered most. So a non-string code is not a
- * code, and what it was is folded into the message rather than dropped.
+ * The contract carries string codes, including numeric DOMException
+ * codes converted to strings. The host's message survives unchanged.
  * @param {unknown} error
  * @returns {{ code: string | null, message: string }}
  */
@@ -84,12 +80,7 @@ export function wireError(error) {
   const raised = /** @type {any} */ (error);
   const code = raised?.code;
   const message = String(raised?.message ?? error);
-  if (typeof code === 'string') return { code, message };
-  if (code === undefined || code === null) return { code: null, message };
-  // a DOMException's numeric code, and the name that explains it, said in
-  // the one place the contract lets this failure carry prose
-  const name = typeof raised?.name === 'string' ? raised.name : 'error';
-  return { code: null, message: `${name} (code ${String(code)}): ${message}` };
+  return { code: code === undefined || code === null ? null : String(code), message };
 }
 
 /**
@@ -106,7 +97,7 @@ function ownerOnly(message) {
 /**
  * The studio's handler table over an injected host.
  * @param {DataHost} host
- * @returns {{ handlers: Record<string, any>, clientHandlers: Record<string, any>, state: any }}
+ * @returns {{ handlers: Record<string, any>, clientHandlers: Record<string, any>, state: any, dispose: () => Promise<void> }}
  */
 export function createDataHandlers(host) {
   const state = {
@@ -157,10 +148,20 @@ export function createDataHandlers(host) {
     state.store = await openStore(args.model, {
       driver: host.makeDriver(), path: host.path(), capture: true, operators: host.operators,
     });
-    host.announce({ store: 'opened', reset: args.reset === true });
-    const capabilities = state.store.capabilities;
+    const opened = storeInfo();
+    host.announce({ store: 'opened', reset: args.reset === true, ...opened });
+    return opened;
+  }
+
+  /** The model and capabilities every attached tab must follow. */
+  function storeInfo() {
+    const capabilities = store().capabilities;
+    const collection = Object.keys(state.model.collections)[0];
     return {
       vfs: host.vfs(),
+      model: state.model,
+      collection,
+      keyPointer: state.model.collections[collection].key ?? '/id',
       capabilities: {
         version: capabilities.version,
         capture: capabilities.capture,
@@ -204,7 +205,7 @@ export function createDataHandlers(host) {
     state.model = refused === null ? args.to : baseline;
     state.store = await openStore(state.model,
       { driver, path, capture: true, operators: host.operators });
-    host.announce({ store: 'migrated', applied: refused === null });
+    host.announce({ store: 'migrated', applied: refused === null, ...storeInfo() });
     if (refused !== null) throw refused;
     const note = applied.note;
     return {
@@ -315,9 +316,8 @@ export function createDataHandlers(host) {
     // not delete a database whose handle is still held.
     dispose: closeStore,
     // The channel a CLIENT tab reaches the owner on serves the same store
-    // through the same table, minus what only the owner may do: `reset`
-    // unlinks the database this context holds open, and no frame tells the
-    // other tabs their store is gone.
+    // through the same table. A client open only attaches: it reads the
+    // current model without closing the owner's connection or live feeds.
     clientHandlers: {
       ...handlers,
       'data.open': guard((/** @type {any} */ input) => {
@@ -325,7 +325,10 @@ export function createDataHandlers(host) {
           throw ownerOnly('recreating the store unlinks the database the owning tab holds:'
             + ' run it in that tab, not from a client');
         }
-        return open(input);
+        return storeInfo();
+      }),
+      'data.migrate': guard(() => {
+        throw ownerOnly('only the owning tab can migrate the store; run the migration in that tab');
       }),
     },
     state,

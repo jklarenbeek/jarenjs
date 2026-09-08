@@ -301,7 +301,7 @@ describe('the boot effect is terminal', () => {
     assert.strictEqual(worlds[0].live(), 0);
   });
 
-  it('a successful owner boot reaches data/opened once, with one live subscription; a client reaches data/ready', async () => {
+  it('a successful owner boot reaches data/opened once, with one live subscription; a client attaches to the current model', async () => {
     const owner = harness([{ init: OWNER }]);
     await owner.runtime.effects['data-boot']({}, owner.dispatch);
     assert.deepStrictEqual(owner.names().slice(0, 3), ['data/seed', 'data/status', 'data/opened']);
@@ -310,8 +310,9 @@ describe('the boot effect is terminal', () => {
     const CLIENT = { topology: 'client', vfs: 'opfs-sahpool', version: '3.51' };
     const client = harness([{ init: CLIENT, stages: ['sqlite-init', 'vfs-acquire', 'topology'] }]);
     await client.runtime.effects['data-boot']({}, client.dispatch);
-    assert.deepStrictEqual(client.names().slice(0, 3), ['data/seed', 'data/status', 'data/ready']);
-    assert.ok(!client.worlds[0].counts.invokes.includes('data.open'), 'a client opens nothing');
+    assert.deepStrictEqual(client.names().slice(0, 3), ['data/seed', 'data/status', 'data/opened']);
+    assert.ok(client.worlds[0].counts.invokes.includes('data.open'), 'a client attaches through the non-reset channel handler');
+    assert.ok(!client.worlds[0].counts.invokes.includes('data.insert'), 'a client never seeds the owner');
     assert.strictEqual(client.worlds[0].counts.subscriptions, 1);
   });
 
@@ -354,6 +355,9 @@ describe('quirks pinned after the boot protocol landed', () => {
     const client = { ...booting, data: { ...booting.data, status: 'ready', topology: 'client', vfs: 'opfs-sahpool' } };
     assert.match(dataViewModel(client).durability, /persistent/);
     assert.match(dataViewModel(client).operatorSummary, /owner's/);
+    client.data.capture = 'session';
+    assert.strictEqual(dataViewModel(client).operatorSummary, 'none registered',
+      'an attached client reports the capabilities it actually received');
     assert.strictEqual('booted' in booting.data, false, 'no dead state member');
   });
 

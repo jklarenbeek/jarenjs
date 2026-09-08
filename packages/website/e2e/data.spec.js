@@ -84,6 +84,12 @@ test('the wasm store boots, a live query maintains, explain shows the pushdown',
   // a migration plans on a shadow database and applies
   await page.locator('.data-live .btn', { hasText: 'title index' }).click();
   await expect(page.locator('.data-migration-steps')).toContainText('by_title', READY);
+  if (!snapshot) {
+    await page.locator('.data-insert-title').fill('live after migration');
+    await page.locator('.data-insert-title').blur();
+    await expect(liveRows).toContainText('live after migration', READY);
+    await expect(page.locator('.data-live-regs strong')).toHaveText('1', READY);
+  }
 
   expect(errors, 'no uncaught page errors').toEqual([]);
 });
@@ -169,6 +175,9 @@ test('a second tab is refused the pool, becomes a live client, and closing it re
   await expect(client.locator('.data-status .data-topology'))
     .toHaveText('client', READY);
   await expect(client.locator('.data-refusal')).toContainText('JD2061');
+  await expect(client.getByRole('button', { name: 'Recreate store from model' })).toBeDisabled();
+  await expect(client.getByRole('button', { name: 'Add a title index' })).toBeDisabled();
+  await expect(client.locator('.data-owner-reason').first()).toContainText('Only the owning tab');
 
   // the owner writes; the client's live SUBSCRIPTION — a stream-binding
   // push frame over the channel from the owner's sole connection — sees
@@ -193,6 +202,94 @@ test('a second tab is refused the pool, becomes a live client, and closing it re
   }).toPass(READY);
 
   await context.close();
+});
+
+test('reopen and migrate keep the live registration count and both tabs current, including a renamed collection', async ({ page: owner, context }) => {
+  test.slow();
+  await gotoData(owner);
+  test.skip(await owner.locator('.data-vfs').textContent() !== 'opfs-sahpool',
+    'this lifecycle needs the OPFS owner and live capture');
+  await expect(owner.locator('.data-live-regs strong')).toHaveText('1', READY);
+  await owner.getByRole('button', { name: 'Recreate store from model' }).click();
+  await expect(owner.locator('.data-live-rows')).toHaveText('[]', READY);
+  await expect(owner.locator('.data-live-regs strong')).toHaveText('1', READY);
+
+  const client = await context.newPage();
+  await client.emulateMedia({ reducedMotion: 'reduce' });
+  await gotoData(client);
+  await expect(client.locator('.data-topology')).toHaveText('client', READY);
+
+  const editor = owner.locator('.data-status textarea.editor');
+  const model = JSON.parse(await editor.inputValue());
+  model.collections.memos = model.collections.notes;
+  delete model.collections.notes;
+  await editor.fill(JSON.stringify(model));
+  await editor.blur();
+  await owner.getByRole('button', { name: 'Recreate store from model' }).click();
+  await expect(owner.locator('.data-insert-title')).toHaveAttribute('placeholder', /memos/, READY);
+  await expect(client.locator('.data-insert-title')).toHaveAttribute('placeholder', /memos/, READY);
+  await owner.locator('.data-insert-title').fill('before migrating memos');
+  await owner.locator('.data-insert-title').blur();
+  await expect(client.locator('.data-live-rows')).toContainText('before migrating memos', READY);
+  await expect(owner.locator('.data-live-regs strong')).toHaveText('2', READY);
+
+  await owner.getByRole('button', { name: 'Add a title index' }).click();
+  await expect(owner.locator('.data-migration-steps')).toContainText('by_title', READY);
+  for (const tab of [owner, client]) {
+    await expect(tab.locator('.data-live-count')).toHaveText('1 rows, seq 0', READY);
+    await expect(tab.locator('.data-live-rows')).toContainText('before migrating memos', READY);
+  }
+  await owner.locator('.data-insert-title').fill('after migrating memos');
+  await owner.locator('.data-insert-title').blur();
+  for (const tab of [owner, client]) {
+    await expect(tab.locator('.data-live-rows')).toContainText('after migrating memos', READY);
+    await expect(tab.locator('.error-line')).toHaveCount(0);
+  }
+  await expect(owner.locator('.data-live-regs strong')).toHaveText('2', READY);
+  await client.close({ runBeforeUnload: true });
+  await owner.locator('.data-insert-title').fill('one remaining subscriber');
+  await owner.locator('.data-insert-title').blur();
+  await expect(owner.locator('.data-live-regs strong')).toHaveText('1', READY);
+});
+
+test.describe('a busy owner remains the owner', () => {
+  test.use({ serviceWorkers: 'block' });
+  for (const webLocks of [true, false]) {
+    test(`a second tab attaches while the owner worker is blocked (Web Locks: ${webLocks})`, async ({ page: owner, context }) => {
+      test.slow();
+      if (!webLocks) await context.route('**/db-worker-*.js', async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({ response, contentType: 'text/javascript',
+          body: "Object.defineProperty(navigator, 'locks', { value: undefined });\n" + await response.text() });
+      });
+      await gotoData(owner);
+      test.skip(await owner.locator('.data-vfs').textContent() !== 'opfs-sahpool',
+        'the held-access-handle proof needs OPFS SAH-pool');
+      await expect(owner.locator('.data-live-regs strong')).toHaveText('1', READY);
+      await owner.evaluate(() => {
+        globalThis.studioBusy = false;
+        const channel = new BroadcastChannel('studio-busy-test');
+        channel.onmessage = () => { globalThis.studioBusy = true; channel.close(); };
+      });
+      // A synchronous query or migration blocks this same event loop.
+      // The handshake proves the owner is blocked before the tab boots.
+      const busy = owner.workers()[0].evaluate(() => {
+        const channel = new BroadcastChannel('studio-busy-test');
+        channel.postMessage('busy');
+        const until = Date.now() + 2500;
+        while (Date.now() < until) { /* synchronous worker work */ }
+        channel.close();
+      });
+      await owner.waitForFunction(() => globalThis.studioBusy === true);
+      const client = await context.newPage();
+      await client.goto('/#/data');
+      await expect(client.locator('.data-topology')).toHaveText('client', READY);
+      await expect(client.locator('.data-rows')).toContainText('important', READY);
+      await expect(client.locator('.data-refusal')).not.toContainText('OPFS is unavailable');
+      await busy;
+      await client.close({ runBeforeUnload: true });
+    });
+  }
 });
 
 test('two client tabs sharing the owner channel never cross-settle', async ({ browser }) => {

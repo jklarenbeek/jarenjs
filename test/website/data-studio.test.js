@@ -42,6 +42,21 @@ function mount() {
 
 const CAPABILITIES = { capture: 'journal', version: '3', operators: [], pushableOperators: [] };
 
+it('only a ready owner can recreate or migrate, with a reason visible to clients', () => {
+  const { app, container } = mount();
+  for (const topology of ['client', 'memory', 'owner']) {
+    app.dispatch('data/status', { topology, vfs: 'x' });
+    app.dispatch('data/opened', { vfs: 'x', capabilities: CAPABILITIES });
+    const html = serialize(container);
+    for (const label of ['Recreate store from model', 'Add a title index']) {
+      const button = html.match(new RegExp(`<button[^>]*>${label}[^<]*</button>`))?.[0];
+      assert.ok(button);
+      assert.strictEqual(/\bdisabled\b/.test(button), topology !== 'owner');
+    }
+    if (topology !== 'owner') assert.match(html, /Only the owning tab can recreate or migrate/);
+  }
+});
+
 it('accepts query and insert input only after the store opens, beyond storage selection', function () {
   const { app, container } = mount();
   const assertDisabled = (expected) => {
