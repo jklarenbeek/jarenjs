@@ -115,6 +115,8 @@ export async function* readJsonDocuments(source) {
   let inString = false;
   let escaped = false;
   let index = 0;
+  let separator = false;
+  let allowEnd = true;
 
   for await (const chunk of textChunks(source)) {
     for (let i = 0; i < chunk.length; i++) {
@@ -133,9 +135,17 @@ export async function* readJsonDocuments(source) {
         throw refuse(`trailing content after the closing ']' (found '${character}')`);
       }
       if (element === '') {
-        // between elements: whitespace, the separating comma, or the end
-        if (isSpace(character) || character === ',') continue;
-        if (character === ']') { closed = true; continue; }
+        if (isSpace(character)) continue;
+        if (separator) {
+          if (character === ']') { closed = true; continue; }
+          if (character !== ',') throw refuse(`expected ',' or ']' after document ${index - 1}`);
+          separator = false;
+          allowEnd = false;
+          continue;
+        }
+        if (character === ']' && allowEnd) { closed = true; continue; }
+        if (character === ',' || character === ']')
+          throw refuse(`expected a document before '${character}'`);
         element = character;
         if (character === '"') inString = true;
         else if (character === '{' || character === '[') depth = 1;
@@ -148,7 +158,11 @@ export async function* readJsonDocuments(source) {
         else if (character === '"') {
           inString = false;
           // a top-level string element ends with its closing quote
-          if (depth === 0) { yield parseDocument(element, `document ${index++}`); element = ''; }
+          if (depth === 0) {
+            yield parseDocument(element, `document ${index++}`);
+            element = '';
+            separator = true;
+          }
         }
         continue;
       }
@@ -158,7 +172,8 @@ export async function* readJsonDocuments(source) {
         if (isSpace(character) || character === ',' || character === ']') {
           yield parseDocument(element, `document ${index++}`);
           element = '';
-          if (character === ']') closed = true;
+          separator = true;
+          i--; // the array's separator is checked on the next iteration
           continue;
         }
         element += character;
@@ -169,7 +184,11 @@ export async function* readJsonDocuments(source) {
       if (character === '{' || character === '[') { depth++; continue; }
       if (character === '}' || character === ']') {
         depth--;
-        if (depth === 0) { yield parseDocument(element, `document ${index++}`); element = ''; }
+        if (depth === 0) {
+          yield parseDocument(element, `document ${index++}`);
+          element = '';
+          separator = true;
+        }
       }
     }
   }
@@ -216,6 +235,11 @@ export async function openAtomicTarget(target, format) {
     await handle.write(text);
     bytes += Buffer.byteLength(text);
   };
+  const discard = async () => {
+    try { await handle.close(); }
+    catch { /* A failed close must not prevent temporary-file removal. */ }
+    await fsp.rm(temporary, { force: true });
+  };
 
   return {
     temporary,
@@ -227,20 +251,24 @@ export async function openAtomicTarget(target, format) {
     commit: async () => {
       if (settled) throw refuse('this target was already settled');
       settled = true;
-      if (format === 'json') await put(documents === 0 ? '[]\n' : '\n]\n');
-      // the durability the rename then publishes: a crash between the
-      // two leaves the ORIGINAL, which is the outcome a caller can live
-      // with; a rename over unflushed bytes is not
-      await handle.sync().catch(() => undefined);
-      await handle.close();
-      await fsp.rename(temporary, target);
-      return { bytes, documents };
+      try {
+        if (format === 'json') await put(documents === 0 ? '[]\n' : '\n]\n');
+        // Publish only after the temporary has been durably flushed.
+        await handle.sync();
+        await handle.close();
+        await fsp.rename(temporary, target);
+        return { bytes, documents };
+      }
+      catch (error) {
+        try { await discard(); }
+        catch (cleanupError) { error.cleanupError = cleanupError; }
+        throw error;
+      }
     },
     abort: async () => {
       if (settled) return;
       settled = true;
-      await handle.close().catch(() => undefined);
-      await fsp.rm(temporary, { force: true });
+      await discard();
     },
   };
 }

@@ -20,6 +20,7 @@
  */
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { setObjectMember } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
@@ -73,7 +74,7 @@ function planStorelessRun(migrations, present, context) {
         migrationId: migration.id,
         compileJslt: context.compileJslt,
         compileQuery: context.compileQuery,
-        keys: context.keys[step.collection] ?? [],
+        keys: Object.hasOwn(context.keys, step.collection) ? (context.keys[step.collection] ?? []) : [],
       })),
     });
   }
@@ -110,8 +111,8 @@ const emptyReport = (plans) => ({
 
 /** The per-collection counters a report carries. */
 const countersFor = (report, collection) => {
-  if (report.counts[collection] === undefined)
-    report.counts[collection] = { read: 0, transformed: 0, asserted: 0 };
+  if (!Object.hasOwn(report.counts, collection))
+    setObjectMember(report.counts, collection, { read: 0, transformed: 0, asserted: 0 });
   return report.counts[collection];
 };
 
@@ -151,11 +152,11 @@ export async function migrateDocuments(collections, migrations, options = {}) {
 
   /** @type {Record<string, any[]>} */
   const state = {};
-  for (const [name, documents] of Object.entries(collections)) state[name] = [...documents];
+  for (const [name, documents] of Object.entries(collections)) setObjectMember(state, name, [...documents]);
   const report = emptyReport(plans);
   for (const name of Object.keys(state)) {
     countersFor(report, name).read = state[name].length;
-    report.strategy[name] = 'materialized';
+    setObjectMember(report.strategy, name, 'materialized');
   }
 
   for (const plan of plans) {
@@ -276,7 +277,7 @@ export async function streamDocuments(sources, migrations, options) {
   // one collection's whole ordered pipeline: every migration's steps
   // over it, in order, applied to each document as it passes
   /** @type {Record<string, any[]>} */
-  const pipeline = {};
+  const pipeline = Object.create(null);
   for (const plan of plans) {
     for (const operation of plan.operations) {
       (pipeline[operation.collection] ??= []).push({
@@ -287,7 +288,7 @@ export async function streamDocuments(sources, migrations, options) {
 
   for (const name of Object.keys(sources)) {
     const counters = countersFor(report, name);
-    report.strategy[name] = 'streamed';
+    setObjectMember(report.strategy, name, 'streamed');
     const stages = pipeline[name] ?? [];
     /** @type {any[]} */
     let batch = [];

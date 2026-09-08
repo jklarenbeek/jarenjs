@@ -24,6 +24,41 @@ import { wasmDriver } from '@jarenjs/db/wasm';
 
 const PKG_SRC = path.resolve('packages/db/src');
 
+describe('a refused connection releases its raw handle', () => {
+  for (const asynchronous of [false, true]) {
+    for (const closeMode of ['success', 'throw', 'reject']) {
+      it(`${asynchronous ? 'asynchronous' : 'synchronous'} probe failure with ${closeMode} cleanup`, async () => {
+        const failure = new Error('probe failed');
+        const closeError = new Error('close failed');
+        let closes = 0;
+        const raw = {
+          close() {
+            closes += 1;
+            if (closeMode === 'throw') throw closeError;
+            if (closeMode === 'reject') return Promise.reject(closeError);
+            return asynchronous ? Promise.resolve() : undefined;
+          },
+        };
+        await assert.rejects(async () => openConnection(raw, {
+          dialect: nodeDriver().dialect,
+          probe() {
+            if (asynchronous) return Promise.reject(failure);
+            throw failure;
+          },
+        }), (error) => {
+          if (closeMode === 'success') assert.strictEqual(error, failure);
+          else {
+            assert.ok(error instanceof AggregateError);
+            assert.deepStrictEqual(error.errors, [failure, closeError]);
+          }
+          return true;
+        });
+        assert.strictEqual(closes, 1);
+      });
+    }
+  }
+});
+
 /** Static import specifiers of one source file (dynamic ones excluded). */
 function staticImports(file) {
   const source = fs.readFileSync(file, 'utf8');

@@ -69,6 +69,31 @@ const seedUsers = (n) => Array.from({ length: n }, (_, i) => ({
   last: `Last${i}`,
 }));
 
+describe('collection names that also name object members', () => {
+  for (const name of ['__proto__', 'constructor', 'toString']) {
+    it(`preserves '${name}' documents and counters in both execution modes`, async () => {
+      const input = { [name]: [{ id: 'u1' }] };
+      const migration = documentHalf(documentMigration('0001-identity', [
+        { kind: 'jslt', collection: name, stylesheet: [] },
+      ]));
+      const unchanged = await migrateDocuments(input, []);
+      assert.deepStrictEqual(unchanged.documents, input);
+      const materialized = await migrateDocuments(input, [migration]);
+      assert.deepStrictEqual(materialized.documents, input);
+      assert.deepStrictEqual(materialized.report.counts,
+        { [name]: { read: 1, transformed: 1, asserted: 0 } });
+      assert.deepStrictEqual(materialized.report.strategy, { [name]: 'materialized' });
+      const written = [];
+      const streamed = await streamDocuments(input, [migration], {
+        write: (collection, document) => written.push([collection, document]),
+      });
+      assert.deepStrictEqual(written, [[name, { id: 'u1' }]]);
+      assert.deepStrictEqual(streamed.counts, materialized.report.counts);
+      assert.deepStrictEqual(streamed.strategy, { [name]: 'streamed' });
+    });
+  }
+});
+
 /** Run one migration through a real Store and read the documents back. */
 async function throughStore(documents, migration) {
   const { dbPath, cleanup } = tempDbPath();

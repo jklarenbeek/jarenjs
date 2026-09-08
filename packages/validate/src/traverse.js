@@ -26,6 +26,7 @@ import {
   decodeJSONPointerSegment,
 } from '@jarenjs/json/pointer';
 
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
 
 function encodeJsonPointerKey(key) {
   return encodeURIComponent(encodeJSONPointerSegment(key));
@@ -139,17 +140,6 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
   }
   return new JsonPointer(`${leftUri}#`, search, `${leftUri}#`, null);
 }
-
-const TRAVERSE_SCHEMA_OBJECTS = [
-  'items', 'prefixItems', 'additionalItems', 'contains', 'unevaluatedItems',
-  'additionalProperties', 'propertyNames', 'unevaluatedProperties',
-  'not', 'oneOf', 'anyOf', 'allOf', 'if', 'then', 'else',
-];
-const TRAVERSE_SCHEMA_MAPS = [
-  'properties', 'patternProperties',
-  'dependencies', 'dependentSchemas', 'dependentRequired',
-  'definitions', '$defs', 'components',
-];
 
 export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions()) {
   if (!isObjectClass(schema)) {

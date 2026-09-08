@@ -7,7 +7,8 @@
  * existing JF2001 refusal covers a snapshot naming an undeclared
  * state), and `createDurableFsmSession` persists through a
  * SYNCHRONOUS `{ load, save }` store on every state CHANGE — a store
- * that throws fails the send, never loses a transition silently. An
+ * that throws leaves the session at its previous state, so the event
+ * can be retried without losing a transition. An
  * asynchronous store composes its own wrapper; the session contract
  * stays synchronous.
  */
@@ -41,7 +42,8 @@ export function resumeFsmSession(fsm, snapshot) {
  * A session that persists its state through a synchronous store:
  * `load()` answers the stored state (or null/undefined for a fresh
  * start), `save(state)` records each CHANGED state before the step
- * result is returned.
+ * result is returned and the session advances. A failed save leaves
+ * the session unchanged.
  * @param {any} fsm - a machine from `compileFsm`
  * @param {{ load: () => string | null | undefined,
  *   save: (state: string) => void }} store
@@ -51,14 +53,15 @@ export function createDurableFsmSession(fsm, store) {
     throw new TypeError('createDurableFsmSession: the store must provide load and save');
   }
   const stored = store.load();
-  const session = createFsmSession(fsm, stored ?? undefined);
+  let session = createFsmSession(fsm, stored ?? undefined);
   return Object.freeze({
     get state() { return session.state; },
     get done() { return session.done; },
     can: (event, opts) => session.can(event, opts),
     send(event, opts) {
-      const result = session.send(event, opts);
+      const result = fsm.step(session.state, event, opts);
       if (result.changed) store.save(result.state);
+      session = createFsmSession(fsm, result.state);
       return result;
     },
   });

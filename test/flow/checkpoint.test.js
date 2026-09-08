@@ -250,5 +250,31 @@ describe('FSM persistence (§7.7)', () => {
       save: () => { throw new Error('disk gone'); },
     });
     assert.throws(() => session.send('send'), /disk gone/);
+    assert.strictEqual(session.state, 'draft');
+    assert.strictEqual(session.done, false);
+  });
+
+  it('retries a failed save from the original state and evaluates each step once', () => {
+    const compiled = compileFsm(MACHINE);
+    let steps = 0;
+    const fsm = { ...compiled, step: (...args) => { steps++; return compiled.step(...args); } };
+    let stored = 'draft';
+    let fail = true;
+    const session = createDurableFsmSession(fsm, {
+      load: () => stored,
+      save: (state) => {
+        if (fail) throw new Error('disk gone');
+        assert.strictEqual(session.state, 'draft', 'publish only after persistence');
+        stored = state;
+      },
+    });
+    assert.throws(() => session.send('send'), /disk gone/);
+    assert.strictEqual(stored, 'draft');
+    assert.strictEqual(session.state, 'draft');
+    fail = false;
+    assert.strictEqual(session.send('send').changed, true);
+    assert.strictEqual(session.state, 'sent');
+    assert.strictEqual(stored, 'sent');
+    assert.strictEqual(steps, 2, 'one step evaluation per send, including the failed send');
   });
 });

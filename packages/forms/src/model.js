@@ -293,7 +293,8 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
   // data pointer (the root field's base is the empty pointer '').
   const base = typeof effective['x-msgid'] === 'string' ? effective['x-msgid'] : pointer;
 
-  const oneOfBranches = kind === 'enum' ? getOneOfConstBranches(effective) : null;
+  const oneOfBranches = kind === 'enum' && !Array.isArray(effective.enum)
+    ? getOneOfConstBranches(effective) : null;
   const enumValues = kind === 'enum'
     ? (Array.isArray(effective.enum)
       ? effective.enum

@@ -403,7 +403,7 @@ function splitYamlKey(line, indent, lineNo) {
   if (key.length > 1) {
     const q = key.charCodeAt(0);
     if ((q === 0x22 || q === 0x27) && key.charCodeAt(key.length - 1) === q) {
-      key = String(parseQuoted(key, 0, /** @type {'"'|"'"} */ (key[0])).value);
+      key = String(parseQuoted(key, 0, /** @type {'"'|"'"} */ (key[0]), lineNo).value);
     }
   }
   let restColumn = indent + colon + 1;
@@ -462,7 +462,7 @@ function parseYamlFlowOrScalar(state, rest, lineNo) {
     const flow = parseFlowValue(text, 0, lineNo);
     return flow.value;
   }
-  return parseYamlScalar(stripComment(rest));
+  return parseYamlScalar(stripComment(rest), lineNo);
 }
 
 /**
@@ -509,13 +509,14 @@ function stripComment(text) {
 /**
  * Parse a scalar: quoted string, null, boolean, number, or plain string.
  * @param {string} text trimmed scalar text
+ * @param {number} lineNo
  * @returns {any}
  */
-function parseYamlScalar(text) {
+function parseYamlScalar(text, lineNo) {
   if (text === '') return null;
   const c0 = text.charCodeAt(0);
   if (c0 === 0x22 || c0 === 0x27) {
-    return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0])).value;
+    return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), lineNo).value;
   }
   switch (text) {
     case 'null': case 'Null': case 'NULL': case '~': return null;
@@ -533,9 +534,10 @@ function parseYamlScalar(text) {
  * @param {string} text
  * @param {number} pos
  * @param {'"'|"'"} quote
+ * @param {number} lineNo
  * @returns {{ value: string, end: number }}
  */
-function parseQuoted(text, pos, quote) {
+function parseQuoted(text, pos, quote, lineNo) {
   let out = '';
   let i = pos + 1;
   while (i < text.length) {
@@ -569,7 +571,7 @@ function parseQuoted(text, pos, quote) {
     out += ch;
     i++;
   }
-  return { value: out, end: i };
+  throw new MdFrontmatterError('unterminated quoted string', lineNo);
 }
 
 /**
@@ -578,26 +580,29 @@ function parseQuoted(text, pos, quote) {
  * @param {string} text
  * @param {number} pos
  * @param {number} lineNo
+ * @param {boolean} [key=false] whether a colon ends a map key
  * @returns {{ value: any, end: number }}
  */
-function parseFlowValue(text, pos, lineNo) {
+function parseFlowValue(text, pos, lineNo, key = false) {
   while (pos < text.length && text.charCodeAt(pos) === 0x20) pos++;
   const c = text.charCodeAt(pos);
   if (c === 0x5B /* [ */) return parseFlowSeq(text, pos, lineNo);
   if (c === 0x7B /* { */) return parseFlowMap(text, pos, lineNo);
   if (c === 0x22 || c === 0x27) {
-    return parseQuoted(text, pos, /** @type {'"'|"'"} */ (text[pos]));
+    return parseQuoted(text, pos, /** @type {'"'|"'"} */ (text[pos]), lineNo);
   }
   let end = pos;
   let depth = 0;
   while (end < text.length) {
     const cc = text.charCodeAt(end);
-    if (depth === 0 && (cc === 0x2C || cc === 0x5D || cc === 0x7D || cc === 0x3A)) break;
+    if (depth === 0 && (cc === 0x2C || cc === 0x5D || cc === 0x7D)) break;
+    if (depth === 0 && cc === 0x3A
+      && (key || end + 1 === text.length || /[\s,[\]{}]/.test(text[end + 1]))) break;
     if (cc === 0x5B || cc === 0x7B) depth++;
     else if (cc === 0x5D || cc === 0x7D) depth--;
     end++;
   }
-  return { value: parseYamlScalar(text.slice(pos, end).trim()), end };
+  return { value: parseYamlScalar(text.slice(pos, end).trim(), lineNo), end };
 }
 
 /**
@@ -620,6 +625,7 @@ function parseFlowArray(text, pos, lineNo, parseItem, unterminated) {
     if (i >= text.length) throw new MdFrontmatterError(unterminated, lineNo);
     if (text.charCodeAt(i) === 0x5D /* ] */) return { value: out, end: i + 1 };
     const item = parseItem(text, i, lineNo);
+    if (item.end <= i) throw new MdFrontmatterError('expected a flow array item', lineNo);
     out.push(item.value);
     i = item.end;
   }
@@ -651,7 +657,7 @@ function parseFlowMap(text, pos, lineNo) {
     while (i < text.length && (text.charCodeAt(i) === 0x20 || text.charCodeAt(i) === 0x2C)) i++;
     if (i >= text.length) throw new MdFrontmatterError('unterminated flow map', lineNo);
     if (text.charCodeAt(i) === 0x7D /* } */) return { value: out, end: i + 1 };
-    const key = parseFlowValue(text, i, lineNo);
+    const key = parseFlowValue(text, i, lineNo, true);
     i = key.end;
     while (i < text.length && text.charCodeAt(i) === 0x20) i++;
     if (text.charCodeAt(i) !== 0x3A /* : */) {
@@ -699,16 +705,15 @@ export function parseTomlSubset(text) {
     const eq = findTomlEquals(line);
     if (eq === -1) throw new MdFrontmatterError(`expected 'key = value', got '${line}'`, no);
     const path = parseTomlKeyPath(line.slice(0, eq), no);
-    let valueText = line.slice(eq + 1).trim();
-    // Multi-line flow arrays / inline tables: join lines while open.
-    while (flowDepth(stripTomlComment(valueText)) > 0 && no + 1 < lines.length) {
-      valueText += ' ' + lines[++no].trim();
+    let valueText = stripTomlComment(line.slice(eq + 1)).trim();
+    // Comments end at each physical line, before continuation lines join.
+    while (flowDepth(valueText) > 0 && no + 1 < lines.length) {
+      valueText += ' ' + stripTomlComment(lines[++no]).trim();
     }
-    valueText = stripTomlComment(valueText).trim();
     let target = table;
     for (let i = 0; i < path.length - 1; i++) {
       const step = path[i];
-      if (!(step in target) || typeof target[step] !== 'object') {
+      if (!Object.hasOwn(target, step) || typeof target[step] !== 'object') {
         const next = {};
         setObjectMember(target, step, next);
         target = next;
@@ -772,7 +777,7 @@ function parseTomlKeyPath(text, no) {
     while (i < text.length && text.charCodeAt(i) === 0x20) i++;
     const c = text.charCodeAt(i);
     if (c === 0x22 || c === 0x27) {
-      const q = parseQuoted(text, i, /** @type {'"'|"'"} */ (text[i]));
+      const q = parseQuoted(text, i, /** @type {'"'|"'"} */ (text[i]), no);
       out.push(q.value);
       i = q.end;
     }
@@ -812,7 +817,7 @@ function descendTomlTable(root, path, isArray, no) {
   let target = root;
   for (let i = 0; i < path.length - 1; i++) {
     const step = path[i];
-    let next = target[step];
+    let next = Object.hasOwn(target, step) ? target[step] : undefined;
     if (next === undefined) {
       next = {};
       setObjectMember(target, step, next);
@@ -827,7 +832,7 @@ function descendTomlTable(root, path, isArray, no) {
   }
   const leaf = path[path.length - 1];
   if (isArray) {
-    let arr = target[leaf];
+    let arr = Object.hasOwn(target, leaf) ? target[leaf] : undefined;
     if (arr === undefined) {
       arr = [];
       setObjectMember(target, leaf, arr);
@@ -837,7 +842,7 @@ function descendTomlTable(root, path, isArray, no) {
     arr.push(fresh);
     return fresh;
   }
-  let next = target[leaf];
+  let next = Object.hasOwn(target, leaf) ? target[leaf] : undefined;
   if (next === undefined) {
     next = {};
     setObjectMember(target, leaf, next);
@@ -861,7 +866,7 @@ function parseTomlValue(text, no) {
   if (text === '') throw new MdFrontmatterError('missing value', no);
   const c0 = text.charCodeAt(0);
   if (c0 === 0x22 || c0 === 0x27) {
-    return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0])).value;
+    return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), no).value;
   }
   if (c0 === 0x5B /* [ */) return parseTomlArray(text, no).value;
   if (c0 === 0x7B /* { */) return parseTomlInline(text, no).value;
@@ -907,8 +912,14 @@ function parseTomlInline(text, no) {
     const item = parseTomlItem(text, end + 1, no);
     let target = out;
     for (let p = 0; p < path.length - 1; p++) {
-      const next = {};
-      setObjectMember(target, path[p], next);
+      const step = path[p];
+      let next = Object.hasOwn(target, step) ? target[step] : undefined;
+      if (next === undefined) {
+        next = {};
+        setObjectMember(target, step, next);
+      }
+      if (next === null || typeof next !== 'object' || Array.isArray(next))
+        throw new MdFrontmatterError(`'${step}' is not a table`, no);
       target = next;
     }
     setObjectMember(target, path[path.length - 1], item.value);
@@ -935,7 +946,7 @@ function parseTomlItem(text, pos, no) {
     return { value: inner.value, end: pos + inner.end };
   }
   if (c === 0x22 || c === 0x27) {
-    return parseQuoted(text, pos, /** @type {'"'|"'"} */ (text[pos]));
+    return parseQuoted(text, pos, /** @type {'"'|"'"} */ (text[pos]), no);
   }
   let end = pos;
   while (end < text.length) {

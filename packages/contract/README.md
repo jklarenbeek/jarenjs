@@ -585,6 +585,9 @@ isCompatible(clientContract, serverContract);
 jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking   # exit 1 on a breaking change
 ```
 
+`--fail-on` requires at least one change class; a missing or empty value is a
+usage error (exit 2), so an unset CI variable cannot silently disable the gate.
+
 The revision answers "is this byte-for-byte the contract I compiled
 against?"; `version`/`compat` answer "do the authors claim we speak?";
 the diff answers "what exactly moved, and does it break me?". They are

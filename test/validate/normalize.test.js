@@ -203,6 +203,22 @@ describe('compileNormalizer — schema shapes', () => {
     deepStrictEqual(draft7(['1', 5]), [1, '5']);
   });
 
+  for (const schema of [
+    { prefixItems: [true, {}], items: { type: 'number' } },
+    { items: [true, {}], additionalItems: { type: 'number' } },
+  ]) {
+    it(`keeps an unchanged ${'prefixItems' in schema ? '2020-12' : 'draft-07'} prefix outside tail normalization`, () => {
+      const normalize = compileNormalizer(schema, { coerceTypes: true });
+      const input = Object.freeze(['1', '2', '3']);
+      const output = normalize(input);
+      deepStrictEqual(output, ['1', '2', 3]);
+      deepStrictEqual(input, ['1', '2', '3']);
+      strictEqual(normalize(output), output);
+      const prefixOnly = ['1', '2'];
+      strictEqual(normalize(prefixOnly), prefixOnly);
+    });
+  }
+
   it('follows same-document $ref, including recursion', () => {
     const tree = {
       type: 'object',
@@ -226,6 +242,29 @@ describe('compileNormalizer — schema shapes', () => {
     // A default reachable only behind the ref still does not materialize —
     // the documented normalizer edge is unchanged by anchor resolution.
     deepStrictEqual(compileNormalizer(schema, ALL)({}), {});
+  });
+
+  it('ignores anchor-looking instance data in annotations and constants', () => {
+    for (const keyword of ['default', 'const', 'enum', 'examples']) {
+      const fake = { $anchor: 'port', type: 'boolean' };
+      const schema = {
+        [keyword]: keyword === 'enum' || keyword === 'examples' ? [fake] : fake,
+        $defs: { Port: { $anchor: 'port', type: 'integer' } },
+        properties: { port: { $ref: '#port' } },
+      };
+      deepStrictEqual(compileNormalizer(schema, { coerceTypes: true })({ port: '9000' }), { port: 9000 });
+    }
+  });
+
+  it('visits schema-map entries without interpreting their property names as schema keywords', () => {
+    const schema = {
+      properties: {
+        $id: { type: 'string' },
+        default: { $anchor: 'port', type: 'integer' },
+        port: { $ref: '#port' },
+      },
+    };
+    deepStrictEqual(compileNormalizer(schema, { coerceTypes: true })({ port: '9000' }), { port: 9000 });
   });
 
   it('does not resolve an anchor declared inside an embedded resource', () => {

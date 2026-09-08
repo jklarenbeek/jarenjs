@@ -101,11 +101,15 @@ The built-in parser handles, from scratch and dependency-free:
   `yes`/`no`, sexagesimals, hex ints and timestamps — is a **string**.
 - **Quoted strings** — double quotes with JSON-style escapes
   (`\n \t \r \b \f \0 \\ \" \uXXXX`), single quotes with `''` → `'`.
+  An opening quote requires a closing quote; an unterminated string is
+  a located frontmatter error.
 - **Block maps and sequences** by indentation (spaces only). A sequence
   MAY sit at the same indent as its parent key. `- key: value` opens an
   inline map item.
 - **Flow collections** — `[a, b]` and `{a: 1}`, nesting freely, spanning
-  multiple lines while brackets remain open.
+  multiple lines while brackets remain open. Plain values retain internal
+  colons (`[a:b]`, `{url: http://host}`); shorthand map entries inside
+  sequences (`[a: b]`) are outside the subset and are rejected.
 - **Block scalars** — literal `|` and folded `>`, each with the `-`
   chomp (drop the final newline). The `+` chomp and explicit indent
   indicators are not supported.
@@ -133,7 +137,10 @@ with dotted paths, bare/quoted/dotted keys, basic and literal strings,
 integers (decimal/hex/octal/binary with `_`), floats, booleans, flow
 arrays (multi-line), inline tables and comments. Datetimes and any other
 unrecognized value are kept as verbatim **strings**; multi-line strings
-are not supported.
+are not supported. Comments end at each physical line, including within
+multi-line arrays. Dotted keys in an inline table preserve sibling
+members, and table names such as `__proto__` are ordinary own properties.
+An unterminated quoted string is a located frontmatter error.
 
 ### 3.4 Frontmatter as ambient variables
 

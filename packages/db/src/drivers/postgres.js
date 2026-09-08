@@ -314,16 +314,16 @@ export function postgresDriver(source, options = undefined) {
           // not there fails as `3F000` — classified `cantopen`
           : raw.exec(`SET search_path TO ${dialect.quoteIdentifier(schema)}`);
         return Promise.resolve(prepared)
+          .catch((error) => Promise.resolve(raw.close()).then(() => {
+            throw error;
+          }, () => {
+            throw error;
+          }))
           .then(() => openConnection(raw, {
             dialect,
             synchronous: false,
             probe: postgresProbe,
             queueTimeout: openOptions?.queueTimeout ?? options?.queueTimeout,
-          }))
-          .catch((error) => Promise.resolve(raw.close()).then(() => {
-            throw error;
-          }, () => {
-            throw error;
           }));
       });
     },

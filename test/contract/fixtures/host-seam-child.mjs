@@ -9,7 +9,8 @@
 // encoded bytes ever ahead of the consumer. A halfway cancellation must
 // reach every finalizer exactly once: the byte source's `return()`, the
 // DB cursor's `return()`, the acquired release and the identity release,
-// with no later pull. The carrier half is repeated through the Fetch
+// with no later pull once cancellation reaches the byte source. The
+// carrier half is repeated through the Fetch
 // adapter in-process. One JSON line is printed; nothing retains a body.
 import http from 'node:http';
 import { once } from 'node:events';
@@ -128,6 +129,9 @@ function encoded(text, c) {
           return { done: false, value: bytes };
         },
         async return(value) {
+          // TCP cancellation reaches the source after the client stops;
+          // count later pulls from this producer-side boundary.
+          c.cancelled = true;
           c.bodyReturns += 1;
           if (typeof inner.return === 'function') await inner.return();
           return { done: true, value };
@@ -185,7 +189,6 @@ async function sink(stream, of, cancelAt) {
     if (pullsAtQuarter === null && consumed >= TOTAL / 4) pullsAtQuarter = c.pulls;
     sample();
     if (cancelAt !== null && consumed >= cancelAt) {
-      c.cancelled = true;
       await reader.cancel();
       break;
     }

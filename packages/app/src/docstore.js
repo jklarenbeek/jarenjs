@@ -12,6 +12,8 @@
  * forgivingly: a corrupt token decodes to `null`, never a throw.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
+
 /**
  * @param {Object} opts
  * @param {{ read: () => any, write: (store: any) => void }} opts.storage
@@ -29,10 +31,10 @@
 export function createDocStore({ storage, key = 'experiments' }) {
   // read once; keep the SAME object reference for every write-back
   const store = storage.read() ?? {};
-  if (store[key] === undefined || store[key] === null) store[key] = {};
+  if (!Object.hasOwn(store, key) || store[key] == null) setObjectMember(store, key, {});
   return {
-    save(name, value) { store[key][name] = value; storage.write(store); },
-    load(name) { return store[key][name]; },
+    save(name, value) { setObjectMember(store[key], name, value); storage.write(store); },
+    load(name) { return Object.hasOwn(store[key], name) ? store[key][name] : undefined; },
     remove(name) { delete store[key][name]; storage.write(store); },
     names() { return Object.keys(store[key]).sort(); },
     all() { return store[key]; },

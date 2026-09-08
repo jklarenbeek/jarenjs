@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -78,5 +78,54 @@ describe('jaren-emit — bundle mode', () => {
     // Separate files are separate name spaces: both keep the name Id.
     assert.match(out['Order.d.ts'], /export type Id = number;/);
     assert.match(out['User.d.ts'], /export type Id = string;/);
+  });
+
+  it('refuses colliding output names before writing, including on a repeated run or --check', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-emit-'));
+    try {
+      const schemaDir = path.join(dir, 'schemas');
+      const outDir = path.join(dir, 'out');
+      fs.mkdirSync(schemaDir);
+      fs.mkdirSync(outDir);
+      for (const [file, schema] of Object.entries({
+        'a.json': { type: 'boolean' },
+        'user-account.json': { type: 'string' },
+        'user_account.json': { type: 'number' },
+      })) fs.writeFileSync(path.join(schemaDir, file), JSON.stringify(schema));
+      fs.writeFileSync(path.join(outDir, 'UserAccount.d.ts'), 'existing declaration\n');
+      for (const args of [[], [], ['--check']]) {
+        const result = spawnSync(process.execPath,
+          [CLI, '--schema', schemaDir, '--out', outDir, ...args], { encoding: 'utf8' });
+        assert.strictEqual(result.status, 2, result.stderr);
+        assert.strictEqual(result.stdout, '');
+        assert.match(result.stderr, /output collision:.*user-account\.json.*user_account\.json.*UserAccount\.d\.ts/);
+        assert.deepStrictEqual(fs.readdirSync(outDir), ['UserAccount.d.ts']);
+        assert.strictEqual(fs.readFileSync(path.join(outDir, 'UserAccount.d.ts'), 'utf8'), 'existing declaration\n');
+      }
+    }
+    finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('compares output names without case on Windows', { skip: process.platform !== 'win32' }, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-emit-'));
+    try {
+      const schemaDir = path.join(dir, 'schemas');
+      const outDir = path.join(dir, 'out');
+      fs.mkdirSync(schemaDir);
+      // Distinct input filenames can normalize to outputs differing only by case.
+      fs.writeFileSync(path.join(schemaDir, 'user-account.json'), '{"type":"string"}');
+      fs.writeFileSync(path.join(schemaDir, 'useraccount.json'), '{"type":"number"}');
+      const result = spawnSync(process.execPath,
+        [CLI, '--schema', schemaDir, '--out', outDir], { encoding: 'utf8' });
+      assert.strictEqual(result.status, 2, result.stderr);
+      assert.strictEqual(result.stdout, '');
+      assert.match(result.stderr, /output collision:.*user-account\.json.*useraccount\.json/);
+      assert.strictEqual(fs.existsSync(outDir), false);
+    }
+    finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

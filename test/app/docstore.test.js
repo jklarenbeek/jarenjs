@@ -48,6 +48,36 @@ describe('@jarenjs/app — createDocStore', () => {
     store.save('s1', { a: 1 });
     assert.deepStrictEqual(Object.keys(storage.peek()), ['sessions']);
   });
+
+  it('round-trips document names that also name prototype members', () => {
+    const storage = memStorage();
+    const store = createDocStore({ storage });
+    const names = ['__proto__', 'constructor', 'toString'];
+    for (const name of names) {
+      assert.strictEqual(store.load(name), undefined);
+      store.save(name, { name });
+    }
+    const reloaded = createDocStore({ storage });
+    assert.deepStrictEqual(reloaded.names(), names);
+    for (const name of names) {
+      assert.deepStrictEqual(reloaded.load(name), { name });
+      reloaded.remove(name);
+      assert.strictEqual(reloaded.load(name), undefined);
+    }
+    assert.deepStrictEqual(reloaded.names(), []);
+  });
+
+  it('creates own collections for prototype-member keys and preserves them on reload', () => {
+    for (const key of ['__proto__', 'constructor', 'toString']) {
+      const storage = memStorage();
+      const store = createDocStore({ storage, key });
+      assert.strictEqual(Object.getPrototypeOf(store.all()), Object.prototype);
+      assert.notStrictEqual(store.all(), Object.prototype);
+      store.save('document', { v: 1 });
+      assert.ok(Object.hasOwn(storage.peek(), key));
+      assert.deepStrictEqual(createDocStore({ storage, key }).load('document'), { v: 1 });
+    }
+  });
 });
 
 describe('@jarenjs/app — the share codec', () => {

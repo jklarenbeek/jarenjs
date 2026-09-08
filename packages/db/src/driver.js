@@ -189,9 +189,26 @@ export function openConnection(raw, options) {
   const { dialect } = options;
   const synchronous = options.synchronous === true;
   const probe = options.probe ?? sqliteProbe;
-  return chain(probe(raw, dialect, options.declared ?? {}), (capabilities) =>
-    finishConnection(raw, dialect, synchronous, capabilities,
-      options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT));
+  // The binding has already acquired its handle. A failed probe must
+  // release it here, before a store can take ownership of the connection.
+  /** @param {any} failure */
+  const failClosed = (failure) => {
+    /** @param {any} closeError */
+    const both = (closeError) => new AggregateError([failure, closeError],
+      'the connection failed to open, and closing its handle failed too');
+    const closed = attempt(() => raw.close(), both);
+    return chain(closed, () => { throw failure; });
+  };
+  let opened;
+  try {
+    opened = chain(probe(raw, dialect, options.declared ?? {}), (capabilities) =>
+      finishConnection(raw, dialect, synchronous, capabilities,
+        options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT));
+  }
+  catch (failure) {
+    return failClosed(failure);
+  }
+  return isThenable(opened) ? opened.then(undefined, failClosed) : opened;
 }
 
 /**

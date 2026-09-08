@@ -216,6 +216,10 @@ jaren-emit --schema <file|dir> --out <dir> [options]
 generated types did not, which is the failure mode that makes generated code
 untrustworthy in the first place.
 
+Outside bundle mode, schema names must produce distinct output filenames.
+Names such as `user-account.json` and `user_account.json` both become
+`UserAccount.d.ts`; the CLI refuses that collision with exit 2 before writing.
+
 `--bundle` compiles every schema into **one name space**: a `$defs.Id` that
 two schemas both declare comes out as `Id` and `Id2`, deterministically in
 sorted-file order, instead of two colliding declarations. The programmatic

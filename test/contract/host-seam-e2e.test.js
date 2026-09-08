@@ -10,7 +10,8 @@
  * and the encoded bytes ahead of the consumer stay bounded. A halfway
  * cancellation reaches the byte source's `return()`, the cursor's
  * `return()`, the acquired release and the identity release exactly
- * once, with no pull after it. The carrier half repeats through the
+ * once, with no pull after cancellation reaches the byte source. The
+ * carrier half repeats through the
  * Fetch adapter. The exact figures are in the campaign record; the
  * assertions here are the bounds.
  */
@@ -49,7 +50,7 @@ describe('the host seam end to end — a fixed-heap child', () => {
       assert.ok(cancel.consumed >= out.cancelAt && cancel.consumed < TOTAL / 2, `${carrier}: cancelled halfway (${cancel.consumed} bytes)`);
       assert.strictEqual(cancel.bodyReturns, 1, `${carrier}: the byte source's return() ran once`);
       assert.strictEqual(cancel.cursorReturns, 1, `${carrier}: the cursor's return() ran once`);
-      assert.strictEqual(cancel.pullsAfterCancel, 0, `${carrier}: no pull after the cancel`);
+      assert.strictEqual(cancel.pullsAfterCancel, 0, `${carrier}: no pull after cancellation reaches the source`);
       assert.ok(cancel.pulls < out.rows, `${carrier}: the cursor stopped at ${cancel.pulls} of ${out.rows} rows`);
       assert.deepStrictEqual(cancel.releases, { identity: expectedReleases, acquired: expectedReleases }, `${carrier}: acquired and identity released once per request`);
     }

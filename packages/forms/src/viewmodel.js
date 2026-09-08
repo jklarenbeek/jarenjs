@@ -352,7 +352,7 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
       // number, boolean and null enums, which `String(v)` is not.
       key: JSON.stringify(v) ?? 'null',
       label: field.enumLabels?.[i] ?? String(v),
-      selected: v === node.value,
+      selected: equalsJson(v, node.value),
     }));
   }
 

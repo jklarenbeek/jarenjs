@@ -102,6 +102,17 @@ describe('buildFormViewModel', function () {
       assert.deepStrictEqual(JSON.parse(option.key), option.value);
   });
 
+  it('selects structured enum values by JSON equality after a data round trip', function () {
+    const values = [{ x: 1 }, { x: 2 }, [1, { x: 2 }]];
+    const model = buildFormModel({ enum: values });
+    for (let i = 0; i < values.length; i++) {
+      const data = JSON.parse(JSON.stringify(values[i]));
+      const node = buildFormViewModel(model, data);
+      assert.deepStrictEqual(node.options.map((option) => option.selected),
+        values.map((_, index) => index === i));
+    }
+  });
+
   it('excludes rule-hidden fields and carries computed values', function () {
     const model = buildFormModel(schema);
     const rules = compileFormRules(model);

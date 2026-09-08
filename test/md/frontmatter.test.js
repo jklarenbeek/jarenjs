@@ -1,6 +1,7 @@
 //@ts-check
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 
 import {
   parseFrontmatter,
@@ -82,6 +83,14 @@ describe('parseYamlSubset', function () {
       { a: 'x\n"y"', b: "it's" });
   });
 
+  it('rejects unterminated single and double quoted YAML values at their line', function () {
+    for (const quote of ['"', "'"]) {
+      assert.throws(() => parseYamlSubset(`ok: 1\nx: ${quote}unterminated`),
+        (error) => error instanceof MdFrontmatterError
+          && error.line === 1 && error.message.includes('unterminated quoted string'));
+    }
+  });
+
   it('parses nested maps and sequences by indentation', function () {
     assert.deepEqual(parseYamlSubset('a:\n  b:\n    c: 1\n  d: 2\n'),
       { a: { b: { c: 1 }, d: 2 } });
@@ -99,6 +108,28 @@ describe('parseYamlSubset', function () {
     assert.deepEqual(parseYamlSubset('tags: [a, b, "c d"]\n'), { tags: ['a', 'b', 'c d'] });
     assert.deepEqual(parseYamlSubset('map: {x: 1, y: [2, 3]}\n'), { map: { x: 1, y: [2, 3] } });
     assert.deepEqual(parseYamlSubset('tags: [\n  a,\n  b,\n]\n'), { tags: ['a', 'b'] });
+  });
+
+  it('keeps colons inside plain flow values while separating map keys', function () {
+    // A parser that stops advancing blocks synchronous test timers too.
+    const moduleUrl = new URL('../../components/md/src/frontmatter.js', import.meta.url).href;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { parseYamlSubset } from ${JSON.stringify(moduleUrl)};
+      const read = (source) => {
+        try { return parseYamlSubset(source); }
+        catch (error) { return error.name; }
+      };
+      console.log(JSON.stringify([
+        read('x: [a:b]'), read('x: {url: http://host}'),
+        read('x: [a: b]'), read('x: [}]'),
+      ]));
+    `], { encoding: 'utf8', timeout: 2500 });
+    assert.ifError(child.error);
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), [
+      { x: ['a:b'] }, { x: { url: 'http://host' } },
+      'MdFrontmatterError', 'MdFrontmatterError',
+    ]);
   });
 
   it('parses block scalars with chomping', function () {
@@ -139,6 +170,55 @@ describe('parseTomlSubset', function () {
 
   it('parses multi-line arrays', function () {
     assert.deepEqual(parseTomlSubset('arr = [\n  1,\n  2,\n]\n'), { arr: [1, 2] });
+  });
+
+  it('keeps continuation values after comments in multi-line arrays', function () {
+    assert.deepEqual(parseTomlSubset('values = [1, # first\n # comment-only line\n 2,\n "# text",\n 3]'),
+      { values: [1, 2, '# text', 3] });
+  });
+
+  it('rejects unterminated single and double quoted TOML values at their line', function () {
+    for (const quote of ['"', "'"]) {
+      assert.throws(() => parseTomlSubset(`ok = 1\nx = ${quote}unterminated`),
+        (error) => error instanceof MdFrontmatterError
+          && error.line === 1 && error.message.includes('unterminated quoted string'));
+    }
+  });
+
+  it('treats inherited table names as own data in dotted keys and table headers', function () {
+    const name = 'jarenFrontmatterOwnKeyProbe';
+    const nested = 'jarenFrontmatterNestedProbe';
+    const fixtures = [
+      [`__proto__.${name} = 7`, false],
+      [`[__proto__]\n${name} = 7`, false],
+      [`[[__proto__]]\n${name} = 7`, true],
+      [`[__proto__.${nested}]\n${name} = 7`, 'nested'],
+    ];
+    for (const [source, shape] of fixtures) {
+      try {
+        const out = parseTomlSubset(source);
+        assert.ok(Object.hasOwn(out, '__proto__'));
+        assert.strictEqual(Object.getPrototypeOf(out), Object.prototype);
+        const expected = { [name]: 7 };
+        assert.deepEqual(out.__proto__, shape === true ? [expected]
+          : shape === 'nested' ? { [nested]: expected } : expected);
+        assert.strictEqual(Object.hasOwn(Object.prototype, name), false);
+        assert.deepEqual(parseTomlSubset(source), out);
+      }
+      finally {
+        delete Object.prototype[name];
+        delete Object.prototype[nested];
+      }
+    }
+    assert.deepEqual(parseTomlSubset('[constructor]\nx = 1'), { constructor: { x: 1 } });
+  });
+
+  it('preserves sibling dotted keys in inline tables', function () {
+    const source = 'point = { x.a = 1, x.b = 2, y.c = 3 }';
+    const expected = { point: { x: { a: 1, b: 2 }, y: { c: 3 } } };
+    assert.deepEqual(parseTomlSubset(source), expected);
+    assert.deepEqual(parseTomlSubset(source), expected);
+    assert.throws(() => parseTomlSubset('point = { x = 1, x.a = 2 }'), MdFrontmatterError);
   });
 });
 

@@ -31,6 +31,7 @@ import {
 } from '@jarenjs/core/object';
 
 import { parseJSONPointer } from '@jarenjs/json';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -138,8 +139,14 @@ export function collectSameDocumentAnchors(root) {
     if (!isRoot && typeof node.$id === 'string') return;
     if (typeof node.$anchor === 'string' && !anchors.has(node.$anchor))
       anchors.set(node.$anchor, node);
-    const keys = Object.getOwnPropertyNames(node);
-    for (let i = 0; i < keys.length; i++) walk(node[keys[i]], false);
+    // Only schema positions declare anchors. Annotation values such as
+    // defaults and examples are instance data, even when they contain $anchor.
+    for (const key of Object.keys(node)) {
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], false);
+      else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isJsonObject(node[key])) {
+        for (const child of Object.values(node[key])) walk(child, false);
+      }
+    }
   };
   walk(root, true);
   return anchors;
@@ -378,13 +385,15 @@ function buildArrayStep(node, ctx) {
     : compileNode(restSource, ctx);
 
   if (prefixSteps === null && restStep === null) return null;
-  const prefixLength = prefixSteps === null ? 0 : prefixSteps.length;
+  // A prefix with no work still occupies its declared positions: the tail
+  // schema applies only after it, even when its step table was elided.
+  const prefixLength = Array.isArray(prefixSource) ? prefixSource.length : 0;
 
   return function normalizeArray(value) {
     if (!Array.isArray(value)) return value;
     let out = value;
     for (let i = 0; i < value.length; i++) {
-      const step = i < prefixLength ? prefixSteps[i] : restStep;
+      const step = i < prefixLength ? (prefixSteps === null ? null : prefixSteps[i]) : restStep;
       if (step === null) continue;
       const current = value[i];
       const next = step(current);

@@ -88,6 +88,15 @@ describe('a JSON array of documents, read structurally', () => {
       (error) => /document 1 is not JSON/.test(/** @type {Error} */ (error).message));
   });
 
+  it('refuses missing, repeated, leading and trailing array separators across chunks', async () => {
+    for (const text of ['[,1]', '[1,]', '[1,,2]', '[{}{}]', '[1 2]', '["a""b"]']) {
+      for (const size of [1, 2, 100]) {
+        await assert.rejects(() => collect(readJsonDocuments(chunked(text, size))),
+          (error) => /** @type {any} */ (error).code === 'JD0024', `${text}, chunk size ${size}`);
+      }
+    }
+  });
+
   it('holds one document at a time, not the array', async () => {
     // 20k documents of ~130 bytes: reading the array whole would retain
     // every one of them, and the walk retains one
@@ -150,6 +159,21 @@ describe('the format a path declares', () => {
 });
 
 describe('an atomic target', () => {
+  it('removes the temporary when publication fails, and permits a subsequent abort', async () => {
+    const { dir, cleanup } = tempDir();
+    try {
+      const target = path.join(dir, 'existing-directory');
+      fs.mkdirSync(target);
+      const sink = await openAtomicTarget(target, 'json');
+      await sink.write({ id: 'u1' });
+      await assert.rejects(() => sink.commit());
+      await sink.abort();
+      assert.deepStrictEqual(fs.readdirSync(dir), ['existing-directory']);
+      assert.deepStrictEqual(fs.readdirSync(target), []);
+    }
+    finally { cleanup(); }
+  });
+
   it('replaces the file only on commit, and round-trips its own output', async () => {
     const { dir, cleanup } = tempDir();
     try {

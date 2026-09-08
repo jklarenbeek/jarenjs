@@ -85,7 +85,11 @@ function parseArgs(argv) {
       case '--contract': options.contract = argv[++i] ?? null; break;
       case '--from': options.from = argv[++i] ?? null; break;
       case '--to': options.to = argv[++i] ?? null; break;
-      case '--fail-on': options.failOn = argv[++i] ?? null; break;
+      case '--fail-on':
+        if (argv[i + 1] === undefined || argv[i + 1].startsWith('-'))
+          throw new Error('--fail-on needs at least one change class');
+        options.failOn = argv[++i];
+        break;
       case '--out': options.out = argv[++i] ?? null; break;
       case '--check': options.check = true; break;
       case '--lenient': options.lenient = true; break;
@@ -179,6 +183,7 @@ async function runDiff(options) {
   let failOn = [];
   if (options.failOn !== null) {
     failOn = options.failOn.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    if (failOn.length === 0) return fail('--fail-on needs at least one change class', true);
     for (const name of failOn) {
       if (!DIFF_CLASSES.includes(name)) return fail(`--fail-on '${name}' is not a change class (${DIFF_CLASSES.join(', ')})`, true);
     }

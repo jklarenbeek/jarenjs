@@ -364,7 +364,10 @@ Enum option labels come from the JSON Schema idiom
 `oneOf: [{ "const": "nl", "title": "Netherlands" }, ...]` (treated as an
 enum with per-option titles) or `String(value)`, each through
 `t('<base>#enum/<value>', fallback)`; the labels land on
-`field.enumLabels`, parallel to `field.enumValues`.
+`field.enumLabels`, parallel to `field.enumValues`. An explicit `enum`
+supplies its own values and `String(value)` labels even when `oneOf` is
+also present. The view model selects object and array options by JSON
+equality, so values loaded from JSON keep their selection.
 
 ## Data helpers
 

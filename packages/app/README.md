@@ -170,6 +170,10 @@ Two IDE-shaped primitives ship ready to bind, so a two-pane surface (the studio,
 - **`createSplitterWidget({ action, grid, rail, cssVar, min, max, step })`** — a drag handle over a pane boundary. It drives a CSS ratio variable *live* during a drag (no per-move dispatch — that would flood the transaction log and undo) and commits the ratio through `action` on pointer-up only, plus keyboard resize as an ARIA separator. Register it like any widget; parameterize the grid/rail selectors, the CSS variable and the commit action so each surface binds its own.
 - **`createDocStore({ storage, key })`** — a keyed `save`/`load`/`remove`/`names`/`all` CRUD over an injected `storage` (`localStorage` in the browser, an in-memory object in tests), so the package never touches `localStorage` itself. Paired with **`encodeShare(snapshot)`** / **`decodeShare(token)`**, a Unicode-safe base64url share-link codec (a corrupt token decodes to `null`, never a throw), it is the new/save/load/delete/share pattern behind the studio and play surfaces.
 
+Collection keys and document names such as `__proto__` are ordinary own
+members of the document store and survive persistence. Loading a name
+that has not been saved returns `undefined`, including prototype-member names.
+
 ## Invariants the model can't cheat
 
 ```javascript

@@ -336,6 +336,17 @@ describe('static text i18n (buildFormModel options.t)', () => {
     assert.ok(seen.includes('/size#enum/m'));
   });
 
+  it('keeps explicit enum labels independent of shorter or reordered oneOf branches', () => {
+    for (const oneOf of [
+      [{ const: 'a', title: 'A' }],
+      [{ const: 'b', title: 'B' }, { const: 'a', title: 'A' }],
+    ]) {
+      const model = buildFormModel({ enum: ['a', 'b'], oneOf });
+      assert.deepStrictEqual(model.enumValues, ['a', 'b']);
+      assert.deepStrictEqual(model.enumLabels, ['a', 'b']);
+    }
+  });
+
   it('t translates labels, descriptions and enum options', () => {
     const staticNl = {
       '/firstName#label': 'Voornaam',

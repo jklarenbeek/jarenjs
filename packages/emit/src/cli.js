@@ -143,6 +143,23 @@ function main() {
     return;
   }
 
+  // Validate the whole output plan before writing: different schema names
+  // can collapse onto the same PascalCase filename.
+  if (options.bundle === null) {
+    const destinations = new Map();
+    for (const file of files) {
+      const out = path.join(options.out, nameFromFile(file) + target.extension);
+      const destination = process.platform === 'win32' ? out.toLowerCase() : out;
+      const previous = destinations.get(destination);
+      if (previous !== undefined) {
+        console.error(`output collision: '${previous}' and '${file}' both write '${out}'`);
+        process.exit(2);
+        return;
+      }
+      destinations.set(destination, file);
+    }
+  }
+
   // Only pass normalize options when at least one is on: a null here is what
   // tells the model to emit a single declaration per type rather than a pair.
   const normalizeOptions = options.defaults || options.coerce

@@ -676,6 +676,10 @@ Walked: `properties`, `patternProperties`, `additionalProperties`,
 stripping disabled inside them because one branch cannot know what a sibling
 declares.
 
+Tuple tail normalization starts after the declared prefix, including prefix
+positions that need no changes. Same-document anchors are collected from schema
+positions; anchor-looking keys in defaults, constants and examples are data.
+
 Member schemas **compose the way JSON Schema says they do**: a member covered
 by `properties` *and* by one or more matching `patternProperties` is
 normalized by every one of them, in that order, and `additionalProperties`

@@ -180,6 +180,16 @@ describe('jaren-contract diff — the compatibility gate', () => {
     assert.strictEqual(refused.status, 2);
     assert.match(refused.stderr, /JC0004/);
   });
+
+  it('rejects missing or empty --fail-on values instead of passing a breaking change', () => {
+    for (const suffix of [[], [''], [' , '], ['--check']]) {
+      const r = run(['diff', '--from', 'shop.json', '--to', 'shop-v2.json', '--fail-on', ...suffix],
+        withV2((v2) => { delete v2.operations['product.remove']; }));
+      assert.strictEqual(r.status, 2, JSON.stringify(suffix));
+      assert.strictEqual(r.stdout, '');
+      assert.match(r.stderr, /--fail-on needs at least one change class/);
+    }
+  });
 });
 
 describe('jaren-contract — module documents (the shared @jarenjs/json/node loader)', () => {
