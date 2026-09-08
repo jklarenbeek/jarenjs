@@ -232,9 +232,9 @@ equivalent is the `reserved` option of `compileEmitModel`.
 | `type: 'string' \| 'number' \| 'integer' \| 'boolean' \| 'null'` | the primitive (`integer` → `number`) |
 | `const` / `enum` | a literal / a union of literals |
 | `properties` + `required` | interface members, optional when not required |
-| `additionalProperties` / `patternProperties` | an index signature, widened to cover the declared members |
+| `additionalProperties` / `patternProperties` | an index signature combining their value types, widened to cover the declared members |
 | *omitted* `additionalProperties` | `[key: string]: unknown` — the object is **open**, see below |
-| `additionalProperties: false` | a closed interface, with no index signature; with no members at all, `Record<string, never>` (an empty interface would let a primitive through) |
+| `additionalProperties: false` | a closed interface unless `patternProperties` supplies an index signature; with no members or patterns, `Record<string, never>` (an empty interface would let a primitive through) |
 | `items` | `Array<T>` |
 | `prefixItems`, array-form `items` | a tuple: the first `minItems` positions required, the rest optional, and an **open** rest (`...Array<unknown>`) unless `items: false`/`additionalItems: false` closes it — JSON Schema accepts shorter and longer arrays, so the type does too |
 | `$ref` (same document, including cycles) | a reference to the named declaration — `#/pointer` and plain `#anchor` forms, resolving exactly as `compileNormalizer` resolves them; a root `$ref` aliases its target, and 2019-09+ siblings intersect with it |
@@ -249,7 +249,10 @@ equivalent is the `reserved` option of `compileEmitModel`.
 A JSON Schema object accepts members it never declared. That is the default,
 and it is easy to forget when reading a schema that lists four properties and
 looks like a struct. So an interface generated from one carries an index
-signature, and only `additionalProperties: false` removes it.
+signature. `additionalProperties: false` removes it unless `patternProperties`
+still permits matching names. When patterns and typed additional properties
+coexist, the index includes both value types; TypeScript cannot restrict each
+type to the names that JSON Schema assigns it.
 
 This costs something real: with an index signature TypeScript stops flagging a
 misspelled property, because the misspelling is a legal member. The trade is

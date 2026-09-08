@@ -18,6 +18,7 @@ import {
   fixedUnitMs,
   DATE_UNITS,
   parseRFC3339Parts,
+  epochOfRFC3339Parts,
 } from '@jarenjs/core/dates';
 
 const P = (s) => parseRFC3339Parts(s);
@@ -35,6 +36,16 @@ function show(p) {
 }
 
 describe('civil day-number arithmetic', () => {
+  it('converts early-year leap days and year-end carries without a 1900 calendar', () => {
+    for (const [input, expected] of [
+      ['0000-02-29T12:34:56.789Z', '0000-02-29T12:34:56.789Z'],
+      ['0000-02-29T12:34:56.789+02:00', '0000-02-29T10:34:56.789Z'],
+      ['0099-12-31T23:59:60Z', '0100-01-01T00:00:00.000Z'],
+    ]) {
+      assert.strictEqual(new Date(epochOfRFC3339Parts(P(input))).toISOString(), expected, input);
+    }
+  });
+
   it('should round-trip and agree with Date across four decades', () => {
     // the oracle is Date itself: every consecutive day for 40 years must
     // convert both ways and match, which pins the era arithmetic

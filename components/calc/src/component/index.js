@@ -117,6 +117,12 @@ function keypadFor(mode) {
   }));
 }
 
+/** Static choices come from the converter's unit registry; currency
+ * choices are read from the current rate table by the action. */
+const CONVERTER_UNIT_IDS = Object.fromEntries(converterDimensions()
+  .filter((dimension) => dimension !== 'currency')
+  .map((dimension) => [dimension, unitOptions(dimension).map((unit) => unit.id)]));
+
 /**
  * The action query documents. `dataPointer` for the financial form is
  * `/calc/fin`.
@@ -152,7 +158,29 @@ export const calcActions = {
   'calc/plot-expr': { patch: [{ op: 'replace', path: '/calc/plot/expr', value: '$event.value' }] },
   'calc/plot-kind': { patch: [{ op: 'replace', path: '/calc/plot/kind', value: '$payload.kind' }] },
   // converter
-  'calc/conv-dim': { patch: [{ op: 'replace', path: '/calc/conv/dimension', value: '$event.value' }] },
+  'calc/conv-dim': {
+    $let: { units: { $if: [
+      { $eq: ['$event.value', 'currency'] },
+      [{ $for: { unit: { $entries: '$.calc.rates.rates' } }, $return: '$unit.key' }],
+      { $get: [{ $const: CONVERTER_UNIT_IDS }, '$event.value'] },
+    ] } },
+    // Change the dimension and its unit selections in one transition,
+    // retaining a selection only when the new dimension offers it.
+    $return: { $if: [
+      { $exists: '$units[0]' },
+      { patch: [
+        { op: 'replace', path: '/calc/conv/dimension', value: '$event.value' },
+        { op: 'replace', path: '/calc/conv/from', value: { $if: [
+          { $eq: ['$units[*]', '$.calc.conv.from'] }, '$.calc.conv.from', '$units[0]',
+        ] } },
+        { op: 'replace', path: '/calc/conv/to', value: { $if: [
+          { $eq: ['$units[*]', '$.calc.conv.to'] }, '$.calc.conv.to',
+          { $default: ['$units[1]', '$units[0]'] },
+        ] } },
+      ] },
+      {},
+    ] },
+  },
   'calc/conv-from': { patch: [{ op: 'replace', path: '/calc/conv/from', value: '$event.value' }] },
   'calc/conv-to': { patch: [{ op: 'replace', path: '/calc/conv/to', value: '$event.value' }] },
   'calc/conv-value': { patch: [{ op: 'replace', path: '/calc/conv/value', value: { $number: '$event.value' } }] },

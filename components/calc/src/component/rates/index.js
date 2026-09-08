@@ -70,20 +70,31 @@ export function createRatesLayer(options = {}) {
   const fallbackRates = options.fallbackRates ?? FALLBACK_RATES;
   let lastAt = -Infinity;
   let inflight = false;
+  let generation = 0;
 
   /**
    * Fetch once (debounced), dispatching `calc/rates-ok` or
-   * `calc/rates-err`. `props.force` bypasses the debounce.
+   * `calc/rates-err`. `props.force` bypasses the debounce; only the
+   * newest request may publish a result or clear the in-flight flag.
    */
   function fetchOnce(props, dispatch) {
     const t = now();
     if (!props?.force && (inflight || t - lastAt < refreshMs)) return;
     inflight = true;
     lastAt = t;
+    const request = ++generation;
     Promise.resolve(adapter(codes, { fetch: options.fetch, endpoint: options.endpoint, at: t }))
       .then(
-        (table) => { inflight = false; dispatch('calc/rates-ok', { ...table, at: t }); },
-        (err) => { inflight = false; dispatch('calc/rates-err', { message: String(err?.message ?? err) }); },
+        (table) => {
+          if (request !== generation) return;
+          inflight = false;
+          dispatch('calc/rates-ok', { ...table, at: t });
+        },
+        (err) => {
+          if (request !== generation) return;
+          inflight = false;
+          dispatch('calc/rates-err', { message: String(err?.message ?? err) });
+        },
       );
   }
 

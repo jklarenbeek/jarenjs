@@ -99,6 +99,73 @@ describe('an entity migrates whole', () => {
   });
 });
 
+describe('migration walks cover every entity and signed row identity', () => {
+  const schema = (name) => ({
+    type: 'object', required: ['id', 'name'],
+    properties: { id: { type: 'integer', 'x-entity': { key: true } }, name },
+  });
+  const FROM = model({ User: { schema: schema({ type: 'string' }) } });
+  const TO = model({ User: { schema: schema({ type: 'string', pattern: '^[A-Z]+$' }) } });
+  const migration = (steps) => ({
+    $migration: '0.1', id: 'uppercase', from: shapeHash(FROM), to: shapeHash(TO), steps,
+  });
+
+  it('transforms every signed key and skips the already applied migration on the second run', async () => {
+    const file = fresh('negative-transform');
+    const ids = [-Number.MAX_SAFE_INTEGER, -2, -1, 0, 1];
+    const store = await openStore(FROM, { driver: nodeDriver(), path: file });
+    for (const id of ids) await store.entity('User').create({ id, name: 'ada' });
+    await store.close();
+    const m = migration([{ kind: 'jslt', collection: 'User',
+      stylesheet: [{ match: '$', body: { name: { $upper: '$.name' } } }] }]);
+    const options = { baseline: FROM, model: TO, compileSchema, batchSize: 1 };
+    assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: file }, [m], options)).applied,
+      ['uppercase']);
+    const again = await migrate({ driver: nodeDriver(), path: file }, [m], options);
+    assert.deepStrictEqual({ applied: again.applied, skipped: again.skipped, upToDate: again.upToDate },
+      { applied: [], skipped: ['uppercase'], upToDate: true });
+    const migrated = await openStore(TO, { driver: nodeDriver(), path: file });
+    try {
+      assert.deepStrictEqual(await Promise.all(ids.map((id) => migrated.entity('User').get(id))),
+        ids.map((id) => ({ id, name: 'ADA' })));
+    }
+    finally { await migrated.close(); }
+  });
+
+  it('rejects a target-schema violation on a negative key without recording the migration', async () => {
+    const file = fresh('negative-validation');
+    const store = await openStore(FROM, { driver: nodeDriver(), path: file });
+    await store.entity('User').create({ id: -1, name: 'ada' });
+    await store.close();
+    const m = migration([]);
+    await assert.rejects(migrate({ driver: nodeDriver(), path: file }, [m],
+      { baseline: FROM, model: TO, compileSchema, batchSize: 1 }), (e) => e.code === 'JD0021');
+    const status = await migrationStatus({ driver: nodeDriver(), path: file }, [m]);
+    assert.deepStrictEqual(status.applied, []);
+    assert.deepStrictEqual(status.pending, ['uppercase']);
+  });
+
+  it('validates later entities after an empty or valid first entity', async () => {
+    const from = model({ First: FROM.entities.User, Second: FROM.entities.User });
+    const to = model({ First: TO.entities.User, Second: TO.entities.User });
+    const m = { $migration: '0.1', id: 'narrow-all',
+      from: shapeHash(from), to: shapeHash(to), steps: [] };
+    for (const seedFirst of [false, true]) {
+      const file = fresh(`later-entity-${seedFirst}`);
+      const store = await openStore(from, { driver: nodeDriver(), path: file });
+      if (seedFirst) await store.entity('First').create({ id: 1, name: 'ADA' });
+      await store.entity('Second').create({ id: 1, name: 'ada' });
+      await store.close();
+      await assert.rejects(migrate({ driver: nodeDriver(), path: file }, [m],
+        { baseline: from, model: to, compileSchema, batchSize: 1 }),
+      (e) => e.code === 'JD0021' && e.message.includes("entity 'Second'"));
+      const status = await migrationStatus({ driver: nodeDriver(), path: file }, [m]);
+      assert.deepStrictEqual(status.applied, []);
+      assert.deepStrictEqual(status.pending, ['narrow-all']);
+    }
+  });
+});
+
 describe('planning is idempotent under a declared rename', () => {
   it('a model still carrying its x-rename hint plans nothing against itself, and hashes as the hint-free model', () => {
     const m1 = model({ Person: ent({ name: { type: 'string' } }) });

@@ -2,6 +2,14 @@
 // `node scripts/generate-emit-fixture.js`. test/emit/agreement.test.js
 // fails if this drifts from what the generator produces.
 
+/**
+ * Schema constraints this type cannot express: patternProperties=["^x"]
+ */
+export interface Patterned {
+  [key: string]: number | string;
+}
+
+
 export interface Account {
   /**
    * Schema constraints this type cannot express: minLength=3

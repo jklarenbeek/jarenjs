@@ -220,6 +220,11 @@ const app = createApp({
 
 Schema in, live form out: text/email/number/date/color inputs, textareas, checkboxes, selects with precomputed options, nested object fieldsets, arrays with add/remove buttons, inline errors, and `x-form` visibility/enablement/computed reacting per keystroke. The `viewModel` option is the general **derivation boundary**: it maps state to the view stylesheet's input before every render, so JS-computed derivations enter the render path without ever entering the state. A DOM control's value is a string, and two controls carry something else: a select over a non-string enum, and the `json` editor over a structured value. Both round-trip through JSON text and decode it in `formEventFields()`, the format's one sanctioned place for host JavaScript at the DOM boundary (APP-FORMAT §5.4) — **register it or those two controls write nothing**. Remaining 0.1 limits (documented in `src/forms.js`): a cleared number input writes `null`, and arrays need to exist in the data (give them `default: []` in the schema).
 
+Nested object and array fields honor `x-form.enabled` through their native
+`fieldset` disablement, including child controls and array buttons. A `readOnly`
+field uses native `readonly` for text inputs and textareas, and `disabled` for
+checkboxes, selects, collection fieldsets, and add/remove buttons.
+
 ## Headless and server-side
 
 Without a `node`, the app runs headless: `getVnode()` returns the current view output for any renderer, and SSR is one composition:

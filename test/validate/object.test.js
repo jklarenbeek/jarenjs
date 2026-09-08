@@ -544,6 +544,18 @@ describe('Schema Object Type', function () {
   });
 
   describe('#objectDependentRequired()', function () {
+    it('treats prototype-named JSON members as data, not inherited dependencies', function () {
+      const validate = compiler.compile({ dependentRequired: { a: ['b'] } });
+      for (const key of ['constructor', 'toString', '__proto__']) {
+        assert.isTrue(validate({ [key]: 1 }), key);
+        const named = compiler.compile({ dependentRequired: { [key]: ['b'] } });
+        assert.isFalse(named({ [key]: 1 }), key);
+        assert.isTrue(named({ [key]: 1, b: 2 }), key);
+      }
+      assert.isFalse(validate({ a: 1 }));
+      assert.isTrue(validate({ a: 1, b: 2 }));
+    });
+
     it('should return true when dependentRequired is empty', function () {
       const validate = compiler.compile({ dependentRequired: {} });
       assert.isTrue(validate({}), 'neither');

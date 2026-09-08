@@ -16,9 +16,9 @@
  * commit it was built from and the version the manifests carried. The
  * comparison is against the LOCAL `git rev-parse HEAD` and the root
  * manifest, and it lines up because of the order the close-out protocol
- * runs in: the version bump lands in the working tree, the site is built
- * and deployed, and only THEN is the work committed. At the moment this
- * runs, HEAD is exactly the revision the deployed build recorded.
+ * runs in: the version bump and any changed measurements are committed
+ * before deployment, which builds and publishes that committed revision.
+ * At the moment this runs, HEAD is the revision the deployed build recorded.
  *
  * A fresh publish takes a minute or two to propagate, so a mismatch is
  * retried with backoff before it is believed.

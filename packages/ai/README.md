@@ -744,7 +744,8 @@ const { memories, scores, skipped } = await ledger.recall({
   skipped }` the same way, a skill's meaning being its name, when and instructions together.
 - **`embedMissing({ limit?, batch? })` is the explicit sweep** — every un-embedded memory and
   skill, through `embed(texts[])` in batches, written inside the ledger's write chain, answering
-  `{ embedded, remaining }`. A second run embeds zero and makes no seam call. A failing batch
+  `{ embedded, remaining }`. A positive fractional `batch` is floored to at least one.
+  A second run embeds zero and makes no seam call. A failing batch
   ends the run with the error surfaced once: what was embedded before it is written, the rest
   stays un-embedded and is counted in `remaining` — never a throw that loses the batch. A ledger
   that already holds vectors under another identity is refused up front rather than turned into

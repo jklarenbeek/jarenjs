@@ -137,7 +137,7 @@ function compileDollarDataRequired(schemaObj, ref) {
     if (requiredProps === JSONPOINTER_NOTHING || !Array.isArray(requiredProps)) return true;
 
     for (const prop of requiredProps) {
-      if (!(prop in data)) {
+      if (!Object.hasOwn(data, prop)) {
         return addError(prop, data, dataPath);
       }
     }

@@ -13,7 +13,7 @@
  * cached by pointer string and reads are allocation-free.
  */
 
-import { equalsJson } from '@jarenjs/core/object';
+import { equalsJson, setObjectMember } from '@jarenjs/core/object';
 import { createBoundedCache } from '@jarenjs/core/cache';
 import {
   parseJSONPointer,
@@ -243,7 +243,7 @@ export function createInitialData(field) {
     if (field.children) {
       for (const child of field.children) {
         const value = createInitialData(child);
-        if (value !== undefined) obj[child.key] = value;
+        if (value !== undefined) setObjectMember(obj, child.key, value);
       }
     }
     return obj;

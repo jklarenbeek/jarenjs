@@ -416,10 +416,6 @@ function parseArgs(argv) {
     },
   });
 
-  if (!Number.isInteger(options.iterations) || options.iterations < 1) {
-    console.error('--iterations must be a positive integer');
-    process.exit(2);
-  }
   if (!['console', 'csv', 'json'].includes(options.output)) {
     console.error('--output must be console, csv, or json');
     process.exit(2);

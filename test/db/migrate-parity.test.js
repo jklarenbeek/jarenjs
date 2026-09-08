@@ -127,24 +127,27 @@ describe('batched assertions', () => {
     const { dbPath, cleanup } = await seeded(5000);
     try {
       const { driver, prepared } = tracingDriver();
+      const events = [];
       const migration = assertionMigration({
         assert: { $for: { it: '$[*]' }, $where: { $eq: ['$it.n', 2600] }, $return: '$it.id' },
         note: 'no user may carry n = 2600',
       });
       await assert.rejects(async () => migrate({ driver, path: dbPath }, [migration],
-        { baseline: M0, model: M1, batchSize: 500, shadow: false }),
+        { baseline: M0, model: M1, batchSize: 500, shadow: false, onProgress: (p) => events.push(p) }),
       (error) => error.code === 'JD0023' && /step 1 \(query\)/.test(error.message)
         && /expected an empty sequence/.test(error.message));
       const reads = prepared.filter((sql) => /FROM "users"/.test(sql));
-      assert.ok(reads.length > 0);
+      assert.strictEqual(reads.length, 2);
       for (const sql of reads) {
         assert.match(sql, /LIMIT 500/, sql);
-        assert.match(sql, /WHERE "rowid" > \?/, sql);
+        assert.match(sql, /ORDER BY "rowid"/, sql);
       }
-      // fail fast: the violation sits in batch 6 of 10, so at most six
-      // batches (plus the peek that follows) were read
-      const batches = prepared.filter((sql) => /FROM "users"/.test(sql)).length;
-      assert.ok(batches <= 7, `${batches} batch statements`);
+      assert.doesNotMatch(reads[0], /WHERE/, 'the first page includes every signed identity');
+      assert.match(reads[1], /WHERE "rowid" > \?/);
+      // The violation is in batch six. Only the first five complete;
+      // count progress, not preparations of the two reusable statements.
+      assert.deepStrictEqual(events.filter((event) => event.asserted !== undefined)
+        .map((event) => event.asserted), [500, 1000, 1500, 2000, 2500]);
     }
     finally {
       cleanup();

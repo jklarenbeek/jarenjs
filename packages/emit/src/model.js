@@ -851,11 +851,15 @@ function objectShape(node, ctx, hint) {
     // unsound type for a consumer who prefers excess-property checking.
     index = T.unknown();
   }
-  else if (isJsonObject(node.patternProperties)) {
+  // Matching names are governed by their pattern schemas, not by
+  // additionalProperties. A typed additional index must therefore include
+  // those values too; an unknown index already covers every pattern.
+  if (index?.kind !== 'unknown' && isJsonObject(node.patternProperties)) {
     const patterns = Object.getOwnPropertyNames(node.patternProperties);
     if (patterns.length > 0) {
-      index = unionOf(patterns.map((p, i) =>
-        typeOf(node.patternProperties[p], ctx, `${hint}Pattern${i + 1}`)));
+      const patternTypes = patterns.map((p, i) =>
+        typeOf(node.patternProperties[p], ctx, `${hint}Pattern${i + 1}`));
+      index = unionOf(index === null ? patternTypes : [index, ...patternTypes]);
     }
   }
 

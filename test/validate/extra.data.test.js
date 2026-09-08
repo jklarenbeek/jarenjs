@@ -961,6 +961,17 @@ describe('Schema $data Keyword (Ajv-style)', function () {
       assert.isFalse(validate({ obj: { a: 1, b: 2, c: 3, d: 4 }, maxProps: 3 }));
     });
 
+    it('requires own JSON members when required names come from $data', function () {
+      const validate = compiler.compile({
+        properties: { obj: { type: 'object', required: { $data: '/requiredProps' } } },
+      });
+      for (const key of ['constructor', 'toString', '__proto__']) {
+        assert.isFalse(validate({ obj: {}, requiredProps: [key] }), key);
+        assert.isTrue(validate({ obj: { [key]: null }, requiredProps: [key] }), key);
+        assert.isFalse(validate({ obj: Object.create({ [key]: 1 }), requiredProps: [key] }), key);
+      }
+    });
+
     it('should validate required using $data reference', function () {
       const validate = compiler.compile({
         properties: {

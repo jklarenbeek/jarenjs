@@ -51,11 +51,12 @@ export function resolveTheme(themes, prefix, nameOrOverrides = 'default', hostVa
   let vars = null;
   if (nameOrOverrides === 'host' && hostVars) nameOrOverrides = { vars: hostVars };
   if (typeof nameOrOverrides === 'string') {
-    name = themes[nameOrOverrides] ? nameOrOverrides : 'default';
+    name = Object.hasOwn(themes, nameOrOverrides) && themes[nameOrOverrides] ? nameOrOverrides : 'default';
     base = themes[name];
   }
   else if (nameOrOverrides && typeof nameOrOverrides === 'object') {
-    if (typeof nameOrOverrides.theme === 'string' && themes[nameOrOverrides.theme]) {
+    if (typeof nameOrOverrides.theme === 'string'
+      && Object.hasOwn(themes, nameOrOverrides.theme) && themes[nameOrOverrides.theme]) {
       name = nameOrOverrides.theme;
       base = themes[name];
     }

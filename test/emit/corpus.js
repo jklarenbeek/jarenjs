@@ -21,6 +21,18 @@
  */
 export const CORPUS = [
   {
+    // Pattern values remain valid even when additional names use another type.
+    name: 'Patterned',
+    schema: {
+      type: 'object',
+      patternProperties: { '^x': { type: 'string' } },
+      additionalProperties: { type: 'number' },
+    },
+    valid: [{ x: 'a' }, { other: 1 }, { x: 'a', other: 1 }],
+    invalidShape: [{ x: true }],
+    invalidWidened: [{ x: 1 }, { other: 'a' }],
+  },
+  {
     name: 'Account',
     schema: {
       type: 'object',

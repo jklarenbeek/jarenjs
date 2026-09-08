@@ -166,8 +166,12 @@ store untouched.
 
 The shadow runs over an empty data set; the real-data facts (the
 widening check, key consistency, the assertions over real rows) run on
-the real store inside its transaction. The shadow registers the same
-functions as the real run: `migrate(…, { registerFunctions })` runs on
+the real store inside its transaction. Batched transforms and validation
+include every row identity, including negative integer primary keys;
+target-schema validation visits every declared entity, even after an
+empty entity table.
+The shadow registers the same functions as the real run:
+`migrate(…, { registerFunctions })` runs on
 the shadow, the real and the reference connections before any DDL
 (§10), so a hand-created index over a registered deterministic
 function neither fails the shadow nor is silently dropped by it.

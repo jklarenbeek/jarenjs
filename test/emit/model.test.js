@@ -101,6 +101,24 @@ describe('compileEmitModel — composition', () => {
     assert.strictEqual(t.index.kind, 'union');
   });
 
+  it('includes pattern values beside typed additional properties in the index', () => {
+    const t = shape({
+      type: 'object',
+      properties: { enabled: { type: 'boolean' } },
+      required: ['enabled'],
+      patternProperties: { '^x': { type: 'string' } },
+      additionalProperties: { type: 'number' },
+    });
+    assert.deepStrictEqual(t.index, {
+      kind: 'union',
+      options: [
+        { kind: 'primitive', primitive: 'number' },
+        { kind: 'primitive', primitive: 'string' },
+        { kind: 'primitive', primitive: 'boolean' },
+      ],
+    });
+  });
+
   it('reads both tuple spellings', () => {
     assert.strictEqual(shape({ type: 'array', prefixItems: [{ type: 'string' }] }).kind, 'tuple');
     assert.strictEqual(shape({ type: 'array', items: [{ type: 'string' }] }).kind, 'tuple');

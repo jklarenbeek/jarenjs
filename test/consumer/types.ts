@@ -342,7 +342,18 @@ void (chainedValid && chainedIssues >= 0);
 //     than the schema, so it cannot certify data the service rejects
 //   - a constraint-invalid instance IS assignable  → the documented widening;
 //     TypeScript cannot express minLength, and the generated file says so
-import type { Account, Node as EmitNode, Strict } from './emit-generated.js';
+import type { Account, Node as EmitNode, Strict, Patterned } from './emit-generated.js';
+
+const emitPatternValid: Patterned = { x: 'a' };
+const emitAdditionalValid: Patterned = { other: 1 };
+const emitPatternAndAdditional: Patterned = { x: 'a', other: 1 };
+// The index cannot express which names match the pattern, so these widen honestly.
+const emitPatternWidened: Patterned = { x: 1 };
+const emitAdditionalWidened: Patterned = { other: 'a' };
+// @ts-expect-error — neither pattern nor additional properties admits a boolean
+const emitPatternInvalid: Patterned = { x: true };
+void [emitPatternValid, emitAdditionalValid, emitPatternAndAdditional,
+  emitPatternWidened, emitAdditionalWidened, emitPatternInvalid];
 
 // valid → must type-check
 const emitValid1: Account = { id: 'abc' };

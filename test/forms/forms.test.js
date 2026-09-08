@@ -310,6 +310,15 @@ describe('Preemptive Field Validation', function () {
 
 describe('Form Data Helpers', function () {
   describe('#createInitialData()', function () {
+    it('preserves prototype-named defaults as own JSON members', function () {
+      const schema = JSON.parse('{"type":"object","properties":{"__proto__":{"default":{"role":"admin"}},"constructor":{"const":3},"toString":{"default":"label"}}}');
+      const data = createInitialData(buildFormModel(schema));
+      assert.deepStrictEqual(data, JSON.parse('{"__proto__":{"role":"admin"},"constructor":3,"toString":"label"}'));
+      assert.strictEqual(Object.getPrototypeOf(data), Object.prototype);
+      assert.strictEqual(data.role, undefined);
+      assert.strictEqual(JSON.stringify(data), '{"__proto__":{"role":"admin"},"constructor":3,"toString":"label"}');
+    });
+
     it('should fill defaults and consts, leave the rest absent', function () {
       const model = buildFormModel({
         type: 'object',

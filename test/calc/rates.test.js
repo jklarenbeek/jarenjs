@@ -99,6 +99,69 @@ describe('#calc rates layer (effect + debounce + fallback)', function () {
     assert.ok(/HTTP 503/.test(events[0][1].message));
   });
 
+  it('an older success or failure cannot replace the newest successful refresh', async () => {
+    for (const staleFails of [false, true]) {
+      const pending = [];
+      const events = [];
+      const layer = createRatesLayer({
+        provider: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+        now: () => 100, // requests may start in the same clock tick
+      });
+      const dispatch = (name, payload) => events.push([name, payload]);
+      layer.effects['rates-fetch']({}, dispatch);
+      layer.effects['rates-fetch']({ force: true }, dispatch);
+      pending[1].resolve({ base: 'USD', rates: { USD: 1, EUR: 2 } });
+      await Promise.resolve();
+      if (staleFails) pending[0].reject(new Error('old failure'));
+      else pending[0].resolve({ base: 'USD', rates: { USD: 1, EUR: 1 } });
+      await Promise.resolve();
+      assert.deepEqual(events, [['calc/rates-ok', { base: 'USD', rates: { USD: 1, EUR: 2 }, at: 100 }]]);
+    }
+  });
+
+  it('an older success cannot mask the newest refresh failure', async () => {
+    const pending = [];
+    const events = [];
+    const layer = createRatesLayer({
+      provider: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+      now: () => 100,
+    });
+    const dispatch = (name, payload) => events.push([name, payload]);
+    layer.effects['rates-fetch']({}, dispatch);
+    layer.effects['rates-fetch']({ force: true }, dispatch);
+    pending[1].reject(new Error('latest failure'));
+    await Promise.resolve();
+    pending[0].resolve({ base: 'USD', rates: { USD: 1 } });
+    await Promise.resolve();
+    assert.deepEqual(events, [['calc/rates-err', { message: 'latest failure' }]]);
+  });
+
+  it('settling an older request keeps the newest request in flight', async () => {
+    for (const staleFails of [false, true]) {
+      const pending = [];
+      const events = [];
+      let clock = 100;
+      const layer = createRatesLayer({
+        provider: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+        now: () => clock,
+        refreshMs: 100,
+      });
+      const dispatch = (name, payload) => events.push([name, payload]);
+      layer.effects['rates-fetch']({}, dispatch);
+      layer.effects['rates-fetch']({ force: true }, dispatch);
+      if (staleFails) pending[0].reject(new Error('old failure'));
+      else pending[0].resolve({ base: 'USD', rates: { USD: 1 } });
+      await Promise.resolve();
+      clock = 1000; // debounce window has expired, but the newer request has not settled
+      layer.effects['rates-fetch']({}, dispatch);
+      assert.equal(pending.length, 2);
+      assert.deepEqual(events, []);
+      pending[1].resolve({ base: 'USD', rates: { USD: 1, EUR: 2 } });
+      await Promise.resolve();
+      assert.deepEqual(events, [['calc/rates-ok', { base: 'USD', rates: { USD: 1, EUR: 2 }, at: 100 }]]);
+    }
+  });
+
   it('the static fallback table works offline (no network)', () => {
     const layer = createRatesLayer({});
     assert.equal(layer.fallbackRates.base, 'USD');

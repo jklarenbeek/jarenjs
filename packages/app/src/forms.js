@@ -111,6 +111,9 @@ export function createFormView(options = {}) {
   const ctl = (control) => `${root}..[?@.control == '${control}']`;
 
   const disabled = { $not: '$.enabled' };
+  // Selects, checkboxes and collection controls have no readonly mode.
+  // Disabling their fieldset also prevents edits through child controls.
+  const writeDisabled = { $or: [disabled, '$.readOnly'] };
 
   /** The shared field chrome around one control vnode. */
   const field = (control) => ['div', { class: `${cls}-field`, 'data-pointer': '$.pointer' },
@@ -128,6 +131,7 @@ export function createFormView(options = {}) {
         // the glyph is decoration; the accessible name is the label
         'aria-label': labels.removeItem,
         title: labels.removeItem,
+        disabled: writeDisabled,
         on: { click: { action: act.remove, with: { pointer: '$.pointer' } } },
       }, options.removeLabel ?? '×']] },
   ];
@@ -179,7 +183,7 @@ export function createFormView(options = {}) {
     // nested objects: a fieldset group
     {
       match: ctl('object'),
-      body: ['fieldset', { class: `${cls}-group`, 'data-pointer': '$.pointer' },
+      body: ['fieldset', { class: `${cls}-group`, 'data-pointer': '$.pointer', disabled: writeDisabled },
         { $if: ['$.label', ['legend', {}, '$.label']] },
         [{ $apply: '$.children[*]' }],
         [{ $apply: '$.errors[*]' }],
@@ -188,7 +192,7 @@ export function createFormView(options = {}) {
     // arrays: expanded items plus the add-item button
     {
       match: ctl('array'),
-      body: ['fieldset', { class: `${cls}-array`, 'data-pointer': '$.pointer' },
+      body: ['fieldset', { class: `${cls}-array`, 'data-pointer': '$.pointer', disabled: writeDisabled },
         { $if: ['$.label', ['legend', {}, '$.label']] },
         [{ $apply: '$.items[*]' }],
         { $if: [{ $exists: '$.addValue' },
@@ -197,6 +201,7 @@ export function createFormView(options = {}) {
             class: `${cls}-add`,
             'aria-label': labels.addItem,
             title: labels.addItem,
+            disabled: writeDisabled,
             on: { click: { action: act.add, with: { pointer: '$.pointer', value: '$.addValue' } } },
           }, options.addLabel ?? '+']] },
         [{ $apply: '$.errors[*]' }],
@@ -216,7 +221,7 @@ export function createFormView(options = {}) {
     {
       match: ctl('select'),
       body: field(['select', {
-        disabled,
+        disabled: writeDisabled,
         on: {
           change: { action: act.json, with: writeWith, event: [JSON_FIELD] },
         },
@@ -228,7 +233,7 @@ export function createFormView(options = {}) {
       body: field(['input', {
         type: 'checkbox',
         checked: '$.value',
-        disabled,
+        disabled: writeDisabled,
         on: { change: { action: act.check, with: writeWith } },
       }]),
     },

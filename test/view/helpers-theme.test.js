@@ -33,6 +33,27 @@ describe('view/helpers — resolveTheme', () => {
     assert.equal(r.tokens.axis, '#64748b');
   });
 
+  it('falls back for inherited names in string and override selections', () => {
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      const direct = resolveTheme(THEMES, 'calc', name);
+      assert.equal(direct.name, 'default');
+      assert.deepEqual(direct.tokens, THEMES.default);
+      const overrides = resolveTheme(THEMES, 'calc', { theme: name });
+      assert.equal(overrides.name, 'default');
+      assert.deepEqual(overrides.tokens, { ...THEMES.default, theme: name });
+      assert.equal(overrides.cssVars['--calc-axis'], '#64748b');
+    }
+  });
+
+  it('selects explicitly declared prototype-named themes', () => {
+    const themes = { ...THEMES, ['__proto__']: { axis: '#fff' } };
+    for (const selection of ['__proto__', { theme: '__proto__' }]) {
+      const result = resolveTheme(themes, 'calc', selection);
+      assert.equal(result.name, '__proto__');
+      assert.equal(result.cssVars['--calc-axis'], '#fff');
+    }
+  });
+
   it('defaults the argument to "default"', () => {
     const r = resolveTheme(THEMES, 'calc');
     assert.equal(r.name, 'default');

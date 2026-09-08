@@ -89,6 +89,70 @@ describe('#calc component: app integration (synchronous dispatch)', function () 
     assert.equal(after.to, before.from);
   });
 
+  it('changing converter dimension selects valid units and immediately computes their result', () => {
+    const { app } = makeApp();
+    app.dispatch('calc/mode', { mode: 'converter' });
+    for (const [dimension, from, to, result] of [
+      ['length', 'nm', 'um', '0.1'],
+      ['temperature', 'K', 'C', '-173.15'],
+      ['currency', 'USD', 'EUR', '92.592593'],
+    ]) {
+      app.dispatch('calc/conv-dim', null, { target: { value: dimension } });
+      assert.deepEqual(app.getState().calc.conv, { dimension, from, to, value: 100 });
+      const vm = contributeCalcViewModel(app.getState()).converter;
+      assert.deepEqual(vm.unitsFrom.filter((unit) => unit.selected).map((unit) => unit.id), [from]);
+      assert.deepEqual(vm.unitsTo.filter((unit) => unit.selected).map((unit) => unit.id), [to]);
+      assert.equal(vm.result, result);
+    }
+    app.destroy();
+  });
+
+  it('selecting the same dimension preserves the chosen units', () => {
+    const { app } = makeApp();
+    app.dispatch('calc/mode', { mode: 'converter' });
+    app.dispatch('calc/conv-dim', null, { target: { value: 'length' } });
+    app.dispatch('calc/conv-from', null, { target: { value: 'm' } });
+    app.dispatch('calc/conv-to', null, { target: { value: 'km' } });
+    for (let i = 0; i < 2; i++) {
+      app.dispatch('calc/conv-dim', null, { target: { value: 'length' } });
+      assert.deepEqual(app.getState().calc.conv, { dimension: 'length', from: 'm', to: 'km', value: 100 });
+      assert.equal(contributeCalcViewModel(app.getState()).converter.result, '0.1');
+    }
+    app.destroy();
+  });
+
+  it('currency selection reads the current rate table, including a single available currency', () => {
+    const { app } = makeApp();
+    app.dispatch('calc/mode', { mode: 'converter' });
+    for (const [rates, from, to, result] of [
+      [{ USD: 1, CHF: 2 }, 'USD', 'CHF', '50'],
+      [{ EUR: 1 }, 'EUR', 'EUR', '100'],
+    ]) {
+      app.dispatch('calc/conv-dim', null, { target: { value: 'length' } });
+      app.dispatch('calc/rates-ok', { base: 'USD', rates });
+      app.dispatch('calc/conv-dim', null, { target: { value: 'currency' } });
+      const vm = contributeCalcViewModel(app.getState()).converter;
+      assert.deepEqual(app.getState().calc.conv, { dimension: 'currency', from, to, value: 100 });
+      assert.deepEqual(vm.unitsFrom.filter((unit) => unit.selected).map((unit) => unit.id), [from]);
+      assert.deepEqual(vm.unitsTo.filter((unit) => unit.selected).map((unit) => unit.id), [to]);
+      assert.equal(vm.result, result);
+    }
+    app.destroy();
+  });
+
+  it('a dimension with no available units leaves the existing conversion intact', () => {
+    const { app } = makeApp();
+    app.dispatch('calc/mode', { mode: 'converter' });
+    app.dispatch('calc/conv-dim', null, { target: { value: 'length' } });
+    const before = app.getState().calc.conv;
+    app.dispatch('calc/conv-dim', null, { target: { value: 'unknown' } });
+    assert.deepEqual(app.getState().calc.conv, before);
+    app.dispatch('calc/rates-ok', { base: 'USD', rates: {} });
+    app.dispatch('calc/conv-dim', null, { target: { value: 'currency' } });
+    assert.deepEqual(app.getState().calc.conv, before);
+    app.destroy();
+  });
+
   it('financial mode renders the @jarenjs/forms panel and a solved result', () => {
     const { app } = makeApp();
     app.dispatch('calc/mode', { mode: 'financial' });

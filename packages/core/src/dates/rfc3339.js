@@ -5,7 +5,7 @@ import {
   isObjectOfClass,
 } from '../index.js';
 // the calendar rules live in civil.js, which owns the day tables
-import { isLeapYear, daysInMonth } from './civil.js';
+import { isLeapYear, daysInMonth, daysFromCivil } from './civil.js';
 
 export { isLeapYear };
 
@@ -365,18 +365,16 @@ export function epochOfRFC3339Parts(parts) {
     return NaN;
   const seconds = parts.seconds < 0 ? 0 : parts.seconds;
   const whole = Math.floor(seconds);
+  // Civil day numbers preserve year zero's leap day and carries across
+  // year 99; Date.UTC's 1900-based interpretation of 0-99 cannot.
   const ms = Date.UTC(
-    parts.year, parts.month - 1, parts.day,
+    1970, 0, 1 + daysFromCivil(parts.year, parts.month, parts.day),
     parts.hours < 0 ? 0 : parts.hours,
     parts.minutes < 0 ? 0 : parts.minutes,
     whole, Math.round((seconds - whole) * 1000));
   if (ms !== ms)
     return NaN;
-  // Date.UTC maps years 0-99 into the 1900s; restore the real year
-  const utc = new Date(ms);
-  if (parts.year >= 0 && parts.year < 100)
-    utc.setUTCFullYear(parts.year);
-  return utc.getTime() - (parts.offset === null ? 0 : parts.offset) * 60000;
+  return ms - (parts.offset === null ? 0 : parts.offset) * 60000;
 }
 //#endregion
 

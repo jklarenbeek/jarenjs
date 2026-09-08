@@ -1040,20 +1040,23 @@ function walkRows(connection, table, batchSize, handle, keyed = true, entityMapp
   const keySelect = keyed ? `, ${q('key')} AS ${q('k')}` : '';
   const columnSelect = entityMapping === null ? '' : entityColumnsOf(entityMapping)
     .map((column) => `, ${q(column)}`).join('');
-  const sql = `SELECT ${rid} AS ${q('rid')}, ${dialect.jsonText(q('doc'))} AS ${q('doc')}`
-    + `${keySelect}${columnSelect} FROM ${q(table)} WHERE ${rid} > ${dialect.parameterRef(1, 'after')} `
-    + `ORDER BY ${rid} ${dialect.limitClause(batchSize, undefined)}`;
-  return chain(connection.prepare(sql), (statement) => {
+  const select = `SELECT ${rid} AS ${q('rid')}, ${dialect.jsonText(q('doc'))} AS ${q('doc')}`
+    + `${keySelect}${columnSelect} FROM ${q(table)}`;
+  const ordered = ` ORDER BY ${rid} ${dialect.limitClause(batchSize, undefined)}`;
+  // An INTEGER PRIMARY KEY can be negative. The first batch has no
+  // lower bound; subsequent batches seek from a row actually read.
+  return chain(connection.prepare(select + ordered), (first) => chain(connection.prepare(
+    `${select} WHERE ${rid} > ${dialect.parameterRef(1, 'after')}${ordered}`), (statement) => {
     const nextBatch = (after) => {
       if (check !== undefined) check();
-      return chain(statement.all([after]), (rows) => {
+      return chain(after === undefined ? first.all([]) : statement.all([after]), (rows) => {
         if (rows.length === 0) return null;
         return chain(handle(rows), () =>
           nextBatch(rows[rows.length - 1].rid));
       });
     };
-    return nextBatch(-1);
-  });
+    return nextBatch(undefined);
+  }));
 }
 
 /** The physical columns an entity row carries beside its document. */
@@ -1316,7 +1319,6 @@ function validateTargetState(connection, model, options) {
   const collections = [...normalizeModel(model, options.expressions).values()];
   const entities = [...normalizeEntities(model).values()];
   const dialect = connection.dialect;
-  const q = dialect.quoteIdentifier;
   // entity tables carry no 'key' column; the batched walk goes by row
   // identity and validates every stored document against the target
   const verifyEntity = (i) => {
@@ -1330,28 +1332,17 @@ function validateTargetState(connection, model, options) {
     // schema judges; the rest-document alone failed every entity whose
     // required members are columns, so a pure widening could not land
     const entityMapping = explainMapping(model).entities[entity.name];
-    const rid = dialect.rowIdentity();
-    const columnSelect = entityColumnsOf(entityMapping).map((column) => `, ${q(column)}`).join('');
-    const sql = `SELECT ${rid} AS ${q('rid')}, ${dialect.jsonText(q('doc'))} AS ${q('doc')}${columnSelect} `
-      + `FROM ${q(entity.name)} WHERE ${rid} > ${dialect.parameterRef(1, 'after')} `
-      + `ORDER BY ${rid} ${dialect.limitClause(options.batchSize, undefined)}`;
-    return chain(connection.prepare(sql), (statement) => {
-      const nextBatch = (after) =>
-        chain(statement.all([after]), (rows) => {
-          if (rows.length === 0) return null;
-          for (const row of rows) {
-            const outcome = validate(mergeEntityRow(entityMapping, row, 'doc'));
-            const valid = outcome === true || outcome?.valid === true;
-            if (!valid) {
-              throw refuse('JD0021',
-                `entity '${entity.name}': a stored document (row ${row.rid}) does not `
-                + 'validate against the target schema — a narrowing needs a data transform');
-            }
-          }
-          return nextBatch(rows[rows.length - 1].rid);
-        });
-      return nextBatch(-1);
-    });
+    return chain(walkRows(connection, entity.name, options.batchSize, (rows) => {
+      for (const row of rows) {
+        const outcome = validate(mergeEntityRow(entityMapping, row, 'doc'));
+        const valid = outcome === true || outcome?.valid === true;
+        if (!valid) {
+          throw refuse('JD0021',
+            `entity '${entity.name}': a stored document (row ${row.rid}) does not `
+            + 'validate against the target schema — a narrowing needs a data transform');
+        }
+      }
+    }, false, entityMapping), () => verifyEntity(i + 1));
   };
   const verifyNext = (i) => {
     if (i >= collections.length) return null;

@@ -116,6 +116,75 @@ describe('the standard forms stylesheet', function () {
     assert.strictEqual(fieldControl(container, '/name').attributes.get('value') ?? 'Joham', 'Joham');
   });
 
+  it('group enablement disables nested controls and array buttons, and clears when enabled', function () {
+    const enabled = { $not: '$.locked' };
+    const { app, container } = mountForm({ schema: {
+      type: 'object',
+      properties: {
+        locked: { type: 'boolean', default: true },
+        group: {
+          type: 'object', 'x-form': { enabled },
+          properties: { name: { type: 'string', default: 'Jo' } },
+        },
+        tags: { type: 'array', default: ['a'], items: { type: 'string' }, 'x-form': { enabled } },
+      },
+    } });
+    const group = find(container, (n) => n.attributes?.get('data-pointer') === '/group');
+    const tags = find(container, (n) => n.attributes?.get('data-pointer') === '/tags');
+    const add = find(tags, (n) => n.attributes?.get('class') === 'jaren-form-add');
+    assert.strictEqual(group.tagName, 'fieldset');
+    assert.strictEqual(tags.tagName, 'fieldset');
+    for (const control of [group, tags, add]) assert.strictEqual(control.attributes.has('disabled'), true);
+
+    fire(fieldControl(container, '/locked'), 'change', { target: { checked: false } });
+    for (const control of [group, tags, add]) assert.strictEqual(control.attributes.has('disabled'), false);
+    assert.deepStrictEqual(app.getState().data, { locked: false, group: { name: 'Jo' }, tags: ['a'] });
+    fire(fieldControl(container, '/locked'), 'change', { target: { checked: true } });
+    for (const control of [group, tags, add]) assert.strictEqual(control.attributes.has('disabled'), true);
+    app.destroy();
+  });
+
+  it('readOnly disables controls without a native readonly mode and preserves text readonly', function () {
+    const { app, container } = mountForm({ schema: {
+      type: 'object',
+      properties: {
+        accepted: { type: 'boolean', default: true, readOnly: true },
+        plan: { enum: ['free', 'pro'], default: 'free', readOnly: true },
+        name: { type: 'string', default: 'Jo', readOnly: true },
+        group: { type: 'object', readOnly: true, properties: { name: { type: 'string', default: 'Jo' } } },
+        tags: { type: 'array', default: ['a'], items: { type: 'string' }, readOnly: true },
+        editable: { type: 'boolean', default: false },
+      },
+    } });
+    assert.strictEqual(fieldControl(container, '/accepted').attributes.has('disabled'), true);
+    assert.strictEqual(fieldControl(container, '/plan', 'select').attributes.has('disabled'), true);
+    assert.strictEqual(fieldControl(container, '/name').attributes.has('readonly'), true);
+    assert.strictEqual(fieldControl(container, '/name').attributes.has('disabled'), false);
+    assert.strictEqual(fieldControl(container, '/editable').attributes.has('disabled'), false);
+    for (const pointer of ['/group', '/tags']) {
+      const group = find(container, (n) => n.attributes?.get('data-pointer') === pointer);
+      assert.strictEqual(group.attributes.has('disabled'), true);
+    }
+    const html = renderToString(app.getVnode());
+    assert.match(html, /<input type="checkbox" checked disabled>/);
+    assert.match(html, /<select disabled>/);
+    assert.match(html, /<fieldset class="jaren-form-array" data-pointer="\/tags" disabled>/);
+    app.destroy();
+  });
+
+  it('disabled and readOnly array items cannot be removed through an enabled button', function () {
+    for (const annotation of [{ readOnly: true }, { 'x-form': { enabled: false } }, {}]) {
+      const { app, container } = mountForm({ schema: {
+        type: 'object',
+        properties: { tags: { type: 'array', default: ['a'], items: { type: 'string', ...annotation } } },
+      } });
+      const item = find(container, (n) => n.attributes?.get('data-pointer') === '/tags/0');
+      const remove = find(item, (n) => n.attributes?.get('class') === 'jaren-form-remove');
+      assert.strictEqual(remove.attributes.has('disabled'), Object.keys(annotation).length > 0);
+      app.destroy();
+    }
+  });
+
   it('number inputs coerce, clearing writes null', function () {
     const { app, container } = mountForm();
     fire(fieldControl(container, '/age'), 'input', { target: { value: '44' } });

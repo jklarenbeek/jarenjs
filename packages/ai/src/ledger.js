@@ -955,7 +955,8 @@ export function createLedger(options = {}) {
    * vector, through the seam, in batches, inside the write chain — so no
    * other write moves a record under it. Memories first, then skills,
    * each in key order; `limit` caps how many records this run embeds,
-   * `batch` how many texts one seam call carries.
+   * `batch` how many texts one seam call carries. Positive fractional batch sizes
+   * are floored to an integer of at least one.
    *
    * Honest about what it did not do. A second run over a swept ledger
    * embeds zero and makes no seam call (the two-run check). A failing
@@ -972,7 +973,7 @@ export function createLedger(options = {}) {
    */
   function embedMissing(options = {}) {
     return enqueue(async () => {
-      const batch = typeof options.batch === 'number' && options.batch > 0 ? Math.floor(options.batch) : EMBED_BATCH;
+      const batch = typeof options.batch === 'number' && options.batch > 0 ? Math.max(1, Math.floor(options.batch)) : EMBED_BATCH;
       /** @type {Array<{ key: string, record: any, text: string }>} */
       const pending = [];
       /** @type {Map<string, LedgerEmbeddedBy>} */

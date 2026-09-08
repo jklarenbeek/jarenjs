@@ -198,6 +198,13 @@ describe('createIntlZoneProvider — named answers', () => {
     assert.strictEqual(provider.toEpoch(wall(2026, 7, 1, 12, 0, 30.25), 'Asia/Kolkata'), at);
   });
 
+  it('keeps year-zero leap day and its UTC offset in both directions', () => {
+    const at = Date.parse('0000-02-29T12:34:56.789Z');
+    const parts = { ...wall(0, 2, 29, 12, 34, 56.789), offset: 0 };
+    assert.deepStrictEqual(provider.toParts(at, 'Etc/UTC'), parts);
+    assert.strictEqual(provider.toEpoch(parts, 'Etc/UTC'), at);
+  });
+
   it('keeps a year below 100 and a year before 1 as the kernel counts them', () => {
     assert.strictEqual(provider.toParts(Date.UTC(-50, 0, 1), 'Etc/UTC').year, -50);
     const fiftyAD = new Date(0);

@@ -228,7 +228,7 @@ function compileDependentRequired(schemaObj, jsonSchema) {
   const addError = schemaObj.createErrorHandler(false, ['dependentRequired']);
 
   return function validateDependentRequiredItem(data, dataPath, dataRoot, dataKey) {
-    if (dataKey in dependentRequired) {
+    if (Object.hasOwn(dependentRequired, dataKey)) {
       const required = dependentRequired[dataKey];
       return includesAll(Object.keys(data), required)
         || addError(dataKey, data, dataPath);

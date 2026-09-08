@@ -47,6 +47,12 @@ depreciation, bond, indicators, returns) and `@jarenjs/core/convert`
 primitive). The calculator's financial mode calls `core/finance`; its
 converter calls `core/convert`. Core is pure and never fetches.
 
+Changing the converter dimension updates its unit selections in the same
+transition. Existing choices survive when the new dimension offers them;
+otherwise it selects the first two available units (the same unit for both
+sides when only one exists). Currency choices come from the current rate
+table. A dimension with no available units leaves the conversion unchanged.
+
 ## Live currency (the maturity example)
 
 The converter's currency dimension takes live crypto+fiat rates from free
@@ -55,7 +61,9 @@ public tickers (CoinGecko default, Binance alternative) through an
 conversion** is `@jarenjs/core/convert`'s `convertCurrency`; only the
 *fetch* is component-side. A static fallback table keeps the converter,
 SSR and offline tests working with no network; failures route to an error
-action.
+action. When refreshes overlap, only the newest request may publish success
+or failure; an older completion cannot replace its rates or clear its
+in-flight status.
 
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
 

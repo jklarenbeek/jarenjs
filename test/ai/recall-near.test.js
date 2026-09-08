@@ -377,6 +377,25 @@ describe('ai ledger — embedMissing is the explicit sweep', function () {
     assert.deepStrictEqual(embedder.batches.map((b) => b.length), [2, 1, 3, 1]);
   });
 
+  it('floors a positive fractional batch to at least one and makes no calls on the second sweep', async function () {
+    const embedder = counting({
+      model: 'fractional-batch', dims: 2,
+      embed: async (texts) => {
+        assert.ok(texts.length > 0, 'a batch must make progress');
+        return texts.map(() => new Float32Array([1, 0]));
+      },
+    });
+    const ledger = createLedger({ now: clock(), embedder });
+    await ledger.addMemory(memory('m1', 'first fact'));
+    await ledger.addMemory(memory('m2', 'second fact'));
+    assert.deepStrictEqual(await ledger.embedMissing({ batch: 0.5 }), { embedded: 2, remaining: 0 });
+    assert.deepStrictEqual(embedder.batches, [['first fact'], ['second fact']]);
+    assert.deepStrictEqual((await ledger.getMemory('m1')).embedding, [1, 0]);
+    assert.deepStrictEqual((await ledger.getMemory('m2')).embedding, [1, 0]);
+    assert.deepStrictEqual(await ledger.embedMissing({ batch: 0.5 }), { embedded: 0, remaining: 0 });
+    assert.strictEqual(embedder.batches.length, 2);
+  });
+
   it('a failing batch leaves its records un-embedded, counted in `remaining`, with the error surfaced once', async function () {
     const inner = hash16();
     let calls = 0;

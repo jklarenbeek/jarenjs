@@ -27,6 +27,7 @@
  */
 
 import { createBoundedCache } from '@jarenjs/core/cache';
+import { daysFromCivil } from '@jarenjs/core/dates/civil';
 import { epochOfRFC3339Parts } from '@jarenjs/core/dates/rfc3339';
 
 /**
@@ -92,25 +93,6 @@ function createFormatter(zone) {
 }
 
 /**
- * `Date.UTC` with the year kept as given: it maps 0-99 into the 1900s.
- * @param {number} year
- * @param {number} month - 1-12
- * @param {number} day
- * @param {number} hours
- * @param {number} minutes
- * @param {number} seconds - whole
- * @returns {number}
- */
-function utcOf(year, month, day, hours, minutes, seconds) {
-  const ms = Date.UTC(year, month - 1, day, hours, minutes, seconds);
-  if (year < 0 || year >= 100)
-    return ms;
-  const restored = new Date(ms);
-  restored.setUTCFullYear(year);
-  return restored.getTime();
-}
-
-/**
  * The wall clock at an instant, and the offset that produced it. The
  * offset is not read from a formatted `GMT+02:00` string but derived:
  * the wall clock re-read as UTC minus the instant is the offset, exact
@@ -143,7 +125,10 @@ function readParts(format, epoch) {
   if (beforeChrist)
     year = 1 - year;
   const wholeSecond = Math.floor(epoch / 1000) * 1000;
-  const offset = (utcOf(year, month, day, hours, minutes, seconds) - wholeSecond) / MINUTE;
+  // Use the core calendar for every year, including year zero and BCE.
+  const wall = daysFromCivil(year, month, day) * DAY
+    + ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  const offset = (wall - wholeSecond) / MINUTE;
   return { year, month, day, hours, minutes, seconds: seconds + (epoch - wholeSecond) / 1000, offset };
 }
 
