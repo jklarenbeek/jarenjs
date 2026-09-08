@@ -291,3 +291,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/locales/zh-tw` | JavaScript | declared |
 | `@jarenjs/locales/package.json` | metadata | — |
 <!--/fact-->
+
+Author JSON template catalogs and MessageSpec references with the
+[messages pen](../linq/docs/MESSAGES-PEN.md); existing locale render functions
+retain their pluralization and formatting behavior.

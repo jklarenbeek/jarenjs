@@ -87,3 +87,5 @@ npm install @jarenjs/studio
 
 Zero third-party runtime dependencies — only other `@jarenjs/*` packages.
 Node ≥ 24, ESM.
+
+Author portable project files with the [project pen](../../packages/linq/docs/PROJECT-PEN.md).

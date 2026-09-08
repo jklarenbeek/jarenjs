@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.67.0",
+  "version": "0.68.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -47,7 +47,27 @@
       "types": "./types/db.d.ts",
       "default": "./src/db/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./charts": {
+      "types": "./types/charts.d.ts",
+      "default": "./src/charts/index.js"
+    },
+    "./project": {
+      "types": "./types/project.d.ts",
+      "default": "./src/project/index.js"
+    },
+    "./jtlt": {
+      "types": "./types/jtlt.d.ts",
+      "default": "./src/jtlt/index.js"
+    },
+    "./messages": {
+      "types": "./types/messages.d.ts",
+      "default": "./src/messages/index.js"
+    },
+    "./ai": {
+      "types": "./types/ai.d.ts",
+      "default": "./src/ai/index.js"
+    }
   },
   "files": [
     "types/",
@@ -84,13 +104,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.67.0",
-    "@jarenjs/json": "^0.67.0"
+    "@jarenjs/core": "^0.68.0",
+    "@jarenjs/json": "^0.68.0"
   },
   "peerDependencies": {
-    "@jarenjs/db": "^0.67.0",
-    "@jarenjs/formats": "^0.67.0",
-    "@jarenjs/validate": "^0.67.0"
+    "@jarenjs/db": "^0.68.0",
+    "@jarenjs/formats": "^0.68.0",
+    "@jarenjs/validate": "^0.68.0"
   },
   "peerDependenciesMeta": {
     "@jarenjs/db": {

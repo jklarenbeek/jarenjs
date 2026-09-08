@@ -699,49 +699,6 @@ what each does is its own documentation's job
   invocation (`--in users=…  --in events=…`) and deciding what atomicity
   means across several files, since the whole-or-nothing rename that makes
   one file safe does not compose across two.
-- [ ] **The remaining authored documents have no pen.** Nine formats are
-  written by code today, under one contract stated in
-  [LINQ-FORMAT §1](../packages/linq/docs/LINQ-FORMAT.md) — the emitted
-  document is exactly the published one, types are phantoms, and grammar,
-  compile, docs and type gates hold each. Five authored formats are still
-  written as JSON literals, each for its own reason rather than a shared
-  blocker: `chart-definition` (`@jarenjs/charts`) is the most immediately
-  useful; `jaren-project` (`@jarenjs/studio`) is low value alone, since
-  the studio authors projects — its worth is round-tripping pen output
-  into the studio; the JTLT template document is blocked first on a
-  published `jaren-jtlt` grammar, which is a format decision and not a
-  pen one; message catalogs (`@jarenjs/contract`, `@jarenjs/locales`)
-  would be typed by the msgids the English catalog declares; and the AI
-  action language is authored by models rather than people, so a pen
-  there buys fixtures and tests rather than authoring. Each is one work
-  order of the shape every shipped pen already has — a subpath, a
-  `types/<pen>.d.ts`, a corpus test asserting emission byte for byte
-  against hand-written documents and the format's own examples, grammar
-  validation, an engine compile and run, a pen document whose fences
-  run, a tree-shaking probe carrying neither chain module nor engine, a
-  packed-consumer subpath and a type pin. A JTLT order additionally
-  carries the grammar artifact and its tests. None is scheduled.
-- [ ] **Twenty-five keywords the validator compiles have no schema-pen
-  method.** `@jarenjs/linq/schema` owns 69 keyword names
-  (`packages/linq/src/schema/builders.js`) and has a builder method for 44
-  of them; the rest are reachable only through `.keyword(key, value)` or
-  `from(json)`, which write verbatim and change no phantom type. They are
-  `not`; `unevaluatedProperties` and `unevaluatedItems`;
-  `dependentSchemas` and `dependencies`; `minContains` and `maxContains`;
-  `contentEncoding`, `contentMediaType` and `contentSchema`;
-  `formatMinimum`, `formatMaximum`, `formatExclusiveMinimum` and
-  `formatExclusiveMaximum`; `$id`, `$anchor` and `$vocabulary`;
-  `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef` and
-  `$recursiveAnchor`; `definitions` (the draft-07 spelling of `$defs`);
-  `additionalItems`; and `$data` with its bare `data` spelling. `@jarenjs/validate` compiles every one. The constraint is that
-  a method is not the whole cost: each wants a type reading that stays
-  honest — `not` has no sound `Infer<>` narrowing, the unevaluated pair is
-  an annotation-dependent keyword whose result depends on sibling
-  applicators, and the dynamic references would make `named()`'s
-  one-name-one-definition identity rule ambiguous — so the ones worth
-  adding first are the ones whose type reading is simply `this`
-  (`minContains`/`maxContains`, the content family, the format bounds).
-  The forms and model pens inherit whatever lands here.
 
 ## @jarenjs/ai
 

@@ -2,8 +2,8 @@
 
 > this file, the binder and the family's **normative reference**: what a
 > pen is, the rules all of them keep, the shared `JL01xx` table, and the
-> cross-pen views derived from the ten guides it indexes. **Read it when**
-> you want a rule that is true of every pen, an index of the eleven
+> cross-pen views derived from the guides it indexes. **Read it when**
+> you want a rule that is true of every pen, an index of the
 > documents, or one place to look up a method without knowing which pen
 > owns it
 
@@ -16,28 +16,29 @@ A **pen** is a by-code front-end to one of the suite's document formats:
 named functions that build a standard document — a JSON Schema, a
 `$model`, a `$jslt` stylesheet — the way the chain builds a query
 document. `@jarenjs/linq` exports each pen under its own subpath
-(`@jarenjs/linq/schema`, `/model`, `/jslt`, `/migration`, `/contract`,
-`/flow`, `/app` and `/forms`); `.` stays the chain.
+(<!--fact:coverage.subpaths-->`./ai`, `./app`, `./charts`, `./contract`, `./db`, `./flow`, `./forms`, `./jslt`, `./jtlt`, `./messages`, `./migration`, `./model`, `./project`, `./schema`<!--/fact-->); `.` stays the chain.
+
+Coverage: <!--fact:coverage.pens-->14 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
 
 **This document is the family's normative reference**: §1 states the
 rules every pen keeps, §1.3 the error codes they share, and §4–§7 the
 cross-pen views — the census, the refusal map, the measured price of each
 subpath, and every pen's mapping table in one place — none of which is
-written here, all of it derived from the ten documents beside it. Those
-ten are **guides**: each opens with the problem its pen solves, builds one
+written here, all of it derived from the documents beside it. Those
+are **guides**: each opens with the problem its pen solves, builds one
 document across its sections, and carries exactly one normative section
 of its own, the mapping table its rows here come from. So the two
 questions have two homes and neither is a copy of the other — "what is
 true of every pen, and where do I look this method up" is answered here;
 "how do I write one of these documents" is answered there. This section
-is the index of the ten, and it is how a reader reaches any of them.
+is the index of those guides, and it is how a reader reaches any of them.
 
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 820 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the ten guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the eleven documents, or one place to look up a method without knowing which pen owns it |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 948 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 1,724 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,218 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,092 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 781 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
@@ -45,13 +46,17 @@ is the index of the ten, and it is how a reader reaches any of them.
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,033 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,143 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 940 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
+| [AI-PEN.md](AI-PEN.md) | 98 | `./ai` — the public action program over environment slots. **Read it when** you want typed fixtures or host-authored programs without a model client. |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
+| [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | 75 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
 | [DB-CLIENT.md](DB-CLIENT.md) | 893 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 <!--/fact-->
 
 Every row of that table is derived, and none of it is written here: the
 sentence is the document's own opening line, the length is the file's,
-and `npm run docs:derive` writes the table out of the eleven documents
-beside this one. The line counts are not decoration — they are what tells
+and `npm run docs:derive` writes the table out of the documents in this directory. The line counts are not decoration — they are what tells
 a reader whether the document they are about to open is a ten-minute read
 or an afternoon — and `test/docs/format-citations.test.js` holds each one
 equal to the file it names, independently of the derivation.
@@ -61,7 +66,7 @@ the website opens these files through the binder and only through the
 binder, so the index IS the directory listing, and a pen added to
 `packages/linq/docs/` appears here the next time the derivation runs.
 
-§2 to §5 are derived the same way, from the same eleven documents. They
+§2 to §5 are derived the same way, from the same documents. They
 exist so that a reader with a cross-pen question — which pens raise
 `JL0104`, what a subpath costs, which pen has a `named()` — has one
 place to look, and so that the answer is never a second copy anybody has
@@ -89,17 +94,15 @@ data rather than for a program has no compile step to be faithful to.
 | `$fsm` 0.1, `$dag` 0.1 (`jaren-fsm`, `jaren-dag`) | `@jarenjs/flow` | **`./flow`** | [FLOW-PEN.md](FLOW-PEN.md) |
 | `jaren-app` 0.1 | `@jarenjs/app` | **`./app`** | [APP-PEN.md](APP-PEN.md) |
 | `x-form` on JSON Schema | `@jarenjs/forms` | **`./forms`** | [FORMS-PEN.md](FORMS-PEN.md) |
+| AI action program | `@jarenjs/ai` | **`./ai`** | [AI-PEN.md](AI-PEN.md) |
+| message catalogs / MessageSpec | `@jarenjs/core`, validate/forms/contract | **`./messages`** | [MESSAGES-PEN.md](MESSAGES-PEN.md) |
+| `$jtlt` 0.1 (`jaren-jtlt`) | `@jarenjs/json` | **`./jtlt`** | [JTLT-PEN.md](JTLT-PEN.md) |
+| `jaren-project` | `@jarenjs/studio` | **`./project`** | [PROJECT-PEN.md](PROJECT-PEN.md) |
+| `chart-definition` | `@jarenjs/charts` | **`./charts`** | [CHARTS-PEN.md](CHARTS-PEN.md) |
 
-Authored formats without a pen **yet** — the contract generalises to
-each, and each is its own piece of work rather than a silent extension
-of the set above: `chart-definition` (`@jarenjs/charts`),
-`jaren-project` (`@jarenjs/studio` — low value alone, since the studio
-authors projects; its worth is round-tripping pen output INTO the
-studio), the JTLT template document (`@jarenjs/json` — blocked first on
-a published `jaren-jtlt` grammar, which is a format decision), message
-catalogs (`@jarenjs/contract` and `@jarenjs/locales`), and the AI action
-language (`@jarenjs/ai` — a model authors those documents; a pen's worth
-there is fixtures and tests).
+The authored-document formats above share the public JSON boundary. Message
+catalogs preserve template strings; locale render functions remain executable
+code at the existing renderer boundary, as MESSAGES-PEN documents.
 
 Formats with **no pen, by decision**, each for the reason its row gives:
 
@@ -191,7 +194,7 @@ being assembled where one exists (`/properties/lines/items`).
 
 ## 2. The census
 
-What each of the eleven documents covers, counted from the document
+What each document covers, counted from the document
 itself. Every column has a gate behind it in a different file: the
 mapping rows are held equal to the subpath's callable names, the worked
 examples are executed against the JSON beside them, the refusal count is
@@ -201,18 +204,23 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 820 | — | — | — | — |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 948 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,724 | 34 | 8 | 15 | 174,264 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,218 | 66 | 10 | 4 | 33,156 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,092 | 28 | 6 | 3 | 41,582 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 36,717 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,092 | 28 | 6 | 3 | 45,143 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,856 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 24,259 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 45,298 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 48,859 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,033 | 16 | 7 | 3 | 19,910 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 47,444 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 37,312 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 893 | 41 | 4 | 2 | 623,994 B |
-| **eleven documents** | | **11,820** | **291** | **67** | | |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 51,006 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 40,873 B |
+| [AI-PEN.md](AI-PEN.md) | `./ai` | 98 | 12 | 1 | 3 | 16,841 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 18,337 B |
+| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,725 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 75 | 9 | 1 | 1 | 15,132 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,014 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 893 | 41 | 4 | 2 | 624,075 B |
+| **16 documents** | | **12,390** | **371** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -231,10 +239,10 @@ throws, so this table moves when a pen's source does.
 <!--fact:pens.codes-->
 | Code | Raised by |
 |---|---|
-| `JL0101` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [MODEL-PEN.md](MODEL-PEN.md), [JSLT-PEN.md](JSLT-PEN.md), [MIGRATION-PEN.md](MIGRATION-PEN.md), [CONTRACT-PEN.md](CONTRACT-PEN.md), [FLOW-PEN.md](FLOW-PEN.md), [APP-PEN.md](APP-PEN.md), [FORMS-PEN.md](FORMS-PEN.md), [DB-CLIENT.md](DB-CLIENT.md) |
-| `JL0102` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [MODEL-PEN.md](MODEL-PEN.md), [JSLT-PEN.md](JSLT-PEN.md), [MIGRATION-PEN.md](MIGRATION-PEN.md), [CONTRACT-PEN.md](CONTRACT-PEN.md), [FLOW-PEN.md](FLOW-PEN.md), [APP-PEN.md](APP-PEN.md), [FORMS-PEN.md](FORMS-PEN.md) |
+| `JL0101` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [MODEL-PEN.md](MODEL-PEN.md), [JSLT-PEN.md](JSLT-PEN.md), [MIGRATION-PEN.md](MIGRATION-PEN.md), [CONTRACT-PEN.md](CONTRACT-PEN.md), [FLOW-PEN.md](FLOW-PEN.md), [APP-PEN.md](APP-PEN.md), [FORMS-PEN.md](FORMS-PEN.md), [AI-PEN.md](AI-PEN.md), [MESSAGES-PEN.md](MESSAGES-PEN.md), [JTLT-PEN.md](JTLT-PEN.md), [PROJECT-PEN.md](PROJECT-PEN.md), [CHARTS-PEN.md](CHARTS-PEN.md), [DB-CLIENT.md](DB-CLIENT.md) |
+| `JL0102` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [MODEL-PEN.md](MODEL-PEN.md), [JSLT-PEN.md](JSLT-PEN.md), [MIGRATION-PEN.md](MIGRATION-PEN.md), [CONTRACT-PEN.md](CONTRACT-PEN.md), [FLOW-PEN.md](FLOW-PEN.md), [APP-PEN.md](APP-PEN.md), [FORMS-PEN.md](FORMS-PEN.md), [AI-PEN.md](AI-PEN.md) |
 | `JL0103` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [CONTRACT-PEN.md](CONTRACT-PEN.md) |
-| `JL0104` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [MODEL-PEN.md](MODEL-PEN.md), [JSLT-PEN.md](JSLT-PEN.md), [MIGRATION-PEN.md](MIGRATION-PEN.md), [FLOW-PEN.md](FLOW-PEN.md), [APP-PEN.md](APP-PEN.md), [FORMS-PEN.md](FORMS-PEN.md) |
+| `JL0104` | [SCHEMA-PEN.md](SCHEMA-PEN.md), [MODEL-PEN.md](MODEL-PEN.md), [JSLT-PEN.md](JSLT-PEN.md), [MIGRATION-PEN.md](MIGRATION-PEN.md), [FLOW-PEN.md](FLOW-PEN.md), [APP-PEN.md](APP-PEN.md), [FORMS-PEN.md](FORMS-PEN.md), [AI-PEN.md](AI-PEN.md), [JTLT-PEN.md](JTLT-PEN.md) |
 | `JL0105` | [QUERY-PEN.md](QUERY-PEN.md) |
 | `JL0106` | [MIGRATION-PEN.md](MIGRATION-PEN.md) |
 | `JL0107` | [DB-CLIENT.md](DB-CLIENT.md) |
@@ -255,15 +263,20 @@ it and each document publishes it. The rounded column is what
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
 | `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 174,264 B | 174 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 33,156 B | 33 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 41,582 B | 42 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 36,717 B | 37 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 45,143 B | 45 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,856 B | 20 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,259 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 45,298 B | 45 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 48,859 B | 49 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,910 B | 20 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 47,444 B | 47 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 37,312 B | 37 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 623,994 B | 624 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 51,006 B | 51 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 40,873 B | 41 kB |
+| `@jarenjs/linq/ai` | [AI-PEN.md](AI-PEN.md) | 16,841 B | 17 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 18,337 B | 18 kB |
+| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,725 B | 17 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,132 B | 15 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,014 B | 17 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 624,075 B | 624 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -467,6 +480,32 @@ it says.
 | `schemaOf(value)` | nothing: the document of a builder, or the value as given — the one call a consumer needs to accept "a schema, by hand or by pen" | `unknown` | native |
 | `requireJson(value, what)` | nothing: the JSON boundary every value entering a document crosses, exported so a pen built over this one uses the same door | `T` | native; a non-JSON value is `JL0101` |
 | `createFactories(classes)` | nothing: the named factories above, built for one SET of builder classes. `@jarenjs/linq/model` and `@jarenjs/linq/forms` call it with their subclasses, which is why the wiring exists exactly once and no subpath patches another's prototype | the factory record | native |
+
+**Content, containment and resource identity**
+
+| Method | Emits | `Infer` / `Input` | Status |
+|---|---|---|---|
+| `.id(uri)` | `$id` | `this` | native; string required |
+| array `.minContains(n)`, `.maxContains(n)` | `minContains`, `maxContains` | `this` | native; non-negative integers |
+| string `.contentEncoding(text)` | `contentEncoding` | `this` | native |
+| string `.contentMediaType(text)` | `contentMediaType` | `this` | native |
+| string `.contentSchema(builder)` | `contentSchema` | `this` | native; named definitions hoist |
+| string `.formatMinimum(text)`, `.formatMaximum(text)` | `formatMinimum`, `formatMaximum` | `this` | native |
+| string `.formatExclusiveMinimum(text)`, `.formatExclusiveMaximum(text)` | `formatExclusiveMinimum`, `formatExclusiveMaximum` | `this` | native |
+
+**Applicators, references and legacy keywords**
+
+| Method | Emits | `Infer` / `Input` | Status |
+|---|---|---|---|
+| `.not(builder)` | `not` | `this` | native |
+| `.unevaluatedProperties(builder)`, `.unevaluatedItems(builder)` | `unevaluatedProperties`, `unevaluatedItems` | `this` | native |
+| `.dependentSchemas(map)`, `.dependencies(map)` | `dependentSchemas`, `dependencies` | `this` | native; legacy dependencies also accept arrays of distinct member names |
+| `.anchor(name)`, `.vocabulary(map)` | `$anchor`, `$vocabulary` | `this` | native |
+| `.dynamicRef(uri)`, `.dynamicAnchor(name)` | `$dynamicRef`, `$dynamicAnchor` | `this` | native; no inferred reference identity |
+| `.recursiveRef(uri)`, `.recursiveAnchor(boolean)` | `$recursiveRef`, `$recursiveAnchor` | `this` | native |
+| `.definitions(map)`, `.additionalItems(builder)` | `definitions`, `additionalItems` | `this` | native; legacy vocabulary |
+| `.dollarData(pointer)`, `.data(map)` | `$data`, `data` | `this` | native |
+| `.legacyNullable(boolean)` | `nullable` | `unknown` | native; distinct from `.nullable()` |
 
 ### The Jaren model pen — [MODEL-PEN.md §2](MODEL-PEN.md)
 
@@ -751,6 +790,95 @@ it says.
 | `assert` | EBV query | `x-form.assert` | a cross-field preemptive assertion. Fails **closed**: an assertion that cannot be computed has not been satisfied |
 | `computed` | query | `x-form.computed` | the field's derived value, mapped to plain JSON. A failure leaves the value absent |
 | `message` | string or MessageSpec | `x-form.message`, verbatim | what an `assert` failure renders — an inline template, or `{ $msgid, message?, params? }` for the catalog |
+
+### The AI program pen — [AI-PEN.md §2](AI-PEN.md)
+
+| Factory / method | Emits | Type | Status |
+|---|---|---|---|
+| `program(slots?)` | empty `steps` | declared input names | native |
+| `chunk(from, as, options?)`, `.chunk(...)` | chunk; strategy and size | result family | native |
+| `grep(from, as, options)`, `.grep(...)` | grep; pattern, flags, limit | match-list slot | native |
+| `select(from, as, query)`, `.select(...)` | select; query JSON | result slot | native |
+| `stat(from, as)`, `.stat(...)` | stat | result slot | native |
+| `peek(from, as)`, `.peek(...)` | peek | result slot | native |
+| `map(from, as, prompt)`, `.map(...)` | map; bounded instruction | result family | native |
+| `reduce(from, as, query)`, `.reduce(...)` | reduce; query JSON | result slot | native |
+| `answer(from, options?)`, `.answer(...)` | answer; optional chars, no as | terminal program | native |
+| `.step(step)` | appends a public step | tracks its input/result names | native |
+| `from(document)` | raw program | no binding-order inference | native |
+| `.schema`, `.toJSON()` | frozen public JSON | program document | native |
+
+### The messages pen — [MESSAGES-PEN.md §2](MESSAGES-PEN.md)
+
+| Method | Emits | Type | Status |
+|---|---|---|---|
+| `catalog(source?, locale?)` | starts an empty draft; defaults to all/en | source key space | native |
+| `.entry(id, template)` | adds or replaces one string entry | adds present id | native |
+| `.entries(map)` | adds or replaces several entries | adds literal keys | native |
+| `.complete()` | complete frozen catalog | every source id | native |
+| `.partial()` | frozen subset | explicitly present ids | native |
+| `.toJSON()` | complete frozen catalog | requires completeness | native |
+| `from(document, options?)` | raw draft; options choose source/locale | literal keys where known | native |
+| `inline(template)` | inline MessageSpec string | string | native |
+| `message(id, options?)` | `{ $msgid, params?, message? }` | known id/parameter names | native |
+
+### The JTLT pen — [JTLT-PEN.md §2](JTLT-PEN.md)
+
+| Method | Emits | Type | Status |
+|---|---|---|---|
+| `text(string)` | literal text; doubles a leading `$` | string segment | native |
+| `query(expression, options?)` | raw or captured query string/object | interpolated segment | native |
+| `raw(expression, options?)` | `{ $raw: expression }` | unescaped interpolation | native |
+| `json(expression, options?)` | `{ $json: expression }` | JSON serialization | native |
+| `apply(selector, mode?, options?)` | `$apply` selector or selector/mode list | dispatch splice | native |
+| `rule(body?, options?)` | body and optional match/mode/priority | rule | native |
+| `.body(segments)`, `.match(spec)`, `.mode(string)`, `.priority(number)` | replacement rule member | same rule | native |
+| `stylesheet(rules?, options?)` | `$jtlt`, optional output, rules | envelope | native |
+| `bare(rules?)` | public rule array | shorthand | native |
+| `.rules(rules)`, `.rule(rule)` | replace or append rules | preserves envelope/shorthand | native |
+| `.output(method)` | output method; wraps a bare list in an envelope | text or XML | native |
+| `from(document)` | raw template with member order preserved | template | native |
+| `.schema`, `.toJSON()` | frozen public JSON | document | native |
+
+### The project pen — [PROJECT-PEN.md §2](PROJECT-PEN.md)
+
+| Method | Emits | Type | Status |
+|---|---|---|---|
+| `file(name, kind, text)` | `{ name, kind, text }`, preserving text | literal name/kind | native |
+| `jsonFile(name, kind, document)` | same file, with serialized JSON text | literal name/kind | native |
+| `defineProject(files?, options?)` | version, files, optional active/layout | names from files | native |
+| `.files(files)` | replacement file list | replaces known names | native |
+| `.file(file)` | appended file | adds its name | native |
+| `.active(name)` | requested active name | existing name | native |
+| `.layout(options)` | replacement layout | mode, ratio, autorun | native |
+| `from(document)` | raw project envelope | arbitrary names | native |
+| `.schema`, `.toJSON()` | frozen public document | project document | native |
+
+### The chart pen — [CHARTS-PEN.md §2](CHARTS-PEN.md)
+
+| Method | Emits | Type | Status |
+|---|---|---|---|
+| `pie(options?)`, `bar(options?)`, `line(options?)`, `scatter(options?)` | the named `type` and options | corresponding chart | native |
+| `candlestick(options?)`, `radar(options?)`, `gauge(options?)`, `boxplot(options?)` | the named `type` and options | corresponding chart | native |
+| `heatmap(options?)`, `treemap(options?)`, `streamgraph(options?)`, `sankey(options?)`, `map(options?)` | the named `type` and options | corresponding chart | native |
+| `.options(object)` | supplied known members | same kind | native |
+| `.title(text)`, `.stream(spec)` | `title`, `stream` | same kind | native |
+| `.donut(value)`, `.slices(values)` | pie members | pie | native |
+| `.stacked(value)`, `.orient(value)`, `.categories(values)` | bar members | bar | native |
+| `.log(value)`, `.catLabel(text)`, `.valLabel(text)` | members on kinds that declare them | same kind | native |
+| `.series(values)` | the kind's series shape | same kind | native |
+| `.x(value)`, `.markers(value)`, `.sampling(value)` | line members | line | native |
+| `.xLabel(text)`, `.yLabel(text)`, `.domain(spec)`, `.dateNames(names)`, `.timeFormats(formats)` | axis members on their declared kinds | same kind | native |
+| `.xLog(value)`, `.yLog(value)`, `.refY(value)`, `.refLabel(text)` | scatter members | scatter | native |
+| `.points(values)`, `.candles(values)` | the kind's point/candle data | same kind | native |
+| `.axes(values)`, `.max(value)`, `.min(value)` | radar/gauge members | same kind | native |
+| `.value(value)`, `.unit(text)`, `.tone(value)` | gauge values; map `value` is a property name | same kind | native |
+| `.boxes(values)`, `.xLabels(values)`, `.yLabels(values)`, `.values(values)` | boxplot/heatmap members | same kind | native |
+| `.aspect(value)`, `.items(values)`, `.xs(values)` | treemap/map/streamgraph members | same kind | native |
+| `.nodes(values)`, `.links(values)` | sankey members | sankey | native |
+| `.label(text)`, `.simplify(value)`, `.features(values)` | map members | map | native |
+| `from(document)` | raw document, including extensions | declared chart shape | native |
+| `.schema`, `.toJSON()` | frozen public document | chart definition | native |
 
 ### The Jaren linq client — [DB-CLIENT.md §2](DB-CLIENT.md)
 

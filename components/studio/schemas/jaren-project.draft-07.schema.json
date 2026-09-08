@@ -23,7 +23,7 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "kind": {
-          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model"]
+          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model", "contract"]
         },
         "text": { "type": "string" }
       }

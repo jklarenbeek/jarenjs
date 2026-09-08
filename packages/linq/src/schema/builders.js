@@ -33,14 +33,9 @@ const NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
  * document asserts: `meta()` refuses them so an annotation is never a
  * back door around a builder.
  *
- * The two kinds are not the same size. 44 of these have a builder method
- * that emits them; the other 25 — `not`, the unevaluated pair,
- * `dependentSchemas`/`dependencies`, the `contains` bounds, the content
- * family, the four format bounds, the identification and dynamic-
- * reference families, `definitions`, `additionalItems` and `$data` — are
- * owned only by the second clause, and are written with `keyword()` or
- * `from()`. SCHEMA-PEN.md §6.2 lists them and `test/linq/schema-pen.test.js`
- * holds that list equal to this set.
+ * Each owned name has an executable dedicated emission route. The keyword
+ * census checks exact spellings, including the explicit legacy nullable
+ * spelling, independently of the normalized nullable() union.
  */
 const OWNED = new Set([
   '$schema', '$id', '$ref', '$defs', 'definitions', '$anchor', '$dynamicRef',
@@ -151,6 +146,36 @@ function annotate(annotations, key, value) {
   return Object.freeze(next);
 }
 
+/** @param {any} value @param {string} what */
+function requireBoolean(value, what) {
+  if (typeof value === 'boolean') return value;
+  throw new LinqBuildError('JL0101', `${what} takes a boolean`);
+}
+
+/** Own-key maps preserve computed `__proto__` names. */
+function valueMap(map, what, accept) {
+  if (map === null || typeof map !== 'object' || Array.isArray(map))
+    throw new LinqBuildError('JL0101', `${what} takes a plain object`);
+  requireNameMap(map, what);
+  return Object.fromEntries(Object.keys(map).map((key) => [key, accept(map[key], `${what}.${key}`)]));
+}
+
+/** Keep builder identity while snapshotting JSON containers. */
+function snapshotKeyword(value, seen = new Set()) {
+  if (isSchemaBuilder(value)) return value;
+  if (value === null || typeof value !== 'object') return requireJson(value, 'keyword()');
+  if (seen.has(value)) throw new LinqBuildError('JL0101', 'keyword() received a cycle, which is not JSON');
+  seen.add(value);
+  let result;
+  if (Array.isArray(value)) result = Array.from(value, (v) => snapshotKeyword(v, seen));
+  else {
+    requireNameMap(value, 'keyword()');
+    result = Object.fromEntries(Object.keys(value).map((key) => [key, snapshotKeyword(value[key], seen)]));
+  }
+  seen.delete(value);
+  return Object.freeze(result);
+}
+
 /** The state every kind shares. @param {string} kind @param {object} own */
 export function initial(kind, own) {
   return Object.freeze({
@@ -199,6 +224,50 @@ export class SchemaBuilder {
 
   /** `JSON.stringify(builder)` is the document. */
   toJSON() { return this.schema; }
+
+  /** `$id`: the schema resource identifier. @param {string} uri */
+  id(uri) { return this.keyword('$id', requireString(uri, 'id()')); }
+
+  /** `$anchor`: emitted verbatim, without inferred reference identity. @param {string} value */
+  anchor(value) { return this.keyword('$anchor', requireString(value, 'anchor()')); }
+  /** `$dynamicRef`: emitted verbatim, without inferred reference identity. @param {string} value */
+  dynamicRef(value) { return this.keyword('$dynamicRef', requireString(value, 'dynamicRef()')); }
+  /** `$dynamicAnchor`: emitted verbatim, without inferred reference identity. @param {string} value */
+  dynamicAnchor(value) { return this.keyword('$dynamicAnchor', requireString(value, 'dynamicAnchor()')); }
+  /** `$recursiveRef`: emitted verbatim, without inferred reference identity. @param {string} value */
+  recursiveRef(value) { return this.keyword('$recursiveRef', requireString(value, 'recursiveRef()')); }
+  /** `$data`: emitted verbatim, without inferred reference identity. @param {string} value */
+  dollarData(value) { return this.keyword('$data', requireString(value, 'dollarData()')); }
+  /** `$recursiveAnchor`. @param {boolean} value */
+  recursiveAnchor(value) { return this.keyword('$recursiveAnchor', requireBoolean(value, 'recursiveAnchor()')); }
+  /** Legacy `nullable`, without a narrower phantom claim. @param {boolean} value */
+  legacyNullable(value) { return this.keyword('nullable', requireBoolean(value, 'legacyNullable()')); }
+  /** `$vocabulary`: URI → required flag. @param {Record<string, boolean>} map */
+  vocabulary(map) { return this.keyword('$vocabulary', valueMap(map, 'vocabulary()', requireBoolean)); }
+  /** `data`: keyword → instance pointer. @param {Record<string, string>} map */
+  data(map) { return this.keyword('data', valueMap(map, 'data()', requireString)); }
+  /** `not`: a validator assertion, without negating the phantom. @param {any} builder */
+  not(builder) { return this.keyword('not', requireBuilder(builder, 'not()')); }
+  /** `unevaluatedProperties`: annotation-dependent validation. @param {any} builder */
+  unevaluatedProperties(builder) { return this.keyword('unevaluatedProperties', requireBuilder(builder, 'unevaluatedProperties()')); }
+  /** `unevaluatedItems`: annotation-dependent validation. @param {any} builder */
+  unevaluatedItems(builder) { return this.keyword('unevaluatedItems', requireBuilder(builder, 'unevaluatedItems()')); }
+  /** `dependentSchemas`: member → schema. @param {Record<string, any>} map */
+  dependentSchemas(map) { return this.keyword('dependentSchemas', Object.fromEntries(requireBuilderMap(map, 'dependentSchemas()'))); }
+  /** Legacy schema definitions; named children retain shared `$defs` identity. @param {Record<string, any>} map */
+  definitions(map) { return this.keyword('definitions', Object.fromEntries(requireBuilderMap(map, 'definitions()'))); }
+  /** Legacy `additionalItems`; use with a draft-07 tuple. @param {any} builder */
+  additionalItems(builder) { return this.keyword('additionalItems', requireBuilder(builder, 'additionalItems()')); }
+  /** Legacy schema or required-member dependencies. @param {Record<string, any>} map */
+  dependencies(map) {
+    return this.keyword('dependencies', valueMap(map, 'dependencies()', (value, what) => {
+      if (!Array.isArray(value)) return requireBuilder(value, what);
+      const names = value.map((v) => requireString(v, what));
+      if (new Set(names).size !== names.length)
+        throw new LinqBuildError('JL0101', `${what} takes unique member names`);
+      return Object.freeze(names);
+    }));
+  }
 
   /** As an object member: left out of `required`. */
   optional() { return this.with({ optional: true }); }
@@ -323,12 +392,30 @@ export class SchemaBuilder {
    * @returns {this}
    */
   keyword(key, value) {
-    return this.with({ keywords: Object.freeze({ ...this.#state.keywords, [key]: value }) });
+    if ((this.state.kind === 'never' || (this.state.kind === 'raw' && typeof this.state.json === 'boolean'))
+      && !this.state.nullable) {
+      throw new LinqBuildError('JL0102', `a boolean schema carries no '${key}' — nullable() it first`);
+    }
+    return this.with({ keywords: Object.freeze({ ...this.#state.keywords, [key]: snapshotKeyword(value) }) });
   }
 }
 
 /** `{ type: 'string' }` and the string constraints. */
 export class StringBuilder extends SchemaBuilder {
+  /** `contentEncoding`. @param {string} value */
+  contentEncoding(value) { return this.keyword('contentEncoding', requireString(value, 'contentEncoding()')); }
+  /** `contentMediaType`. @param {string} value */
+  contentMediaType(value) { return this.keyword('contentMediaType', requireString(value, 'contentMediaType()')); }
+  /** `contentSchema`: annotation, with shared definition identity. @param {any} builder */
+  contentSchema(builder) { return this.keyword('contentSchema', requireBuilder(builder, 'contentSchema()')); }
+  /** `formatMinimum`. @param {string} value */
+  formatMinimum(value) { return this.keyword('formatMinimum', requireString(value, 'formatMinimum()')); }
+  /** `formatMaximum`. @param {string} value */
+  formatMaximum(value) { return this.keyword('formatMaximum', requireString(value, 'formatMaximum()')); }
+  /** `formatExclusiveMinimum`. @param {string} value */
+  formatExclusiveMinimum(value) { return this.keyword('formatExclusiveMinimum', requireString(value, 'formatExclusiveMinimum()')); }
+  /** `formatExclusiveMaximum`. @param {string} value */
+  formatExclusiveMaximum(value) { return this.keyword('formatExclusiveMaximum', requireString(value, 'formatExclusiveMaximum()')); }
   /** `minLength`. @param {number} n */
   min(n) { return this.keyword('minLength', requireCount(n, 'min()')); }
   /** `maxLength`. @param {number} n */
@@ -388,6 +475,10 @@ export class NumberBuilder extends SchemaBuilder {
 
 /** `{ type: 'array', items }` and the array constraints. */
 export class ArrayBuilder extends SchemaBuilder {
+  /** `minContains`. @param {number} n */
+  minContains(n) { return this.keyword('minContains', requireCount(n, 'minContains()')); }
+  /** `maxContains`. @param {number} n */
+  maxContains(n) { return this.keyword('maxContains', requireCount(n, 'maxContains()')); }
   /** `minItems`. @param {number} n */
   min(n) { return this.keyword('minItems', requireCount(n, 'min()')); }
   /** `maxItems`. @param {number} n */

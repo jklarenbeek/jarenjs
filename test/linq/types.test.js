@@ -158,7 +158,7 @@ describe('the declared export set and the runtime export set are one set', () =>
   // module exports and the declaration omits is a class a `strict`
   // consumer cannot reach. Both directions are asserted per pen, so a
   // failure names the pen and the names.
-  const PENS = ['schema', 'model', 'jslt', 'migration', 'db', 'contract', 'flow', 'app', 'forms'];
+  const PENS = ['schema', 'model', 'jslt', 'migration', 'db', 'contract', 'flow', 'app', 'forms', 'charts', 'project', 'jtlt', 'messages', 'ai'];
 
   // The forms a `.d.ts` uses to export a VALUE. `export type`, `export
   // interface`, `export type { … }` and a type-only re-export are
@@ -172,8 +172,8 @@ describe('the declared export set and the runtime export set are one set', () =>
     return [...new Set([...source.matchAll(VALUE_EXPORT)].map((m) => m[1]))].sort();
   };
 
-  it('the nine pens are every subpath the package publishes beside the chain', () => {
-    // A tenth pen must not arrive unnoticed: the list above is what the
+  it('the pen family covers every subpath the package publishes beside the chain', () => {
+    // A new pen must not arrive unnoticed: the list above is what the
     // suite below iterates, and this holds it to the package's own map.
     const manifest = JSON.parse(
       fs.readFileSync(new URL('../../packages/linq/package.json', import.meta.url), 'utf8'));

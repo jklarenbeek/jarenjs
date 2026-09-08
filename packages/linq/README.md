@@ -13,7 +13,8 @@ it by hand, as JSON, with nothing checking it until it ran.
 
 This package removes the price. You write the query, the schema, the
 model, the migration, the contract, the stylesheet, the state machine,
-the dataflow, the application or the form as ordinary typed JavaScript,
+the dataflow, the application, the form, chart, project, text template,
+message catalog or AI program as ordinary typed JavaScript,
 and what comes back is the document — exactly the one its engine
 already takes, byte for byte, with its types derived beside it. The
 chain is the pen; the document is the deliverable.
@@ -46,9 +47,11 @@ SQL — and nothing is hidden: the chain's `explain()` shows the document
 it sent, and the store's `explain(document)` shows what that became,
 `SELECT … FROM "User" WHERE "age" > ? ORDER BY "name"`.
 
+Coverage: <!--fact:coverage.pens-->14 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
+
 ## What you gain
 
-- **One idiom for ten kinds of document.** `(u) => u.age.gt(21)` is a
+- **One idiom across document formats.** `(u) => u.age.gt(21)` is a
   query predicate. The same shape is a schema's cross-field `check()`,
   a form's `assert`, a state machine's guard, a stylesheet rule's body,
   an app action's patch. Every callback is recorded by one proxy over
@@ -95,6 +98,11 @@ it sent, and the store's `explain(document)` shows what that became,
 | a state machine, a dataflow | `@jarenjs/linq/flow` | `@jarenjs/flow` | [flow pen](#by-code-the-flow-pen) · [FLOW-PEN](docs/FLOW-PEN.md) |
 | an application | `@jarenjs/linq/app` | `@jarenjs/app` | [app pen](#by-code-the-app-pen) · [APP-PEN](docs/APP-PEN.md) |
 | a form | `@jarenjs/linq/forms` | `@jarenjs/forms` | [forms pen](#by-code-the-forms-pen) · [FORMS-PEN](docs/FORMS-PEN.md) |
+| an AI action program | `@jarenjs/linq/ai` | `@jarenjs/ai` | [AI-PEN](docs/AI-PEN.md) |
+| a message catalog | `@jarenjs/linq/messages` | `@jarenjs/core/message` | [MESSAGES-PEN](docs/MESSAGES-PEN.md) |
+| a text template | `@jarenjs/linq/jtlt` | `@jarenjs/json/jtlt` | [JTLT-PEN](docs/JTLT-PEN.md) |
+| a Studio project | `@jarenjs/linq/project` | `@jarenjs/studio` | [PROJECT-PEN](docs/PROJECT-PEN.md) |
+| a chart | `@jarenjs/linq/charts` | `@jarenjs/charts` | [CHARTS-PEN](docs/CHARTS-PEN.md) |
 | typed handles on the store | `@jarenjs/linq/db` | the front door, not a pen | [the front door](#the-front-door-jarenjslinqdb) · [DB-CLIENT](docs/DB-CLIENT.md) |
 
 The rules every pen keeps — what a pen may spell, what it must refuse,
@@ -716,4 +724,9 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/linq/forms` | JavaScript | declared |
 | `@jarenjs/linq/db` | JavaScript | declared |
 | `@jarenjs/linq/package.json` | metadata | — |
+| `@jarenjs/linq/charts` | JavaScript | declared |
+| `@jarenjs/linq/project` | JavaScript | declared |
+| `@jarenjs/linq/jtlt` | JavaScript | declared |
+| `@jarenjs/linq/messages` | JavaScript | declared |
+| `@jarenjs/linq/ai` | JavaScript | declared |
 <!--/fact-->

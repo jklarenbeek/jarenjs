@@ -94,6 +94,11 @@ const DOCS = [
   ['flow', 'the flow pen', 'FLOW-PEN.md', 7],
   ['app', 'the app pen', 'APP-PEN.md', 7],
   ['forms', 'the forms pen', 'FORMS-PEN.md', 6],
+  ['charts', 'the chart pen', 'CHARTS-PEN.md', 1],
+  ['project', 'the project pen', 'PROJECT-PEN.md', 1],
+  ['jtlt', 'the JTLT pen', 'JTLT-PEN.md', 1],
+  ['messages', 'the messages pen', 'MESSAGES-PEN.md', 2],
+  ['ai', 'the AI program pen', 'AI-PEN.md', 1],
 ];
 
 /** `DB-CLIENT.md`'s §2 answers a different question — the client writes
@@ -427,7 +432,7 @@ describe('QUERY-PEN.md — the chain\'s surface and its codes', () => {
   // assertion below proves rather than assumes, so the exclusion cannot
   // hide a chain refusal.
   const SRC = new URL('../../packages/linq/src/', import.meta.url);
-  const PEN_DOORS = new Set(['json-boundary.js', 'capture-root.js', 'effect.js']);
+  const PEN_DOORS = new Set(['json-boundary.js', 'capture-root.js', 'effect.js', 'authored.js']);
   /** Every code a `throw new Linq…Error('JLxxxx'` raises, per file. The
    * source is read, never imported: a code thrown from a branch no test
    * takes must still count. A `throw` is matched rather than a bare

@@ -925,7 +925,7 @@ for this pen at all.
 
 ## 7. Cost
 
-`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->37,312<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->40,873<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -934,7 +934,7 @@ pen it subclasses, and no chain module, no `@jarenjs/forms` byte and no
 model pen.
 
 Most of that figure is the schema pen: `@jarenjs/linq/schema` alone
-is <!--fact:bundle.schema-->33,156<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
+is <!--fact:bundle.schema-->36,717<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
 capture, the submit transform and their refusal messages — is about 4 kB
 on top of a pen a form-shaped consumer usually already carries. A
 consumer importing both subpaths pays the schema pen once.

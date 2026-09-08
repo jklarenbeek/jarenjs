@@ -778,4 +778,4 @@ proxy behind it, and the canonicalizer — and the two model documents
 themselves arrive as data, deep-frozen JSON that the consumer's own model
 module built. So a consumer who ships migrations to a browser does not
 ship the model pen with them; a consumer who OPENS a store does, and pays
-`./model`'s <!--fact:bundle.model-->41,582<!--/fact--> bytes for it.
+`./model`'s <!--fact:bundle.model-->45,143<!--/fact--> bytes for it.

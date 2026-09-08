@@ -37,7 +37,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Canonical JSON ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)) | `canonicalizeJson`, `JsonCanonicalizeError` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
-| Jaren JTLT | `compileJtltStylesheet`, `renderText`, `JtltCompileError`, `JtltRuntimeError` |
+| Jaren JTLT | `compileJtltStylesheet`, `renderText`, `validateJtltTemplate`, `JtltCompileError`, `JtltRuntimeError` |
 
 ### JSON Pointer
 
@@ -756,6 +756,11 @@ The identity row is the sharing fast path: Jaren returns the input reference in 
 
 ## JTLT — template-driven text output
 
+The [JTLT pen](../linq/docs/JTLT-PEN.md) authors portable templates. The
+[published grammar](./schemas/jaren-jtlt.schema.json) and its
+[draft-07 twin](./schemas/jaren-jtlt.draft-07.schema.json) check structure;
+`validateJtltTemplate(doc, options)` returns compiler diagnostics as `{ valid, errors }`.
+
 JSLT transforms JSON into JSON. JTLT points the same dispatcher at **text**: a template is a JSLT-shaped rule document whose bodies are *segment lists* — literal text, interpolated queries, and `$apply` splices — and whose result is a string. It is the T4/XSLT-`method="text"` analogue of this stack, and like the XQuery module it is a **front-end, not a second engine**: `compileJtltStylesheet` desugars the template into an ordinary JSLT 0.1 stylesheet (inspectable as `render.stylesheet`) and serializes the dispatched result, so dispatch, modes, conflict resolution and schema matching are inherited, not reimplemented. The normative contract is [JTLT-FORMAT.md](./docs/JTLT-FORMAT.md); this section is the tour.
 
 ```javascript
@@ -824,6 +829,8 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/json/schemas/jaren-jslt.draft-07.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-jslt.llm-profile.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-jslt.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-jtlt.draft-07.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-jtlt.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.draft-07.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.llm-profile.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.schema.json` | schema | — |

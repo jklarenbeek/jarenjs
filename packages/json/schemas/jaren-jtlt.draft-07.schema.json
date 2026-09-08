@@ -1,0 +1,1183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-jtlt/0.1/draft-07",
+  "title": "Jaren JTLT 0.1 template",
+  "description": "The closed JTLT envelope and segment vocabulary, composing the JSLT query grammar. Format assertions are optional; compileJtltStylesheet is authoritative for registered path functions, schema hooks and runtime output.",
+  "oneOf": [
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/rule"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "$jtlt": {
+          "const": "0.1"
+        },
+        "output": {
+          "enum": [
+            "text",
+            "xml"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/rule"
+          }
+        }
+      },
+      "required": [
+        "$jtlt",
+        "rules"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "rule": {
+      "description": "A JTLT rule: JSLT matching and modes, a segment-list body, and priorities above the reserved built-in band.",
+      "type": "object",
+      "properties": {
+        "match": {
+          "$ref": "#/definitions/matchSpec"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number",
+          "exclusiveMinimum": -1e+307
+        },
+        "body": {
+          "$ref": "#/definitions/segmentList"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "matchSpec": {
+      "description": "A positional RFC 9535 JSONPath match, a shape match using an annotation-only JSON Schema literal, or both conditions in one closed object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "json-path"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "format": "json-path"
+            },
+            "schema": {
+              "$ref": "#/definitions/schemaLiteral"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "path"
+              ]
+            },
+            {
+              "required": [
+                "schema"
+              ]
+            }
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "schemaLiteral": {
+      "description": "A JSON Schema literal, taken verbatim - never interpreted as a query expression, so JSON Schema's $-prefixed keywords ($ref, $defs, ...) do not collide with Rule 1. Deliberately unconstrained (a true schema is draft-neutral by definition): embedded schemas are not meta-validated by this artifact; the consumer's type-test compiler is authoritative (JQ0009)."
+    },
+    "segmentList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/segment"
+      }
+    },
+    "segment": {
+      "description": "Literal or interpolated strings, recursively nested lists, raw/JSON phrases, and query objects containing a dollar-prefixed key. Runtime compilation resolves path syntax, hooks and expression semantics.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/segmentList"
+        },
+        {
+          "$ref": "#/definitions/rawSegment"
+        },
+        {
+          "$ref": "#/definitions/jsonSegment"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/queryDocument"
+            },
+            {
+              "type": "object",
+              "not": {
+                "propertyNames": {
+                  "pattern": "^[^$]"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "rawSegment": {
+      "type": "object",
+      "properties": {
+        "$raw": {
+          "$ref": "#/definitions/queryDocument"
+        }
+      },
+      "required": [
+        "$raw"
+      ],
+      "additionalProperties": false
+    },
+    "queryDocument": {
+      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/versionEnvelope"
+        },
+        {
+          "$ref": "#/definitions/expression"
+        }
+      ]
+    },
+    "versionEnvelope": {
+      "description": "Top-level version envelope. Only recognized at the top level of a query document.",
+      "type": "object",
+      "properties": {
+        "$query": {
+          "const": "0.1"
+        },
+        "$expr": {
+          "$ref": "#/definitions/expression"
+        }
+      },
+      "required": [
+        "$query",
+        "$expr"
+      ],
+      "additionalProperties": false
+    },
+    "expression": {
+      "description": "Any expression per the encoding rules: scalars are literals, strings split on the leading '$', arrays are array constructors, objects partition into map constructors (no $-prefixed key) and operator phrases (all keys $-prefixed).",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/scalarLiteral"
+        },
+        {
+          "$ref": "#/definitions/stringExpression"
+        },
+        {
+          "$ref": "#/definitions/arrayConstructor"
+        },
+        {
+          "$ref": "#/definitions/objectExpression"
+        }
+      ]
+    },
+    "scalarLiteral": {
+      "description": "Numbers, booleans and null are literal items.",
+      "type": [
+        "null",
+        "boolean",
+        "number"
+      ]
+    },
+    "stringExpression": {
+      "description": "Rule 2: a string starting with '$' is a query expression ('$$' escapes a literal); any other string is a literal.",
+      "type": "string",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/literalString"
+        },
+        {
+          "$ref": "#/definitions/escapedStringLiteral"
+        },
+        {
+          "$ref": "#/definitions/absolutePathString"
+        },
+        {
+          "$ref": "#/definitions/variablePathString"
+        }
+      ]
+    },
+    "literalString": {
+      "description": "A string that does not start with '$' denotes itself.",
+      "type": "string",
+      "pattern": "^([^$]|$)"
+    },
+    "escapedStringLiteral": {
+      "description": "A string starting with '$$' denotes the literal string with one leading '$' dropped.",
+      "type": "string",
+      "pattern": "^\\$\\$"
+    },
+    "absolutePathString": {
+      "description": "An absolute RFC 9535 JSONPath query rooted at the input document: '$' alone or starting '$.', '$[' or '$..'. The json-path format asserts the full RFC 9535 grammar where format assertion is enabled (format is annotation-only by default from draft 2020-12).",
+      "type": "string",
+      "pattern": "^\\$($|[.\\[])",
+      "format": "json-path"
+    },
+    "variablePathString": {
+      "description": "A variable-rooted path: '$name' with name matching [A-Za-z_][A-Za-z0-9_]*, optionally followed by RFC 9535 segments. The pattern checks the head; the json-path-segments format asserts the full segment grammar where format assertion is enabled (the compiler enforces it either way, JQ0004).",
+      "type": "string",
+      "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*($|[.\\[])",
+      "format": "json-path-segments"
+    },
+    "arrayConstructor": {
+      "description": "An array in expression position constructs an array; element results are concatenated per XQuery sequence flattening.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/expression"
+      }
+    },
+    "objectExpression": {
+      "description": "Rule 1: objects partition by $-prefixed keys. A mixed object matches neither branch and is invalid (JQ0001).",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/mapConstructor"
+        },
+        {
+          "$ref": "#/definitions/constPhrase"
+        },
+        {
+          "$ref": "#/definitions/mapPhrase"
+        },
+        {
+          "$ref": "#/definitions/callPhrase"
+        },
+        {
+          "$ref": "#/definitions/flworPhrase"
+        },
+        {
+          "$ref": "#/definitions/somePhrase"
+        },
+        {
+          "$ref": "#/definitions/everyPhrase"
+        },
+        {
+          "$ref": "#/definitions/unaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/binaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/variadicOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/nonEmptyVariadicOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/conditionalArityOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/stringJoinPhrase"
+        },
+        {
+          "$ref": "#/definitions/geohashPhrase"
+        },
+        {
+          "$ref": "#/definitions/ternaryOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/replacePhrase"
+        },
+        {
+          "$ref": "#/definitions/schemaOperatorPhrase"
+        },
+        {
+          "$ref": "#/definitions/seriesSpecPhrase"
+        },
+        {
+          "$ref": "#/definitions/asOfPhrase"
+        },
+        {
+          "$ref": "#/definitions/timeBucketPhrase"
+        },
+        {
+          "$ref": "#/definitions/applyPhrase"
+        }
+      ]
+    },
+    "mapConstructor": {
+      "description": "An object with no $-prefixed key: keys are literal member names, values are expressions. Use $map or $const for member names that start with '$'.",
+      "type": "object",
+      "patternProperties": {
+        "^\\$": false
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/expression"
+      }
+    },
+    "constPhrase": {
+      "description": "Quote: the value is returned verbatim, nothing inside is evaluated.",
+      "type": "object",
+      "properties": {
+        "$const": true
+      },
+      "required": [
+        "$const"
+      ],
+      "additionalProperties": false
+    },
+    "mapPhrase": {
+      "description": "General map constructor for computed keys or keys starting with '$'. Each entry is a [keyExpr, valueExpr] pair; keyExpr must evaluate to a single string at runtime (JQ2004); later pairs win on duplicate keys.",
+      "type": "object",
+      "properties": {
+        "$map": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/mapEntry"
+          }
+        }
+      },
+      "required": [
+        "$map"
+      ],
+      "additionalProperties": false
+    },
+    "mapEntry": {
+      "description": "One [keyExpr, valueExpr] pair of a $map phrase.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/expression"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "callPhrase": {
+      "description": "A registered trusted host function call: ['name', ...argument expressions]. The name must be registered at compile time (options.functions, JQ0010); sequences cross the boundary as arrays, a returned undefined is the empty sequence, a throwing function is JQ2010.",
+      "type": "object",
+      "properties": {
+        "$call": {
+          "type": "array",
+          "minItems": 1,
+          "items": [
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "additionalItems": {
+            "$ref": "#/definitions/expression"
+          }
+        }
+      },
+      "required": [
+        "$call"
+      ],
+      "additionalProperties": false
+    },
+    "flworPhrase": {
+      "description": "FLWOR phrase. Clauses apply in the fixed semantic order $fold, $for, $let, $as, $where, $groupby, $orderby, $count, $return regardless of JSON key order (D7); interleavings are expressed by nesting phrases. $return is required, plus at least one of $fold/$for/$let. With $fold the phrase evaluates to the final accumulator instead of the collected $return sequence.",
+      "type": "object",
+      "properties": {
+        "$fold": {
+          "$ref": "#/definitions/foldBinding"
+        },
+        "$for": {
+          "$ref": "#/definitions/forBindings"
+        },
+        "$let": {
+          "$ref": "#/definitions/bindingMap"
+        },
+        "$as": {
+          "$ref": "#/definitions/asClause"
+        },
+        "$where": {
+          "$ref": "#/definitions/expression"
+        },
+        "$groupby": {
+          "$ref": "#/definitions/bindingMap"
+        },
+        "$orderby": {
+          "$ref": "#/definitions/orderBySpec"
+        },
+        "$count": {
+          "$ref": "#/definitions/variableName"
+        },
+        "$return": {
+          "$ref": "#/definitions/expression"
+        }
+      },
+      "required": [
+        "$return"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "$for"
+          ]
+        },
+        {
+          "required": [
+            "$let"
+          ]
+        },
+        {
+          "required": [
+            "$fold"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "foldBinding": {
+      "description": "The $fold accumulator: exactly one variable name mapped to the accumulator's initial value, evaluated once in the enclosing scope before the tuple stream starts. $return then names the accumulator's next value per surviving tuple.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/expression"
+      }
+    },
+    "forBindings": {
+      "description": "Iteration bindings: variable name to source expression or extended $in binding. Bindings nest left-to-right in document key order and may be correlated; key-order-hostile producers should nest phrases instead.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/forSource"
+      }
+    },
+    "forSource": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/expression"
+        },
+        {
+          "$ref": "#/definitions/extendedForBinding"
+        }
+      ]
+    },
+    "extendedForBinding": {
+      "description": "Extended $for binding. $in is the source; $at binds the 0-based (D6) position variable; $allowing-empty emits one tuple with the variable bound to the empty sequence (position -1) when the source yields no tuple; $window with $size, and optionally $step, iterates tumbling or sliding windows instead of items. Only $in is structurally required: the compiler rejects $size/$step without $window, and $window without $size (JQ0003).",
+      "type": "object",
+      "properties": {
+        "$in": {
+          "$ref": "#/definitions/expression"
+        },
+        "$at": {
+          "$ref": "#/definitions/variableName"
+        },
+        "$allowing-empty": {
+          "type": "boolean"
+        },
+        "$window": {
+          "enum": [
+            "tumbling",
+            "sliding"
+          ]
+        },
+        "$size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "$step": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "$in"
+      ],
+      "additionalProperties": false
+    },
+    "variableName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "bindingMap": {
+      "description": "Variable name to expression map, used by $let, $groupby and quantifier bindings.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/expression"
+      }
+    },
+    "asClause": {
+      "description": "The $as clause: variable-name to JSON Schema literal members, applied per tuple after $for/$let binding and before $where. Each name must be bound by the same phrase's $for (including $at names) or $let - a compiler rule (JQ0005); each binding validates per item at runtime (JQ2008).",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/schemaLiteral"
+      }
+    },
+    "orderBySpec": {
+      "description": "A single key spec or a major-to-minor list of key specs. An array value is by specification ALWAYS a list of key specs, so the single form excludes arrays; write a single array-constructor key as {\"$key\": [...]}.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/singleOrderByKey"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/orderByKey"
+          },
+          "minItems": 1
+        }
+      ]
+    },
+    "singleOrderByKey": {
+      "description": "A key spec in non-list position: any non-array expression, or the explicit {$key, $dir, $empty} form.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/scalarLiteral"
+        },
+        {
+          "$ref": "#/definitions/stringExpression"
+        },
+        {
+          "$ref": "#/definitions/objectExpression"
+        },
+        {
+          "$ref": "#/definitions/orderByKeySpec"
+        }
+      ]
+    },
+    "orderByKeySpec": {
+      "description": "Explicit order key: direction defaults to 'asc', empty-sequence placement to 'least'. A $collation names a registered pure compare function (options.collations, JQ0010) applied to string keys; the default stays code-point order.",
+      "type": "object",
+      "properties": {
+        "$key": {
+          "$ref": "#/definitions/expression"
+        },
+        "$dir": {
+          "enum": [
+            "asc",
+            "desc"
+          ]
+        },
+        "$empty": {
+          "enum": [
+            "least",
+            "greatest"
+          ]
+        },
+        "$collation": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "$key"
+      ],
+      "additionalProperties": false
+    },
+    "orderByKey": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/expression"
+        },
+        {
+          "$ref": "#/definitions/orderByKeySpec"
+        }
+      ]
+    },
+    "somePhrase": {
+      "description": "Existential quantifier: true iff some binding tuple satisfies the EBV of $satisfies; short-circuits.",
+      "type": "object",
+      "properties": {
+        "$some": {
+          "$ref": "#/definitions/bindingMap"
+        },
+        "$satisfies": {
+          "$ref": "#/definitions/expression"
+        }
+      },
+      "required": [
+        "$some",
+        "$satisfies"
+      ],
+      "additionalProperties": false
+    },
+    "everyPhrase": {
+      "description": "Universal quantifier: true iff every binding tuple satisfies the EBV of $satisfies; short-circuits.",
+      "type": "object",
+      "properties": {
+        "$every": {
+          "$ref": "#/definitions/bindingMap"
+        },
+        "$satisfies": {
+          "$ref": "#/definitions/expression"
+        }
+      },
+      "required": [
+        "$every",
+        "$satisfies"
+      ],
+      "additionalProperties": false
+    },
+    "unaryOperatorPhrase": {
+      "description": "Operators whose value is a single operand expression.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$exists",
+          "$empty",
+          "$not",
+          "$neg",
+          "$count",
+          "$sum",
+          "$avg",
+          "$min",
+          "$max",
+          "$distinct",
+          "$reverse",
+          "$sort",
+          "$head",
+          "$tail",
+          "$entries",
+          "$from-entries",
+          "$upper",
+          "$lower",
+          "$string-length",
+          "$normalize-space",
+          "$string",
+          "$number",
+          "$boolean",
+          "$is-string",
+          "$is-number",
+          "$is-boolean",
+          "$is-null",
+          "$is-array",
+          "$is-object",
+          "$is-date",
+          "$is-time",
+          "$is-datetime",
+          "$is-duration",
+          "$year",
+          "$month",
+          "$day",
+          "$hours",
+          "$minutes",
+          "$seconds",
+          "$offset",
+          "$epoch",
+          "$datetime",
+          "$week",
+          "$week-year",
+          "$quarter",
+          "$weekday",
+          "$bbox",
+          "$area",
+          "$length",
+          "$centroid",
+          "$geo-parse",
+          "$geo-text",
+          "$geohash-bounds",
+          "$geohash-neighbours"
+        ]
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/expression"
+      }
+    },
+    "binaryOperatorPhrase": {
+      "description": "Operators whose value is an array of exactly two operand expressions.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$eq",
+          "$ne",
+          "$lt",
+          "$le",
+          "$gt",
+          "$ge",
+          "$add",
+          "$sub",
+          "$mul",
+          "$div",
+          "$idiv",
+          "$mod",
+          "$contains",
+          "$starts-with",
+          "$ends-with",
+          "$match",
+          "$search",
+          "$index-of",
+          "$range",
+          "$get",
+          "$start-of",
+          "$end-of",
+          "$date-format",
+          "$distance",
+          "$within",
+          "$bbox-intersects",
+          "$geo-simplify",
+          "$similarity",
+          "$overlaps",
+          "$default"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/expression"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "variadicOperatorPhrase": {
+      "description": "Variadic operators accepting zero or more operand expressions.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$seq",
+          "$concat"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/expression"
+        }
+      }
+    },
+    "nonEmptyVariadicOperatorPhrase": {
+      "description": "Variadic operators requiring at least one operand expression.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$and",
+          "$or",
+          "$coalesce"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/expression"
+        },
+        "minItems": 1
+      }
+    },
+    "conditionalArityOperatorPhrase": {
+      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit].",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$if",
+          "$substring",
+          "$subsequence",
+          "$date-add",
+          "$date-sub"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/expression"
+        },
+        "minItems": 2,
+        "maxItems": 3
+      }
+    },
+    "stringJoinPhrase": {
+      "description": "$string-join [seq, separator?]: one or two operand expressions.",
+      "type": "object",
+      "properties": {
+        "$string-join": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/expression"
+          },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "$string-join"
+      ],
+      "additionalProperties": false
+    },
+    "geohashPhrase": {
+      "description": "$geohash [value] or [value, precision]: a GeoJSON value as a base-32 cell string. Precision is an integer from 1 to 12 (default 9); a value that is not a bare position is represented by its centroid.",
+      "type": "object",
+      "properties": {
+        "$geohash": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/expression"
+          },
+          "minItems": 1,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "$geohash"
+      ],
+      "additionalProperties": false
+    },
+    "ternaryOperatorPhrase": {
+      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit].",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$date-diff"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/expression"
+        },
+        "minItems": 3,
+        "maxItems": 3
+      }
+    },
+    "replacePhrase": {
+      "description": "$replace [input, pattern, replacement]: exactly three operand expressions (I-Regexp has no flags argument, D5).",
+      "type": "object",
+      "properties": {
+        "$replace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/expression"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "$replace"
+      ],
+      "additionalProperties": false
+    },
+    "schemaOperatorPhrase": {
+      "description": "Schema operators $valid/$assert: [expr, schema] - exactly two elements, an operand expression and a verbatim JSON Schema literal. Tuple validation is outside the draft-neutral subset, so both positions validate uniformly as schema literals here; the operand position is normalized as an ordinary expression by the compiler (JQ0xxx).",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$valid",
+          "$assert"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/schemaLiteral"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "seriesSpecPhrase": {
+      "description": "$resample / $rolling [series, spec]: an operand expression and a VERBATIM spec literal. $resample returns sorted {at, value, count} buckets one per 'every'; $rolling returns one row per input instant over a window measured in time.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$resample",
+          "$rolling"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/expression"
+          },
+          {
+            "$ref": "#/definitions/seriesSpec"
+          }
+        ],
+        "additionalItems": false,
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "seriesSpec": {
+      "description": "A $resample or $rolling spec (QUERY-FORMAT.md section 8.16): a VERBATIM literal, never an expression, so the width, the aggregate, the fill policy, the wall clock and the row selectors are read once when the query compiles. Closed: an unknown member is JQ0003. 'every'/'width' is an ISO 8601 duration or a count of milliseconds; 'origin'/'start'/'end' are epoch milliseconds or an RFC 3339 string; 'at'/'value' are singular paths where '$' reads as the ROW. A named 'zone' needs an injected zoneProvider - this suite bundles no time-zone database.",
+      "type": "object",
+      "properties": {
+        "every": {
+          "$ref": "#/definitions/seriesSpan"
+        },
+        "width": {
+          "$ref": "#/definitions/seriesSpan"
+        },
+        "origin": {
+          "$ref": "#/definitions/seriesInstant"
+        },
+        "start": {
+          "$ref": "#/definitions/seriesInstant"
+        },
+        "end": {
+          "$ref": "#/definitions/seriesInstant"
+        },
+        "aggregate": {
+          "enum": [
+            "sum",
+            "mean",
+            "min",
+            "max",
+            "first",
+            "last",
+            "count"
+          ]
+        },
+        "fill": {
+          "enum": [
+            "omit",
+            "null",
+            "zero",
+            "locf",
+            "linear"
+          ]
+        },
+        "minPeriods": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at": {
+          "$ref": "#/definitions/rowSelector"
+        },
+        "value": {
+          "$ref": "#/definitions/rowSelector"
+        },
+        "zone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "number"
+        },
+        "disambiguation": {
+          "enum": [
+            "reject",
+            "earlier",
+            "later"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "seriesSpan": {
+      "description": "A width: an ISO 8601 duration string ('PT1H', 'P1M') or a count of milliseconds. A duration mixing the calendar and clock families ('P1MT1H') is refused by the compiler.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      ]
+    },
+    "seriesInstant": {
+      "description": "An instant: epoch milliseconds, or an RFC 3339 string. A full-time names no instant and is refused by the compiler.",
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "rowSelector": {
+      "description": "Where a member lives in a source row: a singular JSONPath whose '$' is the ROW rather than the document ('$.on', \"$['recorded at']\", '$.meta.at'). Wildcards, descendants and filters are refused (JQ0003) - a selector names one member.",
+      "type": "string",
+      "pattern": "^\\$[.\\[]"
+    },
+    "asOfPhrase": {
+      "description": "$asof [left, right] or [left, right, spec]: two operand expressions and an optional VERBATIM spec literal. Answers one {left, right, distance} per left row; a left row with no match keeps right: null and stays in the answer.",
+      "type": "object",
+      "properties": {
+        "$asof": {
+          "type": "array",
+          "items": [
+            {
+              "$ref": "#/definitions/expression"
+            },
+            {
+              "$ref": "#/definitions/expression"
+            },
+            {
+              "$ref": "#/definitions/asOfSpec"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 2,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "$asof"
+      ],
+      "additionalProperties": false
+    },
+    "asOfSpec": {
+      "description": "The $asof spec (QUERY-FORMAT.md section 8.16): a VERBATIM literal. 'by' joins within groups; 'leftAt'/'rightAt' say where each side keeps its instant when the two documents spell it differently. Closed: an unknown member is JQ0003.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "enum": [
+            "backward",
+            "forward",
+            "nearest"
+          ]
+        },
+        "tolerance": {
+          "$ref": "#/definitions/seriesSpan"
+        },
+        "by": {
+          "$ref": "#/definitions/rowSelector"
+        },
+        "leftAt": {
+          "$ref": "#/definitions/rowSelector"
+        },
+        "rightAt": {
+          "$ref": "#/definitions/rowSelector"
+        }
+      },
+      "additionalProperties": false
+    },
+    "timeBucketPhrase": {
+      "description": "$time-bucket [at, every] / [at, every, origin] / [at, every, origin, context]: the instant labelling the bucket 'at' falls in. The first three positions are operand expressions ('origin' may be null for the ladder's own default); the fourth is a VERBATIM calendar context literal.",
+      "type": "object",
+      "properties": {
+        "$time-bucket": {
+          "type": "array",
+          "items": [
+            {
+              "$ref": "#/definitions/expression"
+            },
+            {
+              "$ref": "#/definitions/expression"
+            },
+            {
+              "$ref": "#/definitions/expression"
+            },
+            {
+              "$ref": "#/definitions/calendarContext"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 2,
+          "maxItems": 4
+        }
+      },
+      "required": [
+        "$time-bucket"
+      ],
+      "additionalProperties": false
+    },
+    "calendarContext": {
+      "description": "$time-bucket's optional fourth position: the wall clock its boundaries fall on. UTC is the default and needs nothing; a named 'zone' needs an injected zoneProvider.",
+      "type": "object",
+      "properties": {
+        "zone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "number"
+        },
+        "disambiguation": {
+          "enum": [
+            "reject",
+            "earlier",
+            "later"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "applyPhrase": {
+      "description": "JSLT body-only $apply phrase. A non-array value is any expression except an array constructor. An array value is the argument list [selector] or [selector, mode]. The draft-neutral subset has no positional-array keyword, so the compiler remains authoritative that a two-item list's second item is a literal string (JT0007 wrapping JQ0003).",
+      "type": "object",
+      "properties": {
+        "$apply": {
+          "oneOf": [
+            {
+              "description": "Bare selector form: any non-array expression.",
+              "oneOf": [
+                {
+                  "$ref": "#/definitions/scalarLiteral"
+                },
+                {
+                  "$ref": "#/definitions/stringExpression"
+                },
+                {
+                  "$ref": "#/definitions/objectExpression"
+                }
+              ]
+            },
+            {
+              "description": "Argument-list form: [selector] or [selector, mode]. Items are expressions uniformly for draft neutrality; the compiler enforces the literal-string mode position.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/expression"
+              },
+              "minItems": 1,
+              "maxItems": 2
+            }
+          ]
+        }
+      },
+      "required": [
+        "$apply"
+      ],
+      "additionalProperties": false
+    },
+    "jsonSegment": {
+      "type": "object",
+      "properties": {
+        "$json": {
+          "$ref": "#/definitions/queryDocument"
+        }
+      },
+      "required": [
+        "$json"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

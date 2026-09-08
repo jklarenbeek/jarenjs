@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
+import { compileJtltStylesheet } from './grammar-harness.js';
 
 // Every worked example of JTLT-FORMAT.md Appendix A, verbatim. When the
 // specification changes, this file must change with it - the appendix

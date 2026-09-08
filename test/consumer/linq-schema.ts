@@ -255,3 +255,29 @@ void s.BooleanBuilder;
 void s.NullBuilder;
 // @ts-expect-error NamedBuilder is exported as a type only
 void s.NamedBuilder;
+
+// Annotation and bound methods preserve the builder's existing reading.
+const ContentBound = s.string().contentEncoding('base64').contentMediaType('application/json')
+  .contentSchema(s.number()).formatMinimum('a').formatMaximum('z')
+  .formatExclusiveMinimum('b').formatExclusiveMaximum('y').id('urn:content');
+const ContainsBound = s.array(s.number()).contains(s.number()).minContains(1).maxContains(2);
+const contentString: s.Infer<typeof ContentBound> = 'encoded';
+const containsNumbers: s.Infer<typeof ContainsBound> = [1];
+void [contentString, containsNumbers];
+// @ts-expect-error contentSchema does not change the instance type to number
+const decodedContent: s.Infer<typeof ContentBound> = 1;
+void decodedContent;
+
+const SemanticString = s.string().not(s.number()).unevaluatedProperties(s.never())
+  .unevaluatedItems(s.never()).dependentSchemas({ x: s.any() }).dependencies({ x: ['y'] })
+  .anchor('n').vocabulary({ 'urn:test': false }).dynamicRef('#n').dynamicAnchor('n')
+  .recursiveRef('#').recursiveAnchor(true).definitions({ N: s.number() })
+  .additionalItems(s.never()).dollarData('/limit').data({ maximum: '/limit' });
+const semanticString: s.Infer<typeof SemanticString> = 'x';
+void semanticString;
+// @ts-expect-error negation, references and annotation-dependent assertions do not invent a numeric phantom
+const semanticNumber: s.Infer<typeof SemanticString> = 1;
+void semanticNumber;
+const LegacyNullable = s.string().legacyNullable(true);
+const broadLegacy: s.Infer<typeof LegacyNullable> = null;
+void broadLegacy;

@@ -86,6 +86,25 @@ export function compileJtltStylesheet(doc, options = {}) {
   return render;
 }
 
+/**
+ * Validate a template through the same compiler that will render it. Successful
+ * validation does not run the template or assert anything about future input.
+ * Schema hooks and compile options are identical to compileJtltStylesheet.
+ * @param {any} doc - public template document
+ * @param {Parameters<typeof compileJtltStylesheet>[1]} [options]
+ * @returns {{ valid: boolean, errors: Array<{ code: string, message: string, docPath: string }> }}
+ */
+export function validateJtltTemplate(doc, options) {
+  try {
+    compileJtltStylesheet(doc, options);
+    return { valid: true, errors: [] };
+  }
+  catch (error) {
+    if (!(error instanceof JtltCompileError)) throw error;
+    return { valid: false, errors: [{ code: error.code, message: error.message, docPath: error.docPath }] };
+  }
+}
+
 const TEMPLATE_CACHE = createOptionVariantCache();
 
 function cachedRender(template, options) {

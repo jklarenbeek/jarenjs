@@ -115,6 +115,9 @@ Applies to inline templates and to string-valued catalog entries:
 - an unknown name leaves the placeholder literally (debuggability);
 - `{{` escapes a literal `{`.
 
+Compiled templates expose a frozen `parameters` array of unique placeholder
+names, read from the same parse that produces the renderer.
+
 Templates compile ONCE into a closure (`compileMessageTemplate`) — the
 two-stage house rule applies to messages too. There is **no pointer/data
 interpolation in v1** (`${/foo}` ajv-style is a roadmap follow-up; params

@@ -427,3 +427,6 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/charts/schemas/chart-definition.schema.json` | schema | — |
 | `@jarenjs/charts/package.json` | metadata | — |
 <!--/fact-->
+
+Author definitions in code with the typed [chart pen](../../packages/linq/docs/CHARTS-PEN.md),
+then pass its `.schema` directly to `compileChart`.

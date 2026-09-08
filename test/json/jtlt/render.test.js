@@ -6,7 +6,7 @@ import {
   renderText,
   JtltCompileError,
   JtltRuntimeError,
-} from '@jarenjs/json/jtlt';
+} from './grammar-harness.js';
 
 function makeStubHook() {
   return (schema) => {

@@ -54,7 +54,7 @@ function measuredEcho(dir) {
   return { name: 'measured figures (echoed)', docs: () => [], facts: () => facts };
 }
 
-/** A throwaway root holding a copy of the eleven documents. */
+/** A throwaway root holding a copy of the pen documents. */
 function sandbox() {
   const root = mkdtempSync(join(tmpdir(), 'jaren-pen-index-'));
   const dir = join(root, 'packages/linq/docs');
@@ -91,13 +91,16 @@ describe('the index is the directory, and the directory is the index', () => {
   it('carries one row per document, each linking itself and stating its length', () => {
     const files = readdirSync(DOCS).filter((file) => file.endsWith('.md')).sort();
     const binder = readFileSync(join(DOCS, BINDER), 'utf8');
-    const block = binder.slice(binder.indexOf(`<!--${NS}:pens.index-->`), binder.indexOf(`<!--/${NS}-->`));
+    const block = scanSourceDirectives(binder, { ns: NS }).directives
+      .find((directive) => directive.key === 'pens.index')?.body ?? '';
     const rows = [...block.matchAll(/^\| \[([A-Za-z0-9._-]+\.md)\]\(\1\) \| ([\d,]+) \|/gm)];
     assert.deepStrictEqual(rows.map((row) => row[1]).sort(), files);
     for (const [, file, stated] of rows) {
       assert.strictEqual(Number(stated.replace(/,/g, '')),
         readFileSync(join(DOCS, file), 'utf8').split('\n').length - 1, `${file}'s stated length`);
     }
+    assert.ok(binder.includes(`| **${files.length} documents** |`),
+      'the census total must grow with the documents it counts');
   });
 
   it('a document the registry has not been told about is still walked', () => {
@@ -157,7 +160,7 @@ describe('a hand-edited row is drift, and the write mode repairs it', () => {
 });
 
 describe('every committed marker sits where a renderer sees it', () => {
-  it('none of the eleven documents opens an HTML block over its own sentence', () => {
+  it('none of the pen documents opens an HTML block over its own sentence', () => {
     const problems = readdirSync(DOCS).filter((file) => file.endsWith('.md')).flatMap((file) =>
       bake(readFileSync(join(DOCS, file), 'utf8'), { ns: NS, resolve: () => undefined })
         .diagnostics.map((message) => `${file}: ${message}`));

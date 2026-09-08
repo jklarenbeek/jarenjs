@@ -1186,6 +1186,9 @@ this existed — and which to reach for is the choice, not a migration.
 
 ## The action language — a program the model writes and the compiler checks
 
+For typed fixture and host authoring, the [AI program pen](../linq/docs/AI-PEN.md)
+emits this same document and imports no AI runtime.
+
 The environment lets a model *address* a corpus. A program lets it *work* one: a small
 document whose steps name slots and operations, generated under a schema, compiled before
 anything runs, and executed by the harness.

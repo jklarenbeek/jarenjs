@@ -484,6 +484,7 @@ compileJtltStylesheet(doc, options) -> render
   render.doc                    // deeply frozen copy of the template
   render.stylesheet             // the frozen compiled JSLT stylesheet (§6)
 renderText(template, data, externals?, options?) // one-shot, WeakMap-cached
+validateJtltTemplate(doc, options?) // { valid, errors: [{ code, message, docPath }] }
 ```
 
 Module: `@jarenjs/json/jtlt`. `options` carries `compileTypeTest` (§8) and
@@ -640,20 +641,37 @@ sanctioned way to put a container into the stream (§3.3).
 
 ---
 
-## Appendix B. LLM structured output (non-normative)
+## Appendix B. Published grammar and validation
 
-No schema artifact is published for templates in version 0.1 — this is
-the honest gap between JTLT and its siblings, and closing it is roadmap.
-The intended derivation follows the JSLT artifact's discipline
-(JSLT-FORMAT Appendix B): reuse the committed query artifact's definition
-map for expression segments, define the segment alternation of §3.1 over
-it (strings, nested lists, `$raw`/`$json`/`$apply` phrases), reuse the
-JSLT artifact's rule scaffolding with `body` narrowed to the segment-list
-array, and derive a draft-07 twin mechanically. Until that artifact
-exists, generated templates should be validated by compiling them:
-`compileJtltStylesheet` is the authority, and every rejection carries a
-`docPath` into the template for a repair loop.
+The public artifacts are
+[`jaren-jtlt.schema.json`](../schemas/jaren-jtlt.schema.json) (2020-12) and
+[`jaren-jtlt.draft-07.schema.json`](../schemas/jaren-jtlt.draft-07.schema.json).
+Import either through `@jarenjs/json/schemas/`. Both describe version 0.1;
+`node scripts/generate-jtlt-schema.js` derives them from the committed JSLT
+query/match definitions and the segment vocabulary. The draft-07 twin is a
+mechanical transform, held equal by tests. Every existing render, specification
+and option-variant fixture crosses both grammars at its engine boundary.
 
-Templates remain ordinary JSON throughout a toolchain — function-call
-arguments, retrieved rule sets, reviewed diffs, audit-log entries, and
-replayable renderers without a text parser.
+The grammar closes envelope/rule members, reserves the built-in priority band,
+and distinguishes literal strings, nested lists, `$raw`, `$json`, `$apply` and
+query-object segments. Mixed query/literal objects are refused by the inherited
+query grammar and compiler. Segment-only `$raw`/`$json` forms remain illegal
+inside ordinary query expressions.
+
+Structural validation is not compilation. Format annotations need not be
+asserted: a host can supply custom path functions that a standalone RFC 9535
+format checker cannot know. The compiler resolves path and external syntax,
+literal `$apply` mode arguments, query operator semantics, and schema-hook
+availability. Data-dependent serialization errors, unbound render parameters
+and recursion depth require running the renderer. Each compiler refusal that
+passes the structural grammar is an explicit boundary in the differential tests.
+
+`validateJtltTemplate(doc, options?)` returns `{ valid, errors }`, compiling with
+the same options and engine as `compileJtltStylesheet`. Errors carry the original
+`code`, `message` and template `docPath`; a successful report does not execute
+rules or certify future input. Unexpected host exceptions propagate. There is
+no second runtime template parser.
+
+Templates remain ordinary JSON throughout a toolchain: function-call arguments,
+retrieved rule sets, reviewed diffs and replayable renderers. For fluent
+construction see the [JTLT pen](../../linq/docs/JTLT-PEN.md).

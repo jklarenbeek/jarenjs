@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 import { build } from 'esbuild';
+import { AUTHORED_PEN_PROBES } from './lib/authored-pen-probes.js';
 
 const result = await build({
   stdin: {
@@ -139,7 +140,7 @@ if (engineLeak.length > 0)
 // the pen's many-to-many relation lowering through the join root. Their
 // diagnostics belong in this bundle: keep useful refusals within the
 // budget rather than shortening messages to hide unrelated growth.
-if (schemaBytes > 33500)
+if (schemaBytes > 38000)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -254,7 +255,7 @@ if (modelEngineLeak.length > 0)
 // versions, the closed entity vocabulary, and valid rename hints), with
 // diagnostics that explain the accepted spelling at build time. It also
 // includes the same many-to-many relation lowering as the schema pen.
-if (modelBytes > 42000)
+if (modelBytes > 46500)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -457,7 +458,7 @@ const contractPenLeak = Object.entries(contractPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|flow|app|forms|db)\//.test(file) && info.bytesInOutput > 0);
 if (contractPenLeak.length > 0)
   throw new Error(`The contract pen pulled another pen into the bundle: ${contractPenLeak.map(([file]) => file).join(', ')}`);
-if (contractPenBytes > 46000)
+if (contractPenBytes > 50500)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -567,7 +568,7 @@ const appPenLeak = Object.entries(appPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(model|migration|contract|flow|forms|db)\//.test(file) && info.bytesInOutput > 0);
 if (appPenLeak.length > 0)
   throw new Error(`The app pen pulled another pen into the bundle: ${appPenLeak.map(([file]) => file).join(', ')}`);
-if (appPenBytes > 48000)
+if (appPenBytes > 53000)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -618,7 +619,7 @@ const formsPenLeak = Object.entries(formsPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|contract|flow|app|db)\//.test(file) && info.bytesInOutput > 0);
 if (formsPenLeak.length > 0)
   throw new Error(`The forms pen pulled another pen into the bundle: ${formsPenLeak.map(([file]) => file).join(', ')}`);
-if (formsPenBytes > 40000)
+if (formsPenBytes > 42500)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
@@ -630,6 +631,31 @@ if (schemaFormsLeak.length > 0)
   throw new Error(`The schema pen pulled the forms pen into the bundle: ${schemaFormsLeak.map(([file]) => file).join(', ')}`);
 
 console.log(`Tree-shaking smoke test passed (${formsPenBytes} byte forms-pen bundle; no chain module, no @jarenjs/forms bytes, no model pen).`);
+
+// Every authored-format entry point is isolated from target engines and the chain.
+for (const [pen, probe] of Object.entries(AUTHORED_PEN_PROBES)) {
+  const result = await build({
+    stdin: { contents: probe.source, resolveDir: process.cwd(), sourcefile: `${pen}-pen-consumer.js` },
+    bundle: true, format: 'esm', metafile: true, minify: true,
+    platform: 'neutral', treeShaking: true, write: false,
+  });
+  const bytes = result.outputFiles[0].contents.length;
+  const inputs = Object.entries(Object.values(result.metafile.outputs)[0].inputs)
+    .filter(([, info]) => info.bytesInOutput > 0).map(([file]) => file);
+  const forbidden = inputs.filter((file) =>
+    /components\//.test(file)
+    || /packages\/(?!core\/|linq\/)/.test(file)
+    || (/packages\/linq\/src\/[^/]+\//.test(file) && !file.includes(`/src/${pen}/`))
+    || /packages\/linq\/src\/(sequence|document|async|concurrency|provider|sources|schema-of)\.js$/.test(file));
+  if (forbidden.length) throw new Error(`${pen} pen imported runtime engines, another pen or chain modules: ${forbidden}`);
+  if (bytes > probe.maxBytes) throw new Error(`${pen} pen grew to ${bytes} bytes (budget ${probe.maxBytes})`);
+  for (const inputs of [chainInputs, schemaInputs]) {
+    if (Object.entries(inputs).some(([file, info]) => file.includes(`/src/${pen}/`) && info.bytesInOutput > 0))
+      throw new Error(`The chain or schema pen imported the ${pen} pen`);
+  }
+  linqBundles.set(pen, bytes);
+  console.log(`Tree-shaking passed (${pen}: ${bytes} bytes; no target engine or chain modules).`);
+}
 
 // ---- the measured baseline (D11) ----
 // Every figure this repository publishes about a `@jarenjs/linq` subpath

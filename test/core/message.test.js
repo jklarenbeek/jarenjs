@@ -68,6 +68,21 @@ describe('compileMessageTemplate', function () {
 });
 
 describe('compileMessageCatalog', function () {
+  it('preserves prototype-named ids as frozen own entries', function () {
+    const closure = (p) => `closure ${p.n}`;
+    for (const entry of ['value {n}', closure]) {
+      const input = { ['__proto__']: entry, constructor: 'ctor {n}', toString: 'text {n}' };
+      const catalog = compileMessageCatalog(input);
+      assert.deepEqual(Object.keys(catalog), Object.keys(input));
+      assert.equal(Object.getPrototypeOf(catalog), Object.prototype);
+      assert.equal(catalog.__proto__({ n: 2 }), typeof entry === 'string' ? 'value 2' : 'closure 2');
+      assert.equal(catalog.constructor({ n: 2 }), 'ctor 2');
+      assert.equal(catalog.toString({ n: 2 }), 'text 2');
+      assert.equal(Object.isFrozen(catalog), true);
+      assert.equal(Object.isFrozen(input), false);
+    }
+  });
+
   it('compiles template strings and passes closures through', function () {
     const closure = (p) => `closure ${p.n}`;
     const catalog = compileMessageCatalog({ a: 'tpl {n}', b: closure });

@@ -826,7 +826,7 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->623,994<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->624,075<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.db.kb-->624<!--/fact--> kB) beside the other nine subpath prices in
@@ -856,7 +856,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->41,582<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->45,143<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

@@ -1273,7 +1273,7 @@ const FACTS = {
   // Ten sentences quoting another subpath's price used to be typed, and
   // one schema-pen change left every one of them 94 bytes stale.
   ...Object.fromEntries(['schema', 'chain', 'model', 'jslt', 'migration', 'db',
-    'contract', 'flow', 'app', 'forms'].flatMap((name) => [
+    'contract', 'flow', 'app', 'forms', 'charts', 'project', 'jtlt', 'messages', 'ai'].flatMap((name) => [
     [`bundle.${name}`, () => thousands(bundleBytes(name))],
     // the rounded kB docs/CONSUMING.md publishes: decimal, so a reader
     // comparing it with the exact figure beside it can do the division

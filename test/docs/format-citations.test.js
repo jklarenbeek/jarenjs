@@ -211,7 +211,7 @@ describe('the linq binder indexes every document beside it', () => {
   // the linq README, the README links the binder, the binder links the
   // rest. A document the binder does not name is unreachable there.
   it('links each one, so a reader on the site can open it', () => {
-    assert.strictEqual(LINQ_DOCUMENTS.length, 11, `${LINQ_DOCS} holds ${LINQ_DOCUMENTS.length} documents`);
+    assert.strictEqual(LINQ_DOCUMENTS.length, 16, `${LINQ_DOCS} holds ${LINQ_DOCUMENTS.length} documents`);
     const binder = fs.readFileSync(path.join(ROOT, LINQ_DOCS, BINDER), 'utf8');
     // §1's opening, where the index sits — not the whole file: the
     // disposition table below it links nine of the same documents, and

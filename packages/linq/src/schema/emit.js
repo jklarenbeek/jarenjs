@@ -118,7 +118,10 @@ export function reachesNormalizer(builder, seen = new Set()) {
   for (const [key] of st.annotations) {
     if (NORMALIZER_KEYS.includes(key)) return true;
   }
-  return children(st).some((child) => reachesNormalizer(child, seen));
+  const keywordChildren = (value) => isSchemaBuilder(value) ? reachesNormalizer(value, seen)
+    : value !== null && typeof value === 'object' && Object.values(value).some(keywordChildren);
+  return Object.values(st.keywords).some(keywordChildren)
+    || children(st).some((child) => reachesNormalizer(child, seen));
 }
 
 /** Every builder one state holds directly (lazy thunks resolved). */
@@ -215,11 +218,30 @@ function emitNode(builder, ctx, at) {
   const st = builder.state;
   let node = emitCore(builder, st, ctx, at);
   if (st.nullable) node = nullableOf(node, st);
+  for (const key of Object.keys(st.keywords)) {
+    const value = st.keywords[key];
+    setObjectMember(node, key, emitKeyword(value, ctx, `${at}/${token(key)}`, key));
+  }
+  if (st.nullable && TYPED[st.kind] !== undefined && Array.isArray(node.enum)
+    && !node.enum.includes(null)) node.enum = [...node.enum, null];
   if (st.checks.length > 0) {
     node.$query = st.checks.length === 1 ? st.checks[0] : { $and: st.checks };
   }
   for (const [key, value] of st.annotations) setObjectMember(node, key, value);
   return node;
+}
+
+/** Emit schema-valued keywords in the root's shared definition context. */
+function emitKeyword(value, ctx, at, keyword) {
+  if (isSchemaBuilder(value)) {
+    if (['not', 'unevaluatedProperties', 'unevaluatedItems', 'dependentSchemas', 'dependencies', 'contentSchema'].includes(keyword))
+      refuseNormalizerUnder(value, keyword, at);
+    return emitNode(value, ctx, at);
+  }
+  if (Array.isArray(value)) return value.map((v, i) => emitKeyword(v, ctx, `${at}/${i}`, keyword));
+  if (value !== null && typeof value === 'object')
+    return Object.fromEntries(Object.keys(value).map((k) => [k, emitKeyword(value[k], ctx, `${at}/${token(k)}`, keyword)]));
+  return value;
 }
 
 /** Fold `null` into a typed node; wrap an untyped one in `anyOf`. */
@@ -238,12 +260,6 @@ function nullableOf(node, st) {
   return { anyOf: [node, { type: 'null' }] };
 }
 
-/** The constraint keywords a builder collected, in the order set. */
-function withKeywords(node, st) {
-  for (const key of Object.keys(st.keywords)) node[key] = st.keywords[key];
-  return node;
-}
-
 /**
  * The kind-specific core of a node: `type` and the structural
  * keywords, with the collected constraints after them.
@@ -256,7 +272,7 @@ function withKeywords(node, st) {
 function emitCore(builder, st, ctx, at) {
   switch (st.kind) {
     case 'string': case 'number': case 'integer': case 'boolean': case 'null':
-      return withKeywords({ type: st.kind }, st);
+      return { type: st.kind };
     case 'literal':
       return { const: st.value };
     case 'enum':
@@ -293,20 +309,20 @@ function emitCore(builder, st, ctx, at) {
         node.propertyNames = emitNode(st.names, ctx, `${at}/propertyNames`);
       }
       if (st.dependent !== null) node.dependentRequired = cloneJson(st.dependent);
-      return withKeywords(node, st);
+      return node;
     }
     case 'record':
-      return withKeywords({
+      return {
         type: 'object',
         additionalProperties: emitNode(st.values, ctx, `${at}/additionalProperties`),
-      }, st);
+      };
     case 'array': {
       const node = { type: 'array', items: emitNode(st.items, ctx, `${at}/items`) };
       if (st.contains !== null) {
         refuseNormalizerUnder(st.contains, 'contains()', `${at}/contains`);
         node.contains = emitNode(st.contains, ctx, `${at}/contains`);
       }
-      return withKeywords(node, st);
+      return node;
     }
     case 'tuple': {
       const node = {
@@ -315,7 +331,7 @@ function emitCore(builder, st, ctx, at) {
       };
       if (st.rest !== null) node.items = emitNode(st.rest, ctx, `${at}/items`);
       node.minItems = st.items.length;
-      return withKeywords(node, st);
+      return node;
     }
     case 'union': case 'discriminated': {
       const keyword = st.kind === 'union' ? 'anyOf' : 'oneOf';

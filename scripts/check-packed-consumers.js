@@ -36,7 +36,8 @@
  * gate exists to catch; a declaration missing from a tarball fails the
  * TypeScript leg the same way. The claim under test is "every explicit
  * JavaScript export key" — wildcard export patterns (`./x/*`) and
- * non-JavaScript subpaths (schemas, package.json) are NOT covered.
+ * non-JavaScript subpaths (schemas, package.json) are not generally covered.
+ * The JSON package also pins both published JTLT grammar artifacts explicitly.
  *
  * Portability: paths derive from `fileURLToPath` (a URL `pathname` is
  * not a Windows filesystem path), npm runs through its own JS
@@ -182,6 +183,9 @@ focus.flush();
 focus.dispose();
 `,
   '@jarenjs/json': `
+import { validateJtltTemplate } from '@jarenjs/json/jtlt';
+const jtltValid: boolean = validateJtltTemplate([]).valid;
+void jtltValid;
 import { compileJsonQuery } from '@jarenjs/json/query';
 const q = compileJsonQuery('$.rows[*]', {
   limits: { sequenceItems: 100, resultItems: 10 },
@@ -265,6 +269,17 @@ import { defineDag, defineFsm, edge, effect, input, on, output, query, state } f
 import { action, append, bind, defineApp, transition } from '@jarenjs/linq/app';
 import { rule } from '@jarenjs/linq/jslt';
 import { defineMigration } from '@jarenjs/linq/migration';
+import { bar as penBar } from '@jarenjs/linq/charts';
+import { catalog as messageCatalog, message as messageRef } from '@jarenjs/linq/messages';
+messageCatalog('forms').entry('form/required', 'Required').partial();
+messageRef('minimum', { params: { limit: 3 } });
+import { program as aiProgram } from '@jarenjs/linq/ai';
+aiProgram(['data']).select('data', 'result', v => v.get('n').add(1)).answer('result');
+const chartKind: 'bar' = penBar().categories(['A']).series([{ name: 'S', values: [1] }]).schema.type;
+void chartKind;
+import { defineProject, jsonFile } from '@jarenjs/linq/project';
+import { stylesheet as textTemplate, rule as textRule } from '@jarenjs/linq/jtlt';
+defineProject([jsonFile('template', 'data', textTemplate([textRule(['hi'])]).schema)]).active('template');
 import * as fm from '@jarenjs/linq/forms';
 import { assertOnSubmit } from '@jarenjs/linq/forms';
 import { open } from '@jarenjs/linq/db';
@@ -576,6 +591,12 @@ try {
       }
     }
     let program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
+    if (name === '@jarenjs/json') program += `
+for (const suffix of ['schema', 'draft-07.schema']) {
+  const { default: grammar } = await import('@jarenjs/json/schemas/jaren-jtlt.' + suffix + '.json', { with: { type: 'json' } });
+  if (!grammar.$id.includes('jaren-jtlt/0.1')) throw new Error('Packed JTLT grammar is missing its version');
+}
+`;
     if (name === '@jarenjs/db') program += `
 const { openStore } = await import('@jarenjs/db');
 const { nodeWorkerDriver } = await import('@jarenjs/db/node-worker');

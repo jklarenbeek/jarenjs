@@ -332,107 +332,16 @@ describe('the schema pen — no engine behind it', () => {
   });
 });
 
-// ——— the owned keywords that have no method ———
-//
-// `OWNED` holds two kinds, and the comment above it says so: the keywords
-// a builder method emits, and the ones that "would change what a document
-// asserts" and are kept out of `meta()` for that reason alone. The second
-// kind has no spelling of its own on this surface — a reader who wants
-// `not` or `unevaluatedProperties` reaches for `keyword()` or `from()` —
-// and SCHEMA-PEN.md §6.2 is where that is written down. Nothing held the
-// document to the module, so the list drifted the moment a method landed
-// for one of them, or a keyword joined `OWNED` and nobody documented it.
-describe('the schema pen — the owned keywords with no method', () => {
-  const DOC = new URL('../../packages/linq/docs/SCHEMA-PEN.md', import.meta.url);
-  const SRC = new URL('../../packages/linq/src/schema/builders.js', import.meta.url);
-
-  /** §6.2's own table, read as the document publishes it: every keyword
-   * in the right-hand column of every row under that heading. */
-  const documented = () => {
-    const markdown = fs.readFileSync(DOC, 'utf8');
-    const start = markdown.indexOf('### 6.2 ');
-    assert.notStrictEqual(start, -1, 'SCHEMA-PEN.md carries its §6.2');
-    const from_ = markdown.indexOf('\n', start) + 1;
-    const next = markdown.slice(from_).search(/^#{2,3} /m);
-    const section = markdown.slice(start, next < 0 ? markdown.length : from_ + next);
-    const rows = [...section.matchAll(/^\| [^|]+ \| (.+?) \|$/gm)]
-      .map((m) => m[1]).filter((cell) => !/^-+$/.test(cell.trim()));
-    return rows.flatMap((cell) => [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-  };
-
-  /** The `OWNED` set, read out of the source rather than imported: it is
-   * a module-private constant, and a test that re-declared it would be a
-   * second copy of the thing under test. */
-  const owned = () => {
-    const source = fs.readFileSync(SRC, 'utf8');
+describe('owned keywords retain the raw escape hatch', () => {
+  it('meta refuses owned keywords and keyword writes every spelling verbatim', () => {
+    const source = fs.readFileSync(new URL('../../packages/linq/src/schema/builders.js', import.meta.url), 'utf8');
     const block = /const OWNED = new Set\(\[([\s\S]*?)\]\);/.exec(source);
-    assert.ok(block, 'builders.js still declares OWNED as a Set literal');
-    return [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  };
-
-  /** Every method name reachable on any builder class the subpath exports,
-   * plus every exported name — the surface a caller can write. */
-  const surface = () => {
-    const names = new Set(Object.keys(s));
-    for (const name of Object.keys(s)) {
-      const value = /** @type {any} */ (/** @type {any} */ (s)[name]);
-      if (typeof value === 'function' && value.prototype && value.prototype !== Function.prototype)
-        for (const m of Object.getOwnPropertyNames(value.prototype)) if (m !== 'constructor') names.add(m);
+    assert.ok(block);
+    const names = [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    assert.strictEqual(names.length, 69);
+    for (const name of names) {
+      assert.throws(() => s.string().meta({ [name]: 1 }), { code: 'JL0104' });
+      assert.strictEqual(s.string().keyword(name, 1).schema[name], 1);
     }
-    return names;
-  };
-
-  it('§6.2 lists only keywords the pen actually owns', () => {
-    const set = new Set(owned());
-    const strangers = documented().filter((keyword) => !set.has(keyword));
-    assert.deepStrictEqual(strangers, [],
-      `SCHEMA-PEN.md §6.2 names ${strangers.length} keyword(s) OWNED does not carry: ${strangers.join(', ')}`);
-  });
-
-  it('§6.2 lists only keywords with no method of their own', () => {
-    // The weak direction of "no method", and the one that can be read off
-    // the module: a keyword whose name IS a callable name is a keyword the
-    // caller can spell, so it does not belong in a list of absences.
-    const names = surface();
-    const spellable = documented().filter((keyword) => names.has(keyword));
-    assert.deepStrictEqual(spellable, [],
-      `SCHEMA-PEN.md §6.2 lists ${spellable.length} keyword(s) the surface names: ${spellable.join(', ')}`);
-  });
-
-  it('every keyword §6.2 lists is refused by meta() and written by keyword()', () => {
-    for (const keyword of documented()) {
-      assert.throws(() => s.string().meta({ [keyword]: 1 }), (error) => {
-        assert.ok(error instanceof LinqBuildError);
-        assert.strictEqual(error.code, 'JL0104', `meta() refuses '${keyword}' with JL0104`);
-        return true;
-      }, `meta() refuses '${keyword}'`);
-      const document = /** @type {any} */ (s.string().keyword(keyword, 1).schema);
-      assert.strictEqual(document[keyword], 1,
-        `keyword('${keyword}', …) is the door §6.2 promises, and it writes the keyword verbatim`);
-    }
-  });
-
-  it('the count §6.2 publishes is the number of keywords it lists', () => {
-    const markdown = fs.readFileSync(DOC, 'utf8');
-    const heading = /^### 6\.2 The absences: (.+?) keywords with no method$/m.exec(markdown);
-    assert.ok(heading, 'the §6.2 heading still states a count');
-    const WORDS = { twenty: 20, thirty: 30 };
-    const [tens, units] = heading[1].split('-');
-    const stated = (WORDS[tens] ?? 0)
-      + ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
-        .indexOf(units ?? 'zero');
-    assert.strictEqual(stated, documented().length,
-      `§6.2 says '${heading[1]}' and lists ${documented().length}`);
-  });
-
-  it('the refusal names the door a keyword with no method actually has', () => {
-    // The message used to name only "the builder method that emits it",
-    // which for every keyword in §6.2 is a method that does not exist.
-    assert.throws(() => s.string().meta({ not: { type: 'number' } }), (error) => {
-      assert.match(/** @type {Error} */ (error).message, /keyword\('not', value\)/,
-        'the message names keyword() for a keyword no method emits');
-      assert.match(/** @type {Error} */ (error).message, /from\(\)/);
-      return true;
-    });
   });
 });

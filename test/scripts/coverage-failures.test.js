@@ -38,7 +38,7 @@ cp.spawnSync = () => {
     status: options.status,
     signal: null,
     error: options.launchError ? new Error('LAUNCH_ERROR_MARKER') : undefined,
-    stdout: '\u2716 failing case\n  AssertionError [ERR_ASSERTION]: DIAGNOSTIC_MARKER\n'
+    stdout: 'x'.repeat(options.padding ?? 0) + '\u2716 failing case\n  AssertionError [ERR_ASSERTION]: DIAGNOSTIC_MARKER\n'
       + '  actual: 12\n  expected: 21\n  at test/example.test.js:9:12\n'
       + '\u2139 tests 1\n\u2139 pass 0\n\u2139 fail 1\n',
   };
@@ -49,7 +49,7 @@ process.argv = [process.execPath, 'benchmark/coverage.js',
 await import('./benchmark/coverage.js');
 `;
 
-/** @param {{ deadCode: boolean, writesReport: boolean, status: number | null, launchError?: boolean }} options */
+/** @param {{ deadCode: boolean, writesReport: boolean, status: number | null, launchError?: boolean, padding?: number }} options */
 function invoke(options) {
   const result = spawnSync(process.execPath,
     ['--input-type=module', '--eval', HARNESS, JSON.stringify(options)],
@@ -67,6 +67,14 @@ describe('coverage CLI failure reporting', () => {
     assert.match(result.stderr, /expected: 21/);
     assert.match(result.stderr, /test\/example\.test\.js:9:12/);
     assert.doesNotMatch(result.stdout, /OLD_REPORT_MARKER/);
+  });
+
+  it('drains a long failed suite before exiting, preserving its final diagnosis', () => {
+    const result = invoke({ deadCode: true, writesReport: true, status: 1, padding: 1024 * 1024 });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /DIAGNOSTIC_MARKER/);
+    assert.match(result.stderr, /expected: 21/);
+    assert.match(result.stderr, /fix the suite first/);
   });
 
   it('fails a profiler run even when that failed child produces partial coverage', () => {

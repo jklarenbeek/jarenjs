@@ -14,7 +14,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { renderText, compileJtltStylesheet } from '@jarenjs/json/jtlt';
+import { renderText, compileJtltStylesheet } from './grammar-harness.js';
 import { transformJson } from '@jarenjs/json/jslt';
 
 const REGISTRY = {

@@ -77,11 +77,16 @@ if (args.includes('--help') || args.includes('-h')) {
 // all unhit — the stale/dead-code candidates a refactor must resolve.
 // Unlike the profiler mode below, it takes no target file.
 if (args.includes('--dead-code')) {
-  process.exit(runDeadCodeAudit({
+  const exitCode = runDeadCodeAudit({
     tempDir: path.join(rootDir, 'coverage', 'tmp-dead'),
     fail: !args.includes('--no-fail'),
     json: args.includes('--json'),
-  }));
+  });
+  // Pipes are asynchronous: a failed suite can exceed their buffers, and an
+  // immediate exit would discard the assertion near the end of its output.
+  await Promise.all([process.stdout, process.stderr].map((stream) =>
+    new Promise((resolve) => stream.write('', resolve))));
+  process.exit(exitCode);
 }
 
 // Parse arguments

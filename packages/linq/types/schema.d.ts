@@ -161,6 +161,42 @@ export class SchemaBuilder<Out = unknown, In = Out, F extends Flag = never> {
   readonly schema: JsonSchema | boolean;
   /** `JSON.stringify(builder)` is the document. */
   toJSON(): JsonSchema | boolean;
+  /** `$id`: resource identity; the phantom is unchanged. */
+  id(uri: string): this;
+  /** Raw constraint escape hatch, without inferred narrowing. */
+  keyword(key: string, value: Json): this;
+  /** Validation or annotation only; retains the current phantom. */
+  anchor(value: string): this;
+  /** Validation or annotation only; retains the current phantom. */
+  dynamicRef(value: string): this;
+  /** Validation or annotation only; retains the current phantom. */
+  dynamicAnchor(value: string): this;
+  /** Validation or annotation only; retains the current phantom. */
+  recursiveRef(value: string): this;
+  /** Validation or annotation only; retains the current phantom. */
+  recursiveAnchor(value: boolean): this;
+  /** Validation or annotation only; retains the current phantom. */
+  dollarData(value: string): this;
+  /** Validation or annotation only; retains the current phantom. */
+  vocabulary(value: Readonly<Record<string, boolean>>): this;
+  /** Validation or annotation only; retains the current phantom. */
+  data(value: Readonly<Record<string, string>>): this;
+  /** Validation or annotation only; retains the current phantom. */
+  not(value: AnyBuilder): this;
+  /** Validation or annotation only; retains the current phantom. */
+  unevaluatedProperties(value: AnyBuilder): this;
+  /** Validation or annotation only; retains the current phantom. */
+  unevaluatedItems(value: AnyBuilder): this;
+  /** Validation or annotation only; retains the current phantom. */
+  dependentSchemas(value: Props): this;
+  /** Validation or annotation only; retains the current phantom. */
+  definitions(value: Props): this;
+  /** Validation or annotation only; retains the current phantom. */
+  additionalItems(value: AnyBuilder): this;
+  /** Validation or annotation only; retains the current phantom. */
+  dependencies(value: Readonly<Record<string, AnyBuilder | readonly string[]>>): this;
+  /** Legacy nullable may widen acceptance; no inferred shape is claimed. */
+  legacyNullable(value: boolean): SchemaBuilder<unknown, unknown, F>;
   /** As an object member: left out of `required`. */
   optional(): SchemaBuilder<Out, In, F | 'optional'>;
   /** Admit `null`. */
@@ -183,6 +219,20 @@ export class SchemaBuilder<Out = unknown, In = Out, F extends Flag = never> {
 
 /** `{ type: 'string' }` and the string constraints. */
 export class StringBuilder<Out = string, In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
+  /** `contentEncoding`; retains the current phantom. */
+  contentEncoding(value: string): this;
+  /** `contentMediaType`; retains the current phantom. */
+  contentMediaType(value: string): this;
+  /** `contentSchema`; retains the current phantom. */
+  contentSchema(value: AnyBuilder): this;
+  /** `formatMinimum`; retains the current phantom. */
+  formatMinimum(value: string): this;
+  /** `formatMaximum`; retains the current phantom. */
+  formatMaximum(value: string): this;
+  /** `formatExclusiveMinimum`; retains the current phantom. */
+  formatExclusiveMinimum(value: string): this;
+  /** `formatExclusiveMaximum`; retains the current phantom. */
+  formatExclusiveMaximum(value: string): this;
   optional(): StringBuilder<Out, In, F | 'optional'>;
   nullable(): StringBuilder<Out | null, In | null, F>;
   default(value: Out): StringBuilder<Out, In, F | 'defaulted'>;
@@ -254,6 +304,10 @@ declare class NullBuilder<Out = null, In = Out, F extends Flag = never> extends 
 
 /** `{ type: 'array', items }` and the array constraints. */
 export class ArrayBuilder<Out = unknown[], In = Out, F extends Flag = never> extends SchemaBuilder<Out, In, F> {
+  /** `minContains`; retains the current phantom. */
+  minContains(value: number): this;
+  /** `maxContains`; retains the current phantom. */
+  maxContains(value: number): this;
   optional(): ArrayBuilder<Out, In, F | 'optional'>;
   nullable(): ArrayBuilder<Out | null, In | null, F>;
   default(value: Out): ArrayBuilder<Out, In, F | 'defaulted'>;

@@ -31,11 +31,9 @@ import * as s from '@jarenjs/linq/schema';
 builds JSON Schema 2020-12 documents: the structural keywords, the
 constraints and the annotations, each with a method of its own; `$query`
 captured through the chain's proxy; `$defs`/`$ref` recursion; the
-normalizer's per-field predicates. Twenty-five further keywords that
-`@jarenjs/validate` also compiles have no method on this surface and are
-written through `.keyword()` or `from()` instead —
-[§6.2](#62-the-absences-twenty-five-keywords-with-no-method) lists them
-by family. The type reading is
+normalizer's per-field predicates. Every owned keyword has a dedicated spelling. Annotation-dependent,
+negating and dynamic-reference methods preserve the existing phantom;
+[§6.2](#62-annotation-and-legacy-boundaries) explains those boundaries. The type reading is
 emit's (EMIT-FORMAT §5–§7), because the agreement pins them equal; a
 constraint (`min`, `pattern`, `format`) never changes a type — the honest
 widening emit documents — with one addition: a string with
@@ -296,6 +294,42 @@ Three rules the tables imply, spelled out:
 - **A `when()` builder is thenable-shaped.** Its `then()` takes a schema,
   so a promise that resolves one calls it with a function and is refused
   by name (`JL0101`); keep builders out of async return positions.
+
+### 2.11 Content, containment and resource identity
+
+Each method preserves the current phantom and replaces a prior value in place.
+The content methods describe encoded strings; `contentSchema` is annotation
+information, not a promise that the validator checks the decoded value.
+`contentValidation: true` enables encoding/media checks. Format bounds require
+a format compiler that supports ordering. Schema-valued methods take builders
+and share the root's definition-hoisting context.
+
+| Method | Emits | `Infer` / `Input` | Status |
+|---|---|---|---|
+| `.id(uri)` | `$id` | `this` | native; string required |
+| array `.minContains(n)`, `.maxContains(n)` | `minContains`, `maxContains` | `this` | native; non-negative integers |
+| string `.contentEncoding(text)` | `contentEncoding` | `this` | native |
+| string `.contentMediaType(text)` | `contentMediaType` | `this` | native |
+| string `.contentSchema(builder)` | `contentSchema` | `this` | native; named definitions hoist |
+| string `.formatMinimum(text)`, `.formatMaximum(text)` | `formatMinimum`, `formatMaximum` | `this` | native |
+| string `.formatExclusiveMinimum(text)`, `.formatExclusiveMaximum(text)` | `formatExclusiveMinimum`, `formatExclusiveMaximum` | `this` | native |
+
+### 2.12 Applicators, references and legacy keywords
+
+All methods below are immutable; repeated calls replace the previous value.
+Raw schemas enter through `from()`. Use `never()` for a false subschema.
+
+| Method | Emits | `Infer` / `Input` | Status |
+|---|---|---|---|
+| `.not(builder)` | `not` | `this` | native |
+| `.unevaluatedProperties(builder)`, `.unevaluatedItems(builder)` | `unevaluatedProperties`, `unevaluatedItems` | `this` | native |
+| `.dependentSchemas(map)`, `.dependencies(map)` | `dependentSchemas`, `dependencies` | `this` | native; legacy dependencies also accept arrays of distinct member names |
+| `.anchor(name)`, `.vocabulary(map)` | `$anchor`, `$vocabulary` | `this` | native |
+| `.dynamicRef(uri)`, `.dynamicAnchor(name)` | `$dynamicRef`, `$dynamicAnchor` | `this` | native; no inferred reference identity |
+| `.recursiveRef(uri)`, `.recursiveAnchor(boolean)` | `$recursiveRef`, `$recursiveAnchor` | `this` | native |
+| `.definitions(map)`, `.additionalItems(builder)` | `definitions`, `additionalItems` | `this` | native; legacy vocabulary |
+| `.dollarData(pointer)`, `.data(map)` | `$data`, `data` | `this` | native |
+| `.legacyNullable(boolean)` | `nullable` | `unknown` | native; distinct from `.nullable()` |
 
 ## 3. Worked examples
 
@@ -830,25 +864,13 @@ JSON are still two, and still a collision.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
-| `s.string().meta({ type: 'x' })` | `meta() cannot write 'type' — the pen owns that keyword; spell it through the builder method that emits it, keyword('type', value) where no method does, or wrap a hand-written schema with from()` | the method that emits it — or, for a keyword §6.2 lists, `s.keyword(…)` or `s.from({ … })` |
+| `s.string().meta({ type: 'x' })` | `meta() cannot write 'type' — the pen owns that keyword; spell it through the builder method that emits it, keyword('type', value) where no method does, or wrap a hand-written schema with from()` | the method that emits it — or, for a raw value, `.keyword(…)` or `s.from({ … })` |
 | `.check((o, x) => x.foo.eq(1))` | `a check() rule cannot bind 'foo' — its query evaluates with exactly 2 externals, 'root' and 'path'; anything else has nothing to bind to` | `x.root` and `x.path`, and nothing else |
 
-The owned set is every keyword the pen writes itself plus every keyword
-that would change what a document asserts — the structural ones, the
-constraints, `$schema`/`$id`/`$ref`/`$defs` and the anchors, `$query`,
-`default`/`title`/`description`/`examples`/`errorMessage`, and
-`x-coerce`/`x-trim`. `meta()` is for everything else: a 2020-12
-annotation the pen has no method for (`deprecated`, `readOnly`,
-`writeOnly`), and any vendor extension. The type declaration carries the
-same set as `OwnedKeyword`, so a forbidden key does not compile either
-(§5). Twenty-five of the sixty-nine have no method to be spelled through,
-which is why the message names `keyword()` as well;
-[§6.2](#62-the-absences-twenty-five-keywords-with-no-method) lists them
-and the two doors that stay open for them.
-
-`check()`'s two externals are the two the validator binds on every
-`$query` evaluation. The refusal is raised at BUILD time, earlier than
-the validator's own compile error and with the same meaning.
+The owned set is the vocabulary written by the dedicated methods. `meta()`
+refuses those names so an annotation never changes the schema's assertions.
+`keyword()` remains available for raw values and `from()` for whole schemas;
+[§6.2](#62-annotation-and-legacy-boundaries) describes their type boundaries.
 
 ## 5. The types
 
@@ -1081,70 +1103,35 @@ having.
   `packages/json/docs/QUERY-FORMAT.md` §8; a rule outside it is
   application code, run beside validation rather than inside it.
 
-### 6.2 The absences: twenty-five keywords with no method
+### 6.2 Annotation and legacy boundaries
 
-The pen's own list of the keywords it owns
-(`packages/linq/src/schema/builders.js`) is sixty-nine names, and it holds
-two kinds — the keywords a method emits, and the ones that "would change
-what a document asserts" and are kept out of `meta()` for that reason
-alone (the comment above the list says so). The second kind has no
-spelling of its own on this surface:
+Every owned keyword has a dedicated route. The executable census in
+`test/linq/schema-keyword-corpus.js` checks the actual emitted spelling;
+a route that returns a different keyword cannot satisfy it.
 
-| Family | Keywords with no method |
-|---|---|
-| negation | `not` |
-| unevaluated | `unevaluatedProperties`, `unevaluatedItems` |
-| conditional members | `dependentSchemas`, `dependencies` |
-| `contains` bounds | `minContains`, `maxContains` |
-| content | `contentEncoding`, `contentMediaType`, `contentSchema` |
-| format bounds | `formatMinimum`, `formatMaximum`, `formatExclusiveMinimum`, `formatExclusiveMaximum` |
-| identification | `$id`, `$anchor`, `$vocabulary` |
-| dynamic references | `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor` |
-| legacy and extension spellings | `definitions`, `additionalItems`, `$data`, `data` |
+`not`, unevaluated constraints, dependencies and dynamic references keep the
+existing phantom. They may reject more values, but TypeScript does not infer
+annotation tracking, negation or dynamic scope. `legacyNullable(boolean)`
+writes the OpenAPI `nullable` spelling exactly and deliberately broadens the
+phantom to `unknown`; `.nullable()` retains its inferred union and standard
+JSON Schema emission. These are separate operations.
 
-`@jarenjs/validate` compiles every one of them — `not` in `combine.js`,
-the unevaluated pair in `unevaluated.js`, `dependentSchemas` in
-`object.js`, the `contains` bounds in `array.js`, the content family in
-`content.js`, the dynamic references in `dynamic-ref.js`, `$data` in
-`dollar-data.js` — so the gap is this pen's surface, not the format and
-not the engine. It is tracked in
-[docs/ROADMAP.md](../../../docs/ROADMAP.md) under the data pair, and
-`test/linq/schema-pen.test.js` holds this table equal to the pen's own
-owned set, so a method that lands for one of them fails the suite until
-its row goes.
+`contentSchema` remains annotation information in the current validator.
+Encoding and media checks require `contentValidation: true`; ordered format
+bounds require a registered format compiler with comparison support.
 
-Two doors are open in the meantime, and both are rows of
-[§2.10](#210-the-document-and-the-builder-itself):
+`definitions` and `additionalItems` author draft-07 vocabulary. Declare that
+dialect in a raw root when using them; `document({ draft: '2020-12' })` does
+not translate a legacy tuple. Schema-valued methods accept builders, including
+`from(json)` and `never()` for an exact raw or boolean subschema. They share
+named definition identity with every other branch, including recursive ones.
+Normalizer annotations in branches the normalizer never visits are refused.
 
-```js
-s.string().keyword('not', { type: 'number' })
-// { "type": "string", "not": { "type": "number" } }
-
-s.object({ a: s.string() }).keyword('unevaluatedProperties', false)
-// { "type": "object", …, "unevaluatedProperties": false }
-```
-
-`.keyword(key, value)` writes one keyword onto the node the builder is
-assembling, in the order first set, exactly as a named method does;
-`from(json)` wraps a hand-written subschema whole. Neither changes the
-type reading — `.keyword()` answers `this` and `from<T>()` carries the
-type the caller asserts — which is the honest trade rather than a
-shortfall: a keyword with no method has no phantom to read either.
-
-`definitions` is the draft-07 spelling of `$defs`, and `named()` writes
-`$defs`: the pen emits one definitions block under one name, so the older
-keyword is owned to keep a document from carrying both and reached, like
-the rest of the table, through `keyword()` or `from()`.
-
-**`meta()` is not a third door.** Every name in the table is owned, so
-`meta()` refuses it with `JL0104`
-([§4.4](#44-jl0104--the-keyword-and-the-external)) — and the message
-names both doors that ARE open, `keyword()` and `from()`. One name is on
-the owned list for the opposite reason: `nullable` is refused because
-`.nullable()` already exists and emits a type union
-(`type: ['string', 'null']`) — `nullable` as a keyword is an OpenAPI
-spelling that 2020-12 does not carry, and refusing it is what keeps one
-document from claiming both.
+`dollarData(pointer)` builds a `$data` reference object; use its `.schema` as
+a raw constraint value. `data(map)` writes keyword-to-pointer bindings at the
+schema node. Both leave pointer resolution to the validator. `keyword()` and
+`from()` remain the escape hatches for future extensions, with no inferred
+narrowing. A boolean document cannot carry a keyword; widen it first.
 
 ### 6.3 When not to reach for this pen
 
@@ -1180,10 +1167,10 @@ hand, or generate it some other way, when:
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->33,156<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->36,717<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.schema.kb-->33<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.schema.kb-->37<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building

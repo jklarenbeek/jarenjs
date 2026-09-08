@@ -179,6 +179,7 @@ The kernel is measured against one-pass loops written for one question and again
 import { compileMessageTemplate, compileMessageCatalog } from '@jarenjs/core/message';
 
 const t = compileMessageTemplate('must be {comparison} {limit}');
+// t.parameters is the frozen unique list ['comparison', 'limit'] from this parser.
 t({ comparison: '>=', limit: 18 });   // 'must be >= 18'
 ```
 

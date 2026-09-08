@@ -1,4 +1,5 @@
 //@ts-check
+import { setObjectMember } from './object.js';
 
 /**
  * Human-message templating: the shared half of every message catalog in
@@ -49,7 +50,7 @@ export function formatMessageValue(value) {
  * instead of rendering as `undefined`); `{{` escapes a literal `{`.
  *
  * @param {string} template - The template text
- * @returns {(params: object, error?: object) => string} The compiled render closure
+ * @returns {((params: object, error?: object) => string) & { readonly parameters: readonly string[] }} The compiled render closure and its unique placeholder names
  */
 export function compileMessageTemplate(template) {
   /** @type {string[]} literal parts between placeholders */
@@ -79,22 +80,24 @@ export function compileMessageTemplate(template) {
   }
   parts.push(literal);
 
-  if (names.length === 0) {
-    const text = parts[0];
-    return function renderLiteralTemplate() { return text; };
-  }
-
-  return function renderMessageTemplate(params) {
-    let out = parts[0];
-    for (let i = 0; i < names.length; ++i) {
-      const name = names[i];
-      out += (params != null && name in params)
-        ? formatTemplateParam(params[name])
-        : `{${name}}`;
-      out += parts[i + 1];
-    }
-    return out;
-  };
+  const render = names.length === 0
+    ? function renderLiteralTemplate() { return parts[0]; }
+    : function renderMessageTemplate(params) {
+      let out = parts[0];
+      for (let i = 0; i < names.length; ++i) {
+        const name = names[i];
+        out += (params != null && name in params)
+          ? formatTemplateParam(params[name])
+          : `{${name}}`;
+        out += parts[i + 1];
+      }
+      return out;
+    };
+  // Metadata comes from the parser that renders the message; consumers must
+  // never parse placeholders with a second, subtly different grammar.
+  return Object.defineProperty(render, 'parameters', {
+    value: Object.freeze([...new Set(names)]), enumerable: true,
+  });
 }
 
 /**
@@ -111,9 +114,9 @@ export function compileMessageCatalog(catalogLike) {
   const keys = Object.keys(catalogLike);
   for (let i = 0; i < keys.length; ++i) {
     const entry = catalogLike[keys[i]];
-    compiled[keys[i]] = typeof entry === 'function'
+    setObjectMember(compiled, keys[i], typeof entry === 'function'
       ? entry
-      : compileMessageTemplate(String(entry));
+      : compileMessageTemplate(String(entry)));
   }
   return Object.freeze(compiled);
 }

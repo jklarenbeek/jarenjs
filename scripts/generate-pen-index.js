@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * The binder's registry: every cross-pen table in
- * `packages/linq/docs/LINQ-FORMAT.md` is computed here from the eleven
+ * `packages/linq/docs/LINQ-FORMAT.md` is computed here from the
  * documents beside it and written between `<!--fact:pens.key-->` …
  * `<!--/fact-->` markers by `scripts/derive-docs.js`.
  *
@@ -29,7 +29,7 @@
  * question get committed.
  *
  * Measured figures are NOT this script's: a subpath's bundle size is
- * baked from `benchmark/bundle-sizes.json` under the `bm:` namespace
+ * baked from `benchmark/bundle-sizes.json` under the `fact:` namespace
  * (`scripts/generate-benchmark-facts.js`), including the §7 headlines
  * this script's `cost` block reads back out of the documents. So the
  * chain of custody for a price is esbuild → the committed baseline → the
@@ -45,7 +45,7 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Where the eleven documents live, relative to the repository root. */
+/** Where the pen documents live, relative to the repository root. */
 const DOCS_DIR = 'packages/linq/docs';
 /** The document that carries the combined view; the rest are its sources. */
 const BINDER = 'LINQ-FORMAT.md';
@@ -294,7 +294,7 @@ function derivationsOver(documents) {
           + `| ${doc.codes.length === 0 ? NONE : doc.codes.length} `
           + `| ${doc.bytes === null ? NONE : `${grouped(doc.bytes)} B`} |`;
       }),
-      `| **eleven documents** | | **${grouped(all.reduce((n, doc) => n + doc.lines, 0))}** `
+      `| **${all.length} documents** | | **${grouped(all.reduce((n, doc) => n + doc.lines, 0))}** `
       + `| **${grouped(penned.reduce((n, doc) => n + /** @type {any} */ (doc.mapping).tables
         .reduce((rows, table) => rows + dataRows(table).length, 0), 0))}** `
       + `| **${all.reduce((n, doc) => n + doc.examples, 0)}** | | |`,
@@ -302,7 +302,7 @@ function derivationsOver(documents) {
 
     // ——— which document owns each shared refusal. What a code MEANS is
     // §1.3's, written by a person; where it is raised is a fact about
-    // ten source directories, and each document's own refusal section is
+    // the source directories, and each document's own refusal section is
     // held equal to its directory in both directions.
     'pens.codes': () => {
       // §1.3's own subsection, never the whole file: this block is in the

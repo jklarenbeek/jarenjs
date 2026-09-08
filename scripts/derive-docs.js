@@ -22,11 +22,12 @@ import { main } from './lib/derive.js';
 import { measuredFigures } from './generate-benchmark-facts.js';
 import { penTables } from './generate-pen-index.js';
 import { exportInventory } from './generate-export-inventory.js';
+import { penCoverage } from './generate-pen-census.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage],
   argv: process.argv.slice(2),
 }));
