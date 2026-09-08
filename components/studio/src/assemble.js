@@ -14,14 +14,14 @@
  * `classifyChange` is the load-bearing UX datum: a `state`-only edit must
  * HOT-DISPATCH into a running app (no reboot, the user keeps scroll and
  * inputs), while a `view`/`actions` change must reboot. It compares a
- * STRUCTURAL key (an app doc minus its `state`) via the suite's own
+ * STRUCTURAL key (an app's `view`, `actions` and `subs`) via the suite's own
  * `semanticKey` — the collision-free identity, not the memo-grade
  * `contentKey` fingerprint: a classification decides whether a running
  * app reboots, so a fingerprint collision would read a changed document
  * as unchanged. The artifacts are parsed JSON, so the identity is total.
  */
 
-import { semanticKey } from '@jarenjs/core/object';
+import { semanticKey, setObjectMember } from '@jarenjs/core/object';
 import { validateFile } from './validate.js';
 
 /** Kinds that are runnable artifacts on their own (vs. `state`/`data`
@@ -90,15 +90,15 @@ export function classifyChange(prevProject, nextProject) {
   for (const [name, a] of next) {
     const b = prev.get(name);
     let c;
-    if (b === undefined) c = 'structural';
+    if (b === undefined || b.kind !== a.kind) c = 'structural';
     else if (structuralKey(b) !== structuralKey(a)) c = 'structural';
     else if (semanticKey(b.doc) !== semanticKey(a.doc)) c = 'state-only';
     else c = 'none';
-    perArtifact[name] = c;
+    setObjectMember(perArtifact, name, c);
     bump(c);
   }
   for (const name of prev.keys()) {
-    if (!next.has(name)) { perArtifact[name] = 'structural'; bump('structural'); }
+    if (!next.has(name)) { setObjectMember(perArtifact, name, 'structural'); bump('structural'); }
   }
   return { overall, perArtifact };
 }

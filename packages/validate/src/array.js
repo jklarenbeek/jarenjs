@@ -37,7 +37,7 @@ function compileMinItems(schemaObj, jsonSchema) {
 }
 
 function compileMaxItems(schemaObj, jsonSchema) {
-  const max = getIntishType(jsonSchema.maxItems) || -1;
+  const max = getIntishType(jsonSchema.maxItems) ?? -1;
   if (max < 0) return undefined;
   const min = getIntishType(jsonSchema.minItems) || 0;
   if (max < min) throw new Error('maxItems must be greater then minItems');
@@ -121,7 +121,7 @@ function compileArrayContains(schemaObj, jsonSchema) {
 }
 
 function compileContainsMinMax(schemaObj, jsonSchema) {
-  const contains = getObjectType(jsonSchema.contains);
+  const contains = getBoolOrObjectClass(jsonSchema.contains);
   if (contains == null) return undefined;
 
   const minContains = getIntishType(jsonSchema.minContains);
@@ -161,17 +161,28 @@ function compileContainsMinMax(schemaObj, jsonSchema) {
 
 function compileArrayContainsBoolean(schemaObj, jsonSchema) {
   const contains = getBoolishType(jsonSchema.contains);
+  if (contains == null) return undefined;
+  const validateCount = jsonSchema.minContains != null || jsonSchema.maxContains != null
+    ? compileContainsMinMax(schemaObj, jsonSchema)
+    : undefined;
   if (contains === true) {
     const addError = schemaObj.createErrorHandler(true, 'contains');
+    const root = schemaObj.root;
+    const trackContains = root.usesUnevaluated && (schemaObj.options.draftVersion || 7) >= 2020;
     return function validateArrayContainsTrue(data, dataPath) {
-      return data.length > 0
-        || addError(data, dataPath);
+      const valid = validateCount != null
+        ? validateCount(data.length, dataPath)
+        : data.length > 0 || addError(data, dataPath);
+      if (valid && trackContains) root.evalLog.add(data, -1);
+      return valid;
     };
   }
   if (contains === false) {
     const addError = schemaObj.createErrorHandler(false, 'contains');
     return function validateArrayContainsFalse(data, dataPath) {
-      return addError(data, dataPath);
+      return validateCount != null
+        ? validateCount(0, dataPath)
+        : addError(data, dataPath);
     };
   }
   return undefined;
@@ -474,7 +485,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   if (validateItem == null && validateContains != null) {
     const validator = validateContains;
 
-    return function validateArrayContainsOnly(data, dataPath) {
+    return function validateArrayContainsOnly(data, dataPath, dataRoot) {
       const len = resolveLength(data.length);
       const arr = data;
       // Each element is a CANDIDATE probe: the array only has to contain a
@@ -482,7 +493,8 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       const errors = root.errorMark();
       let contains = 0;
       for (let i = 0; i < len; ++i) {
-        if (validator(arr[i], dataPath) === true) {
+        const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
+        if (validator(arr[i], itemPath, dataRoot) === true) {
           contains++;
           if (trackContains) root.evalLog.add(data, i);
         }
@@ -515,7 +527,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       }
       // A contains candidate is a probe: not matching is not a fault.
       const containsMark = root.errorMark();
-      if (containsValidator(obj, dataPath, dataRoot) === true) {
+      if (containsValidator(obj, itemPath, dataRoot) === true) {
         contains++;
         if (trackContains) root.evalLog.add(data, i);
       }

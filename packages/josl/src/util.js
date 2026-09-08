@@ -18,6 +18,21 @@ export const RE_DATETIME = /(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2}):(\d{2
 export const RE_TIMEONLY = /(\d{2}):(\d{2}):(\d{2})(\.\d+)?/y;
 
 /**
+ * Convert a local date and time with an offset to their native instant.
+ * ISO parsing preserves years 0000-0099 and truncates sub-millisecond
+ * precision consistently for JOSL and typed CSV. An invalid offset (or
+ * an instant Date cannot represent) returns an invalid Date for the
+ * caller's own refusal or text-preservation policy.
+ * @param {import('./values.js').LocalDate} date - Validated calendar date
+ * @param {import('./values.js').LocalTime} time - Validated local time
+ * @param {string} offset - Z/z or a signed HH:MM offset
+ * @returns {Date}
+ */
+export function offsetDateTime(date, time, offset) {
+  return new Date(`${date.toString()}T${time.toString()}${offset.toUpperCase()}`);
+}
+
+/**
  * Run a sticky regex at `pos` and return its match (or null).
  * @param {RegExp} re - A sticky (`y`) pattern
  * @param {string} text - The text to match against

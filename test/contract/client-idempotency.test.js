@@ -166,6 +166,100 @@ describe('the client half of idempotency', () => {
     assert.strictEqual(sent.length, 0);
     if (!o.ok) assert.deepStrictEqual([o.error.code, /** @type {any} */ (o.error.details)[0].keyword], ['JC2050', 'canonical']);
   });
+
+  it('serializes concurrent durable records across clients sharing one storage adapter', async () => {
+    for (const shared of [false, true]) {
+      const mem = memoryStorage();
+      const firstRead = Promise.withResolvers();
+      let reads = 0;
+      let clocks = 0;
+      const storage = { ...mem.storage, read: () => {
+        const previous = mem.storage.read();
+        return ++reads === 1 ? firstRead.promise.then(() => previous) : previous;
+      } };
+      const options = {
+        storage, sleep: async () => {},
+        now: () => {
+          if (++clocks === 2) firstRead.resolve(undefined);
+          return 1;
+        },
+        fetch: async () => { throw new TypeError('offline'); },
+      };
+      const first = openHttpClient(shop, options);
+      const second = shared ? openHttpClient(shop, options) : first;
+      try {
+        const outcomes = await Promise.all([
+          first.invoke('product.save', SAVE, { idempotencyKey: 'a' }),
+          second.invoke('product.save', SAVE, { idempotencyKey: 'b' }),
+        ]);
+        assert.deepStrictEqual(outcomes.map((outcome) => outcome.kind), ['network', 'network']);
+        assert.deepStrictEqual(await first.pending(),
+          [{ op: 'product.save', key: 'a' }, { op: 'product.save', key: 'b' }]);
+      }
+      finally { first.close(); second.close(); }
+    }
+  });
+
+  it('keeps a new durable record when it overlaps a settled key release', async () => {
+    const mem = memoryStorage();
+    const fetched = Promise.withResolvers();
+    const response = Promise.withResolvers();
+    const releaseRead = Promise.withResolvers();
+    const continueRelease = Promise.withResolvers();
+    let holdRead = false;
+    let clocks = 0;
+    const storage = { ...mem.storage, read: () => {
+      const previous = mem.storage.read();
+      if (!holdRead) return previous;
+      holdRead = false;
+      releaseRead.resolve(undefined);
+      return continueRelease.promise.then(() => previous);
+    } };
+    const client = openHttpClient(shop, {
+      storage, sleep: async () => {},
+      now: () => {
+        if (++clocks === 2) continueRelease.resolve(undefined);
+        return 1;
+      },
+      fetch: async (_url, init) => {
+        if (init.headers['idempotency-key'] === 'b') throw new TypeError('offline');
+        fetched.resolve(undefined);
+        return response.promise;
+      },
+    });
+    try {
+      const first = client.invoke('product.save', SAVE, { idempotencyKey: 'a' });
+      await fetched.promise;
+      holdRead = true;
+      response.resolve(new Response(JSON.stringify(PRODUCT), { status: 200 }));
+      await releaseRead.promise;
+      const second = client.invoke('product.save', SAVE, { idempotencyKey: 'b' });
+      assert.strictEqual((await first).ok, true);
+      assert.strictEqual((await second).kind, 'network');
+      assert.deepStrictEqual(await client.pending(), [{ op: 'product.save', key: 'b' }]);
+    }
+    finally { client.close(); }
+  });
+
+  it('continues durable writes after a failed queued update', async () => {
+    const mem = memoryStorage();
+    let writes = 0;
+    const client = openHttpClient(shop, {
+      storage: { ...mem.storage, write: (value) => {
+        if (++writes === 1) throw new Error('disk');
+        mem.storage.write(value);
+      } },
+      sleep: async () => {}, fetch: async () => { throw new TypeError('offline'); },
+    });
+    try {
+      const failed = await client.invoke('product.save', SAVE, { idempotencyKey: 'a' });
+      assert.strictEqual(failed.ok, false);
+      if (!failed.ok) assert.strictEqual(failed.error.code, 'JC2054');
+      assert.strictEqual((await client.invoke('product.save', SAVE, { idempotencyKey: 'b' })).kind, 'network');
+      assert.deepStrictEqual(await client.pending(), [{ op: 'product.save', key: 'b' }]);
+    }
+    finally { client.close(); }
+  });
 });
 
 describe('retry under the declared policy', () => {

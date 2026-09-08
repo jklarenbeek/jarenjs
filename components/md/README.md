@@ -315,7 +315,9 @@ createApp(appDoc, {
 - A document whose frontmatter declares a schema (`form:` or `$schema`)
   feeds [`@jarenjs/forms`](../../packages/forms) through `mdToForm(doc, forms)` —
   `{ schema, fields, data }`, with the forms module injected so this
-  package stays dependency-free.
+  package stays dependency-free. When frontmatter omits `data`, the built
+  form model supplies schema defaults and `const` values; explicit data,
+  including `null`, is preserved.
 - In an [`@jarenjs/app`](../../packages/app) document, a view can be a JSLT
   stylesheet over a loaded MdDocument: register `loadMarkdown` as an
   async effect that dispatches the plain `MdDocument` into the state,

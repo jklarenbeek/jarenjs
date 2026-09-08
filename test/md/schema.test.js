@@ -101,4 +101,37 @@ describe('mdToForm', function () {
     assert.equal(mdToForm(parseMarkdown('# no form\n'), forms), null);
     assert.equal(mdToForm(parseMarkdown('---\ntitle: x\n---\n'), forms), null);
   });
+
+  it('derives schema defaults and const values from the built form model when data is absent', function () {
+    for (const declaration of ['form', '$schema']) {
+      const doc = parseMarkdown([
+        '---json',
+        JSON.stringify({
+          [declaration]: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', default: 'Ada' },
+              fixed: { const: 42 },
+            },
+          },
+        }),
+        '---',
+      ].join('\n'));
+      const form = mdToForm(doc, forms);
+      assert.notEqual(form, null);
+      assert.deepEqual(form.data, { name: 'Ada', fixed: 42 });
+      assert.deepEqual(form.data, forms.createInitialData(form.fields));
+    }
+  });
+
+  it('preserves explicit frontmatter data including null instead of filling schema defaults', function () {
+    for (const data of [null, {}, false, 0]) {
+      const doc = parseMarkdown([
+        '---json',
+        JSON.stringify({ form: { type: 'object', properties: { name: { default: 'Ada' } } }, data }),
+        '---',
+      ].join('\n'));
+      assert.deepEqual(mdToForm(doc, forms).data, data);
+    }
+  });
 });

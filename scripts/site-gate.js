@@ -58,7 +58,7 @@ const playwrightArgs = [];
 for (const arg of argv) {
   const match = /^--browser=(full|smoke|skip)$/.exec(arg);
   if (match !== null) browser = /** @type {any} */ (match[1]);
-  else if (arg === '--browser') {
+  else if (arg === '--browser' || arg.startsWith('--browser=')) {
     console.error('site-gate: use --browser=full|smoke|skip');
     process.exit(2);
   }

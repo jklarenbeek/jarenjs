@@ -116,6 +116,38 @@ describe('materialised entities are plain frozen JSON', () => {
     assert.strictEqual(report.statements.length, 0);
     assert.strictEqual(report.updated, 0);
   });
+
+  it('keeps composite keys distinct when their values contain the tracking separator', async () => {
+    const database = await openStore({
+      $model: '0.1',
+      entities: { Grade: { schema: { type: 'object', properties: {
+        student: { type: 'string', 'x-entity': { key: true } },
+        course: { type: 'string', 'x-entity': { key: true } },
+        score: { type: 'integer' },
+      } } } },
+    }, { driver: nodeDriver() });
+    try {
+      const grades = database.entity('Grade');
+      const first = { student: 'a\u001fb', course: 'c', score: 1 };
+      const second = { student: 'a', course: 'b\u001fc', score: 2 };
+      grades.add(first);
+      grades.add(second);
+      assert.strictEqual((await database.saveChanges()).inserted, 2);
+      assert.deepStrictEqual(await grades.get(first), first);
+      assert.deepStrictEqual(await grades.get(second), second);
+      grades.put({ ...first, score: 3 });
+      grades.put({ ...second, score: 4 });
+      assert.strictEqual((await database.saveChanges()).updated, 2);
+      assert.strictEqual((await grades.asNoTracking().get(first)).score, 3);
+      assert.strictEqual((await grades.asNoTracking().get(second)).score, 4);
+      assert.deepStrictEqual((await database.saveChanges()).statements, []);
+      grades.remove(first);
+      assert.strictEqual((await database.saveChanges()).deleted, 1);
+      assert.strictEqual(await grades.asNoTracking().get(first), undefined);
+      assert.strictEqual((await grades.asNoTracking().get(second)).score, 4);
+    }
+    finally { await database.close(); }
+  });
 });
 
 describe('the diff-to-statement table (§11.3)', () => {

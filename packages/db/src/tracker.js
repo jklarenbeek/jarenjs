@@ -109,8 +109,9 @@ export function createTracker(context) {
   const memberships = new Map();
   let pendingSequence = 0;
 
-  const keyOf = (entityName, parts) =>
-    `${entityName}${UNIT_SEPARATOR}${parts.join(UNIT_SEPARATOR)}`;
+  // Keys may contain the membership separator themselves. Encode the
+  // whole tuple so its component boundaries and entity remain distinct.
+  const keyOf = (entityName, parts) => JSON.stringify([entityName, ...parts]);
 
   const recordKeyFor = (entityName, doc) => {
     const plan = coreFor(entityName).plan;

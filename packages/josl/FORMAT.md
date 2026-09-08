@@ -228,7 +228,9 @@ information that cannot be recovered downstream:
   did not carry it, `''` would claim it carried nothing.
 - `typed: true` promotes an integer beyond 2^53 to bigint rather than
   rounding, reads unambiguous ISO-8601 as the value classes above, and
-  leaves anything with a leading zero a string.
+  leaves numbers with a leading zero a string. Offset date-times use
+  the same instant conversion as JOSL, preserving four-digit years and
+  truncating precision beyond milliseconds; invalid offsets stay text.
 - A BOM is stripped without comment; it is an encoding mark, not data.
 
 **Writing** quotes a field only when it contains the delimiter, the quote

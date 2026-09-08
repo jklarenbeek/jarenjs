@@ -121,22 +121,38 @@ describe('ai — map is bounded', function () {
     assert.strictEqual(result.subcalls, 12);
   });
 
-  it('is faster in parallel than in sequence — the paper\'s limitation, measured', async function () {
+  it('completes twelve sequential timer waves in three waves at concurrency four', async function (t) {
     const slow = 20;
-    const sequentialClient = measuringClient({ delayMs: slow });
-    const sequential = await (await runnerOver(sequentialClient, { sequential: true })).run(PROGRAM);
-    const parallelClient = measuringClient({ delayMs: slow });
-    const parallel = await (await runnerOver(parallelClient, { maxConcurrentSubcalls: 4 })).run(PROGRAM);
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 });
+    async function measure(options) {
+      const client = measuringClient({ delayMs: slow });
+      const runner = await runnerOver(client, options);
+      let completed = false;
+      const running = runner.run(PROGRAM).then((result) => {
+        completed = true;
+        return result;
+      });
+      // Drain each wave's promise continuations before advancing the
+      // next timer; host scheduling never contributes to the clock.
+      for (let wave = 0; wave < 12; wave++) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (completed) break;
+        t.mock.timers.tick(slow);
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.strictEqual(completed, true, 'the map did not finish in twelve waves');
+      return { client, result: await running };
+    }
+    const { client: sequentialClient, result: sequential } = await measure({ sequential: true });
+    const { client: parallelClient, result: parallel } = await measure({ maxConcurrentSubcalls: 4 });
 
     assert.strictEqual(sequentialClient.state.calls, parallelClient.state.calls,
       'the two runs did not do the same work');
-    assert.ok(parallel.ms < sequential.ms,
-      `parallel ${parallel.ms}ms was not faster than sequential ${sequential.ms}ms`);
-    // twelve pieces at concurrency four is three waves against twelve —
-    // asserted at half the theoretical gain so a loaded machine cannot
-    // make a real property look flaky
-    assert.ok(sequential.ms / parallel.ms >= 2,
-      `parallel was only ${(sequential.ms / parallel.ms).toFixed(1)}× faster`);
+    assert.strictEqual(sequential.ok, true);
+    assert.strictEqual(parallel.ok, true);
+    assert.strictEqual(sequential.ms, 12 * slow);
+    assert.strictEqual(parallel.ms, 3 * slow);
+    assert.deepStrictEqual(parallel.answer, sequential.answer);
   });
 
   it('stops at maxSubcalls and says how many pieces it did not visit', async function () {

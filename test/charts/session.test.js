@@ -159,6 +159,22 @@ describe('chart session — modes and reference reuse', function () {
     assert.equal(session.tick().mode, 'rebuilt');
   });
 
+  it('an RFC 3339 append moves the domain and stays byte-equal to a wholesale time chart', function () {
+    const adapter = createStreamAdapter('line', ADAPTER_SPEC);
+    const config = { type: 'line', x: 'time', markers: true };
+    const session = createChartSession(config, adapter);
+    feedDoc(adapter, { x: '2026-01-01T00:00:00Z', y: 1 });
+    feedDoc(adapter, { x: '2026-01-02T00:00:00Z', y: 2 });
+    assert.equal(renderToString(session.tick().vnode),
+      renderToString(compileChart(config, adapter.getData()).toVnode()));
+
+    feedDoc(adapter, { x: '2026-01-10T00:00:00Z', y: 100 });
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode),
+      renderToString(compileChart(config, adapter.getData()).toVnode()));
+  });
+
   it('a new series and a reset both rebuild and stay byte-equal', function () {
     const { adapter, session, config } = seeded();
     feedDoc(adapter, { x: 6, s: 'newcomer', y: 30 });

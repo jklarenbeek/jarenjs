@@ -15,6 +15,7 @@
  * hidden write.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
 import { classifyChange } from '../assemble.js';
 
 /**
@@ -30,7 +31,7 @@ export function hostPolicy(prevProject, nextProject) {
   /** @type {Record<string, 'reboot' | 'hot' | 'skip'>} */
   const out = {};
   for (const [name, change] of Object.entries(perArtifact)) {
-    out[name] = change === 'structural' ? 'reboot' : change === 'state-only' ? 'hot' : 'skip';
+    setObjectMember(out, name, change === 'structural' ? 'reboot' : change === 'state-only' ? 'hot' : 'skip');
   }
   return out;
 }

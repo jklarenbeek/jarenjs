@@ -49,7 +49,7 @@ import {
 
 import { CsvSyntaxError } from './errors.js';
 import { JoslLimitError, limitOption } from './limits.js';
-import { columnOf, feedMachine, beginParseAll } from './util.js';
+import { columnOf, feedMachine, beginParseAll, offsetDateTime } from './util.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import {
@@ -184,9 +184,10 @@ export function coerceCsvValue(s) {
     const frac = m[7] === undefined ? '' : '.' + m[7];
     if (m[8] !== undefined || m[9] !== undefined) {
       // an offset date-time is an instant, which `Date` holds faithfully
-      const offset = m[8] !== undefined ? 0 : (m[9] === '-' ? -1 : 1) * (+m[10] * 60 + +m[11]);
-      const ms = frac === '' ? 0 : Math.round(Number('0' + frac) * 1000);
-      return new Date(Date.UTC(year, month - 1, day, hour, min, sec, ms) - offset * 60000);
+      const offset = m[8] ?? `${m[9]}${m[10]}:${m[11]}`;
+      const instant = offsetDateTime(new LocalDate(year, month, day),
+        new LocalTime(hour, min, sec, frac), offset);
+      return Number.isNaN(instant.getTime()) ? s : instant;
     }
     return new LocalDateTime(
       new LocalDate(year, month, day),

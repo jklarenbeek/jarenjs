@@ -12,6 +12,18 @@ const compiler = new JarenValidator()
 describe('Schema String Type', function () {
 
   describe('#stringBasic()', function () {
+    it('enforces maxLength zero with and without a pattern', function () {
+      for (const pattern of [undefined, '^a*$']) {
+        const validate = compiler.compile({
+          type: 'string',
+          maxLength: 0,
+          ...(pattern === undefined ? {} : { pattern }),
+        });
+        assert.isTrue(validate(''));
+        assert.isFalse(validate('a'));
+      }
+    });
+
     it('should validate type: \'string\'', function () {
       const validate = compiler.compile({ type: 'string' });
 

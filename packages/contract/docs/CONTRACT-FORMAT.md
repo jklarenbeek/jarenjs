@@ -1426,6 +1426,11 @@ is the server-side half). A store that throws on the pre-send write is
 `JC2054` and nothing is sent; a store that throws on the drop leaves
 the record (the conservative side) and the outcome is unaffected.
 
+Concurrent writes and releases are serialized across clients sharing the
+same storage adapter object, so each mutation sees the previous write.
+A failed mutation does not block later ones. Separate adapter objects,
+tabs and processes need coordination in the storage implementation.
+
 ### §10.4 Retry
 
 Only under a declared `policy.retry` (`{ max, on }`); never for an

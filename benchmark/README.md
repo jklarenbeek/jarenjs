@@ -187,20 +187,18 @@ annotation tracking) is covered in the
 
 ## coverage.js — code coverage analysis
 
-Analyzes which functions are touched — and which are not — when running the
-official test suite and/or the repository unit tests. Coverage from every run
-is merged into a single report, so you get one complete picture to decide
-where tests are missing and what might be dead code:
+Analyzes which functions are touched — and which are not — when profiling one
+official-suite fixture or auditing the repository test suite. Every invocation
+starts with a fresh coverage report. A child failure exits nonzero and prints
+its full diagnostics, even if no report was produced; any partial coverage
+shown belongs to that failed run.
 
 ```bash
-# The full picture: every draft of the official suite PLUS the unit tests
-node benchmark/coverage.js --all --unit-tests
-
-# Complete official suite (draft7, 2019-09, 2020-12) with per-function detail
-node benchmark/coverage.js --all --functions
+# Whole-repository test suite: fail on untouched shipped functions
+node benchmark/coverage.js --dead-code
 
 # Machine readable output for diffing between runs
-node benchmark/coverage.js --all --unit-tests --json coverage/analysis.json
+node benchmark/coverage.js --dead-code --json
 
 # What does a single suite file touch?
 node benchmark/coverage.js '/required.json' --threshold 25
@@ -208,26 +206,22 @@ node benchmark/coverage.js '/required.json' --threshold 25
 # Show TOUCHED and NOT touched functions with hit counts
 node benchmark/coverage.js '/required.json' --functions
 
-# Full options
-What to run (combine freely; at least one is required):
-  <testfile.json>    Cover a single official-suite file (e.g. '/ref.json')
-  --all              Cover the COMPLETE official suite (all drafts)
-  --unit-tests       Cover the repository unit tests (node --test test/)
-
-Options:
-  --draft <list>     Draft(s) to run, comma separated
-                     (default for --all: draft7,draft2019-09,draft2020-12)
-  --iterations <n>   Profiling iterations (default: 1 with --all, 1000 single file)
+# Single-fixture options
+  --iterations <n>   Profiling iterations (default: 1000)
   --threshold <n>    Only show files with function coverage > n% (default: 0)
   --functions        Show TOUCHED and NOT touched functions
   --touched-only     Show only TOUCHED functions
-  --json <path>      Write the full analysis as JSON
-  --temp-dir <dir>   Temporary directory for V8 coverage data
+  --temp-dir <dir>   Temporary directory for c8 coverage data
+
+# Dead-code audit options
+  --json            Print the audit data as JSON after the run banner
+  --no-fail         Report dead-code findings without failing on them;
+                    test failures and missing coverage still fail
 ```
 
-The report ends with three actionable sections: **untouched functions**
-(add tests or consider removal), **files with 0% function coverage**, and
-**files never loaded at all** — the strongest dead-code candidates.
+The dead-code audit reports **fully dead files**, **untouched functions** in
+otherwise-used files, and the total function hit count. An empty report or
+zero instrumented functions fails the audit.
 
 ## callgraph.js — call graph analysis
 

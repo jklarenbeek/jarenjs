@@ -408,14 +408,14 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
       if (built !== null) items.push(built);
     }
     node.items = items;
-    if (field.item !== null && field.item !== undefined) {
-      node.addValue = createItemValue(field.item) ?? null;
-    }
-    else if (field.tuple !== null && field.tuple !== undefined && array.length < field.tuple.length) {
+    if (field.tuple !== null && field.tuple !== undefined && array.length < field.tuple.length) {
       // a tuple shorter than its schema grows one slot at a time, each
       // starting from ITS OWN template — that is what makes a tuple
       // loaded short (or absent) fillable at all
       node.addValue = createItemValue(field.tuple[array.length]) ?? null;
+    }
+    else if (field.item !== null && field.item !== undefined) {
+      node.addValue = createItemValue(field.item) ?? null;
     }
   }
 

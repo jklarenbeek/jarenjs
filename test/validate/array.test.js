@@ -10,6 +10,13 @@ const compiler = new JarenValidator();
 
 describe('Schema Array Type', function () {
   describe('#arrayBasic()', function () {
+    it('enforces an explicit maxItems of zero', function () {
+      const validate = compiler.compile({ type: 'array', maxItems: 0 });
+      assert.isTrue(validate([]));
+      assert.isFalse(validate([1]));
+      assert.throws(() => compiler.compile({ type: 'array', minItems: 1, maxItems: 0 }));
+    });
+
     it('should throw an error when maxItems is smaller then minItems', function () {
       assert.throws(() => compiler.compile({
         type: 'array',
@@ -237,6 +244,66 @@ describe('Schema Array Type', function () {
       assert.isFalse(validate(['foo']), 'any non empty array is invalid');
       assert.isFalse(validate([]), 'any empty array is invalid');
       assert.isTrue(validate('contains does not apply'), 'non-arrays are valid');
+    });
+
+    it('counts every item against bounds for contains:true', function () {
+      const minimum = compiler.compile({ contains: true, minContains: 2 });
+      assert.isFalse(minimum([]));
+      assert.isFalse(minimum([1]));
+      assert.isTrue(minimum([1, 2]));
+      const maximum = compiler.compile({ contains: true, maxContains: 1 });
+      assert.isFalse(maximum([]), 'the default minimum remains one');
+      assert.isTrue(maximum([1]));
+      assert.isFalse(maximum([1, 2]));
+    });
+
+    it('permits zero matches for either boolean contains schema when minContains is zero', function () {
+      for (const contains of [true, false]) {
+        const validate = compiler.compile({ contains, minContains: 0, maxContains: 0 });
+        assert.isTrue(validate([]));
+        assert.strictEqual(validate([1]), !contains);
+      }
+      const noMatches = compiler.compile({ contains: false, minContains: 0 });
+      assert.isTrue(noMatches([]));
+      assert.isTrue(noMatches([1]));
+      assert.isFalse(compiler.compile({ contains: false, minContains: 1 })([1]));
+    });
+
+    it('tracks contains:true item annotations only in draft 2020-12', function () {
+      for (const [draft, expected] of [['2019-09', false], ['2020-12', true]]) {
+        for (const bounds of [{}, { minContains: 0, maxContains: 1 }]) {
+          const validate = compiler.compile({
+            $schema: `https://json-schema.org/draft/${draft}/schema`,
+            contains: true,
+            ...bounds,
+            unevaluatedItems: false,
+          });
+          assert.strictEqual(validate([1]), expected);
+        }
+      }
+    });
+
+    it('resolves contains $data references from each item and the document root', function () {
+      for (const skipErrors of [true, false]) {
+        const instance = new JarenValidator({ skipErrors });
+        for (const ref of ['/needle', '2/needle']) {
+          for (const items of [undefined, true, { type: 'number' }]) {
+            const validate = instance.compile({
+              type: 'object',
+              properties: {
+                needle: { type: 'number' },
+                values: {
+                  type: 'array',
+                  contains: { const: { $data: ref } },
+                  ...(items === undefined ? {} : { items }),
+                },
+              },
+            });
+            assert.isTrue(validate({ needle: 7, values: [8, 7] }));
+            assert.isFalse(validate({ needle: 7, values: [8] }));
+          }
+        }
+      }
     });
 
     it('should validate schema with items + contains properties', function () {

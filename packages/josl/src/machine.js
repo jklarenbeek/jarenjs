@@ -62,7 +62,7 @@ import {
   isValidTimeParts,
 } from './values.js';
 import {
-  getOwn, columnOf, feedMachine, beginParseAll, stickyExec, RE_DATETIME, RE_TIMEONLY,
+  getOwn, columnOf, feedMachine, beginParseAll, stickyExec, RE_DATETIME, RE_TIMEONLY, offsetDateTime,
 } from './util.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { countCharCode, utf8ByteLength } from '@jarenjs/core/string';
@@ -1254,8 +1254,7 @@ export class JoslMachine {
       const end = this.checkValueEnd(line, pos + m[0].length);
       if (m[8] === undefined)
         return [new LocalDateTime(date, time), end];
-      const offset = m[8] === 'z' || m[8] === 'Z' ? 'Z' : m[8];
-      const instant = new Date(`${date.toString()}T${time.toString()}${offset}`);
+      const instant = offsetDateTime(date, time, m[8]);
       if (Number.isNaN(instant.getTime()))
         this.err(pos, `invalid date-time '${m[0]}'`);
       return [instant, end];

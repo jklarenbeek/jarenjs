@@ -98,6 +98,33 @@ suite('classifyChange — reboot vs. hot-update', () => {
     const q2 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: '{"a":"$.y"}' }] });
     assert.strictEqual(classifyChange(q1, q2).perArtifact.q, 'structural');
   });
+
+  it('a file kind change is structural even when its JSON is identical', () => {
+    const project = (kind) => parseProject({ project: '0.1', files: [{ name: 'file', kind, text: '{}' }] });
+    const schema = project('schema');
+    const query = project('query');
+    const expected = { overall: 'structural', perArtifact: { file: 'structural' } };
+    assert.deepStrictEqual(classifyChange(schema, query), expected);
+    assert.deepStrictEqual(classifyChange(query, schema), expected);
+  });
+
+  it('classifies a file named __proto__ as an own member throughout its lifecycle', () => {
+    const empty = parseProject({ project: '0.1', files: [] });
+    const project = (text) => parseProject({ project: '0.1', files: [{ name: '__proto__', kind: 'query', text }] });
+    const first = project('{}');
+    const edited = project('{"value":1}');
+    for (const [before, after, change] of [
+      [empty, first, 'structural'],
+      [first, edited, 'structural'],
+      [edited, edited, 'none'],
+      [edited, empty, 'structural'],
+    ]) {
+      const result = classifyChange(before, after);
+      assert.strictEqual(result.overall, change);
+      assert.deepStrictEqual(result.perArtifact, Object.fromEntries([['__proto__', change]]));
+      assert.strictEqual(Object.getPrototypeOf(result.perArtifact), Object.prototype);
+    }
+  });
 });
 
 suite('describe — the file-rail datum', () => {

@@ -190,6 +190,12 @@ export { CLIENT_ERRORS };
 /** The storage member every record lives under. */
 const STORAGE_MEMBER = 'jaren-contract';
 
+/** Read-copy-write mutations share one queue per adapter, even across
+ * clients and contract ids. Other processes or adapter wrappers must
+ * coordinate through their storage implementation.
+ * @type {WeakMap<KeyStorage, Promise<void>>} */
+const storageUpdates = new WeakMap();
+
 /** The backoff ceiling of a retry, in ms. */
 const BACKOFF_MAX = 8000;
 
@@ -718,18 +724,26 @@ export function openHttpClient(contract, options = {}) {
    *   copied table; returns false when nothing changed (no write then)
    * @returns {Promise<void>}
    */
-  async function updateTable(update) {
-    const raw = await storage?.read();
-    /** @type {Record<string, any>} */
-    const store = isJsonObject(raw) ? { ...raw } : {};
-    /** @type {Record<string, any>} */
-    const root = isJsonObject(store[STORAGE_MEMBER]) ? { ...store[STORAGE_MEMBER] } : {};
-    /** @type {Record<string, any>} */
-    const table = isJsonObject(root[contractId]) ? { ...root[contractId] } : {};
-    if (!update(table)) return;
-    setObjectMember(root, contractId, table);
-    setObjectMember(store, STORAGE_MEMBER, root);
-    await storage?.write(store);
+  function updateTable(update) {
+    // The invoking paths enter only when durable storage is configured.
+    const adapter = /** @type {KeyStorage} */ (storage);
+    const previous = storageUpdates.get(adapter) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      const raw = await adapter.read();
+      /** @type {Record<string, any>} */
+      const store = isJsonObject(raw) ? { ...raw } : {};
+      /** @type {Record<string, any>} */
+      const root = isJsonObject(store[STORAGE_MEMBER]) ? { ...store[STORAGE_MEMBER] } : {};
+      /** @type {Record<string, any>} */
+      const table = isJsonObject(root[contractId]) ? { ...root[contractId] } : {};
+      if (!update(table)) return;
+      setObjectMember(root, contractId, table);
+      setObjectMember(store, STORAGE_MEMBER, root);
+      await adapter.write(store);
+    });
+    // The caller receives its failure; later writes still get their turn.
+    storageUpdates.set(adapter, next.catch(() => {}));
+    return next;
   }
 
   /**

@@ -142,4 +142,22 @@ describe('buildFormViewModel', function () {
     assert.strictEqual(lines.items[0].removable, true);
     assert.notStrictEqual(lines.addValue, undefined, 'array with item template can add');
   });
+
+  it('fills remaining tuple prefixes before using the tail item starter in both schema dialects', function () {
+    const prefix = [{ type: 'string', default: 'prefix' }, { type: 'boolean', default: true }];
+    const rest = { type: 'number', default: 7 };
+    for (const tupleSchema of [
+      { type: 'array', prefixItems: prefix, items: rest },
+      { type: 'array', items: prefix, additionalItems: rest },
+    ]) {
+      const model = buildFormModel(tupleSchema);
+      const data = [];
+      for (const expected of ['prefix', true, 7]) {
+        const node = buildFormViewModel(model, data);
+        assert.strictEqual(node.addValue, expected);
+        data.push(node.addValue);
+      }
+      assert.deepStrictEqual(data, ['prefix', true, 7]);
+    }
+  });
 });

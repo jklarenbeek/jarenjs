@@ -30,7 +30,7 @@ function compileMinLength(schemaObj, jsonSchema) {
 }
 
 function compileMaxLength(schemaObj, jsonSchema) {
-  const max = getIntishType(jsonSchema.maxLength) || -1;
+  const max = getIntishType(jsonSchema.maxLength) ?? -1;
   if (max < 0) return undefined;
 
   const addError = schemaObj.createErrorHandler(max, 'maxLength');

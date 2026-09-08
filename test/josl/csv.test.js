@@ -3,6 +3,7 @@ import { deepStrictEqual, strictEqual, throws, ok } from 'node:assert';
 
 import {
   parseCsv,
+  parseJosl,
   parseCsvDocument,
   stringifyCsv,
   stringifyCsvChunks,
@@ -125,6 +126,29 @@ describe('csv: typed values', () => {
   it('never coerces a quoted cell', () => {
     deepStrictEqual(parseCsv('"1","true","2026-07-27"', { typed: true }),
       [['1', 'true', '2026-07-27']]);
+  });
+
+  it('preserves early years and fractional instants across JOSL and typed CSV', async () => {
+    const cases = [
+      ['0099-01-02T03:04:05Z', '0099-01-02T03:04:05.000Z'],
+      ['0000-02-29T00:00:00Z', '0000-02-29T00:00:00.000Z'],
+      ['0099-12-31t23:30:00-01:00', '0100-01-01T00:30:00.000Z'],
+      ['2026-01-01 00:00:00.9999z', '2026-01-01T00:00:00.999Z'],
+    ];
+    for (const [text, expected] of cases) {
+      strictEqual(coerceCsvValue(text).toISOString(), expected);
+      strictEqual(parseJosl(`at = ${text}`).at.toISOString(), expected);
+      strictEqual(parseCsv(text, { typed: true })[0][0].toISOString(), expected);
+      strictEqual((await parseCsvStream([...text], { typed: true }))[0][0].toISOString(), expected);
+    }
+  });
+
+  it('keeps invalid offset instants as text instead of normalizing them', () => {
+    for (const text of ['2026-01-01T00:00:00+24:00', '2026-01-01T00:00:00+01:99',
+      '2026-01-01T00:00:00-00:60']) {
+      strictEqual(coerceCsvValue(text), text);
+      deepStrictEqual(parseCsv(text, { typed: true }), [[text]]);
+    }
   });
 
   it('exposes the coercion on its own', () => {

@@ -15,6 +15,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 
+import { createRuntime } from '@jarenjs/core/runtime';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
@@ -275,18 +276,19 @@ describe('explain() names the profile that applied and the budgets imposed', () 
 
 describe('signal and deadline are declared per call and honoured', () => {
   it('an aborted call and a passed deadline issue no statement; a cursor checks the deadline at every row', async () => {
-    const { store, counters } = await seeded();
+    let now = 1_000;
+    const { store, counters } = await seeded({ runtime: createRuntime({ now: () => now }) });
     const aborted = AbortSignal.abort();
     const document = { $for: { u: '$.User[*]' }, $return: '$u' };
     await assert.rejects(async () => (store.entity('User').execute(document, { signal: aborted })), codeIs('JD2072'));
     await assert.rejects(async () => (store.collection('docs').execute({ $for: { it: '$[*]' }, $return: '$it' }, { signal: aborted })), codeIs('JD2072'));
-    assert.throws(() => store.entity('User').cursor(document, { deadline: Date.now() - 1 }), codeIs('JD2075', /passed before the call ran/));
-    await assert.rejects(() => store.entity('User').page({}, { deadline: Date.now() - 1 }), codeIs('JD2075'));
+    assert.throws(() => store.entity('User').cursor(document, { deadline: now - 1 }), codeIs('JD2075', /passed before the call ran/));
+    await assert.rejects(() => store.entity('User').page({}, { deadline: now - 1 }), codeIs('JD2075'));
     assert.strictEqual(counters.all + counters.iterate, 0, 'no statement ran for any of them');
     assert.throws(() => store.entity('User').cursor(document, { deadline: /** @type {any} */ ('soon') }), TypeError);
-    const soon = store.entity('User').cursor(document, { deadline: Date.now() + 40 });
+    const soon = store.entity('User').cursor(document, { deadline: now + 40 });
     assert.strictEqual((await soon.next()).done, false);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    now += 60;
     await assert.rejects(() => soon.next(), codeIs('JD2075', /passed before the next row/));
     assert.strictEqual(counters.return, 1, 'released at the row boundary');
     await store.close();

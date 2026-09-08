@@ -38,6 +38,17 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 
+// A failed child can still produce useful partial coverage, but its status
+// and full diagnosis must survive even when it produced no report at all.
+function reportRunFailure(run, label) {
+  if (run.status === 0) return false;
+  console.warn(`${label} exited ${run.status} (signal ${run.signal ?? 'none'}).`);
+  if (run.error != null) console.warn(run.error);
+  const output = String(run.stdout ?? '').trimEnd();
+  if (output !== '') console.warn(output);
+  return true;
+}
+
 // Check for help first
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
@@ -141,6 +152,7 @@ if (fs.existsSync(tempDir)) {
 fs.mkdirSync(tempDir, { recursive: true });
 
 const coverageFile = path.join(rootDir, 'coverage', 'coverage-final.json');
+fs.rmSync(coverageFile, { force: true });
 
 // Run c8 with profiler
 console.log('='.repeat(80));
@@ -167,12 +179,13 @@ const c8Args = [
   '--iterations', String(iterations),
 ];
 
-// c8 may exit with an error code but still produce coverage
-spawnSync(process.execPath, c8Args, {
+// Keep current-run partial coverage when c8 fails, with a failing exit code.
+const run = spawnSync(process.execPath, c8Args, {
   cwd: rootDir,
   stdio: ['inherit', 'pipe', 'inherit'],
   encoding: 'utf8'
 });
+if (reportRunFailure(run, 'The profiler')) process.exitCode = 1;
 
 // Check if coverage file was generated
 if (!fs.existsSync(coverageFile)) {
@@ -366,6 +379,7 @@ console.log('');
  */
 function runDeadCodeAudit(opts) {
   const coverageFile = path.join(rootDir, 'coverage', 'coverage-final.json');
+  fs.rmSync(coverageFile, { force: true });
   if (fs.existsSync(opts.tempDir)) fs.rmSync(opts.tempDir, { recursive: true });
   fs.mkdirSync(opts.tempDir, { recursive: true });
 
@@ -414,25 +428,19 @@ function runDeadCodeAudit(opts) {
   // A non-zero exit means the suite has failing tests. Coverage is still
   // written, but a red suite makes the audit unreliable (untested paths
   // may simply not have run) — flag it.
-  // the suite's own output is kept, not shown: on a green run it is
-  // noise beside the plain test stage, and on a red one the failing
-  // tests and the summary are the whole diagnosis — a red suite whose
-  // failures were discarded is a flake nobody can name
+  // A green suite's output is noise beside the plain test stage. On failure
+  // keep it whole: assertions, actual/expected values and stacks are needed
+  // to diagnose the failure, regardless of whether c8 wrote a report.
   const run = spawnSync(process.execPath, c8Args,
     { cwd: rootDir, stdio: ['inherit', 'pipe', 'inherit'], maxBuffer: 256 * 1024 * 1024 });
-  const suiteFailed = run.status !== 0;
-  if (!fs.existsSync(coverageFile)) {
-    console.error('Error: coverage data not generated.');
-    return 1;
-  }
+  const suiteFailed = reportRunFailure(run, 'The instrumented suite');
   if (suiteFailed) {
     console.warn('Warning: the test suite did not pass cleanly — fix the suite first; '
       + 'dead-code findings below may be inaccurate.');
-    const lines = String(run.stdout ?? '').split('\n');
-    const failing = lines.filter((line) => /^\s*✖|^ℹ (tests|pass|fail|cancelled|skipped)\b/.test(line));
-    console.warn(failing.length > 0
-      ? `The instrumented suite reported (exit ${run.status}):\n${failing.join('\n')}`
-      : `The instrumented suite exited ${run.status} (signal ${run.signal ?? 'none'}) without a failing test line.`);
+  }
+  if (!fs.existsSync(coverageFile)) {
+    console.error('Error: coverage data not generated.');
+    return 1;
   }
 
   const data = JSON.parse(fs.readFileSync(coverageFile, 'utf8'));

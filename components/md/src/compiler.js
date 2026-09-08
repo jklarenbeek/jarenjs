@@ -152,7 +152,7 @@ export function frontmatterExternals(frontmatter) {
  *
  * @param {MdDocument} doc
  * @param {{ buildFormModel: (schema: any) => any,
- *           createInitialData: (schema: any) => any }} forms
+ *           createInitialData: (fields: any) => any }} forms
  * @returns {{ schema: any, fields: any, data: any } | null}
  */
 export function mdToForm(doc, forms) {
@@ -162,6 +162,7 @@ export function mdToForm(doc, forms) {
     ? fm.form
     : typeof fm.$schema === 'object' && fm.$schema !== null ? fm.$schema : null;
   if (schema === null) return null;
-  const data = fm.data !== undefined ? fm.data : forms.createInitialData(schema);
-  return { schema, fields: forms.buildFormModel(schema), data };
+  const fields = forms.buildFormModel(schema);
+  const data = fm.data !== undefined ? fm.data : forms.createInitialData(fields);
+  return { schema, fields, data };
 }

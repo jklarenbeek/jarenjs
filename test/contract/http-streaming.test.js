@@ -581,19 +581,29 @@ describe('bytes — the node adapter over a real socket', () => {
     assert.strictEqual(gone.ended, 0);
   });
 
-  it('a peer that goes away mid-download cancels the source exactly once, at the next point the source can observe it', async () => {
+  it('a peer that goes away mid-download cancels the source exactly once, at the next point the source can observe it', async (t) => {
     releaseDownload = () => {};
+    t.after(() => {
+      releaseDownload?.();
+      releaseDownload = null;
+    });
+    const closed = new Promise((resolve) => {
+      server.once('request', (_req, res) => res.once('close', resolve));
+    });
     const controller = new AbortController();
     const get = await fetch(`${origin}/blobs/4`, { signal: controller.signal });
     const reader = /** @type {NonNullable<typeof get.body>} */ (get.body).getReader();
     await reader.read();
     assert.ok(lastDownload !== null);
     const download = /** @type {ReturnType<typeof chunkSource>} */ (lastDownload);
+    await wait(() => download.counts.pulled === 2);
     controller.abort();
     // the handler's generator is parked on an await inside its body: a
     // cancel cannot interrupt that await, so nothing is released yet —
     // the cancel is queued for the generator's next step
-    await new Promise((r) => setTimeout(r, 40));
+    // Observe cancellation at the server before releasing the source;
+    // client abort propagation has no fixed wall-clock deadline.
+    await closed;
     assert.strictEqual(download.counts.returned, 0);
     /** @type {() => void} */ (releaseDownload)();
     await wait(() => download.counts.returned === 1);

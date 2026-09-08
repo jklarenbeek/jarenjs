@@ -75,8 +75,12 @@ share link and the eject, so its shape is fixed at v0.1.
 ## `classifyChange` — reboot vs. hot-update
 
 `classifyChange(prev, next)` reports, **per artifact**, whether a change
-is `structural`, `state-only`, or `none`. It compares a structural key —
-an `app` document *minus its `state`* — via the suite's own `contentKey`.
+is `structural`, `state-only`, or `none`. A change of artifact kind is
+structural even when the JSON text stays the same. It compares an app's
+`view`, `actions` and `subs` (other artifacts' whole documents) via the
+suite's collision-free `semanticKey`; a remaining document change is
+`state-only`. Every filename, including `__proto__`, is an own member of
+the result map.
 An IDE reads it to decide: a `state-only` edit hot-dispatches into a
 running app (the user keeps scroll and inputs); a `structural` edit
 reboots. Keeping this datum in the tested engine, and the policy in the

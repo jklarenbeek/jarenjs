@@ -119,6 +119,32 @@ describe('the two hard-problem policies', () => {
     assert.strictEqual(hostPolicy(base, base)['a.json'], 'skip');
   });
 
+  it('hostPolicy reboots when an unchanged document switches artifact kinds', () => {
+    const studio = createStudioComponent();
+    const project = (kind) => studio.parseProject({
+      project: '0.1', files: [{ name: 'file', kind, text: '{}' }],
+    });
+    assert.deepStrictEqual(hostPolicy(project('schema'), project('query')), { file: 'reboot' });
+    assert.deepStrictEqual(hostPolicy(project('query'), project('schema')), { file: 'reboot' });
+  });
+
+  it('hostPolicy retains a __proto__ filename in reboot and skip decisions', () => {
+    const studio = createStudioComponent();
+    const empty = studio.parseProject({ project: '0.1', files: [] });
+    const project = studio.parseProject({
+      project: '0.1', files: [{ name: '__proto__', kind: 'query', text: '{}' }],
+    });
+    for (const [before, after, decision] of [
+      [empty, project, 'reboot'],
+      [project, project, 'skip'],
+      [project, empty, 'reboot'],
+    ]) {
+      const policy = hostPolicy(before, after);
+      assert.deepStrictEqual(policy, Object.fromEntries([['__proto__', decision]]));
+      assert.strictEqual(Object.getPrototypeOf(policy), Object.prototype);
+    }
+  });
+
   it('reconcileBuffer: clean adopts; dirty+different conflicts; dirty+same clears', () => {
     assert.deepStrictEqual(reconcileBuffer({ text: 'old', dirty: false }, 'new'),
       { text: 'new', dirty: false, conflict: null });
