@@ -571,6 +571,7 @@ export function createDataRuntime(env = {}) {
   let liveSub = null;
   /** @type {any} */
   let liveDoc = null;
+  let liveAvailable = true;
   /** The collection every effect works on: the model pane is EDITABLE,
    * so naming one literally makes editing the model produce a studio
    * that queries a collection the model no longer declares. It is the
@@ -596,6 +597,7 @@ export function createDataRuntime(env = {}) {
    */
   const subscribeLive = (dispatch) => {
     liveSub?.stop();
+    if (!liveAvailable) { liveSub = null; return; }
     const refreshRegistrations = () => {
       transport?.request('data.lives', null)
         .then((lives) => dispatch('data/lives', { count: lives.count }))
@@ -676,6 +678,7 @@ export function createDataRuntime(env = {}) {
     try {
       const status = await booting.boot();
       if (superseded()) return;
+      liveAvailable = status.vfs !== 'indexeddb-snapshot';
       dispatch('data/status', status);
       // an owner (OPFS) and a standalone memory tab each hold their
       // OWN connection, so both open and seed; only a CLIENT attaches
@@ -684,6 +687,7 @@ export function createDataRuntime(env = {}) {
         const opened = await booting.bounded('store-open',
           () => booting.request('data.open', { model: DATA_MODEL }));
         if (superseded()) return;
+        liveAvailable = opened?.capabilities?.live !== false;
         dispatch('data/opened', { ...opened, collection, keyPointer: keyPointerOf(DATA_MODEL, collection) });
         for (const seedDoc of SEEDS) {
           await booting.request('data.insert',
@@ -1025,9 +1029,14 @@ export function dataViewModel(state) {
     refusal: data.refusal,
     // a verdict only once the topology is known: during the boot, and
     // after a boot failure, nothing about OPFS has been learned
-    durability: data.vfs === 'opfs-sahpool'
+    liveNote: data.vfs === 'indexeddb-snapshot' ? 'Live queries are unavailable while writes await durable snapshots. The Store pane refreshes after each write.' : '',
+    durability: data.vfs === 'opfs-sab'
+      ? 'persistent (OPFS with SharedArrayBuffer and cross-origin isolation)'
+      : data.vfs === 'indexeddb-snapshot'
+        ? 'persistent (atomic IndexedDB snapshots; writes await storage)'
+        : data.vfs === 'opfs-sahpool'
       ? 'persistent (OPFS access-handle pool, no special headers)'
-      : data.vfs === 'memory' ? 'in-memory (OPFS unavailable here — data lives until reload)'
+      : data.vfs === 'memory' ? 'in-memory (non-durable — persistent storage is unavailable; data lives until reload)'
         : 'not decided yet — the store has not booted',
     modelText: data.modelText,
     queryText: data.queryText,

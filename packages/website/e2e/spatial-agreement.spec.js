@@ -59,7 +59,7 @@ test(`the spatial corpus agrees with the engine through ${EXECUTOR}, in this eng
   // it settled on is fine — the oracle's stores are throwaway either way
   await expect(page.locator('.data-status .data-vfs')).not.toHaveText('—', READY);
   const vfs = (await page.locator('.data-status .data-vfs').textContent())?.trim();
-  expect(['opfs-sahpool', 'memory']).toContain(vfs);
+  expect(['opfs-sab', 'opfs-sahpool', 'indexeddb-snapshot', 'memory']).toContain(vfs);
 
   await page.locator('.data-oracle > summary').click();
   await page.locator('.data-oracle-run').click();

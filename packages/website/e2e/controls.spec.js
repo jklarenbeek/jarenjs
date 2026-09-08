@@ -58,7 +58,7 @@ test('a render mid-edit never erases what is being typed', async ({ page }) => {
   await page.evaluate(() => { window.location.hash = '#/data'; });
   await expect(page.locator('.data-insert-title')).toBeVisible();
   // the store must be open before an insert can land
-  await expect(page.locator('.data-status .data-vfs')).not.toHaveText('—', { timeout: 30_000 });
+  await expect(page.locator('.data-insert-title')).toBeEnabled({ timeout: 30_000 });
 
   await page.locator('.data-insert-title').focus();
   await page.keyboard.type('a note being typed');
@@ -68,7 +68,7 @@ test('a render mid-edit never erases what is being typed', async ({ page }) => {
 
   // and the commit still works: blur inserts the row and clears the field
   await page.locator('.data-insert-title').blur();
-  await expect(page.locator('.data-live-rows')).toContainText('a note being typed', { timeout: 30_000 });
+  await expect(page.locator('.data-rows')).toContainText('a note being typed', { timeout: 30_000 });
   await expect(page.locator('.data-insert-title')).toHaveValue('');
 
   // ——— the project IDE's file-name field ———

@@ -142,3 +142,10 @@ traps and focus restoration under an actual screen reader, and AT
 semantics — tracked in [ROADMAP.md](../../docs/ROADMAP.md);
 [APP-FORMAT](../app/docs/APP-FORMAT.md) §8.7 states the contracts it will
 have to prove.
+
+The data studio selects isolated SharedArrayBuffer OPFS, SAH-pool OPFS, atomic
+IndexedDB snapshots or visibly non-durable memory through runtime write/reopen
+probes. IndexedDB writes await durable acknowledgement and explicitly disable live
+maintenance. The isolated Playwright preview sets COOP/COEP on a second server;
+production headers remain host-controlled. See the [database host matrix](../db/docs/HOSTS.md)
+for evidence, failure behavior and measurement recipes.

@@ -319,6 +319,46 @@ function geoTable(keep) {
   return ['', '| scenario | Jaren | rival | ratio |', '|---|---|---|---|', ...rows, ''].join('\n');
 }
 const FACTS = {
+  'db.hosts': () => {
+    const baseline = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-baseline.json'), 'utf8'));
+    const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-results.json'), 'utf8'));
+    const fixed = (n) => n.toFixed(2);
+    const mib = (n) => fixed(n / 1048576);
+    return '\n\n' + [
+      `Measured ${report.measuredAt.slice(0, 10)}, ${report.runtime}, ${report.host.cpu}; ${report.samples} samples per latency/include case.`,
+      '',
+      '| Host | Open p50 ms | Slow SQL p50 ms | Event-loop max ms | Tiny reads/s | Mixed work ms | Wait p95 ms |',
+      '|---|---:|---:|---:|---:|---:|---:|',
+      ...report.hosts.map((h) => `| ${h.name} | ${fixed(h.startupMs.p50)} | ${fixed(h.statementMs.p50)} | ${fixed(h.eventLoopDelayMs.max)} | ${Math.round(h.tiny.operationsPerSecond)} | ${fixed(h.mixed.durationMs)} | ${fixed(h.mixed.metrics?.waitMs?.p95 ?? 0)} |`),
+      '',
+      '| Host | Cursor rows | Cursor ms | Sampled heap growth MiB | Sampled total RSS MiB |',
+      '|---|---:|---:|---:|---:|',
+      ...report.hosts.map((h) => `| ${h.name} | ${h.cursor.rows} | ${fixed(h.cursor.durationMs)} | ${mib(h.cursor.sampledHeapGrowthBytes)} | ${mib(h.cursor.sampledRssBytes)} |`),
+      '',
+      '| Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |',
+      '|---|---:|---:|---:|',
+      ...report.includes.map((r) => `| ${r.method} | ${r.bytes} | ${fixed(r.durationMs.p50)} | ${mib(r.heapGrowthBytes.p50)} |`),
+      '',
+      `The worker event-loop acceptance bound is ${report.workerEventLoopMaxBoundMs} ms. The original in-process baseline measured p50/p95/max event-loop delay of ${fixed(baseline.eventLoopDelayMs.p50)}/${fixed(baseline.eventLoopDelayMs.p95)}/${fixed(baseline.eventLoopDelayMs.max)} ms, bare worker startup p50 ${fixed(baseline.workerStartupMs.p50)} ms, and duplicate include serialization ${fixed(baseline.include.durationMs)} ms with ${mib(baseline.include.heapDeltaBytes)} MiB uncollected heap growth. The current open measurement also includes driver probing; its startup cost is broader than that bare-worker baseline.`,
+    ].join('\n') + '\n\n';
+  },
+  'db.browserHosts': () => {
+    const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-browser-results.json'), 'utf8'));
+    return '\n\n' + [
+      `${report.passed} storage scenarios passed without skips, measured ${report.measuredAt.slice(0, 10)}.`,
+      '',
+      '| Engine | Version | Isolated | Ordinary | OPFS denied | All storage denied / quota |',
+      '|---|---|---|---|---|---|',
+      ...['chromium', 'firefox', 'webkit'].map((engine) => {
+        const rows = report.rows.filter((r) => r.engine === engine);
+        const pick = (prefix) => rows.find((r) => r.scenario.startsWith(prefix));
+        return `| ${engine} | ${rows[0].browserVersion} | ${pick('isolated').vfs} | ${pick('ordinary').vfs} | ${pick('IndexedDB').vfs} | ${pick('memory').vfs} (non-durable) |`;
+      }),
+      '',
+      ...report.rows.filter((r) => r.isolated && r.fallback).map((r) => `${r.engine} isolated fallback: ${r.fallback}`),
+    ].join('\n') + '\n\n';
+  },
+
   // ——— when the quoted suites were actually measured. A README that
   // names a date is making a provenance claim; if the suites disagree
   // the range is printed rather than one flattering date.
@@ -1324,6 +1364,7 @@ const DOCS = [
   'packages/josl/README.md',
   'packages/ai/README.md',
   'packages/db/README.md',
+  'packages/db/docs/HOSTS.md',
   'packages/linq/README.md',
   'packages/db/docs/MODEL-FORMAT.md',
   'packages/core/README.md',

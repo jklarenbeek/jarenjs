@@ -1,0 +1,65 @@
+{
+  "measuredAt": "2026-09-08T15:19:29.775Z",
+  "rows": [
+    {
+      "engine": "chromium",
+      "isolated": false,
+      "sab": false,
+      "indexedDB": true,
+      "opfs": true,
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "13",
+        "date": "Tue, 08 Sep 2026 15:19:16 GMT",
+        "keep-alive": "timeout=5"
+      }
+    },
+    {
+      "engine": "chromium",
+      "isolated": true,
+      "sab": true,
+      "indexedDB": true,
+      "opfs": true,
+      "headers": {
+        "connection": "keep-alive",
+        "content-length": "13",
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-opener-policy": "same-origin",
+        "date": "Tue, 08 Sep 2026 15:19:16 GMT",
+        "keep-alive": "timeout=5"
+      }
+    },
+    {
+      "engine": "firefox",
+      "isolated": false,
+      "sab": false,
+      "indexedDB": true,
+      "opfs": true,
+      "headers": {
+        "date": "Tue, 08 Sep 2026 15:19:24 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "content-length": "13"
+      }
+    },
+    {
+      "engine": "firefox",
+      "isolated": true,
+      "sab": true,
+      "indexedDB": true,
+      "opfs": true,
+      "headers": {
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-embedder-policy": "require-corp",
+        "date": "Tue, 08 Sep 2026 15:19:27 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "content-length": "13"
+      }
+    },
+    {
+      "engine": "webkit",
+      "error": "browserType.launch: Target page, context or browser has been closed\nBrowser logs:\n\n<launching> /home/joham/.cache/ms-playwright/webkit-2311/pw_run.sh --inspector-pipe --headless --no-startup-window\n<launched> pid=35605\n[pid=35605][err] /home/joham/.cache/ms-playwright/webkit-2311/minibrowser-wpe/bin/MiniBrowser: error while loading shared libraries: libjpeg.so.8: cannot open shared object file: No such file or directory\nCall log:\n\u001b[2m  - <launching> /home/joham/.cache/ms-playwright/webkit-2311/pw_run.sh --inspector-pipe --headless --no-startup-window\u001b[22m\n\u001b[2m  - <launched> pid=35605\u001b[22m\n\u001b[2m  - [pid=35605][err] /home/joham/.cache/ms-playwright/webkit-2311/minibrowser-wpe/bin/MiniBrowser: error while loading shared libraries: libjpeg.so.8: cannot open shared object file: No such file or directory\u001b[22m\n\u001b[2m  - [pid=35605] <gracefully close start>\u001b[22m\n\u001b[2m  - [pid=35605] <kill>\u001b[22m\n\u001b[2m  - [pid=35605] <will force kill>\u001b[22m\n\u001b[2m  - [pid=35605] <process did exit: exitCode=127, signal=null>\u001b[22m\n\u001b[2m  - [pid=35605] starting temporary directories cleanup\u001b[22m\n\u001b[2m  - [pid=35605] finished temporary directories cleanup\u001b[22m\n\u001b[2m  - [pid=35605] <gracefully close end>\u001b[22m\n"
+    }
+  ]
+}

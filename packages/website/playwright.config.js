@@ -32,10 +32,15 @@ export default defineConfig({
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
-  webServer: {
+  webServer: [{
     command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
-  },
+  }, {
+    command: 'npm run preview -- --host 127.0.0.1 --port 4174 --strictPort --mode isolated',
+    url: 'http://127.0.0.1:4174',
+    reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
+  }],
 });

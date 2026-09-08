@@ -687,3 +687,15 @@ else {
     + `equal to the committed baseline: `
     + [...linqBundles].map(([name, bytes]) => `${name} ${kb(bytes)} kB`).join(', ') + ').');
 }
+
+// Browser consumers retain wasm/storage support without any Node transport.
+const dbBrowser = await build({
+  stdin: { contents: "export { openStore } from '@jarenjs/db'; export { wasmDriver, sqlite3Handle, indexedDbSnapshotHandle } from '@jarenjs/db/wasm';",
+    resolveDir: process.cwd(), sourcefile: 'db-browser-consumer.js' },
+  bundle: true, format: 'esm', platform: 'browser', treeShaking: true,
+  minify: true, metafile: true, write: false,
+});
+const remoteInputs = Object.keys(dbBrowser.metafile.inputs).filter((file) =>
+  /drivers\/(node|worker-)/.test(file));
+if (remoteInputs.length) throw new Error(`Node worker transport entered browser bundle: ${remoteInputs.join(', ')}`);
+console.log(`DB browser isolation passed (${dbBrowser.outputFiles[0].contents.length} bytes; zero Node transport modules).`);

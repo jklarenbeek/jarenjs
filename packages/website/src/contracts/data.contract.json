@@ -29,11 +29,13 @@
           "topology": { "enum": ["owner", "client", "memory"] },
           "vfs": { "type": "string" },
           "version": { "type": "string" },
-          "refusal": { "$ref": "#/$defs/DbError" }
+          "refusal": { "$ref": "#/$defs/DbError" },
+          "durable": { "type": "boolean" },
+          "failures": { "type": "array", "items": { "type": "object", "required": ["vfs", "reason"], "properties": { "vfs": { "type": "string" }, "reason": { "type": "string" } } } }
         }
       },
       "errors": { "db": { "schema": { "$ref": "#/$defs/DbError" } } },
-      "doc": "Load the SQLite wasm build and decide the topology: owner (holds the OPFS pool), client (another context owns it — talk over the channel), or memory (OPFS absent — standalone). refusal carries the coded downgrade when there is one."
+      "doc": "Load the SQLite wasm build and decide the topology: owner (holds the selected durable storage), client (another context owns it — talk over the channel), or visibly non-durable memory. Probe order: isolated SharedArrayBuffer OPFS, SAH-pool OPFS, atomic IndexedDB snapshots, memory. failures names each rejected rung; refusal carries the visible downgrade."
     },
     "data.open": {
       "kind": "command",

@@ -57,14 +57,15 @@ test('the wasm store boots, a live query maintains, explain shows the pushdown',
   page.on('pageerror', (error) => errors.push(String(error)));
   await gotoData(page);
 
-  // the store is real: capture reports the journal fallback (sessions
-  // are compiled into the wasm build but not adapted — stated)
-  await expect(page.locator('.data-status')).toContainText('journal');
+  // The canonical build passed the live disposable session probe.
+  await expect(page.locator('.data-status')).toContainText('session');
   const vfs = await page.locator('.data-status .data-vfs').textContent();
-  expect(['opfs-sahpool', 'memory']).toContain(vfs?.trim());
+  expect(['opfs-sab', 'opfs-sahpool', 'indexeddb-snapshot', 'memory']).toContain(vfs?.trim());
 
   // the seeded live query shows the three seed rows
-  const liveRows = page.locator('.data-live-rows');
+  const snapshot = vfs?.trim() === 'indexeddb-snapshot';
+  if (snapshot) await expect(page.locator('.data-live-note')).toContainText('unavailable');
+  const liveRows = page.locator(snapshot ? '.data-rows' : '.data-live-rows');
   await expect(liveRows).toContainText('important', READY);
   const before = await page.locator('.data-live-count').textContent();
 
@@ -73,7 +74,7 @@ test('the wasm store boots, a live query maintains, explain shows the pushdown',
   await page.locator('.data-insert-title').blur();
   await expect(liveRows).toContainText('a brand new note', READY);
   const after = await page.locator('.data-live-count').textContent();
-  expect(after).not.toBe(before);
+  if (!snapshot) expect(after).not.toBe(before);
 
   // run + explain: the SQL and the index chosen are visible
   await page.locator('.data-query .btn.primary', { hasText: 'Run + explain' }).click();
@@ -117,7 +118,7 @@ test('the spatial round trip runs CSV → stylesheet → meta-schema → store �
   expect(errors, 'no uncaught page errors').toEqual([]);
 });
 
-test('data survives a reload via OPFS (or is honestly in-memory)', async ({ page }) => {
+test('data survives a reload through its selected durable storage (or is honestly in-memory)', async ({ page }) => {
   // the only test here that pays for TWO store opens — the wasm build boots
   // again after the reload — so it gets more than the single-boot budget its
   // siblings run inside
@@ -127,7 +128,7 @@ test('data survives a reload via OPFS (or is honestly in-memory)', async ({ page
 
   await page.locator('.data-insert-title').fill('persist me across reload');
   await page.locator('.data-insert-title').blur();
-  await expect(page.locator('.data-live-rows')).toContainText('persist me across reload', READY);
+  await expect(page.locator('.data-rows')).toContainText('persist me across reload', READY);
 
   // reload and WAIT — no second goto: navigating again to the same URL
   // would boot a second worker beside the reload's own, and two
@@ -143,8 +144,8 @@ test('data survives a reload via OPFS (or is honestly in-memory)', async ({ page
   // (the durability line says so). Persistence is asserted precisely
   // when the reloaded tab actually re-owns the pool.
   const vfsAfter = (await page.locator('.data-status .data-vfs').textContent())?.trim();
-  if (vfs === 'opfs-sahpool' && vfsAfter === 'opfs-sahpool') {
-    await expect(page.locator('.data-live-rows'))
+  if (vfs !== 'memory' && vfsAfter === vfs) {
+    await expect(page.locator('.data-rows'))
       .toContainText('persist me across reload', READY);
   }
   else {
@@ -289,7 +290,7 @@ test.describe('the boot is terminal: a failed stage is named and a retry starts 
     await failure.locator('.data-boot-retry').click();
     await expect(page.locator('.data-status .data-vfs')).not.toHaveText('—', READY);
     await expect(page.locator('.data-boot-error')).toHaveCount(0);
-    await expect(page.locator('.data-live-rows')).toContainText('important', READY);
+    await expect(page.locator('.data-rows')).toContainText('important', READY);
     expect(errors, 'no uncaught page errors').toEqual([]);
   });
 

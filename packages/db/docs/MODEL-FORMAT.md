@@ -1073,6 +1073,11 @@ error.
 | `JD2087` | the connection to the database was lost |
 | `JD2088` | the transaction was aborted by an earlier failure in it |
 | `JD2089` | the statement was cancelled by the server |
+| `JD2090` | worker generation lost; reopen, never automatically replay; retryable only outside a transaction |
+| `JD2091` | bounded worker/pool admission overflow; retryable, with queue depth |
+| `JD2092` | a worker row, compatibility result or remote identity count exceeds its declared bound |
+| `JD2093` | malformed worker protocol request |
+| `JD2094` | invalid or uncommitted durable snapshot; reopen the last committed version |
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
@@ -2241,3 +2246,6 @@ const report = await store.saveChanges();      // { joinInserted: 1, joinDeleted
 - The report counts the rows written under `joinInserted`/`joinDeleted`
   and `stats().tracker.pendingMemberships` counts the pending
   (entity, key, member) records.
+
+Worker/pool options, synchronous cursors, wasm session probing and the browser
+persistence ladder are specified in [execution hosts](HOSTS.md).

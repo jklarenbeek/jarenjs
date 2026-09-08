@@ -117,16 +117,40 @@ export function lazyOpen(specifier, reason, use, args) {
  * @returns {{ run: Function, get: Function, all: Function,
  *   iterate: Function }}
  */
-export function wrapStatement(statement, guard = undefined) {
+export function wrapStatement(statement, guard = undefined, active = undefined) {
   const before = guard ?? (() => {});
+  const track = (source) => {
+    if (active === undefined) return source;
+    let done = false;
+    const iterator = {
+      next: () => {
+        before();
+        if (done) return { done: true, value: undefined };
+        return chain(source.next(), (step) => {
+          if (step.done) { done = true; active.delete(iterator); }
+          return step;
+        });
+      },
+      return: (value) => {
+        if (done) return { done: true, value };
+        done = true;
+        active.delete(iterator);
+        return source.return?.(value) ?? { done: true, value };
+      },
+      [Symbol.iterator]: () => iterator,
+      [Symbol.asyncIterator]: () => iterator,
+    };
+    active.add(iterator);
+    return iterator;
+  };
   return {
     run: (params = []) => { before(); return statement.run(params); },
     get: (params = []) => { before(); return statement.get(params); },
     all: (params = []) => { before(); return statement.all(params); },
     iterate: typeof statement.iterate === 'function'
-      ? (params = []) => { before(); return /** @type {Function} */ (statement.iterate)(params); }
+      ? (params = []) => { before(); return chain(/** @type {Function} */ (statement.iterate)(params), track); }
       : (params = []) => { before(); return chain(statement.all(params),
-        (rows) => rows[Symbol.iterator]()); },
+        (rows) => track(rows[Symbol.iterator]())); },
   };
 }
 
@@ -165,7 +189,11 @@ export function attempt(call, wrap) {
  */
 function settleTransaction(body, commit, rollback) {
   const fail = (error) => chain(attempt(rollback, (cleanupError) =>
-    new TransactionFailure(error, cleanupError)), () => { throw error; });
+    // Losing one remote generation also loses its rollback channel.
+    // That is one failure, not two independent transaction defects.
+    error === cleanupError || error?.code === 'JD2090' && cleanupError?.code === 'JD2090'
+      && error.generation === cleanupError.generation
+      ? error : new TransactionFailure(error, cleanupError)), () => { throw error; });
   const succeed = (value) => {
     let committed;
     try {
@@ -262,6 +290,11 @@ export function baseCapabilities() {
     rtree: false,
     fts: false,
     sessions: false,
+    sessionReason: null,
+    worker: false,
+    pooling: false,
+    poolReaders: 0,
+    poolWriters: 0,
     userFunctions: false,
     deterministicIndexableFunctions: false,
     aggregateFunctions: false,
@@ -324,6 +357,7 @@ export function sqliteProbe(raw, dialect, declared) {
             sessions: declared.sessions === true
               && typeof raw.session === 'function'
               && compiled.has('ENABLE_SESSION'),
+            sessionReason: raw.sessionReason ?? null,
             userFunctions: declared.userFunctions === true
               && typeof raw.registerFunction === 'function',
             deterministicIndexableFunctions:
@@ -401,6 +435,7 @@ export function sqliteProbe(raw, dialect, declared) {
  * @returns {any}
  */
 export function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout) {
+  const activeIterators = new Set();
   /** Savepoint names are never reused, so a stale name can never be
    * mistaken for a live one in an error or a log. */
   let savepointSeq = 0;
@@ -432,6 +467,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * leaking the binding's own error (or, on a build that tolerates it,
    * running against a closed handle). */
   let closed = false;
+  let closeResult;
   const requireOpen = () => {
     if (closed) {
       throw new DbRuntimeError('JD2063',
@@ -653,7 +689,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     /** @param {string} sql */
     exec: (sql) => { requireOpen(); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql) => { requireOpen(); return chain(raw.prepare(sql), (s) => wrapStatement(s, requireOpen)); },
+    prepare: (sql, metadata) => { requireOpen(); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
     /** A nested savepoint inside this transaction.
      * @param {(scope: any) => any} fn */
     transaction: (fn) => savepointAround(fn),
@@ -689,7 +725,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // report failure.
     exec: (sql) => { requireOpen(); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql) => { requireOpen(); return chain(raw.prepare(sql), (s) => wrapStatement(s, requireOpen)); },
+    prepare: (sql, metadata) => { requireOpen(); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
     /** Whether a transaction issued NOW would have to queue: an owner
      * holds the connection and no owning callback is on the stack (a
      * synchronous call from inside the callback nests instead). What a
@@ -757,9 +793,21 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // idempotent: the second close is a no-op on every driver, not a
     // raw error on one and a resolved promise on another
     close: () => {
-      if (closed) return undefined;
+      if (closed) return closeResult;
       closed = true;
-      return raw.close();
+      // Remote hosts own cursor cleanup within their bounded shutdown.
+      // Waiting for a row here would postpone that deadline indefinitely.
+      if (raw.closeDrainsIterators === true) {
+        activeIterators.clear();
+        return closeResult = raw.close();
+      }
+      const pending = [];
+      for (const iterator of activeIterators) {
+        try { pending.push(iterator.return()); }
+        catch (error) { pending.push(Promise.reject(error)); }
+      }
+      if (pending.some(isThenable)) return closeResult = Promise.allSettled(pending).then(() => raw.close());
+      return closeResult = raw.close();
     },
     registerFunction: typeof raw.registerFunction === 'function'
       ? (name, functionOptions, fn) => { requireOpen(); return raw.registerFunction(name, functionOptions, fn); }

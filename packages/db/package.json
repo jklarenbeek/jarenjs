@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/db",
   "private": false,
-  "version": "0.65.1",
+  "version": "0.66.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -36,7 +36,15 @@
       "default": "./src/app.js"
     },
     "./schemas/*": "./schemas/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./node-worker": {
+      "types": "./types/node-worker.d.ts",
+      "default": "./src/drivers/node-worker.js"
+    },
+    "./node-pool": {
+      "types": "./types/node-pool.d.ts",
+      "default": "./src/drivers/node-pool.js"
+    }
   },
   "files": [
     "types/",
@@ -76,9 +84,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.65.1",
-    "@jarenjs/json": "^0.65.1",
-    "@jarenjs/validate": "^0.65.1"
+    "@jarenjs/core": "^0.66.0",
+    "@jarenjs/json": "^0.66.0",
+    "@jarenjs/validate": "^0.66.0"
   },
   "bin": {
     "jaren-db": "./src/cli.js"

@@ -448,7 +448,19 @@ client.close();
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { bunDriver } from '@jarenjs/db/bun';
-import { wasmDriver } from '@jarenjs/db/wasm';
+import { wasmDriver, indexedDbSnapshotHandle } from '@jarenjs/db/wasm';
+import { nodeWorkerDriver, type WorkerMetrics } from '@jarenjs/db/node-worker';
+import { nodeWorkerPoolDriver, type PoolMetrics } from '@jarenjs/db/node-pool';
+async function hosts() {
+  const worker = await nodeWorkerDriver({ windowRows: 3 }).open();
+  const metrics: WorkerMetrics = worker.metrics();
+  const pool = await nodeWorkerPoolDriver({ readers: 0 }).open();
+  const pooled: PoolMetrics = pool.metrics();
+  await pool.close();
+  await worker.close();
+  return [metrics.generation, pooled.queued];
+}
+void [hosts, indexedDbSnapshotHandle];
 const model = { $model: '0.1', collections: { users: { schema: { type: 'object' }, key: '/id', indexes: [] } } };
 void normalizeModel(model).size;
 const driver = nodeDriver();
@@ -563,7 +575,25 @@ try {
         for (const dep of declaredClosure(byName, peer)) install(dep);
       }
     }
-    const program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
+    let program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
+    if (name === '@jarenjs/db') program += `
+const { openStore } = await import('@jarenjs/db');
+const { nodeWorkerDriver } = await import('@jarenjs/db/node-worker');
+const { nodeWorkerPoolDriver } = await import('@jarenjs/db/node-pool');
+for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })]) {
+  try {
+    const store = await openStore({ $model: '0.1', collections: {
+      notes: { key: '/id', schema: { type: 'object' } }
+    } }, { driver });
+    try {
+      await store.collection('notes').insert({ id: 'packed', value: 7 });
+      if ((await store.collection('notes').get('packed')).value !== 7) throw new Error('packed worker data mismatch');
+    } finally { await store.close(); }
+  } catch (error) {
+    if (!(typeof Bun !== 'undefined' && error.code === 'JD0003')) throw error;
+  }
+}
+`;
     // the runtime consumer is a real program FILE: `-e` strings are not
     // portable (a Windows shell reparses multiline programs)
     const programFile = join(consumerDir, 'consumer.mjs');

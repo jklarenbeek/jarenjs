@@ -506,6 +506,12 @@ export interface StoreCapabilities {
    * `false` every cursor reports `streaming: 'buffered'` with a
    * `{ construct: 'driver' }` barrier. Probed at open. */
   readonly lazyIteration: boolean;
+  readonly sessions: boolean;
+  readonly sessionReason: string | null;
+  readonly worker: boolean;
+  readonly pooling: boolean;
+  readonly poolReaders: number;
+  readonly poolWriters: number;
   readonly capture: 'session' | 'journal' | 'none';
   readonly captureLog: boolean;
   readonly live: boolean;
@@ -654,6 +660,9 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   update(key: EntityKeyArg, changes: Partial<T>): Readonly<T>;
   delete(key: EntityKeyArg): boolean;
   load(spec?: LoadSpec): ReadonlyArray<Readonly<T>>;
+  loadCursor(spec?: LoadSpec, options?: EntityCursorOptions): SyncQueryCursor<Readonly<T>>;
+  page(spec?: LoadSpec, options?: PageOptions): Page<Readonly<T>>;
+  cursor<R = T>(document: unknown, options?: EntityCursorOptions): SyncQueryCursor<R>;
   explainLoad(spec?: LoadSpec): LoadExplanation;
   add(doc: I): Readonly<T>;
   put(next: T): Readonly<T>;
@@ -668,6 +677,15 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   readonly root: string;
   readonly scope: EntityScope;
   readonly relations: RelationTable;
+}
+
+/** A lazy synchronous cursor; return, disposal, errors and close release its source. */
+export interface SyncQueryCursor<T = unknown> extends IterableIterator<T> {
+  readonly streaming: 'row' | 'buffered';
+  readonly barrier: CursorBarrier | null;
+  return(): IteratorResult<T, undefined>;
+  [Symbol.iterator](): SyncQueryCursor<T>;
+  [Symbol.dispose](): void;
 }
 
 // ————— the store —————

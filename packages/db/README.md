@@ -146,7 +146,15 @@ construct, an external the database cannot bind, a chain's window) —
 and a linq chain's `for await` over a set IS this cursor, so a
 `break` after three rows of twenty thousand costs three rows. A cursor
 registers no snapshots unless asked (`tracking: true`, one per yielded
-row — unbounded in the result size, by the caller's choice). A graph
+row — unbounded in the result size, by the caller's choice).
+
+On synchronous connections, `store.sync.entity(name)` also offers `cursor`,
+`loadCursor` and `page`. The cursors use `for...of` and support `return()`
+and `Symbol.dispose`; pages return values immediately. Both surfaces use
+the same plans, bounds and continuation identities. Closing the store
+releases every active iterator; later entry refuses with `JD2063`.
+
+A graph
 streams the same way: `loadCursor(spec)` yields one root with its
 includes attached, and every include is bounded per root (`maxRows`,
 `maxBytes`, defaults 1000 rows and 1 MiB; `Infinity` spelled for the
@@ -508,8 +516,8 @@ fixture on disk and the number of entries run against the corpus. Each
 runner names the executor, the entry and the query when it disagrees.
 That is the whole claim — not faster than anyone, not PostGIS — and the
 browser leg's limit is stated with it: **it proves execution, not
-durability.** Where OPFS is unavailable the tab's store is in-memory,
-which is a property of the host, not of the suite.
+durability.** The separate [host matrix](docs/HOSTS.md) proves OPFS and
+IndexedDB persistence and the visibly non-durable memory fallback.
 
 **No head-to-head rival, and saying so.** Nothing else in JavaScript
 stores GeoJSON in SQLite from a JSON query document, so the suite
@@ -962,12 +970,24 @@ Your numbers will differ; the command is the point, not the table.
   EQUALITY against a fresh build as the acceptance criterion, drift
   detection, and `jaren-db check` for CI.
 
+## Execution hosts
+
+`@jarenjs/db/node-worker` exports `nodeWorkerDriver()` for SQLite off the caller
+thread; `@jarenjs/db/node-pool` exports `nodeWorkerPoolDriver()` for one writer and
+bounded read-only WAL workers. Both use the ordinary Store contract, with credited
+row frames, generation fencing, queue refusals and inspected lifecycle metrics.
+Async connections declare `store.sync` and live queries unavailable. See
+[execution hosts](docs/HOSTS.md) for options, cleanup guarantees, native-call
+shutdown limits, the browser persistence matrix and measured latency/memory losses.
+
 ## The reactive and durable half (phase C)
 
 - **Change capture** (LIVE-FORMAT §§1–6): every committed write
   becomes an observable stream of RFC 6902 patches — from SQLite's
   own session changesets where the binding has them, from a write-path
-  journal where it does not (`bun:sqlite`, the wasm build). One diff
+  journal where it does not (`bun:sqlite`, Node worker connections). The
+  wasm adapter probes the live session API and names a failed probe in
+  `sessionReason`. One diff
   format runs store → patch → live query → O(k) render. Capture is
   opt-in; the overhead is published, not waved away.
 - **Live queries** (LIVE-FORMAT §§7–13): `collection.live(document)`
@@ -1004,7 +1024,9 @@ Your numbers will differ; the command is the point, not the table.
   database file deterministically.
 - **The browser** (`@jarenjs/db/wasm`): the same store, the same
   queries, the same live updates run on the official SQLite wasm build
-  over the header-free OPFS SAH-pool VFS — one tab owns the
+  over a probed persistence ladder: isolated SharedArrayBuffer OPFS,
+  header-free SAH-pool OPFS, atomic IndexedDB snapshots, then visibly
+  non-durable memory. One tab owns the
   connection, others are clients. Proven in the `#/data` studio across
   Chromium, Firefox and WebKit, whose boot is a closed five-stage protocol
   (LIVE-FORMAT §11): every attempt ends ready or in a named, retryable
@@ -1012,8 +1034,10 @@ Your numbers will differ; the command is the point, not the table.
   that studio is built on: `sqlite3Handle(sqlite3, { DbClass })` builds
   the injected handle from a loaded wasm module and the database class
   the host picks (`sqlite3.oo1.DB` in memory, the SAH-pool
-  `OpfsSAHPoolDb` for OPFS), and `adaptOo1Database(sqlite3, db)` wraps
-  an oo1 database the host already opened.
+  `OpfsSAHPoolDb` or `OpfsDb` for OPFS), and `adaptOo1Database(sqlite3, db)`
+  wraps an oo1 database the host already opened. `indexedDbSnapshotHandle`
+  adds bounded atomic persistence with asynchronous commit acknowledgements;
+  its connection declares synchronous/live methods unavailable.
 - **The runtime record** (`@jarenjs/core/runtime`): `openStore(model,
   { runtime })` and `migrate(target, migrations, { runtime })` take one
   frozen record — `{ now, uuid, random, zoneProvider }`, defaulting
@@ -1257,9 +1281,10 @@ its side-effect-free status read are in
   horizon a view claims and is checked against the window it maintains;
   the maintained state is still bounded by `live.maxMaintained`, and no
   version of this compacts a bucket's rows away.
-- **The wasm build journals** (its session extension is not yet
-  adapted); OPFS needs a secure context, and where it is absent the
-  store runs in memory with the durability difference stated.
+- **Browser storage is probed.** The canonical wasm build supports session
+  capture after a disposable live probe. Failed session probes select journal
+  capture. OPFS, IndexedDB snapshots and memory have explicit capability and
+  durability differences; see [execution hosts](docs/HOSTS.md).
 - **Named future work, not silent gaps**: `$groupby` pushdown beyond
   the `$time-bucket` ladder, a many-to-many hop on the chain, membership
   on an auto-keyed pending insert, incremental joins, other SQL dialects,
@@ -1296,4 +1321,6 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/schemas/jaren-model.draft-07.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-model.schema.json` | schema | — |
 | `@jarenjs/db/package.json` | metadata | — |
+| `@jarenjs/db/node-worker` | JavaScript | declared |
+| `@jarenjs/db/node-pool` | JavaScript | declared |
 <!--/fact-->

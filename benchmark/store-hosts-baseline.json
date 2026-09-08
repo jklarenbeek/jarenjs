@@ -1,0 +1,40 @@
+{
+  "recipe": "node --expose-gc benchmark/store-hosts-baseline.js",
+  "measuredAt": "2026-09-08T15:18:20.046Z",
+  "runtime": "v24.19.0",
+  "host": {
+    "platform": "linux",
+    "release": "7.2.3-200.nobara.fc44.x86_64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "samples": 7,
+  "slowStatementSql": "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<500000) SELECT sum(x) AS total FROM n",
+  "statementMs": {
+    "p50": 86.39082199999996,
+    "p95": 86.81181799999999,
+    "max": 86.81181799999999
+  },
+  "eventLoopDelayMs": {
+    "p50": 1.073151,
+    "p95": 86.966271,
+    "max": 87.621631
+  },
+  "workerStartupMs": {
+    "p50": 27.47749699999997,
+    "p95": 70.29049799999996,
+    "max": 70.29049799999996
+  },
+  "memory": {
+    "cursorRows": 100000,
+    "cursorHeapDeltaBytes": 12863696,
+    "rssBytes": 104960000
+  },
+  "include": {
+    "bytes": 3218891,
+    "durationMs": 14.677610000000072,
+    "heapDeltaBytes": 8390856,
+    "rows": 10000,
+    "method": "JSON.parse then JSON.stringify and UTF-8 count"
+  },
+  "workerEventLoopMaxBoundMs": 50
+}

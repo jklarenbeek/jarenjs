@@ -96,6 +96,11 @@ export const DB_CODES = Object.freeze({
   JD2087: 'the connection to the database was lost',
   JD2088: 'the transaction was aborted by an earlier failure in it',
   JD2089: 'the statement was cancelled by the server',
+  JD2090: 'the worker connection generation was lost',
+  JD2091: 'the worker admission queue is full',
+  JD2092: 'a worker transport bound was exceeded',
+  JD2093: 'the worker protocol frame is invalid',
+  JD2094: 'the durable snapshot failed and the connection is invalid',
 });
 
 /**
@@ -579,4 +584,23 @@ export class DbRuntimeError extends CodedError {
     if (details?.key !== undefined) this.key = details.key;
     if (details?.errors !== undefined) this.errors = details.errors;
   }
+}
+
+/** Cloneable driver errors keep the native classification fields.
+ * @param {any} error @returns {any}
+ */
+export function cloneDriverError(error) {
+  const out = { message: String(error?.message ?? error), name: String(error?.name ?? 'Error') };
+  for (const key of ['code', 'errcode', 'errstr', 'errno', 'resultCode', 'class', 'retryable', 'generation', 'depth']) {
+    const value = error?.[key];
+    if (['string', 'number', 'boolean'].includes(typeof value)) out[key] = value;
+  }
+  return out;
+}
+
+/** Convert a returned SQLite C result into the one native error vocabulary.
+ * @param {number} rc @param {string} operation
+ */
+export function sqliteResultError(rc, operation) {
+  return Object.assign(new Error(`${operation} failed (${rc})`), { resultCode: rc });
 }

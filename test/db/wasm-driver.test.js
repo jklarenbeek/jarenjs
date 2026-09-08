@@ -2,8 +2,8 @@
 /**
  * @file The wasm driver against the REAL official SQLite wasm build
  * (`@sqlite.org/sqlite-wasm`, which also initializes under Node — the
- * same bytes the browser runs): the capability matrix (sessions NOT
- * declared → capture journals; user functions adapted), the FULL
+ * same bytes the browser runs): the capability matrix (sessions probed and
+ * adapted; user functions adapted), the FULL
  * pushdown oracle corpus in both native and forced-residual modes,
  * writes and patches, entities with the unit of work, journal capture,
  * live queries, the job queue, and a planned-and-applied migration
@@ -65,12 +65,13 @@ const MODEL = {
 };
 
 describe('the wasm driver (real sqlite-wasm build)', () => {
-  it('probes the capability matrix: journal capture, adapted functions', async () => {
+  it('probes the capability matrix: session capture, adapted functions', async () => {
     const store = await openStore(MODEL, { driver, capture: true });
     const caps = store.capabilities;
     assert.ok(caps.version >= SQLITE_FLOOR, `wasm build ${caps.version}`);
-    assert.strictEqual(caps.capture, 'journal',
-      'sessions are compiled into the wasm build but NOT yet adapted — journal, stated');
+    assert.strictEqual(caps.capture, 'session',
+      'session support passed the disposable live probe');
+    assert.equal(caps.sessionReason, null);
     assert.strictEqual(caps.live, true);
     assert.ok(store.sync, 'the oo1 API is synchronous — the fast path exists');
     await store.close();
@@ -103,7 +104,8 @@ describe('the wasm driver (real sqlite-wasm build)', () => {
       const { store, collection } = await storeForGroup(group, driver);
       for (const kase of group.cases) {
         for (const mode of ['native', 'residual']) {
-          await runCase(collection, group.documents, kase, mode);
+          assert.strictEqual(await runCase(collection, group.documents, kase, mode), null,
+            `${group.group}/${kase.name}/${mode}`);
         }
       }
       await store.close();

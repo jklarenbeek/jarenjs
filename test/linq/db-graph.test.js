@@ -311,10 +311,10 @@ describe('the drift gates', () => {
     const query = code('packages/db/src/query.js');
     // one graph source: `openCursor` opens the load statement as a cursor
     // source, and both the cursor and the page reach it
-    const source = between(query, 'const openCursor = (entry, signal, register, deadline = undefined) => {', 'const continuationOf =');
+    const source = between(query, 'const openCursor = (', 'const continuationOf =');
     assert.doesNotMatch(source, /\.all\(|toArray/);
     assert.match(source, /open: \(\) =>/);
-    const load = between(query, 'loadCursor(spec, options = undefined, register = undefined) {', 'explainLoad(spec) {');
+    const load = between(query, 'loadCursor(spec, options = undefined, register = undefined,', 'explainLoad(spec) {');
     assert.doesNotMatch(load, /\.all\(|toArray/);
     assert.strictEqual((load.match(/openCursor\(/g) ?? []).length, 2, 'the cursor and the page open the same source');
     const graph = between(code('packages/linq/src/db/include.js'), 'cursor(options) {', 'toSpec()');

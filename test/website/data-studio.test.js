@@ -42,6 +42,24 @@ function mount() {
 
 const CAPABILITIES = { capture: 'journal', version: '3', operators: [], pushableOperators: [] };
 
+it('accepts query and insert input only after the store opens, beyond storage selection', function () {
+  const { app, container } = mount();
+  const assertDisabled = (expected) => {
+    const html = serialize(container);
+    const insert = html.match(/<input[^>]*class="data-insert-title"[^>]*>/)?.[0];
+    const run = html.match(/<button[^>]*>Run \+ explain<\/button>/)?.[0];
+    assert.ok(insert);
+    assert.ok(run);
+    assert.strictEqual(/\bdisabled\b/.test(insert), expected);
+    assert.strictEqual(/\bdisabled\b/.test(run), expected);
+  };
+  assertDisabled(true);
+  app.dispatch('data/status', { vfs: 'indexeddb-snapshot', topology: 'owner' });
+  assertDisabled(true);
+  app.dispatch('data/opened', { vfs: 'indexeddb-snapshot', capabilities: CAPABILITIES });
+  assertDisabled(false);
+});
+
 describe('the collection the studio works on', function () {
   it('stays on the seed model\'s when an open answers nothing about it', function () {
     const { app } = mount();

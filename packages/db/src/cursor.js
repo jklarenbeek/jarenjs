@@ -28,7 +28,23 @@
 import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { DbRuntimeError } from './errors.js';
-import { chain, attempt } from './driver.js';
+import { chain, isThenable } from './driver.js';
+
+/** Preserve a failure, but acknowledge source cleanup before rejecting it.
+ * @param {() => any} call @param {() => any} release @param {(error:any)=>any} [wrap]
+ */
+function settling(call, release, wrap = (error) => error) {
+  const failed = (error) => {
+    const failure = wrap(error);
+    let cleanup;
+    try { cleanup = release(); } catch { throw failure; }
+    if (isThenable(cleanup)) return cleanup.then(() => { throw failure; }, () => { throw failure; });
+    throw failure;
+  };
+  let result;
+  try { result = call(); } catch (error) { return failed(error); }
+  return isThenable(result) ? result.then(undefined, failed) : result;
+}
 
 /**
  * The serialised size of a JSON text in UTF-8 bytes — the one measure
@@ -98,133 +114,141 @@ export function rowClassOf(connection) {
  */
 
 /**
- * Build the cursor over one source.
+ * Build an asynchronous item cursor over one source.
  * @param {CursorSpec} spec
- * @returns {any} the `QueryCursor`
+ * @returns {any}
  */
 export function createCursor(spec) {
-  const { streaming, signal } = spec;
-  const barrier = spec.barrier ?? null;
-  const now = spec.now ?? null;
-  if (spec.deadline !== undefined && now === null)
-    throw new TypeError('a cursor with a deadline is built with the clock it is read against (now)');
-  /** @type {any[]} */
-  let buffered = [];
-  let bufferedAt = 0;
-  /** @type {any} */
-  let underlying = null;
-  /** @type {Promise<void> | null} */
-  let materialized = null;
-  let done = false;
-  let released = false;
-  /** @type {(() => void) | null} */
-  let onAbort = null;
+  return itemCursor(spec, false);
+}
 
+/**
+ * The same lifecycle over a synchronous source, answering values.
+ * @param {CursorSpec} spec
+ * @returns {any}
+ */
+export function createSyncCursor(spec) {
+  return itemCursor(spec, true);
+}
+
+/** @param {CursorSpec} spec @param {boolean} synchronous */
+function itemCursor(spec, synchronous) {
+  const { streaming, signal } = spec;
+  if (spec.deadline !== undefined && spec.now === undefined)
+    throw new TypeError('a cursor with a deadline is built with the clock it is read against (now)');
+  let buffered = [];
+  let offset = 0;
+  let underlying = null;
+  let opening = null;
+  let cleanup;
+  let sourceReleased = false;
+  let done = false;
   let opened = false;
-  /** Forget the abort listener and mark the source released. */
+  let tail = synchronous ? undefined : Promise.resolve();
   const settle = () => {
+    if (done) return;
     done = true;
-    if (released) return;
-    released = true;
-    if (onAbort !== null && signal !== undefined) {
-      signal.removeEventListener('abort', onAbort);
-      onAbort = null;
-    }
+    buffered = [];
+    signal?.removeEventListener('abort', onAbort);
     spec.onSettle?.(opened);
   };
-  /** Release the source exactly once, at the row boundary we are on. */
-  const release = () => {
-    if (released) {
-      done = true;
-      return;
-    }
-    settle();
-    if (underlying !== null && typeof underlying.return === 'function')
-      underlying.return(undefined);
+  const releaseSource = () => {
+    if (sourceReleased || underlying === null) return;
+    sourceReleased = true;
+    return underlying.return?.(undefined);
   };
-  const abortRefusal = () => new DbRuntimeError('JD2072',
+  const release = () => {
+    settle();
+    if (cleanup === undefined) cleanup = chain(opening, releaseSource);
+    return cleanup;
+  };
+  const onAbort = () => {
+    // Event listeners cannot await remote acknowledgement. The public
+    // return still awaits it, and a rejection is observed here as well.
+    try { const pending = release(); if (isThenable(pending)) pending.catch(() => {}); }
+    catch { /* the next/return boundary reports the source failure */ }
+  };
+  const aborted = () => new DbRuntimeError('JD2072',
     'the cursor was aborted: its statement was released at a row boundary and it pulls '
     + 'no further row', { cause: signal?.reason });
-  if (signal !== undefined) {
-    if (signal.aborted) settle();
-    else {
-      onAbort = () => release();
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  }
-
-  const fromBuffer = () => ({ done: false, value: buffered[bufferedAt++] });
-  const exhausted = () => {
-    settle();
-    return { done: true, value: undefined };
-  };
-  /** @param {() => any} call */
-  const guarded = (call) => attempt(call, (error) => {
-    release();
-    return spec.wrap === undefined ? error : spec.wrap(error);
-  });
-
-  const pull = () => {
-    if (signal?.aborted) {
-      release();
-      return Promise.reject(abortRefusal());
-    }
-    // a settled cursor holds nothing: `{ done: true }`, whatever the clock says
-    if (done) return Promise.resolve({ done: true, value: undefined });
-    if (spec.deadline !== undefined && /** @type {() => number} */ (now)() > spec.deadline) {
-      release();
-      return Promise.reject(new DbRuntimeError('JD2075',
+  const end = () => ({ done: true, value: undefined });
+  const boundary = () => {
+    if (signal?.aborted) throw aborted();
+    if (done) return;
+    if (spec.deadline !== undefined && spec.now() > spec.deadline)
+      throw new DbRuntimeError('JD2075',
         `the deadline passed before the next row (${new Date(spec.deadline).toISOString()}); `
-        + 'the statement was released at a row boundary'));
-    }
-    if (done) return Promise.resolve({ done: true, value: undefined });
-    if (bufferedAt < buffered.length) return Promise.resolve(fromBuffer());
-    opened = true;
-    if (spec.materialize !== undefined) {
-      if (materialized === null) {
-        materialized = Promise.resolve(guarded(() => chain(spec.materialize(), (items) => {
-          buffered = items;
-          bufferedAt = 0;
-        })));
-      }
-      return materialized.then(() => {
-        if (signal?.aborted) throw abortRefusal();
-        return bufferedAt < buffered.length ? fromBuffer() : exhausted();
-      });
-    }
-    const source = underlying === null
-      ? guarded(() => chain(spec.open?.(), (iterator) => {
-        underlying = iterator;
-        return iterator;
-      }))
-      : underlying;
-    return Promise.resolve(chain(source, (iterator) =>
-      chain(guarded(() => iterator.next()), (step) => {
-        if (signal?.aborted) {
-          release();
-          throw abortRefusal();
-        }
-        if (step.done === true) return exhausted();
-        buffered = guarded(() => spec.items?.(step.value) ?? []);
-        bufferedAt = 0;
-        return bufferedAt < buffered.length ? fromBuffer() : pull();
-      })));
+        + 'the statement was released at a row boundary');
   };
-
-  /** @type {any} */
+  const accept = (step) => {
+    boundary();
+    if (done) return end();
+    if (step.done === true) {
+      sourceReleased = true; // exhausted native iterators already reset
+      settle();
+      return end();
+    }
+    buffered = spec.items?.(step.value) ?? [];
+    offset = 0;
+    return null;
+  };
+  const rows = () => {
+    for (;;) {
+      boundary();
+      if (done) return end();
+      if (offset < buffered.length) return { done: false, value: buffered[offset++] };
+      const next = underlying.next();
+      if (isThenable(next)) return next.then((step) => accept(step) ?? rows());
+      const result = accept(next);
+      if (result !== null) return result;
+    }
+  };
+  const pull = () => {
+    boundary();
+    if (done) return end();
+    if (spec.materialize !== undefined) {
+      if (!opened) {
+        opened = true;
+        return chain(spec.materialize(), (items) => {
+          boundary();
+          if (done) return end();
+          buffered = items;
+          return pull();
+        });
+      }
+      if (offset < buffered.length) return { done: false, value: buffered[offset++] };
+      settle();
+      return end();
+    }
+    if (!opened) {
+      opened = true;
+      opening = chain(spec.open?.(), (iterator) => { underlying = iterator; });
+      return chain(opening, () => done
+        ? chain(releaseSource(), () => { boundary(); return end(); }) : rows());
+    }
+    return rows();
+  };
+  const guarded = () => settling(pull, release, spec.wrap);
+  if (signal?.aborted) settle();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  const next = synchronous ? guarded : () => {
+    const result = tail.then(guarded);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const finish = () => chain(release(), end);
   const cursor = {
     streaming,
-    barrier,
-    /** Whether the cursor has settled — exhausted, released or aborted —
-     * and so holds no source: what an admission layer reads to answer
-     * without borrowing anything. */
+    barrier: spec.barrier ?? null,
     get settled() { return done; },
-    next: () => pull(),
-    return: () => {
-      release();
-      return Promise.resolve({ done: true, value: undefined });
+    next,
+    return: synchronous ? finish : () => {
+      try { return Promise.resolve(finish()); }
+      catch (error) { return Promise.reject(error); }
     },
-    [Symbol.asyncIterator]: () => cursor,
+    ...(synchronous
+      ? { [Symbol.iterator]: () => cursor, [Symbol.dispose]: finish }
+      : { [Symbol.asyncIterator]: () => cursor, [Symbol.asyncDispose]: async () => { await finish(); } }),
   };
   return Object.freeze(cursor);
 }
@@ -302,6 +326,22 @@ export function admitCursor(cursor, admit, signal, what) {
   return Object.freeze(admitted);
 }
 
+/** Synchronous admission per pull; cleanup is permitted even after refusal.
+ * @param {any} cursor @param {(fn: () => any) => any} admit
+ * @returns {any}
+ */
+export function admitSyncCursor(cursor, admit) {
+  const wrapped = {
+    streaming: cursor.streaming,
+    barrier: cursor.barrier,
+    next: () => admit(() => cursor.next()),
+    return: () => cursor.return(),
+    [Symbol.iterator]: () => wrapped,
+    [Symbol.dispose]: () => { cursor.return(); },
+  };
+  return Object.freeze(wrapped);
+}
+
 /** The page size a page takes when none is given. */
 export const PAGE_LIMIT_DEFAULT = 100;
 
@@ -321,50 +361,51 @@ export const PAGE_LIMIT_DEFAULT = 100;
  * @param {any} cursor - a `QueryCursor`
  * @param {{ limit: number, maxBytes: number | null, after?: any,
  *   sizeOf: (item: any) => number, continuationOf: (item: any) => any }} options
- * @returns {Promise<{ items: any[], continuation: any, hasMore: boolean }>}
+ * @returns {any} value-or-promise, matching the cursor
  */
 export function drainPage(cursor, options) {
   const { limit, maxBytes, sizeOf, continuationOf } = options;
   const after = options.after ?? null;
-  /** @type {any[]} */
   const items = [];
   let bytes = 0;
   let last = after;
   let hasMore = false;
-  const finish = () => Promise.resolve(cursor.return()).then(() => ({
-    items,
-    continuation: items.length > 0 ? last : (hasMore ? after : null),
-    hasMore,
+  const finish = () => chain(cursor.return(), () => ({
+    items, continuation: items.length > 0 ? last : (hasMore ? after : null), hasMore,
   }));
-  const step = () => {
+  const consume = (pulled) => {
     if (items.length >= limit) {
-      return cursor.next().then((peek) => {
-        hasMore = peek.done !== true;
-        return finish();
-      });
+      hasMore = pulled.done !== true;
+      return finish();
     }
-    return cursor.next().then((pulled) => {
-      if (pulled.done === true) return finish();
-      const item = pulled.value;
-      const size = maxBytes === null ? 0 : sizeOf(item);
-      if (maxBytes !== null && bytes + size > maxBytes) {
-        if (items.length === 0) {
-          return Promise.resolve(cursor.return()).then(() => {
-            throw new DbRuntimeError('JD2074',
-              `the next item is ${size} serialised bytes, more than the page's maxBytes bound of `
-              + `${maxBytes}; the continuation was not advanced — raise the bound, or bound the `
-              + "item itself (an include's maxBytes, a narrower document)",
-              { errors: [{ bytes: size, maxBytes, at: continuationOf(item) }] });
-          });
-        }
-        hasMore = true;
-        return finish();
+    if (pulled.done === true) return finish();
+    const item = pulled.value;
+    const size = maxBytes === null ? 0 : sizeOf(item);
+    if (maxBytes !== null && bytes + size > maxBytes) {
+      if (items.length === 0) {
+        return chain(cursor.return(), () => {
+          throw new DbRuntimeError('JD2074',
+            `the next item is ${size} serialised bytes, more than the page's maxBytes bound of `
+            + `${maxBytes}; the continuation was not advanced — raise the bound, or bound the `
+            + "item itself (an include's maxBytes, a narrower document)",
+            { errors: [{ bytes: size, maxBytes, at: continuationOf(item) }] });
+        });
       }
-      items.push(item);
-      bytes += size;
-      last = continuationOf(item);
-      return step();
-    });
+      hasMore = true;
+      return finish();
+    }
+    items.push(item);
+    bytes += size;
+    last = continuationOf(item);
+    return null;
   };
-  return step();
+  const step = () => {
+    for (;;) {
+      const pulled = cursor.next();
+      if (isThenable(pulled)) return pulled.then((value) => consume(value) ?? step());
+      const result = consume(pulled);
+      if (result !== null) return result;
+    }
+  };
+  return settling(step, () => cursor.return());
 }

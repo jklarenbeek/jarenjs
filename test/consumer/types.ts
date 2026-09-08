@@ -1677,3 +1677,27 @@ async function replays(): Promise<number | undefined> {
   return reply.replayed?.ms;
 }
 void replays;
+
+// Synchronous entity streaming preserves the async page/continuation shapes.
+import type { SyncEntitySet, SyncQueryCursor, Page } from '@jarenjs/db';
+declare const syncHostItems: SyncEntitySet<{ id: number }>;
+const syncHostCursor: SyncQueryCursor<Readonly<{ id: number }>> = syncHostItems.loadCursor();
+for (const item of syncHostCursor) { const id: number = item.id; void id; break; }
+syncHostCursor[Symbol.dispose]();
+const syncHostPage: Page<Readonly<{ id: number }>> = syncHostItems.page({}, { limit: 2 });
+void syncHostPage.continuation;
+
+import { nodeWorkerDriver, type WorkerMetrics } from '@jarenjs/db/node-worker';
+import { nodeWorkerPoolDriver, type PoolMetrics } from '@jarenjs/db/node-pool';
+import { indexedDbSnapshotHandle, openSnapshotStorage } from '@jarenjs/db/wasm';
+async function typedWorkerHosts() {
+  const remote = await nodeWorkerDriver({ windowRows: 8 }).open();
+  const metrics: WorkerMetrics = remote.metrics();
+  const pooled = await nodeWorkerPoolDriver({ readers: 2, queueCapacity: 8 }).open('test.sqlite');
+  const poolMetrics: PoolMetrics = pooled.metrics();
+  await pooled.transaction(async (scope) => { await scope.exec('SELECT 1'); });
+  await remote.close();
+  await pooled.close();
+  return [metrics.generation, poolMetrics.waitMs.p95];
+}
+void [typedWorkerHosts, indexedDbSnapshotHandle, openSnapshotStorage];

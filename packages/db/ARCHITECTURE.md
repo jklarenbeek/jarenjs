@@ -1,21 +1,21 @@
 # @jarenjs/db — architecture
 
-The public documentation promises SQLite and nothing else. This file
-documents the two seams that make that promise cheap to keep and cheap
-to outgrow — an undocumented seam decays into an accident.
+The package separates Store behavior from driver ownership and dialect spelling.
 
 ## The driver seam (`src/driver.js`, `src/drivers/*`)
 
-A driver is `{ name, dialect, open(path, options) }` returning a
-`Connection` (see `docs/MODEL-FORMAT.md` §4). Three bindings exist,
-one per subpath — `./node` (`node:sqlite`), `./bun` (`bun:sqlite`),
-`./wasm` (an injected handle) — and each imports its runtime builtin
-**lazily inside `open()`**, never at module scope. The release gate
-imports every export subpath under Node *and* Bun; Bun ships no
-`node:sqlite` and Node cannot resolve `bun:` specifiers, so a
-top-level builtin import would turn the gate red in both directions.
-`open()` is where "this binding does not exist here" becomes the coded
-`JD0003`.
+A driver is `{ name, dialect, open(path, options) }` returning a Connection
+(`docs/MODEL-FORMAT.md` §4). Runtime bindings live behind public Node, Bun, wasm,
+PostgreSQL, Node worker and Node pool subpaths. Node and Bun builtins load lazily
+inside `open()`, so importing a subpath remains portable and an unavailable
+binding becomes `JD0003`. The worker endpoint's static Node imports are reached
+only when the Node worker factory launches that endpoint.
+
+Worker protocol, scheduling and snapshot storage sit below `finishConnection`;
+query planning, capture and transaction scopes remain in the Store. Compiled
+operation metadata classifies reads for the pool. The wasm oo1 adapter shares one
+session mapping across OPFS and atomic IndexedDB snapshots. [Execution hosts](docs/HOSTS.md)
+documents bounds, native-call shutdown limits, capability probes and measurements.
 
 Every connection and statement method may return a value or a promise.
 The store composes through the sync-capable `chain` helper, which

@@ -248,7 +248,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const prepared = (name, sql) => {
     let statement = statements.get(name);
     if (statement === undefined) {
-      statement = connection.prepare(sql);
+      statement = connection.prepare(sql, { readOnly: name === 'get' });
       statements.set(name, statement);
     }
     return statement;

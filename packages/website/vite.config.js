@@ -2,7 +2,11 @@ import { defineConfig } from 'vite';
 
 // GitHub Pages serves the site under /jarenjs/. No framework plugins:
 // the site is plain ESM over @jarenjs/view + @jarenjs/app.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  preview: { headers: mode === 'isolated' ? {
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  } : {} },
   base: '/jarenjs/',
   build: {
     sourcemap: true,
@@ -27,4 +31,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

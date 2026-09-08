@@ -213,7 +213,7 @@ describe('the drift gates', () => {
     const drains = files.filter((file) => /export function drainPage\(/.test(fs.readFileSync(`packages/db/src/${file}`, 'utf8')));
     assert.deepStrictEqual(drains, ['cursor.js']);
     const query = fs.readFileSync('packages/db/src/query.js', 'utf8');
-    assert.match(query, /page\(spec, options = undefined, register = undefined\) \{[\s\S]*?return drainPage\(cursor, \{/,
+    assert.match(query, /page\(spec, options = undefined, register = undefined, cursorFactory = createCursor\) \{[\s\S]*?drainPage\(cursor, \{/,
       'the graph page is a drain of its cursor');
   });
 });

@@ -45,7 +45,7 @@ import { selectPlan, conjoin, effectiveOrder, planOrder } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
 } from './residual.js';
-import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
+import { createCursor, createSyncCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
 import { deepFreeze } from '@jarenjs/core/object';
 import { derivedSlotValue, probeBox, probeVector, columnScore } from './derive.js';
 import { cutCandidates, identityBatches } from './knn.js';
@@ -624,7 +624,7 @@ export function createQueryEngine(context) {
   };
 
   const statementOf = (entry) => {
-    if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+    if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
     return entry.statement;
   };
   const setResidualOf = (entry, document) => {
@@ -656,7 +656,7 @@ export function createQueryEngine(context) {
   };
   const fullScanOf = (entry) => {
     const emitted = fullScanEmitted(entry);
-    if (emitted.statement === null) emitted.statement = connection.prepare(emitted.sql);
+    if (emitted.statement === null) emitted.statement = connection.prepare(emitted.sql, { readOnly: true });
     return emitted.statement;
   };
   const fullScanParams = (entry) =>
@@ -690,7 +690,7 @@ export function createQueryEngine(context) {
   const guardScan = (entry) => {
     if (!entry.needsScanCheck || entry.scanChecked) return null;
     const eqpParams = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
-    return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
+    return chain(connection.prepare(dialect.explainQuery(entry.sql), { readOnly: true }), (statement) =>
       chain(statement.all(eqpParams), (rows) => {
         const lines = dialect.explainLines(rows);
         if (lines.some((line) => dialect.isFullScan(line, [physical.table]))) {
@@ -719,7 +719,7 @@ export function createQueryEngine(context) {
   /** One alternative's statement, prepared once and kept with the plan. */
   const alternativeStatement = (alternative) => {
     if (alternative.statement === null)
-      alternative.statement = connection.prepare(alternative.sql);
+      alternative.statement = connection.prepare(alternative.sql, { readOnly: true });
     return alternative.statement;
   };
 
@@ -738,7 +738,7 @@ export function createQueryEngine(context) {
     const next = (i) => {
       if (i >= entry.seeks.length) return anchors;
       const seek = entry.seeks[i];
-      if (seek.statement === null) seek.statement = connection.prepare(seek.sql);
+      if (seek.statement === null) seek.statement = connection.prepare(seek.sql, { readOnly: true });
       return chain(seek.statement, (prepared) =>
         chain(prepared.get(seek.slots.map((slot) => slotValue(slot, {}))), (row) => {
           anchors[seek.name] = anchorValue(seek, row);
@@ -942,7 +942,7 @@ export function createQueryEngine(context) {
       const batch = batches[i];
       let statement = identityFetch.get(batch.size);
       if (statement === undefined) {
-        statement = connection.prepare(dialect.dml.selectByIdentities(physical, batch.size));
+        statement = connection.prepare(dialect.dml.selectByIdentities(physical, batch.size), { readOnly: true });
         identityFetch.set(batch.size, statement);
       }
       return chain(statement, (prepared) => chain(prepared.all(batch.params), (rows) => {
@@ -1234,7 +1234,7 @@ export function createQueryEngine(context) {
       // the bind may have to READ first (a seek's anchor), so it settles
       // before the statement it binds is prepared
       open: () => chain(guardScan(entry), () => chain(bindParams(entry, externals),
-        (params) => chain(connection.prepare(entry.sql),
+        (params) => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }),
           (statement) => statement.iterate(params)))),
       items: (row) => {
         pulledRows++;
@@ -1346,7 +1346,7 @@ export function createQueryEngine(context) {
       : entry.planned.reasons;
 
     const rank = entry.plan.rank;
-    return chain(connection.prepare(dialect.explainQuery(chosen.sql)), (statement) =>
+    return chain(connection.prepare(dialect.explainQuery(chosen.sql), { readOnly: true }), (statement) =>
       chain(statement.all(eqpParams), (rows) => ({
         mode,
         // what a cursor over this call does — one row per pull, or a
@@ -1730,7 +1730,7 @@ export function createEntityQueryEngine(context) {
   const guardEntityScan = (entry) => {
     if (!entry.needsScanCheck || entry.scanChecked) return null;
     const eqpParams = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
-    return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
+    return chain(connection.prepare(dialect.explainQuery(entry.sql), { readOnly: true }), (statement) =>
       chain(statement.all(eqpParams), (rows) => {
         // the entity statement aliases its tables `t0`, `t1`, … and the
         // database's narrative names the alias; a bare table name is
@@ -1782,7 +1782,7 @@ export function createEntityQueryEngine(context) {
     const next = (i) => {
       if (i >= entry.fetchers.length) return root;
       const fetcher = entry.fetchers[i];
-      if (fetcher.statement === null) fetcher.statement = connection.prepare(fetcher.sql);
+      if (fetcher.statement === null) fetcher.statement = connection.prepare(fetcher.sql, { readOnly: true });
       return chain(fetcher.statement, (statement) =>
         chain(statement.all(fetcher.params), (rows) => {
           root[fetcher.name] = checkRows(entry, rows, fetcher.name).map((row) =>
@@ -1819,7 +1819,7 @@ export function createEntityQueryEngine(context) {
     const params = entry.slots.map((slot) => slotValue(slot, externals));
     if (params.some((value) => !bindable(value)))
       return runResidual(entry, document, externals);
-    if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+    if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
     return chain(guardEntityScan(entry), () => chain(entry.statement, (statement) => {
       if (entry.planned.plan.aggregate === 'count')
         return chain(statement.get(params), (row) => wrapValue(entry, row?.value ?? 0));
@@ -1903,7 +1903,7 @@ export function createEntityQueryEngine(context) {
    *   signal?: AbortSignal }} [options]
    * @param {((entity: string, doc: any) => any) | undefined} [register]
    */
-  const query = (document, options = undefined, register = undefined) => {
+  const query = (document, options = undefined, register = undefined, cursorFactory = createCursor) => {
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
@@ -1925,11 +1925,11 @@ export function createEntityQueryEngine(context) {
     const signal = options?.signal;
     const deadline = options?.deadline;
     if (entry.planned.wrapped === true) {
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(execute(document, options), (value) => [value]) });
     }
     if (classified.barrier !== null) {
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(fetchRoot(entry), (root) =>
           packedResidualOf(entry, document)(root, externals).map(each)) });
     }
@@ -1938,11 +1938,11 @@ export function createEntityQueryEngine(context) {
     // cursor's construction touches no connection, so it can be handed
     // back before the pull is admitted (MODEL-FORMAT §5.1)
     const prepared = () => {
-      if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+      if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
       return entry.statement;
     };
     if (entry.planned.plan.aggregate === 'count') {
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
           chain(statement.get(params), (row) => [row?.value ?? 0]))) });
     }
@@ -1952,8 +1952,8 @@ export function createEntityQueryEngine(context) {
     let pulledRows = 0;
     // a statement of its own per cursor: two live iterators over one
     // cached statement invalidate each other at the driver
-    return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-      open: () => chain(guardEntityScan(entry), () => chain(connection.prepare(entry.sql),
+    return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      open: () => chain(guardEntityScan(entry), () => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }),
         (statement) => statement.iterate(params))),
       items: (row) => {
         pulledRows++;
@@ -1998,7 +1998,7 @@ export function createEntityQueryEngine(context) {
         : { mode: 'set', reasons },
     };
     if (mode !== 'native') return base;
-    return chain(connection.prepare(dialect.explainQuery(entry.sql)), (statement) =>
+    return chain(connection.prepare(dialect.explainQuery(entry.sql), { readOnly: true }), (statement) =>
       chain(statement.all(entry.slots.map((slot) =>
         ('literal' in slot ? slot.literal : null))), (rows) => ({
         ...base,
@@ -2010,7 +2010,9 @@ export function createEntityQueryEngine(context) {
       })));
   };
 
-  return { execute: bounded(execute, driverWrap), query, explain: bounded(explain, driverWrap), relations };
+  return { execute: bounded(execute, driverWrap), query,
+    syncQuery: (document, options, register) => query(document, options, register, createSyncCursor),
+    explain: bounded(explain, driverWrap), relations };
 }
 
 /**
@@ -2612,15 +2614,15 @@ export function createLoadEngine(context, entityName) {
     : (storeProfile === null ? null : 'store'));
 
   /** The graph cursor over one built load: one root row per pull. */
-  const openCursor = (entry, signal, register, deadline = undefined) => {
+  const openCursor = (entry, signal, register, deadline = undefined, cursorFactory = createCursor) => {
     const params = entry.slots.map((slot) => slot.literal);
     const each = register === undefined ? (doc) => doc : (doc) => register(entry.tree, doc);
     let pulled = 0;
     // prepared by the first pull, never at construction (MODEL-FORMAT
     // §5.1), and a statement of this cursor's own: two live iterators
     // over one cached statement invalidate each other at the driver
-    return createCursor({ ...rowClassOf(connection), signal, deadline, now: state.now, wrap: driverWrap,
-      open: () => chain(connection.prepare(entry.sql), (statement) => statement.iterate(params)),
+    return cursorFactory({ ...rowClassOf(connection), signal, deadline, now: state.now, wrap: driverWrap,
+      open: () => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(params)),
       items: (row) => [each(checkRoot(entry, parseGraphRow(entry.tree, row, '__doc'), ++pulled))] });
   };
 
@@ -2647,7 +2649,7 @@ export function createLoadEngine(context, entityName) {
     load(spec, options = undefined) {
       requireCallable(options, state.now);
       const entry = buildLoad(spec, false, profileOf(options));
-      if (entry.statement === null) entry.statement = connection.prepare(entry.sql);
+      if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
       const params = entry.slots.map((slot) => slot.literal);
       return chain(entry.statement, (statement) =>
         chain(statement.all(params), (rows) =>
@@ -2664,10 +2666,10 @@ export function createLoadEngine(context, entityName) {
      * @param {{ signal?: AbortSignal }} [options]
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
-    loadCursor(spec, options = undefined, register = undefined) {
+    loadCursor(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
       requireCallable(options, state.now);
       return openCursor(buildLoad(spec, false, profileOf(options)), options?.signal, register,
-        options?.deadline);
+        options?.deadline, cursorFactory);
     },
     /**
      * One page: a bounded drain of the graph cursor in keyset mode —
@@ -2682,7 +2684,7 @@ export function createLoadEngine(context, entityName) {
      *   consistency?: 'live' | 'snapshot', signal?: AbortSignal }} [options]
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
-    page(spec, options = undefined, register = undefined) {
+    page(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
       requireCallable(options, state.now);
       const limit = options?.limit ?? PAGE_LIMIT_DEFAULT;
       if (!Number.isSafeInteger(limit) || limit < 1)
@@ -2714,12 +2716,12 @@ export function createLoadEngine(context, entityName) {
       // registration happens on the DELIVERED roots after the drain — a
       // peeked root the caller never received must not enter the unit
       // of work
-      const cursor = openCursor(entry, options?.signal, undefined, options?.deadline);
-      return drainPage(cursor, {
+      const cursor = openCursor(entry, options?.signal, undefined, options?.deadline, cursorFactory);
+      return chain(drainPage(cursor, {
         limit, maxBytes, after: after ?? null,
         sizeOf: (doc) => utf8Length(JSON.stringify(doc)),
         continuationOf: (doc) => continuationOf(entry, doc),
-      }).then((page) => ({
+      }), (page) => ({
         ...page,
         items: register === undefined ? page.items : page.items.map((doc) => register(entry.tree, doc)),
         snapshot: entry.snapshot === true,
@@ -2767,6 +2769,8 @@ export function createLoadEngine(context, entityName) {
   // same wrap
   return { ...surface,
     load: bounded(surface.load, driverWrap),
+    syncLoadCursor: (spec, options, register) => surface.loadCursor(spec, options, register, createSyncCursor),
+    syncPage: bounded((spec, options, register) => surface.page(spec, options, register, createSyncCursor), driverWrap),
     page: bounded(surface.page, driverWrap),
     explainLoad: bounded(surface.explainLoad, driverWrap) };
 }

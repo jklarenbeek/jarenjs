@@ -570,8 +570,6 @@ export function createCaptureEngine(options) {
   const wrap = (fn) => {
     if (depth > 0) return fn();
     depth = 1;
-    if (mode === 'session') session = connection.session();
-    else journal = [];
     const cleanupFailure = () => {
       depth = 0;
       if (session !== null) {
@@ -582,6 +580,8 @@ export function createCaptureEngine(options) {
     };
     let outcome;
     try {
+      if (mode === 'session') session = connection.session();
+      else journal = [];
       outcome = connection.transaction((...scopeArgs) =>
         chain(fn(...scopeArgs), (result) =>
           chain(collect(), (patch) => {

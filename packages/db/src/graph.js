@@ -16,6 +16,7 @@
 
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
+import { jsonBytes, decodeCountedJson } from './json-bytes.js';
 
 /**
  * Refuse an include that crossed its per-root bound.
@@ -41,23 +42,26 @@ function boundRefusal(node, include, keyed, bound, measured) {
 /**
  * Hold one include of one parent to its bounds. Bytes are measured on
  * the serialised text the database projected (a nested include arrives
- * already embedded as JSON and is re-serialised to measure it); rows on
+ * already embedded as JSON and carries its decoder-computed size); rows on
  * the parsed array.
  * @param {any} node
  * @param {any} include
  * @param {any} keyed
  * @param {any} raw - the projected value: text at the root, JSON below
- * @param {any} parsed
+ * @param {WeakMap<object, number>} sizes
+ * @returns {any} the bounded decoded value
  */
-function checkBounds(node, include, keyed, raw, parsed) {
+function checkBounds(node, include, keyed, raw, sizes) {
   if (include.maxBytes !== null && include.maxBytes !== undefined) {
-    const bytes = utf8Length(typeof raw === 'string' ? raw : JSON.stringify(raw));
+    const bytes = typeof raw === 'string' ? utf8Length(raw) : jsonBytes(raw, sizes);
     if (bytes > include.maxBytes) throw boundRefusal(node, include, keyed, 'maxBytes', bytes);
   }
+  const parsed = typeof raw === 'string' ? decodeCountedJson(raw, sizes) : raw;
   if (include.many && include.maxRows !== null && include.maxRows !== undefined
     && parsed.length > include.maxRows) {
     throw boundRefusal(node, include, keyed, 'maxRows', parsed.length);
   }
+  return parsed;
 }
 
 /**
@@ -93,6 +97,7 @@ export function mergeEntityRow(entityMapping, row, docField = 'doc') {
  * @returns {any}
  */
 export function parseGraphRow(node, row, docField = '__doc') {
+  const sizes = new WeakMap();
   const doc = mergeEntityRow(node.entityMapping, row, docField);
   for (const include of node.includes) {
     const raw = row[include.field];
@@ -104,11 +109,10 @@ export function parseGraphRow(node, row, docField = '__doc') {
       doc[include.name] = include.many ? [] : null;
       continue;
     }
-    const parsed = JSON.parse(raw);
-    checkBounds(node, include, row, raw, parsed);
+    const parsed = checkBounds(node, include, row, raw, sizes);
     doc[include.name] = include.many
-      ? parsed.map((child) => parseGraphChild(include.child, child))
-      : parseGraphChild(include.child, parsed);
+      ? parsed.map((child) => parseGraphChild(include.child, child, sizes))
+      : parseGraphChild(include.child, parsed, sizes);
   }
   return doc;
 }
@@ -122,7 +126,7 @@ export function parseGraphRow(node, row, docField = '__doc') {
  * @param {any} child
  * @returns {any}
  */
-function parseGraphChild(node, child) {
+function parseGraphChild(node, child, sizes) {
   const doc = typeof child.__doc === 'string' ? JSON.parse(child.__doc) : child.__doc;
   for (const column of node.entityMapping.columns) {
     if (column.source === 'epoch(document)') continue;
@@ -144,11 +148,10 @@ function parseGraphChild(node, child) {
       doc[include.name] = include.many ? [] : null;
       continue;
     }
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    checkBounds(node, include, child, raw, parsed);
+    const parsed = checkBounds(node, include, child, raw, sizes);
     doc[include.name] = include.many
-      ? parsed.map((grandchild) => parseGraphChild(include.child, grandchild))
-      : parseGraphChild(include.child, parsed);
+      ? parsed.map((grandchild) => parseGraphChild(include.child, grandchild, sizes))
+      : parseGraphChild(include.child, parsed, sizes);
   }
   return doc;
 }

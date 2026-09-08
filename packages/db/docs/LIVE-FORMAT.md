@@ -449,6 +449,18 @@ in-browser proof of this topology (delivery across real tabs, the
 refusal, reload survival) is the website's Playwright suite over the
 `#/data` studio; this section is the decided contract it implements.
 
+The wasm session adapter performs an actual disposable create/attach/changeset/delete
+probe. It declares sessions only after success; `sessionReason` explains journal
+fallback. Changeset bytes are detached from wasm-owned memory before transfer, and
+capture cleanup deletes every session even on rollback or connection close.
+
+The studio probes isolated SharedArrayBuffer OPFS, header-free SAH-pool OPFS,
+atomic IndexedDB snapshots, then visibly non-durable memory. IndexedDB snapshots
+require exclusive ownership and acknowledge writes after atomic version replacement.
+They expose no synchronous/live surface; the Store pane explicitly refreshes after
+writes. Failed snapshot persistence invalidates the connection without publishing
+partial state. [Execution hosts](HOSTS.md) specifies bounds and the observed matrix.
+
 **The browser boot is a closed protocol.** Reaching an owner, a client
 or a standalone memory store passes through five named stages —
 `worker-start`, `sqlite-init`, `vfs-acquire`, `topology`,
@@ -457,8 +469,8 @@ ready, or a stable failure record `{ code: 'DATA_BOOT', stage, message }`
 naming the stage that failed. Each stage carries its own budget, so a
 stage that never settles fails under its own name rather than under an
 outer deadline that cannot say which resource to release; an OPFS pool
-that is genuinely absent or held still produces the `memory` or `client`
-answer above, while a pool install that hangs is a `vfs-acquire` failure
+that is absent advances to the next persistence probe; an existing owner
+produces the `client` answer above, while a pool install that hangs is a `vfs-acquire` failure
 and never masquerades as absence. A failed attempt releases everything it
 created — worker, port client, channel, listeners, timers — before the
 page hears of it, so a retry (or a reload) starts clean, and the page

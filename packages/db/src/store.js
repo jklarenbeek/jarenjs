@@ -29,7 +29,7 @@ import { chain, toPromise, isThenable, attempt } from './driver.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
-import { admitCursor } from './cursor.js';
+import { admitCursor, admitSyncCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
@@ -1097,7 +1097,7 @@ export function openStore(model, options) {
         /** @param {string} sql */
         exec: (sql) => (scope ?? opened).exec(sql),
         /** @param {string} sql */
-        prepare: (sql) => (scope ?? opened).prepare(sql),
+        prepare: (sql, metadata) => (scope ?? opened).prepare(sql, metadata),
         /** Internal transaction users (jobs, checkpoints, migrations)
          * nest when a transaction is open and take the gate when not. */
         transaction: (fn) => withScope((scope ?? opened).transaction, fn),
@@ -1983,6 +1983,12 @@ export function openStore(model, options) {
               // the graph cursor registers nothing unless asked: a
               // snapshot per yielded root is a tracker that grows with the
               // result, so it is the caller's decision (`tracking: true`)
+              syncLoadCursor: (spec, cursorOptions) => loads.syncLoadCursor(spec, cursorOptions,
+                cursorOptions?.tracking === true
+                  ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
+              syncPage: (spec, pageOptions) => loads.syncPage(spec, pageOptions,
+                pageOptions?.tracking === true
+                  ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
               loadCursor: (spec, cursorOptions) => loads.loadCursor(spec, cursorOptions,
                 cursorOptions?.tracking === true
                   ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
@@ -2080,6 +2086,11 @@ export function openStore(model, options) {
                   update: (key, changes) => ops.update(key, changes),
                   delete: (key) => ops.delete(key),
                   load: (spec, loadOptions) => ops.load(spec, loadOptions),
+                  loadCursor: (spec, cursorOptions) => ops.syncLoadCursor(spec, cursorOptions),
+                  page: (spec, pageOptions) => ops.syncPage(spec, pageOptions),
+                  cursor: (document, queryOptions) => entityEngine.syncQuery(document, queryOptions,
+                    queryOptions?.tracking === true
+                      ? (entity, doc) => tracker.register(entity, doc) : undefined),
                   explainLoad: ops.explainLoad,
                   add: ops.add,
                   put: ops.put,
@@ -2563,8 +2574,16 @@ export function openStore(model, options) {
               scopedMembers(identity, inner.asNoTracking(), [], ['get', 'load']));
             return Object.freeze({
               ...scopedMembers(identity, inner, [],
-                ['create', 'get', 'update', 'delete', 'load', 'execute', 'explain',
+                ['create', 'get', 'update', 'delete', 'load', 'page', 'execute', 'explain',
                   'add', 'put', 'remove', 'discard', 'link', 'unlink']),
+              cursor: (document, options) => {
+                requireScope(identity);
+                return admitSyncCursor(inner.cursor(document, options), (fn) => { requireScope(identity); return fn(); });
+              },
+              loadCursor: (spec, options) => {
+                requireScope(identity);
+                return admitSyncCursor(inner.loadCursor(spec, options), (fn) => { requireScope(identity); return fn(); });
+              },
               asNoTracking: () => untracked,
             });
           };
@@ -2967,7 +2986,11 @@ export function openStore(model, options) {
                   const untracked = syncGatedMembers(inner.asNoTracking(), ['get', 'load']);
                   handle = Object.freeze({
                     ...syncGatedMembers(inner,
-                      ['create', 'get', 'update', 'delete', 'load', 'execute', 'explain']),
+                      ['create', 'get', 'update', 'delete', 'load', 'page', 'execute', 'explain']),
+                    cursor: (document, options) => gatedSync(() =>
+                      admitSyncCursor(inner.cursor(document, options), gatedSync)),
+                    loadCursor: (spec, options) => gatedSync(() =>
+                      admitSyncCursor(inner.loadCursor(spec, options), gatedSync)),
                     asNoTracking: () => untracked,
                   });
                   gatedSyncEntities.set(name, handle);

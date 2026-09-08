@@ -152,7 +152,7 @@ export function createDataHandlers(host) {
    */
   async function open(args) {
     await closeStore();
-    if (args.reset === true) host.unlink();
+    if (args.reset === true) await host.unlink();
     state.model = args.model;
     state.store = await openStore(args.model, {
       driver: host.makeDriver(), path: host.path(), capture: true, operators: host.operators,

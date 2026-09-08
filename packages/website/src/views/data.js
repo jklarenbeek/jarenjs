@@ -91,7 +91,10 @@ const queryCard =
     ['h3', {}, 'Query'],
     editorTextarea({ value: '$.queryText', action: 'data/query-text', rows: 8 }),
     ['p', {},
-      ['button', { class: 'btn small primary', type: 'button', on: { click: 'data/run' } },
+      ['button', {
+        class: 'btn small primary', type: 'button',
+        disabled: { $ne: ['$.status', 'ready'] }, on: { click: 'data/run' },
+      },
         'Run + explain'],
       // every keystroke is published, then Enter or blur commits: this
       // page re-renders on each live-query event, and a controlled input
@@ -99,6 +102,7 @@ const queryCard =
       ['input', {
         class: 'data-insert-title', type: 'text',
         value: '$.insertDraft', placeholder: '$.insertPlaceholder',
+        disabled: { $ne: ['$.status', 'ready'] },
         on: { input: 'data/insert-draft', change: 'data/insert' },
       }]],
     { $if: ['$.explain',
@@ -123,6 +127,7 @@ const queryCard =
 const liveCard =
   ['div', { class: 'card pg-card data-live' },
     ['h3', {}, 'Live query'],
+    { $if: ['$.liveNote', ['p', { class: 'muted data-live-note' }, '$.liveNote']] },
     ['p', { class: 'muted' },
       'A subscribe operation over the contract stream binding: the snapshot, then RFC 6902 patches as writes commit — one diff format end to end.'],
     ['p', { class: 'data-live-count' }, '$.liveSummary'],

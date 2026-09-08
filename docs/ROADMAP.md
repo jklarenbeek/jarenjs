@@ -559,16 +559,14 @@ what each does is its own documentation's job
   promotion stays: project only when no residual conjunct still needs a
   member the projection would drop, because a projection that dropped
   one is a wrong answer rather than a slow one.
-- [ ] **The synchronous entity set has no cursor.** A cursor is
-  asynchronous by contract (`next()` answers a promise); `from(
-  store.sync.entity('X'))` pushes one whole window as it always did.
-  A synchronous row iterator on the `sync` twin is unbuilt.
-- [ ] **A nested include's byte bound re-serialises the embedded JSON to
-  measure it.** The root-level include text already contains every
-  nested relation, so the outer bound covers nested content; per-child
-  measurement below the root stringifies the parsed child. Projecting
-  nested includes as text would make it a length, at the price of a
-  projection change.
+- [x] **Synchronous entity cursors and pages.** `SyncEntitySet.cursor`,
+  `loadCursor` and `page` share async plans, bounds and keyset identity;
+  synchronous disposal and scope/Store cleanup have regression coverage.
+  See [execution hosts](../packages/db/docs/HOSTS.md).
+- [x] **Nested include byte accounting.** Decoding records exact UTF-8 JSON
+  sizes bottom-up, removing the second full nested serialization. The bounded
+  outer value is still parsed whole; measured traversal/heap losses are published
+  in [execution hosts](../packages/db/docs/HOSTS.md).
 - [ ] **A third SQL dialect, and the two capability slots still empty.**
   PostgreSQL 16+ ships (`@jarenjs/db/postgres`): the same model, the
   same query documents and the same differential oracle run on both
@@ -637,40 +635,21 @@ what each does is its own documentation's job
   two-level `groupBy` emission all RE-RUN on invalidation (declared,
   reported through `live.mode`). Incremental joins in particular are
   the open research half this program deliberately did not open-end.
-- [ ] **The session extension in the wasm build.** The official SQLite
-  wasm build compiles `ENABLE_SESSION`, but the oo1 adapter does not
-  yet map the session C API, so browser capture runs in the journal
-  mode (stated in the capability matrix). Adapting it makes wasm
-  capture session-complete.
-- [ ] **The SharedArrayBuffer OPFS VFS and a header-capable host.**
-  The deployed demo uses the header-free SAH-pool VFS because GitHub
-  Pages cannot set COOP/COEP; a host that can set them may use the
-  faster SharedArrayBuffer VFS family. Wiring that path (and an
-  IndexedDB-backed fallback for hosts with neither) is unwritten.
-- [ ] **A worker-hosted Node driver and its pool.** Every shipped
-  driver runs SQLite on the caller's thread: one synchronous
-  `DatabaseSync` per open, so a slow statement holds the event loop of
-  the process that issued it. The website already hosts the wasm build
-  in a dedicated worker with a five-stage named-failure boot; Node has
-  no equivalent. What is wanted is a `nodeWorkerDriver()` that is a
-  DRIVER — `{ name, dialect, open }` returning the same Connection
-  contract, never a second store API — over a worker thread: a
-  transport that keeps transaction affinity (one worker connection per
-  open transaction), prepared-statement identity across the boundary,
-  row cursors with credits rather than whole results, and driver-
-  generation errors (a restarted worker refuses the statements of the
-  generation before it, classed and retryable). Before it, a faulting
-  and pausing test Driver, so generation-specific failure across the
-  boundary is tested rather than hoped for. Then the pool: read-only
-  WAL workers beside one writer, bounded queues, a graceful close, and
-  queue-depth/latency metrics. Definition of done: a store over
-  `nodeWorkerDriver()` passes the SAME store test suite as the
-  in-process driver; a slow statement on a worker-backed store does
-  not raise event-loop latency on the calling thread beyond a stated,
-  measured, published bound; and `npm run test:deps` proves no
-  `db → contract` edge (the transport lives in `@jarenjs/db`). It
-  builds on the cancellation surface (`capabilities.cancellation`) and
-  the driver-failure classes the store now has.
+- [x] **The session extension in the wasm build.** A disposable live probe
+  gates session capture; failed/missing bindings name journal fallback.
+  Transfer, rollback and close cleanup are covered by the shared host corpus.
+- [x] **The SharedArrayBuffer OPFS VFS and persistence ladder.** Isolated
+  and ordinary three-engine fixtures exercise the runtime-probed OPFS paths,
+  atomic IndexedDB snapshots, denied storage and visibly non-durable memory.
+  Production header availability remains the host's choice; engine limitations
+  are recorded in [the host matrix](../packages/db/docs/HOSTS.md).
+- [x] **A worker-hosted Node driver and its pool.** The worker Driver and
+  bounded one-writer WAL pool share Store values/errors, credited row transport,
+  generation fencing, transaction affinity, FIFO refusal and lifecycle metrics.
+  [Measurements](../packages/db/docs/HOSTS.md) publish event-loop gains beside
+  startup/throughput/RSS losses. Scope is explicit: root Store admission remains
+  serial, and native SQLite calls cannot be preempted by V8 worker termination;
+  deadline failure fences the connection without promising a rollback.
 - [ ] **A migration assertion cannot be pushed into SQL.** Every
   assertion is now classified before it runs and none reads a collection
   whole: an associative aggregate over the root (`$count`, `$sum`,
