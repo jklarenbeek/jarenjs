@@ -22,6 +22,27 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 describe('the manifest census', () => {
+  it('includes a string root export in both the inventory and runtime probes', () => {
+    const pkg = { name: '@jarenjs/x', exports: './src/index.js' };
+    assert.deepStrictEqual(exportEntries(pkg), [{
+      subpath: '@jarenjs/x', key: '.', kind: 'javascript', target: './src/index.js',
+      types: false, expanded: false,
+    }]);
+    assert.deepStrictEqual(importSubpaths(pkg), ['@jarenjs/x']);
+    assert.deepStrictEqual(exportEntries({ name: '@jarenjs/x', exports: {} }), []);
+  });
+
+  it('keeps a root condition map attached to its root and declaration', () => {
+    const pkg = { name: '@jarenjs/x', exports: {
+      types: './dist/types/index.d.ts', import: { default: './src/index.js' },
+    } };
+    assert.deepStrictEqual(exportEntries(pkg), [{
+      subpath: '@jarenjs/x', key: '.', kind: 'javascript', target: './src/index.js',
+      types: true, expanded: false,
+    }]);
+    assert.deepStrictEqual(importSubpaths(pkg), ['@jarenjs/x']);
+  });
+
   it('classifies every export kind, expands a wildcard only where the files are committed, and keeps the root', () => {
     const pkg = {
       name: '@jarenjs/x',

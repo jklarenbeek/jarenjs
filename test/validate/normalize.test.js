@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import { strictEqual, deepStrictEqual, notStrictEqual } from 'node:assert';
 
-import { compileNormalizer } from '@jarenjs/validate/normalize';
+import { compileNormalizer, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 import { JarenValidator } from '@jarenjs/validate';
 
 // Every normalization is opt-in, so most cases enable exactly what they test.
@@ -13,6 +13,47 @@ const ALL = {
 };
 
 describe('compileNormalizer — the non-mutation contract', () => {
+  it('normalizes a root default on the first application and is then idempotent', () => {
+    const schema = {
+      type: 'object',
+      default: { port: '8080', name: '  jaren  ', stray: true },
+      properties: { port: { type: 'integer' }, name: { type: 'string' } },
+      additionalProperties: false,
+    };
+    const normalize = compileNormalizer(schema, ALL);
+    const once = normalize(undefined);
+    deepStrictEqual(once, { port: 8080, name: 'jaren' });
+    strictEqual(new JarenValidator().compile(schema)(once), true);
+    strictEqual(normalize(once), once);
+    notStrictEqual(normalize(undefined), once);
+    deepStrictEqual(schema.default, { port: '8080', name: '  jaren  ', stray: true });
+  });
+
+  it('decodes same-document reference fragments once before resolving pointer tokens or anchors', () => {
+    const schema = {
+      $defs: {
+        'a b': { type: 'integer' },
+        '%20': { type: 'string' },
+        'a/b': { type: 'integer' },
+        anchored: { $anchor: 'amount', type: 'integer' },
+      },
+      type: 'object',
+      properties: {
+        port: { $ref: '#/$defs/a%20b' },
+        literal: { $ref: '#/$defs/%2520' },
+        slash: { $ref: '#%2F$defs%2Fa~1b' },
+        anchored: { $ref: '#%61mount' },
+      },
+    };
+    const normalize = compileNormalizer(schema, ALL);
+    deepStrictEqual(normalize({ port: '8080', literal: '  value  ', slash: '2', anchored: '3' }),
+      { port: 8080, literal: 'value', slash: 2, anchored: 3 });
+    strictEqual(resolveSameDocumentRef('#/$defs/a%20b', schema), schema.$defs['a b']);
+    strictEqual(resolveSameDocumentRef('#/$defs/%2520', schema), schema.$defs['%20']);
+    strictEqual(resolveSameDocumentRef('#/$defs/%', schema), undefined);
+    strictEqual(resolveSameDocumentRef('#/$defs/~2', schema), undefined);
+  });
+
   it('returns a new value and leaves the input untouched', () => {
     const normalize = compileNormalizer({
       type: 'object',

@@ -304,6 +304,37 @@ describe('dispatch — HEAD, entity tags, status override, opaque, well-known', 
     assert.strictEqual(head.status, 304);
   });
 
+  it('round-trips comma-bearing opaque tags in conditional headers and tag lists', async () => {
+    for (const strong of [false, true]) {
+      const server = serve({ 'catalog.load': (input, ctx) => {
+        ctx.etag('version,part', { strong });
+        return { revision: 1, products: [] };
+      } });
+      const first = await server.dispatch(req('GET', '/api/catalog'));
+      const etag = strong ? '"version,part"' : 'W/"version,part"';
+      assert.strictEqual(first.headers.etag, etag);
+      for (const candidate of [etag, '"version,part"', 'W/"version,part"', '"other,tag", "version,part", bare']) {
+        const cached = await server.dispatch(req('GET', '/api/catalog', { 'if-none-match': candidate }));
+        assert.strictEqual(cached.status, 304, candidate);
+        assert.strictEqual(cached.body, null);
+        assert.strictEqual(cached.headers.etag, etag);
+      }
+      for (const candidate of ['"version,part"', '"other,tag", "version,part"']) {
+        const matched = await server.dispatch(req('GET', '/api/catalog', { 'if-match': candidate }));
+        assert.strictEqual(matched.status, strong ? 200 : 412);
+      }
+      assert.strictEqual((await server.dispatch(req('GET', '/api/catalog', {
+        'if-match': 'W/"version,part"',
+      }))).status, 412);
+      assert.strictEqual((await server.dispatch(req('GET', '/api/catalog', { 'if-match': '*' }))).status, 200);
+    }
+    const bare = serve({ 'catalog.load': (input, ctx) => {
+      ctx.etag('r42', { strong: true });
+      return { revision: 42, products: [] };
+    } });
+    assert.strictEqual((await bare.dispatch(req('GET', '/api/catalog', { 'if-match': 'other, r42' }))).status, 200);
+  });
+
   it('a strong tag: If-Match compares strongly (412 JC2014 on a mismatch or a weak candidate), If-None-Match on a non-GET is 412', async () => {
     const server = serve({
       'catalog.load': (input, ctx) => { ctx.etag('s1', { strong: true }); return { revision: 1, products: [] }; },

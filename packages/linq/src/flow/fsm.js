@@ -22,7 +22,7 @@
  * and everything else §5.1 lists.
  */
 
-import { deepFreeze } from '@jarenjs/core/object';
+import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { effectDescriptor, readEffects } from '../effect.js';
@@ -46,11 +46,6 @@ const STATE_MEMBERS = Object.freeze(['entry', 'exit', 'final']);
 const ON_MEMBERS = Object.freeze(['payload']);
 /** The members `defineFsm()` takes. */
 const FSM_MEMBERS = Object.freeze(['initial', 'states', 'transitions', 'context']);
-
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * A member set the pen knows, or `JL0101` naming the one it does not.
@@ -111,7 +106,7 @@ export function effect(run, props = undefined) {
 export function state(id, options = undefined) {
   const out = { id: readId(id, 'state()') };
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         `state() options are { entry?, exit?, final? }, got ${describeValue(options)}`);
     }
@@ -203,7 +198,7 @@ export function on(from, event = null, options = undefined) {
     entry.event = event;
   }
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         `on() options are { payload? }, got ${describeValue(options)}`);
     }
@@ -239,7 +234,7 @@ export function on(from, event = null, options = undefined) {
  * compileFsm(machine).step('draft', 'submit').state;   // 'review'
  */
 export function defineFsm(spec) {
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
       `defineFsm() takes { initial, states, transitions, context? }, got ${describeValue(spec)}`);
   }
@@ -266,7 +261,7 @@ export function defineFsm(spec) {
       states.push(entry);
       return;
     }
-    if (!isPlainObject(entry) || entry[STATE] !== true) {
+    if (!isJsonObject(entry) || entry[STATE] !== true) {
       throw new LinqBuildError('JL0101',
         `defineFsm() states[${i}] is an id or state(id, options?), got ${describeValue(entry)}`,
         `/states/${i}`);
@@ -305,7 +300,7 @@ export function defineFsm(spec) {
   }
   const transitions = spec.transitions.map((declaration, i) => {
     const at = `/transitions/${i}`;
-    const entry = isPlainObject(declaration) ? declaration[TRANSITION] : undefined;
+    const entry = isJsonObject(declaration) ? declaration[TRANSITION] : undefined;
     if (entry === undefined) {
       throw new LinqBuildError('JL0101',
         `defineFsm() transitions[${i}] is on(from, event?).to(state), got `

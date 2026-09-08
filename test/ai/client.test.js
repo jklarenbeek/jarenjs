@@ -480,6 +480,84 @@ describe('ai — the retry policy', function () {
     assert.strictEqual(call, 1, 'the failed stream was not replayed');
   });
 
+  it('never retries after reasoning reached the caller', async function () {
+    let calls = 0;
+    const client = createChatClient({
+      provider: 'ollama', model: 'm',
+      retry: { sleep: () => Promise.resolve() },
+      fetch: () => {
+        calls++;
+        return Promise.resolve(new Response(sseBody([
+          delta({ reasoning: 'thinking' }), 'not-json',
+        ])));
+      },
+    });
+    const reasoning = [];
+    await assert.rejects(client.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      onReasoning: (text) => reasoning.push(text),
+    }), (error) => error instanceof AiError && error.code === 'AI0003');
+    assert.deepStrictEqual(reasoning, ['thinking']);
+    assert.strictEqual(calls, 1);
+  });
+
+  it('cancels and unlocks an unfinished body when a stream chunk is malformed', async function () {
+    let cancelled = 0;
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: not-json\n\n'));
+      },
+      cancel() { cancelled++; },
+    }));
+    const client = createChatClient({
+      provider: 'ollama', model: 'm', retry: { attempts: 1 },
+      fetch: () => Promise.resolve(response),
+    });
+    await assert.rejects(client.complete({ messages: [{ role: 'user', content: 'x' }] }),
+      (error) => error instanceof AiError && error.code === 'AI0003');
+    assert.strictEqual(cancelled, 1);
+    assert.strictEqual(response.body.locked, false);
+  });
+
+  it('preserves a callback failure when cancelling its unfinished stream also fails', async function () {
+    const failure = new Error('callback failed');
+    let cancelled = 0;
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sseBody([delta({ content: 'hello' })])));
+      },
+      cancel() { cancelled++; throw new Error('cancel failed'); },
+    }));
+    const client = createChatClient({
+      provider: 'ollama', model: 'm', retry: { attempts: 1 },
+      fetch: () => Promise.resolve(response),
+    });
+    await assert.rejects(client.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      onDelta: () => { throw failure; },
+    }), (error) => error === failure);
+    assert.strictEqual(cancelled, 1);
+    assert.strictEqual(response.body.locked, false);
+  });
+
+  it('unlocks a completed stream without cancelling it', async function () {
+    let cancelled = 0;
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sseBody([delta({ content: 'hello' })])));
+        controller.close();
+      },
+      cancel() { cancelled++; },
+    }));
+    const client = createChatClient({
+      provider: 'ollama', model: 'm', fetch: () => Promise.resolve(response),
+    });
+    const result = await client.complete({ messages: [{ role: 'user', content: 'x' }] });
+    assert.strictEqual(result.message.content, 'hello');
+    assert.strictEqual(cancelled, 0);
+    assert.strictEqual(response.body.locked, false);
+  });
+
   it('an abort during backoff rejects promptly with the abort reason', async function () {
     const controller = new AbortController();
     const { client } = scriptedClient([

@@ -221,7 +221,7 @@ describe('FSM persistence (§7.7)', () => {
     assert.throws(() => resumeFsmSession(fsm, /** @type {any} */ ({})), TypeError);
   });
 
-  it('a durable session persists every state CHANGE through the store', () => {
+  it('a durable session persists every fired transition through the store', () => {
     const fsm = compileFsm(MACHINE);
     const saved = [];
     let stored = /** @type {string | null} */ (null);
@@ -241,6 +241,24 @@ describe('FSM persistence (§7.7)', () => {
     assert.deepStrictEqual(saved, ['sent', 'paid']);
     assert.strictEqual(second.done, true);
     assert.throws(() => createDurableFsmSession(fsm, /** @type {any} */ ({})), TypeError);
+  });
+
+  it('persists a fired self-transition even though the state string stays the same', () => {
+    const fsm = compileFsm({
+      $fsm: '0.1', initial: 'ready', states: ['ready'],
+      transitions: [{ from: 'ready', event: 'tick', to: 'ready', effects: [{ run: 'tick' }] }],
+    });
+    const saved = [];
+    const session = createDurableFsmSession(fsm, {
+      load: () => 'ready', save: (state) => saved.push(state),
+    });
+    for (let i = 0; i < 2; i++) {
+      const result = session.send('tick');
+      assert.strictEqual(result.changed, true);
+      assert.strictEqual(result.state, 'ready');
+      assert.deepStrictEqual(result.effects, [{ run: 'tick' }]);
+    }
+    assert.deepStrictEqual(saved, ['ready', 'ready']);
   });
 
   it('a throwing save fails the send rather than losing the transition silently', () => {

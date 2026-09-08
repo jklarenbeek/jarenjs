@@ -20,6 +20,7 @@
  * nothing.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { describeValue } from '../json-boundary.js';
 
@@ -56,11 +57,6 @@ export const POLICY_VALUES = Object.freeze({
 
 /** An error code: `^[a-z][a-z0-9-]*$` (§3's table). */
 const CODE = /^[a-z][a-z0-9-]*$/;
-
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * A member set the pen knows, or `JL0101` naming the one it does not.
@@ -104,7 +100,7 @@ function policyMember(member, value, at) {
     return value;
   }
   if (member === 'limits') {
-    if (!isPlainObject(value)) {
+    if (!isJsonObject(value)) {
       throw new LinqBuildError('JL0101', 'policy.limits is { maxBodyBytes }', at);
     }
     closedTo(value, ['maxBodyBytes'], 'policy.limits', at);
@@ -116,7 +112,7 @@ function policyMember(member, value, at) {
     return { maxBodyBytes: value.maxBodyBytes };
   }
   if (member === 'errors') {
-    if (!isPlainObject(value)) {
+    if (!isJsonObject(value)) {
       throw new LinqBuildError('JL0101', 'policy.errors is { details }', at);
     }
     closedTo(value, ['details'], 'policy.errors', at);
@@ -128,7 +124,7 @@ function policyMember(member, value, at) {
     return { details: value.details };
   }
   if (member === 'retry') {
-    if (!isPlainObject(value)) {
+    if (!isJsonObject(value)) {
       throw new LinqBuildError('JL0101', 'policy.retry is { max, on }', at);
     }
     closedTo(value, ['max', 'on'], 'policy.retry', at);
@@ -144,7 +140,7 @@ function policyMember(member, value, at) {
     return { max: value.max, on: value.on.slice() };
   }
   // stream
-  if (!isPlainObject(value)) {
+  if (!isJsonObject(value)) {
     throw new LinqBuildError('JL0101', 'policy.stream is { resume?, heartbeatMs?, maxPatchBytes? }', at);
   }
   closedTo(value, ['resume', 'heartbeatMs', 'maxPatchBytes'], 'policy.stream', at);
@@ -184,7 +180,7 @@ function policyMember(member, value, at) {
  * @returns {any}
  */
 export function emitPolicy(policy, at) {
-  if (!isPlainObject(policy)) {
+  if (!isJsonObject(policy)) {
     throw new LinqBuildError('JL0101',
       `policy is a plain object of the members CONTRACT-FORMAT §3.1 declares, got `
       + `${describeValue(policy)}`, at);
@@ -210,7 +206,7 @@ export function emitPolicy(policy, at) {
  * error({ status: 409, schema: Conflict });
  */
 export function error(spec = {}) {
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
       `error() takes { status?, schema? }, got ${describeValue(spec)}`);
   }
@@ -235,7 +231,7 @@ export function error(spec = {}) {
  * @returns {[string, any][]} code → `{ status?, schema? }`, in declaration order
  */
 export function readErrors(errors, at) {
-  if (!isPlainObject(errors)) {
+  if (!isJsonObject(errors)) {
     throw new LinqBuildError('JL0101',
       `errors is a plain object of code → error(), got ${describeValue(errors)}`, at);
   }
@@ -245,7 +241,7 @@ export function readErrors(errors, at) {
         `an error code matches ^[a-z][a-z0-9-]*$, got '${code}'`, `${at}/${code}`);
     }
     const declared = errors[code];
-    if (!isPlainObject(declared)) {
+    if (!isJsonObject(declared)) {
       throw new LinqBuildError('JL0101',
         `errors.${code} is error({ status?, schema? }), got ${describeValue(declared)}`,
         `${at}/${code}`);
@@ -270,7 +266,7 @@ export function readErrors(errors, at) {
  */
 export function checkOperation(kind, spec, at) {
   const base = at ?? '';
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
       `${kind}() takes { input?, output, errors?, policy?, http?, doc? }, got `
       + `${describeValue(spec)}`, at);

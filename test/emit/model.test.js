@@ -14,6 +14,15 @@ const names = (model) => model.declarations.map((d) => d.name);
 const decl = (model, name) => model.declarations.find((d) => d.name === name);
 
 describe('compileEmitModel — declarations and naming', () => {
+  it('resolves percent-encoded same-document references through the normalizer resolver', () => {
+    const model = compileEmitModel({
+      $defs: { 'a b': { type: 'integer' } },
+      type: 'object',
+      properties: { port: { $ref: '#/$defs/a%20b' } },
+    });
+    assert.deepStrictEqual(decl(model, 'Root').type.members[0].type, { kind: 'ref', ref: 'AB' });
+  });
+
   it('declares $defs in document order, then the root', () => {
     const model = compileEmitModel({
       $defs: { Beta: { type: 'string' }, Alpha: { type: 'number' } },

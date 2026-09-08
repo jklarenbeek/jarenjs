@@ -3,6 +3,7 @@ import * as assert from '../../assert.node.js';
 
 import {
   compileDateFormat,
+  formatRFC3339Parts,
   parseRFC3339Parts,
   parseDuration,
   durationToMs,
@@ -26,6 +27,27 @@ const EN = {
 };
 
 describe('compileDateFormat', () => {
+  it('should retain parser precision in RFC 3339 output and keep SSS three digits wide', () => {
+    for (const value of [
+      '2026-09-08T12:34:59.999999Z',
+      '2026-09-08T12:34:05.000001Z',
+      '2026-09-08T12:34:05.123456+02:00',
+      '12:34:05.123456-05:30',
+    ]) {
+      const parts = P(value);
+      const output = formatRFC3339Parts(parts);
+      assert.strictEqual(output, value);
+      assert.deepStrictEqual(P(output), parts);
+    }
+    assert.strictEqual(formatRFC3339Parts(P('2026-09-08T12:34:05.120000Z')),
+      '2026-09-08T12:34:05.12Z');
+    const millis = compileDateFormat('ss.SSS');
+    assert.strictEqual(millis(P('2026-09-08T12:34:59.999999Z')), '59.999');
+    assert.strictEqual(millis(P('2026-09-08T12:34:05.000001Z')), '05.000');
+    assert.strictEqual(millis(P('2026-09-08T12:34:05.123999Z')), '05.123');
+    assert.strictEqual(compileDateFormat('ss.S')(P('2026-09-08T12:34:01.2Z')), '01.2');
+  });
+
   it('should round-trip an RFC 3339 value through its own pattern', () => {
     const iso = compileDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX");
     for (const value of [

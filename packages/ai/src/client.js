@@ -272,7 +272,7 @@ export function createChatClient(options = {}) {
 
   /**
    * One request/response cycle. `state.delivered` flips as soon as a
-   * streamed delta reaches the caller's `onDelta` — the point of no
+   * streamed delta reaches `onDelta` or `onReasoning` — the point of no
    * return for the retry loop (the caller has observed output).
    * @param {ChatRequest} request
    * @param {{ delivered: boolean }} state
@@ -313,7 +313,10 @@ export function createChatClient(options = {}) {
       }
       if (onReasoning !== undefined) {
         const thinking = reasoningOf(chunk?.choices?.[0]?.delta ?? {});
-        if (thinking !== '') onReasoning(thinking);
+        if (thinking !== '') {
+          state.delivered = true;
+          onReasoning(thinking);
+        }
       }
       const text = accumulator.push(chunk);
       if (text !== '' && onDelta !== undefined) {
@@ -339,10 +342,20 @@ export function createChatClient(options = {}) {
     if (typeof response.body?.getReader === 'function') {
       const reader = response.body.getReader();
       const textDecoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        feed(textDecoder.decode(value, { stream: true }));
+      let finished = false;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) { finished = true; break; }
+          feed(textDecoder.decode(value, { stream: true }));
+        }
+      }
+      finally {
+        if (!finished) {
+          try { await reader.cancel(); }
+          catch { /* Preserve the read, decoding or callback failure. */ }
+        }
+        reader.releaseLock();
       }
     }
     else {

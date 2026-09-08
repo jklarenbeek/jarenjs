@@ -19,6 +19,7 @@
  * `.json` schema is a schema, and a `.js` target is JavaScript — with
  * `types` when the manifest points a declaration at it, through nested
  * conditions (`{ import: { types, default } }`) as well as flat ones.
+ * Root string and condition-map shorthands are inventoried as `.`.
  */
 
 import { readdirSync, statSync, existsSync } from 'node:fs';
@@ -89,7 +90,13 @@ function kindOf(key, target) {
  * @returns {ExportEntry[]}
  */
 export function exportEntries(pkg, dir = null) {
-  const exports = pkg.exports ?? { '.': pkg.main ?? './src/index.js' };
+  const declared = pkg.exports ?? { '.': pkg.main ?? './src/index.js' };
+  const keys = Object.keys(declared);
+  // A string or a root condition map is shorthand for the root export;
+  // its characters/condition names are not public subpath keys.
+  const exports = typeof declared === 'string'
+    || (!Array.isArray(declared) && keys.length > 0 && !keys.some((key) => key.startsWith('.')))
+    ? { '.': declared } : declared;
   /** @type {ExportEntry[]} */
   const entries = [];
   const specifier = (/** @type {string} */ key) => (key === '.' ? pkg.name : pkg.name + key.slice(1));

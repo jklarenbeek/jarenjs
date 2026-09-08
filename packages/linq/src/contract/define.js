@@ -21,7 +21,7 @@
  * document means.
  */
 
-import { cloneJson, deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { cloneJson, deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
@@ -36,11 +36,6 @@ const HEAD_MEMBERS = ['id', 'version', 'compat'];
 /** `[A-Za-z_][A-Za-z0-9_-]*` — a contract id (§2.1). */
 const ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 /**
  * One schema position — `input`, `output`, an error's `schema` — as the
  * document carries it: a builder emitted into the shared `$defs`
@@ -53,7 +48,7 @@ function isPlainObject(value) {
 function schemaAt(value, ctx, at) {
   if (isSchemaBuilder(value)) return emitInto(value, ctx, at);
   const json = requireJson(value, `the schema at ${at}`);
-  if (typeof json !== 'boolean' && !isPlainObject(json)) {
+  if (typeof json !== 'boolean' && !isJsonObject(json)) {
     throw new LinqBuildError('JL0101',
       `a schema is an object, true or false — got ${describeValue(value)}`, at);
   }
@@ -78,7 +73,7 @@ function schemaAt(value, ctx, at) {
  */
 function declarationOf(declared, at) {
   if (isOperation(declared)) return declared;
-  if (!isPlainObject(declared)) {
+  if (!isJsonObject(declared)) {
     throw new LinqBuildError('JL0101',
       `an operation is read(), command() or subscribe() — got ${describeValue(declared)}`, at);
   }
@@ -166,7 +161,7 @@ export class Contract {
  * compileContract(shop.document).ids;   // ['catalog.load']
  */
 export function defineContract(meta, operations) {
-  if (!isPlainObject(meta)) {
+  if (!isJsonObject(meta)) {
     throw new LinqBuildError('JL0101',
       `defineContract() takes ({ id?, version?, compat? }, operations), got `
       + `${describeValue(meta)} as its first argument`);
@@ -191,7 +186,7 @@ export function defineContract(meta, operations) {
     throw new LinqBuildError('JL0101',
       'defineContract() compat is an array of peer version strings', '/compat');
   }
-  if (!isPlainObject(operations)) {
+  if (!isJsonObject(operations)) {
     throw new LinqBuildError('JL0101',
       `defineContract() operations is a plain object of id → operation, got `
       + `${describeValue(operations)}`, '/operations');

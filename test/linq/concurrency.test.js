@@ -62,6 +62,53 @@ describe('mapAsync', () => {
     assert.notDeepStrictEqual(out, [30, 1, 20, 2], 'completion order, not source order');
   });
 
+  it('observes an unordered rejection while the next source pull is pending', async () => {
+    const failure = new Error('task failed during source pull');
+    let rejectTask;
+    let reads = 0;
+    let closed = false;
+    const callbacks = [];
+    const signals = [];
+    const source = {
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            if (++reads === 1) return { done: false, value: 1 };
+            rejectTask(failure);
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            return { done: false, value: 2 };
+          },
+          async return() { closed = true; return { done: true, value: undefined }; },
+        };
+      },
+    };
+    await assert.rejects(fromAsync(source).mapAsync((n, signal) => {
+      callbacks.push(n);
+      signals.push(signal);
+      return new Promise((_resolve, reject) => { rejectTask = reject; });
+    }, { concurrency: 3, ordered: false }).toArray(), (error) => error === failure);
+    assert.deepStrictEqual(callbacks, [1], 'the pending pull cannot launch work after failure');
+    assert.strictEqual(reads, 2);
+    assert.strictEqual(signals[0].aborted, true);
+    assert.strictEqual(closed, true);
+  });
+
+  it('observes abandoned unordered tasks that reject when downstream stops', async () => {
+    const aborted = [];
+    const out = await fromAsync([1, 2, 3]).mapAsync((n, signal) => {
+      if (n === 1) return n;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          aborted.push(n);
+          reject(new Error(`aborted ${n}`));
+        }, { once: true });
+      });
+    }, { concurrency: 3, ordered: false }).take(1).toArray();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepStrictEqual(out, [1]);
+    assert.deepStrictEqual(aborted, [2, 3]);
+  });
+
   it('concat runs strictly sequentially', async () => {
     let inflight = 0;
     let peak = 0;

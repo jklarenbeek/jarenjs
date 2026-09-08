@@ -21,7 +21,9 @@ Parsing: `parseRFC3339Parts(str)` → a flat **parts** record
 `{year, month, day, hours, minutes, seconds, offset}`. Absent fields are
 `-1` sentinels; `offset` is minutes east of UTC, `0` for `Z` and `null`
 when the string carried none. The inverse is `formatRFC3339Parts(parts)`
-(round-trips the offset). `epochOfRFC3339Parts(parts)` → epoch ms: a
+(round-trips the offset and up to six fractional-second digits, dropping
+trailing zeros). The `SSS` formatting token writes the first three fraction
+digits. `epochOfRFC3339Parts(parts)` → epoch ms: a
 date-only reads as UTC midnight, an offset shifts to its instant, and a
 time-only has **no** instant — it returns `NaN` rather than inventing a
 day. `getDateTypeOf*` variants produce a `Date` for callers that want

@@ -40,6 +40,13 @@ import {
 const D2 = (n) => (n < 10 ? '0' + n : '' + n);
 const D3 = (n) => (n < 10 ? '00' + n : n < 100 ? '0' + n : '' + n);
 
+// The parser retains up to six fractional digits. Round the whole seconds
+// before extracting them, so subtraction does not expose binary noise.
+/** @param {number} seconds */
+function fractionDigits(seconds) {
+  return seconds.toFixed(6).slice(-6);
+}
+
 function pad(n, width) {
   const s = '' + n;
   return s.length >= width ? s : '0'.repeat(width - s.length) + s;
@@ -86,8 +93,8 @@ const TOKENS = {
   m: (p) => '' + p.minutes,
   ss: (p) => D2(Math.trunc(p.seconds)),
   s: (p) => '' + Math.trunc(p.seconds),
-  SSS: (p) => D3(Math.round((p.seconds - Math.trunc(p.seconds)) * 1000)),
-  S: (p) => '' + Math.trunc((p.seconds - Math.trunc(p.seconds)) * 10),
+  SSS: (p) => fractionDigits(p.seconds).slice(0, 3),
+  S: (p) => fractionDigits(p.seconds).slice(0, 1),
   a: (p, n) => n.meridiem[p.hours < 12 ? 0 : 1],
   XXX: (p) => offsetText(p.offset, true, true),
   XX: (p) => offsetText(p.offset, false, true),
@@ -203,7 +210,8 @@ const FORMAT_TIME = compileDateFormat('HH:mm:ssXXX');
  * `full-time`, and the offset is the record's own rather than UTC.
  *
  * The round trip preserves the *value*, not necessarily the spelling: a
- * fractional second is emitted only when non-zero and without trailing
+ * fractional second keeps the parser's six-digit precision and is emitted
+ * only when non-zero and without trailing
  * zeros, so `…:05.250Z` comes back `…:05.25Z`. The parts record holds
  * the fraction as a number, so the original digit count is not
  * recoverable — a consumer that must reproduce the input byte for byte
@@ -222,9 +230,11 @@ export function formatRFC3339Parts(parts) {
   if (fraction === 0)
     return base;
   // splice the fraction in after the seconds, before the offset
-  const digits = fraction.toFixed(3).slice(1).replace(/0+$/, '');
+  const digits = fractionDigits(parts.seconds).replace(/0+$/, '');
+  if (digits.length === 0)
+    return base;
   const cut = base.length - (FORMAT_OFFSET_LEN(parts));
-  return base.slice(0, cut) + digits + base.slice(cut);
+  return base.slice(0, cut) + '.' + digits + base.slice(cut);
 }
 
 // how many characters the rendered offset takes, so the fraction can be

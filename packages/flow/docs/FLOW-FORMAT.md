@@ -481,7 +481,8 @@ IS its current state string. `@jarenjs/flow` ships three thin helpers
 — `snapshotFsm(session)` → `{ state }`, `resumeFsmSession(fsm,
 snapshot)` (an undeclared state refuses with the session's own
 JF2001), and `createDurableFsmSession(fsm, { load, save })`, which
-persists through a SYNCHRONOUS store on every state CHANGE, before
+persists through a SYNCHRONOUS store on every fired transition,
+including self-transitions (`changed: true`), before
 the step result returns and the session advances; a throwing `save`
 leaves the session unchanged so the event can be retried. A worked
 example over a `@jarenjs/db` collection:

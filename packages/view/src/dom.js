@@ -1104,8 +1104,9 @@ function patchChildren(ctx, parent, oldCh, newCh, ns) {
       oldStart++; newStart++;
     }
     else if (isSameNode(oE, nE)) {
-      patchNode(ctx, parent, oldDom[oldEnd], oE, nE, ns);
-      tailRef = oldDom[oldEnd];
+      // A widget may replace its host while keeping its vnode key/tag.
+      // Future insertions must anchor to the live replacement.
+      tailRef = patchNode(ctx, parent, oldDom[oldEnd], oE, nE, ns);
       oldEnd--; newEnd--;
     }
     else if (isSameNode(oS, nE)) {

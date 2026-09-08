@@ -83,7 +83,16 @@ export function createRatesLayer(options = {}) {
     inflight = true;
     lastAt = t;
     const request = ++generation;
-    Promise.resolve(adapter(codes, { fetch: options.fetch, endpoint: options.endpoint, at: t }))
+    let result;
+    try {
+      result = adapter(codes, { fetch: options.fetch, endpoint: options.endpoint, at: t });
+    }
+    catch (err) {
+      // A provider may throw before returning its promise. It still
+      // settles through the failure path and releases the in-flight slot.
+      result = Promise.reject(err);
+    }
+    Promise.resolve(result)
       .then(
         (table) => {
           if (request !== generation) return;

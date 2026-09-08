@@ -154,7 +154,8 @@ export function collectSameDocumentAnchors(root) {
 
 /**
  * Resolve a same-document `$ref` — `#`, `#/` followed by a JSON Pointer, or
- * `#name` for a plain `$anchor` — to the schema it addresses. Refs into other
+ * `#name` for a plain `$anchor` — to the schema it addresses. URI fragment
+ * escapes are decoded once, before JSON Pointer token escapes. Refs into other
  * documents are not followed: a normalizer compiles one schema, and reaching
  * a registered sibling would mean owning the whole resolution scope that
  * `compile` owns. Exported for `@jarenjs/emit`, which must resolve references
@@ -168,12 +169,13 @@ export function collectSameDocumentAnchors(root) {
 export function resolveSameDocumentRef(ref, root, anchors) {
   if (ref === '#') return root;
   if (!ref.startsWith('#')) return undefined;
-  if (!ref.startsWith('#/'))
-    return anchors === undefined ? undefined : anchors.get(ref.slice(1));
   let node = root;
   let tokens;
   try {
-    tokens = parseJSONPointer(ref.slice(1));
+    const fragment = decodeURIComponent(ref.slice(1));
+    if (!fragment.startsWith('/'))
+      return anchors === undefined ? undefined : anchors.get(fragment);
+    tokens = parseJSONPointer(fragment);
   }
   catch (_e) {
     return undefined;
@@ -524,7 +526,8 @@ function compileNode(node, ctx) {
  * **What is normalized.** `properties`, `patternProperties`,
  * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, same-document
  * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
- * with stripping disabled inside it).
+ * with stripping disabled inside it). A materialized root default passes
+ * through the same normalization steps as an explicitly supplied value.
  *
  * **What is not, and why.** `anyOf`, `oneOf`, `if`/`then`/`else` and `not`
  * are not descended: which branch applies is only known after validating,
@@ -586,7 +589,10 @@ export function compileNormalizer(schema, options = {}) {
     return function normalize(data) { return step(data); };
   }
   return function normalizeWithRootDefault(data) {
-    if (data === undefined) return cloneJson(rootDefault);
+    if (data === undefined) {
+      const value = cloneJson(rootDefault);
+      return step === null ? value : step(value);
+    }
     return step === null ? data : step(data);
   };
 }

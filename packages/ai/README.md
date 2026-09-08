@@ -58,7 +58,7 @@ error), `AI0002` (HTTP error status), `AI0003` (malformed payload).
 exponentially with full jitter and try again (`retry: { attempts, baseMs, maxMs }`,
 default 3 total tries; `attempts: 1` disables). A provider `Retry-After` header (seconds
 or HTTP-date) overrides the computed delay, capped at `maxMs`. Two hard rules: a request
-never retries once the caller has observed a streamed delta, and an abort cancels the
+never retries once `onDelta` or `onReasoning` has received output, and an abort cancels the
 backoff immediately. The final `AI0002` reports what happened: `status`, `attempts`,
 `retryAfterMs`.
 

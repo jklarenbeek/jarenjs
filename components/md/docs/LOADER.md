@@ -32,14 +32,23 @@ remembers the response's `ETag` and `Last-Modified`; a cache hit
 resolves immediately with the cached compiled document, and a
 revalidating fetch (`If-None-Match`/`If-Modified-Since`) only replaces
 the entry when the origin answers with new content (`200` with a
-different validator). Entries also key on the compile-relevant options
-(plugin names), so the same URL compiled with different plugin sets
-does not alias.
+different validator). Entries also key on every compile-relevant option:
+GFM and frontmatter parsing, source retention, HTML handling, heading and
+footnote policies, and vnode keys. Plugins and the injected TOML/URL
+callbacks key by identity, so equally named plugins with different
+implementations never alias. Treat plugin objects and callbacks as
+immutable for the lifetime of a compiled document.
 
 - `createMdCache(limit = 64)` — an LRU cache instance; the default
   shared instance is exported as `defaultMdCache`.
 - `cache: false` — bypass entirely.
-- `cache.delete(url)` / `cache.clear()` — manual invalidation.
+- `cache.delete(url)` — invalidate the normalized URL's default-options
+  entry; `cache.clear()` invalidates every entry, including option variants.
+
+Invalidation also revokes a pending load or background revalidation's
+right to update that entry. Its original caller still receives its
+response, but an older completion cannot restore a cleared entry,
+overwrite a newer document, or evict a newer load on failure.
 
 Concurrent `loadMarkdown` calls for the same key share one in-flight
 fetch (the promise itself is cached), so a burst of loads costs one

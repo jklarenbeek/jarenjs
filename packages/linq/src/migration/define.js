@@ -16,7 +16,7 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
-import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson } from '../json-boundary.js';
@@ -30,11 +30,6 @@ const HEAD_MEMBERS = ['$migration', 'id', 'from', 'to', 'note', 'steps'];
 /** A JSON value, copied: the document is a value of its own. @param {any} v */
 const copy = (v) => JSON.parse(JSON.stringify(v));
 
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 /**
  * The model without its `x-rename` hints. A hint is a PLANNING
  * instruction, not shape (MIGRATION-FORMAT §3): two models that differ
@@ -47,11 +42,11 @@ function withoutRenameHints(model) {
   for (const key of Object.keys(model)) setObjectMember(out, key, model[key]);
   for (const member of ['collections', 'entities']) {
     const declared = model[member];
-    if (!isPlainObject(declared)) continue;
+    if (!isJsonObject(declared)) continue;
     const stripped = {};
     for (const name of Object.keys(declared)) {
       const spec = declared[name];
-      if (isPlainObject(spec) && Object.hasOwn(spec, 'x-rename')) {
+      if (isJsonObject(spec) && Object.hasOwn(spec, 'x-rename')) {
         const { 'x-rename': _hint, ...rest } = spec;
         setObjectMember(stripped, name, rest);
       }
@@ -82,10 +77,10 @@ function shapeHashOf(model) {
  */
 function requireModel(model, what) {
   const doc = requireJson(model, what);
-  if (!isPlainObject(doc) || doc.$model !== '0.1') {
+  if (!isJsonObject(doc) || doc.$model !== '0.1') {
     throw new LinqBuildError('JL0101',
       `${what} is a $model 0.1 document (defineModel(…), or its JSON), got `
-      + `${isPlainObject(doc) ? 'an object without $model: \'0.1\'' : describeValue(model)}`);
+      + `${isJsonObject(doc) ? 'an object without $model: \'0.1\'' : describeValue(model)}`);
   }
   return doc;
 }
@@ -98,7 +93,7 @@ function requireModel(model, what) {
 function declaredNames(model) {
   const names = [];
   for (const member of ['entities', 'collections']) {
-    if (isPlainObject(model[member])) names.push(...Object.keys(model[member]));
+    if (isJsonObject(model[member])) names.push(...Object.keys(model[member]));
   }
   return names;
 }
@@ -241,7 +236,7 @@ export class Migration {
  * @returns {Migration}
  */
 export function defineMigration(spec) {
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101', 'defineMigration() takes { id, from, to, note? }');
   }
   for (const key of Object.keys(spec)) {
@@ -277,7 +272,7 @@ export function defineMigration(spec) {
  */
 export function fromPlanned(document, options = undefined) {
   const doc = copy(requireJson(document, 'fromPlanned() document'));
-  if (!isPlainObject(doc) || doc.$migration !== MIGRATION_VERSION
+  if (!isJsonObject(doc) || doc.$migration !== MIGRATION_VERSION
     || typeof doc.id !== 'string' || doc.id === ''
     || typeof doc.from !== 'string' || typeof doc.to !== 'string' || !Array.isArray(doc.steps)) {
     throw new LinqBuildError('JL0101',
@@ -293,7 +288,7 @@ export function fromPlanned(document, options = undefined) {
   }
   let names = null;
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101', `fromPlanned() options are { from?, to? }, got ${describeValue(options)}`);
     }
     for (const key of Object.keys(options)) {

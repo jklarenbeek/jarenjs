@@ -119,6 +119,46 @@ describe('widget vnodes (VIEW-FORMAT §7)', function () {
       [['a', 'mount'], ['a', 'unmount'], ['b', 'mount']]);
   });
 
+  it('inserts before the live tail when a keyed widget replaces its host', function () {
+    const log = [];
+    const { container, render } = host({ w: recorder('w', log) });
+    render(['main', {},
+      ['p', { key: 'a' }, 'A'],
+      ['jaren-widget', { key: 'w', name: 'w', tag: 'div' }]]);
+    render(['main', {},
+      ['p', { key: 'a' }, 'A'],
+      ['p', { key: 'b' }, 'B'],
+      ['jaren-widget', { key: 'w', name: 'w', tag: 'section' }]]);
+    assert.strictEqual(serialize(container),
+      '<div><main><p>A</p><p>B</p><section></section></main></div>');
+    assert.deepStrictEqual(log.map((call) => call[1]), ['mount', 'unmount', 'mount']);
+  });
+
+  it('inserts before a poisoned keyed tail widget when recovery replaces it', function () {
+    const log = [];
+    let mounts = 0;
+    const { container, render } = host({
+      w: {
+        mount() {
+          mounts++;
+          log.push('mount');
+          if (mounts === 1) throw new Error('first mount failed');
+          return {};
+        },
+        unmount() { log.push('unmount'); },
+      },
+    });
+    const widget = ['jaren-widget', { key: 'w', name: 'w' }];
+    assert.throws(() => render(['main', {}, ['p', { key: 'a' }, 'A'], widget]),
+      /first mount failed/);
+    render(['main', {}, ['p', { key: 'a' }, 'A'], ['p', { key: 'b' }, 'B'], widget]);
+    assert.strictEqual(serialize(container),
+      '<div><main><p>A</p><p>B</p><div></div></main></div>');
+    assert.deepStrictEqual(log, ['mount', 'mount']);
+    render.destroy();
+    assert.deepStrictEqual(log, ['mount', 'mount', 'unmount']);
+  });
+
   it('patches host props (class) without any widget call', function () {
     const log = [];
     const props = { n: 1 };

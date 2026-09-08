@@ -263,8 +263,8 @@ export function exceedsBytes(body, limit) {
 //#region entity tags
 
 /**
- * Parse an `If-Match`/`If-None-Match` field into its opaque tags. `*` is
- * reported as `null` in the list; a weak indicator is dropped
+ * Parse an `If-Match`/`If-None-Match` field into its opaque tags. `*` sets
+ * `any`; commas inside quoted tags are retained. A weak indicator is dropped
  * (`W/"x"` → `x`) — the caller decides weak/strong comparison because a
  * strong comparison must reject weak tags, which `weak[i]` records.
  * @param {string} value
@@ -276,9 +276,14 @@ export function parseEntityTags(value) {
   /** @type {boolean[]} */
   const weak = [];
   let any = false;
-  const parts = value.split(',');
-  for (let i = 0; i < parts.length; i++) {
-    let part = parts[i].trim();
+  let start = 0;
+  let quoted = false;
+  for (let i = 0; i <= value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0x22) quoted = !quoted;
+    if (i < value.length && (code !== 0x2c || quoted)) continue;
+    let part = value.slice(start, i).trim();
+    start = i + 1;
     if (part === '*') {
       any = true;
       continue;

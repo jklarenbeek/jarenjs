@@ -13,7 +13,7 @@
  * body's operators, the schema — is the compiler's.
  */
 
-import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
 import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
@@ -24,11 +24,6 @@ const DISPOSITIONS = ['share', 'fresh', 'error'];
 /** A JSON value, copied: the document is a value of its own. @param {any} v */
 const copy = (v) => JSON.parse(JSON.stringify(v));
 
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 /**
  * The `match` member (§3.1), or `undefined` for the unconditional rule.
  * @param {any} match
@@ -37,7 +32,7 @@ function isPlainObject(value) {
 function readMatch(match) {
   if (match === undefined || match === null) return undefined;
   if (typeof match === 'string') return match;
-  if (!isPlainObject(match)) {
+  if (!isJsonObject(match)) {
     throw new LinqBuildError('JL0101',
       `rule() match is a JSONPath string or { path?, schema? }, got ${describeValue(match)}`,
       '/match');
@@ -97,7 +92,7 @@ function readBody(value) {
 export function rule(match, bodyOrFn, options = undefined) {
   const out = {};
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         `rule() options are { mode?, priority? }, got ${describeValue(options)}`);
     }
@@ -156,7 +151,7 @@ export function stylesheet(rules, options = undefined) {
   }
   const out = { $jslt: '0.1' };
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         `stylesheet() options are { unmatched?, modes? }, got ${describeValue(options)}`);
     }
@@ -170,7 +165,7 @@ export function stylesheet(rules, options = undefined) {
       out.unmatched = readDisposition(options.unmatched, 'unmatched');
     }
     if (options.modes !== undefined) {
-      if (!isPlainObject(options.modes)) {
+      if (!isJsonObject(options.modes)) {
         throw new LinqBuildError('JL0101',
           `stylesheet() modes is { name: { unmatched } }, got ${describeValue(options.modes)}`,
           '/modes');
@@ -179,7 +174,7 @@ export function stylesheet(rules, options = undefined) {
       const modes = {};
       for (const name of Object.keys(options.modes)) {
         const mode = options.modes[name];
-        if (!isPlainObject(mode) || Object.keys(mode).length !== 1 || mode.unmatched === undefined) {
+        if (!isJsonObject(mode) || Object.keys(mode).length !== 1 || mode.unmatched === undefined) {
           throw new LinqBuildError('JL0101',
             `stylesheet() mode '${name}' is { unmatched } and nothing else (JSLT-FORMAT §2.1)`,
             `/modes/${name}`);
@@ -191,7 +186,7 @@ export function stylesheet(rules, options = undefined) {
     }
   }
   out.rules = rules.map((r, i) => {
-    if (!isPlainObject(r)) {
+    if (!isJsonObject(r)) {
       throw new LinqBuildError('JL0101',
         `stylesheet() rule ${i} is an object — rule(match, body) — got ${describeValue(r)}`,
         `/rules/${i}`);

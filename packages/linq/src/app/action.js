@@ -19,6 +19,7 @@
  * payload-creator function.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { effectDescriptor, readEffects } from '../effect.js';
 import { describeValue } from '../json-boundary.js';
@@ -51,11 +52,6 @@ const EXCLUDED_FIELDS = new Set([
   'files', 'dataTransfer', 'touches', 'targetTouches', 'changedTouches',
   'path', 'composedPath', 'clipboardData', 'submitter',
 ]);
-
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * A member set the pen knows, or `JL0101` naming the one it does not.
@@ -120,7 +116,7 @@ export function effect(run, props = undefined) {
  * transition({ state: () => null, effects: [effect('save')] });
  */
 export function transition(spec) {
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
       `transition() takes { state?, patch?, effects? }, got ${describeValue(spec)}`);
   }
@@ -157,7 +153,7 @@ export function action(fn, options = undefined) {
       `action() takes a callback (s, x) => transition(…), got ${describeValue(fn)}`);
   }
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         `action() options are { payload?, event? }, got ${describeValue(options)}`);
     }
@@ -232,7 +228,7 @@ export function bind(name, options = undefined) {
   }
   const out = { action: name };
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         'bind() options are { payload?, event?, preventDefault?, stopPropagation? }, got '
         + describeValue(options));

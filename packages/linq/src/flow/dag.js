@@ -20,7 +20,7 @@
  * task-registry resolution (`JF0018`).
  */
 
-import { cloneJson, deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { cloneJson, deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
@@ -40,11 +40,6 @@ const EDGE = Symbol.for('@jarenjs/linq/flow-edge');
 const EDGE_MEMBERS = Object.freeze(['port', 'select']);
 /** The members `defineDag()` takes. */
 const DAG_MEMBERS = Object.freeze(['nodes', 'edges']);
-
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * A member set the pen knows, or `JL0101` naming the one it does not.
@@ -209,7 +204,7 @@ export function edge(from, to, options = undefined) {
   }
   const members = { from, to };
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101',
         `edge() options are { port?, select? }, got ${describeValue(options)}`);
     }
@@ -250,12 +245,12 @@ export function edge(from, to, options = undefined) {
  * await compileDag(graph).run([{ age: 20 }]);
  */
 export function defineDag(spec) {
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
       `defineDag() takes { nodes, edges }, got ${describeValue(spec)}`);
   }
   closedTo(spec, DAG_MEMBERS, 'defineDag()');
-  if (!isPlainObject(spec.nodes)) {
+  if (!isJsonObject(spec.nodes)) {
     throw new LinqBuildError('JL0101',
       `defineDag() nodes is a plain object of id → node declaration, got ${describeValue(spec.nodes)}`,
       '/nodes');
@@ -268,7 +263,7 @@ export function defineDag(spec) {
   const nodes = {};
   for (const id of ids) {
     const declared = spec.nodes[id];
-    const members = isPlainObject(declared) ? declared[NODE] : undefined;
+    const members = isJsonObject(declared) ? declared[NODE] : undefined;
     if (members === undefined) {
       throw new LinqBuildError('JL0101',
         `defineDag() node '${id}' is input(), constant(), query(), jslt(), task() or `
@@ -284,7 +279,7 @@ export function defineDag(spec) {
   }
   const edges = spec.edges.map((declared, i) => {
     const at = `/edges/${i}`;
-    const members = isPlainObject(declared) ? declared[EDGE] : undefined;
+    const members = isJsonObject(declared) ? declared[EDGE] : undefined;
     if (members === undefined) {
       throw new LinqBuildError('JL0101',
         `defineDag() edges[${i}] is edge(from, to, options?), got ${describeValue(declared)}`, at);

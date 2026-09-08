@@ -155,17 +155,22 @@ export async function* applyMapAsync(items, fn, opts) {
     const start = async () => {
       const step = await items.next();
       if (step.done) { sourceDone = true; return; }
+      if (rejected) return; // a task failed while this source pull awaited
       const id = nextId++;
-      inflight.set(id, Promise.resolve(fn(step.value, signal)).then(
+      const promise = Promise.resolve(fn(step.value, signal)).then(
         (value) => ({ id, value }),
         // the task's identity rides in an internal ENVELOPE, never on the
         // rejection value. Stamping the value mutated whatever the handler
         // threw: a frozen error became a different TypeError, a thrown
         // string came back boxed, an ordinary error grew a private
         // property, and a hostile proxy could break normalization outright.
-        (error) => { throw new TaskFailure(id, error); }));
+        (error) => { throw new TaskFailure(id, error); });
+      // Observe failures immediately, including while the next source
+      // pull is pending or downstream has stopped consuming the window.
+      promise.catch(() => { rejected = true; controller.abort(); });
+      inflight.set(id, promise);
     };
-    while (!sourceDone && inflight.size < opts.concurrency) await start();
+    while (!sourceDone && !rejected && inflight.size < opts.concurrency) await start();
     while (inflight.size > 0) {
       let settled;
       try {
@@ -179,7 +184,7 @@ export async function* applyMapAsync(items, fn, opts) {
         throw err;
       }
       inflight.delete(settled.id);
-      if (!sourceDone) await start();
+      if (!sourceDone && !rejected) await start();
       yield settled.value;
     }
   }

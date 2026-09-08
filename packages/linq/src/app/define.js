@@ -24,7 +24,7 @@
  * click; the pen can see the whole document at once and refuses it.
  */
 
-import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
@@ -36,11 +36,6 @@ const APP_VERSION = '0.1';
 
 /** The members `defineApp()` takes. */
 const APP_MEMBERS = Object.freeze(['state', 'initial', 'schema', 'view', 'actions', 'subs']);
-
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /** A JSON value, copied: the document is a value of its own. @param {any} v */
 const copy = (v) => JSON.parse(JSON.stringify(v));
@@ -65,7 +60,7 @@ function initialOf(schema, at, needed) {
   }
   if (schema.default !== undefined) return { has: true, value: copy(schema.default) };
   if (schema.const !== undefined) return { has: true, value: copy(schema.const) };
-  if (!isPlainObject(schema.properties)) return { has: false };
+  if (!isJsonObject(schema.properties)) return { has: false };
 
   const required = Array.isArray(schema.required) ? schema.required : [];
   const out = {};
@@ -114,7 +109,7 @@ function collectBoundActions(node, out) {
       const name = literalName(value);
       if (name !== null) out.add(name);
     }
-    if (key === 'on' && isPlainObject(value)) {
+    if (key === 'on' && isJsonObject(value)) {
       for (const binding of Object.values(value)) {
         const name = literalName(binding);
         if (name !== null) out.add(name);
@@ -137,7 +132,7 @@ function readView(view) {
       + 'bare rule array; the format requires the member and the runtime refuses an app '
       + 'without one (JA0002)', '/view');
   }
-  if (!Array.isArray(view) && !isPlainObject(view)) {
+  if (!Array.isArray(view) && !isJsonObject(view)) {
     throw new LinqBuildError('JL0101',
       `defineApp() view is a JSLT stylesheet document or a bare rule array, got ${describeValue(view)}`,
       '/view');
@@ -165,7 +160,7 @@ function readView(view) {
  * createApp(document, { node, validateState: new JarenValidator().compile(stateSchema) });
  */
 export function defineApp(spec) {
-  if (!isPlainObject(spec)) {
+  if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
       `defineApp() takes { state, initial?, schema?, view, actions?, subs? }, got ${describeValue(spec)}`);
   }
@@ -199,7 +194,7 @@ export function defineApp(spec) {
   /** @type {Record<string, any> | undefined} */
   let actions;
   if (spec.actions !== undefined) {
-    if (!isPlainObject(spec.actions)) {
+    if (!isJsonObject(spec.actions)) {
       throw new LinqBuildError('JL0101',
         `defineApp() actions is an object of named action() declarations, got ${describeValue(spec.actions)}`,
         '/actions');
@@ -207,7 +202,7 @@ export function defineApp(spec) {
     requireNameMap(spec.actions, 'defineApp() actions', '/actions');
     actions = {};
     for (const [name, declared] of Object.entries(spec.actions)) {
-      if (!isPlainObject(declared) || declared[ACTION] !== true) {
+      if (!isJsonObject(declared) || declared[ACTION] !== true) {
         throw new LinqBuildError('JL0101',
           `defineApp() action '${name}' is action((s, x) => transition(…)), got ${describeValue(declared)}`,
           `/actions/${name}`);
@@ -225,7 +220,7 @@ export function defineApp(spec) {
         '/subs');
     }
     subs = spec.subs.map((declared, i) => {
-      if (!isPlainObject(declared) || declared[SUB] !== true) {
+      if (!isJsonObject(declared) || declared[SUB] !== true) {
         throw new LinqBuildError('JL0101',
           `defineApp() subs[${i}] is sub(run, options?), got ${describeValue(declared)}`,
           `/subs/${i}`);

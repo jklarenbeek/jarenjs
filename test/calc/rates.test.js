@@ -99,6 +99,32 @@ describe('#calc rates layer (effect + debounce + fallback)', function () {
     assert.ok(/HTTP 503/.test(events[0][1].message));
   });
 
+  it('routes a synchronous provider throw to failure and allows the next refresh', async () => {
+    let calls = 0;
+    const events = [];
+    const layer = createRatesLayer({
+      provider: () => {
+        calls++;
+        if (calls === 1) throw new Error('offline');
+        return Promise.resolve({ base: 'USD', rates: { USD: 1 } });
+      },
+      refreshMs: 0,
+      now: () => 1,
+    });
+    const dispatch = (name, payload) => events.push([name, payload]);
+    assert.doesNotThrow(() => layer.effects['rates-fetch']({}, dispatch));
+    assert.equal(calls, 1, 'the provider is still invoked synchronously');
+    await Promise.resolve();
+    assert.deepEqual(events, [['calc/rates-err', { message: 'offline' }]]);
+    layer.effects['rates-fetch']({}, dispatch);
+    await Promise.resolve();
+    assert.equal(calls, 2);
+    assert.deepEqual(events, [
+      ['calc/rates-err', { message: 'offline' }],
+      ['calc/rates-ok', { base: 'USD', rates: { USD: 1 }, at: 1 }],
+    ]);
+  });
+
   it('an older success or failure cannot replace the newest successful refresh', async () => {
     for (const staleFails of [false, true]) {
       const pending = [];

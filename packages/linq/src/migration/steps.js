@@ -13,6 +13,7 @@
  * `$it` inside the `$for` the format's own example writes.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { captureExpression } from '../expression.js';
 import { body } from '../jslt/body.js';
 import { describeValue, requireJson } from '../json-boundary.js';
@@ -27,11 +28,6 @@ const NO_PARAMS = new Set();
 
 /** A JSON value, copied: the document is a value of its own. @param {any} v */
 const copy = (v) => JSON.parse(JSON.stringify(v));
-
-/** @param {any} value */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * A table name: an identifier, as the artifact's pattern admits.
@@ -117,7 +113,7 @@ export function transformStep(name, spelling) {
   else if (Array.isArray(spelling)) {
     stylesheet = copy(requireJson(spelling, 'transform() rules'));
   }
-  else if (isPlainObject(spelling) && spelling.$jslt === '0.1') {
+  else if (isJsonObject(spelling) && spelling.$jslt === '0.1') {
     for (const key of Object.keys(spelling)) {
       if (key !== '$jslt' && key !== 'rules') {
         throw new LinqBuildError('JL0102',
@@ -155,7 +151,7 @@ export function assertStep(name, spelling, options = undefined) {
   requireName(name, 'assert()');
   let expect;
   if (options !== undefined) {
-    if (!isPlainObject(options)) {
+    if (!isJsonObject(options)) {
       throw new LinqBuildError('JL0101', `assert() options are { expect? }, got ${describeValue(options)}`);
     }
     for (const key of Object.keys(options)) {
@@ -211,10 +207,10 @@ export function deriveStep(name, columns) {
  */
 export function rawStep(step) {
   const raw = copy(requireJson(step, 'step()'));
-  if (!isPlainObject(raw) || !STEP_KINDS.includes(raw.kind)) {
+  if (!isJsonObject(raw) || !STEP_KINDS.includes(raw.kind)) {
     throw new LinqBuildError('JL0101',
       `step() takes a migration step with a recognised kind (${STEP_KINDS.join(', ')}), got `
-      + `${isPlainObject(raw) ? `kind ${describeValue(raw.kind)}` : describeValue(step)}`);
+      + `${isJsonObject(raw) ? `kind ${describeValue(raw.kind)}` : describeValue(step)}`);
   }
   const need = (member, ok) => {
     if (!ok) {
