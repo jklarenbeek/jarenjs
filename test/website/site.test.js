@@ -530,11 +530,12 @@ describe('website — the site as one app document', function () {
     [`${RAW_MAIN}/packages/core/README.md`]:
       '![logo](../../jaren.png)\n\n'
       + '- the reference is [DATES](./docs/DATES.md)\n'
+      + '- jump to [date section](./docs/DATES.md#date%2Dsection)\n'
       + '- see [formats](../formats) and [LICENSE](./LICENSE)\n\n'
       + 'More at [spec](https://example.com/spec) and [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n\n'
       + '## Quick start\n\nJump to [quick start](#quick-start).\n',
     [`${RAW_MAIN}/packages/core/docs/DATES.md`]:
-      '# dates doc\n\nBack to [the README](../README.md).\n',
+      '# dates doc\n\nBack to [the README](../README.md).\n\n## Date section\n',
     [`${RAW_MAIN}/packages/formats/README.md`]: '# formats readme\n',
   };
 
@@ -651,6 +652,29 @@ describe('website — the site as one app document', function () {
     const html = serialize(container);
     assert.match(html, /class="md-dialog-title">packages\/formats\/README\.md/);
     assert.match(html, /formats readme/);
+  });
+
+  it('cross-document fragments stay in the dialog and replay after loading through history', async function () {
+    const { app, container, urls, scrolled, hashes } = await openCoreReadme();
+    const link = find(container, (n) => n.tagName === 'a'
+      && n.childNodes?.[0]?.nodeValue === 'date section');
+    fire(link, 'click');
+    assert.deepStrictEqual(scrolled, [], 'the new document has not loaded yet');
+    await tick();
+    assert.strictEqual(app.getState().readme.url, `${RAW_MAIN}/packages/core/docs/DATES.md#date%2Dsection`);
+    assert.strictEqual(urls.at(-1), `${RAW_MAIN}/packages/core/docs/DATES.md`, 'only the document path is fetched');
+    assert.deepStrictEqual(scrolled, ['date-section'], 'the fragment is decoded after the document renders');
+    assert.ok(find(container, (n) => n.attributes?.get('id') === 'date-section'), 'the destination heading exists');
+    assert.strictEqual(app.getState().readme.stack.length, 2);
+    const before = hashes.length;
+    app.dispatch('readme/back');
+    await tick();
+    app.dispatch('readme/forward');
+    await tick();
+    assert.deepStrictEqual(scrolled, ['date-section', 'date-section']);
+    assert.strictEqual(hashes.length, before, 'the route stays on the docs page');
+    app.dispatch('theme/toggle');
+    assert.deepStrictEqual(scrolled, ['date-section', 'date-section'], 'an unrelated render does not scroll again');
   });
 
   it('parseHash covers the route grammar', function () {
@@ -813,8 +837,8 @@ describe('website — every published figure is the measured one', function () {
         assert.match(html, new RegExp(`${ajv.passed} / ${ajv.failed} / ${ajv.errors}`),
           `the ${draft} ajv row is the generated one`);
       }
-      assert.match(html, /431 \/ 2 \/ 0/,
-        'the two failing 2020-12 cases are published, not rounded away');
+      assert.match(html, /433 \/ 0 \/ 0/,
+        'the corrected dynamic references pass in the refreshed 2020-12 measurement');
     });
 
     it('says so when the run cannot be loaded', async function () {

@@ -393,6 +393,10 @@ export function emitPlan(plan, dialect, physical) {
         // per row.
         const column = q(pred.column);
         const list = pred.cells.map((cell) => param({ literal: cell })).join(', ');
+        // An empty membership search item raises in the query engine. The
+        // candidate fetch must retain it for the original row predicate.
+        if (pred.keepEmpty === true) return pred.cells.length === 0 ? `${column} IS NULL`
+          : `(${column} IS NULL OR ${column} IN (${list}))`;
         return `(${column} IS NOT NULL AND ${column} IN (${list}))`;
       }
       case 'cellPrefix': {

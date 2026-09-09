@@ -84,6 +84,56 @@ const MODEL = {
 };
 
 describe('PostgreSQL, live', { skip: SKIP }, () => {
+  it('an unsafe allocated int8 key refuses and rolls back insert or put, including a caught nested refusal', async () => {
+    const driver = await freshDriver();
+    const schema = schemas.at(-1);
+    const store = await openStore(MODEL, { driver });
+    const sequence = `pg_get_serial_sequence('"${schema}".events', 'key')`;
+    const rows = async () => (await admin.query(`SELECT key::text FROM "${schema}".events`)).rows;
+    try {
+      await admin.query(`SELECT setval(${sequence}, 9007199254740991, false)`);
+      const key = await store.collection('events').insert({ n: 1 });
+      assert.strictEqual(key, Number.MAX_SAFE_INTEGER);
+      assert.deepStrictEqual(await store.collection('events').get(key), { n: 1 });
+      await store.collection('events').delete(key);
+      for (const method of ['insert', 'put']) {
+        await assert.rejects(store.collection('events')[method]({ n: 2 }),
+          (error) => error.code === 'JD2005' && /safe JavaScript integer range/.test(error.reason));
+        assert.deepStrictEqual(await rows(), []);
+      }
+      await store.transaction(async (tx) => {
+        await assert.rejects(tx.collection('events').insert({ n: 3 }),
+          (error) => error.code === 'JD2005');
+        await tx.collection('users').insert({ id: 'still-usable' });
+      });
+      assert.deepStrictEqual(await rows(), []);
+      assert.deepStrictEqual(await store.collection('users').get('still-usable'), { id: 'still-usable' });
+    }
+    finally {
+      await store.close();
+    }
+  });
+
+  it('concurrent first opens all verify the winning collection and entity shapes', async () => {
+    const model = { ...MODEL, entities: { Marker: { schema: { type: 'object', properties: {
+      id: { type: 'string', 'x-entity': { key: true } }, value: { type: 'integer' },
+    } } } } };
+    for (let round = 0; round < 4; round++) {
+      const driver = await freshDriver();
+      const outcomes = await Promise.allSettled(Array.from({ length: 8 }, () => openStore(model, { driver })));
+      try {
+        assert.deepStrictEqual(outcomes.filter((outcome) => outcome.status === 'rejected'), []);
+        const stores = outcomes.map((outcome) => outcome.value);
+        await stores[0].entity('Marker').create({ id: 'shared', value: round });
+        for (const store of stores) assert.deepStrictEqual(await store.entity('Marker').get('shared'),
+          { id: 'shared', value: round });
+      }
+      finally {
+        for (const outcome of outcomes) if (outcome.status === 'fulfilled') await outcome.value.close();
+      }
+    }
+  });
+
   before(async () => {
     pg = (await import('pg')).default;
     admin = new pg.Client({ connectionString: URL });

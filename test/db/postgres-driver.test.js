@@ -219,6 +219,18 @@ describe('the injected PostgreSQL driver', () => {
       assert.deepStrictEqual(out[1], { count: null, total: null, small: null, plain: null });
     });
 
+    it('int8 refuses unsafe values from text, bigint, or a host number parser', async () => {
+      const fields = [{ name: 'key', dataTypeID: 20 }];
+      for (const value of ['9007199254740991', '-9007199254740991', 3n, 4]) {
+        assert.deepStrictEqual(await readBack(fields, [{ key: value }]), [{ key: Number(value) }]);
+      }
+      for (const value of ['9007199254740992', '9007199254740993', '-9007199254740993',
+        9007199254740993n, 9007199254740992]) {
+        await assert.rejects(readBack(fields, [{ key: value }]),
+          (error) => error.code === 'JD2005' && /safe JavaScript integer range/.test(error.reason));
+      }
+    });
+
     it('a bool is 1 or 0, which is what every shared form compares against', async () => {
       const out = await readBack([{ name: 'ok', dataTypeID: 16 }],
         [{ ok: true }, { ok: false }, { ok: null }]);

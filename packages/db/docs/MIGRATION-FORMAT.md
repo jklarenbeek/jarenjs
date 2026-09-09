@@ -107,6 +107,39 @@ and the column entry carries the width the value is packed to:
 
 ## 3. Planning and the widening/narrowing rule
 
+### Repairing a legacy spatial member expression
+
+SQLite derived spatial columns read members as JSON values, preserving strings
+and booleans as well as geometry objects and coordinate arrays. A legacy column
+declared with `json(jsonb_extract(...))` has different SQL and remains a
+`JD0002` at open; opening never rewrites an existing table. Rebuild those
+derived columns through an ordinary migration. The intermediate model below
+removes only spatial indexes; the two plans are combined into one transaction,
+including any R\*Tree trigger removal and backfill:
+
+```js
+const withoutSpatial = structuredClone(model);
+for (const collection of Object.values(withoutSpatial.collections ?? {})) {
+  collection.indexes = (collection.indexes ?? [])
+    .filter((index) => !['geohash', 'bbox'].includes(index.derive));
+}
+const remove = planMigration(model, withoutSpatial, { dialect: sqliteDialect }).migration;
+const restore = planMigration(withoutSpatial, model, { dialect: sqliteDialect }).migration;
+const repair = {
+  ...remove, id: 'spatial-member-json', to: restore.to,
+  steps: [...remove.steps, ...restore.steps],
+};
+await migrate({ driver, path }, [...previousMigrations, repair], { baseline, model });
+```
+
+Keep the historical baseline and full migration list. With no previous migrations,
+`baseline` is `model`. The logical model hash stays the same; the explicit
+artifact changes the physical expression. Shadow verification and final shape
+validation run normally, stored documents remain intact, and replay skips the
+recorded repair. The stored-column mapping does not need this repair.
+
+### Model differences
+
 `planMigration(fromModel, toModel, { dialect, id, derived })` produces
 `{ migration, report }` by diffing the two models' PHYSICAL plans. The
 from-model is the previous model — the previous model FILE, or, under

@@ -432,8 +432,10 @@ describe('spatial promotions (the implied conjunct)', () => {
     assert.strictEqual(planned.plan.filter.column, 'gx_at_gh6');
     assert.strictEqual(planned.plan.filter.cells.length, 9);
     assert.ok(planned.plan.filter.cells.includes('u173zc'), 'the cell itself is one of the nine');
-    assert.strictEqual(planned.mode, 'native');
-    assert.strictEqual(planned.prefilters[0].exact, true);
+    assert.strictEqual(planned.plan.filter.keepEmpty, true);
+    assert.strictEqual(planned.mode, 'set');
+    assert.strictEqual(planned.prefilters[0].exact, false);
+    assert.match(planned.reasons[0].reason, /empty/);
     // a cell that is not the column's own length compares whole strings
     // against a different length, so nothing may be assumed
     const mismatched = planQuery(where({

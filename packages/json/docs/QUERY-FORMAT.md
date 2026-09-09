@@ -1441,13 +1441,20 @@ survives.
 ```json
 { "$let": { "cells": { "$geohash-neighbours": { "$geohash": ["$.here", 6] } } },
   "$return": { "$for": { "c": "$.places[*]" },
-               "$where": { "$exists": { "$index-of": ["$cells", { "$geohash": ["$c.at", 6] }] } },
+               "$where": { "$and": [
+                 { "$exists": { "$geohash": ["$c.at", 6] } },
+                 { "$exists": { "$index-of": ["$cells", { "$geohash": ["$c.at", 6] }] } }
+               ] },
                "$return": "$c.name" } }
 ```
 
 — the nine-cell probe, in the language's own clauses. Narrow it with
 `$distance` when an exact radius matters; the cells are the cheap filter, not
 the answer.
+
+The existence guard excludes a missing or unbounded position before
+`$index-of` receives its search item; that operator requires exactly one item
+and raises `JQ2001` for an empty search expression.
 
 ```json
 { "$for": { "c": "$.cities[*]" },

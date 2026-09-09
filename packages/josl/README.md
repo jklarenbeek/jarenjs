@@ -147,7 +147,10 @@ for await (const record of iterateJoslStream(response.body, { signal }))
 Every reader refuses a document by size only when asked: the limits
 default to `Infinity`, count **UTF-8 bytes** (never code units), and are
 checked while the offending text is still in cutter, token or container
-state — before a concatenation or a link could cross them. A crossing
+state. Limited streams inspect bounded slices and reject an oversized pending
+span before accepting another slice; complete spans are checked before decoding
+or linking values. Total bytes include a leading BOM, and splitting a surrogate
+pair across chunks does not change the byte count. A crossing
 throws `JoslLimitError` with a stable code and the limit; it is never a
 repair, because a document that is too large is not damaged.
 
@@ -159,7 +162,7 @@ repair, because a document that is too large is not damaged.
 | CSV | `maxColumns` | `CSV2004` |
 | JOSL / TOML | `maxTotalBytes` | `JOSL2001` |
 | JOSL / TOML | `maxRecordBytes` (one logical line) | `JOSL2002` |
-| JOSL / TOML | `maxTokenBytes` (a string or key as written, quotes included) | `JOSL2003` |
+| JOSL / TOML | `maxTokenBytes` (a key or scalar token as written, quotes and regexp flags included) | `JOSL2003` |
 | JOSL / TOML | `maxDepth` (inline nesting, header path depth) | `JOSL2004` |
 | JOSL / TOML | `maxRetainedValues` (values the root holds; starts over per detached `[[]]` item) | `JOSL2005` |
 | JSONX / JSON stream | `maxTotalBytes` | `JSONX2001` |
@@ -171,6 +174,11 @@ The CSV and JOSL limits guard the whole-document parsers too, which run
 the same machines; the JSONX limits are the stream reader's, which is
 where a document arrives a chunk at a time. `CSV_LIMIT_CODES`,
 `JOSL_LIMIT_CODES` and `JSONX_LIMIT_CODES` are the tables as data.
+
+Field and token limits bound those spans, not an entire record containing many
+small spans. Use `maxRecordBytes` or `maxTotalBytes` as well when the buffered
+source itself needs a hard ceiling. Open strings, bare keys and scalar tokens
+are checked as they arrive, including in the first chunk.
 
 Measured on a synthetic OpenStreetMap-shaped extract (`node --expose-gc
 benchmark/jsonx-stream.js`), reading 20 000 features of 40 vertices each:
@@ -457,12 +465,12 @@ acceptance corpus, and on a scorecard of damaged documents.
 <!--fact:csv.table-->
 | engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |
 | --- | --- | --- | --- | --- |
-| **jaren** | **11/11** | 2.3 ms | 3.4 ms | 1.4 ms |
-| udsv | 11/11 | **1.9 ms** | **3.1 ms** | **1.0 ms** |
-| papaparse | 11/11 | 6.8 ms | 8.0 ms | 2.1 ms |
-| csv-parse | 11/11 | 18.8 ms | 12.1 ms | 11.0 ms |
-| d3-dsv | 11/11 | 2.8 ms | 4.3 ms | 1.7 ms |
-| @vanillaes/csv | n/a | 7.9 ms | 7.9 ms | 4.8 ms |
+| **jaren** | **11/11** | 2.2 ms | 3.0 ms | 1.3 ms |
+| udsv | 11/11 | **1.8 ms** | **2.9 ms** | **1.0 ms** |
+| papaparse | 11/11 | 5.8 ms | 7.5 ms | 2.1 ms |
+| csv-parse | 11/11 | 17.7 ms | 11.9 ms | 11.0 ms |
+| d3-dsv | 11/11 | 2.9 ms | 3.9 ms | 1.7 ms |
+| @vanillaes/csv | n/a | 5.9 ms | 7.3 ms | 4.6 ms |
 <!--/fact-->
 
 (The suite's twelfth fixture, `location_coordinates`, is excluded: its

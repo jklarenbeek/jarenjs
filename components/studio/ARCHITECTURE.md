@@ -104,11 +104,19 @@ DOM-touching widgets. The website mounts it live at
   state with `app.setState` (a diff re-render, so the running app keeps
   scroll, focus and uncontrolled inputs — no reboot);
 - the **edit loop** commits the last-good app mount, so an invalid edit
-  keeps the previous frame on the stage;
+  keeps the previous frame on the stage. `layout.autorun: false` holds
+  commits until Run; the toolbar toggle persists in the project layout;
+- the **stage error** is the latest nested-app boot/runtime failure,
+  displayed from `project.stageError` and cleared before a new boot;
 - the **layout switcher** (pen bar) drives the three grid modes, and the
-  drag **splitter** (a pointer-capture widget) drives the grid's
+  drag **splitter** drives the grid's
   `--js-ratio` live and commits `layout.ratio` on pointer-up — also an
-  ARIA `separator`, arrow-key resizable.
+  ARIA `separator`, arrow-key resizable. It uses the vertical axis for
+  stacked panes and restores the committed ratio on pointer cancellation.
+
+The host's Download action serializes a complete `jaren-project` snapshot;
+App JSON retains the separate single-app export. Neither includes transient
+results, mounted runtime state or stage errors.
 
 ## One pane at a time on a phone
 

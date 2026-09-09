@@ -257,7 +257,8 @@ export function memberAt(doc, segments) {
 /**
  * Parse the JSON text a derived column's expression hands the function.
  * SQLite passes SQL NULL for a member the document does not have, and
- * `json()` of an extracted member is unambiguous JSON text otherwise.
+ * the JSON-valued extraction preserves the member's encoding otherwise,
+ * including quotes around strings and the spelling of booleans.
  * @param {any} text
  * @returns {any} the value, or `undefined` when there is none
  */

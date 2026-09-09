@@ -69,6 +69,27 @@ function runProperty(config, adapterSpec, frames, seed) {
 }
 
 describe('chart session — byte-equality property', function () {
+  it('sampled rebuilds scan source points exactly as often as wholesale builds', () => {
+    for (const extra of [{}, { domain: { x: { window: 1500, slide: 100 } } }, { log: true }]) {
+      let reads = 0;
+      const data = { series: [{ name: 'sampled', points: Array.from({ length: 3000 }, (_, i) => ({
+        get x() { reads++; return i; }, y: 1 + i % 100,
+      })) }] };
+      const config = { type: 'line', x: 'time', ...extra };
+      const wholesale = compileChart(config, data).toVnode();
+      const expectedReads = extra.domain ? 12000 : 6000;
+      assert.equal(reads, expectedReads);
+      const session = createChartSession(config, { getData: () => data,
+        takeChanges: () => [{ op: 'replace', path: '' }] });
+      for (let tick = 0; tick < 2; tick++) {
+        reads = 0;
+        const result = session.tick();
+        assert.equal(result.mode, 'rebuilt');
+        assert.equal(reads, expectedReads);
+        assert.equal(renderToString(result.vnode), renderToString(wholesale));
+      }
+    }
+  });
   it('policy config: every frame byte-equal, most frames incremental', function () {
     const config = {
       type: 'line', title: 'Stream', markers: true,

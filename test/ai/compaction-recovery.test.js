@@ -40,6 +40,26 @@ const SHAPE_KEYS = /** @type {const} */ (['front', 'late']);
 const wireSize = (messages) => messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
 
 describe('ai — compaction moves instead of destroying (D4)', function () {
+  it('refuses colliding archive addresses before losing a round or calling the model', async () => {
+    for (const legacy of [false, true]) {
+      const ledger = createLedger();
+      const storage = legacy ? { getSlot: ledger.getSlot, readSlot: ledger.readSlot, putSlot: ledger.putSlot } : ledger;
+      let calls = 0;
+      const client = { complete: async () => {
+        calls++;
+        return { message: { role: 'assistant', content: 'ok', toolCalls: null }, finishReason: 'stop' };
+      } };
+      const history = [{ role: 'user', content: 'go' },
+        { role: 'assistant', content: 'ID%lGHipCD_`' },
+        { role: 'assistant', content: 'iNcv1D?lK(q0' },
+        ...Array.from({ length: 5 }, (_, i) => ({ role: 'user', content: `filler ${i}${'x'.repeat(300)}` }))];
+      const before = structuredClone(history);
+      await assert.rejects(createAgent({ client: /** @type {any} */ (client), ledger: storage, historyBudget: 500 }).send(history), /collision/);
+      assert.strictEqual(calls, 0);
+      assert.deepStrictEqual(history, before);
+      assert.deepStrictEqual(await ledger.listSlots(), []);
+    }
+  });
   it('every fact is recoverable at every benchmark budget, in both payload shapes', async function () {
     const corpus = makeCorpus({});
     for (const shape of SHAPE_KEYS) {

@@ -177,7 +177,7 @@ describe('compileDag — THE PROGRAM THESIS', function () {
         rows: { kind: 'input' },
         adults: {
           kind: 'query',
-          query: { $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' },
+          query: [{ $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' }],
         },
         view: {
           kind: 'jslt',
@@ -204,6 +204,11 @@ describe('compileDag — THE PROGRAM THESIS', function () {
     assert.deepStrictEqual(result,
       ['ul', {}, [['li', {}, 'ada'], ['li', {}, 'lin']]],
       'the exact vnode JSON, engine to engine, no rendering package anywhere');
+
+    assert.deepStrictEqual(await dag.run([{ name: 'ada', age: 36 }, { name: 'kid', age: 8 }]),
+      ['ul', {}, [['li', {}, 'ada']]], 'one adult is one child with the same array shape');
+    assert.deepStrictEqual(await dag.run([{ name: 'kid', age: 8 }]),
+      ['ul', {}, []], 'no adults is an empty child array');
 
     const manifest = JSON.parse(readFileSync(
       new URL('../../packages/flow/package.json', import.meta.url), 'utf8'));

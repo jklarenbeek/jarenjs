@@ -53,6 +53,15 @@ const editActiveApp = (app, container, mutate) => {
 };
 
 describe('website — the Project IDE (#/project)', () => {
+  it('stores results under the exact file name, including JSON Pointer characters', () => {
+    const { app } = mountSite();
+    for (const name of ['folder/a.query', 'a~1b.query', '__proto__']) {
+      app.dispatch('project/result', { name, result: { ok: true, value: 42 } });
+      assert.deepStrictEqual(app.getState().project.results[name], { ok: true, value: 42 });
+      assert.strictEqual(Object.hasOwn(app.getState().project.results, name), true);
+    }
+    app.destroy();
+  });
   it('boots the starter project: the IDE chrome, the file rail, and a LIVE app stage', () => {
     const { app, container } = mountSite();
     const html = serialize(container);
@@ -127,6 +136,24 @@ describe('website — the Project IDE (#/project)', () => {
     fire(btn, 'click', {});
     assert.notStrictEqual(app.getState().project.stageError, null,
       'the nested runtime error was captured as a stage error, isolated from the site');
+    assert.match(serialize(container), /js-stage-error/);
+    assert.ok(serialize(container).includes(app.getState().project.stageError));
+    app.dispatch('project/run');
+    assert.strictEqual(app.getState().project.stageError, null, 'a successful restart clears the old failure');
+  });
+
+  it('autorun false preserves the last app frame until an explicit run', () => {
+    const { app, container } = mountSite();
+    app.dispatch('project/autorun');
+    assert.strictEqual(app.getState().project.layout.autorun, false);
+    editActiveApp(app, container, (doc) => { doc.state.title = 'MANUAL TITLE'; });
+    assert.doesNotMatch(serialize(container), /<h1[^>]*>MANUAL TITLE/);
+    assert.match(serialize(container), /Hello from the studio/);
+    app.dispatch('project/run');
+    assert.match(serialize(container), /<h1[^>]*>MANUAL TITLE/);
+    app.dispatch('project/autorun');
+    editActiveApp(app, container, (doc) => { doc.state.title = 'LIVE AGAIN'; });
+    assert.match(serialize(container), /<h1[^>]*>LIVE AGAIN/);
   });
 });
 

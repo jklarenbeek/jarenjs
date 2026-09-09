@@ -43,6 +43,7 @@
  */
 
 import { chunkText, excerpt, truncate } from '@jarenjs/core/chunk';
+import { setObjectMember } from '@jarenjs/core/object';
 
 import { createLedger } from './ledger.js';
 
@@ -63,6 +64,14 @@ const CHUNK_PREVIEW = 8;
 
 /** The default piece size, in characters. */
 const CHUNK_SIZE = 4000;
+
+/** Validate a finite host budget before it can become a slice endpoint. */
+function budgetOption(value, fallback, name, minimum = 0) {
+  const result = value ?? fallback;
+  if (!Number.isSafeInteger(result) || result < minimum)
+    throw new TypeError(`${name} must be a ${minimum ? 'positive' : 'non-negative'} safe integer`);
+  return result;
+}
 
 /** The kind a chunk slot is written under, so a digest can group them. */
 export const CHUNK_KIND = 'chunk';
@@ -194,10 +203,10 @@ export function createEnvironment(options = {}) {
     ? scopedLedger(base, options.scope)
     : base;
   const compileQuery = typeof options.compileQuery === 'function' ? options.compileQuery : null;
-  const excerptChars = options.excerptChars ?? EXCERPT_CHARS;
-  const digestSlots = options.digestSlots ?? DIGEST_SLOTS;
-  const matchLimit = options.matchLimit ?? MATCH_LIMIT;
-  const defaultChunkSize = options.chunkSize ?? CHUNK_SIZE;
+  const excerptChars = budgetOption(options.excerptChars, EXCERPT_CHARS, 'excerptChars');
+  const digestSlots = budgetOption(options.digestSlots, DIGEST_SLOTS, 'digestSlots');
+  const matchLimit = budgetOption(options.matchLimit, MATCH_LIMIT, 'matchLimit');
+  const defaultChunkSize = budgetOption(options.chunkSize, CHUNK_SIZE, 'chunkSize', 1);
 
   /** Compiled selections, keyed by their document — `select` on a
    * hundred chunks compiles one query, not a hundred. */
@@ -261,7 +270,16 @@ export function createEnvironment(options = {}) {
       bytes += text.length;
       index += 1;
     }
+    await removeStalePieces(chunkFamily(name, strategy, size), index);
     return { name, family: chunkFamily(name, strategy, size), count: index, size: bytes };
+  }
+
+  /** A replacement owns indexed family members, never a host's named siblings. */
+  async function removeStalePieces(family, count) {
+    for (const old of await ledger.listSlots()) {
+      if (old.name.startsWith(family) && /^\d+$/.test(old.name.slice(family.length))
+        && Number(old.name.slice(family.length)) >= count) await ledger.deleteSlot(old.name);
+    }
   }
 
   /**
@@ -270,9 +288,9 @@ export function createEnvironment(options = {}) {
    * @param {{ chars?: number }} [options_]
    */
   async function peek(name, options_ = {}) {
+    const chars = Math.min(budgetOption(options_.chars, excerptChars, 'chars'), excerptChars * 4);
     const slot = await ledger.getSlot(name);
     if (slot === null) return unknown(name);
-    const chars = Math.min(options_.chars ?? excerptChars, excerptChars * 4);
     const content = await ledger.readSlot(name);
     return {
       ...view(slot),
@@ -293,11 +311,12 @@ export function createEnvironment(options = {}) {
    *   overlap?: number, separator?: string, preview?: number }} [options_]
    */
   async function chunk(name, options_ = {}) {
+    const preview = Math.min(budgetOption(options_.preview, CHUNK_PREVIEW, 'preview'), CHUNK_PREVIEW);
     const slot = await ledger.getSlot(name);
     if (slot === null) return unknown(name);
     const content = await ledger.readSlot(name);
     const strategy = options_.strategy ?? 'size';
-    const size = options_.size ?? defaultChunkSize;
+    const size = budgetOption(options_.size, defaultChunkSize, 'size', 1);
     const pieces = chunkText(String(content ?? ''), { ...options_, strategy, size });
 
     for (const piece of pieces) {
@@ -306,12 +325,7 @@ export function createEnvironment(options = {}) {
       if (written?.error !== undefined) return written;
     }
     // A shorter replacement must not leave old pieces reachable by grep/map.
-    const family = chunkFamily(name, strategy, size);
-    for (const old of await ledger.listSlots()) {
-      if (old.name.startsWith(family) && /^\d+$/.test(old.name.slice(family.length))
-        && Number(old.name.slice(family.length)) >= pieces.length) await ledger.deleteSlot(old.name);
-    }
-    const preview = Math.min(options_.preview ?? CHUNK_PREVIEW, CHUNK_PREVIEW);
+    await removeStalePieces(chunkFamily(name, strategy, size), pieces.length);
     return {
       source: name,
       strategy,
@@ -346,8 +360,8 @@ export function createEnvironment(options = {}) {
     if (compiled.error !== undefined) return { error: compiled.error, pattern };
     const regex = compiled.value;
     const scope = options_.in ?? '';
-    const limit = Math.min(options_.limit ?? matchLimit, matchLimit);
-    const chars = Math.min(options_.chars ?? MATCH_CHARS, MATCH_CHARS);
+    const limit = Math.min(budgetOption(options_.limit, matchLimit, 'limit'), matchLimit);
+    const chars = Math.min(budgetOption(options_.chars, MATCH_CHARS, 'chars'), MATCH_CHARS);
 
     const slots = await slotsUnder(scope);
     /** @type {any[]} */
@@ -419,30 +433,30 @@ export function createEnvironment(options = {}) {
     }
 
     const key = JSON.stringify(query);
-    let run = queries.get(key);
-    if (run === undefined) {
+    let compiled = queries.get(key);
+    if (compiled === undefined) {
       try {
-        run = compileQuery(query);
+        compiled = { run: compileQuery(query), index: queries.size };
       }
       catch (err) {
         const e = /** @type {any} */ (err);
         return { error: `the query does not compile: ${e?.reason ?? e?.message ?? err}`,
           code: e?.code, docPath: e?.docPath };
       }
-      queries.set(key, run);
+      queries.set(key, compiled);
     }
 
     /** @type {any} */
     let result;
     try {
-      result = run(data);
+      result = compiled.run(data);
     }
     catch (err) {
       const e = /** @type {any} */ (err);
       return { error: `the query failed on '${name}': ${e?.reason ?? e?.message ?? err}` };
     }
     const text = JSON.stringify(result ?? null);
-    const target = options_.as ?? `${name}#select/${queries.size - 1}`;
+    const target = options_.as ?? `${name}#select/${compiled.index}`;
     const written = await ledger.putSlot(target, text, {
       kind: 'selection',
       count: Array.isArray(result) ? result.length : undefined,
@@ -475,7 +489,7 @@ export function createEnvironment(options = {}) {
     let size = 0;
     let largest = slots[0];
     for (const slot of slots) {
-      kinds[slot.kind] = (kinds[slot.kind] ?? 0) + 1;
+      setObjectMember(kinds, slot.kind, (Object.hasOwn(kinds, slot.kind) ? kinds[slot.kind] : 0) + 1);
       size += slot.size;
       if (slot.size > largest.size) largest = slot;
     }
@@ -501,7 +515,7 @@ export function createEnvironment(options = {}) {
    */
   async function digest(options_ = {}) {
     const slots = await slotsUnder(options_.prefix ?? '');
-    const limit = Math.min(options_.limit ?? digestSlots, digestSlots);
+    const limit = Math.min(budgetOption(options_.limit, digestSlots, 'limit'), digestSlots);
     const listed = slots.slice(0, limit);
     let size = 0;
     for (const slot of slots) size += slot.size;
@@ -527,7 +541,7 @@ export function createEnvironment(options = {}) {
    */
   async function read(name, options_) {
     const chars = Math.floor(options_?.chars ?? 0);
-    if (!(chars > 0)) {
+    if (!Number.isSafeInteger(chars) || !(chars > 0)) {
       return { error: 'read needs an explicit character budget: read(name, { chars })' };
     }
     const slot = await ledger.getSlot(name);

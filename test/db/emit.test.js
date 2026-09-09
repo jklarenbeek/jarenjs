@@ -222,7 +222,7 @@ describe('the spatial forms (over derived columns)', () => {
       where({ $exists: { '$index-of': [
         { '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }] } }), sqliteDialect);
     assert.match(whole.sql,
-      /WHERE \("gx_at_gh6" IS NOT NULL AND "gx_at_gh6" IN \(\?, \?, \?, \?, \?, \?, \?, \?, \?\)\)/);
+      /WHERE \("gx_at_gh6" IS NULL OR "gx_at_gh6" IN \(\?, \?, \?, \?, \?, \?, \?, \?, \?\)\)/);
     assert.strictEqual(whole.slots.length, 9);
 
     const prefix = emitPlaces(

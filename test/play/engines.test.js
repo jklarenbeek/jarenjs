@@ -21,6 +21,20 @@ const deep = (r) => r.panels.filter((p) => p.depth === 'deep');
 const view = (r) => r.panels.find((p) => p.kind === 'view')?.vnode;
 
 describe('@jarenjs/play — the engines run', () => {
+  it('threads explicit externals through JSLT, JTLT and XQuery', () => {
+    for (const [engine, source, expected] of [
+      ['jslt', { stylesheet: '[{"match":"$","body":"$who"}]' }, '"Ada"'],
+      ['jtlt', { template: '[{"match":"$","body":["Hello ","$who"]}]' }, 'Hello Ada'],
+      ['xquery', { text: 'declare variable $doc external; declare variable $factor external; $doc * $factor' }, '6'],
+    ]) {
+      const value = runExample(engine, { ...source, externals: '{"who":"Ada","factor":3,"doc":100}' }, { data: '2' });
+      assert.strictEqual(value.ok, true, value.error?.message);
+      assert.strictEqual(out(value), expected);
+      const invalid = runExample(engine, { ...source, externals: '{broken' }, { data: '2' });
+      assert.strictEqual(invalid.ok, false);
+      assert.strictEqual(invalid.error.pane, 'externals');
+    }
+  });
   it('path selects nodes from a document, with a deep drill-down (cards + normalized paths)', () => {
     const r = runExample('path', { selector: '$.book[*].title' }, { data: '{"book":[{"title":"A"},{"title":"B"}]}' });
     assert.strictEqual(r.ok, true);

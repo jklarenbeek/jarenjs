@@ -33,6 +33,47 @@ function corpus(lines = 200) {
 const AT = '2026-08-13T09:00:00Z';
 const env = (options = {}) => createEnvironment({ now: () => AT, ...options });
 
+describe('environment replacement and bounds', () => {
+  it('keeps each cached selection at its own address', async () => {
+    const environment = env({ compileQuery: compileJsonQuery });
+    await environment.put('data', '[1,2]');
+    const sum = await environment.select('data', { $sum: '$[*]' });
+    const count = await environment.select('data', { $count: '$[*]' });
+    assert.strictEqual((await environment.select('data', { $sum: '$[*]' })).name, sum.name);
+    assert.strictEqual(await environment.ledger.readSlot(count.name), '2');
+  });
+  it('removes only stale indexed pieces after a shorter or empty ingestion', async () => {
+    const environment = env();
+    await environment.ingest('corpus', ['current', 'stale']);
+    await environment.put('corpus#given:0/note', 'keep');
+    await environment.ingest('corpus', ['replacement']);
+    assert.strictEqual((await environment.grep('stale')).total, 0);
+    await environment.ingest('corpus', []);
+    assert.deepStrictEqual((await environment.ledger.listSlots()).map((slot) => slot.name), ['corpus#given:0/note']);
+  });
+  it('refuses invalid caps before negative slice indices can expose bulk data', async () => {
+    const environment = env();
+    await environment.put('data', 'x'.repeat(10000));
+    for (const bad of [-1, NaN, Infinity, 1.5, '2']) {
+      assert.throws(() => env({ digestSlots: bad }), TypeError);
+      await assert.rejects(environment.peek('data', { chars: bad }), TypeError);
+      await assert.rejects(environment.digest({ limit: bad }), TypeError);
+      await assert.rejects(environment.chunk('data', { preview: bad }), TypeError);
+      await assert.rejects(environment.grep('x', { limit: bad }), TypeError);
+    }
+    assert.strictEqual((await environment.digest({ limit: 0 })).listed, 0);
+    assert.strictEqual((await environment.chunk('data', { preview: 0 })).chunks.length, 0);
+  });
+  it('counts prototype-like slot kinds as own members', async () => {
+    const environment = env();
+    for (const kind of ['__proto__', 'constructor', 'toString']) await environment.put(kind, 'x', { kind });
+    const stats = await environment.stat();
+    assert.strictEqual(stats.slots, 3);
+    assert.deepStrictEqual(Object.keys(stats.kinds).sort(), ['__proto__', 'constructor', 'toString']);
+    for (const count of Object.values(stats.kinds)) assert.strictEqual(count, 1);
+  });
+});
+
 describe('ai — the environment', function () {
   it('answers with metadata, never with content', async function () {
     const environment = env();

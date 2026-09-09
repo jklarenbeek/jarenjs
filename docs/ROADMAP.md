@@ -89,7 +89,6 @@ delete it or fix it.
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
 - [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
 - [ ] **Standalone `@jarenjs/jslt` package** — publish the stylesheet layer as its own package only when the query-engine internals it needs have a deliberate public boundary; today the module stays colocated to avoid exposing compiler internals.
-- [ ] **Bare `$`/`$root` `$apply` selectors and locations** — a bare root selector currently dispatches location-less; JSLT-FORMAT §6.4 ("path rooted at") arguably includes the zero-segment path. Clarify the spec or carry the location.
 - [ ] **`$apply` mode-argument typing in the schema twins** — the draft-neutral subset forbids tuple validation, so a non-string mode in the two-item `$apply` array is compiler-rejected (JT0007) but schema-accepted. Changing this means abandoning the mechanical twin transform or changing the language encoding; documented in JSLT-FORMAT Appendix B.
 
 ## @jarenjs/json — XQuery front-end & QT3
@@ -100,19 +99,6 @@ delete it or fix it.
 - [ ] **Front-end diagnostic polish** — a bare NameTest colliding with a keyword (`let`, `order`, ...) raises `unexpected keyword` instead of `unsupported construct 'path expression'`; `=>` after a comparison RHS raises a generic error. Deliberate-diagnostic spots, baselined as known bugs in the QT3 harness.
 
 ## @jarenjs/validate
-
-- [ ] **Two `$dynamicRef` cases fail in 2020-12** — the official suite's
-  `dynamicRef.json` has two groups Jaren does not satisfy: *"A `$dynamicRef`
-  that initially resolves to a schema with a matching `$dynamicAnchor`
-  resolves to the first `$dynamicAnchor` in the dynamic scope"* (1 of 2
-  assertions) and *"after leaving a dynamic scope, it is not used by a
-  `$dynamicRef`"* (2 of 3). Both sit where the dynamic scope must be
-  *unwound*: the resolver keeps an anchor visible after the scope that
-  introduced it has been left. They went unseen because Ajv errors on the
-  same two groups (`"$dynamicRef" only supports hash fragment reference`)
-  and the conformance count dropped every test the rival could not compile
-  — each engine is now scored over the tests it ran, so the suite reports
-  them.
 
 - [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped
   sibling-coverage elision compiles away the checks that are statically
@@ -131,52 +117,12 @@ delete it or fix it.
   shape added for `anyOf`/`oneOf`/`not`/`if`/`contains` is the tool if this
   ever needs finer treatment.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
-- [ ] **Cross-root compile memo for registered schemas** — a *registered* schema whose `$query` literal `$ref`s that same registration compiles a fresh root per hook invocation and can recurse at `compile()` time; a cross-root memo would close this compile-time foot-gun.
 - [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.
-- [ ] **Normalizer edges** — a selected rest coercion can reach unselected
-  `prefixItems` positions; a root `default` is cloned but not passed through the
-  root's own normalization step; an own property explicitly set to `undefined`
-  suppresses its default and stays `undefined`; and a `default` reachable only
-  behind a local `$ref` does not materialize an absent property.
 - [ ] **Predicate normalization from the CLI** — `--defaults`/`--coerce` are
   booleans, so the per-node predicate route (`x-trim`, `x-coerce`, `x-default`)
   is programmatic-only; a config-file route would make it usable from the CLI.
-- [ ] **`data` next to `$ref` in 2019-09+** — `$query` was added to the `$ref`-sibling keyword list; `data` has the same latent gap and still relies on pre-existing behavior.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
-
-- [ ] **A scoped QUIRKS pass over the validate/emit triangle is owed, and
-  its findings are already reproduced.** A reading of validate, emit and
-  the normalizer beside each other returned eighteen findings that no
-  campaign since has been allowed to widen into. They are listed here so
-  the pass starts from reproductions rather than from a re-reading, and
-  they are NOT ordered by severity: `patternProperties` beside a
-  schema-valued `additionalProperties` types NARROWER than the document
-  admits; the accepted-twin memo is order-dependent under cycles;
-  constraints on anonymous nodes are dropped silently; `nullable: true` is
-  ignored by emit; `required` away from `properties` is dropped; absolute
-  same-document `$ref`s and percent-encoded pointers go unresolved by the
-  shared resolver; `$ref` siblings under the default draft; a
-  self-`$ref`ing `$query` literal hangs `compile()`; `/re/flags` pattern
-  keys diverge between the validator and the normalizer, which is silent
-  data loss; `addSchema(s); compile(s)` throws; the emit-model schema
-  rejects `extensions`; four MIGRATING-FROM-ZOD rows mislead (`.strict()`,
-  `tuple`, the `items` count, `schemaPath`); a hidden `errors` getter sits
-  on compiled validators; `validateSchema` defaults to draft-06 while
-  `compile` defaults to draft-07; a `$query` literal cannot see the
-  enclosing document, beside two message typos; the emit README's outputs
-  differ from the tool's; integer coercion rounds above 2^53; and a set of
-  dead switches (the `validation` option, a boolean `required`,
-  `--suffix`, `--name`, raw stack traces, `enum` with a mismatched
-  `type`). One more, found while building the schema pen and worth naming
-  separately because it has a working route beside it:
-  `JarenValidator.addMetaSchema(<the 2020-12 bundle>)` — the array form
-  `@jarenjs/refs` hands out — answers `false` for every schema, and so
-  does the 2019-09 bundle; compiling the main document with the
-  vocabulary documents registered beside it (`addSchema(vocabularies)
-  .compile(main)`) works, and is what this repository's own tests do.
-  Each of these is a fix, a documented deviation or a drop; none is a
-  widening of a shipped behavior without that decision being made.
 
 ## @jarenjs/contract
 
@@ -235,11 +181,6 @@ delete it or fix it.
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
 - [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§8: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
-- [ ] **Controlled select SSR** — a trusted `select` vnode with `value: 'b'`
-  currently emits a `value` attribute without selecting its matching option,
-  so a browser initially selects the first option. Carry selection context
-  through options and optgroups, including multiple selections and options
-  whose value comes from their text, to satisfy VIEW-FORMAT §6.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
 - [ ] **Safe-mode composition/IME and a real-browser adversarial suite** — the
   safe render profile (VIEW-FORMAT §8) and the controlled-input registry are
@@ -270,20 +211,6 @@ delete it or fix it.
   `@jarenjs/josl` incremental readers is the natural 0.2 composition,
   and doing it honestly changes the node contract, so it is a format
   revision rather than an option.
-- [ ] **A dag node's result carries the query engine's singleton rule,
-  and §6 never says so** — QUERY-FORMAT rule 5 identifies a one-item
-  sequence with the item, and `compileDag` calls a compiled query with
-  its default entry point, so a `query` node whose filter passes exactly
-  one row yields THAT ROW where two rows yield an array. FLOW-FORMAT §6
-  states only the empty case ("a `query`/`jslt` node whose own result is
-  empty yields `null`"), and its own worked example changes shape at one
-  row. Reproduction: run §6's document over
-  `[{name:'ada',age:36},{name:'kit',age:9},{name:'lin',age:20}]` — the
-  `ul` carries two `li`s with names; drop `lin` and the `ul` carries two
-  EMPTY `li`s, because the downstream `$[*]` iterated the surviving
-  object's values. The fix is a §6 sentence and a worked example that
-  cannot be read two ways, or a node-level "always a sequence" option;
-  either is a format decision, not a bug fix.
 - [ ] **Editor: free-form geometry** — the Flow studio lays out every
   diagram deterministically and connects by click-source-then-target;
   free-form node dragging and *persisted* positions are out of scope for
@@ -307,14 +234,6 @@ delete it or fix it.
   the third scheduler with better manners. Built when that consumer exists.
 
 ## @jarenjs/md
-
-- [ ] **`meta.hash` costs ~11% of a parse and cannot simply go lazy** — hashing
-  the source is a full pass over it, paid by every caller including the ones
-  that never read the hash. A getter would fix that and would also make an
-  MdDocument stop being plain JSON, which MD-FORMAT §1.1 promises it is; an
-  opt-out flag would leave a document carrying a hash that is a lie. Measured
-  and left alone deliberately — the honest fix is the `Math.imul` item above,
-  which halves it for everyone.
 
 - [ ] **Chunking is text-only; a block sequence has no packer.** `@jarenjs/core/chunk`
   cuts one string by size, line or separator with offsets back into it,
@@ -351,17 +270,6 @@ delete it or fix it.
 
 - [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
 - [ ] **Deeper treemap nesting** — one hierarchy level ships (groups squarify, children squarify under a naming band). Arbitrary depth needs a recursive layout and a header budget that does not eat the leaves.
-- [ ] **A sampled line session scans its input twice.** Above the 2,000-point
-  default the session rebuilds every frame, and `rebuild()` runs
-  `scanLineExtremes` and then lets `buildLineAST` scan the same input again —
-  so a 10,000-point time line patches at 3.25 ms against a 2.53 ms wholesale
-  render, the one shape where the incremental path is the slower one
-  (`sampling: false` restores the 4.44 µs patch exactly, and both rows are
-  published in the charts suite). Letting `buildLineAST` accept pre-scanned
-  extremes, or having the session read them back off the AST, removes the
-  second scan; the session's contract is byte equality with `compileChart` of
-  the same data, so whatever is passed forward has to be what the wholesale
-  path would have computed.
 
 ## @jarenjs/calc
 
@@ -387,11 +295,6 @@ costs a descriptor plus examples and no UI code at all.
   parsers are pure, but they consume a stream rather than a string, so a
   descriptor for them first needs a source pane that means "feed this in
   chunks" — a question the `(source, data)` shape does not answer.
-- [ ] **JSLT, JTLT and XQuery cannot be given externals** — all three compiled
-  functions accept an externals object and play passes none, so `$query` is the
-  only engine with an externals pane. XQuery is the sharp case: it binds
-  exactly `$doc` and silently drops every other declared external, so a query
-  with a second variable cannot run here at all.
 - [ ] **The `validate` engine is single-schema** — one schema pane and no
   `addSchema`, so a schema that `$ref`s another by `$id` cannot be demonstrated
   even though the docs teach exactly that. The other surfaces that compile
@@ -402,12 +305,6 @@ costs a descriptor plus examples and no UI code at all.
   are data, so each is cheap; what makes the gap worth listing is that it is
   invisible from the page — a reader who sees four chart examples concludes
   there are four charts.
-- [ ] **The package documents its view but not its host contract** — play is the
-  only component without an `ARCHITECTURE.md`, and the reducer actions, the
-  debounced run loop, the session document store and the share codec all live at
-  the host, described nowhere. The `play-splitter` widget and the `$.dataForm`
-  mount point are host seams the format doc's seam list omits, so a second
-  consumer finds them by reading the website's source.
 
 ## @jarenjs/studio
 
@@ -459,31 +356,10 @@ beyond a textarea, which is what the first two entries are about.
   (`packages/json/schemas/jaren-{query,jslt}.llm-profile.schema.json`).
   `app`/`fsm`/`dag`/`model` would each need a profile derived, or would have to
   accept the canonical schema with its unresolved-`$ref` limitation stated.
-- [ ] **There is no whole-project takeaway** — `project/download` emits the
-  designated `app` file's document as one JSON file, so every query, jslt,
-  schema and data sibling is dropped, and a project with no `app` file at all
-  (three of the shipped templates) downloads nothing and says nothing. That
-  gap has a second edge: a project whose share token exceeds the 8000-character
-  limit is honestly refused a link and told to "use Download instead" — advice
-  Download cannot currently fulfil. The intended answer is a `.zip` eject: the
-  project as a folder that runs offline, every file under a sane name plus a
-  small host page and a README. The one real decision it needs is how the
-  ejected host reaches `@jarenjs/*` — bundled, or a pinned CDN — which has to
-  be chosen and written down rather than defaulted into.
-- [ ] **The stage swallows a nested app's own failures** — `project/stage-error`
-  is dispatched from three places in the stage widget, reduced into
-  `project.stageError`, and never read by any view, so an app that throws at
-  boot or at runtime shows the user nothing. A real console is out of the
-  question by construction: nested documents get widgets but no effects and no
-  subscriptions, and capturing `console.*` would breach exactly that isolation.
-  The substitute the design calls for is a boot-log / last-error panel fed by
-  the state that is already being collected.
-- [ ] **Two `layout` knobs the IDE does not honour** — `autorun` is in the
-  schema, in PROJECT-FORMAT and in `LAYOUT_DEFAULT`, and no code reads it:
-  there is no toggle and the debounced commit loop always runs, so the format
-  promises a switch the document cannot actually throw. Either honour it or
-  drop it. Separately, the drag splitter is horizontal, so `data-mode="top"`
-  hides it and the stacked layout cannot be resized at all.
+- [ ] **A runnable offline project export.** Download now preserves every file
+  and the layout in a `jaren-project` JSON envelope. A `.zip` eject with a
+  host page, runtime dependencies and a README remains a separate capability;
+  it needs an explicit bundled-versus-pinned-CDN dependency policy.
 - [ ] **No syntax highlighting** — the editor is a plain `<textarea>` here and
   in `@jarenjs/play`. The two ways to add it — a `contenteditable` surface, or
   a mirrored `<pre>` behind a transparent textarea — both fight the
@@ -559,14 +435,6 @@ what each does is its own documentation's job
   promotion stays: project only when no residual conjunct still needs a
   member the projection would drop, because a projection that dropped
   one is a wrong answer rather than a slow one.
-- [x] **Synchronous entity cursors and pages.** `SyncEntitySet.cursor`,
-  `loadCursor` and `page` share async plans, bounds and keyset identity;
-  synchronous disposal and scope/Store cleanup have regression coverage.
-  See [execution hosts](../packages/db/docs/HOSTS.md).
-- [x] **Nested include byte accounting.** Decoding records exact UTF-8 JSON
-  sizes bottom-up, removing the second full nested serialization. The bounded
-  outer value is still parsed whole; measured traversal/heap losses are published
-  in [execution hosts](../packages/db/docs/HOSTS.md).
 - [ ] **A third SQL dialect, and the two capability slots still empty.**
   PostgreSQL 16+ ships (`@jarenjs/db/postgres`): the same model, the
   same query documents and the same differential oracle run on both
@@ -603,18 +471,6 @@ what each does is its own documentation's job
   which needs sources that declare an ordering; and the same door on the
   entity translator's own three-plus-binding residual (MODEL-FORMAT
   §10.6).
-- [ ] **A re-run live view is read before it has re-run.**
-  `benchmark/live.js`'s event-time leg compares `live.result.rows`
-  against the kernel's own answer immediately after a write. The
-  MAINTAINED view passes it — the patch is applied with the write — and
-  the `rerun` view does not, because its re-execution is scheduled and
-  `LiveQuery` exposes no settle point to await, only `subscribe`. The
-  suite has failed this way for at least four releases, so
-  `benchmark:generate` omits the live rows rather than publishing wrong
-  ones. Two ways to close it, and the choice is the live contract's: the
-  harness awaits an emission before it compares, or a re-run view
-  settles before `result` is readable. Found by QUERYREACH's close-out;
-  it belongs to whoever owns live maintenance.
 - [ ] **Replication beyond bounded SQLite histories.** Portable JSON envelopes,
   replica identities, causal frontiers, durable replay receipts, transactional
   apply, explicit conflicts and bounded snapshot resets are implemented in
@@ -633,21 +489,6 @@ what each does is its own documentation's job
   graph projections and LINQ group-of-groups emission. Offset windows remain
   rerun. [Equal-correctness measurements](../packages/db/docs/REPLICATION-FORMAT.md#measurements)
   publish initialization and high-fan-out losses beside selective maintenance.
-- [x] **The session extension in the wasm build.** A disposable live probe
-  gates session capture; failed/missing bindings name journal fallback.
-  Transfer, rollback and close cleanup are covered by the shared host corpus.
-- [x] **The SharedArrayBuffer OPFS VFS and persistence ladder.** Isolated
-  and ordinary three-engine fixtures exercise the runtime-probed OPFS paths,
-  atomic IndexedDB snapshots, denied storage and visibly non-durable memory.
-  Production header availability remains the host's choice; engine limitations
-  are recorded in [the host matrix](../packages/db/docs/HOSTS.md).
-- [x] **A worker-hosted Node driver and its pool.** The worker Driver and
-  bounded one-writer WAL pool share Store values/errors, credited row transport,
-  generation fencing, transaction affinity, FIFO refusal and lifecycle metrics.
-  [Measurements](../packages/db/docs/HOSTS.md) publish event-loop gains beside
-  startup/throughput/RSS losses. Scope is explicit: root Store admission remains
-  serial, and native SQLite calls cannot be preempted by V8 worker termination;
-  deadline failure fences the connection without promising a rollback.
 - [ ] **Typed SQL migration aggregates need an intermediate schema.**
   Proven collection counts now execute through the existing SQL query planner.
   Other independent `$count`, `$sum`, `$avg`, `$min`, `$max` operands use
@@ -682,7 +523,6 @@ what each does is its own documentation's job
   the conjunction alone is exact — which is a model-format change with its own
   migration parity, plus `createIntervalIndex` as the resident shape it would
   then serve.
-
 
 ## @jarenjs/ai
 
@@ -811,16 +651,6 @@ and LIVE-FORMAT; the spatial authoring profile and the geo toolbox in the
 and the one-document-three-executors claim in `docs/ARCHITECTURE.md`. What is
 still open is listed here, each with its reason.
 
-- [ ] **`$geo-parse` and the published proximity recipe raise where the rest
-  of §8.14 answers.** §8.14's nine-cell membership test is `$exists` over
-  `$index-of`, and `$index-of` refuses an empty search item (`JQ2001`), so a
-  row whose geometry has no bounded position — a missing coordinate, an empty
-  `FeatureCollection` — raises in the engine and under a pushdown-off run,
-  while the same query under the promotion never fetches that row and answers.
-  Whether the *language* should answer `false` there (a membership test over
-  nothing is not a match) is a query-format decision with a spec diff, not a
-  patch; until it is made, guard the probe with `$exists` on the position, as
-  the format's prose says.
 - [ ] **The spatial authoring profile has not met a live model.** Its three
   refusals (a geohash prefix offered as proximity, planar arithmetic over a
   coordinate member, a geographic ask with no spatial operator) are proven on
@@ -830,17 +660,6 @@ still open is listed here, each with its reason.
   `@jarenjs/ai` README. Its intent reader is an English word list — a question
   that says "in the neighbourhood of" without a listed word is not read as
   proximity, so a prefix document passes; a host can pass its own `gates`.
-- [ ] **A string at a derived index path cannot be stored.** A collection
-  declaring `derive` on a member writes that member into the generated column
-  through `json(jsonb_extract(doc, …))`, and `jsonb_extract` hands back the raw
-  SQL value for a string rather than its JSON representation — so `json()`
-  rejects it and the insert fails with `JD2005: malformed JSON`. Numbers,
-  booleans, `null` and arrays are unaffected. The member is not geography in
-  that case, so the document was wrong; the failure is opaque about it, and a
-  collection whose spatial member is sometimes a WKT string cannot be written
-  at all. The fix is a dialect-level change to how the member reaches the
-  function, which moves a generated column's declared expression and therefore
-  needs the shape-verification and migration story thought through with it.
 - [ ] **A parameterized `$distance` bound is not promoted.** A bounded
   `$distance` pushes its circle's box only when BOTH the probe position and the
   radius are literals: an external on either side would need a parameter slot
@@ -861,27 +680,6 @@ still open is listed here, each with its reason.
   [Turf](https://github.com/Turfjs/turf) (~796k weekly downloads) and JSTS
   (~577k), and records the loss here rather than pretending the gap is small.
 
-## The website
-
-- [ ] **A cross-document deep link leaves the site.** The README dialog's
-  link walk (`rewriteAnchor`, `packages/website/src/boundaries/markdown.js`)
-  resolves a repo-relative href and then tests the resolved path for
-  `.md` — but the path still carries its `#fragment`, so
-  `SCHEMA-PEN.md#4-refusals` fails that test, fails `isDirectoryPath`
-  next because its last segment contains a dot, and falls through to a
-  GitHub blob URL in a new tab. A bare `SCHEMA-PEN.md` navigates in the
-  dialog and a same-document `#4-refusals` scrolls; only the two
-  together throw the reader out, which is exactly the form a directory
-  of interlinked documents wants to write. The fix has to split the
-  fragment off before the extension test and then carry it: the dialog's
-  navigation state is `{ title, url }` in three places — `readme/navigate`
-  patches it, the `readme-hist` effect stores it as the trail entry, and
-  `readme/show` replays that entry on back and forward — and the scroll
-  cannot run at dispatch time the way `readme/anchor` does, because the
-  document is not in the DOM until `readme/loaded`. The trail then has
-  to decide whether a fragment is a history entry of its own or a
-  detail of the entry it arrived with.
-
 ## Benchmarks & tooling
 
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
@@ -890,4 +688,3 @@ still open is listed here, each with its reason.
   wants `--sizes 10000`. Backing the largest leg with a file would buy the
   headroom at the price of measuring a page cache instead of a database, which
   is only worth trading once a runner actually fails.
-- [ ] **Compile-mean coverage in `jslt.js`** — `COMPILE_KEYS` is `['identity', 'surgical', 'annotate']`, so the compile row's stylesheet set omits the reshape stylesheet.

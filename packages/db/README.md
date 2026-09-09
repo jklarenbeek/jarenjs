@@ -297,7 +297,9 @@ no continuation to emit.
   `$within`, a `$bbox-intersects`, a bounded `$distance` or a geohash
   probe over such a collection narrows **in SQLite** through the index
   and refines **in the engine**. `$bbox-intersects` and a geohash cell
-  test are exact and need no refinement; `$within` and a bounded
+  prefix test are exact and need no refinement; neighbourhood membership
+  retains unbounded candidates and preserves the engine's empty-item error.
+  `$within` and a bounded
   `$distance` push a bounding box the truth table proves they imply,
   and the exact predicate re-runs over the narrowed candidates —
   `explain().prefilters` says which, over what columns, and whether it
@@ -431,8 +433,10 @@ how.scanNarrative;
 The region arrives as a bound parameter: a GeoJSON object is not a
 value any database can bind, so what binds is one edge of its box per
 slot, computed at bind time from the same kernel the stored columns
-came from. `$bbox-intersects` and a geohash cell test are exact and
-need no refinement; `$within` and a bounded `$distance` push the box
+came from. `$bbox-intersects` and a geohash prefix no longer than the
+indexed cell are exact and need no refinement; neighbourhood membership
+refines to preserve errors on
+unbounded candidates. `$within` and a bounded `$distance` push the box
 they provably imply and re-run the exact predicate over the narrowed
 candidates. A circle that reaches a pole or crosses the antimeridian
 pushes **nothing** — there is no single box to push — and the answer is
@@ -1085,13 +1089,13 @@ disagree.
 <!--fact:live.eventTimeTable-->
 | view | maintained | re-run | ratio |
 |---|---:|---:|---:|
-| bucket (60 s ladder, mean), 1000 rows | 119 µs | 1.09 ms | 9.2× |
-| rolling (5 min window, mean), 1000 rows | 407 µs | 3.86 ms | 9.5× |
-| bucket (60 s ladder, mean), 10000 rows | 136 µs | 10.9 ms | 80.2× |
-| rolling (5 min window, mean), 10000 rows | 13.7 ms | 62.7 ms | 4.6× |
+| bucket (60 s ladder, mean), 1000 rows | 123 µs | 911 µs | 7.4× |
+| rolling (5 min window, mean), 1000 rows | 411 µs | 3.67 ms | 8.9× |
+| bucket (60 s ladder, mean), 10000 rows | 136 µs | 8.12 ms | 59.6× |
+| rolling (5 min window, mean), 10000 rows | 13.4 ms | 60.9 ms | 4.5× |
 <!--/fact-->
 
-The gain is <!--fact:live.eventTimeBand-->80.2× for the bucket and 4.6× for the rolling at 10,000 readings<!--/fact-->. A bucket
+The gain is <!--fact:live.eventTimeBand-->59.6× for the bucket and 4.5× for the rolling at 10,000 readings<!--/fact-->. A bucket
 view is nearly flat in the series length, because a write folds one
 bucket again and the rest of the ladder is untouched. A rolling view is
 not, and the table says so: its answer is one row per reading, so the

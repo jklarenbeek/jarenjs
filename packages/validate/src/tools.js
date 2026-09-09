@@ -105,7 +105,7 @@ export const REF_SIBLING_KEYWORDS = Object.freeze(['type', 'const', 'enum',
   'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
   'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
   'then', 'else', 'propertyNames', 'contentEncoding', 'contentMediaType',
-  'unevaluatedProperties', 'unevaluatedItems', '$query']);
+  'unevaluatedProperties', 'unevaluatedItems', '$query', 'data']);
 
 /**
  * Whether a schema carrying a `$ref` also carries a keyword of

@@ -45,7 +45,7 @@ carries the type; every pen spelling here is one the pen's corpus emits.
 | `z.literal('a')` | `{ "const": "a" }` | `s.literal('a')` |
 | `z.enum(['a','b'])` | `{ "enum": ["a","b"] }`, or typed: `{ "type": "string", "enum": ["a","b"] }` | `s.enumOf(['a', 'b'])`, or `s.string().enumOf(['a', 'b'])` |
 | `z.array(T)` | `{ "type": "array", "items": T }` | `s.array(T)` |
-| `z.tuple([A, B])` | `{ "type": "array", "prefixItems": [A, B], "items": false, "minItems": 2 }` | `s.tuple([A, B]).rest(s.never())` (without `.rest()` the tuple stays open, as JSON Schema reads it) |
+| `z.tuple([A, B])` | `{ "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "array", "prefixItems": [A, B], "items": false, "minItems": 2 }` | `s.tuple([A, B]).rest(s.never())` (without `.rest()` the tuple stays open, as JSON Schema reads it) |
 | `z.object({...})` | `{ "type": "object", "properties": {...}, "required": [...], "additionalProperties": false }` | `s.object({...})` — closed by default, like `.strict()` |
 | `.optional()` | omit the key from `required` | `.optional()` |
 | `.nullable()` | `{ "type": ["string","null"] }` | `.nullable()` |
@@ -59,7 +59,8 @@ carries the type; every pen spelling here is one the pen's corpus emits.
 | `z.uuid()`, `z.email()`, `z.url()` | `{ "type": "string", "format": "uuid" \| "email" \| "uri" }` | `s.string().uuid()`, `.email()`, `.uri()` |
 | `z.iso.datetime()` | `{ "type": "string", "format": "date-time" }` | `s.datetime()` — typed as the linq `DateTime` brand |
 | `.default(v)` | `{ "default": v }` + the normalizer's `useDefaults` | `.default(v)` — present in `Infer<>`, optional in `Input<>` |
-| `.strict()` (and Zod's default stripping) | `additionalProperties: false` + `removeAdditional` | the default; `.open()` to lift it |
+| `.strict()` | `additionalProperties: false`, with `removeAdditional: false` so extra keys are rejected | `s.object({...})`; keep stripping off |
+| Zod's default object stripping | a declared object shape + `removeAdditional: 'all'` | `s.object({...})`; enable the normalizer's stripping |
 | `.passthrough()` | leave `additionalProperties` open, `removeAdditional: false` | `.open()` |
 | `z.coerce.number()` | `{ "type": "number", "x-coerce": true }` + `coerceTypes` as a predicate | `s.number().coerce()` — `Input<>` admits the string form |
 | `.trim()` | the normalizer's `trimStrings`, as a **predicate** — see below | `s.string().trim()` (`x-trim: true`) |
@@ -125,7 +126,7 @@ const issues = result.errors.map(e => ({
 | `issue.code` | `error.keyword` |
 | `issue.message` | `error.message` |
 | — | `error.msgid` + `error.params`, for report-time i18n |
-| — | `error.schemaPath`, the absolute URI of the failing keyword |
+| — | `error.schemaPath`, the absolute URI of the schema node owning the failing keyword |
 | `result.success` | `result.valid` |
 | `error.issues` (v4) / `error.errors` (v3) | `result.errors` |
 
@@ -146,10 +147,9 @@ function toPath(error) {
 ```
 
 **An array yields per-item errors *plus* an aggregate `items` error** at the
-array itself, carrying the count of failing elements. Zod emits only the
-per-item issues. Decide once, centrally, whether the aggregate is signal
-(useful for "3 of 50 rows are invalid" summaries) or noise, and filter it in
-the adapter rather than at each call site:
+array itself. Its `params` do not carry a failing-element count. Zod emits
+only the per-item issues. Decide once, centrally, whether the aggregate is
+useful, and filter it in the adapter rather than at each call site:
 
 ```javascript
 const issues = result.errors

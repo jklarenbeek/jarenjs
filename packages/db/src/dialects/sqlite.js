@@ -299,8 +299,12 @@ export const sqliteDialect = createDialect({
     ? `LIMIT ${limit === null ? -1 : limit} OFFSET ${offset}`
     : `LIMIT ${limit === null ? -1 : limit}`),
   jsonPathText,
-  jsonExtract: (columnSql, pathText) =>
-    `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
+  // JSON-valued consumers need the encoded member, including quotes around
+  // strings and the original boolean spelling; jsonb_extract returns SQL
+  // scalars for these and json() cannot recover their JSON representation.
+  jsonExtract: (columnSql, pathText, kind) => kind === 'json'
+    ? `(${columnSql} -> ${stringLiteral(pathText)})`
+    : `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
   // a DERIVED column's expression: the member as JSON text handed to
   // the deterministic function the store registers at open. The
   // precision is a LITERAL, not a parameter — a generated column's

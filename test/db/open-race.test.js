@@ -23,6 +23,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { postgresDialect } from '@jarenjs/db/postgres';
 
 import { recordingDriver, tempDbPath } from './helpers.js';
 
@@ -156,6 +157,48 @@ describe('two processes opening one fresh file with the change log and the job t
 });
 
 describe('the mechanism', () => {
+  it('catalog creation races roll back before retry; ordinary constraints and repeated races refuse', async () => {
+    const dialect = postgresDialect();
+    for (const [code, constraint, table, retry] of [
+      ['42P07', undefined, undefined, true],
+      ['23505', 'pg_type_typname_nsp_index', 'pg_type', true],
+      ['23505', 'pg_class_relname_nsp_index', 'pg_class', true],
+      ['23505', 'notes_pkey', 'notes', false],
+      ['23505', 'pg_type_typname_nsp_index', 'notes', false],
+      ['23514', undefined, undefined, false],
+    ]) {
+      for (const persistent of [false, true]) {
+        const statements = [];
+        let attempts = 0;
+        const base = nodeDriver();
+        const driver = { ...base, open: async (...args) => {
+          const connection = await base.open(...args);
+          return { ...connection, dialect: { ...connection.dialect, isCreateRace: dialect.isCreateRace },
+            exec(sql) {
+              statements.push(sql);
+              if (/^CREATE TABLE/.test(sql) && (attempts++ === 0 || persistent))
+                throw Object.assign(new Error('injected create failure'), { code, constraint, table });
+              return connection.exec(sql);
+            },
+          };
+        } };
+        if (retry && !persistent) {
+          const store = await openStore(MODEL, { driver });
+          await store.close();
+          assert.strictEqual(attempts, 2);
+          const failed = statements.findIndex((sql) => /^CREATE TABLE/.test(sql));
+          assert.deepStrictEqual(statements.slice(failed + 1, failed + 3), ['ROLLBACK', 'BEGIN IMMEDIATE']);
+        }
+        else {
+          await assert.rejects(openStore(MODEL, { driver }), (error) => error.code === 'JD0002'
+            && error.cause.code === code);
+          assert.strictEqual(attempts, retry ? 2 : 1);
+          assert.strictEqual(statements.at(-1), 'ROLLBACK');
+        }
+      }
+    }
+  });
+
   it('shape creation runs under BEGIN IMMEDIATE and its DDL is idempotent', async () => {
     const { dbPath, cleanup } = tempDbPath();
     try {

@@ -302,9 +302,17 @@ export const ACTIONS = {
     patch: [{ op: 'replace', path: '/project/mobilePane', value: 'stage' }],
     effects: [{ run: 'project-run' }],
   },
+  'project/autorun': {
+    patch: [
+      { op: 'replace', path: '/project/layout/autorun', value: { $not: '$.project.layout.autorun' } },
+      { op: 'replace', path: '/project/dirty', value: true },
+    ],
+  },
   // a transform file's run result (render nodes) — keyed by file name
   'project/result': {
-    patch: [{ op: 'add', path: { $concat: ['/project/results/', '$payload.name'] }, value: '$payload.result' }],
+    patch: [{ op: 'add', path: { $concat: ['/project/results/',
+      { $replace: [{ $replace: ['$payload.name', '~', '~0'] }, '/', '~1'] },
+    ] }, value: '$payload.result' }],
   },
   // file management: add (a kind from the rail select), delete (× per row),
   // rename (the editor-head name field). Each rewrites the files array in
@@ -373,6 +381,7 @@ export const ACTIONS = {
   'project/template': { effects: [{ run: 'project-template', with: { id: '$payload' } }] },
   // download the designated app file's document (the Studio's takeaway)
   'project/download': { effects: [{ run: 'project-download' }] },
+  'project/export': { effects: [{ run: 'project-export' }] },
   // the layout switcher (which grid mode) + the splitter (where the handle
   // sits within that mode); the splitter widget commits on pointer-up
   'project/layout-mode': { patch: [{ op: 'replace', path: '/project/layout/mode', value: '$payload' }] },

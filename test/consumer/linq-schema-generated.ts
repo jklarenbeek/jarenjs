@@ -183,6 +183,11 @@ export interface Dates {
 }
 
 
+/**
+ * Schema constraints this type cannot express: type="integer"
+ */
+export type ArrayRulesPairItem = number;
+
 export interface ArrayRules {
   /**
    * Schema constraints this type cannot express: minItems=1, maxItems=3, uniqueItems=true
@@ -191,7 +196,7 @@ export interface ArrayRules {
   /**
    * Schema constraints this type cannot express: minItems=2, maxItems=2
    */
-  pair: Array<number>;
+  pair: Array<ArrayRulesPairItem>;
   /**
    * Schema constraints this type cannot express: contains={"const":0}
    */
@@ -215,8 +220,13 @@ export interface Tuples {
 }
 
 
+/**
+ * Schema constraints this type cannot express: type="integer"
+ */
+export type DictAdditional = number;
+
 export interface Dict {
-  [key: string]: number;
+  [key: string]: DictAdditional;
 }
 
 
@@ -250,12 +260,12 @@ export interface Linked {
 }
 
 
-export interface Conditional {
-  k: string;
-  v: unknown;
-  [key: string]: unknown;
-}
+/**
+ * Schema constraints this type cannot express: if={"type":"object","properties":{"k":{"const":"a"}},"required":["k"]}, then={"type":"object","properties":{"v":{"type":"string"}},"required":["v"]}, else={"type":"object","properties":{"v":{"type":"number"}},"required":["v"]}
+ */
+export type ConditionalPart2 = unknown;
 
+export type Conditional = { k: string; v: unknown; [key: string]: unknown; } & ConditionalPart2;
 
 export interface Wrapped {
   meta: { a?: string; [key: string]: unknown; };
@@ -292,8 +302,18 @@ export interface Keyed {
 }
 
 
+export interface DerivedOne {
+  id: string;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  age?: number;
+  email?: string;
+}
+
+
 export interface Derived {
-  one: { id: string; age?: number; email?: string; };
+  one: DerivedOne;
   two?: { name: string; };
 }
 
@@ -308,13 +328,25 @@ export interface Invoice {
 
 
 /**
+ * Schema constraints this type cannot express: $query={"$eq":["$root.currency","$.currency"]}
+ */
+export interface OrderLinesItem {
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  qty: number;
+  currency: string;
+}
+
+
+/**
  * Schema constraints this type cannot express: $query={"$and":[{"$le":["$.start","$.end"]},{"$every":{"l":"$.lines[*]"},"$satisfies":{"$gt":["$l.qty",0]}}]}
  */
 export interface Order {
   currency: string;
   start: DateTime;
   end: DateTime;
-  lines: Array<{ qty: number; currency: string; }>;
+  lines: Array<OrderLinesItem>;
 }
 
 

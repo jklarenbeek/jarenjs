@@ -53,8 +53,8 @@ import { createJsonPointer } from './traverse.js';
  * Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12).
  * These keywords require runtime resolution based on dynamic scope.
  * 
- * $recursiveRef: References the nearest parent schema with $recursiveAnchor: true
- * $dynamicRef: References the nearest parent schema with matching $dynamicAnchor name
+ * $recursiveRef: References the outermost schema resource with $recursiveAnchor: true
+ * $dynamicRef: References the outermost schema resource with matching $dynamicAnchor name
  * 
  * @param {ValidationObject} schemaObj - The validation object
  * @param {object} jsonSchema - The JSON schema
@@ -144,13 +144,13 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
 }
 
 /**
- * Compile $dynamicRef which references the nearest matching $dynamicAnchor.
+ * Compile $dynamicRef which references the outermost matching $dynamicAnchor.
  * 
  * Per JSON Schema 2020-12 spec:
  * 1. The initial target is determined by resolving the reference as a URI reference
  *    against the current base URI (like $ref)
  * 2. If the initial target has $dynamicAnchor with matching name, look up the dynamic scope
- *    for the nearest $dynamicAnchor with that name and use that schema instead
+ *    for the outermost $dynamicAnchor with that name and use that schema instead
  * 3. Otherwise, use the initial target (like a normal $ref)
  * 
  * @param {ValidationObject} schemaObj - The validation object
@@ -162,68 +162,26 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   const ref = jsonSchema.$dynamicRef;
   const addError = schemaObj.createErrorHandler(ref, '$dynamicRef');
 
-  // A $dynamicRef whose fragment is a JSON POINTER (not a plain-name anchor)
-  // behaves identically to $ref: no dynamic resolution takes place.
-  if (ref.startsWith('#') && ref.charAt(1) === '/') {
-    const baseUri = schemaObj.baseUri;
-    const { id: resolvedRef } = createJsonPointer(ref, baseUri);
+  const baseUri = schemaObj.baseUri;
+  const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri);
+
+  // Pointer fragments resolve statically, regardless of whether the reference
+  // also names a resource. Plain-name fragments use the same dynamic lookup
+  // for relative, absolute and fragment-only references.
+  if (anchorName?.startsWith('/')) {
     return function validateDynamicRefPointer(data, dataPath, dataRoot) {
       let targetObj;
       try {
-        targetObj = root.resolveObject(resolvedRef, baseUri, { $ref: resolvedRef });
+        targetObj = root.resolveObject(initialTargetUri, baseUri, { $ref: initialTargetUri });
       } catch (_e) {
         return addError(data, dataPath);
       }
-      if (targetObj) {
-        return targetObj.validate(data, dataPath, dataRoot);
-      }
-      return addError(data, dataPath);
+      return targetObj
+        ? targetObj.validate(data, dataPath, dataRoot)
+        : addError(data, dataPath);
     };
   }
 
-  // $dynamicRef is typically a fragment reference like "#name"
-  // For non-hash references, fall back to normal $ref behavior
-  // BUT we must defer resolution to validation time to avoid infinite recursion
-  // when the target schema also has $dynamicRef
-  if (!ref.startsWith('#')) {
-    // Non-fragment $dynamicRef - defer resolution to validation time
-    const baseUri = schemaObj.baseUri;
-    const resolvedPointer = createJsonPointer(ref, baseUri);
-    const resolvedRef = resolvedPointer.id;
-    
-    // Look up the target schema at compile time
-    let targetSchema = root.getSchemaByUri(resolvedRef);
-    if (!targetSchema && resolvedRef.includes('#')) {
-      // Try without fragment
-      const [baseRef] = resolvedRef.split('#');
-      targetSchema = root.getSchemaByUri(baseRef);
-    }
-    
-    if (targetSchema) {
-      // Return a validator that creates the target object at validation time
-      // This avoids infinite recursion during compilation
-      return function validateDynamicRefAsRef(data, dataPath, dataRoot) {
-        let targetObj = root.unresolvedObject(resolvedRef);
-        if (targetObj === null) {
-          targetObj = root.createObject(resolvedRef, targetSchema, baseUri);
-        }
-        if (targetObj) {
-          return targetObj.validate(data, dataPath, dataRoot);
-        }
-        return addError(data, dataPath);
-      };
-    }
-    return addError;
-  }
-
-  const anchorName = ref.slice(1); // Remove the "#" prefix
-  
-  // Get the base URI for resolving the reference
-  const baseUri = schemaObj.baseUri;
-  
-  // Resolve the reference to find the initial target URI
-  const { id: initialTargetUri } = createJsonPointer(ref, baseUri);
-  
   // Look up the initial target schema by its URI
   let initialTargetSchema = root.getSchemaByUri(initialTargetUri);
   if (!initialTargetSchema && initialTargetUri.endsWith('#')) {
@@ -237,7 +195,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   return function validateDynamicRef(data, dataPath, dataRoot) {
     if (hasDynamicAnchor) {
       // The initial target has matching $dynamicAnchor
-      // Look up the dynamic scope for the nearest $dynamicAnchor with this name
+      // Look up the dynamic scope for the outermost $dynamicAnchor with this name
       const dynamicValidator = root.getDynamicAnchorValidator(anchorName);
       
       if (dynamicValidator) {

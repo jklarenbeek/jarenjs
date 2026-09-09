@@ -8,6 +8,7 @@
  * three layout modes render without widening the viewport, light and dark.
  */
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 // These cases click controls on freshly routed pages. Under
 // `no-preference` a card is still rising on its staggered reveal while
@@ -188,6 +189,55 @@ test('the splitter drags to commit a new ratio and keyboard-resizes as a separat
   await splitter.press('ArrowLeft');
   expect(Number(await splitter.getAttribute('aria-valuenow')),
     'ArrowLeft shrinks the left pane by 5%').toBe(before - 5);
+});
+
+test('mobile content fills the available row independently of desktop mode and ratio', async ({ page }) => {
+  const css = readFileSync(new URL('../../../components/studio/styles/studio.css', import.meta.url), 'utf8');
+  await page.setViewportSize({ width: 390, height: 844 });
+  let expectedHeight;
+  for (const mode of ['classic', 'right', 'top']) {
+    for (const ratio of [0.1, 0.5, 0.9]) {
+      for (const [pane, selector] of [['files', '.js-rail'], ['editor', '.js-editor'], ['stage', '.js-stage']]) {
+        await page.setContent(`<style>${css}</style><div class="jstudio" data-mode="${mode}" data-pane="${pane}"
+          style="height:600px;--js-ratio-first:${ratio}fr;--js-ratio-rest:${1 - ratio}fr">
+          <div class="js-penbar">Project</div><div class="js-panebar">Panes</div>
+          <div class="js-rail">Files</div><div class="js-editor">Editor</div>
+          <div class="js-split"></div><div class="js-stage">Stage</div></div>`);
+        const height = (await page.locator(selector).boundingBox()).height;
+        expect(height, `${mode}/${ratio}/${pane} fills the available content row`).toBeGreaterThan(500);
+        expectedHeight ??= height;
+        expect(height).toBeCloseTo(expectedHeight, 1);
+      }
+    }
+  }
+});
+
+test('the stacked splitter resizes rows and cancels a drag without committing', async ({ page }) => {
+  await page.goto('/#/project');
+  await page.locator('.js-layout button', { hasText: 'Stack' }).click();
+  const splitter = page.locator('.js-split');
+  const editor = page.locator('.js-editor');
+  await expect(splitter).toBeVisible();
+  await expect(splitter).toHaveAttribute('aria-orientation', 'horizontal');
+  const originalHeight = (await editor.boundingBox()).height;
+  let box = await splitter.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + 100, { steps: 5 });
+  await page.mouse.up();
+  const committed = Number(await splitter.getAttribute('aria-valuenow'));
+  expect(committed).toBeGreaterThan(50);
+  expect((await editor.boundingBox()).height).toBeGreaterThan(originalHeight + 30);
+  box = await splitter.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y - 80, { steps: 5 });
+  await splitter.dispatchEvent('pointercancel');
+  await page.mouse.up();
+  await expect(splitter).toHaveAttribute('aria-valuenow', String(committed));
+  await splitter.focus();
+  await splitter.press('ArrowUp');
+  await expect(splitter).toHaveAttribute('aria-valuenow', String(committed - 5));
 });
 
 // Below the breakpoint the IDE shows ONE pane at a time, so the three

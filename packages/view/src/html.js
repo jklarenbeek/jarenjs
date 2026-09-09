@@ -29,11 +29,19 @@ const VOID_ELEMENTS = new Set([
 /** Props that never serialize to markup. */
 const SKIP_PROPS = new Set(['key', 'on', 'memo']);
 
-/** A controlled textarea's value is its text content in HTML markup. */
-const TEXTAREA_SKIP_PROPS = new Set([...SKIP_PROPS, 'value']);
+/** Controlled textareas/selects express their value through their children. */
+const VALUE_SKIP_PROPS = new Set([...SKIP_PROPS, 'value']);
+const OPTION_SKIP_PROPS = new Set([...SKIP_PROPS, 'selected']);
 
 /** Widget-vnode props that configure the widget, not the host element. */
 const WIDGET_SKIP_PROPS = new Set(['key', 'on', 'memo', 'name', 'props', 'tag']);
+
+/** The text of an option whose value attribute is absent. @param {any} vnode */
+function optionText(vnode) {
+  if (isTextNode(vnode)) return String(vnode);
+  if (!isElementNode(vnode) || vnode[0] === 'script') return '';
+  return childrenOf(vnode).map(optionText).join('');
+}
 
 /**
  * Escape text content: `&`, `<`, `>`.
@@ -142,9 +150,10 @@ export function renderToString(vnode, options = {}) {
  * @param {Record<string, { ssr?: (props: any) => any }> | undefined} widgets
  * @param {import('./safe.js').SafePolicy | null} policy
  * @param {((info: { kind: string, name: string }) => void) | null} onUnsafe
+ * @param {{values: Set<string>, multiple: boolean, matched: boolean} | null} [selection]
  * @returns {string}
  */
-function renderNode(vnode, widgets, policy, onUnsafe) {
+function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
   if (isTextNode(vnode)) {
     return escapeText(String(vnode));
   }
@@ -170,7 +179,7 @@ function renderNode(vnode, widgets, policy, onUnsafe) {
     // `ssr()` (the documented behavior for both)
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
-      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe)
+      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection)
       : '';
     return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe) + '>'
       + inner + '</' + hostTag + '>';
@@ -188,8 +197,28 @@ function renderNode(vnode, widgets, policy, onUnsafe) {
     onUnsafe({ kind: 'event', name: 'on' });
   }
   const controlledTextarea = policy === null && tag === 'textarea' && 'value' in props;
+  const controlledSelect = policy === null && tag === 'select' && 'value' in props;
+  if (tag === 'select') {
+    const multiple = props.multiple != null && props.multiple !== false;
+    selection = controlledSelect ? {
+      values: new Set(multiple && Array.isArray(props.value)
+        ? props.value.map(String) : [props.value == null ? '' : String(props.value)]),
+      multiple: multiple && Array.isArray(props.value), matched: false,
+    } : null;
+  }
+  const controlledOption = tag === 'option' && selection !== null;
   let out = '<' + tag + serializeProps(props,
-    controlledTextarea ? TEXTAREA_SKIP_PROPS : SKIP_PROPS, policy, onUnsafe);
+    controlledTextarea || controlledSelect ? VALUE_SKIP_PROPS
+      : controlledOption ? OPTION_SKIP_PROPS : SKIP_PROPS, policy, onUnsafe);
+  if (controlledOption) {
+    const value = props.value == null || props.value === false
+      ? optionText(vnode).replace(/[\t\n\f\r ]+/g, ' ').replace(/^ | $/g, '')
+      : props.value === true ? '' : String(props.value);
+    if (selection.values.has(value) && (selection.multiple || !selection.matched)) {
+      out += ' selected';
+      selection.matched = true;
+    }
+  }
   if (VOID_ELEMENTS.has(tag)) {
     return out + '>';
   }
@@ -202,7 +231,7 @@ function renderNode(vnode, widgets, policy, onUnsafe) {
   }
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
-    out += renderNode(children[i], widgets, policy, onUnsafe);
+    out += renderNode(children[i], widgets, policy, onUnsafe, selection);
   }
   return out + '</' + tag + '>';
 }

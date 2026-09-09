@@ -423,7 +423,9 @@ the root's) location extended with the path's normalized-path suffix. Such
 items can match path rules (§3.2). Items produced any other way — FLWOR
 phrases, operators, variable-rooted paths on other variables, literals —
 are **location-less**: only schema and unconditional rules can match them.
-The dispatch of the input root carries location `$`.
+The bare selectors `$` and `$root` are zero-segment paths and preserve the
+current and root locations respectively. The dispatch of the input root
+carries location `$`.
 
 ### 6.5 Mode dispatch defaults
 

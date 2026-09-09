@@ -49,7 +49,10 @@ The datasets list length is the whole story: **0** → the engine takes no
 data (markdown/mermaid); **1** → one dataset; **N** → a switcher that runs
 the *same* source over each shape. Adding an engine is a descriptor plus
 examples — the picker, panes and switcher all derive from the descriptor.
-See [docs/PLAY-FORMAT.md](docs/PLAY-FORMAT.md).
+See [docs/PLAY-FORMAT.md](docs/PLAY-FORMAT.md) for descriptors and results,
+and [ARCHITECTURE.md](ARCHITECTURE.md) for the state, action and run-loop
+contract an embedding host supplies. Query, JSLT, JTLT and XQuery expose
+an editable JSON externals pane.
 
 ## Exports
 

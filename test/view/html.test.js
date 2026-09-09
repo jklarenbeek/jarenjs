@@ -66,6 +66,38 @@ describe('renderToString', function () {
       '<textarea value="attribute">visible</textarea>');
   });
 
+  it('serializes controlled select values on the matching options', function () {
+    assert.strictEqual(renderToString(['select', { value: 'b' },
+      ['option', { value: 'a', selected: true }, 'A'],
+      ['optgroup', { label: 'Group' }, ['option', { value: 'b' }, 'B']],
+      ['option', { value: 'b' }, 'Duplicate'],
+    ]), '<select><option value="a">A</option><optgroup label="Group"><option value="b" selected>B</option></optgroup><option value="b">Duplicate</option></select>');
+    assert.strictEqual(renderToString(['select', { value: ['a', 'b'], multiple: true },
+      ['option', { value: 'a' }, 'A'], ['option', { value: 'b' }, 'B'],
+      ['option', { value: 'c', selected: true }, 'C'],
+    ]), '<select multiple><option value="a" selected>A</option><option value="b" selected>B</option><option value="c">C</option></select>');
+  });
+
+  it('matches implicit option text after HTML whitespace normalization and escapes it once', function () {
+    assert.strictEqual(renderToString(['select', { value: 'A & B' },
+      ['option', {}, ' \n A ', ['span', {}, '&'], '\t B  '],
+    ]), '<select><option selected> \n A <span>&amp;</span>\t B  </option></select>');
+    assert.strictEqual(renderToString(['select', { value: 0 },
+      ['option', { value: 0 }, 'Zero'],
+    ]), '<select><option value="0" selected>Zero</option></select>');
+    assert.strictEqual(renderToString(['select', { value: null },
+      ['option', { value: '' }, 'Empty'],
+    ]), '<select><option value="" selected>Empty</option></select>');
+  });
+
+  it('preserves uncontrolled and safe select attribute rendering', function () {
+    const vnode = ['select', { value: 'b' }, ['option', { value: 'a', selected: true }, 'A']];
+    assert.strictEqual(renderToString(vnode, { safe: true }),
+      '<select value="b"><option value="a" selected>A</option></select>');
+    assert.strictEqual(renderToString(['select', {}, ['option', { selected: true }, 'A']]),
+      '<select><option selected>A</option></select>');
+  });
+
   it('serializes style objects, camelCase to kebab-case', function () {
     assert.strictEqual(
       styleToString({ fontSize: '12px', '--gap': '1rem', color: 'red', display: null }),

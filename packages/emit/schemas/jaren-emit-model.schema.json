@@ -64,6 +64,7 @@
         "type": { "$ref": "#/$defs/type" },
         "required": { "type": "boolean" },
         "default": { "description": "The schema default, when it declares one." },
+        "extensions": { "type": "object", "description": "Selected property extension annotations, carried verbatim." },
         "constraints": { "$ref": "#/$defs/constraints" },
         "doc": { "$ref": "#/$defs/doc" }
       }

@@ -57,7 +57,7 @@ export const PLAN_VERSION = 2;
  *   { p: 'udf', name: string, key: string } |
  *   { p: 'bboxOverlap', columns: { w: string, s: string, e: string,
  *     n: string }, probe: { box: number[] } | { ext: string } } |
- *   { p: 'cellIn', column: string, cells: string[] } |
+ *   { p: 'cellIn', column: string, cells: string[], keepEmpty?: boolean } |
  *   { p: 'cellPrefix', column: string, prefix: string } |
  *   { p: 'interval', columns: { start: string, end: string },
  *     probe: { from: number, to: number } } |
@@ -75,6 +75,9 @@ export const PLAN_VERSION = 2;
  *   — but each is TOTAL through its own `IS NOT NULL`, so a row with no
  *   box or no cell answers FALSE rather than SQL's NULL and negation
  *   still composes classically.
+ *   A neighbourhood membership uses `keepEmpty: true` instead: NULL
+ *   cells remain candidates so its residual preserves the query's error
+ *   for an empty search item. Such a predicate is never exact.
  *
  *   `colCmp` is the same idea one comparison wide: a bound over a
  *   DECLARED column, with no `json_type` beside it. The planner builds

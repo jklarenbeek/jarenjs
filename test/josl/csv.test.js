@@ -22,6 +22,12 @@ import {
 //#region reading
 
 describe('csv: RFC 4180 reading', () => {
+  it('uses an explicit delimiter when detecting a header', () => {
+    const text = 'a;b,c\n1;x,y';
+    strictEqual(sniffCsvDialect(text, { delimiter: ';' }).delimiter, ';');
+    deepStrictEqual(parseCsvDocument(text, { delimiter: ';', headers: 'auto' }).rows,
+      [{ a: '1', 'b,c': 'x,y' }]);
+  });
   it('reads records and fields', () => {
     deepStrictEqual(parseCsv('a,b,c\n1,2,3'), [['a', 'b', 'c'], ['1', '2', '3']]);
     deepStrictEqual(parseCsv('a,b\r\n1,2\r\n'), [['a', 'b'], ['1', '2']]);

@@ -8,7 +8,7 @@ Every engine in the repository follows one philosophy: **parse and decide everyt
 
 ## ✅ Conformance & Speed
 
-Jaren scores **<!--fact:validate.conformance-->1164 of 1166<!--/fact-->** on the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) — including the optional format suites — across all benchmarked drafts, counted independently of what the rival could compile; the cases that fail are named in [the roadmap](docs/ROADMAP.md). Against Ajv it is faster on <!--fact:validate.perTestWins-->742 of 1090<!--/fact--> of the tests both engines pass, and <!--fact:validate.vsAjv-->1.4<!--/fact-->x as fast on the success-only totals. All numbers below were measured on <!--fact:benchmarks.measured-->2026-08-02–2026-08-21 with Node v24.19.0/v22.22.2<!--/fact-->; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
+Jaren scores **<!--fact:validate.conformance-->1166 of 1166<!--/fact-->** on the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) — including the optional format suites — across all benchmarked drafts, counted independently of what the rival could compile; the cases that fail are named in [the roadmap](docs/ROADMAP.md). Against Ajv it is faster on <!--fact:validate.perTestWins-->735 of 1090<!--/fact--> of the tests both engines pass, and <!--fact:validate.vsAjv-->1.4<!--/fact-->x as fast on the success-only totals. All numbers below were measured on <!--fact:benchmarks.measured-->2026-08-02–2026-09-09 with Node v24.19.0/v22.22.2<!--/fact-->; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
 
 ### @jarenjs/validate — vs Ajv over the official suite
 
@@ -17,9 +17,9 @@ Jaren scores **<!--fact:validate.conformance-->1164 of 1166<!--/fact-->** on the
 <!--fact:validate.table-->
 | Draft | Jaren | Ajv | Success-only totals | Jaren faster on |
 |---|---|---|---|---|
-| draft-07 | **308 passed, 0 failed, 0 errors** | 294 passed, 13 failed, 1 error | **94 ms** vs 165 ms | 216 of 294 tests |
-| 2019-09 | **425 passed, 0 failed, 0 errors** | 406 passed, 15 failed, 4 errors | **170 ms** vs 208 ms | 275 of 406 tests |
-| 2020-12 | **431 passed, 2 failed, 0 errors** | 390 passed, 33 failed, 10 errors | **144 ms** vs 189 ms | 251 of 390 tests |
+| draft-07 | **308 passed, 0 failed, 0 errors** | 294 passed, 13 failed, 1 error | **93 ms** vs 145 ms | 213 of 294 tests |
+| 2019-09 | **425 passed, 0 failed, 0 errors** | 406 passed, 15 failed, 4 errors | **179 ms** vs 242 ms | 268 of 406 tests |
+| 2020-12 | **433 passed, 0 failed, 0 errors** | 390 passed, 33 failed, 10 errors | **168 ms** vs 225 ms | 254 of 390 tests |
 <!--/fact-->
 
 These runs exercise `@jarenjs/formats` and `@jarenjs/refs` too: the optional format suites are included, and every draft's bundled meta-schemas are in play. `unevaluatedProperties`/`unevaluatedItems` checks that sibling keywords make unreachable are compiled away entirely, so the `unevaluated*` outliers that once dragged the 2020-12 totals to a near-tie are gone; per-test medians favor Jaren in all three drafts.

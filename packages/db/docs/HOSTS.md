@@ -6,6 +6,11 @@ capabilities are observed when the connection opens. The common oracle and
 lifecycle corpus is `test/db/store-hosts.test.js`; it checks values and coded
 errors across Node, worker, pool, wasm sessions and wasm journal fallback.
 
+Concurrent PostgreSQL first opens can race while creating the same collection
+or entity table. Each initialization transaction retries one catalog-creation
+collision after rollback, then re-reads and verifies the winning shape. Ordinary
+constraint failures remain errors, and a repeated collision refuses the open.
+
 ## Node workers
 
 ```js

@@ -44,6 +44,12 @@ function parseJson(text, pane, label = pane) {
   catch (err) { return { error: `${label}: ${msg(err)}`, pane }; }
 }
 
+/** The optional JSON bindings pane shared by every engine accepting externals. */
+function parseExternals(source) {
+  return source.externals === undefined || String(source.externals).trim() === ''
+    ? { value: {} } : parseJson(source.externals, 'externals');
+}
+
 /** A single-`code`-panel Result — the shape most engines return. */
 /** @returns {import('./index.js').PlayResult} */
 const ok = (text, compileMs, runMs, deep) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }, ...(deep ?? [])], compileMs, runMs);
@@ -295,16 +301,13 @@ export const ENGINE_LIST = [
     run(source, data, options) {
       const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       const q = parseJson(source.query, 'query'); if (q.error) return failParse(q);
-      let externals = {};
-      if (source.externals !== undefined && String(source.externals).trim() !== '') {
-        const e = parseJson(source.externals, 'externals'); if (e.error) return failParse(e); externals = e.value;
-      }
+      const e = parseExternals(source); if (e.error) return failParse(e);
       let fn; const t0 = now();
       try { fn = compileJsonQuery(q.value, compileOptions(options)); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'query')); }
       const t1 = now();
       let out;
-      try { out = fn(d.value, externals); }
+      try { out = fn(d.value, e.value); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'query')); }
       const t2 = now();
       const items = out === undefined ? 0 : Array.isArray(out) ? out.length : 1;
@@ -319,17 +322,18 @@ export const ENGINE_LIST = [
   },
   {
     id: 'jslt', label: 'JSLT', lead: 'JSON stylesheet transform (registered operators included).',
-    sourcePanes: [{ key: 'stylesheet', label: 'Stylesheet', control: 'code' }],
+    sourcePanes: [{ key: 'stylesheet', label: 'Stylesheet', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
       const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       const s = parseJson(source.stylesheet, 'stylesheet'); if (s.error) return failParse(s);
+      const e = parseExternals(source); if (e.error) return failParse(e);
       let compiled; const t0 = now();
       try { compiled = compileJsltStylesheet(s.value, compileOptions(options)); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'stylesheet')); }
       const t1 = now();
       let out;
-      try { out = compiled(d.value); }
+      try { out = compiled(d.value, e.value); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'stylesheet')); }
       const t2 = now();
       // the identity lesson: a rule that changes nothing hands the INPUT back
@@ -345,17 +349,18 @@ export const ENGINE_LIST = [
   },
   {
     id: 'jtlt', label: 'JTLT', lead: 'JSLT\'s text front-end — render JSON as Markdown, XML or code.',
-    sourcePanes: [{ key: 'template', label: 'Template', control: 'code' }],
+    sourcePanes: [{ key: 'template', label: 'Template', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
       const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       const t = parseJson(source.template, 'template'); if (t.error) return failParse(t);
+      const e = parseExternals(source); if (e.error) return failParse(e);
       let render; const t0 = now();
       try { render = compileJtltStylesheet(t.value, compileOptions(options)); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'template')); }
       const t1 = now();
       let out;
-      try { out = render(d.value); }
+      try { out = render(d.value, e.value); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'template')); }
       const t2 = now();
       // JTLT emits TEXT (markdown / xml / source) — show it verbatim, not fmt'd
@@ -367,11 +372,12 @@ export const ENGINE_LIST = [
   },
   {
     id: 'xquery', label: 'XQuery', lead: 'The XQuery 3.1 text subset — parsed to a query document and run over $doc.',
-    sourcePanes: [{ key: 'text', label: 'XQuery', control: 'code' }],
+    sourcePanes: [{ key: 'text', label: 'XQuery', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
     dataPanes: [{ key: 'data', label: 'Data' }],
     run(source, data, options) {
       const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
       let doc, fn; const t0 = now();
+      const e = parseExternals(source); if (e.error) return failParse(e);
       // two phases: the text parses (a syntax error locates a position in
       // the XQuery pane), then the GENERATED query document compiles and
       // runs — a location in that document has no pane the learner typed
@@ -382,7 +388,7 @@ export const ENGINE_LIST = [
       const t1 = now();
       let out;
       try {
-        const externals = fn.externals.includes('doc') ? { doc: d.value } : {};
+        const externals = fn.externals.includes('doc') ? { ...e.value, doc: d.value } : e.value;
         out = fn(d.value, externals);
       }
       catch (err) { return fail(msg(err), code(err), locate(err)); }

@@ -920,11 +920,9 @@ function synopsizeAddressed(dropped, archive, hostWriter) {
 }
 
 /**
- * Write the archive. A slot whose name and size are already there holds
- * the same bytes by construction (the name IS the hash of those bytes
- * paired with their length), so re-compacting a history rewrites
- * nothing — idempotence falls out of the addressing rather than out of a
- * de-duplication pass.
+ * Write the archive. The fingerprint and length propose an address;
+ * exact content comparison proves it. A collision refuses compaction
+ * before any transcript can be dropped, while identical bytes reuse storage.
  *
  * A store that refuses a write is fatal and says so: the whole point of
  * this path is that nothing leaves the request without a copy, and
@@ -935,13 +933,24 @@ function synopsizeAddressed(dropped, archive, hostWriter) {
  */
 async function writeArchive(ledger, archive, referenceText, protectedNames) {
   if (typeof ledger.putArchive === 'function') {
-    const written = await ledger.putArchive([...archive.entries, archive.index], { referenceText, protectedNames });
+    const written = await ledger.putArchive([...archive.entries, archive.index], { referenceText, protectedNames, immutable: true });
     if (written?.error) throw new AiError('AI0001', `compaction could not archive rounds: ${written.error}`);
     return;
   }
+  const pending = new Map();
   for (const entry of [...archive.entries, archive.index]) {
+    const planned = pending.get(entry.name);
+    if (planned !== undefined && planned.text !== entry.text)
+      throw new AiError('AI0001', `compaction archive address collision at '${entry.name}'`);
     const existing = await ledger.getSlot(entry.name);
-    if (existing !== null && existing !== undefined && existing.size === entry.size) continue;
+    if (existing !== null && existing !== undefined) {
+      if (await ledger.readSlot(entry.name) !== entry.text)
+        throw new AiError('AI0001', `compaction archive address collision at '${entry.name}'`);
+      continue;
+    }
+    pending.set(entry.name, entry);
+  }
+  for (const entry of pending.values()) {
     const written = await ledger.putSlot(entry.name, entry.text, { kind: entry.kind });
     if (written?.error !== undefined) {
       throw new AiError('AI0001',

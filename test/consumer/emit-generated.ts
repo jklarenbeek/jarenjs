@@ -134,12 +134,25 @@ export interface JobInput {
 }
 
 
+/**
+ * The declared shape of this schema where normalization does not reach: inside anyOf/oneOf branches the normalizer neither materializes defaults nor coerces.
+ */
+export interface ChoiceOptAnyOf1Plain {
+  mode?: string;
+  /**
+   * Schema constraints this type cannot express: type="integer"
+   */
+  level?: number;
+  [key: string]: unknown;
+}
+
+
 export interface Choice {
   /**
    * Schema constraints this type cannot express: type="integer"
    */
   port: number;
-  opt?: { mode?: string; level?: number; [key: string]: unknown; } | string;
+  opt?: ChoiceOptAnyOf1Plain | string;
   [key: string]: unknown;
 }
 
@@ -152,7 +165,7 @@ export interface ChoiceInput {
    * Schema constraints this type cannot express: type="integer"
    */
   port?: number | string;
-  opt?: { mode?: string; level?: number; [key: string]: unknown; } | string;
+  opt?: ChoiceOptAnyOf1Plain | string;
   [key: string]: unknown;
 }
 

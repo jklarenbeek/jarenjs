@@ -4,8 +4,8 @@
  * name field, Save / Share / Download, the share status line and the
  * saved-name recall chips. It renders above the `@jarenjs/studio` shell
  * and drives the site's `ide/*` actions over the `$.ui.projectIde` model
- * (`project/download` is the one project-owned button: the designated
- * app file's document as JSON).
+ * (the whole project downloads as JSON; the designated app document
+ * also has its own explicit export).
  */
 
 const ideBar = {
@@ -24,9 +24,13 @@ const ideBar = {
       on: { click: 'ide/share' },
     }, 'Share'],
     ['button', {
-      type: 'button', class: 'btn small', title: 'Download the app document as JSON',
-      on: { click: 'project/download' },
+      type: 'button', class: 'btn small', title: 'Download every project file as JSON',
+      on: { click: 'project/export' },
     }, 'Download'],
+    ['button', {
+      type: 'button', class: 'btn small', title: 'Download only the app document as JSON',
+      on: { click: 'project/download' },
+    }, 'App JSON'],
     { $if: ['$.shared', ['span', { class: 'muted' }, '$.shared']] },
     ['div', { class: 'ide-list' }, [{ $apply: '$.names[*]' }]],
   ],

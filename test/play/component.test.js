@@ -270,7 +270,8 @@ describe('an error says WHERE — the view model and the view (PLAY-FORMAT §2)'
 
   it('the pane the error names is invalid and carries the location; the others are clean', () => {
     const vm = playViewModel(jsltState(jsltError.error));
-    assert.deepStrictEqual(vm.sourcePanes.map((p) => [p.key, p.invalid, p.where]), [['stylesheet', true, 'at /rules/0/match']]);
+    assert.deepStrictEqual(vm.sourcePanes.map((p) => [p.key, p.invalid, p.where]),
+      [['stylesheet', true, 'at /rules/0/match'], ['externals', false, '']]);
     assert.deepStrictEqual(vm.dataPanes.map((p) => [p.key, p.invalid, p.where]), [['data', false, '']]);
     // the error line: the code chip, the message WITHOUT its own code prefix, and the pane's label
     assert.deepStrictEqual(vm.result.error, {

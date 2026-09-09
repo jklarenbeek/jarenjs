@@ -258,9 +258,11 @@ re-run unnamed rather than raised.
 
 Three normalizations, each forced by the wire rather than chosen:
 `int8` and `numeric` arrive as strings (they can exceed a double) and
-become JavaScript numbers, which is the same ceiling SQLite's INTEGER
-has; `json`/`jsonb` arrive parsed, because the client's type parsers are
-the host's configuration, and the row decoder reads text; and a
+become JavaScript numbers. An `int8` outside the safe integer range
+refuses with `JD2005`; allocated collection inserts decode `RETURNING`
+inside a transaction so a refused key rolls its row back. PostgreSQL
+sequences still advance on rollback. `json`/`jsonb` arrive parsed, because
+the client's type parsers are the host's configuration, and the row decoder reads text; and a
 JavaScript boolean is bound as 1 or 0, because a boolean member is 1 or
 0 in this mapping.
 
@@ -529,7 +531,7 @@ member as an array or an object **and nothing else** — §8.14 answers
 | `{$le\|$lt: [{$distance: [<path>, <literal>]}, r]}` | the same four comparisons against `circleBounds(probe, r)` | implied | every position within `r` metres lies inside the circle's box, which the kernel computes on the same sphere and the same `EARTH_RADIUS` the engine measures with — so the two cannot disagree by model. `$ge`/`$gt` is NOT promoted: no box narrows "farther than r" |
 | `{$starts-with: [{$geohash: [<path>, k]}, "<cell>"]}`, cell length ≤ k | `<c> IN ("<cell>")` or `<c> >= "<cell>" AND <c> < successor` | **exact** | the column HOLDS `$geohash(row, k)`, and geohash is a prefix code, so a prefix test on the expression is the same test on the column |
 | the same, cell length > k | the cell truncated to k | implied | the column can only confirm its own first k characters |
-| `{$exists: {$index-of: [{$geohash-neighbours: "<cell>"}, {$geohash: [<path>, k]}]}}`, cell length = k | `<c> IN (…the nine cells…)` | **exact** | the membership test compares whole strings and the column is exactly one of them. Nine cells, never one: two points ten metres apart can differ in the FIRST character of their cell (D7), so a single prefix is bucketing and only the neighbourhood is proximity |
+| `{$exists: {$index-of: [{$geohash-neighbours: "<cell>"}, {$geohash: [<path>, k]}]}}`, cell length = k | `<c> IS NULL OR <c> IN (…the nine cells…)` | **inexact** | Unbounded members remain candidates so the row predicate preserves the empty-search-item error. An explicit `$exists` guard excludes them safely. Nine cells cover neighbours across a cell boundary; one prefix does not. |
 
 **The proof is a proof about BOXES, not about SQL**, so the physical
 mapping (MODEL-FORMAT §2.1, `physical`) does not enter it: the same box

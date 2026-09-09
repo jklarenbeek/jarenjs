@@ -516,7 +516,9 @@ describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
     { name: 'the nine-cell neighbourhood',
       document: where({ $exists: { '$index-of': [
         { '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }] } }),
-      exact: true,
+      exact: false,
+      residualReason: 'the cell pre-filter retains unbounded members; the engine preserves '
+        + 'the membership error when its search item is empty',
       // §8.14's membership recipe RAISES on a value with no bounded
       // position (`$index-of` refuses an empty search item), so the
       // engine side cannot run over the degenerate rows at all; the
@@ -558,7 +560,9 @@ describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
           'a refinement ran, so the query is NOT native');
         assert.strictEqual(explained.residual.mode, 'set');
         assert.match(explained.residual.reasons[0].reason, /pre-filter/);
-        assert.match(explained.residual.reasons[0].reason, /refines in the engine/);
+        if (shape.residualReason !== undefined)
+          assert.strictEqual(explained.residual.reasons[0].reason, shape.residualReason);
+        else assert.match(explained.residual.reasons[0].reason, /refines in the engine/);
         await assert.rejects(
           () => Promise.resolve(places.explain(shape.document,
             { externals: { region: REGION }, strict: true })),
@@ -651,7 +655,7 @@ describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
     await store.close();
   });
 
-  it('the same rule covers the membership recipe, which raises on an unbounded value', async () => {
+  it('the membership recipe retains an unbounded value and preserves its empty-search error', async () => {
     const documents = [
       { id: 'greenwich', at: [-0.00007, 51.4779] },
       { id: 'no-box', at: { type: 'FeatureCollection', features: [] } },
@@ -666,9 +670,10 @@ describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
     const indexes = [{ name: 'by_cell5', path: '$.at', derive: 'geohash', precision: 5 }];
     const { store, places } = await freshPlaces(indexes, documents);
     const explained = await places.explain(document);
-    assert.strictEqual(explained.prefilters[0].exact, true);
-    assert.deepStrictEqual(await places.execute(document), documents[0],
-      'the unbounded row is not a candidate, so nothing raises and the match still lands');
+    assert.strictEqual(explained.prefilters[0].exact, false);
+    assert.strictEqual(explained.residual.mode, 'set');
+    await assert.rejects(async () => places.execute(document), (error) => error.code === 'JQ2001',
+      'the unbounded row remains a candidate and raises just as it does in the engine');
     await store.close();
   });
 

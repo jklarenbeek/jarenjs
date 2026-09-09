@@ -1,9 +1,32 @@
+//@ts-check
+import { utf8ByteLength } from '@jarenjs/core/string';
+
+/** Count a string stream without charging split surrogate pairs as two replacements.
+ * @param {{ byteTail?: number }} state @param {string} text @returns {number} */
+export function chunkByteLength(state, text) {
+  if (text.length === 0) return 0;
+  const first = text.charCodeAt(0);
+  const joined = state.byteTail >= 0xD800 && state.byteTail <= 0xDBFF
+    && first >= 0xDC00 && first <= 0xDFFF;
+  state.byteTail = text.charCodeAt(text.length - 1);
+  return utf8ByteLength(text) - (joined ? 2 : 0);
+}
+
+/** Let a cutter inspect bounded additions, including the first incomplete token.
+ * @param {string} chunk @param {number} limit @param {(part: string) => void} consume */
+export function feedBounded(chunk, limit, consume) {
+  if (limit === Infinity || chunk.length === 0) { consume(chunk); return; }
+  const size = Math.max(1, Math.min(16384, limit));
+  for (let offset = 0; offset < chunk.length; offset += size) consume(chunk.slice(offset, offset + size));
+}
+
 //#region hostile-input limits
 // The three readers and the CSV machine take the same shape of guard:
 // a limit that defaults to Infinity — nothing in this package refuses a
 // document by size unless a caller asks — and, once asked, is checked
 // while the offending text is still in cutter, token or container
-// state, before a concatenation or a link could cross it. Every limit
+// state. Limited streams inspect bounded additions before accepting another;
+// complete spans are checked before decoding or linking values. Every limit
 // counts UTF-8 bytes, never JavaScript code units: a limit stated in
 // bytes is the one an HTTP body limit, a disk quota or a proxy speaks.
 //

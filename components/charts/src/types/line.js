@@ -219,6 +219,16 @@ export function buildLineAST(data, config = {}) {
   const log = config.log === true;
   const policy = normalizeDomainPolicy(config.domain);
   const domains = resolveLineDomains(scanLineExtremes(input, policy, log), policy, time, log);
+  return buildLineASTResolved(input, config, domains);
+}
+
+/** Build from the same resolved domains a session already used for its frame decision.
+ * Internal to the chart engine; public builds always scan their own input.
+ * @param {{name?: string, points: any[]}[]} input @param {any} config
+ * @param {ReturnType<typeof resolveLineDomains>} domains @returns {LineAST} */
+export function buildLineASTResolved(input, config, domains) {
+  const time = config.x === 'time';
+  const log = config.log === true;
   const { xScale, yScale } = lineScales(domains, time, log);
   const timeLabel = time
     ? compileTimeTickFormat({ dateNames: config.dateNames, timeFormats: config.timeFormats })

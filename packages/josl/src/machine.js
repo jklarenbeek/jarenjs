@@ -53,7 +53,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { JoslSyntaxError } from './errors.js';
-import { JoslLimitError, limitOption } from './limits.js';
+import { JoslLimitError, limitOption, chunkByteLength, feedBounded } from './limits.js';
 import {
   LocalDate,
   LocalTime,
@@ -81,6 +81,8 @@ const S_LITERAL = 2; // '...'  (single line)
 const S_ML_BASIC = 3; // """..."""
 const S_ML_LITERAL = 4; // '''...'''
 const S_COMMENT = 5;
+const S_REGEXP = 6;
+const S_REGEXP_FLAGS = 7;
 
 // Runs of characters that cannot end a logical line or change the cutter's
 // state. The cutter skips them with the regex engine rather than stepping
@@ -89,7 +91,7 @@ const S_COMMENT = 5;
 // logical line spans without a separate walk over it.
 // The basic/literal classes serve both the single- and multi-line states:
 // a `'` is inert inside a basic string and a `"` inside a literal one.
-const RUN_NONE = /[^\n"'#[\]]*/y;
+const RUN_NONE = /[^\n"'#[\]/]*/y;
 const RUN_BASIC = /[^\n"\\]*/y;
 const RUN_LITERAL = /[^\n']*/y;
 
@@ -146,6 +148,12 @@ export class JoslMachine {
     this.maxDepth = limitOption(options, 'maxDepth');
     this.maxRetainedValues = limitOption(options, 'maxRetainedValues');
     this.totalBytes = 0;
+    this.byteTail = undefined;
+    this.scanTokenStart = -1;
+    this.scanBareStart = -1;
+    this.scanKeyMode = true;
+    this.scanContainers = [];
+    this.scanRegExpClass = false;
     this.retained = 0; // values linked into the root since the last detachment
     this.depth = 0; // inline container nesting while a value is parsed
     // Logical-line sink used by the CST layer: reports each line's source
@@ -185,18 +193,20 @@ export class JoslMachine {
    */
   feed(chunk) {
     if (this.maxTotalBytes !== Infinity) {
-      this.totalBytes += utf8ByteLength(chunk);
+      this.totalBytes += chunkByteLength(this, chunk);
       if (this.totalBytes > this.maxTotalBytes)
         throw new JoslLimitError('JOSL2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, this.startLine);
     }
-    if (this.maxRecordBytes !== Infinity && chunk.indexOf('\n') < 0
-      && utf8ByteLength(this.buf) + utf8ByteLength(chunk) > this.maxRecordBytes) {
-      // the logical line still being cut, plus this chunk, would pass the
-      // bound before any newline could end it: refused before the
-      // concatenation that would hold it
-      throw new JoslLimitError('JOSL2002', 'a logical line exceeds maxRecordBytes', this.maxRecordBytes, this.startLine);
-    }
-    return feedMachine(this, chunk);
+    feedBounded(chunk, Math.min(this.maxRecordBytes, this.maxTokenBytes), (part) => {
+      feedMachine(this, part);
+      const end = this.scanDepth === 0 && (this.scanState === S_NONE || this.scanState === S_COMMENT)
+        && this.buf.endsWith('\r') ? this.buf.length - 1 : this.buf.length;
+      if (this.maxRecordBytes !== Infinity && utf8ByteLength(this.buf, 0, end) > this.maxRecordBytes)
+        throw new JoslLimitError('JOSL2002', 'a logical line exceeds maxRecordBytes', this.maxRecordBytes, this.startLine);
+      if (this.scanTokenStart >= 0) this.token(this.buf, this.scanTokenStart, this.buf.length);
+      if (this.scanBareStart >= 0) this.token(this.buf, this.scanBareStart, this.buf.length);
+    });
+    return this;
   }
 
   /**
@@ -232,9 +242,9 @@ export class JoslMachine {
    * @returns {*} The completed root value
    */
   parseAll(text) {
-    text = beginParseAll(this, text);
     if (this.maxTotalBytes !== Infinity && utf8ByteLength(text) > this.maxTotalBytes)
       throw new JoslLimitError('JOSL2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, 1);
+    text = beginParseAll(this, text);
     // positions are offsets into the whole source, which starts at line 1
     this.lineOrigin = 1;
     const tracking = this.onEvent !== null;
@@ -327,20 +337,54 @@ export class JoslMachine {
     let state = this.scanState;
     let depth = this.scanDepth;
     let nl = this.scanNl;
+    let tokenStart = this.scanTokenStart;
+    let bareStart = this.scanBareStart;
+    let keyMode = this.scanKeyMode;
+    const containers = this.scanContainers;
+    const limited = this.maxTokenBytes !== Infinity;
     const ended = this.ended;
     outer:
     while (pos < buf.length) {
       switch (state) {
         case S_NONE: {
-          pos = skipRun(RUN_NONE, buf, pos);
+          if (!limited) pos = skipRun(RUN_NONE, buf, pos);
           if (pos >= buf.length)
             break outer;
           const c = buf.charCodeAt(pos);
+          if (limited) {
+            const boundary = c === CC_SPACE || c === CC_TAB || c === CC_CR || c === CC_LF
+              || c === CC_EQ || c === CC_COMMA || c === CC_LBRACE || c === CC_RBRACE
+              || c === CC_LBRACKET || c === CC_RBRACKET || c === CC_HASH
+              || c === CC_DQUOTE || c === CC_SQUOTE || (keyMode && c === CC_DOT)
+              || (!keyMode && c === CC_SLASH);
+            if (boundary) {
+              if (bareStart >= 0) this.token(buf, bareStart, pos);
+              bareStart = -1;
+            }
+            else if (bareStart < 0) bareStart = pos;
+            if (c === CC_EQ) keyMode = false;
+            else if (c === CC_LBRACE) { containers.push('table'); keyMode = true; }
+            else if (c === CC_LBRACKET) {
+              const header = keyMode && (containers.length === 0 || containers.at(-1) === 'header');
+              containers.push(header ? 'header' : 'array');
+              keyMode = header;
+            }
+            else if (c === CC_RBRACKET || c === CC_RBRACE) { containers.pop(); keyMode = false; }
+            else if (c === CC_COMMA) keyMode = containers.at(-1) === 'table';
+          }
+          if (c === CC_SLASH) {
+            tokenStart = pos++;
+            this.scanRegExpClass = false;
+            state = S_REGEXP;
+            break;
+          }
           if (c === CC_LF) {
             if (depth === 0) {
               this.cutLine(buf, lineStart, pos, nl);
               lineStart = pos + 1;
               nl = 0;
+              keyMode = true;
+              containers.length = 0;
             }
             else
               nl++;
@@ -348,6 +392,7 @@ export class JoslMachine {
             break;
           }
           if (c === CC_DQUOTE || c === CC_SQUOTE) {
+            tokenStart = pos;
             if (pos + 2 >= buf.length && !ended)
               break outer; // may be a triple delimiter split across chunks
             if (buf.charCodeAt(pos + 1) === c && buf.charCodeAt(pos + 2) === c) {
@@ -383,6 +428,8 @@ export class JoslMachine {
             this.cutLine(buf, lineStart, at, nl);
             lineStart = at + 1;
             nl = 0;
+            keyMode = true;
+            containers.length = 0;
           }
           else
             nl++;
@@ -390,6 +437,28 @@ export class JoslMachine {
           pos = at + 1;
           break;
         }
+        case S_REGEXP: {
+          const c = buf.charCodeAt(pos);
+          if (c === CC_BACKSLASH) {
+            if (pos + 1 >= buf.length && !ended) break outer;
+            pos += 2;
+            break;
+          }
+          if (c === CC_LF) this.cutLine(buf, lineStart, pos, nl);
+          if (c === CC_LBRACKET) this.scanRegExpClass = true;
+          else if (c === CC_RBRACKET) this.scanRegExpClass = false;
+          else if (c === CC_SLASH && !this.scanRegExpClass) state = S_REGEXP_FLAGS;
+          pos++;
+          break;
+        }
+        case S_REGEXP_FLAGS:
+          if (isAsciiLetterCode(buf.charCodeAt(pos))) pos++;
+          else {
+            this.token(buf, tokenStart, pos);
+            tokenStart = -1;
+            state = S_NONE;
+          }
+          break;
         case S_BASIC:
         case S_LITERAL: {
           const basic = state === S_BASIC;
@@ -418,6 +487,8 @@ export class JoslMachine {
           }
           state = S_NONE; // the run only stops on the closing quote
           pos++;
+          this.token(buf, tokenStart, pos);
+          tokenStart = -1;
           break;
         }
         case S_ML_BASIC:
@@ -444,8 +515,11 @@ export class JoslMachine {
             run++;
           if (run === buf.length && run - pos < 3 && !ended)
             break outer; // quote run may continue in the next chunk
-          if (run - pos >= 3)
+          if (run - pos >= 3) {
             state = S_NONE;
+            this.token(buf, tokenStart, run);
+            tokenStart = -1;
+          }
           pos = run;
           break;
         }
@@ -460,6 +534,9 @@ export class JoslMachine {
     this.scanState = state;
     this.scanDepth = depth;
     this.scanNl = nl;
+    this.scanTokenStart = tokenStart < 0 ? -1 : tokenStart - lineStart;
+    this.scanBareStart = bareStart < 0 ? -1 : bareStart - lineStart;
+    this.scanKeyMode = keyMode;
   }
 
   // `innerNl` is how many newlines the cutter already counted inside this
@@ -876,6 +953,7 @@ export class JoslMachine {
     const start = pos;
     while (pos < line.length && isAsciiLetterCode(line.charCodeAt(pos)))
       pos++;
+    this.token(line, start, pos);
     const word = line.slice(start, pos);
     switch (word) {
       case 'true': return [true, this.checkValueEnd(line, pos)];
@@ -899,6 +977,7 @@ export class JoslMachine {
     const start = p;
     while (p < line.length && isAsciiLetterCode(line.charCodeAt(p)))
       p++;
+    this.token(line, pos, p);
     const word = line.slice(start, p);
     if (word === 'inf')
       return [neg ? -Infinity : Infinity, this.checkValueEnd(line, p)];
@@ -1216,11 +1295,13 @@ export class JoslMachine {
         break;
       pos++;
     }
+    this.token(line, start, pos + 1);
     const body = line.slice(start + 1, pos);
     pos++; // consume '/'
     const flagStart = pos;
     while (pos < line.length && isAsciiLetterCode(line.charCodeAt(pos)))
       pos++;
+    this.token(line, start, pos);
     const flags = line.slice(flagStart, pos);
     try {
       return [new RegExp(body, flags), this.checkValueEnd(line, pos)];
@@ -1237,6 +1318,7 @@ export class JoslMachine {
       return this.parseNumber(line, pos);
     let m = stickyExec(RE_DATETIME, line, pos);
     if (m !== null) {
+      this.token(line, pos, pos + m[0].length);
       const year = Number(m[1]);
       const month = Number(m[2]);
       const day = Number(m[3]);
@@ -1261,6 +1343,7 @@ export class JoslMachine {
     }
     m = stickyExec(RE_TIMEONLY, line, pos);
     if (m !== null) {
+      this.token(line, pos, pos + m[0].length);
       const hour = Number(m[1]);
       const minute = Number(m[2]);
       const second = Number(m[3]);
@@ -1309,6 +1392,7 @@ export class JoslMachine {
       while (p < line.length && isDigitCode(line.charCodeAt(p)))
         p++;
       if ((p - pos === 1 || c0 !== CC_0) && atValueEnd(line, p)) {
+        this.token(line, pos, p);
         const source = line.slice(pos, p);
         return [this.intValue(pos, source, false, source), p];
       }
@@ -1325,6 +1409,7 @@ export class JoslMachine {
         m = stickyExec(RE_BIN, line, pos);
     }
     if (m !== null) {
+      this.token(line, pos, pos + m[0].length);
       const big = this.bigIntCheck(pos, m[1]);
       const stripped = (big ? m[0].slice(0, -1) : m[0]).replace(/_/g, '');
       const end = this.checkValueEnd(line, pos + m[0].length);
@@ -1333,6 +1418,7 @@ export class JoslMachine {
     m = stickyExec(RE_NUM, line, pos);
     if (m === null)
       this.err(pos, 'invalid number');
+    this.token(line, pos, pos + m[0].length);
     const big = this.bigIntCheck(pos, m[1]);
     const token = big ? m[0].slice(0, -1) : m[0];
     const isFloat = /[.eE]/.test(token);

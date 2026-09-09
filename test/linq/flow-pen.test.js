@@ -130,7 +130,7 @@ describe('FLOW-FORMAT §6, rebuilt through the pen', () => {
   const build = () => defineDag({
     nodes: {
       rows: input(),
-      adults: query({ $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' }),
+      adults: query([{ $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' }]),
       names: jslt([rule('$', ['ul', {}, [{ $for: { p: '$[*]' }, $return: ['li', {}, '$p.name'] }]])]),
       out: output(),
     },

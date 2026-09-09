@@ -13,6 +13,106 @@ import {
   JSONX_LIMIT_CODES,
 } from '@jarenjs/josl';
 
+describe('stream limits independent of chunk boundaries', () => {
+  it('counts split supplementary characters and BOMs as original UTF-8 bytes', () => {
+    for (const [make, text, code] of [
+      [createJsonxStreamReader, '{"a":"🦉"}', 'JSONX2001'],
+      [createCsvStreamReader, '\ufeffa\n🦉\n', 'CSV2001'],
+      [createStreamReader, '\ufeffa = "🦉"\n', 'JOSL2001'],
+    ]) {
+      const bytes = new TextEncoder().encode(text).length;
+      for (let cut = 0; cut <= text.length; cut++) {
+        const feed = (maxTotalBytes) => {
+          const reader = make({ maxTotalBytes });
+          reader.feed(text.slice(0, cut));
+          reader.feed('');
+          reader.feed(text.slice(cut));
+          return reader.end();
+        };
+        ok(feed(bytes) !== undefined);
+        strictEqual(codeOf(() => feed(bytes - 1)), code);
+      }
+    }
+    strictEqual(codeOf(() => parseCsv('\ufeffa', { maxTotalBytes: 1 })), 'CSV2001');
+    strictEqual(codeOf(() => parseJosl('\ufeffa=1', { maxTotalBytes: 3 })), 'JOSL2001');
+  });
+  it('bounds a pending JSONX token alone when its closing chunk contains more values', () => {
+    const reader = createJsonxStreamReader({ maxTokenBytes: 4 });
+    reader.feed('["a');
+    reader.feed('",1,2,3,4,5]');
+    deepStrictEqual(reader.end(), ['a', 1, 2, 3, 4, 5]);
+  });
+  it('does not charge CSV terminators or comments as fields', () => {
+    deepStrictEqual(fedByOne(createCsvStreamReader, '# a long comment\r\na,b\r\n',
+      { maxFieldBytes: 1, comment: '#' }), [['a', 'b']]);
+  });
+  it('preserves CSV delimiter searches across bounded additions', () => {
+    for (const [doc, maxRecordBytes] of [['a,b\n1,2\n', 4], ['"a,b",c\n1,2\n', 8], ['a,b\r\n1,2\r\n', 5]]) {
+      const expected = parseCsv(doc, { maxRecordBytes });
+      for (let cut = 0; cut <= doc.length; cut++) {
+        const reader = createCsvStreamReader({ maxRecordBytes });
+        reader.feed(doc.slice(0, cut));
+        reader.feed(doc.slice(cut));
+        deepStrictEqual(reader.end(), expected, `${doc} split at ${cut}`);
+      }
+    }
+  });
+  it('keeps partial-text events at caller chunk boundaries under token limits', () => {
+    const events = [];
+    const reader = createJsonxStreamReader({ maxTokenBytes: 8, partialText: true,
+      onEvent: (event) => { if (event.type === 'text-partial') events.push(event.text); } });
+    reader.feed('[1,2,"abc"]');
+    deepStrictEqual(reader.end(), [1, 2, 'abc']);
+    deepStrictEqual(events, ['abc']);
+  });
+  it('refuses oversized open tokens and records in their first chunk', () => {
+    const large = 'x'.repeat(100000);
+    for (const [make, options, text, code] of [
+      [createJsonxStreamReader, { maxTokenBytes: 8 }, `["${large}`, 'JSONX2002'],
+      [createJsonxStreamReader, { maxTokenBytes: 8 }, `[${'1'.repeat(100000)}`, 'JSONX2002'],
+      [createCsvStreamReader, { maxRecordBytes: 8 }, `a\n"${large}`, 'CSV2002'],
+      [createCsvStreamReader, { maxFieldBytes: 8 }, `"${large}`, 'CSV2003'],
+      [createStreamReader, { maxRecordBytes: 8 }, `a=1\nb="${large}`, 'JOSL2002'],
+      [createStreamReader, { maxTokenBytes: 8 }, `b="${large}`, 'JOSL2003'],
+      [createStreamReader, { maxTokenBytes: 8 }, large, 'JOSL2003'],
+      [createStreamReader, { maxTokenBytes: 8 }, `n=${'1'.repeat(100000)}`, 'JOSL2003'],
+      [createStreamReader, { maxTokenBytes: 8 }, `r=/${large}`, 'JOSL2003'],
+    ]) strictEqual(codeOf(() => make(options).feed(text)), code);
+  });
+  it('bounds JOSL scalar tokens consistently and separates dotted keys from numeric dots', () => {
+    for (const token of ['123456789', '-12345678', '0x1234567', '1.2345678', '1979-05-27', '07:32:00.1', '/abcdefgh/i', 'false', '-inf']) {
+      const limit = token.length - 1;
+      const doc = `v=${token}\n`;
+      strictEqual(codeOf(() => parseJosl(doc, { maxTokenBytes: limit })), 'JOSL2003', token);
+      strictEqual(codeOf(() => fedByOne(createStreamReader, doc, { maxTokenBytes: limit })), 'JOSL2003', token);
+      deepStrictEqual(fedByOne(createStreamReader, doc, { maxTokenBytes: token.length }), parseJosl(doc), token);
+    }
+    for (const doc of ['[a.b.c]\nx=1\n', 'a.b.c=1\n', 'v={a.b.c=1,d=2}\n', 'v=[/a b/,/["\\/]/i]\n']) {
+      const limit = doc.includes('/') ? 8 : 1;
+      for (let cut = 0; cut <= doc.length; cut++) {
+        const reader = createStreamReader({ maxTokenBytes: limit });
+        reader.feed(doc.slice(0, cut));
+        reader.feed(doc.slice(cut));
+        deepStrictEqual(reader.end(), parseJosl(doc), `${doc} split at ${cut}`);
+      }
+    }
+  });
+  it('keeps regexp punctuation out of JOSL container and line state', () => {
+    for (const doc of ['a=/[[]/\nb=1\n', 'a=[/[[]/,/"\'/,/[#]/,/a\\//]\nb=1\n', '[[]]\na=/[[]/\n[[]]\na=1\n']) {
+      const expected = parseJosl(doc);
+      for (const maxTokenBytes of [Infinity, 8]) {
+        for (let cut = 0; cut <= doc.length; cut++) {
+          const reader = createStreamReader({ maxTokenBytes });
+          reader.feed(doc.slice(0, cut));
+          reader.feed(doc.slice(cut));
+          deepStrictEqual(reader.end(), expected, `${doc} split at ${cut}`);
+        }
+        deepStrictEqual(fedByOne(createStreamReader, doc, { maxTokenBytes }), expected);
+      }
+    }
+  });
+});
+
 /**
  * Feed a document one character at a time — the split every limit must
  * survive — through a reader factory, and answer what it did.

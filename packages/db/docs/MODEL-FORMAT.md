@@ -379,7 +379,7 @@ rather than degrading silently.
 
 | capability | value | mapping | drivers |
 |---|---|---|---|
-| `deterministicIndexableFunctions` | `true` | a **virtual generated column** whose expression calls a deterministic function the store registers at open — `jaren_geohash(<member>, <precision>)`, `jaren_bbox_w(<member>)`, … over `json(jsonb_extract("doc", '<path>'))` | `node`, `wasm` |
+| `deterministicIndexableFunctions` | `true` | a **virtual generated column** whose expression calls a deterministic function the store registers at open — `jaren_geohash(<member>, <precision>)`, `jaren_bbox_w(<member>)`, … over `json(("doc" -> '<path>'))` | `node`, `wasm` |
 | `deterministicIndexableFunctions` | `false` | a **stored column** the store writes on every insert, upsert and patch, computed in JavaScript from the same kernel call | `bun` |
 | `rtree` | `false` | a `derive: 'bbox'` column set that declared `physical: 'rtree'` (§2.1) is planned, created and verified as the **B-tree over its four columns**, and `explain().prefilters[].via` reports `'columns'` beside `store.capabilities.rtree === false` | any build without `ENABLE_RTREE` |
 
@@ -451,9 +451,18 @@ no positions at all, or one whose coordinates are not positions, which
 is what a non-finite coordinate becomes: JSON cannot carry `NaN`, so it
 arrives as `null` and is no longer a number.
 
+A string also has no position: an untyped member can store WKT or even the
+string `"[1,2]"` without interpreting it as a coordinate array. Virtual and
+stored columns both derive `NULL`. Existing SQLite expressions that passed raw
+SQL strings to `json()` need the explicit column repair described in
+[MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#repairing-a-legacy-spatial-member-expression).
+
 The consequence is stated here rather than discovered later: **a row
-whose derived column is `NULL` is not found by a predicate pushed to
-that column.** For the spatial predicates the planner promotes
+whose derived column is `NULL` is not found by ordinary predicates pushed to
+that column.** Neighbourhood membership retains those rows as candidates and
+re-runs its predicate: `$index-of` raises for an empty search item, so discarding
+the row would hide that error. Guard the geohash with `$exists` before the
+membership test when unbounded rows should be excluded. For the other spatial predicates the planner promotes
 (ARCHITECTURE.md, "The implied conjunct") that is not a divergence —
 §8.14 measures a value by its representative position, and that
 position is missing in exactly the cases the box is, so `$within`,

@@ -38,7 +38,7 @@ import {
   scanBarExtremes, resolveBarDomains, barScale,
 } from '../types/bar.js';
 import {
-  buildLineAST, buildLineRender, scanLineExtremes, resolveLineDomains,
+  buildLineASTResolved, buildLineRender, scanLineExtremes, resolveLineDomains,
   lineScales, lineVertex, lineSeriesRender, lineSeriesChildren,
 } from '../types/line.js';
 import {
@@ -206,9 +206,10 @@ function createLineSession(config, source, options) {
     const input = (data?.series ?? []).filter((s) => Array.isArray(s.points));
     filteredSeries = input.length !== (data?.series ?? []).length;
     ext = scanLineExtremes(input, policy, log);
-    ast = buildLineAST(data, config);
+    const domains = resolveLineDomains(ext, policy, time, log);
+    ast = buildLineASTResolved(input, config, domains);
     render = buildLineRender(ast, theme, hash, options);
-    xDrop = resolveLineDomains(ext, policy, time, log).xDrop;
+    xDrop = domains.xDrop;
     vnode = render.svg;
     return { vnode, mode: /** @type {const} */ ('rebuilt') };
   }

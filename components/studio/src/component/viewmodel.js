@@ -143,6 +143,7 @@ export function projectViewModel(state, options = {}) {
     problems,
     problemCount: problems.length,
     stage: deriveStage(project, activeMeta, results, revision, committed),
+    stageError: slice.stageError ?? null,
     saveState: (slice.dirty === true || reconciled.dirty) ? 'Unsaved ●' : 'Saved',
     // the phone pane (Files · Editor · Stage). This is host chrome, not a
     // project member: `layout` travels with the saved document, which pane

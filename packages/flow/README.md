@@ -139,7 +139,7 @@ const dag = compileDag({
   nodes: {
     rows:   { kind: 'input' },
     adults: { kind: 'query',
-      query: { $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' } },
+      query: [{ $for: { r: '$[*]' }, $where: { $ge: ['$r.age', 18] }, $return: '$r' }] },
     view:   { kind: 'jslt',
       stylesheet: [{ match: '$', body: ['ul', {},
         [{ $for: { p: '$[*]' }, $return: ['li', {}, '$p.name'] }]] }] },
@@ -154,6 +154,10 @@ const dag = compileDag({
 
 await dag.run(people);   // ['ul', {}, [['li', {}, 'ada'], …]] — a vnode, as JSON
 ```
+
+The query's outer array keeps `adults` an array for zero, one or many
+rows. Without it, the engine's one-result sequence becomes that row;
+the next node's `$[*]` would iterate its members instead of rows.
 
 Cycles, port rules and the exactly-one-output rule are **compile-time**
 rejections (JF0xxx with `docPath`); a `task` node's handler is resolved

@@ -228,6 +228,14 @@ pure: no state, no DOM, safe in any runtime.
 In trusted mode, a `textarea` carrying a `value` prop serializes that
 value as escaped text content, overriding its children; nullish values
 produce empty text. A leading newline is preserved through HTML parsing.
+For a `select` with a `value` prop, serialization places `selected` on
+the matching `option`, overriding authored selections and omitting the
+select's ineffective `value` attribute. A single select marks its first
+match; a `multiple` select accepts an array. Matching uses string values,
+including an option's normalized text when it has no value attribute,
+and works through `optgroup`. HTML cannot encode a single select's
+`selectedIndex = -1`: with no match, the browser may select its default
+option until the DOM renderer reconciles the control.
 Safe mode keeps its attribute-only policy (§8).
 
 Hydration in 0.1 is a client-side first render into the same container

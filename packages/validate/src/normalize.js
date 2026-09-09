@@ -31,6 +31,7 @@ import {
 } from '@jarenjs/core/object';
 
 import { parseJSONPointer } from '@jarenjs/json';
+import { createRegExpTester } from '@jarenjs/core/string';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
 
 const hasOwn = Object.hasOwn;
@@ -89,7 +90,7 @@ function coerceToType(value, type) {
       if (typeof value !== 'string' || !RE_JSON_NUMBER.test(value)) return value;
       const num = Number(value);
       if (!Number.isFinite(num)) return value;
-      if (type === 'integer' && !Number.isInteger(num)) return value;
+      if (type === 'integer' && !Number.isSafeInteger(num)) return value;
       return num;
     }
     case 'boolean':
@@ -206,21 +207,6 @@ export function resolveNormalizeSwitch(option, node) {
   return false;
 }
 
-/** Compile a regular expression, tolerating patterns this engine rejects. */
-function compilePattern(source) {
-  try {
-    return new RegExp(source, 'u');
-  }
-  catch (_e) {
-    try {
-      return new RegExp(source);
-    }
-    catch (_e2) {
-      return null;
-    }
-  }
-}
-
 /**
  * Compose a list of node steps into one function, skipping the empty case.
  * @param {Function[]} steps - The steps to run in order
@@ -282,10 +268,9 @@ function buildObjectStep(node, ctx) {
   if (patternProperties !== null) {
     const sources = Object.getOwnPropertyNames(patternProperties);
     for (let i = 0; i < sources.length; i++) {
-      const regexp = compilePattern(sources[i]);
-      if (regexp === null) continue;
+      const matches = createRegExpTester(sources[i]);
       const step = compileNode(patternProperties[sources[i]], ctx);
-      patternSteps.push(regexp, step);
+      patternSteps.push(matches, step);
       if (step !== null) hasStep = true;
     }
   }
@@ -324,7 +309,7 @@ function buildObjectStep(node, ctx) {
       let covered = named !== undefined;
       if (named != null) next = named(next);
       for (let p = 0; p < patternCount; p += 2) {
-        if (!patternSteps[p].test(key)) continue;
+        if (!patternSteps[p](key)) continue;
         covered = true;
         const patternStep = patternSteps[p + 1];
         if (patternStep !== null) next = patternStep(next);

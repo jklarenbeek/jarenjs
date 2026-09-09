@@ -146,15 +146,19 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
       const locSlot = ruleBox.locSlot;
       const depthSlot = ruleBox.depthSlot;
       const tctxSlot = ruleBox.tctxSlot;
-      const currentPath = selector.kind === 'path'
-        && selector.rootSlot === 0
+      // A bare root is a variable in the query AST: its zero-segment
+      // path still has exactly the same location as a longer selector.
+      const pathLike = selector.kind === 'path' || selector.kind === 'var';
+      const rootSlot = selector.kind === 'var' ? selector.slot : selector.rootSlot;
+      const currentPath = pathLike
+        && rootSlot === 0
         && selector.external === false;
-      const rootPath = selector.kind === 'path'
+      const rootPath = pathLike
         && selector.name === 'root'
         && selector.external === true;
       const locatedPath = currentPath || rootPath;
       const segs = locatedPath
-        ? selector.segments.map(compileSegmentP)
+        ? (selector.segments ?? []).map(compileSegmentP)
         : null;
 
       return (frame) => {
@@ -166,7 +170,7 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
         if (tableBox.needsLoc && locatedPath) {
           const baseLoc = currentPath ? frame[locSlot] : '$';
           if (baseLoc !== null) {
-            const baseValue = currentPath ? frame[0] : frame[selector.rootSlot];
+            const baseValue = frame[rootSlot];
             const result = runSegmentsP(segs, baseValue, baseLoc, frame[0]);
             const vals = result.vals;
             const paths = result.paths;

@@ -51,16 +51,24 @@ function parseArgs(argv) {
     defaults: false, coerce: false, suffix: 'Input',
   };
   for (let i = 2; i < argv.length; i++) {
+    const value = () => {
+      const option = argv[i];
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith('-'))
+        throw new Error(`${option} requires a value`);
+      i++;
+      return next;
+    };
     switch (argv[i]) {
-      case '--schema': options.schema = argv[++i]; break;
-      case '--out': options.out = argv[++i]; break;
-      case '--target': options.target = argv[++i]; break;
-      case '--name': options.name = argv[++i]; break;
-      case '--bundle': options.bundle = argv[++i]; break;
+      case '--schema': options.schema = value(); break;
+      case '--out': options.out = value(); break;
+      case '--target': options.target = value(); break;
+      case '--name': options.name = value(); break;
+      case '--bundle': options.bundle = value(); break;
       case '--check': options.check = true; break;
       case '--defaults': options.defaults = true; break;
       case '--coerce': options.coerce = true; break;
-      case '--suffix': options.suffix = argv[++i]; break;
+      case '--suffix': options.suffix = value(); break;
       case '--help': case '-h': options.help = true; break;
       default:
         throw new Error(`unknown option: ${argv[i]}`);
@@ -203,6 +211,12 @@ function main() {
   }
 }
 
-main();
+try {
+  main();
+}
+catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 2;
+}
 
 //#endregion

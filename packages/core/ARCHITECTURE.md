@@ -445,6 +445,7 @@ flowchart TB
         RegExpUtils --> IsRegExp["isRegExpType()"]
         RegExpUtils --> IsStringRegExp["isStringRegExp()<br/>(tests if valid pattern)"]
         RegExpUtils --> CreateRegExp["createRegExp()<br/>(handles /pattern/flags syntax)"]
+        RegExpUtils --> TestRegExp["createRegExpTester()<br/>(repeatable, isolated global/sticky state)"]
 
         Unicode["Unicode Support"]
         Unicode --> Ascii["isAsciiString()"]

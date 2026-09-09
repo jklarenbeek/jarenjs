@@ -1,6 +1,6 @@
 # @jarenjs/validate
 
-The JSON Schema validating compiler at the heart of [Jaren](https://github.com/jklarenbeek/jarenjs). It compiles JSON Schemas into optimized validation functions and fully supports `draft-06`, `draft-07`, `draft 2019-09` and `draft 2020-12` — passing the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) for draft-07 and 2019-09 in full, and all of 2020-12 except the `$dynamicRef` cases the repository's roadmap names.
+The JSON Schema validating compiler at the heart of [Jaren](https://github.com/jklarenbeek/jarenjs). It compiles JSON Schemas into optimized validation functions and fully supports `draft-06`, `draft-07`, `draft 2019-09` and `draft 2020-12` — passing the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) for draft-07, 2019-09 and 2020-12, including the `$dynamicRef` scope cases.
 
 ## Usage
 
@@ -38,6 +38,13 @@ Highlights:
 - Instance-data references via the `data` keyword (json-everything data-ref) and Ajv-style `$data`
 - Cross-field assertions via the `$query` extension keyword (a [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) inside the schema)
 
+Schema registrations accept boolean schemas when supplied an explicit key.
+Document URIs with or without an empty `#` fragment are aliases; replacing a
+registration replaces both aliases. Named anchor fragments remain distinct.
+`addMetaSchema` accepts the bundles from `@jarenjs/refs` without mutating them,
+and `validateSchema` always returns a boolean. A schema with no `$schema`
+uses draft-07 for both compilation and meta-schema validation.
+
 ## 🔑 JSON Schema validation keywords
 
 Jaren supports the full set of JSON Schema validation keywords. Here's a quick overview:
@@ -60,7 +67,7 @@ Jaren supports the full set of JSON Schema validation keywords. Here's a quick o
 
 - type
 - nullable | _(OpenAPI)_
-- required | _as boolean (OpenAPI)_
+- required | _as boolean: rejects `undefined` when this schema is invoked; object member presence is declared with the parent's `required` array_
 
 ### 🔑 Keywords for numbers
 
@@ -343,6 +350,12 @@ Semantics and composition:
   validator's return shape **once per schema literal** — so even a
   `collectErrors` instance is unwrapped into a boolean predicate.
 
+A schema literal in `$query` has its own document scope; its local `$ref`s do
+not reach the enclosing schema's `$defs`. Register shared schema documents with
+`addSchema` and reference their IDs. Recursive compilation through such a query
+literal is refused at compile time instead of repeatedly opening another root;
+ordinary recursive `$ref` validation remains supported.
+
 ## Compatibility settings
 
 Five options decide answers that differ between validators, between JSON
@@ -375,9 +388,10 @@ Setting `collectErrors: true` implies `skipErrors: false` (collecting errors
 means recording them), so you do not need to set both. Set `skipErrors`
 yourself only to keep first-failure short-circuiting while still collecting.
 
-There is **no `validator.errors` property**. Errors arrive in the returned
-object and nowhere else, which is what makes a compiled validator reentrant
-and safe to share across concurrent requests.
+Read errors from the returned object. The `JarenValidator` instance has no
+`errors` property. A compiled function retains a legacy `errors` getter exposing
+its internal last-call diagnostics; that getter is not the public
+`ValidationError[]` result and should not be used as a request's error record.
 
 Each `ValidationError` carries six fields:
 
@@ -676,9 +690,18 @@ Walked: `properties`, `patternProperties`, `additionalProperties`,
 stripping disabled inside them because one branch cannot know what a sibling
 declares.
 
+Same-document references use the fragment forms `#`, `#/pointer` and `#anchor`;
+absolute URI spellings are not followed by the normalizer. Defaults materialize
+only on directly annotated, absent properties: an own property set to
+`undefined` remains present, and a default found only behind a `$ref` does not
+create an absent property. A supplied value still follows that reference.
+
 Tuple tail normalization starts after the declared prefix, including prefix
 positions that need no changes. Same-document anchors are collected from schema
 positions; anchor-looking keys in defaults, constants and examples are data.
+
+Pattern strings use the validator's syntax, including `/pattern/flags`.
+Global and sticky flags cannot retain a cursor between members or calls.
 
 Member schemas **compose the way JSON Schema says they do**: a member covered
 by `properties` *and* by one or more matching `patternProperties` is
@@ -704,7 +727,7 @@ normalizer hiding it.
 | Declared `type` | Converted | Left alone |
 |---|---|---|
 | `number` | a string that is exactly a JSON number (`'1e5'`, `'-0.5'`) | `'0x10'`, `'1_000'`, `''`, `'Infinity'` |
-| `integer` | as `number`, when the result is integral | `'4.5'` |
+| `integer` | as `number`, when the result is a safe integer | `'4.5'`, integer strings outside ±(2⁵³−1) |
 | `boolean` | `'true'`, `'false'` | `'yes'`, `'1'`, `0` |
 | `string` | finite numbers and booleans | objects, arrays, `null` |
 | `null` | `'null'` | `''`, `0`, `false` |

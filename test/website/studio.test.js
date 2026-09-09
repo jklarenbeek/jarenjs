@@ -353,6 +353,21 @@ describe('website — app authoring on the project surface (the folded Studio)',
     headless.app.dispatch('project/download');
     assert.strictEqual(headless.app.getState().ide.shared, 'download unavailable here');
   });
+
+  it('exports every project file even when there is no app file', function () {
+    const saved = [];
+    const { app } = mountSite({ download: (name, text) => { saved.push({ name, text }); return true; } });
+    app.dispatch('project/template', 'finance');
+    app.dispatch('project/export');
+    assert.strictEqual(saved[0].name, 'jaren-project.json');
+    const restored = JSON.parse(saved[0].text);
+    assert.deepStrictEqual(restored.files, app.getState().project.files);
+    assert.deepStrictEqual(restored.layout, app.getState().project.layout);
+    assert.strictEqual(restored.active, app.getState().project.active);
+    assert.strictEqual(restored.project, '0.1');
+    assert.strictEqual(restored.mount, undefined);
+    assert.strictEqual(app.getState().ide.shared, 'project downloaded');
+  });
 });
 
 describe('website — the Studio render audit (auditDocumentRender)', function () {

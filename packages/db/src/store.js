@@ -450,12 +450,19 @@ function wrapWriteError(error, plan, collection, docPath, key) {
  * open nothing else holds the connection.
  * @param {any} connection
  * @param {() => any} fn - value-or-promise
+ * @param {boolean} [retry] - one retry for a concurrent catalog creation
  * @returns {any} value-or-promise
  */
-function immediately(connection, fn) {
+function immediately(connection, fn, retry = true) {
   const dialect = connection.dialect;
   const commit = (value) => chain(connection.exec(dialect.tx.commit), () => value);
-  const rollback = (error) => chain(connection.exec(dialect.tx.rollback), () => { throw error; });
+  const rollback = (error) => chain(connection.exec(dialect.tx.rollback), () => {
+    // The winner's CREATE has committed before a catalog collision returns.
+    // Re-read and verify that shape in a fresh transaction, once per bracket;
+    // collection and entity creation can race independently during one open.
+    if (retry && dialect.isCreateRace?.(error) === true) return immediately(connection, fn, false);
+    throw error;
+  });
   return chain(connection.exec(dialect.tx.beginImmediate), () => {
     let out;
     try {
@@ -673,6 +680,14 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)));
   };
 
+  // RETURNING is decoded after the server has inserted the row. Keep
+  // decoding in the same transaction so an unrepresentable allocated
+  // key refuses without committing a document the caller cannot address.
+  const insertAllocated = (doc) => connection.transaction(() => chain(
+    runWrite('insertAllocated', dialect.dml.insertAllocated(shape),
+      [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
+    (row) => row.key));
+
   const core = {
     stats: () => ({ ...stats, ...engine.stats() }),
     model: collection,
@@ -694,12 +709,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     insert(doc) {
       checkValid(doc);
       const key = resolveWriteKey(doc, undefined);
-      if (key === null) {
-        return chain(
-          runWrite('insertAllocated', dialect.dml.insertAllocated(shape),
-            [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
-          (row) => row.key);
-      }
+      if (key === null) return insertAllocated(doc);
       return chain(
         runWrite('insert', dialect.dml.insert(shape),
           [key, JSON.stringify(doc), ...derivedFor(doc)], key, false),
@@ -708,12 +718,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     put(doc, explicitKey) {
       checkValid(doc);
       const key = resolveWriteKey(doc, explicitKey);
-      if (key === null) {
-        return chain(
-          runWrite('insertAllocated', dialect.dml.insertAllocated(shape),
-            [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
-          (row) => row.key);
-      }
+      if (key === null) return insertAllocated(doc);
       return chain(
         runWrite('upsert', dialect.dml.upsert(shape),
           [key, JSON.stringify(doc), ...derivedFor(doc)], key, false),

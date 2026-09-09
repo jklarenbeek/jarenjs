@@ -21,6 +21,10 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
 - `sourcePanes` are the engine's input(s): a JSONPath `selector`, a JSLT
   `stylesheet`, a JSON `patch`, a query + its `externals`, a markdown
   `source`. Editable in the playground.
+  Query, JSLT, JTLT and XQuery each expose an `externals` JSON pane; an
+  empty pane means `{}` and malformed JSON is attributed to that pane.
+  XQuery's Data pane supplies the declared `$doc` external and takes
+  precedence over an `externals.doc` member.
 - `dataPanes` are the JSON the engine runs against: usually one `data`; a
   patch's is its `target`; markdown / mermaid / charts have **none** — the
   source is everything.

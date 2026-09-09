@@ -19,7 +19,7 @@ emitTypeScript({
     role: { enum: ['admin', 'user'] },
   },
   required: ['id'],
-}, { name: 'User' });
+}, { name: 'User', banner: false });
 ```
 
 ```typescript
@@ -32,6 +32,7 @@ export interface User {
    */
   id: string;
   role?: "admin" | "user";
+  [key: string]: unknown;
 }
 ```
 
@@ -80,10 +81,10 @@ or a type so wide it certifies anything.
 
 Because Jaren owns **both sides**, that can be tested rather than trusted.
 The suite in `test/emit/agreement.test.js` takes a corpus of schemas plus
-instances, generates the declarations, writes a probe file that assigns every
-instance to its generated type, and runs `tsc` over it. Then it runs the
-compiled validator over the same instances and requires three relationships to
-hold:
+instances, checks the generated declaration fixture, and runs the compiled
+validator over those same instances. The companion `npm run test:types` gate
+runs `tsc` over assignments to that fixture. Together the gates require three
+relationships to hold:
 
 | Instance | Validator | Generated type | What a failure would mean |
 | --- | --- | --- | --- |
@@ -106,7 +107,10 @@ dropped constraint into the generated file:
 The type says `string`. The comment says the schema also demands a minimum
 length that the type does not enforce. A reader learns both. **Widening
 silently would be a lie of omission**, and it is the single most common way a
-generated type misleads the person reading it.
+generated type misleads the person reading it. Anonymous constrained nodes gain
+stable named declarations so their constraints have a documentation location;
+objects with documented members are named as well. Markdown emits those member
+notes after the declaration's table.
 
 The rig is checked against itself, too: deliberately breaking the generator so
 it emits `unknown` everywhere makes the "not wider than the schema" assertion
@@ -146,7 +150,7 @@ handler signature takes `ConfigInput`, the rest of the program handles
 `Config`, and the normalizer is the transition between them.
 
 **A twin appears only where the type actually differs.** The generator works
-that out bottom-up, so a schema with one defaulted field does not double every
+that out across the reference graph, including cycles, so a schema with one defaulted field does not double every
 declaration; everything unaffected keeps a single shared name on both sides.
 
 **Only two normalizations produce a difference.** `useDefaults` moves a member
@@ -211,6 +215,10 @@ jaren-emit --schema <file|dir> --out <dir> [options]
   --bundle <file>   one output file instead of one per schema
   --check           write nothing; exit 1 if any output is out of date
 ```
+
+Options requiring a value reject a missing value before writing. Input and
+filesystem errors are concise diagnostics with exit status 2; output drift under
+`--check` uses status 1.
 
 `--check` is the CI guard: it fails the build when a schema changed and the
 generated types did not, which is the failure mode that makes generated code

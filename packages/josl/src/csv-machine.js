@@ -48,7 +48,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { CsvSyntaxError } from './errors.js';
-import { JoslLimitError, limitOption } from './limits.js';
+import { JoslLimitError, limitOption, chunkByteLength, feedBounded } from './limits.js';
 import { columnOf, feedMachine, beginParseAll, offsetDateTime } from './util.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
@@ -253,6 +253,8 @@ export class CsvMachine {
     this.limited = this.maxTotalBytes !== Infinity || this.maxRecordBytes !== Infinity
       || this.maxFieldBytes !== Infinity || this.maxColumns !== Infinity;
     this.totalBytes = 0;
+    this.byteTail = undefined;
+    this.scanFieldStart = 0;
 
     const headers = options.headers;
     this.wantHeader = headers === true;
@@ -299,44 +301,31 @@ export class CsvMachine {
    * @returns {this} The machine, for chaining
    */
   feed(chunk) {
-    // Growth is append-only, so a found cursor position stays valid; but
-    // a cursor that had run off the end must look again in the new data.
-    if (this.nextDelim === -1)
-      this.nextDelim = -2;
-    if (this.nextLf === -1)
-      this.nextLf = -2;
-    if (this.nextCr === -1)
-      this.nextCr = -2;
     if (this.limited)
       this.count(chunk);
-    return feedMachine(this, chunk);
+    feedBounded(chunk, Math.min(this.maxRecordBytes, this.maxFieldBytes), (part) => {
+      // Every bounded addition can extend a delimiter search that ran
+      // off the previous buffer, just as a caller's next chunk can.
+      if (this.nextDelim === -1) this.nextDelim = -2;
+      if (this.nextLf === -1) this.nextLf = -2;
+      if (this.nextCr === -1) this.nextCr = -2;
+      feedMachine(this, part);
+      if (this.maxRecordBytes !== Infinity && utf8ByteLength(this.buf) > this.maxRecordBytes)
+        throw new JoslLimitError('CSV2002', 'a record exceeds maxRecordBytes', this.maxRecordBytes, this.recordOrigin);
+      const end = this.scanState !== S_QUOTED && this.buf.endsWith('\r') ? this.buf.length - 1 : this.buf.length;
+      this.checkFieldBytes(this.buf, this.scanFieldStart, end);
+    });
+    return this;
   }
 
-  // The byte limits, checked BEFORE the chunk is buffered: a chunk that
-  // takes the document past maxTotalBytes is refused whole, and a record
-  // still being cut — the unconsumed tail plus this chunk — that would
-  // pass maxRecordBytes is refused before the concatenation that would
-  // hold it. `parseAll` counts its one text the same way.
+  // Whole-input accounting precedes buffering. Pending field and record
+  // spans are checked between bounded additions by feed().
   count(text) {
     if (this.maxTotalBytes !== Infinity) {
-      this.totalBytes += utf8ByteLength(text);
+      this.totalBytes += chunkByteLength(this, text);
       if (this.totalBytes > this.maxTotalBytes)
         throw new JoslLimitError('CSV2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, this.line);
     }
-    if (this.maxRecordBytes !== Infinity) {
-      // the pending record is what the cutter has not handed off yet;
-      // a fresh chunk extends it
-      const pending = utf8ByteLength(this.buf) + utf8ByteLength(text);
-      if (pending > this.maxRecordBytes && !this.endsRecordWithin(text))
-        throw new JoslLimitError('CSV2002', 'a record exceeds maxRecordBytes', this.maxRecordBytes, this.recordOrigin);
-    }
-  }
-
-  // Whether a chunk can end the pending record within the bound: cheap
-  // and permissive — a terminator anywhere in the chunk means the cutter
-  // gets its chance; the span check in readSpan is the exact judge.
-  endsRecordWithin(text) {
-    return text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0;
   }
 
   /**
@@ -367,9 +356,9 @@ export class CsvMachine {
    * @returns {Array} The completed rows
    */
   parseAll(text) {
-    text = beginParseAll(this, text);
     if (this.maxTotalBytes !== Infinity && utf8ByteLength(text) > this.maxTotalBytes)
       throw new JoslLimitError('CSV2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, 1);
+    text = beginParseAll(this, text);
     this.readSpan(text, 0, text.length);
     return this.outRows;
   }
@@ -439,7 +428,7 @@ export class CsvMachine {
       // per-character machine. A record that does contain a quote is
       // handed to the machine below, one record at a time; one that
       // visibly STARTS with a quote skips the lookups outright.
-      if (state === S_PLAIN || (state === S_START && buf.charCodeAt(pos) !== quote)) {
+      if (this.maxFieldBytes === Infinity && (state === S_PLAIN || (state === S_START && buf.charCodeAt(pos) !== quote))) {
         if (qi !== -1 && qi < pos)
           qi = quote < 0 ? -1 : buf.indexOf(this.quoteChar, pos);
         const qlimit = qi < 0 ? len : qi;
@@ -509,6 +498,8 @@ export class CsvMachine {
             continue;
           case S_PLAIN: {
             if (c === delim) {
+              this.checkFieldBytes(buf, this.scanFieldStart, pos, start);
+              this.scanFieldStart = pos + 1;
               state = S_START;
               pos++;
               continue;
@@ -517,6 +508,7 @@ export class CsvMachine {
               pos++;
               this.readSpan(buf, start, pos);
               start = pos;
+              this.scanFieldStart = pos;
               state = S_START;
               continue outer;
             }
@@ -539,6 +531,7 @@ export class CsvMachine {
                 pos++;
               this.readSpan(buf, start, pos);
               start = pos;
+              this.scanFieldStart = pos;
               state = S_START;
               continue outer;
             }
@@ -597,6 +590,7 @@ export class CsvMachine {
       return;
     this.buf = this.buf.slice(start);
     this.scanPos -= start;
+    this.scanFieldStart = Math.max(0, this.scanFieldStart - start);
     // The scanner cursors are absolute in the buffer, so they shift with
     // it; one already consumed has no meaning in the new buffer.
     if (this.nextDelim >= 0)
@@ -610,6 +604,13 @@ export class CsvMachine {
   //#endregion
 
   //#region record parsing
+
+  /** Check a field span while its record is still incomplete. */
+  checkFieldBytes(text, start, end, recordStart = 0) {
+    if (this.comment >= 0 && text.charCodeAt(recordStart) === this.comment) return;
+    if (this.maxFieldBytes !== Infinity && utf8ByteLength(text, start, end) > this.maxFieldBytes)
+      throw new JoslLimitError('CSV2003', 'a field exceeds maxFieldBytes', this.maxFieldBytes, this.line);
+  }
 
   // Read every record in `text[pos, end)`. A cut span always carries its
   // own terminator, so this is the same loop the whole-document form runs

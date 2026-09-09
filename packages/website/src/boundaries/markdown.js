@@ -204,7 +204,11 @@ function rewriteAnchor(props, base) {
   const prefix = `${RAW}/`;
   if (!resolved.startsWith(prefix))
     return null;
-  const repoPath = resolved.slice(prefix.length).replace(/\/+$/, '');
+  // Extension/directory tests address the file, while navigation keeps
+  // the fragment with its trail entry until that document has rendered.
+  const documentUrl = resolved.split(/[?#]/, 1)[0];
+  const fragment = new URL(resolved).hash;
+  const repoPath = documentUrl.slice(prefix.length).replace(/\/+$/, '');
   if (/\.md$/i.test(repoPath)) {
     return {
       ...props,
@@ -226,13 +230,13 @@ function rewriteAnchor(props, base) {
       on: {
         click: {
           action: 'readme/navigate',
-          with: { title, url: `${prefix}${title}` },
+          with: { title, url: `${prefix}${title}${fragment}` },
           preventDefault: true,
         },
       },
     };
   }
-  return { ...props, href: `${REPO}/blob/main/${repoPath}`, target: '_blank', rel: 'noopener' };
+  return { ...props, href: `${REPO}/blob/main/${resolved.slice(prefix.length)}`, target: '_blank', rel: 'noopener' };
 }
 
 /** A relative image source, resolved against the raw base, or null. */

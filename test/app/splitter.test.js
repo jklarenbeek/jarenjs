@@ -23,12 +23,12 @@ function fakeEnv({ gridLeft = 0, gridRight = 1000, railRight = 200 } = {}) {
     addEventListener: add(docL), removeEventListener: del(docL),
     dispatch: emit(docL), count: (type) => (docL.get(type)?.size ?? 0),
   };
-  const rail = { getBoundingClientRect: () => ({ right: railRight }) };
+  const rail = { getBoundingClientRect: () => ({ right: railRight, top: 100, bottom: 900 }) };
   const styleSet = {};
   const grid = {
     style: { setProperty: (k, v) => { styleSet[k] = v; } },
     querySelector: (sel) => (sel === '.jplay-rail' ? rail : null),
-    getBoundingClientRect: () => ({ left: gridLeft, right: gridRight }),
+    getBoundingClientRect: () => ({ left: gridLeft, right: gridRight, top: 0, bottom: 900 }),
   };
   const hostL = bag();
   const attrs = {};
@@ -45,6 +45,38 @@ function fakeEnv({ gridLeft = 0, gridRight = 1000, railRight = 200 } = {}) {
 const opts = { grid: '.jplay', rail: '.jplay-rail', cssVar: '--jplay-ratio', action: 'play/layout-ratio' };
 
 describe('@jarenjs/app — createSplitterWidget', () => {
+  it('resizes a stacked layout along its vertical content span', () => {
+    const w = createSplitterWidget(opts);
+    const { host, doc, attrs, styleSet } = fakeEnv();
+    const emitted = [];
+    w.mount(host, { ratio: 0.5, axis: 'y' }, (e) => emitted.push(e));
+    assert.strictEqual(attrs['aria-orientation'], 'horizontal');
+    host.dispatch('pointerdown', { button: 0 });
+    doc.dispatch('pointermove', { clientX: 600, clientY: 740 });
+    doc.dispatch('pointerup', {});
+    assert.strictEqual(emitted.at(-1).with, 0.8);
+    assert.strictEqual(styleSet['--jplay-ratio-first'], '0.8fr');
+    host.dispatch('keydown', { key: 'ArrowUp' });
+    assert.strictEqual(emitted.at(-1).with, 0.75);
+    host.dispatch('keydown', { key: 'ArrowDown' });
+    assert.strictEqual(emitted.at(-1).with, 0.8);
+  });
+
+  it('cancels a pointer drag without a commit and removes document listeners', () => {
+    const w = createSplitterWidget(opts);
+    const { host, doc, styleSet } = fakeEnv();
+    const emitted = [];
+    const handle = w.mount(host, { ratio: 0.5 }, (e) => emitted.push(e));
+    host.dispatch('pointerdown', { button: 0 });
+    doc.dispatch('pointermove', { clientX: 840 });
+    doc.dispatch('pointercancel', {});
+    assert.strictEqual(handle.dragging, false);
+    assert.strictEqual(styleSet['--jplay-ratio'], '0.5');
+    assert.strictEqual(doc.count('pointermove'), 0);
+    assert.strictEqual(doc.count('pointerup'), 0);
+    assert.strictEqual(doc.count('pointercancel'), 0);
+    assert.deepStrictEqual(emitted, []);
+  });
   it('applies the initial ratio to the CSS variable and ARIA on mount', () => {
     const w = createSplitterWidget(opts);
     const { host, styleSet, attrs } = fakeEnv();

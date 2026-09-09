@@ -172,8 +172,9 @@ test.describe('the README dialog over stubbed documents', () => {
       // the .md link sits in the FIRST item of a FIRST-block list on
       // purpose: fragment-shaped vnodes once skipped exactly that spot
       [`${RAW}/packages/core/README.md`]:
-        '- Read [DATES](./docs/DATES.md)\n\nOr [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n',
-      [`${RAW}/packages/core/docs/DATES.md`]: '# the dates kernel\n\nplain text body\n',
+        '- Read [DATES](./docs/DATES.md#date%2Dsection)\n\nOr [the benchmarks](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=geo).\n',
+      [`${RAW}/packages/core/docs/DATES.md`]: '# the dates kernel\n\n'
+        + 'A paragraph before the destination.\n\n'.repeat(80) + '## Date section\n\nTarget body\n',
     };
     await page.route('https://raw.githubusercontent.com/**', (route) => {
       const body = DOCS[route.request().url()];
@@ -192,6 +193,7 @@ test.describe('the README dialog over stubbed documents', () => {
     await dialog.locator('article.md a', { hasText: 'DATES' }).click();
     await expect(dialog.locator('.md-dialog-title')).toHaveText('packages/core/docs/DATES.md');
     await expect(dialog.locator('article.md')).toContainText('the dates kernel');
+    await expect(dialog.locator('#date-section')).toBeInViewport();
     expect(page.url(), 'the page itself did not navigate').toBe(before);
 
     // the trail replays both ways
@@ -200,6 +202,7 @@ test.describe('the README dialog over stubbed documents', () => {
     await dialog.locator('button[aria-label="Forward"]').click();
     await expect(dialog.locator('.md-dialog-title')).toHaveText('packages/core/docs/DATES.md');
     await expect(dialog.locator('button[aria-label="Forward"]')).toBeDisabled();
+    await expect(dialog.locator('#date-section')).toBeInViewport();
 
     // a link to the site itself closes the dialog and routes in-app
     await dialog.locator('button[aria-label="Back"]').click();

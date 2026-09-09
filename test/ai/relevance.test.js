@@ -17,6 +17,14 @@ const qrels = [{ queryId: 'q', corpusId: 'a', relevance: 1 }];
 const temp = (t) => { const dir = mkdtempSync(join(tmpdir(), 'relevance-')); t.after(() => rmSync(dir, { recursive: true, force: true })); return dir; };
 
 describe('labelled relevance and the data boundary', () => {
+  it('scores unjudged prototype-like corpus ids as zero gain', () => {
+    for (const id of ['constructor', '__proto__', 'toString']) {
+      const data = normalizeDataset(manifest, [...corpus, { id, text: 'Unjudged' }], queries, qrels);
+      const result = relevanceMetrics(data.questions, [[id, 'a']]);
+      assert.equal(result.mrr, 0.5);
+      assert.equal(result.ndcg10, 1 / Math.log2(3));
+    }
+  });
   it('pins graded recall, MRR, nDCG and no-answer by hand', async () => {
     const dataset = loadDataset(fixture);
     const rankings = [['b', 'c', 'a'], ['a', 'c'], []];

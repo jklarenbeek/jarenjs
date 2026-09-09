@@ -45,6 +45,7 @@
 
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { compileDocument, isProviderSource, providerRoot } from './provider.js';
+import { memberSegment } from './expression.js';
 
 /** The strategies this boundary knows. One, for now, and it says so. */
 const STRATEGIES = new Set(['hash']);
@@ -121,18 +122,6 @@ function byteSize(row) {
   if (text === undefined) return 0;
   encoder ??= new TextEncoder();
   return encoder.encode(text).length;
-}
-
-/**
- * The root NAME a root expression carries: `'$.Post[*]'` → `'Post'`.
- * A federated source's root is always this shape, because the
- * federation names it.
- * @param {string} root
- * @returns {string}
- */
-function rootName(root) {
-  const match = /^\$\.([^.[\]]+)\[\*\]$/.exec(root);
-  return match === null ? '' : match[1];
 }
 
 /**
@@ -412,7 +401,7 @@ export function federate(spec) {
     // the federated root, which is what the chain binds and what the
     // resident document ranges over; the source's OWN root is what its
     // child document uses, and `childDocument` rewrites between them
-    const root = `$.${name}[*]`;
+    const root = `$${memberSegment(name)}[*]`;
     members.set(root, { name, root, provider, estimatedRows });
   }
 
@@ -448,8 +437,8 @@ export function federate(spec) {
         }, open);
 
       const input = {
-        [rootName(plan.build.root)]: built.rows,
-        [rootName(plan.probe.root)]: probed.rows,
+        [plan.build.member.name]: built.rows,
+        [plan.probe.member.name]: probed.rows,
       };
       const compiled = compileDocument(plan.resident,
         { ...options, externals: options?.externalNames ?? [] });
@@ -462,7 +451,7 @@ export function federate(spec) {
     catch (error) {
       // the call's own failure is the one the caller gets: a cursor
       // that also fails to close must not replace the budget's refusal
-      await closeAll(open);
+      await closeAll(open).catch(() => {});
       throw error;
     }
   };
@@ -513,7 +502,7 @@ export function federate(spec) {
   const handleFor = (name) => {
     let handle = handles.get(name);
     if (handle === undefined) {
-      const root = `$.${name}[*]`;
+      const root = `$${memberSegment(name)}[*]`;
       if (!members.has(root)) {
         throw new LinqBuildError('JL0005',
           `'${name}' is not one of this federation's sources (${names.join(', ')})`);

@@ -25,6 +25,27 @@ import {
 
 import { createTypeTestCompiler } from './query.js';
 
+// Registered schema resources retain their query document identity across
+// compilation roots. A recursive query literal therefore re-enters this set
+// before the outer query compiler returns.
+const compilingQueries = new Set();
+class RecursiveQueryCompileError extends Error {}
+
+/** Identify a recursive compile even after both compilers wrap its cause.
+ * @param {unknown} error - The thrown value
+ * @returns {boolean} Whether a recursive query compile caused this error
+ */
+export function isRecursiveQueryCompileError(error) {
+  const seen = new Set();
+  while (error instanceof Error && !seen.has(error)) {
+    if (error instanceof RecursiveQueryCompileError) return true;
+    seen.add(error);
+    error = error.cause;
+  }
+  return false;
+}
+
+
 /**
  * Compile the '$query' keyword of a schema into a validator.
  *
@@ -50,6 +71,9 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
   const owner = schemaObj.root.owner;
   const compileTypeTest = createTypeTestCompiler(owner ?? undefined);
 
+  if (compilingQueries.has(queryDoc))
+    throw new RecursiveQueryCompileError('recursive schema compilation through a query literal is not supported');
+  compilingQueries.add(queryDoc);
   let query;
   try {
     query = compileJsonQuery(queryDoc, { compileTypeTest });
@@ -58,6 +82,9 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
     if (e instanceof JsonQueryCompileError)
       throw new Error(`invalid '$query' document at '${schemaObj.path}': ${e.message}`, { cause: e });
     throw e;
+  }
+  finally {
+    compilingQueries.delete(queryDoc);
   }
 
   const externals = query.externals;

@@ -129,6 +129,13 @@ describe('recursive result contracts', () => {
     assert.throws(() => compileProgram(plan('$[0].value'), options), { code: 'AI0208' });
     compileProgram(plan('$[0].value', schema), options);
   });
+  it('refuses nested sequence declarations and array-valued FLWOR items', () => {
+    const nested = { type: 'array', items: { type: 'array', items: schema } };
+    assert.throws(() => compileProgram(plan('$[0].value', nested), options), { code: 'AI0208' });
+    const query = [{ $for: { x: '$[*]' }, $return: [{ slot: 'data', value: '$x' }] }];
+    assert.deepEqual(compileJsonQuery(query)([1, 2]), [[{ slot: 'data', value: 1 }], [{ slot: 'data', value: 2 }]]);
+    assert.throws(() => compileProgram(plan(query), options), { code: 'AI0208' });
+  });
   it('refuses a lying declaration before storing or consuming the output', async () => {
     const environment = createEnvironment();
     await environment.put('data', '2', { kind: 'json' });

@@ -385,3 +385,36 @@ describe('federate() — the explicit cross-source boundary', () => {
     await assert.rejects(() => run({ $return: 1 }), codeIs('JL0005', /has no bindings/));
   });
 });
+
+it('federation preserves its primary failure while closing every cursor', async () => {
+  const closed = [];
+  const source = (name, fail) => ({
+    execute() { return []; }, root: '$[*]',
+    cursor() {
+      let read = 0;
+      return {
+        async next() {
+          if (fail) throw fail;
+          return read++ === 0 ? { done: false, value: { id: 1 } } : { done: true };
+        },
+        async return() { closed.push(name); throw new Error(`${name} cleanup failed`); },
+      };
+    },
+  });
+  const primary = new Error('probe read failed');
+  const federation = federate({ sources: { a: source('a'), b: source('b', primary) },
+    maxRows: 10, maxBytes: 1000 });
+  await assert.rejects(fromAsync(federation.source('a')).join(fromAsync(federation.source('b')),
+    (a) => a.id, (b) => b.id, (a) => a).toArray(), (error) => error === primary);
+  assert.deepStrictEqual(closed, ['a', 'b']);
+});
+
+it('federation names are literal JSON member names in every source root', async () => {
+  for (const name of ['a.b', 'a b', 'a-b', '0', '', "quote'\\\n", '__proto__', '😀']) {
+    const federation = federate({ sources: { [name]: fake([{ id: 1 }]).source,
+      other: fake([{ id: 1 }]).source }, maxRows: 10, maxBytes: 1000 });
+    assert.deepStrictEqual(await fromAsync(federation.source(name))
+      .join(fromAsync(federation.source('other')), (a) => a.id, (b) => b.id,
+        (a) => a).toArray(), [{ id: 1 }], name);
+  }
+});

@@ -116,7 +116,7 @@ export function relevanceMetrics(questions, rankings, ks = [1, 5, 10]) {
     if (rank >= 0) mrr += 1 / (rank + 1);
     const gains = q.relevance ?? Object.fromEntries(q.gold.map((id) => [id, 1]));
     const dcg = (values) => values.slice(0, 10).reduce((sum, gain, r) => sum + (2 ** gain - 1) / Math.log2(r + 2), 0);
-    ndcg10 += dcg(ranked.map((id) => gains[id] ?? 0)) / dcg(Object.values(gains).sort((a, b) => Number(b) - Number(a)));
+    ndcg10 += dcg(ranked.map((id) => Object.hasOwn(gains, id) ? gains[id] : 0)) / dcg(Object.values(gains).sort((a, b) => Number(b) - Number(a)));
   }
   const mean = (v) => answerable ? v / answerable : null;
   return { recall: Object.fromEntries(ks.map((k) => [k, mean(recall[k])])),

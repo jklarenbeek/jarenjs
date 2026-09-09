@@ -79,7 +79,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { JsonxSyntaxError } from './errors.js';
-import { JoslLimitError, limitOption } from './limits.js';
+import { JoslLimitError, limitOption, chunkByteLength, feedBounded } from './limits.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import {
@@ -162,6 +162,7 @@ export class JsonxMachine {
     this.maxDepth = limitOption(options, 'maxDepth');
     this.maxRetainedValues = limitOption(options, 'maxRetainedValues');
     this.totalBytes = 0;
+    this.byteTail = undefined;
     this.retained = 0; // values linked into the tree
     this.partialFrom = -1; // body offset the next text-partial delta starts at
     this.partialHold = ''; // lone high surrogate held back for the next delta
@@ -179,6 +180,7 @@ export class JsonxMachine {
     this.lineStart = 0; // buf offset of the current line start (may go negative after compaction)
     // resumable token-scan state
     this.scanPos = -1; // where the pending token's scan left off
+    this.partialBoundary = true;
     this.scanInFlags = false; // regexp scan: past the closing '/'
     this.scanInClass = false; // regexp scan: inside [...]
     this.scanDtSpace = false; // scalar scan: crossed a date-time space separator
@@ -198,19 +200,21 @@ export class JsonxMachine {
       throw new Error('cannot feed after end()');
     if (chunk.length !== 0) {
       if (this.maxTotalBytes !== Infinity) {
-        this.totalBytes += utf8ByteLength(chunk);
+        this.totalBytes += chunkByteLength(this, chunk);
         if (this.totalBytes > this.maxTotalBytes)
           throw new JoslLimitError('JSONX2001', 'the document exceeds maxTotalBytes', this.maxTotalBytes, this.curLine);
       }
-      if (this.maxTokenBytes !== Infinity && this.scanPos >= 0) {
-        // a token still being scanned grows by this chunk: refused
-        // before the concatenation that would hold it
-        const pending = utf8ByteLength(this.buf, this.pos, this.buf.length) + utf8ByteLength(chunk);
-        if (pending > this.maxTokenBytes)
-          throw new JoslLimitError('JSONX2002', 'a token exceeds maxTokenBytes', this.maxTokenBytes, this.curLine);
+      let remaining = chunk.length;
+      try {
+        feedBounded(chunk, this.maxTokenBytes, (part) => {
+          remaining -= part.length;
+          this.partialBoundary = remaining === 0;
+          this.buf += part;
+          this.pump();
+          if (this.scanPos >= 0) this.token(this.buf, this.pos, this.buf.length);
+        });
       }
-      this.buf += chunk;
-      this.pump();
+      finally { this.partialBoundary = true; }
     }
     return this;
   }
@@ -426,7 +430,8 @@ export class JsonxMachine {
     if (c === CC_DQUOTE) {
       const end = this.scanString(buf, pos);
       if (end < 0) {
-        if (this.partialText)
+        this.token(buf, pos, buf.length);
+        if (this.partialText && this.partialBoundary)
           this.emitPartialText(buf, pos, buf.length, true);
         return -1;
       }

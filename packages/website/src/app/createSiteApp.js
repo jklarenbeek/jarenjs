@@ -187,6 +187,8 @@ export function createSiteApp(env) {
   };
   /** @type {any} */
   let app = null;
+  /** @type {{url: string, id: string} | null} */
+  let readmeAnchor = null;
   // the data studio's owner-worker runtime (its boot sub lives in the
   // boundary, which is coverage-excluded as browser-only). The spatial
   // corpus it runs as the third executor is a site artifact, read
@@ -392,12 +394,17 @@ export function createSiteApp(env) {
     // the name Studio downloads always carried
     'project-download': (props, dispatch) => {
       const file = projectAppFile(app.getState().project);
-      if (file === null) return;
+      if (file === null) { dispatch('ide/shared', 'this project has no app document'); return; }
       let doc;
       try { doc = JSON.parse(file.text); }
-      catch { return; } // an unparseable app file has nothing to download
+      catch { dispatch('ide/shared', 'the app document is not valid JSON'); return; }
       const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
       dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
+    },
+    'project-export': (props, dispatch) => {
+      const snapshot = projectSnapshot(app.getState().project);
+      const saved = env.download?.('jaren-project.json', JSON.stringify(snapshot, null, 2));
+      dispatch('ide/shared', saved === true ? 'project downloaded' : 'download unavailable here');
     },
 
     // the Project IDE: the editor commits the ACTIVE file's text (rewriting
@@ -583,7 +590,7 @@ export function createSiteApp(env) {
     // site client); the viewModel parses + renders it through the
     // @jarenjs/md component
     'readme-load': (props, dispatch) => {
-      const path = rawPath(props.url);
+      const path = rawPath(props.url.split(/[?#]/, 1)[0]);
       if (path === null) {
         dispatch(props.error, `Not a repository document: ${props.url}`);
         return;
@@ -593,6 +600,11 @@ export function createSiteApp(env) {
         const readme = app.getState().readme;
         if (!readme.open || readme.url !== props.url) return;
         if (result.ok) {
+          const fragment = new URL(props.url).hash.slice(1);
+          let id = fragment;
+          try { id = decodeURIComponent(fragment); }
+          catch { /* A malformed escape stays a literal heading id. */ }
+          readmeAnchor = fragment === '' ? null : { url: props.url, id };
           dispatch(props.done, result.value.text);
           return;
         }
@@ -636,6 +648,15 @@ export function createSiteApp(env) {
     afterRender: () => {
       env.revealActiveTab?.();
       env.syncMotion?.();
+      // A cross-document fragment belongs to its history entry. It can
+      // scroll only after the matching loaded document reaches the DOM.
+      if (readmeAnchor !== null && app !== null) {
+        const pending = readmeAnchor;
+        readmeAnchor = null;
+        const readme = app.getState().readme;
+        if (readme.open && readme.status === 'ready' && readme.url === pending.url)
+          env.scrollToAnchor?.(pending.id);
+      }
     },
     onError: report,
     effects,
@@ -732,7 +753,8 @@ function wireBoundaries(app, debounceMs, navigate) {
     let playFormEdit = false; // a /play/dataValue* edit (from the generated form)
     let playToggle = false;   // the /play/dataView toggle (json ↔ form)
     for (const path of changes) {
-      if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active') {
+      if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active'
+        || path === '/project/layout/autorun') {
         project = true;
       }
       // any Play ENGINE input (source / data / example / dataset / config)
@@ -751,7 +773,10 @@ function wireBoundaries(app, debounceMs, navigate) {
         routed = true;
       }
     }
-    if (project) debounced('project', () => { runProjectCommit(); runProjectActive(); });
+    if (project) debounced('project', () => {
+      if (app.getState().project.layout.autorun === false) return;
+      runProjectCommit(); runProjectActive();
+    });
     if (play) debounced('play', runPlayLive);
     // a generated-form edit (not the toggle, which sets the buffer from the
     // text) serializes the structured buffer back into the data-pane text —

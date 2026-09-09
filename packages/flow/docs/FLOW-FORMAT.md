@@ -261,7 +261,7 @@ extending it is a format revision, not an option.
   "nodes": {
     "rows": { "kind": "input" },
     "adults": { "kind": "query",
-      "query": { "$for": { "r": "$[*]" }, "$where": { "$ge": ["$r.age", 18] }, "$return": "$r" } },
+      "query": [{ "$for": { "r": "$[*]" }, "$where": { "$ge": ["$r.age", 18] }, "$return": "$r" }] },
     "names": { "kind": "jslt",
       "stylesheet": [{ "match": "$", "body": ["ul", {},
         [{ "$for": { "p": "$[*]" }, "$return": ["li", {}, "$p.name"] }]] }] },
@@ -312,7 +312,15 @@ A node's `$` is decided by its inbound edges:
 
 A delivery whose `select` yields the empty sequence delivers `null`; a
 `query`/`jslt` node whose own result is empty likewise yields `null` —
-`undefined` is not a JSON value and never flows through a graph.
+`undefined` is not a JSON value and never flows through a graph. The
+query engine's singleton rule also applies: one result is that value,
+while two or more results become an array. To deliver an array for every
+cardinality, wrap the query in an array constructor, as `adults.query`
+does above. Its downstream `$[*]` therefore always iterates rows. The
+stylesheet also collects its `li` children in an explicit array: zero,
+one and two adults yield respectively `["ul", {}, []]`,
+`["ul", {}, [["li", {}, "ada"]]]`, and
+`["ul", {}, [["li", {}, "ada"], ["li", {}, "lin"]]]` for those names.
 Values pass **by reference**: nodes and hosts MUST NOT mutate what
 they receive.
 

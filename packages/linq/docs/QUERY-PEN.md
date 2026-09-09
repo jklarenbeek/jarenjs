@@ -728,7 +728,8 @@ const rows = await fromAsync(fed.source('orders'))
 ```
 
 `fed.source(name)` is an ordinary provider source (§8) with the root
-`$.<name>[*]`, and all of a federation's sources share one scope — which
+`$.<name>[*]` (a quoted member selector for names containing punctuation,
+spaces or other characters), and all of a federation's sources share one scope — which
 is exactly what admits the join. The federation is what executes it:
 
 1. each side's own document — the filters and the projection the chain
@@ -1705,7 +1706,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->174<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->626<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->628<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 

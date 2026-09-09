@@ -54,6 +54,37 @@ const orderSchema = {
 };
 
 describe('jaren-emit — bundle mode', () => {
+  it('refuses missing option values before producing any output', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-emit-'));
+    try {
+      const file = path.join(dir, 'schema.json');
+      const out = path.join(dir, 'out');
+      fs.writeFileSync(file, '{"type":"string"}');
+      for (const option of ['--schema', '--out', '--name', '--suffix', '--target', '--bundle']) {
+        for (const tail of [[option], [option, '--check']]) {
+          const result = spawnSync(process.execPath, [CLI, '--schema', file, '--out', out, ...tail], { encoding: 'utf8' });
+          assert.strictEqual(result.status, 2);
+          assert.match(result.stderr, new RegExp(`${option} requires a value`));
+          assert.strictEqual(result.stdout, '');
+          assert.strictEqual(fs.existsSync(out), false);
+        }
+      }
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('reports an unreadable schema as a concise command error', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-emit-'));
+    try {
+      const result = spawnSync(process.execPath, [CLI, '--schema', path.join(dir, 'missing.json'), '--out', path.join(dir, 'out')], { encoding: 'utf8' });
+      assert.strictEqual(result.status, 2);
+      assert.match(result.stderr, /ENOENT/);
+      assert.doesNotMatch(result.stderr, /\n\s+at |node:fs|file:\/\//);
+      assert.strictEqual(result.stdout, '');
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('never bundles two declarations onto one identifier', () => {
     const out = runEmit(
       { 'order.json': orderSchema, 'user.json': userSchema },

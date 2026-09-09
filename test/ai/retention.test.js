@@ -144,6 +144,23 @@ it('scoped lifecycle reads and clears never expose or remove sibling archives', 
   assert.equal(await b.ledger.readSlot('keep'), 'keep');
 });
 
+it('immutable archives reject concurrent address collisions and named archives remain replaceable', async () => {
+  const backing = new Map();
+  const a = createLedger({ storage: createMemoryStorage(backing) });
+  const b = createLedger({ storage: createMemoryStorage(backing) });
+  const outcomes = await Promise.all([a, b].map((ledger, index) => ledger.putArchive([
+    { name: 'same-address', text: String(index), kind: 'agent-round' },
+  ], { immutable: true })));
+  assert.equal(outcomes.filter((outcome) => outcome.ok).length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.code === 'ARCHIVE_COLLISION').length, 1);
+  const before = dump(backing);
+  assert.equal((await a.putArchive([{ name: 'same-address', text: 'changed', kind: 'agent-round' }],
+    { immutable: true })).code, 'ARCHIVE_COLLISION');
+  assert.equal(dump(backing), before);
+  assert.equal((await a.putArchive([{ name: 'same-address', text: 'changed', kind: 'agent-round' }])).ok, true);
+  assert.equal(await a.readSlot('same-address'), 'changed');
+});
+
 it('re-archiving identical content preserves timestamps and pinned protection', async () => {
   let tick = 0;
   const backing = new Map(), ledger = createLedger({ storage: createMemoryStorage(backing),

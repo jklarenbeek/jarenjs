@@ -168,6 +168,11 @@ Jaren owns state and orchestration; the widget owns its DOM. Its `props` come fr
 Two IDE-shaped primitives ship ready to bind, so a two-pane surface (the studio, the play playground) doesn't re-implement them:
 
 - **`createSplitterWidget({ action, grid, rail, cssVar, min, max, step })`** — a drag handle over a pane boundary. It drives a CSS ratio variable *live* during a drag (no per-move dispatch — that would flood the transaction log and undo) and commits the ratio through `action` on pointer-up only, plus keyboard resize as an ARIA separator. Register it like any widget; parameterize the grid/rail selectors, the CSS variable and the commit action so each surface binds its own.
+
+  Widget props accept `axis: 'x' | 'y'` (default `'x'`) for side-by-side or
+  stacked panes. The widget also writes `${cssVar}-first` and
+  `${cssVar}-rest` as fractional grid tracks. Pointer cancellation restores
+  the starting ratio without committing; vertical resizing uses Up/Down.
 - **`createDocStore({ storage, key })`** — a keyed `save`/`load`/`remove`/`names`/`all` CRUD over an injected `storage` (`localStorage` in the browser, an in-memory object in tests), so the package never touches `localStorage` itself. Paired with **`encodeShare(snapshot)`** / **`decodeShare(token)`**, a Unicode-safe base64url share-link codec (a corrupt token decodes to `null`, never a throw), it is the new/save/load/delete/share pattern behind the studio and play surfaces.
 
 Collection keys and document names such as `__proto__` are ordinary own

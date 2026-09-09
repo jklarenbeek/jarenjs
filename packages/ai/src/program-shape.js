@@ -14,32 +14,33 @@ export function recursiveItems(value) {
 
 /** Conservatively prove a declared item/sequence schema. Unknown schema keywords
  * never manufacture required properties. Runtime validation enforces the full declaration.
- * @param {any} schema @returns {boolean} */
-export function recursiveSchema(schema) {
+ * @param {any} schema @param {boolean} [item] @returns {boolean} */
+export function recursiveSchema(schema, item = false) {
   if (!schema || typeof schema !== 'object') return false;
-  if (schema.type === 'array') return recursiveSchema(schema.items);
-  if (schema.anyOf) return schema.anyOf.every(recursiveSchema);
+  if (schema.type === 'array') return !item && recursiveSchema(schema.items, true);
+  if (schema.anyOf) return schema.anyOf.every((branch) => recursiveSchema(branch, item));
   return schema.type === 'object' && schema.required?.includes('slot')
     && schema.required?.includes('value') && schema.properties?.slot?.type === 'string';
 }
 
 /** Three-valued structural proof over the existing annotated query AST.
- * @param {any} node @returns {'compatible'|'incompatible'|'unknown'} */
-export function recursiveShape(node) {
+ * @param {any} node @param {boolean} [item] @returns {'compatible'|'incompatible'|'unknown'} */
+export function recursiveShape(node, item = false) {
   if (!node) return 'unknown';
-  if (node.kind === 'let') return recursiveShape(node.ret);
+  if (node.kind === 'let') return recursiveShape(node.ret, item);
   if (node.kind === 'flwor') {
-    const output = recursiveShape(node.ret);
+    const output = recursiveShape(node.ret, node.fold ? item : true);
     if (!node.fold) return output;
-    const initial = recursiveShape(node.fold.expr);
+    const initial = recursiveShape(node.fold.expr, item);
     return initial === output ? output : 'unknown';
   }
   if (node.kind === 'array') {
-    if (node.elements.some((element) => element.kind === 'array')) return 'incompatible';
-    const shapes = node.elements.map(recursiveShape);
+    if (item) return 'incompatible';
+    const shapes = node.elements.map((element) => recursiveShape(element, true));
     return shapes.includes('incompatible') ? 'incompatible' : shapes.includes('unknown') ? 'unknown' : 'compatible';
   }
-  if (node.kind === 'literal') return recursiveItems(node.value) === null ? 'incompatible' : 'compatible';
+  if (node.kind === 'literal') return (item && (Array.isArray(node.value) || node.value === null))
+    || recursiveItems(node.value) === null ? 'incompatible' : 'compatible';
   if (node.kind === 'object') {
     const slot = node.entries.find((entry) => entry.name === 'slot')?.expr;
     const value = node.entries.find((entry) => entry.name === 'value');

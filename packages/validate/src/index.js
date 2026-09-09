@@ -29,6 +29,7 @@ import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
+import { isRecursiveQueryCompileError } from './query-keyword.js';
 
 export {
   registerFormatCompilers
@@ -191,7 +192,7 @@ export { TraverseOptions };
  * @typedef {(schemaObj: ValidationObject, jsonSchema: JSONSchema & {format?: string}) => ((data: unknown, dataPath?: string) => boolean) | undefined} FormatCompiler
  */
 
-export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-06/schema#'
+export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-07/schema#'
 
 /**
  * Detects the JSON Schema draft version from the schema's $schema property
@@ -335,6 +336,8 @@ export class ValidationRoot {
   #rootValidator = null;
   /** @type {Array<{name: string, schema: object, validator: (function|null)}>} $dynamicAnchors of the root resource (excluding the root's own), registered on each validation */
   #rootDynamicAnchors = [];
+  /** @type {Map<object, Map<string, object>>} Anchor validators keyed by schema identity and resolution base */
+  #anchorObjects = new Map();
   /** @type {boolean} Whether any schema in this compilation contains a $data reference */
   #usesDollarData = false;
   /** @type {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
@@ -766,18 +769,19 @@ export class ValidationRoot {
    * @returns {Function} The validator function
    */
   getOrCreateValidator(schema, basePath, baseUri) {
-    // Create a unique path for this schema based on its content
-    // We use a simple JSON stringify for now, but this could be improved
-    const path = basePath + '/$def-anchor/' + JSON.stringify(schema).slice(0, 50);
-    
-    // Check if we already have an object for this path
-    let obj = this.#objects.get(path);
-    if (obj != null) {
-      return obj.validate;
+    let byBase = this.#anchorObjects.get(schema);
+    if (byBase === undefined) {
+      byBase = new Map();
+      this.#anchorObjects.set(schema, byBase);
     }
-    
-    // Create a new validation object for this schema
-    obj = ValidationRoot.#createObject(this, path, schema, baseUri);
+    const cached = byBase.get(baseUri);
+    if (cached !== undefined) return cached.validate;
+    // An annotation prefix cannot identify a schema. The object's identity
+    // and resolution base own the cache; the synthetic path is only a unique
+    // diagnostic location within this compilation.
+    const path = basePath + '/$def-anchor/' + this.#objects.size;
+    const obj = ValidationRoot.#createObject(this, path, schema, baseUri);
+    byBase.set(baseUri, obj);
     return obj.validate;
   }
 }
@@ -1027,6 +1031,8 @@ export class ValidationObject {
   #schema = null;
   /** @type {function|null} The compiled validator function */
   #validator = null;
+  /** @type {function|null} Dynamic resource scope around the current validator */
+  #resourceValidator = null;
   /** @type {string} The effective base URI for child $ref resolution */
   #effectiveBaseUri = null;
   /** @type {number|null} Draft version declared by this schema's document ($schema), inherited by subschemas; null when never declared */
@@ -1067,6 +1073,34 @@ export class ValidationObject {
     }
 
     this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
+
+    // An applicator may enter an embedded resource without following a ref.
+    // Its anchors have the same lifetime as that evaluation. Keep this
+    // wrapper separate so a ref's lazy validator cache cannot discard it.
+    const draft = this.#declaredDraft ?? root.options.draftVersion;
+    if (draft >= 2020 && isObjectClass(schema) && isStringType(schema.$id)
+      && path !== baseUri) {
+      const anchors = collectDynamicAnchorsDeep(schema);
+      if (anchors.length > 0) {
+        const resourceBase = this.#effectiveBaseUri;
+        const inner = (data, dataPath, dataRoot, dataKey) => this.#validator(data, dataPath, dataRoot, dataKey);
+        this.#resourceValidator = (data, dataPath, dataRoot, dataKey) => {
+          for (const anchor of anchors) {
+            anchor.validator ??= anchor.schema === schema
+              ? inner
+              : root.getOrCreateValidator(anchor.schema, path, resourceBase);
+            root.pushDynamicAnchorValidator(anchor.name, anchor.validator);
+          }
+          try {
+            return inner(data, dataPath, dataRoot, dataKey);
+          }
+          finally {
+            for (let i = anchors.length - 1; i >= 0; i--)
+              root.popDynamicAnchorValidator(anchors[i].name);
+          }
+        };
+      }
+    }
   }
 
   /** @returns {string} The URI path identifying this schema object */
@@ -1081,7 +1115,7 @@ export class ValidationObject {
 
   /** @returns {function} The compiled validator function */
   get validate() {
-    return this.#validator;
+    return this.#resourceValidator ?? this.#validator;
   }
 
   /** @returns {ValidationOptions} The validation options */
@@ -1196,7 +1230,7 @@ export class ValidationObject {
     const child = root.createObject(path, schema, basePath, this.#declaredDraft);
     this.#members.push(child);
 
-    return child.#validator;
+    return child.validate;
   }
 }
 
@@ -1450,16 +1484,16 @@ export class JarenValidator {
     if (Array.isArray(schema)) {
       schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
     }
-    else if (typeof schema === 'object') {
-      const schemaKey = key || schema.$id;
+    else if (isBoolOrObjectClass(schema)) {
+      const schemaKey = key || (isObjectClass(schema) ? schema.$id : undefined);
       if (schemaKey) {
         this.#schemas.set(schemaKey, schema);
-        // CHECK: Also store with alternate key (with/without #) for absolute URIs
-        if (!schemaKey.startsWith('#')) {
+        // Only an empty fragment aliases the document URI. Replace both
+        // aliases together; a named anchor remains a distinct registration.
+        const fragment = schemaKey.indexOf('#');
+        if (!schemaKey.startsWith('#') && (fragment === -1 || fragment === schemaKey.length - 1)) {
           const altKey = schemaKey.endsWith('#') ? schemaKey.slice(0, -1) : schemaKey + '#';
-          if (!this.#schemas.has(altKey)) {
-            this.#schemas.set(altKey, schema);
-          }
+          this.#schemas.set(altKey, schema);
         }
 
         // Also traverse the schema to find and store all internal $id anchors
@@ -1576,7 +1610,7 @@ export class JarenValidator {
   }
 
   static normalizeUriKey(key) {
-    return key;
+    return typeof key === 'string' && !key.includes('#') ? key + '#' : key;
   }
 
   /**
@@ -1599,8 +1633,8 @@ export class JarenValidator {
     const validation = JarenValidator.#withOption(this.#options.validation,
       'unknownFormats', 'ignore');
     if (Array.isArray(schema)) {
-      const first = schema.shift();
-      const { origin, map } = JarenValidator.#traverseSchema(first, schema, undefined, new TraverseOptions(key));
+      const [first, ...siblings] = schema;
+      const { origin, map } = JarenValidator.#traverseSchema(first, siblings, undefined, new TraverseOptions(key));
       const compiled = JarenValidator.#compileSchema(this, origin, map, validation);
       this.#metaSchemas.set(origin, compiled);
       mergeMap(this.#schemas, map);
@@ -1630,7 +1664,7 @@ export class JarenValidator {
    */
   getSchema(key) {
     key = JarenValidator.normalizeUriKey(key)
-    return this.#schemas.get(key) || null;
+    return this.#schemas.get(key) ?? null;
   }
 
   /**
@@ -1647,14 +1681,16 @@ export class JarenValidator {
     if (this.#metaSchemas.size == 0)
       return true;
 
-    const schemaId = JarenValidator.normalizeUriKey(schema.$schema || DEFAULT_SCHEMA_DRAFT);
+    const schemaId = JarenValidator.normalizeUriKey(
+      (isObjectClass(schema) ? schema.$schema : undefined) || DEFAULT_SCHEMA_DRAFT);
     const metaSchema = this.#metaSchemas.get(schemaId);
     // if the metaSchema is not present, we fail the validation
     if (!metaSchema)
       return false;
 
     // otherwise, validate the schema
-    return metaSchema(schema);
+    const result = metaSchema(schema);
+    return typeof result === 'boolean' ? result : result.valid === true;
   }
 
   /**
@@ -1688,6 +1724,7 @@ export class JarenValidator {
         try {
           root.createObject(id, schema, origin);
         } catch (_e) {
+          if (isRecursiveQueryCompileError(_e)) throw _e;
           // May fail if dependencies not resolved yet
         }
       }
@@ -1803,6 +1840,7 @@ export class JarenValidator {
       try {
         root.createObject(id, schema, baseUri);
       } catch (_e) {
+        if (isRecursiveQueryCompileError(_e)) throw _e;
         // Ref may not be resolvable yet, that's ok
       }
     }

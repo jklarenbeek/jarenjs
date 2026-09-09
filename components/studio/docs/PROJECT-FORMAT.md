@@ -72,6 +72,16 @@ than one name).
 autorun: boolean }`, defaulted to `{ classic, 0.5, true }`. It rides the
 share link and the eject, so its shape is fixed at v0.1.
 
+The IDE honours `autorun`: when false, edits keep the last committed stage
+until **Run** is pressed. The toolbar toggle changes the saved layout.
+The splitter resizes the editor horizontally in `classic`/`right` and
+vertically in `top`; pointer cancellation restores the previous ratio.
+
+**Download** exports the complete `jaren-project` envelope, including every
+file and the active file/layout, and works for projects without an app.
+**App JSON** separately exports the designated app document and reports
+when none exists. A runnable offline folder/ZIP is a future export format.
+
 ## `classifyChange` — reboot vs. hot-update
 
 `classifyChange(prev, next)` reports, **per artifact**, whether a change
@@ -109,8 +119,8 @@ Still open, and tracked with their constraints in
 validate but have no editor or runner, so they cannot be added from the
 IDE; fragment assembly (one artifact from several files) is unbuilt;
 the assistant authors files as free-form tool arguments rather than under
-constrained decoding; there is no whole-project export (`.zip` eject);
-`layout.autorun` is declared and never read; and the stage collects a
-nested app's failures without showing them. Syntax highlighting stays a
+constrained decoding; and a runnable offline `.zip` eject is unbuilt.
+The stage displays the nested app's latest boot/runtime failure and clears
+it on restart. Syntax highlighting stays a
 non-goal — the editor is a plain `<textarea>` so the whole IDE remains a
 JSLT document with no imperative chrome.

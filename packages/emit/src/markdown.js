@@ -43,6 +43,7 @@ export const MARKDOWN_STYLESHEET = {
         '| Member | Type | Required |\n| --- | --- | --- |\n',
         [{ $apply: ['$.members[*]', 'row'] }],
         '\n',
+        [{ $apply: ['$.members[?@.doc[0]]', 'memberdoc'] }],
       ],
     },
     {
@@ -55,6 +56,13 @@ export const MARKDOWN_STYLESHEET = {
         [{ $apply: ['$.required', 'yesno'] }], ' |\n'],
     },
     { mode: 'yesno', body: [{ $if: ['$', 'yes', 'no'] }] },
+    {
+      mode: 'memberdoc',
+      body: [
+        '**`', { $raw: '$.name' }, '`**\n\n',
+        [{ $apply: ['$.doc[*]', 'docline'] }],
+      ],
+    },
 
     // --- the same type vocabulary, printed as prose ---------------------
     { match: isKind('primitive'), mode: 'type', body: [{ $raw: '$.primitive' }] },

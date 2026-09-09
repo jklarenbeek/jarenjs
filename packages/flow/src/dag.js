@@ -466,6 +466,8 @@ export function compileDag(doc, options) {
         loaded = await checkpoint.load(runId);
       }
       catch (err) {
+        if (signal !== undefined && onAbort !== null)
+          signal.removeEventListener('abort', onAbort);
         const cause = asError(err);
         throw new FlowRuntimeError('JF2009',
           `the checkpoint store failed to load run '${runId}': ${cause.message}`,

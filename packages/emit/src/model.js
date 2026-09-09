@@ -28,7 +28,7 @@
 // a private intermediate: a third-party stylesheet targets it, and `emit`'s
 // own TypeScript and Markdown emitters have no privileged access.
 
-import { isJsonObject } from '@jarenjs/core/object';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import {
   NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
   ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
@@ -79,6 +79,7 @@ export const EMIT_MODEL_VERSION = '0.1';
  * @property {any} [default] - The schema default, when it declares one
  * @property {EmitConstraint[]} constraints
  * @property {string[]} doc
+ * @property {Record<string, unknown>} [extensions] - Selected extension annotations carried from the property schema
  */
 
 /**
@@ -337,7 +338,7 @@ function unionOf(types) {
  * analysis answering differently from the runtime is precisely the defect the
  * variants exist to rule out.
  *
- * Computed bottom-up and memoized, because a type differs if anything it
+ * Follows reference reachability, because a type differs if anything it
  * contains differs. A node reached while it is still being analyzed is a
  * cycle, and a cycle alone introduces no difference, so it answers `false`.
  * @param {any} node - The schema node
@@ -411,7 +412,10 @@ function normalizationChangesType(node, ctx) {
   }
 
   ctx.analyzing.delete(node);
-  memo.set(node, differs);
+  // A false answer reached through a backedge may still depend on a node
+  // whose coercible member has not been visited. Only a completed outer
+  // traversal proves false; a discovered difference is final immediately.
+  if (differs || ctx.analyzing.size === 0) memo.set(node, differs);
   return differs;
 }
 
@@ -509,9 +513,10 @@ function reserveName(ctx, preferred) {
  * @param {any} node - The schema node
  * @param {object} ctx - The compile context
  * @param {string} hint - A name to use if this node has to be hoisted
+ * @param {boolean} [documented=false] - The owning member already carries this node's own documentation
  * @returns {object} A type ref
  */
-function typeOf(node, ctx, hint) {
+function typeOf(node, ctx, hint, documented = false) {
   if (node === true || node === undefined) return T.unknown();
   if (node === false) return T.never();
   if (!isJsonObject(node)) return T.unknown();
@@ -529,6 +534,15 @@ function typeOf(node, ctx, hint) {
     return T.ref(name);
   }
 
+  // Anonymous constraints need a declaration's documentation slot. Object
+  // member documentation also needs the declaration printer: an inline
+  // object type has no member comment surface in either bundled emitter.
+  const documentedMembers = isJsonObject(node.properties)
+    && Object.values(node.properties).some((member) => isJsonObject(member)
+      && (droppedConstraints(member).length > 0
+        || (typeof member.description === 'string' && member.description.length > 0)));
+  if ((!documented && droppedConstraints(node).length > 0) || documentedMembers)
+    return declare(node, ctx, hint);
   return shapeOf(node, ctx, hint);
 }
 
@@ -671,6 +685,24 @@ function coercionCanProduce(source, type, value) {
   }
 }
 
+/** Whether a literal satisfies the explicitly declared JSON type. */
+function literalMatchesType(value, node) {
+  if (node.type === undefined) return true;
+  if (value === null && node.nullable === true) return true;
+  const types = Array.isArray(node.type) ? node.type : [node.type];
+  return types.some((type) => {
+    switch (type) {
+      case 'null': return value === null;
+      case 'object': return isJsonObject(value);
+      case 'array': return Array.isArray(value);
+      case 'integer': return typeof value === 'number' && Number.isInteger(value);
+      case 'number': return typeof value === 'number' && Number.isFinite(value);
+      case 'string': case 'boolean': return typeof value === type;
+      default: return true;
+    }
+  });
+}
+
 /** The structural shape of a schema node. */
 function shapeOf(node, ctx, hint) {
   const parts = [];
@@ -689,41 +721,38 @@ function shapeOf(node, ctx, hint) {
       parts.push(declare(target.node, ctx, target.name ?? hint));
   }
 
-  // const and enum are the most precise things a schema can say. On the
-  // accepted side the literal set still admits what the normalizer coerces
-  // INTO a member — `"2"` for an integer enum — so it widens by the source
-  // primitives that can actually reach one.
-  if (node.const !== undefined || Array.isArray(node.enum)) {
-    const values = node.const !== undefined ? [node.const] : node.enum;
-    const literals = values.map((v) => T.literal(v));
+  // Literals still satisfy the node's type and every sibling applicator.
+  // Filter the type here instead of emitting redundant `"a" & string` arms.
+  const hasLiterals = node.const !== undefined || Array.isArray(node.enum);
+  let containerLiteral = false;
+  if (hasLiterals) {
+    const values = (node.const !== undefined ? [node.const] : node.enum)
+      .filter((value) => literalMatchesType(value, node));
+    const literals = values.map((value) => T.literal(value));
+    containerLiteral = values.some((value) => isJsonObject(value) || Array.isArray(value));
     for (const source of coercionSources(node, values, ctx))
       literals.push(T.primitive(PRIMITIVES[source]));
     parts.push(unionOf(literals));
   }
-  else {
-    // allOf is intersection.
-    if (Array.isArray(node.allOf) && node.allOf.length > 0) {
-      const branches = node.allOf.map((b, i) => typeOf(b, ctx, `${hint}Part${i + 1}`));
-      const usable = branches.filter((t) => t.kind !== 'unknown');
-      if (usable.length === 1) parts.push(usable[0]);
-      else if (usable.length > 1) parts.push(T.intersection(usable));
-    }
 
-    // anyOf and oneOf are both unions at the type level. oneOf's exclusivity
-    // is a validation property with no type-level equivalent, so it widens to
-    // the same union rather than being faked. When variants are being
-    // derived, branches compile in the PLAIN universe: the runtime
-    // normalizer does not descend them (see createPlainContext).
-    for (const key of ['anyOf', 'oneOf']) {
-      if (Array.isArray(node[key]) && node[key].length > 0) {
-        const branchCtx = ctx.normalize === null
-          ? ctx
-          : (ctx.plain ??= createPlainContext(ctx));
-        parts.push(unionOf(node[key].map((b, i) =>
-          typeOf(b, branchCtx, `${hint}${toIdentifier(key)}${i + 1}`))));
-      }
-    }
+  if (Array.isArray(node.allOf) && node.allOf.length > 0) {
+    const branches = node.allOf.map((branch, i) => typeOf(branch, ctx, `${hint}Part${i + 1}`));
+    const usable = branches.filter((type) => type.kind !== 'unknown');
+    if (usable.length === 1) parts.push(usable[0]);
+    else if (usable.length > 1) parts.push(T.intersection(usable));
+  }
 
+  // The normalizer does not descend union branches, so both variants use
+  // the plain schema reading of those branches.
+  for (const key of ['anyOf', 'oneOf']) {
+    if (Array.isArray(node[key]) && node[key].length > 0) {
+      const branchCtx = ctx.normalize === null ? ctx : (ctx.plain ??= createPlainContext(ctx));
+      parts.push(unionOf(node[key].map((branch, i) =>
+        typeOf(branch, branchCtx, `${hint}${toIdentifier(key)}${i + 1}`))));
+    }
+  }
+
+  if (!hasLiterals || containerLiteral) {
     const own = ownShape(node, ctx, hint);
     if (own !== null) parts.push(own);
   }
@@ -742,7 +771,8 @@ function ownShape(node, ctx, hint) {
 
   const hasObjectKeywords = node.properties !== undefined
     || node.patternProperties !== undefined
-    || node.additionalProperties !== undefined;
+    || node.additionalProperties !== undefined
+    || Array.isArray(node.required);
   const hasArrayKeywords = node.items !== undefined || node.prefixItems !== undefined;
 
   // No `type`: the applicator keywords describe the container cases, but
@@ -786,6 +816,7 @@ function ownShape(node, ctx, hint) {
     }
     else alternatives.push(T.unknown());
   }
+  if (node.nullable === true) alternatives.push(T.primitive('null'));
   return unionOf(alternatives);
 }
 
@@ -812,7 +843,7 @@ function objectShape(node, ctx, hint) {
       const member = {
         kind: 'member',
         name: key,
-        type: typeOf(sub, ctx, `${hint}${toIdentifier(key)}`),
+        type: typeOf(sub, ctx, `${hint}${toIdentifier(key)}`, true),
         required: defaulted
           ? ctx.variant !== 'accepted'
           : declaredRequired,
@@ -828,12 +859,19 @@ function objectShape(node, ctx, hint) {
         for (const keyword of declaredExtensions) {
           if (subNode[keyword] === undefined) continue;
           if (carried === null) carried = {};
-          carried[keyword] = subNode[keyword];
+          setObjectMember(carried, keyword, subNode[keyword]);
         }
         if (carried !== null) member.extensions = carried;
       }
       members.push(member);
     }
+  }
+
+  // `required` owns presence independently of `properties`. A required
+  // undeclared member has no narrower named schema to infer here.
+  for (const key of required) {
+    if (members.some((member) => member.name === key)) continue;
+    members.push({ kind: 'member', name: key, type: T.unknown(), required: true, constraints: [], doc: [] });
   }
 
   // An index signature comes from additionalProperties or patternProperties.

@@ -442,6 +442,11 @@ export function postgresDialect(options = undefined) {
       : `LIMIT ${limit === null ? 'ALL' : limit}`),
     jsonPathText,
     jsonExtract,
+    // Concurrent first opens can both observe an absent relation before
+    // either CREATE commits. Ordinary unique violations remain failures.
+    isCreateRace: (error) => error?.code === '42P07' || error?.code === '23505'
+      && (error.constraint === 'pg_type_typname_nsp_index' && error.table === 'pg_type'
+        || error.constraint === 'pg_class_relname_nsp_index' && error.table === 'pg_class'),
     // a DERIVED column's expression names a function the HOST supplies;
     // this dialect creates none and assumes none. Every driver this
     // package ships for PostgreSQL declares

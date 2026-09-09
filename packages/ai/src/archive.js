@@ -20,6 +20,9 @@ export function retainArchives(current, added, limits, options = {}) {
     key.startsWith('ai/state/memory/') || key.startsWith('ai/state/goal/')))
     + (options.referenceText ?? '');
   for (const { slot, text } of added) {
+    if (options.immutable === true && Object.hasOwn(next, `${CONTENT}${slot.name}`)
+      && next[`${CONTENT}${slot.name}`] !== text)
+      return { error: `archive address collision at '${slot.name}'`, code: 'ARCHIVE_COLLISION' };
     next[`${SLOT}${slot.name}`] = slot;
     next[`${CONTENT}${slot.name}`] = text;
     delete next[`${EVICTED}${slot.name}`];

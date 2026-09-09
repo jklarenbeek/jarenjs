@@ -59,6 +59,28 @@ function runtimeFails(transform, data, code, check = null) {
 }
 
 describe('Jaren JSLT dispatch', () => {
+  it('retains the location of bare current and root apply selectors', () => {
+    for (const selector of ['$', '$root']) {
+      const transform = compileJsltStylesheet({ $jslt: '0.1', rules: [
+        { match: '$', body: { $apply: [selector, 'located'] } },
+        { match: '$', mode: 'located', body: { value: '$.a', path: '$path' } },
+      ] });
+      assert.deepStrictEqual(transform({ a: 1 }), { value: 1, path: '$' });
+    }
+    const transform = compileJsltStylesheet({ $jslt: '0.1', rules: [
+      { match: '$.child', body: {
+        current: { $apply: ['$', 'current'] }, root: { $apply: ['$root', 'root'] },
+      } },
+      { match: '$.child', mode: 'current', body: { value: '$.n', path: '$path' } },
+      { match: '$', mode: 'root', body: { value: '$.name', path: '$path' } },
+    ] });
+    assert.deepStrictEqual(transform({ name: 'parent', child: { n: 2 } }), {
+      name: 'parent', child: {
+        current: { value: 2, path: "$['child']" }, root: { value: 'parent', path: '$' },
+      },
+    });
+  });
+
   describe('matching and sharing', () => {
     it('returns the input by reference for an empty stylesheet', () => {
       const data = { store: { books: [{ price: 10 }] } };

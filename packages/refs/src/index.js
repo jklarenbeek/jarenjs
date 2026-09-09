@@ -81,5 +81,5 @@ export function getSchemaDraftById(schemaId) {
       return item;
   }
 
-  throw new Error(`Schema draft with id '${schemaId}' does not exists`);
+  throw new Error(`Schema draft with id '${schemaId}' does not exist`);
 }

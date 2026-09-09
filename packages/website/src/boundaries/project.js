@@ -213,6 +213,7 @@ export function createProjectStageWidget(env = {}) {
   const shapeKeyOf = (doc) => (doc && typeof doc === 'object' ? contentKey({ ...doc, state: null }) : null);
 
   const boot = (handle, mount) => {
+    handle.emit({ action: 'project/stage-error', with: null });
     const result = loadStudioDocument(mount.doc, {
       node: handle.host,
       document: handle.host.ownerDocument,

@@ -137,6 +137,7 @@ function normalizeCapabilities(declared) {
  *   limitClause: (limit: number, offset?: number) => string,
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
+ *   isCreateRace?: (error: any) => boolean,
  *   derivedExpression?: (memberSql: string, column: { derive: string,
  *     precision?: number, component?: string, dims?: number }) => string,
  *   jsonSet: (exprSql: string, pathText: string, valueSql: string) => string,
@@ -532,6 +533,7 @@ export function createDialect(spec) {
     limitClause: spec.limitClause,
     jsonPathText: spec.jsonPathText,
     jsonExtract: spec.jsonExtract,
+    isCreateRace: spec.isCreateRace,
     /**
      * The expression a DERIVED column is generated from: the member at
      * the index path, as JSON text, handed to the deterministic
@@ -542,7 +544,7 @@ export function createDialect(spec) {
      * @returns {string}
      */
     derivedColumn: (docColumnSql, pathText, column) => spec.derivedExpression(
-      spec.jsonText(spec.jsonExtract(docColumnSql, pathText)), column),
+      spec.jsonText(spec.jsonExtract(docColumnSql, pathText, 'json')), column),
     jsonSet: spec.jsonSet,
     jsonRemove: spec.jsonRemove,
     jsonAppend: spec.jsonAppend,

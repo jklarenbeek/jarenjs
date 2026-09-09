@@ -12,7 +12,7 @@ import {
 } from '@jarenjs/core/number';
 
 import {
-  createRegExp,
+  createRegExpTester,
 } from '@jarenjs/core/string';
 
 import {
@@ -150,12 +150,12 @@ function buildPatternValidators(schemaObj, jsonSchema) {
   const list = [];
   for (let i = 0; i < entryKeys.length; ++i) {
     const key = entryKeys[i];
-    const pattern = createRegExp(key);
-    if (pattern == null) continue;
+    const matches = createRegExpTester(key);
+    if (matches == null) continue;
 
     const validator = schemaObj.createValidator(entries[key], 'patternProperties', key);
     if (validator != null)
-      list.push({ pattern, validator });
+      list.push({ matches, validator });
   }
 
   if (list.length === 0) return undefined;
@@ -173,8 +173,8 @@ function compilePatternProperties(schemaObj, jsonSchema) {
   return function validatePatternPropertiesItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
     for (let i = 0; i < list.length; ++i) {
-      const { pattern, validator } = list[i];
-      if (pattern.test(dataKey)) {
+      const { matches, validator } = list[i];
+      if (matches(dataKey)) {
         const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
         if (track && valid === true) root.evalLog.add(data, dataKey);
         result.addMatch(valid);
@@ -651,7 +651,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
       if (patternList != null) {
         for (let j = 0; j < patternList.length; ++j) {
           const entry = patternList[j];
-          if (entry.pattern.test(dataKey)) {
+          if (entry.matches(dataKey)) {
             matched = true;
             if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
             if (entry.validator(data[dataKey], childPath, dataRoot, dataKey) === false)

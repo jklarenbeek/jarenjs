@@ -28,8 +28,8 @@
 .jstudio[data-mode="right"] { grid-template-areas: "penbar penbar penbar penbar" "rail stage split editor"; }
 .jstudio[data-mode="top"] {
   grid-template-columns: 11rem minmax(0, 1fr);
-  grid-template-areas: "penbar penbar" "rail editor" "rail stage";
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "penbar penbar" "rail editor" "rail split" "rail stage";
+  grid-template-rows: auto minmax(0, var(--js-ratio-first, 0.5fr)) auto minmax(0, var(--js-ratio-rest, 0.5fr));
 }
 
 .js-penbar {
@@ -167,8 +167,12 @@
 }
 .js-split:hover::before, .js-split:focus-visible::before { background: var(--accent, #2563eb); }
 .js-split:focus-visible { outline: none; }
-/* the stacked layout splits by rows; the horizontal handle is hidden there */
-.jstudio[data-mode="top"] .js-split { display: none; }
+.jstudio[data-mode="top"] .js-split {
+  justify-self: stretch; inline-size: auto; block-size: 10px; cursor: row-resize;
+}
+.jstudio[data-mode="top"] .js-split::before {
+  inline-size: 100%; block-size: 4px; margin-block: auto;
+}
 
 /* the phone pane switcher exists only below the breakpoint */
 .js-panebar { display: none; }
@@ -183,8 +187,10 @@
 @media (max-width: 1024px) {
   .jstudio, .jstudio[data-mode="right"], .jstudio[data-mode="top"] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "penbar" "panes" "rail" "editor" "stage";
+    grid-template-areas: "penbar" "panes" "content";
+    grid-template-rows: auto auto minmax(0, 1fr);
   }
+  .js-rail, .js-editor, .js-stage { grid-area: content; }
   .js-panebar { display: flex; grid-area: panes; align-self: start; }
   .js-panebar .seg-btn { flex: 1; }
   .jstudio[data-pane="files"]  .js-editor,

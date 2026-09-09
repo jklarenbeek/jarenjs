@@ -7,7 +7,9 @@
  * DOM call is guarded so it mounts inertly over a headless stub (there the
  * live drag is browser-verified). The host binds it as a widget and
  * parameterizes the grid/rail selectors, the CSS variable and the commit
- * action, so studio, play and any future two-pane surface share one splitter.
+ * action. Widget props `{ ratio, axis: 'x' | 'y' }` select the live direction;
+ * the axis defaults to x. The ratio's `-first`/`-rest` CSS variables carry
+ * fractional tracks for stacked grids after their fixed toolbar and gaps.
  */
 
 /**
@@ -44,22 +46,30 @@ export function createSplitterWidget(opts) {
       const gridOf = () => (typeof host.closest === 'function' ? host.closest(gridSel) : null);
       const applyRatio = (r) => {
         gridOf()?.style?.setProperty?.(cssVar, String(r));
+        gridOf()?.style?.setProperty?.(cssVar + '-first', `${r}fr`);
+        gridOf()?.style?.setProperty?.(cssVar + '-rest', `${1 - r}fr`);
         host.setAttribute?.('aria-valuenow', String(Math.round(r * 100)));
+        host.setAttribute?.('aria-orientation', handle.axis === 'y' ? 'horizontal' : 'vertical');
       };
-      // pointer x → the left content pane's share of the (post-rail) span
-      const ratioAt = (clientX) => {
+      // A rail spans the content rows, so its top excludes the toolbar
+      // when the same content is stacked vertically.
+      const ratioAt = (clientX, clientY) => {
         const g = gridOf();
         if (g === null) return handle.ratio;
         const rail = railSel !== null && typeof g.querySelector === 'function' ? g.querySelector(railSel) : null;
         const box = g.getBoundingClientRect();
-        const left = rail !== null ? rail.getBoundingClientRect().right : box.left;
-        if (!(box.right > left)) return handle.ratio;
-        return clamp((clientX - left) / (box.right - left));
+        const railBox = rail?.getBoundingClientRect();
+        const vertical = handle.axis === 'y';
+        const start = vertical ? (railBox?.top ?? box.top) : (railBox?.right ?? box.left);
+        const end = vertical ? (railBox?.bottom ?? box.bottom) : box.right;
+        const point = vertical ? clientY : clientX;
+        if (!(end > start) || !Number.isFinite(point)) return handle.ratio;
+        return clamp((point - start) / (end - start));
       };
       const onMove = (e) => {
         if (!handle.dragging) return;
         e.preventDefault?.();
-        handle.ratio = ratioAt(e.clientX);
+        handle.ratio = ratioAt(e.clientX, e.clientY);
         applyRatio(handle.ratio); // live only — the commit is on pointer-up
       };
       const onUp = () => {
@@ -67,20 +77,32 @@ export function createSplitterWidget(opts) {
         handle.dragging = false;
         doc?.removeEventListener?.('pointermove', onMove);
         doc?.removeEventListener?.('pointerup', onUp);
+        doc?.removeEventListener?.('pointercancel', onCancel);
         emit({ action, with: handle.ratio });
+      };
+      const onCancel = () => {
+        if (!handle.dragging) return;
+        handle.dragging = false;
+        handle.ratio = handle.startRatio;
+        applyRatio(handle.ratio);
+        doc?.removeEventListener?.('pointermove', onMove);
+        doc?.removeEventListener?.('pointerup', onUp);
+        doc?.removeEventListener?.('pointercancel', onCancel);
       };
       const onDown = (e) => {
         if (e.button !== undefined && e.button !== 0) return;
         handle.dragging = true;
+        handle.startRatio = handle.ratio;
         e.preventDefault?.();
         doc?.addEventListener?.('pointermove', onMove);
         doc?.addEventListener?.('pointerup', onUp);
+        doc?.addEventListener?.('pointercancel', onCancel);
       };
       const onKey = (e) => {
         const s = e.shiftKey ? fineStep : step;
         let next = null;
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = clamp(handle.ratio - s);
-        else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = clamp(handle.ratio + s);
+        if (e.key === 'ArrowLeft' || e.key === (handle.axis === 'y' ? 'ArrowUp' : 'ArrowDown')) next = clamp(handle.ratio - s);
+        else if (e.key === 'ArrowRight' || e.key === (handle.axis === 'y' ? 'ArrowDown' : 'ArrowUp')) next = clamp(handle.ratio + s);
         else if (e.key === 'Home') next = min;
         else if (e.key === 'End') next = max;
         if (next === null) return;
@@ -90,7 +112,9 @@ export function createSplitterWidget(opts) {
         emit({ action, with: next });
       };
 
-      const handle = { host, doc, ratio: clamp(Number(props?.ratio ?? 0.5)), dragging: false, applyRatio, onMove, onUp };
+      const handle = { host, doc, ratio: clamp(Number(props?.ratio ?? 0.5)),
+        axis: props?.axis === 'y' ? 'y' : 'x', startRatio: 0.5,
+        dragging: false, applyRatio, onMove, onUp, onCancel };
       applyRatio(handle.ratio);
       host.addEventListener?.('pointerdown', onDown);
       host.addEventListener?.('keydown', onKey);
@@ -98,6 +122,12 @@ export function createSplitterWidget(opts) {
       return handle;
     },
     update(handle, props) {
+      const axis = props?.axis === 'y' ? 'y' : 'x';
+      if (axis !== handle.axis) {
+        handle.onCancel();
+        handle.axis = axis;
+        handle.applyRatio(handle.ratio);
+      }
       const r = clamp(Number(props?.ratio ?? 0.5));
       if (r !== handle.ratio && !handle.dragging) {
         handle.ratio = r;
@@ -108,6 +138,7 @@ export function createSplitterWidget(opts) {
       for (const [type, fn] of handle.hostListeners) handle.host.removeEventListener?.(type, fn);
       handle.doc?.removeEventListener?.('pointermove', handle.onMove);
       handle.doc?.removeEventListener?.('pointerup', handle.onUp);
+      handle.doc?.removeEventListener?.('pointercancel', handle.onCancel);
     },
   };
 }

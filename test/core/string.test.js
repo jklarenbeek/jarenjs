@@ -9,6 +9,7 @@ import {
   isRegExpType,
   isStringRegExp,
   createRegExp,
+  createRegExpTester,
   getSegmenter,
   isAsciiString,
   getStringLength,
@@ -129,6 +130,18 @@ describe('isStringRegExp', () => {
 });
 
 describe('createRegExp', () => {
+  it('creates repeatable testers without changing the supplied regex state', () => {
+    const source = /x/gy;
+    source.lastIndex = 4;
+    const test = createRegExpTester(source);
+    assert.isTrue(test('x'));
+    assert.isTrue(test('x'));
+    assert.isFalse(test('ax'));
+    assert.strictEqual(source.lastIndex, 4);
+    assert.strictEqual(createRegExpTester(undefined), undefined);
+    assert.strictEqual(createRegExpTester(null), undefined);
+  });
+
   it('should return undefined for null/undefined', () => {
     assert.deepEqual(createRegExp(null), undefined);
     assert.deepEqual(createRegExp(undefined), undefined);

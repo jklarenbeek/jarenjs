@@ -98,7 +98,7 @@ function bracketName(name) {
  * @param {string} name
  * @returns {string}
  */
-function memberSegment(name) {
+export function memberSegment(name) {
   return SHORTHAND_RE.test(name) ? `.${name}` : bracketName(name);
 }
 

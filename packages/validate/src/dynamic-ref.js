@@ -7,14 +7,15 @@
  * which require runtime resolution based on dynamic scope.
  * 
  * Key concepts:
- * - $recursiveRef: References the nearest parent schema with $recursiveAnchor: true
- * - $dynamicRef: References the nearest parent schema with matching $dynamicAnchor
+ * - $recursiveRef: References the outermost schema resource with $recursiveAnchor: true
+ * - $dynamicRef: References the outermost schema resource with matching $dynamicAnchor
  * 
  * Unlike regular $ref, these require runtime resolution because the target depends
  * on the dynamic context where the schema is used.
  */
 
 import { isObjectClass, isStringType } from '@jarenjs/core';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
 
 /**
  * Check if a schema has $recursiveAnchor: true.
@@ -76,7 +77,12 @@ export function collectDynamicAnchorsDeep(schema) {
     }
 
     for (const key of Object.keys(node)) {
-      queue.push({ node: node[key], isRoot: false });
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key))
+        queue.push({ node: node[key], isRoot: false });
+      else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isObjectClass(node[key])) {
+        for (const child of Object.values(node[key]))
+          queue.push({ node: child, isRoot: false });
+      }
     }
   }
 

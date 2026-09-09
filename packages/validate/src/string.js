@@ -10,6 +10,7 @@ import {
 
 import {
   createRegExp,
+  createRegExpTester,
   getStringLength,
 } from '@jarenjs/core/string';
 
@@ -49,9 +50,10 @@ function compilePattern(schemaObj, jsonSchema) {
   if (pattern == null) return undefined;
 
   const addError = schemaObj.createErrorHandler(pattern, 'pattern');
+  const matches = createRegExpTester(pattern);
 
   return function validateIsMatch(str = '', dataPath) {
-    return pattern.test(str)
+    return matches(str)
       || addError(str, dataPath);
   };
 }
@@ -149,9 +151,10 @@ export function compileStringBasic(schemaObj, jsonSchema) {
     const pattern = createRegExp(jsonSchema.pattern);
     if (pattern != null) {
       const addError = schemaObj.createErrorHandler(pattern, 'pattern');
+      const matches = createRegExpTester(pattern);
       return function validateStringPatternOnly(data, dataPath) {
         if (!isStringType(data)) return true;
-        return pattern.test(data) || addError(data, dataPath);
+        return matches(data) || addError(data, dataPath);
       };
     }
   }

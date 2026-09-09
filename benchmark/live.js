@@ -32,6 +32,7 @@
  */
 
 import { writeFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 
 import { openStore } from '../packages/db/src/index.js';
 import { nodeDriver } from '../packages/db/src/drivers/node.js';
@@ -223,7 +224,7 @@ async function eventTimeViews() {
         await write();
         const all = await async_.execute([{ $for: { r: '$[*]' }, $return: '$r' }]);
         const expected = shape.kernel(all, shape.spec);
-        if (JSON.stringify(live.result.rows) !== JSON.stringify(expected)) {
+        if (!isDeepStrictEqual(live.result.rows, expected)) {
           console.error(`\nEVENT TIME ANSWER WRONG: ${shape.label} (${mode}) at ${size} rows`);
           process.exit(1);
         }

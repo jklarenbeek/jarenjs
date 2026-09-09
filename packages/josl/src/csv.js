@@ -166,7 +166,8 @@ export function sniffCsvDialect(text, options = undefined) {
   let bestWidth = 0;
   let bestRows = null;
 
-  for (const candidate of CANDIDATES) {
+  const candidates = opts.delimiter && opts.delimiter !== 'auto' ? [opts.delimiter] : CANDIDATES;
+  for (const candidate of candidates) {
     const probe = probeDelimiter(sample, candidate, opts);
     if (probe.score > bestScore || (probe.score === bestScore && probe.width > bestWidth)) {
       bestScore = probe.score;

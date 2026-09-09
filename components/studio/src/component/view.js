@@ -75,6 +75,10 @@ const shell = {
         layoutButton('right', 'Swap', 'Stage beside the editor'),
         layoutButton('top', 'Stack', 'Editor over the stage'),
       ],
+      ['button', { class: 'btn small', type: 'button',
+        'aria-pressed': { $if: ['$.layout.autorun', 'true', 'false'] },
+        on: { click: 'project/autorun' },
+      }, 'Autorun'],
       ['button', { class: 'btn small', type: 'button', on: { click: 'project/run' } }, 'Run'],
     ],
     // ——— file rail ———
@@ -132,15 +136,16 @@ const shell = {
     // ——— splitter (a pointer-capture widget; its host IS the grab bar) ———
     ['jaren-widget', {
       name: 'studio-splitter', class: 'js-split',
-      role: 'separator', 'aria-orientation': 'vertical',
+      role: 'separator', 'aria-orientation': { $if: [{ $eq: ['$.layout.mode', 'top'] }, 'horizontal', 'vertical'] },
       'aria-label': 'Resize the editor and stage',
       'aria-valuemin': '10', 'aria-valuemax': '90', 'aria-valuenow': '$.ratioPct',
       tabindex: '0',
-      props: { ratio: '$.layout.ratio', mode: '$.layout.mode' },
+      props: { ratio: '$.layout.ratio', mode: '$.layout.mode', axis: { $if: [{ $eq: ['$.layout.mode', 'top'] }, 'y', 'x'] } },
     }],
     // ——— stage ———
     ['div', { class: 'js-stage' },
       ['div', { class: 'js-stage-head' }, 'Stage'],
+      { $if: ['$.stageError', ['div', { class: 'js-stage-error js-stage-fail', role: 'status' }, '$.stageError'], ''] },
       { $if: [{ $eq: ['$.stage.kind', 'app'] },
         ['div', { class: 'js-stage-mount' }, ['jaren-widget', { name: 'studio-stage', props: '$.stage.mount' }]],
         { $if: [{ $eq: ['$.stage.kind', 'result'] },

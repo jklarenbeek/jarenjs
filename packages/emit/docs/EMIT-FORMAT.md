@@ -74,7 +74,9 @@ generated artifact that churns between runs cannot be reviewed in a diff.
 `name` is the property name **verbatim** — it is data, not an identifier, and
 an emitter quotes it if its target language requires that. `default` is
 present only when the source schema declares one. Members appear in the order
-the schema declared them.
+the schema declared them. Names present only in `required` are appended in that
+array's order with type `unknown`; the `properties` map is not required to
+establish member presence.
 
 ### 4.1 The extension seam
 
@@ -194,7 +196,7 @@ boundary can name them separately.
   its counterpart in `variantOf`.
 
 **A twin is emitted only when the type actually differs.** A producer computes
-that bottom-up — a type differs if anything it contains differs — so a schema
+that across reference cycles — a type differs if anything it contains differs — so a schema
 with one defaulted field does not double every declaration in the document.
 Everything unaffected is referenced by its single shared name from both sides.
 
@@ -228,6 +230,17 @@ Three consequences worth stating because each was once wrong:
   extra, because no number ever becomes `"admin"`);
 - coercion widens only nodes with a **single string-valued `type`**, because
   that is the only place `coerceToType` runs.
+
+Anonymous nodes carrying unrepresentable constraints are promoted to stable,
+named declarations so their documentation survives rendering. An anonymous
+object with documented members is named for the same reason. This can add
+helper declarations without changing the structural type. The Markdown emitter
+prints member documentation after each member table.
+
+`nullable: true` extends an explicitly declared type with `null`, matching the
+validator's extension. Literal `const`/`enum` values still satisfy the declared
+type and compose with sibling applicators; an incompatible literal cannot erase
+a type constraint.
 
 ## 8. Determinism
 

@@ -18,9 +18,9 @@
  *    from the round's own bytes, so compacting the same history twice
  *    writes the same slot instead of a second copy — idempotence falls
  *    out of the naming rather than being bolted on with a counter. The
- *    byte length rides in the name beside the hash: `hashContent` is a
- *    32-bit fingerprint, and pairing it with the length means two rounds
- *    would have to collide in both to be mistaken for each other.
+ *    character length rides beside the 32-bit fingerprint. These can
+ *    collide, so compaction compares exact bytes and refuses a conflicting
+ *    address before dropping anything from the transcript.
  *  - **Recall is a tool, not a mechanism.** Nothing re-expands a dropped
  *    round automatically. Automatic re-expansion is a guess about which
  *    round matters, and a wrong guess spends the budget it was trying to

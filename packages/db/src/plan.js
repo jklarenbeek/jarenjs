@@ -505,6 +505,8 @@ const SPATIAL_REASONS = {
   distance: 'a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine',
   prefix: "a cell-range pre-filter over the derived column's precision is pushed; "
     + 'the longer prefix refines in the engine',
+  membership: 'the cell pre-filter retains unbounded members; the engine preserves '
+    + 'the membership error when its search item is empty',
   noIndex: 'no derived spatial index on this member covers the predicate '
     + '(declare indexes[].derive on it)',
   notGeographic: 'spatial predicates translate only over a member the schema types as an '
@@ -856,10 +858,12 @@ function planCellPrefix(node, itSlot, shape) {
  * the cells inline, where the planner can see them.
  *
  * Recognized: `{$exists: {$index-of: [{$geohash-neighbours: "cell"},
- * {$geohash: [path, k]}]}}`. Exact only when the cell's length IS k —
+ * {$geohash: [path, k]}]}}`. Admitted only when the cell's length IS k —
  * the membership test compares whole strings, so any other length makes
  * the document's own predicate constantly false and the promotion would
- * be answering a different question.
+ * be answering a different question. Unbounded rows remain candidates:
+ * the engine's membership raises on an empty search item, so the original
+ * predicate must still run even when the column covers whole cell strings.
  * @param {any} node
  * @param {number} itSlot
  * @param {any} shape
@@ -878,9 +882,26 @@ function planCellNeighbourhood(node, itSlot, shape) {
   const cells = cellNeighbourhood(cell.value);
   if (cells.length === 0)
     return { refusal: refusal('$geohash-neighbours', SPATIAL_REASONS.operand) };
-  return promotion({ p: 'cellIn', column: derivation.column, cells },
+  return promotion({ p: 'cellIn', column: derivation.column, cells, keepEmpty: true },
     { construct: '$geohash-neighbours', via: 'columns', columns: [derivation.column],
-      exact: true });
+      exact: false }, [refusal('$geohash-neighbours', SPATIAL_REASONS.membership)]);
+}
+
+/** Error candidates cannot be discarded by a different pushed conjunct. */
+function neighbourhoodErrorColumns(node, itSlot, shape, columns = new Set()) {
+  if (node === null || typeof node !== 'object') return columns;
+  if (node.kind === 'op' && node.name === '$index-of'
+    && node.args[0]?.name === '$geohash-neighbours') {
+    const derivation = geohashDerivation(node.args[1], itSlot, shape, '$geohash-neighbours');
+    if (!('refusal' in derivation)) columns.add(derivation.column);
+  }
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const child of value) neighbourhoodErrorColumns(child, itSlot, shape, columns);
+    }
+    else if (value !== null && typeof value === 'object') neighbourhoodErrorColumns(value, itSlot, shape, columns);
+  }
+  return columns;
 }
 
 // ————— The k-nearest promotion: an ORDERING the column pre-filters —————
@@ -2363,6 +2384,21 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
         }
       }
     }
+  }
+
+  // A later conjunct must not hide an earlier membership error. Retain
+  // every potentially empty search row through the combined SQL filter;
+  // the original WHERE then decides whether short-circuiting reaches it.
+  const errorColumns = neighbourhoodErrorColumns(node.where, itSlot, shape);
+  if (errorColumns.size > 0 && plan.filter !== null) {
+    if (!(plan.filter.p === 'cellIn' && plan.filter.keepEmpty === true
+      && errorColumns.size === 1 && errorColumns.has(plan.filter.column))) {
+      plan.filter = { p: 'or', items: [plan.filter, ...[...errorColumns].map((column) =>
+        ({ p: 'cellIn', column, cells: [], keepEmpty: true }))] };
+    }
+    whereFullyPushed = false;
+    if (!reasons.some((entry) => entry.reason === SPATIAL_REASONS.membership))
+      reasons.push(refusal('$geohash-neighbours', SPATIAL_REASONS.membership));
   }
 
   // ORDER BY: all terms or none — a partially pushed ordering is wrong.

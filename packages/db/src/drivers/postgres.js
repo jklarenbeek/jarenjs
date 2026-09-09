@@ -20,8 +20,8 @@
  *
  *  - `int8` and `numeric` arrive as STRINGS, because they can exceed
  *    what a double holds. The store's contract is JavaScript numbers —
- *    the same ceiling SQLite's INTEGER has — so they are converted, and
- *    a value past 2^53 loses precision here exactly as it would there.
+ *    so they are converted. An `int8` outside the safe integer range
+ *    refuses rather than returning a rounded key or count.
  *  - `json`/`jsonb` arrive PARSED, because the client's type parsers
  *    are the host's configuration. Every document read is already
  *    `::text` (the dialect's `jsonText`), but a graph load's built
@@ -34,7 +34,7 @@
 
 import { chain, openConnection, baseCapabilities } from '../driver.js';
 import { postgresDialect } from '../dialects/postgres.js';
-import { DbCompileError } from '../errors.js';
+import { DbCompileError, DbRuntimeError } from '../errors.js';
 
 export { postgresDialect, IDENTIFIER_BYTES } from '../dialects/postgres.js';
 
@@ -45,7 +45,7 @@ export const POSTGRES_FLOOR = 160000;
 /** Types the wire hands back as text because they can exceed a double,
  * and the two it hands back as text for width alone. The store's
  * contract is JavaScript numbers throughout. */
-const NUMERIC_OIDS = new Set([20, 21, 23, 26, 700, 701, 1700]);
+const NUMERIC_OIDS = new Set([21, 23, 26, 700, 701, 1700]);
 /** `json` and `jsonb`: parsed by the client unless the host said
  * otherwise, and the row decoder reads text. */
 const JSON_OIDS = new Set([114, 3802]);
@@ -73,6 +73,17 @@ let statementSequence = 0;
  *   is already what the store reads
  */
 function converterFor(dataTypeID) {
+  if (dataTypeID === 20) {
+    return (value) => {
+      if (value === null || value === undefined) return value;
+      const number = Number(value);
+      if (!Number.isSafeInteger(number)) {
+        throw new DbRuntimeError('JD2005',
+          `PostgreSQL int8 value '${String(value)}' is outside the safe JavaScript integer range`);
+      }
+      return number;
+    };
+  }
   if (NUMERIC_OIDS.has(dataTypeID)) {
     return (value) => (value === null || value === undefined ? value : Number(value));
   }

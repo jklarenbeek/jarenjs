@@ -1269,7 +1269,9 @@ export function createLedger(options = {}) {
     return { ok: true, retention: planned.report, footprint: planned.footprint };
   }
 
-  /** Atomically store rounds and their index before removing any transcript. */
+  /** Atomically store rounds and their index before removing any transcript.
+   * `protection.immutable` refuses address collisions, including within one batch;
+   * ordinary host-named archives retain their replacement behavior. */
   function putArchive(entries, protection = {}) {
     return enqueue(async (view) => {
       const records = [];

@@ -89,6 +89,24 @@ export function createRegExp(pattern) {
 }
 
 /**
+ * Compile a pattern into a repeatable predicate. Global and sticky patterns
+ * start at index zero on every call and never change a caller's RegExp state.
+ * @param {string | RegExp | null | undefined} pattern - The regular expression
+ * @returns {((value: string) => boolean) | undefined} The tester, or undefined when no pattern was supplied
+ */
+export function createRegExpTester(pattern) {
+  const parsed = createRegExp(pattern);
+  if (parsed === undefined) return undefined;
+  if (!parsed.global && !parsed.sticky)
+    return (value) => parsed.test(value);
+  const owned = new RegExp(parsed.source, parsed.flags);
+  return (value) => {
+    owned.lastIndex = 0;
+    return owned.test(value);
+  };
+}
+
+/**
  * @type {Intl.Segmenter | null}
  */
 let segmenterCache = null;

@@ -75,7 +75,7 @@ export interface ValueSeries {
 /**
  * one boxplot category: raw samples in `values`, or a precomputed five-number summary
  */
-export type Box = unknown & { label: string; values?: Array<number | null>; min?: number; q1?: number; med?: number; q3?: number; max?: number; outliers?: Array<number>; [key: string]: unknown; };
+export type Box = ({ values: unknown; [key: string]: unknown; } | Array<unknown> | string | number | boolean | null | { min: unknown; q1: unknown; med: unknown; q3: unknown; max: unknown; [key: string]: unknown; }) & { label: string; values?: Array<number | null>; min?: number; q1?: number; med?: number; q3?: number; max?: number; outliers?: Array<number>; [key: string]: unknown; };
 
 export interface TreemapItem {
   label: string;
@@ -121,6 +121,16 @@ export interface SankeyLink {
 
 
 /**
+ * Schema constraints this type cannot express: minimum=-180, maximum=180
+ */
+export type MapPointAtItem1 = number;
+
+/**
+ * Schema constraints this type cannot express: minimum=-90, maximum=90
+ */
+export type MapPointAtItem2 = number;
+
+/**
  * a place marker: the convenience path for a caller holding positions rather than GeoJSON
  */
 export interface MapPoint {
@@ -128,9 +138,29 @@ export interface MapPoint {
    * a GeoJSON position: [longitude, latitude]
    * Schema constraints this type cannot express: minItems=2, maxItems=3
    */
-  at: [number, number, ...Array<number>];
+  at: [MapPointAtItem1, MapPointAtItem2, ...Array<number>];
   label?: string;
   value?: number;
+  [key: string]: unknown;
+}
+
+
+export interface SamplingPolicyAnyOf3 {
+  method?: "lttb" | "minmax";
+  /**
+   * the most points one series may draw; an explicit target makes the rendered line independent of any layout
+   * Schema constraints this type cannot express: type="integer", minimum=2
+   */
+  target?: number;
+  /**
+   * the width the derived target assumes, in CSS pixels (default 560)
+   * Schema constraints this type cannot express: exclusiveMinimum=0
+   */
+  width?: number;
+  /**
+   * Schema constraints this type cannot express: exclusiveMinimum=0
+   */
+  pixelRatio?: number;
   [key: string]: unknown;
 }
 
@@ -138,7 +168,7 @@ export interface MapPoint {
 /**
  * how many of a line's points are drawn: false never samples, a method name or object samples whatever the count, and an omitted member samples a TIME line above 2000 points through @jarenjs/core/series. Distinct from stream.maxPoints, which decides what exists rather than what is drawn.
  */
-export type SamplingPolicy = false | "lttb" | "minmax" | { method?: "lttb" | "minmax"; target?: number; width?: number; pixelRatio?: number; [key: string]: unknown; };
+export type SamplingPolicy = false | "lttb" | "minmax" | SamplingPolicyAnyOf3;
 
 /**
  * the month, weekday and meridiem names a time-axis pattern with a name token reads (compileDateLocale(pack).names from @jarenjs/locales); a name token with no record is a compile error, never an English fallback
@@ -181,11 +211,24 @@ export interface TimeFormats {
 }
 
 
+export interface DomainPolicyX {
+  /**
+   * Schema constraints this type cannot express: exclusiveMinimum=0
+   */
+  window: number;
+  /**
+   * Schema constraints this type cannot express: exclusiveMinimum=0
+   */
+  slide?: number;
+  [key: string]: unknown;
+}
+
+
 /**
  * domain-stability policy: a quantized sliding x window and/or pinned or step-quantized y bounds, so most streaming ticks keep the scales still
  */
 export interface DomainPolicy {
-  x?: { window: number; slide?: number; [key: string]: unknown; };
+  x?: DomainPolicyX;
   y?: "step" | { min?: number; max?: number; [key: string]: unknown; };
   [key: string]: unknown;
 }

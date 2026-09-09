@@ -11,7 +11,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
 | `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging |
-| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), cached regex compilation, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
+| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
 | `@jarenjs/core/cache` | the bounded LRU (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS, for caches whose entries decide a result |
 | `@jarenjs/core/random` | the suite's one seeded generator (`mulberry32`, pinned sequence, ToUint32 seed) and the draws built on it: `randomInt` over a half-open range, in-place Fisher–Yates `shuffle`, and `drawDistinct` — `k` distinct indices from one stream |
 | `@jarenjs/core/runtime` | the runtime record — `createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting member for member to the platform's own (`Date.now`, `crypto.randomUUID`, `Math.random`, no zone provider) — that the store (its query deadlines included), the jobs engine, the migration runner, every contract binding and the contract memory ledger take as `runtime`, so a deterministic run is configured once; a subsystem's own explicit option wins over the record, and the record reaches hosts, never query compilation |
@@ -41,14 +41,16 @@ Deep imports work too (`@jarenjs/core/text/email`, `@jarenjs/core/math/vec2f64`,
 `@jarenjs/core/string` counts string length the way JSON Schema expects — by grapheme cluster, not UTF-16 code units — without paying for `Intl.Segmenter` unless the string actually needs it:
 
 ```javascript
-import { getStringLength, isAsciiString, createRegExp } from '@jarenjs/core/string';
+import { getStringLength, isAsciiString, createRegExp, createRegExpTester } from '@jarenjs/core/string';
 
 getStringLength('hello', true);       // 5  (ASCII fast path: str.length)
 getStringLength('héllo', true);       // 5  (surrogate-aware code point count)
 getStringLength('👨‍👩‍👧‍👦', true); // 1  (grapheme segmentation, only when clusters can form)
 getStringLength('👨‍👩‍👧‍👦');       // 11 (default: plain UTF-16 length)
 
-createRegExp('^\\p{L}+$');            // cached, unicode-flagged RegExp
+createRegExp('^\\p{L}+$');            // unicode-flagged RegExp
+const matches = createRegExpTester('/^x/gi');
+matches('X'); matches('X');          // true both times; global/sticky state is isolated
 ```
 
 ## Text validation
@@ -88,7 +90,7 @@ orient2d(0, 0, 1, 0, 0, 1);                    // > 0 — counter-clockwise, exa
 haversineDistance(4.9041, 52.3676, 2.3522, 48.8566); // 429_862 m (Amsterdam–Paris)
 ringWinding([[0,0],[1,0],[1,1],[0,1],[0,0]]);  // 1 — an RFC 7946 exterior ring
 bboxOf({ type: 'Polygon', coordinates: [[[4,52],[5,52],[5,53],[4,52]]] }); // [4, 52, 5, 53]
-geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string, so a prefix test is proximity
+geohashEncode(4.9041, 52.3676, 5);             // 'u173z' — a string identifying a cell; use distances for proximity
 
 wktToGeoJson('POINT (4.9041 52.3676)');        // { type: 'Point', coordinates: [4.9041, 52.3676] }
 geoJsonToWkt({ type: 'Point', coordinates: [4.9041, 52.3676] }); // 'POINT (4.9041 52.3676)'

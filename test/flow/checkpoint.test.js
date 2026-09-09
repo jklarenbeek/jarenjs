@@ -296,3 +296,17 @@ describe('FSM persistence (§7.7)', () => {
     assert.strictEqual(steps, 2, 'one step evaluation per send, including the failed send');
   });
 });
+
+it('failed checkpoint loads release the caller signal listener before rejecting', async () => {
+  const { getEventListeners } = await import('node:events');
+  const controller = new AbortController();
+  const document = { $dag: '0.1', nodes: { input: { kind: 'input' }, output: { kind: 'output' } },
+    edges: [{ from: 'input', to: 'output' }] };
+  for (const load of [() => { throw new Error('offline'); }, () => Promise.reject(new Error('offline'))]) {
+    const dag = compileDag(document, { checkpoint: { load, save() {}, complete() {} } });
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(dag.run(1, { runId: 'same', signal: controller.signal }), { code: 'JF2009' });
+      assert.strictEqual(getEventListeners(controller.signal, 'abort').length, 0);
+    }
+  }
+});

@@ -996,7 +996,8 @@ the model fetches a round back when it needs one — a normal tool call that sho
 `steps` like any other, rather than an automatic re-expansion guessing which round mattered.
 
 - **Addresses are content-derived**, so compacting the same history twice writes the same
-  slots rather than a second copy.
+  slots rather than a second copy. A fingerprint collision refuses compaction before
+  dropping transcript content; exact bytes establish whether an existing address is reusable.
 - **The allowance grows with the number of archived rounds** instead of being flat, and is
   capped at a quarter of the budget so the addresses cannot crowd out the recent tail. The
   budget still holds to the character.
@@ -1117,6 +1118,10 @@ and memory/goal references are protected. Free-text references are protected
 conservatively by address occurrence. `putArchive` commits rounds, their index,
 evictions and reports together. An impossible budget refuses without changing
 storage or discarding the current transcript.
+
+Compaction uses `putArchive(entries, { immutable: true })` to reject conflicting
+content at an existing address, including conflicts within a batch or between
+concurrent writers. Host-named archives remain replaceable when this option is absent.
 
 `readSlot(name)` returns text, `undefined` for an absent address, or a typed
 `{ status: 'evicted', name, bytes, reason }` tombstone. Recall and environment
@@ -1334,7 +1339,10 @@ asynchronous, out-of-process stub adapter, because a property that only held for
 in-memory default would be a property of the test.
 
 Addresses are derived, never stored: a chunk is `parent#strategy:size/index`, so chunking
-the same slot twice writes the same slots instead of a second copy. `select` needs the
+the same slot twice writes the same slots instead of a second copy. Shorter or empty
+`ingest` and `chunk` replacements remove old indexed suffixes. Cached selections keep
+their original result address. Environment caps must be finite safe integers; negative
+slice bounds cannot expand a preview. `select` needs the
 `compileQuery` seam and declines with a stated reason without it — naming `grep` as the way
 around it — while every other operation is unaffected.
 

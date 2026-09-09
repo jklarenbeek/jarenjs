@@ -174,12 +174,28 @@ Type: `string and object`
 | `price` | `number` | yes |
 | `tags` | `array of string` | no |
 
+**`id`**
+
+Schema constraints this type cannot express: type="integer"
+
+**`name`**
+
+Schema constraints this type cannot express: minLength=1
+
+**`price`**
+
+Schema constraints this type cannot express: minimum=0
+
 ## Catalog
 
 | Member | Type | Required |
 | --- | --- | --- |
 | `revision` | `number` | yes |
 | `products` | `array of Product` | yes |
+
+**`revision`**
+
+Schema constraints this type cannot express: type="integer"
 
 ## CatalogLoadOutput
 
@@ -192,6 +208,14 @@ Type: `Catalog`
 | `id` | `number` | yes |
 | `revision` | `number` | yes |
 | `product` | `Product` | yes |
+
+**`id`**
+
+Schema constraints this type cannot express: type="integer"
+
+**`revision`**
+
+Schema constraints this type cannot express: type="integer"
 
 ## ProductSaveOutput
 
@@ -213,6 +237,10 @@ Type: `Conflict`
 | --- | --- | --- |
 | `id` | `number` | yes |
 
+**`id`**
+
+Schema constraints this type cannot express: type="integer"
+
 ## ImageBytesOutput
 
 Type: `any`
@@ -226,6 +254,10 @@ Type: `any`
 | `tag` | `array of string` | no |
 | `flag` | `boolean` | no |
 
+**`limit`**
+
+Schema constraints this type cannot express: type="integer", minimum=1, maximum=100
+
 ## ProductSearchOutput
 
 Type: `array of Product`
@@ -235,6 +267,10 @@ Type: `array of Product`
 | Member | Type | Required |
 | --- | --- | --- |
 | `id` | `number` | yes |
+
+**`id`**
+
+Schema constraints this type cannot express: type="integer"
 
 ## ProductRemoveOutput
 

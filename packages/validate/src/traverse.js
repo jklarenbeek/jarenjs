@@ -150,7 +150,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 
   const { id: rootUri } = createJsonPointer(schema.$id, baseUri, opts);
   if (!isStringType(schema.$id) || isStringWhiteSpace(schema.$id)) {
-    if (schemas.has(rootUri))
+    if (schemas.has(rootUri) && schemas.get(rootUri) !== schema)
       throw new Error(`Schema '${rootUri}' already exists`);
 
     schemas.set(rootUri, schema);
@@ -169,7 +169,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       const { id } = createJsonPointer(idKeyword, base, opts);
       if (!schemas.has(id))
         schemas.set(id, obj);
-      else if (schemas.get(id) == null)
+      else if (schemas.get(id) == null || schemas.get(id) === obj)
         schemas.set(id, obj);
       else
         throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
@@ -192,7 +192,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       const { id } = createJsonPointer(`#${obj.$anchor}`, baseUri, opts);
       if (!schemas.has(id))
         schemas.set(id, obj);
-      else if (schemas.get(id) == null)
+      else if (schemas.get(id) == null || schemas.get(id) === obj)
         schemas.set(id, obj);
       else
         throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
@@ -207,7 +207,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       const { id } = createJsonPointer(`#${obj.$dynamicAnchor}`, baseUri, opts);
       if (!schemas.has(id))
         schemas.set(id, obj);
-      else if (schemas.get(id) == null)
+      else if (schemas.get(id) == null || schemas.get(id) === obj)
         schemas.set(id, obj);
       else
         throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
@@ -326,7 +326,7 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
   for (const part of fragments) {
     current = current + '/' + part;
     if (!isBoolOrObjectClass(schema[part]) && !Array.isArray(schema[part]))
-      throw new Error(`The '${current}' is not is not a valid schema in '${leftUri}'`);
+      throw new Error(`The '${current}' is not a valid schema in '${leftUri}'`);
 
     schema = schema[part];
     if (isObjectClass(schema) && isStringType(schema.$id) && !isStringWhiteSpace(schema.$id)) {

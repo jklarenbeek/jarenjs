@@ -59,7 +59,6 @@ const SCENARIOS = [
 ];
 
 const ENGINE_KEYS = ['jaren', 'native', 'jsonata'];
-const COMPILE_KEYS = ['identity', 'surgical', 'annotate'];
 
 function makeDocuments(scale) {
   const documents = makeBookstoreDocuments(scale, SCALE_SIZES);
@@ -279,15 +278,14 @@ async function runProfile(engines, scenarios, documents, options) {
 }
 
 function runCompileProfile(engines, scenarios, options) {
-  const selected = new Set(scenarios.map((scenario) => scenario.key));
-  const sources = COMPILE_KEYS.filter((key) => selected.has(key));
+  const sources = scenarios.map((scenario) => scenario.key);
   if (sources.length === 0)
     return null;
 
   const iterations = Math.max(50, Math.floor(options.iterations / 10));
   const results = {};
   for (const engine of engines) {
-    if (typeof engine.compileBench !== 'function') {
+    if (typeof engine.compileBench !== 'function' || sources.some((key) => !engine.scenarios[key])) {
       results[engine.key] = null;
       continue;
     }

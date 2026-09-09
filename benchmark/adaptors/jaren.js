@@ -26,7 +26,6 @@ function buildValidator(draft, remoteSchemas, options = undefined) {
 
   // Add meta-schemas using addMetaSchema which properly processes internal refs
   // This is necessary for drafts like 2019-09 and 2020-12 that have multiple meta-schemas
-  // We spread into a new array because addMetaSchema uses shift() which mutates the array
   // The active draft goes first; the others are registered too so that
   // cross-draft references (and remotes built on other drafts) resolve.
   const seen = new Set();
@@ -34,7 +33,7 @@ function buildValidator(draft, remoteSchemas, options = undefined) {
     const meta = getSchemaDraftByName(name);
     if (seen.has(meta.draft)) continue;
     seen.add(meta.draft);
-    jaren.addMetaSchema([...meta.schema], meta.draft);
+    jaren.addMetaSchema(meta.schema, meta.draft);
   }
 
   for (const id in remoteSchemas) {
