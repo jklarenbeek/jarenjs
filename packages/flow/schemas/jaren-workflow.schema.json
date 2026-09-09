@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-workflow/0.2",
+  "title": "Jaren composed workflow 0.2",
+  "description": "Nested work, choices, waits and bounded control lower onto jaren-fsm 0.2 and jaren-dag 0.1. Distinct from the historical Mermaid jaren-workflow 0.1 projection. Every automatic cycle must cross a declared visit limit; every task needs an implementation version.",
+  "type": "object",
+  "properties": {
+    "$workflow": {
+      "const": "0.2"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "initial": {
+      "type": "string",
+      "minLength": 1
+    },
+    "states": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/state"
+      }
+    }
+  },
+  "required": [
+    "$workflow",
+    "revision",
+    "initial",
+    "states"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "queryDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+    },
+    "dagDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-dag/0.1"
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "initial": {
+          "type": "string",
+          "minLength": 1
+        },
+        "states": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/state"
+          }
+        }
+      },
+      "required": [
+        "initial",
+        "states"
+      ],
+      "additionalProperties": false
+    },
+    "state": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "work": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "with": {
+                      "$ref": "#/$defs/queryDocument"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "version"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "dag": {
+                      "$ref": "#/$defs/dagDocument"
+                    }
+                  },
+                  "required": [
+                    "dag"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "input": {
+              "$ref": "#/$defs/queryDocument"
+            },
+            "then": {
+              "type": "string",
+              "minLength": 1
+            },
+            "catch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "work",
+            "then"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "choose": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "guard": {
+                    "$ref": "#/$defs/queryDocument"
+                  },
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "guard",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "otherwise": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "choose",
+            "otherwise"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "event": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "guard": {
+                    "$ref": "#/$defs/queryDocument"
+                  }
+                },
+                "required": [
+                  "event",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0
+            },
+            "after": {
+              "type": "object",
+              "properties": {
+                "ms": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "ms",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "on"
+          ],
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "properties": {
+                "on": {
+                  "minItems": 1
+                }
+              }
+            },
+            {
+              "required": [
+                "after"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "flow": {
+              "$ref": "#/$defs/body"
+            },
+            "then": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "flow",
+            "then"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "final": {
+              "const": true
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "final"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

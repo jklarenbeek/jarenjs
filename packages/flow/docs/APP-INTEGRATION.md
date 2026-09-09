@@ -1,5 +1,13 @@
 # Hosting a machine in @jarenjs/app
 
+This generator targets jaren-fsm **0.1**. Statecharts and composed workflows
+use structured snapshots; they do not pass through `fsmToApp`. Host a composed
+run through the same `createTaskEffect`/id-guard convention as a DAG, persist
+its snapshot, and submit external events on subsequent calls to
+`workflow.run(input, {runId, snapshot, event, signal})`. A returned `waiting`
+status means control is saved and ready for an event; it is not an unresolved
+effect promise. [WORKFLOW-FORMAT](WORKFLOW-FORMAT.md) defines that boundary.
+
 How a jaren-fsm document drives a live `@jarenjs/app` application. The
 shape of the convention is one sentence: **control state is a state
 slice, and the machine's transition table becomes generated standard

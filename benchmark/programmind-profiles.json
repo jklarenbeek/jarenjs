@@ -87,6 +87,41 @@
         "bytes": 5128,
         "branches": 6
       }
+    },
+    {
+      "grammar": "statechart",
+      "sourceHash": "98191f3fe30c85f237a41b83d58e419cc1be6879c66fa18653fb5368bff1e859",
+      "seamHash": "6082dff6cd338b5716282b69d20f59bff625dd2edb4feb0a6f7345efd2c36e1f",
+      "profileHash": "cebf65ba626891957ff09067c933f8e124fe5fd73057dacac71608436261fa05",
+      "open": [
+        "queryDocument"
+      ],
+      "full": {
+        "bytes": 23058,
+        "branches": 49
+      },
+      "profile": {
+        "bytes": 2634,
+        "branches": 2
+      }
+    },
+    {
+      "grammar": "workflow",
+      "sourceHash": "5e1ba7aeb294b22ab987677b54beb628d281c4e55ba579dc741dfa23df92ccc0",
+      "seamHash": "90746ef8f331b94259a96fa3d6d349640ef37d56ce332da4229b6645c27f0a9d",
+      "profileHash": "3e12c5db1285a96f3115390234fdbe61fa5078a77f309f8be2ae8b53817032bc",
+      "open": [
+        "queryDocument",
+        "dagDocument"
+      ],
+      "full": {
+        "bytes": 52878,
+        "branches": 121
+      },
+      "profile": {
+        "bytes": 3685,
+        "branches": 9
+      }
     }
   ]
 }

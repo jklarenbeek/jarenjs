@@ -3,11 +3,10 @@ package: "@jarenjs/flow"
 card:
   title: Flow — executable workflows
   blurb: >-
-    Executable workflows as JSON: jaren-fsm state machines compiled to a
-    pure step function, and jaren-dag dataflow over the suite’s own engines.
-    Guards are query documents, effects come back as data, and
-    @jarenjs/mermaid projects a diagram both ways — the Flow studio edits,
-    runs and animates them live.
+    Executable workflows as JSON: pure state machines and statecharts,
+    concurrent dataflow, and composed workflows with durable wait/resume.
+    Guards are query documents and effects come back as data. The Flow
+    studio edits, runs and animates flat machines and DAGs live.
   perf: >-
     a machine survives a JSON round trip with its guards; XState’s functions
     do not
@@ -17,7 +16,7 @@ engines:
     title: Flow
 ---
 
-`@jarenjs/flow` makes the suite’s machines executable, in two document formats.
+`@jarenjs/flow` makes the suite’s machines and workflows executable as JSON.
 A `jaren-fsm` is a finite state machine as one JSON value — declared states, an
 initial state and a document-ordered transition table whose guards are Jaren
 JSON Query documents — compiled once into a pure step function; a `jaren-dag`
@@ -25,6 +24,17 @@ is an acyclic dataflow whose nodes are the suite’s own engines (a query
 filters, a JSLT stylesheet projects, a registered task awaits) wired by edges
 that carry data. Both are schema-published for constrained decoding, both
 compile fail-closed with coded, docPath-carrying errors, and neither uses eval.
+
+The statechart vocabulary (`$fsm: '0.2'`) adds compound states, parallel
+regions, shallow and deep history, and transitions driven by an explicit
+clock. A composed workflow (`$workflow: '0.2'`) lowers tasks, DAG fan-out,
+choices, bounded loops, nested flows and event or timed waits onto the existing
+DAG scheduler and the statechart engine. Its checkpoints bind the document,
+input and task versions to the run; a host store supplies atomic generation
+checks, and effectful tasks honor stable activation keys for idempotency. The
+repository’s flow benchmark harness consumes this format, including a review
+wait that resumes in a later process. Mermaid also projects the compound-state
+subset in both directions; the Flow studio continues to edit flat FSMs and DAGs.
 
 Effects are data, not callbacks: a fired transition returns resolved { run,
 with } descriptors — the host’s registry runs them — so the whole machine stays

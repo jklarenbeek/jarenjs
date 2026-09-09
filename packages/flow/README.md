@@ -1,6 +1,8 @@
 # @jarenjs/flow
 
-Executable workflow documents, in two formats. The **jaren-fsm format**
+Executable JSON workflows: flat FSMs, statecharts, DAGs, and a composition
+compiler that combines long-lived control with concurrent work regions.
+The **jaren-fsm 0.1 format**
 is a finite state machine as one JSON value — declared states, an
 initial state, and a document-ordered transition table whose guards and
 effect props are [Jaren JSON Query](../json/docs/QUERY-FORMAT.md)
@@ -9,6 +11,12 @@ documents — compiled, once, into a **pure step function**. The
 own engines — query documents, JSLT stylesheets, registered async
 tasks — wired by edges that carry data and compiled into a
 run-to-completion executor.
+
+`compileStatechart` adds compound states, parallel regions, shallow/deep
+history and explicit-time delayed transitions in jaren-fsm 0.2.
+`compileWorkflow` lowers one composed document onto statechart control and
+DAG work, with choices, bounded loops, nested flows, saved waits and
+generation-fenced checkpoints. Existing 0.1 APIs keep their behavior.
 
 It is the executable half of a round trip the suite already ships: a
 `stateDiagram-v2` parsed by [`@jarenjs/mermaid`](../../components/mermaid)
@@ -20,10 +28,51 @@ The grammar is published as JSON Schema in
 [`schemas/jaren-fsm.schema.json`](schemas/jaren-fsm.schema.json) (with a
 mechanically derived draft-07 twin for providers pinned to older
 drafts) — hand it to a constrained decoder and a language model cannot
-emit a machine with an unknown member or a malformed guard. The
+emit a machine with a structurally malformed guard. The
 normative contract is [docs/FLOW-FORMAT.md](docs/FLOW-FORMAT.md). Zero
 dependencies outside the suite; no `eval`, CSP-safe; the only runtime
-import is `@jarenjs/json`.
+dependencies are `@jarenjs/core` and `@jarenjs/json`.
+
+## Composed workflows and statecharts
+
+```js
+import { compileWorkflow } from '@jarenjs/flow';
+
+const workflow = compileWorkflow({
+  $workflow: '0.2', revision: 'review/1', initial: 'prepare',
+  states: {
+    prepare: { work: { task: 'prepare', version: '1' }, then: 'review' },
+    review: { on: [{ event: 'approve', to: 'done' }] },
+    done: { final: true },
+  },
+}, { tasks: { prepare: { version: '1', run: ({ input }) => ({ ...input, ready: true }) } } });
+
+const first = await workflow.run({ title: 'Draft' }, { runId: 'review-7' });
+const done = await workflow.run({ title: 'Draft' }, {
+  runId: 'review-7', snapshot: first.snapshot, event: { type: 'approve' },
+});
+// done.result = { title: 'Draft', ready: true }
+```
+
+Use `work: {dag: document}` for concurrent branches, `choose` for guarded
+switches, `flow` for nested control, and `limit` to bound a loop. An optional
+CAS store persists node values and control before advancing. The compiler
+rejects a resume whose document, input or task identities changed.
+[WORKFLOW-FORMAT.md](docs/WORKFLOW-FORMAT.md) defines lowering, scope,
+idempotency keys, crash windows and the benchmark command that consumes it.
+
+For statecharts directly, `compileStatechart(doc).start({now})` returns the
+initial control snapshot and entry-effect descriptors. `step(state,event)`
+handles an event; `advance(state,now)` processes deadlines supplied by the
+host. Snapshots include active leaves, history and pending timers.
+`createStatechartSession` provides synchronous save-before-advance sessions.
+[STATECHART-FORMAT.md](docs/STATECHART-FORMAT.md) specifies the semantics.
+Neither API silently upgrades a 0.1 FSM or its string snapshots.
+
+Both formats publish canonical, draft-07 and derived authoring schemas.
+`createGrammarAuthor` accepts `statechart` and `workflow` with their full
+schema/compiler gates. The existing LINQ flow pen continues to author the
+0.1 FSM and DAG documents; its DAG documents can be embedded as work regions.
 
 ## The format in one glance
 
@@ -280,6 +329,14 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/flow/schemas/jaren-fsm.authoring.schema.json` | schema | — |
 | `@jarenjs/flow/schemas/jaren-fsm.draft-07.schema.json` | schema | — |
 | `@jarenjs/flow/schemas/jaren-fsm.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-statechart-state.draft-07.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-statechart-state.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-statechart.authoring.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-statechart.draft-07.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-statechart.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-workflow.authoring.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-workflow.draft-07.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-workflow.schema.json` | schema | — |
 | `@jarenjs/flow/package.json` | metadata | — |
 <!--/fact-->
 

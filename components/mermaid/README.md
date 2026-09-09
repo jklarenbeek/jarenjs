@@ -360,7 +360,9 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/mermaid/schemas/jaren-workflow.schema.json` | schema | — |
 | `@jarenjs/mermaid/stylesheets/dag-to-flowchart.jslt.json` | asset | — |
 | `@jarenjs/mermaid/stylesheets/flowchart-to-dag.jslt.json` | asset | — |
+| `@jarenjs/mermaid/stylesheets/state-to-statechart.jslt.json` | asset | — |
 | `@jarenjs/mermaid/stylesheets/state-to-workflow.jslt.json` | asset | — |
+| `@jarenjs/mermaid/stylesheets/statechart-to-state.jslt.json` | asset | — |
 | `@jarenjs/mermaid/stylesheets/workflow-to-state.jslt.json` | asset | — |
 | `@jarenjs/mermaid/package.json` | metadata | — |
 <!--/fact-->

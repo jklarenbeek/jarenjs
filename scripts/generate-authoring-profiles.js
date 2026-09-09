@@ -14,6 +14,8 @@ export const AUTHORING_PROFILES = [
   { grammar: 'app', package: 'app', open: { queryDocument: QUERY, stylesheetDocument: 'A JSLT stylesheet; validate and compile locally.' } },
   { grammar: 'fsm', package: 'flow', open: { queryDocument: QUERY } },
   { grammar: 'dag', package: 'flow', open: { queryDocument: QUERY, stylesheetDocument: 'A JSLT stylesheet; validate and compile locally.' } },
+  { grammar: 'statechart', package: 'flow', open: { queryDocument: QUERY } },
+  { grammar: 'workflow', package: 'flow', open: { queryDocument: QUERY, dagDocument: 'A Jaren DAG document; validate and compile with versioned tasks locally.' } },
 ];
 
 /** Serialized decoder complexity, including referenced grammars in the full closure.
@@ -57,7 +59,8 @@ export function generateAuthoringProfiles(options = {}) {
       if (typeof node.$ref === 'string' && node.$ref.startsWith('https://jarenjs.dev/schemas/')) {
         const name = node.$ref.split('/').at(-2);
         if (!refs.has(name)) {
-          const schema = JSON.parse(readFileSync(resolve(root, `packages/json/schemas/${name}.schema.json`), 'utf8'));
+          const owner = AUTHORING_PROFILES.find((profile) => `jaren-${profile.grammar}` === name)?.package ?? 'json';
+          const schema = JSON.parse(readFileSync(resolve(root, `packages/${owner}/schemas/${name}.schema.json`), 'utf8'));
           refs.set(name, schema); collect(schema);
         }
       }

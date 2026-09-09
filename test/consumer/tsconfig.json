@@ -14,6 +14,7 @@
   },
   "files": [
     "types.ts",
+    "flow-composition.ts",
     "db-replication.ts"
   ],
   "include": [

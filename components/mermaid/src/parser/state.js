@@ -12,9 +12,8 @@
  * fits no UML pattern reads whole as the event, so plain labels keep
  * their historical meaning byte for byte.
  *
- * Composite states (`state Foo { … }`) are flattened one level: the
- * inner transitions are captured with their parent recorded, keeping the
- * AST geometry-free.
+ * Composite states (`state Foo { … }`) stay in a flat table with parent
+ * ids on both states and transitions, at arbitrary nesting depth.
  */
 
 /** `A --> B` / `A --> B : label`. */
@@ -79,17 +78,19 @@ export function parseState(lines) {
   /** @type {string[]} */
   const parentStack = [];
 
-  const ensure = (id, label) => {
+  const ensure = (id, label, declaration = false) => {
     if (id === '[*]') return;
     let st = stateMap.get(id);
     if (st === undefined) {
-      st = { id, label: label ?? id };
+      st = { id, label: label ?? id,
+        ...(parentStack.length ? { parent: parentStack.at(-1) } : {}) };
       stateMap.set(id, st);
       order.push(id);
     }
     else if (label != null) {
       st.label = label;
     }
+    if (declaration && parentStack.length) st.parent = parentStack.at(-1);
   };
 
   for (let li = 0; li < lines.length; li++) {
@@ -101,13 +102,13 @@ export function parseState(lines) {
     if (line.startsWith('state ') && line.endsWith('{')) {
       const inner = line.slice('state '.length, -1).trim();
       const id = inner.split(/\s+/)[0];
-      ensure(id, id);
+      ensure(id, null, true);
       parentStack.push(id);
       continue;
     }
 
     const sa = RE_STATE_AS.exec(line);
-    if (sa !== null) { ensure(sa[2], sa[1]); continue; }
+    if (sa !== null) { ensure(sa[2], sa[1], true); continue; }
 
     const tr = RE_TRANSITION.exec(line);
     if (tr !== null) {
@@ -127,7 +128,7 @@ export function parseState(lines) {
       continue;
     }
 
-    if (line.startsWith('state ')) { ensure(line.slice('state '.length).trim(), null); continue; }
+    if (line.startsWith('state ')) { ensure(line.slice('state '.length).trim(), null, true); continue; }
 
     const sd = RE_STATE_DESC.exec(line);
     if (sd !== null && sd[1] !== '[*]') { ensure(sd[1], sd[2].trim()); continue; }

@@ -37,6 +37,9 @@ export const FLOW_CODES = Object.freeze({
   JF0017: 'the document does not declare exactly one output node',
   JF0018: 'a task node names a handler the registry does not provide',
   JF0019: 'a task node and its registered handler disagree about the handler version',
+  JF0020: 'a statechart declaration violates hierarchy or transition rules',
+  JF0021: 'a workflow declaration or reference is malformed',
+  JF0022: 'an automatic workflow cycle has no declared visit bound',
   JF2001: 'a state id the machine does not declare',
   JF2002: 'step was called with a non-string event',
   JF2003: 'a guard threw while evaluating',
@@ -46,6 +49,13 @@ export const FLOW_CODES = Object.freeze({
   JF2007: 'the caller signal aborted the run',
   JF2008: 'a declared checkpoint value is not JSON-serializable',
   JF2009: 'the checkpoint store failed',
+  JF2010: 'a statechart snapshot is malformed or has an illegal configuration',
+  JF2011: 'explicit time moved backwards or a timer exceeded its numeric range',
+  JF2012: 'a statechart exceeded its microstep limit',
+  JF2013: 'a checkpoint belongs to a different workflow, input or task implementation',
+  JF2014: 'a workflow run is busy or its snapshot generation is stale',
+  JF2015: 'a workflow state exceeded its declared visit bound',
+  JF2016: 'a workflow snapshot is malformed or execution could not progress',
 });
 
 /**

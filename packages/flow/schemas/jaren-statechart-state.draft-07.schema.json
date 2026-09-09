@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jarenjs.dev/schemas/jaren-fsm/0.2/state/draft-07",
+  "title": "Jaren statechart snapshot",
+  "type": "object",
+  "properties": {
+    "active": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "history": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minItems": 1,
+        "uniqueItems": true
+      }
+    },
+    "timers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "transition": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "at": {
+            "type": "number"
+          },
+          "token": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "transition",
+          "at",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0
+    },
+    "serial": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "time": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "active",
+    "history",
+    "timers",
+    "serial",
+    "time"
+  ],
+  "additionalProperties": false
+}

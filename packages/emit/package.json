@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/emit",
   "private": false,
-  "version": "0.72.3",
+  "version": "0.73.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -68,8 +68,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.72.3",
-    "@jarenjs/json": "^0.72.3",
-    "@jarenjs/validate": "^0.72.3"
+    "@jarenjs/core": "^0.73.0",
+    "@jarenjs/json": "^0.73.0",
+    "@jarenjs/validate": "^0.73.0"
   }
 }

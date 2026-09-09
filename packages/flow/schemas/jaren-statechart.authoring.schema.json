@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-fsm/0.2/authoring",
+  "title": "Jaren statechart 0.2 (authoring profile)",
+  "description": "Authoring profile of the canonical grammar: the document SHAPE only, with queryDocument left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
+  "type": "object",
+  "properties": {
+    "$fsm": {
+      "const": "0.2"
+    },
+    "initial": {
+      "type": "string",
+      "minLength": 1
+    },
+    "states": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "$ref": "#/$defs/state"
+          }
+        ]
+      },
+      "minItems": 1
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transition"
+      },
+      "minItems": 0
+    }
+  },
+  "required": [
+    "$fsm",
+    "initial",
+    "states",
+    "transitions"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "effects": {
+      "description": "Effect descriptors, returned as resolved data when their state or transition fires — the engine never executes them.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "description": "The host-registered handler name.",
+            "type": "string",
+            "minLength": 1
+          },
+          "with": {
+            "description": "Handler props: a Jaren JSON Query document evaluated against the scope at fire time; an empty result omits the member.",
+            "allOf": [
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run"
+        ]
+      }
+    },
+    "queryDocument": {
+      "description": "A Jaren query expression; validate against the full grammar and compile locally."
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "initial": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "atomic",
+            "compound",
+            "parallel",
+            "final",
+            "history"
+          ]
+        },
+        "history": {
+          "enum": [
+            "shallow",
+            "deep"
+          ]
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "entry": {
+          "$ref": "#/$defs/effects"
+        },
+        "exit": {
+          "$ref": "#/$defs/effects"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after": {
+          "type": "number",
+          "minimum": 0
+        },
+        "done": {
+          "const": true
+        },
+        "always": {
+          "const": true
+        },
+        "type": {
+          "enum": [
+            "internal",
+            "external"
+          ]
+        },
+        "guard": {
+          "$ref": "#/$defs/queryDocument"
+        },
+        "effects": {
+          "$ref": "#/$defs/effects"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "event",
+              "after"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "event",
+              "done"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "event",
+              "always"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "after",
+              "done"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "after",
+              "always"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "done",
+              "always"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

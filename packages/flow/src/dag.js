@@ -57,9 +57,9 @@ function compileEmbedded(compile, embedded, docPath) {
  * value, `complete` records the run's result. Any member may return a
  * promise; a throwing store fails the run (JF2009), never silently.
  * @typedef {Object} DagCheckpointStore
- * @property {(runId: string) => any} load
- * @property {(runId: string, nodeId: string, value: any) => any} save
- * @property {(runId: string, result: any) => any} complete
+ * @property {(runId: string, identity?: any) => any} load
+ * @property {(runId: string, nodeId: string, value: any, identity?: any) => any} save
+ * @property {(runId: string, result: any, identity?: any) => any} complete
  */
 
 /**
@@ -71,7 +71,7 @@ function compileEmbedded(compile, embedded, docPath) {
  *   declared task identity this workflow depends on, keyed by node id and
  *   SORTED (§7.8); a nested workflow's map composes under its node's
  *   path. Empty when no node declares a version.
- * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void, runId?: string }) => Promise<any>} run -
+ * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void, runId?: string, drainOnAbort?: boolean }) => Promise<any>} run -
  *   Execute the graph for one input (`undefined` reads as `null`).
  */
 
@@ -124,7 +124,7 @@ function normalizeTaskEntry(entry, name) {
  * @param {{ tasks?: Record<string, ((props: { with: any, input: any }, signal: AbortSignal) => any)
  *     | { run: (props: { with: any, input: any }, signal: AbortSignal) => any, version?: string,
  *         taskVersions?: Record<string, string> }>,
- *   checkpoint?: DagCheckpointStore }} [options]
+ *   checkpoint?: DagCheckpointStore, revision?: string }} [options]
  * @returns {CompiledDag}
  * @throws {FlowCompileError} when the document violates the format (JF0xxx)
  * @throws {TypeError} when the options are malformed (a registry that is
@@ -137,6 +137,9 @@ export function compileDag(doc, options) {
     throw new TypeError('compileDag: "tasks" must be an object of handler functions');
   }
   const checkpoint = options?.checkpoint;
+  const revision = options?.revision;
+  if (revision !== undefined && (typeof revision !== 'string' || !revision.trim() || !checkpoint))
+    throw new TypeError('compileDag: revision must be nonblank and requires a checkpoint store');
   if (checkpoint !== undefined && (typeof checkpoint?.load !== 'function'
     || typeof checkpoint.save !== 'function'
     || typeof checkpoint.complete !== 'function')) {
@@ -262,6 +265,9 @@ export function compileDag(doc, options) {
       `a dag declares exactly one output node (found ${outputs.length})`, '/nodes');
   }
   const outputId = outputs[0];
+  // Exact canonical provenance is opt-in for legacy stores. It is compared
+  // before any saved node value can enter the memo, not merely handed to a host.
+  const documentIdentity = revision === undefined ? null : canonicalizeJson(doc);
 
   if (!Array.isArray(doc.edges)) {
     throw new FlowCompileError('JF0012',
@@ -393,6 +399,8 @@ export function compileDag(doc, options) {
       throw new TypeError('run: "signal" must be an AbortSignal');
     }
     const onNode = opts?.onNode;
+    if (opts?.drainOnAbort !== undefined && typeof opts.drainOnAbort !== 'boolean')
+      throw new TypeError('run: drainOnAbort must be boolean');
     if (onNode !== undefined && typeof onNode !== 'function') {
       throw new TypeError('run: "onNode" must be a function');
     }
@@ -405,7 +413,7 @@ export function compileDag(doc, options) {
       throw new TypeError(
         'run: a checkpointed dag needs a non-empty string "runId" to persist under');
     }
-    return execute(input === undefined ? null : input, signal, onNode, runId);
+    return execute(input === undefined ? null : input, signal, onNode, runId, opts?.drainOnAbort === true);
   }
 
   /**
@@ -413,11 +421,17 @@ export function compileDag(doc, options) {
    * @param {AbortSignal|undefined} signal
    * @param {((record: DagNodeRecord) => void)|undefined} onNode
    * @param {string|undefined} runId
+   * @param {boolean} drainOnAbort
    */
-  async function execute(runInput, signal, onNode, runId) {
+  async function execute(runInput, signal, onNode, runId, drainOnAbort) {
     const controller = new AbortController();
     /** @type {FlowRuntimeError|null} */
     let failure = null;
+    let rejectAborted;
+    const aborted = new Promise((_, reject) => { rejectAborted = reject; });
+    aborted.catch(() => {});
+    const identity = revision === undefined ? undefined
+      : Object.freeze({ revision, document: documentIdentity, input: canonicalizeJson(runInput), taskVersions });
 
     /** @param {DagNodeRecord} rec */
     const record = (rec) => {
@@ -437,6 +451,7 @@ export function compileDag(doc, options) {
       if (failure === null) {
         failure = err;
         controller.abort();
+        rejectAborted(err);
       }
     };
 
@@ -463,11 +478,17 @@ export function compileDag(doc, options) {
     if (checkpoint !== undefined && runId !== undefined) {
       let loaded;
       try {
-        loaded = await checkpoint.load(runId);
+        loaded = await Promise.race([checkpoint.load(runId, identity), aborted]);
+        if (identity !== undefined && loaded != null
+          && canonicalizeJson(loaded.identity ?? null) !== canonicalizeJson(identity)) {
+          throw new FlowRuntimeError('JF2013', `checkpoint '${runId}' has different or missing provenance`);
+        }
       }
       catch (err) {
         if (signal !== undefined && onAbort !== null)
           signal.removeEventListener('abort', onAbort);
+        if (failure !== null) throw failure;
+        if (err instanceof FlowRuntimeError && err.code === 'JF2013') throw err;
         const cause = asError(err);
         throw new FlowRuntimeError('JF2009',
           `the checkpoint store failed to load run '${runId}': ${cause.message}`,
@@ -550,6 +571,7 @@ export function compileDag(doc, options) {
           }
           default: value = null; break;
         }
+        if (failure !== null) throw failure;
         if (node.checkpoint && checkpoint !== undefined && runId !== undefined) {
           // the explicit serialization contract (§7.6): the node
           // DECLARED its output JSON; a value that is not fails the
@@ -564,7 +586,7 @@ export function compileDag(doc, options) {
               + `not JSON-serializable: ${cause.message}`, node.docPath, cause);
           }
           try {
-            await checkpoint.save(runId, node.id, value);
+            await Promise.race([checkpoint.save(runId, node.id, value, identity), aborted]);
           }
           catch (err) {
             const cause = asError(err);
@@ -573,6 +595,7 @@ export function compileDag(doc, options) {
               node.docPath, cause);
           }
         }
+        if (failure !== null) throw failure;
         settle('ok');
         return value;
       }
@@ -603,9 +626,28 @@ export function compileDag(doc, options) {
     });
 
     try {
-      await Promise.all(all);
+      await Promise.race([Promise.all(all), aborted]);
+      if (failure !== null) throw failure;
+      const result = await promises.get(outputId);
+      if (checkpoint !== undefined && runId !== undefined) {
+        try {
+          await Promise.race([checkpoint.complete(runId, result, identity), aborted]);
+        }
+        catch (err) {
+          if (failure !== null) throw failure;
+          const cause = asError(err);
+          throw new FlowRuntimeError('JF2009',
+            `the checkpoint store failed to complete run '${runId}': ${cause.message}`,
+            '', cause);
+        }
+      }
+      return result;
     }
     catch (err) {
+      // A worker's shutdown report accounts for actual task lifetimes. It
+      // owns a separate grace deadline, so it may ask us to retain the run
+      // until ignoring handlers settle instead of reporting early drainage.
+      if (drainOnAbort && failure?.code === 'JF2007') await Promise.allSettled(all);
       throw failure ?? err;
     }
     finally {
@@ -613,20 +655,6 @@ export function compileDag(doc, options) {
         signal.removeEventListener('abort', onAbort);
       }
     }
-    if (failure !== null) throw failure;
-    const result = await promises.get(outputId);
-    if (checkpoint !== undefined && runId !== undefined) {
-      try {
-        await checkpoint.complete(runId, result);
-      }
-      catch (err) {
-        const cause = asError(err);
-        throw new FlowRuntimeError('JF2009',
-          `the checkpoint store failed to complete run '${runId}': ${cause.message}`,
-          '', cause);
-      }
-    }
-    return result;
   }
 
   // The canonical version map: every declared task identity this

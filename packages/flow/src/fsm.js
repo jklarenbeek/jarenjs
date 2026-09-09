@@ -33,7 +33,7 @@ import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
  * @param {string} docPath - JSON Pointer of the list member.
  * @returns {CompiledEffect[]}
  */
-function compileEffectList(list, docPath) {
+export function compileEffectList(list, docPath) {
   if (list === undefined) return [];
   if (!Array.isArray(list)) {
     throw new FlowCompileError('JF0008',
@@ -70,7 +70,7 @@ function compileEffectList(list, docPath) {
  * @param {any[]} out - resolved descriptors, appended to
  * @param {any[]} errors - step-result error records, appended to
  */
-function resolveEffect(effect, scope, out, errors) {
+export function resolveEffect(effect, scope, out, errors) {
   if (effect.with === null) {
     out.push({ run: effect.run });
     return;

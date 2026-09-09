@@ -34,6 +34,9 @@ const args = process.argv.slice(2);
 const OUTPUT = args.includes('--output') ? args[args.indexOf('--output') + 1] : null;
 const FILEPATH = args.includes('--filepath') ? args[args.indexOf('--filepath') + 1] : null;
 const SIZES = [100, 10000];
+const requestedIterations = args.includes('--iterations') ? Number(args[args.indexOf('--iterations') + 1]) : null;
+if (requestedIterations !== null && (!Number.isSafeInteger(requestedIterations) || requestedIterations < 1))
+  throw new TypeError('--iterations must be a positive safe integer');
 //#endregion
 
 /** N people, half adult, each tagged with a region key for the join. */
@@ -119,7 +122,7 @@ const collected = { sync: [], async: [] };
 for (const n of SIZES) {
   await assertAgrees(n);
   const data = rows(n);
-  const iters = n >= 10000 ? 200 : 2000;
+  const iters = requestedIterations ?? (n >= 10000 ? 200 : 2000);
 
   // no-task variant: query/jslt/const only. `run` is async by design
   // (it drives a wavefront), so it is awaited even here — the

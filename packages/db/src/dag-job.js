@@ -199,7 +199,7 @@ export function createDagJobRunner(store, options) {
           compiled.taskVersions);
         // the handler's signal reaches every task: a worker winding down
         // inside its grace period, or a lease this attempt has lost
-        return await compiled.run(input, { runId: runKey, signal: context.signal });
+        return await compiled.run(input, { runId: runKey, signal: context.signal, drainOnAbort: true });
       }
       finally {
         active.delete(runKey);

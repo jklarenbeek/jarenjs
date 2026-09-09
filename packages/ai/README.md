@@ -1602,7 +1602,11 @@ The fixture threshold is not calibrated for other embedders or real question str
 
 ### Derived authoring profiles and host routes
 
-Query, JSLT, app, FSM and DAG have generated `*.authoring.schema.json` artifacts.
+Query, JSLT, app, FSM, DAG, statechart and composed workflow have generated
+`*.authoring.schema.json` artifacts. `grammar: 'statechart'` uses
+`compileStatechart`; `grammar: 'workflow'` uses `compileWorkflow` with the host's
+versioned task registry. Their schemas live in `packages/flow/schemas/`;
+workflow validation registers the DAG, query and JSLT grammars too.
 `createGrammarAuthor({client, grammar, profile, schema, refs, compile})` always validates
 against the full schema after profile decoding and then invokes the injected compiler.
 Profiles intentionally allow values that the full grammar rejects. `docs:check` checks
@@ -1617,6 +1621,8 @@ source, named seam, profile hashes and generated output for drift.
 | app | 47275 | 2799 | 106 | 0 |
 | fsm | 24140 | 3026 | 51 | 4 |
 | dag | 49558 | 5128 | 112 | 6 |
+| statechart | 23058 | 2634 | 49 | 2 |
+| workflow | 52878 | 3685 | 121 | 9 |
 
 <!--/fact-->
 

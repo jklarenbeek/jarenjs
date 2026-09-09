@@ -7,21 +7,25 @@ import { join, dirname } from 'node:path';
 import { createGrammarAuthor, createRoutedClient, createBudgetAccount, checkOutcome } from '@jarenjs/ai';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
-import { compileFsm, compileDag } from '@jarenjs/flow';
+import { compileFsm, compileDag, compileStatechart, compileWorkflow } from '@jarenjs/flow';
 import { JarenValidator } from '@jarenjs/validate';
 import { AUTHORING_PROFILES, generateAuthoringProfiles } from '../../scripts/generate-authoring-profiles.js';
 
 const read = (pkg, name, suffix = '') => JSON.parse(readFileSync(new URL(`../../packages/${pkg}/schemas/jaren-${name}${suffix}.schema.json`, import.meta.url), 'utf8'));
 const query = read('json', 'query');
 const jslt = read('json', 'jslt');
+const dag = read('flow', 'dag');
 const corpus = {
   query: [{$sum:'$.prices[*]'}, {$for:{r:'$.records[*]'},$return:'$r.id'}],
   jslt: [[{match:'$',body:{total:{$sum:'$.prices[*]'}}}]],
   app: [{state:{count:0},view:[{match:'$',body:{tag:'div',children:['hello']}}], actions:{inc:{state:{count:{$add:['$.count',1]}}}}}],
   fsm: [{initial:'idle',states:['idle','done'],transitions:[{from:'idle',to:'done',event:'GO'}]}],
   dag: [{$dag:'0.1',nodes:{input:{kind:'input'},output:{kind:'output'}},edges:[{from:'input',to:'output'}]}],
+  statechart: [{$fsm:'0.2',initial:'idle',states:['idle',{id:'done',final:true}],transitions:[{from:'idle',to:'done',after:10}]}],
+  workflow: [{$workflow:'0.2',revision:'1',initial:'done',states:{done:{final:true}}}],
 };
 const compilers = { query: compileJsonQuery, jslt: compileJsltStylesheet, fsm: compileFsm, dag: compileDag,
+  statechart: compileStatechart, workflow: compileWorkflow,
   app: (doc) => { compileJsltStylesheet(doc.view); Object.values(doc.actions ?? {}).forEach((action) => compileJsonQuery(action)); } };
 
 describe('generated grammar profiles', () => {
@@ -48,6 +52,7 @@ describe('generated grammar profiles', () => {
       const profile = read(entry.package, entry.grammar, '.authoring');
       const full = new JarenValidator({ skipErrors: false });
       if (schema.$id !== query.$id) full.addSchema(query); if (schema.$id !== jslt.$id) full.addSchema(jslt);
+      if (schema.$id !== dag.$id) full.addSchema(dag);
       const check = full.compile(schema);
       for (const doc of corpus[entry.grammar]) {
         assert.equal(checkOutcome(check(doc)).valid, true);
@@ -56,7 +61,7 @@ describe('generated grammar profiles', () => {
           requests.push(request); return { message: { content: JSON.stringify(doc) } };
         } };
         const author = createGrammarAuthor({ client, grammar: entry.grammar, schema, profile,
-          refs: [query, jslt].filter((ref) => ref.$id !== schema.$id), compile: compilers[entry.grammar] });
+          refs: [query, jslt, ...(entry.grammar === 'workflow' ? [dag] : [])].filter((ref) => ref.$id !== schema.$id), compile: compilers[entry.grammar] });
         const result = await author.author('fixture');
         assert.deepEqual(result.value, doc, JSON.stringify(result));
         assert.equal(requests[0].responseFormat.schema.$id, profile.$id);

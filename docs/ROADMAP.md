@@ -207,11 +207,6 @@ delete it or fix it.
 
 ## @jarenjs/flow
 
-- [ ] **Statechart vocabulary** — jaren-fsm 0.1 deliberately has no
-  hierarchy/compound states, history states, parallel regions or
-  delayed/timed transitions (FLOW-FORMAT §1.1 names them as non-goals).
-  Revisit when a consumer needs one; hierarchy is the likely first,
-  since the mermaid state parser already records a flattened `parent`.
 - [ ] **Streaming dag input** — a run is one value in, one value out
   (FLOW-FORMAT §7.5); feeding a graph chunk-by-chunk from the
   `@jarenjs/josl` incremental readers is the natural 0.2 composition,
@@ -223,21 +218,6 @@ delete it or fix it.
   0.1 (geometry never enters the document). A `meta.layout` side-table
   would let a user override the auto-layout without polluting the AST —
   the honest place to add it if a consumer asks.
-- [ ] **Nothing composes a DAG and an FSM into one workflow.** Task,
-  fan-out/fan-in, switch, bounded loop, nested flow and durable wait/resume
-  are each expressible today — static regions as `jaren-dag`, dynamic control
-  as `jaren-fsm`, effects host-executed with the idempotency key honored by
-  the effectful system (FLOW-FORMAT says so) — but a host that needs all six
-  in one document has to write the composition and the lowering itself, and
-  a third scheduler is the usual result. A small composition layer that
-  lowers one neutral document deterministically onto the two engines, with
-  trace and checkpoint records referring to the lowered revisions, is the
-  generic part; roles, prompts, model profiles, tools and domain state are
-  host registries and stay out. The constraint is that this repository has
-  no composed workflow of its own to lower — the website assistant and the
-  benchmark harness are the candidates — and a lowering layer without a
-  deterministic lowering/concurrency/resume test over a real one would be
-  the third scheduler with better manners. Built when that consumer exists.
 
 ## @jarenjs/md
 
@@ -265,7 +245,7 @@ delete it or fix it.
   one another, so the remaining work here is the routing itself: an edge still
   runs straight from border to border and can cross a node it has nothing to
   do with.
-- [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships two executable arrows (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, both run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
+- [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships executable arrows for flat FSMs, compound statecharts and DAGs (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
 - [ ] **Diagram tooltips** — pan/zoom/touch ship as the opt-in
   `mermaidPlugin({ interactive: true })` hydrate; per-node tooltips are the
   remaining half, and they need a hover/focus target the pure render does not
@@ -357,11 +337,11 @@ beyond a textarea, which is what the first two entries are about.
   write and run project files, but a written file arrives as free-form tool
   arguments; `createStructuredOutput` ships and is not wired to this path.
   Doing it honestly means handing the provider exactly ONE file's grammar and
-  never the whole project schema, and only `query` and `jslt` have the
-  `.llm-profile` relaxations that make a schema decodable
-  (`packages/json/schemas/jaren-{query,jslt}.llm-profile.schema.json`).
-  `app`/`fsm`/`dag`/`model` would each need a profile derived, or would have to
-  accept the canonical schema with its unresolved-`$ref` limitation stated.
+  never the whole project schema, and then using the full schema and compiler
+  as the acceptance gate.
+  Derived authoring profiles already ship for `query`, `jslt`, `app`,
+  `fsm`, `dag`, statecharts and composed workflows; the remaining work is
+  wiring the per-file authoring path and providing the `model` profile.
 - [ ] **A runnable offline project export.** Download now preserves every file
   and the layout in a `jaren-project` JSON envelope. A `.zip` eject with a
   host page, runtime dependencies and a README remains a separate capability;
@@ -504,19 +484,6 @@ what each does is its own documentation's job
   aggregates between migration steps still needs a trustworthy schema for
   those intermediate documents and proof of equivalent numeric/order
   semantics. The baseline and target alone cannot provide that guarantee.
-- [ ] **A declared task version is only as honest as the host that bumps
-  it.** A checkpointed task node now declares the identity of the
-  implementation it depends on, the registry must supply the same token,
-  and a DAG job fingerprints the canonical version map beside the
-  workflow revision and the input — so a handler reimplemented under an
-  unchanged document is `JD2069` before a checkpoint is loaded
-  (FLOW-FORMAT §7.8, JOBS-FORMAT §7). What no format can check is whether
-  the host actually moved the token when it changed the code; that is the
-  same limit the workflow revision has always had, now inherited by
-  tasks. An explicit `jobs.reset(id, { expectedGeneration })` now atomically
-  clears an inactive run and advances its fence for recomputation; it
-  refuses stale observations and live leases. Standalone flow checkpoint
-  stores must enforce their own run provenance before returning values.
 - [ ] **A stored interval cannot be declared well-formed, so `$overlaps`
   narrows but never seeks.** The promotion pushes the half-open conjunction
   over the two declared bound columns and the engine's own operator decides,

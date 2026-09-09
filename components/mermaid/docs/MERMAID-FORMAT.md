@@ -261,7 +261,7 @@ primitive.
 
 ### 5.1 Semantic projections
 
-The geometry-free AST doubles as a domain model, and four JSLT
+The geometry-free AST doubles as a domain model, and six JSLT
 stylesheets in [`stylesheets/`](../stylesheets/) project it both ways —
 plain data documents, no code:
 
@@ -269,6 +269,8 @@ plain data documents, no code:
 |---|---|
 | `state-to-workflow.jslt.json` | state DiagramDocument → executable machine (`@jarenjs/flow`'s jaren-fsm superset shape) |
 | `workflow-to-state.jslt.json` | machine document → state AST (print with `toMermaid`) |
+| `state-to-statechart.jslt.json` | compound state DiagramDocument → jaren-fsm 0.2 (`compileStatechart`) |
+| `statechart-to-state.jslt.json` | statechart document → state AST, preserving compound parents, initials and finals |
 | `flowchart-to-dag.jslt.json` | flowchart DiagramDocument → jaren-dag **skeleton** (every node a `task` stub named by its id; edge labels become `port`s verbatim) |
 | `dag-to-flowchart.jslt.json` | jaren-dag document → flowchart AST |
 
@@ -277,6 +279,19 @@ The forward state projection maps the parsed UML parts: `event` and
 `effects: [{ "run": <effect text> }]` — the effect label **is** the
 registry name by convention. The reverse composes the label from the
 machine's parts and stays consistent with the parser by construction.
+
+The compound projection uses `parent` on states as well as transitions;
+the parser records arbitrary nesting depth and the printer retains transition
+order while reopening compound scopes when necessary. A scope's unlabelled
+`[*]` entry supplies its `initial`; an unlabelled edge to `[*]` declares its
+source terminal. Missing or ambiguous initials, a terminal with other outgoing
+transitions, or labelled pseudo-state edges refuse at statechart compilation.
+The 0.1 projection keeps its original flat behavior. Statechart history,
+parallel types, internal/external distinctions, delays, completion/eventless
+triggers and state entry/exit effects have no lossless spelling in this
+projection: author and retain those in JSON. The reverse is a display
+projection outside the compound/initial/final subset, not a serialization
+format for a full statechart.
 
 The dag projection renders each node kind as a fixed flowchart shape:
 

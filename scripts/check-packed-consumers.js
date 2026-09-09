@@ -345,7 +345,8 @@ void codes.JL0001;
 void (LinqBuildError.name === 'LinqBuildError' && LinqRuntimeError.name === 'LinqRuntimeError');
 `,
   '@jarenjs/flow': `
-import { compileFsm, createFsmSession, fsmToApp, fsmStateSchema, compileDag } from '@jarenjs/flow';
+import { compileFsm, createFsmSession, fsmToApp, fsmStateSchema, compileDag, compileStatechart, createStatechartSession, compileWorkflow } from '@jarenjs/flow';
+import type { StatechartResult, WorkflowResult } from '@jarenjs/flow';
 const fsm = compileFsm({
   initial: 'a',
   states: ['a', { id: 'b', final: true }],
@@ -371,6 +372,11 @@ const dag = compileDag({
 const dagNodes: readonly string[] = dag.nodes;
 void [dagNodes, dag.output];
 void dag.run(1, { onNode: (rec) => void (rec.id + rec.status + rec.ms) }).then((v) => v);
+const chart = compileStatechart({ $fsm: '0.2', initial: 'done', states: [{ id: 'done', final: true }], transitions: [] });
+const chartResult: StatechartResult = createStatechartSession(chart).advance(1);
+void chartResult.state.active;
+const workflow = compileWorkflow({ $workflow: '0.2', revision: '1', initial: 'done', states: { done: { final: true } } });
+workflow.run(null, { runId: 'packed' }).then((r: WorkflowResult) => { const s: 'waiting'|'done' = r.status; void s; });
 `,
   '@jarenjs/contract': `
 import {
@@ -613,6 +619,19 @@ if (state.value() !== 1) throw new Error('packed ordered accumulator changed add
 for (const suffix of ['schema', 'draft-07.schema']) {
   const { default: grammar } = await import('@jarenjs/json/schemas/jaren-jtlt.' + suffix + '.json', { with: { type: 'json' } });
   if (!grammar.$id.includes('jaren-jtlt/0.1')) throw new Error('Packed JTLT grammar is missing its version');
+}
+`;
+    if (name === '@jarenjs/flow') program += `
+const { compileStatechart, compileWorkflow } = await import('@jarenjs/flow');
+const chart = compileStatechart({ $fsm: '0.2', initial: 'done', states: [{ id: 'done', final: true }], transitions: [] });
+if (!chart.start().final) throw new Error('Packed statechart did not complete');
+const workflow = compileWorkflow({ $workflow: '0.2', revision: '1', initial: 'done', states: { done: { final: true } } });
+if ((await workflow.run(42, { runId: 'packed' })).result !== 42) throw new Error('Packed workflow changed its result');
+for (const name of ['statechart', 'statechart-state', 'workflow']) {
+  for (const suffix of ['schema', 'draft-07.schema', ...(name === 'statechart-state' ? [] : ['authoring.schema'])]) {
+    const { default: grammar } = await import('@jarenjs/flow/schemas/jaren-' + name + '.' + suffix + '.json', { with: { type: 'json' } });
+    if (!grammar.$id.includes('/0.2')) throw new Error('Packed flow grammar is missing its version');
+  }
 }
 `;
     if (name === '@jarenjs/db') program += `

@@ -1,0 +1,240 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "states": [
+          {
+            "$for": {
+              "s": "$.states[*]"
+            },
+            "$return": {
+              "id": {
+                "$if": [
+                  {
+                    "$is-string": "$s"
+                  },
+                  "$s",
+                  "$s.id"
+                ]
+              },
+              "label": {
+                "$if": [
+                  {
+                    "$is-string": "$s"
+                  },
+                  "$s",
+                  "$s.id"
+                ]
+              },
+              "parent": {
+                "$if": [
+                  "$s.parent",
+                  "$s.parent"
+                ]
+              }
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "$if": [
+              "$.initial",
+              {
+                "from": "[*]",
+                "to": "$.initial",
+                "label": null,
+                "event": null,
+                "guard": null,
+                "effect": null,
+                "parent": null
+              }
+            ]
+          },
+          {
+            "$for": {
+              "s": "$.states[*]"
+            },
+            "$where": {
+              "$exists": "$s.initial"
+            },
+            "$return": {
+              "from": "[*]",
+              "to": "$s.initial",
+              "label": null,
+              "event": null,
+              "guard": null,
+              "effect": null,
+              "parent": "$s.id"
+            }
+          },
+          {
+            "$for": {
+              "t": "$.transitions[*]"
+            },
+            "$return": {
+              "$let": {
+                "guardText": {
+                  "$if": [
+                    "$t.guard",
+                    {
+                      "$concat": [
+                        "[",
+                        {
+                          "$if": [
+                            {
+                              "$is-string": "$t.guard"
+                            },
+                            "$t.guard",
+                            "…"
+                          ]
+                        },
+                        "]"
+                      ]
+                    }
+                  ]
+                },
+                "effectText": {
+                  "$if": [
+                    {
+                      "$exists": "$t.effects[*]"
+                    },
+                    {
+                      "$concat": [
+                        "/ ",
+                        {
+                          "$string-join": [
+                            "$t.effects[*].run",
+                            ", "
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "$return": {
+                "$let": {
+                  "pieces": {
+                    "$seq": [
+                      {
+                        "$if": [
+                          "$t.event",
+                          "$t.event"
+                        ]
+                      },
+                      "$guardText",
+                      "$effectText"
+                    ]
+                  }
+                },
+                "$return": {
+                  "from": "$t.from",
+                  "to": "$t.to",
+                  "label": {
+                    "$coalesce": [
+                      {
+                        "$if": [
+                          {
+                            "$exists": "$pieces"
+                          },
+                          {
+                            "$string-join": [
+                              "$pieces",
+                              " "
+                            ]
+                          }
+                        ]
+                      },
+                      null
+                    ]
+                  },
+                  "event": {
+                    "$coalesce": [
+                      "$t.event",
+                      null
+                    ]
+                  },
+                  "guard": {
+                    "$coalesce": [
+                      {
+                        "$if": [
+                          "$t.guard",
+                          {
+                            "$if": [
+                              {
+                                "$is-string": "$t.guard"
+                              },
+                              "$t.guard",
+                              "…"
+                            ]
+                          }
+                        ]
+                      },
+                      null
+                    ]
+                  },
+                  "effect": {
+                    "$coalesce": [
+                      {
+                        "$if": [
+                          {
+                            "$exists": "$t.effects[*]"
+                          },
+                          {
+                            "$string-join": [
+                              "$t.effects[*].run",
+                              ", "
+                            ]
+                          }
+                        ]
+                      },
+                      null
+                    ]
+                  },
+                  "parent": null
+                }
+              }
+            }
+          },
+          {
+            "$for": {
+              "s": "$.states[*]"
+            },
+            "$where": {
+              "$or": [
+                {
+                  "$eq": [
+                    "$s.final",
+                    true
+                  ]
+                },
+                {
+                  "$eq": [
+                    "$s.type",
+                    "final"
+                  ]
+                }
+              ]
+            },
+            "$return": {
+              "from": "$s.id",
+              "to": "[*]",
+              "label": null,
+              "event": null,
+              "guard": null,
+              "effect": null,
+              "parent": {
+                "$coalesce": [
+                  "$s.parent",
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

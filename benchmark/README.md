@@ -546,7 +546,15 @@ skipped). npm shortcut: `npm run benchmark:mermaid`.
 
 ## flow-fsm.js / flow-dag.js — @jarenjs/flow vs XState and a hand-written baseline
 
-Two runners, one `npm run benchmark:flow`. Each is labeled for what it
+Two runners, one `npm run benchmark:flow`. The command now runs
+[`flow-workflow.js`](flow-workflow.js), consuming the committed
+[`flow-workflow.json`](fixtures/flow-workflow.json) composition. Correctness
+suites fan out, then timed FSM/DAG measurements run sequentially. `--quick`
+is a smoke run; `--review --checkpoint /tmp/flow-runs.json` persists a review
+wait that a later `--checkpoint /tmp/flow-runs.json --accept` (or bounded
+`--retry`) resumes. The [workflow contract](../packages/flow/docs/WORKFLOW-FORMAT.md)
+defines identity, CAS and crash behavior. Each original runner remains
+available directly and is labeled for what it
 fairly compares:
 
 1. **FSM head-to-head against XState v5** (`flow-fsm.js`). The *same

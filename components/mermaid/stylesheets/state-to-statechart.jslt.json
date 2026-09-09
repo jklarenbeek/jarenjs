@@ -1,0 +1,168 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "$map": [
+          [
+            "$$fsm",
+            "0.2"
+          ],
+          [
+            "initial",
+            {
+              "$for": {
+                "t": "$.ast.transitions[*]"
+              },
+              "$where": {
+                "$and": [
+                  {
+                    "$eq": [
+                      "$t.from",
+                      "[*]"
+                    ]
+                  },
+                  {
+                    "$eq": [
+                      "$t.parent",
+                      null
+                    ]
+                  }
+                ]
+              },
+              "$return": "$t.to"
+            }
+          ],
+          [
+            "states",
+            [
+              {
+                "$for": {
+                  "s": "$.ast.states[*]"
+                },
+                "$return": {
+                  "id": "$s.id",
+                  "parent": {
+                    "$if": [
+                      "$s.parent",
+                      "$s.parent"
+                    ]
+                  },
+                  "initial": {
+                    "$for": {
+                      "t": "$.ast.transitions[*]"
+                    },
+                    "$where": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            "$t.from",
+                            "[*]"
+                          ]
+                        },
+                        {
+                          "$eq": [
+                            "$t.parent",
+                            "$s.id"
+                          ]
+                        }
+                      ]
+                    },
+                    "$return": "$t.to"
+                  },
+                  "final": {
+                    "$if": [
+                      {
+                        "$exists": {
+                          "$for": {
+                            "t": "$.ast.transitions[*]"
+                          },
+                          "$where": {
+                            "$and": [
+                              {
+                                "$eq": [
+                                  "$t.to",
+                                  "[*]"
+                                ]
+                              },
+                              {
+                                "$eq": [
+                                  "$t.from",
+                                  "$s.id"
+                                ]
+                              }
+                            ]
+                          },
+                          "$return": "$t.from"
+                        }
+                      },
+                      true
+                    ]
+                  }
+                }
+              }
+            ]
+          ],
+          [
+            "transitions",
+            [
+              {
+                "$for": {
+                  "t": "$.ast.transitions[*]"
+                },
+                "$return": {
+                  "from": "$t.from",
+                  "event": "$t.event",
+                  "guard": {
+                    "$if": [
+                      "$t.guard",
+                      "$t.guard"
+                    ]
+                  },
+                  "to": "$t.to",
+                  "effects": {
+                    "$if": [
+                      "$t.effect",
+                      [
+                        {
+                          "run": "$t.effect"
+                        }
+                      ]
+                    ]
+                  }
+                },
+                "$where": {
+                  "$or": [
+                    {
+                      "$and": [
+                        {
+                          "$ne": [
+                            "$t.from",
+                            "[*]"
+                          ]
+                        },
+                        {
+                          "$ne": [
+                            "$t.to",
+                            "[*]"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "$ne": [
+                        "$t.label",
+                        null
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

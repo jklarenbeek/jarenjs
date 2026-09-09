@@ -253,6 +253,34 @@ function printClass(ast) {
  */
 function printState(ast) {
   const out = ['stateDiagram-v2'];
+  if (ast.states.some((s) => s.parent != null) || ast.transitions.some((t) => t.parent != null)) {
+    const states = new Map(ast.states.map((s) => [s.id, s]));
+    let opened = [];
+    const scope = (parent) => {
+      const target = [];
+      for (let id = parent; id != null; id = states.get(id)?.parent) {
+        if (target.includes(id)) throw new TypeError('cyclic state-diagram parent');
+        target.unshift(id);
+      }
+      let shared = 0;
+      while (shared < opened.length && opened[shared] === target[shared]) shared++;
+      for (let i = opened.length; i > shared; i--) out.push('  '.repeat(i - 1) + '}');
+      for (let i = shared; i < target.length; i++) out.push('  '.repeat(i) + `state ${target[i]} {`);
+      opened = target;
+    };
+    // Declare every id first, then retain transition document order even
+    // when that requires reopening a compound scope. Priority survives print.
+    for (const s of ast.states) {
+      scope(s.parent);
+      out.push('  '.repeat(opened.length) + (s.label !== s.id ? `${s.id} : ${s.label}` : `state ${s.id}`));
+    }
+    for (const t of ast.transitions) {
+      scope(t.parent);
+      out.push('  '.repeat(opened.length) + `${t.from} --> ${t.to}${t.label ? ' : ' + t.label : ''}`);
+    }
+    scope(null);
+    return out.join('\n') + '\n';
+  }
   // an id-only state no transition mentions must still be DECLARED, or
   // the canonical round trip silently drops it (`state x` is the
   // parser's own spelling for exactly that)

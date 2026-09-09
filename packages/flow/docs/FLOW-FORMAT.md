@@ -9,8 +9,10 @@ authoritative for everything a structural schema cannot express, and
 the compiler enforces it.
 
 Section map: §1 scope, §2 the jaren-fsm document, §3 the evaluation
-scope, §4 the selection rule, §5 errors. §6 (the jaren-dag document)
-and §7 (dag execution) are reserved for the dataflow format.
+scope, §4 the selection rule, §5 errors, §6 the jaren-dag document and
+§7 DAG execution/persistence. This document retains the 0.1 engine contracts.
+[STATECHART-FORMAT.md](STATECHART-FORMAT.md) specifies jaren-fsm 0.2 and
+[WORKFLOW-FORMAT.md](WORKFLOW-FORMAT.md) specifies their composed workflow.
 
 ## §1 Scope
 
@@ -42,15 +44,18 @@ them, the same boundary discipline `@jarenjs/app` keeps.
 
 ### §1.1 Non-goals of format 0.1
 
-Named so nobody reads absence as oversight:
+These remain limits of `compileFsm` and its 0.1 format. Compound states,
+history, parallel regions, explicit-time delays, completion and eventless
+transitions ship separately through `compileStatechart` and jaren-fsm 0.2;
+existing string snapshots and app-generated actions retain their contracts.
 
 - **Hierarchy.** No compound or nested states; a mermaid composite state
   arrives flattened.
 - **Eventless chains.** A transition only ever fires in answer to a
   `step`/`send` call; there are no spontaneous microsteps and no
   always-transitions that cascade.
-- **History, parallel regions, delayed/timed transitions.** Statechart
-  vocabulary deferred until a use case demands it.
+- **History, parallel regions, delayed/timed transitions.** These require
+  the structured snapshot and explicit time of version 0.2.
 - **Effect execution.** The engine resolves descriptors and returns
   them; it MUST NOT invoke handlers.
 - **Persistence.** A machine's current state is a string; storing it is
@@ -211,10 +216,13 @@ tables there and here MUST stay in sync.
 | JF0017 | not exactly one `output` node |
 | JF0018 | a `task` node names no registered handler |
 | JF0019 | a `task` node and its registered handler disagree about the handler version |
+| JF0020 | a statechart violates hierarchy, initial, state or transition rules (STATECHART-FORMAT) |
+| JF0021 | a composed workflow declaration or reference is malformed (WORKFLOW-FORMAT) |
+| JF0022 | an automatic workflow cycle has no declared visit bound |
 
 ### §5.2 Runtime: thrown vs recorded
 
-Only **caller mistakes** throw (`FlowRuntimeError`):
+In the **0.1 FSM**, only caller mistakes throw (`FlowRuntimeError`):
 
 | code | condition |
 |---|---|
@@ -246,6 +254,13 @@ exactly the kind of partial result D7 forbids:
 | JF2007 | the caller's signal aborted the run |
 | JF2008 | a node declared `checkpoint: true` but produced a value that is not JSON-serializable; the run rejects at save time |
 | JF2009 | the checkpoint store threw while loading, saving or completing; the run rejects |
+| JF2010 | an invalid statechart snapshot or illegal active/history/timer configuration |
+| JF2011 | time moved backwards or a deadline/token exceeded its numeric range |
+| JF2012 | a statechart exceeded its microstep limit |
+| JF2013 | checkpoint workflow, lowering, input or task provenance disagrees or is missing |
+| JF2014 | a workflow run is busy or a snapshot/event generation is stale |
+| JF2015 | a workflow state exceeded its declared visit limit |
+| JF2016 | a workflow snapshot is malformed or execution failed to progress cleanly |
 
 ## §6 The jaren-dag document
 
@@ -433,11 +448,11 @@ await dag.run(input, { runId: 'run-42' });
   runs twice after a crash is the caller's bug, bluntly. The
   mitigation is an idempotency key threaded through the node's
   `with` props and honoured by the effectful system itself.
-- A standalone checkpoint store owns run identity: it must bind the run
-  id to the workflow, input and `taskVersions` before returning saved
-  values. `compileDag` validates the registry but cannot infer the
-  provenance of an arbitrary host store. Use the `@jarenjs/db` DAG job
-  runner for persisted identity comparison before node-value loading. Values recorded for node ids the current document does not
+- A legacy standalone checkpoint store owns run identity. The opt-in
+  `revision` gate (§7.9) now compares the exact document, input and
+  `taskVersions` before using saved values; the composed workflow supplies
+  this gate and a CAS store automatically. The `@jarenjs/db` DAG job runner
+  retains its own persisted identity and lease checks. Values recorded for node ids the current document does not
   declare (or no longer declares `checkpoint`) are ignored.
 
 ### §7.8 Declared task versions
@@ -511,3 +526,44 @@ const session = createDurableFsmSession(machine, {
   save: (state) => orders.put({ id: 'order-7', state }, 'order-7'),
 });
 ```
+
+### §7.9 Standalone DAG provenance
+
+Pass a nonblank `revision` with a checkpoint store to enable engine-checked
+provenance. The engine constructs an identity containing that revision, the
+exact canonical DAG document, the canonical input and the sorted task-version
+map. It supplies that identity to `load(runId, identity)`,
+`save(runId, nodeId, value, identity)` and `complete(runId, result, identity)`.
+The store persists it beside `values`:
+
+```js
+let record = null; // One-run example; production stores key by runId.
+const checkpoint = {
+  load: () => record,
+  save(runId, nodeId, value, identity) {
+    record ??= { identity, values: {} };
+    Object.defineProperty(record.values, nodeId, { value, enumerable: true,
+      configurable: true, writable: true });
+  },
+  complete() {},
+};
+const dag = compileDag(doc, { tasks, checkpoint, revision: 'enrich/3' });
+await dag.run(input, { runId: 'enrich-7' });
+```
+
+Any non-null loaded record with a missing or different identity is JF2013
+**before** values enter the node memo. Equality uses exact canonical JSON,
+not a collision-prone fingerprint. The store still owns atomic run binding,
+concurrency and retention; the composed workflow's CAS protocol supplies those
+checks for its runs. Supplying no `revision` preserves the legacy store API
+and its host-owned provenance contract. Handler versions remain declarations:
+a host MUST change them when implementation behavior changes.
+
+Caller abort now settles a run even while a task or store load ignores the
+signal. A task settling after failure cannot start a new checkpoint save.
+`run(input, {drainOnAbort: true})` instead waits for started node evaluations
+to settle before rejecting a caller abort. `createDagJobRunner` selects this
+mode so its separately bounded stop grace reports actual unfinished handlers;
+ordinary callers and composed workflows keep prompt rejection.
+Already-started host writes cannot be undone; a durable multi-writer host
+must fence them, as the composed workflow's generation protocol does.

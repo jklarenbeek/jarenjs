@@ -1,0 +1,115 @@
+{
+  "$workflow": "0.2",
+  "revision": "flow-benchmark/1",
+  "initial": "verify",
+  "states": {
+    "verify": {
+      "work": {
+        "dag": {
+          "$dag": "0.1",
+          "nodes": {
+            "input": {
+              "kind": "input"
+            },
+            "fsm": {
+              "kind": "task",
+              "run": "verify-fsm",
+              "version": "flow-harness/1",
+              "checkpoint": true
+            },
+            "dag": {
+              "kind": "task",
+              "run": "verify-dag",
+              "version": "flow-harness/1",
+              "checkpoint": true
+            },
+            "output": {
+              "kind": "output"
+            }
+          },
+          "edges": [
+            {
+              "from": "input",
+              "to": "fsm"
+            },
+            {
+              "from": "input",
+              "to": "dag"
+            },
+            {
+              "from": "fsm",
+              "to": "output",
+              "port": "fsm"
+            },
+            {
+              "from": "dag",
+              "to": "output",
+              "port": "dag"
+            }
+          ]
+        }
+      },
+      "then": "measure"
+    },
+    "measure": {
+      "flow": {
+        "initial": "fsm",
+        "states": {
+          "fsm": {
+            "work": {
+              "task": "measure-fsm",
+              "version": "flow-harness/1"
+            },
+            "input": "$.context.input",
+            "then": "dag"
+          },
+          "dag": {
+            "work": {
+              "task": "measure-dag",
+              "version": "flow-harness/1"
+            },
+            "input": "$.context.input",
+            "then": "done"
+          },
+          "done": {
+            "final": true
+          }
+        }
+      },
+      "then": "report",
+      "limit": 3
+    },
+    "report": {
+      "work": {
+        "task": "report",
+        "version": "flow-harness/1"
+      },
+      "input": "$.context.results",
+      "then": "review-policy"
+    },
+    "review-policy": {
+      "choose": [
+        {
+          "guard": "$.context.input.review",
+          "to": "review"
+        }
+      ],
+      "otherwise": "done"
+    },
+    "review": {
+      "on": [
+        {
+          "event": "accept",
+          "to": "done"
+        },
+        {
+          "event": "retry",
+          "to": "measure"
+        }
+      ]
+    },
+    "done": {
+      "final": true
+    }
+  }
+}

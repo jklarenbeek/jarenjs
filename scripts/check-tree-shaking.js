@@ -717,3 +717,22 @@ const remoteInputs = Object.keys(dbBrowser.metafile.inputs).filter((file) =>
   /drivers\/(node|worker-)/.test(file));
 if (remoteInputs.length) throw new Error(`Node worker transport entered browser bundle: ${remoteInputs.join(', ')}`);
 console.log(`DB browser isolation passed (${dbBrowser.outputFiles[0].contents.length} bytes; zero Node transport modules).`);
+
+// Flat machines keep their small pure surface; statecharts add control only.
+// Composition remains browser-compatible and imports no Node scheduler/store.
+for (const [name, symbol, forbidden] of [
+  ['fsm', 'compileFsm', ['statechart.js', 'workflow.js', 'dag.js']],
+  ['statechart', 'compileStatechart', ['workflow.js', 'dag.js']],
+  ['workflow', 'compileWorkflow', []],
+]) {
+  const result = await build({
+    stdin: { contents: `export { ${symbol} } from '@jarenjs/flow';`, resolveDir: process.cwd(), sourcefile: `flow-${name}-consumer.js` },
+    bundle: true, format: 'esm', platform: 'browser', treeShaking: true,
+    minify: true, metafile: true, write: false,
+  });
+  const inputs = Object.entries(Object.values(result.metafile.outputs)[0].inputs);
+  const leaked = inputs.filter(([path, info]) => info.bytesInOutput > 0
+    && forbidden.some((file) => path.endsWith(`packages/flow/src/${file}`)));
+  if (leaked.length) throw new Error(`Flow ${name} retained unrelated engines: ${leaked.map(([path]) => path).join(', ')}`);
+  console.log(`Flow ${name} browser isolation passed (${result.outputFiles[0].contents.length} bytes).`);
+}
