@@ -95,13 +95,17 @@ function normalizeTaskEntry(entry, name) {
       `compileDag: the registered handler '${name}' is not a function, nor { run, version }`);
   }
   if (entry.version !== undefined
-    && (typeof entry.version !== 'string' || entry.version === '')) {
+    && (typeof entry.version !== 'string' || entry.version.trim() === '')) {
     throw new TypeError(
       `compileDag: the registered handler '${name}' has a version that is not a non-empty string`);
   }
   if (entry.taskVersions !== undefined && !isJsonObject(entry.taskVersions)) {
     throw new TypeError(
       `compileDag: the registered handler '${name}' has a taskVersions that is not an object`);
+  }
+  if (entry.taskVersions !== undefined && Object.entries(entry.taskVersions).some(([path, version]) =>
+    /~(?:[^01]|$)/.test(path) || typeof version !== 'string' || version.trim() === '')) {
+    throw new TypeError(`compileDag: the registered handler '${name}' has invalid taskVersions paths or versions`);
   }
   return {
     run: entry.run,
@@ -156,6 +160,7 @@ export function compileDag(doc, options) {
   /** @type {Map<string, any>} */
   const nodes = new Map();
   const order = Object.keys(doc.nodes);
+  const durable = order.some((id) => doc.nodes[id]?.checkpoint === true);
   for (const id of order) {
     const decl = doc.nodes[id];
     const base = `/nodes/${encodeJSONPointerSegment(id)}`;
@@ -202,7 +207,7 @@ export function compileDag(doc, options) {
             `task node '${id}' must carry a non-empty string "run"`, `${base}/run`);
         }
         if (decl.version !== undefined
-          && (typeof decl.version !== 'string' || decl.version === '')) {
+          && (typeof decl.version !== 'string' || decl.version.trim() === '')) {
           throw new FlowCompileError('JF0011',
             `task node '${id}' has a "version" member that is not a non-empty string`,
             `${base}/version`);
@@ -212,9 +217,9 @@ export function compileDag(doc, options) {
         // same implementation. That identity is declared, never derived:
         // hashing a closure's source would call a reformat a new task and
         // a changed dependency the same one
-        if (node.checkpoint && decl.version === undefined) {
+        if (durable && decl.version === undefined) {
           throw new FlowCompileError('JF0011',
-            `task node '${id}' declares checkpoint, so it must also declare a "version" — `
+            `task node '${id}' belongs to a workflow with checkpoints, so it must also declare a "version" — `
             + 'a checkpointed result is replayed only while the handler that produced it is '
             + 'the same one, and that identity has to be stated', `${base}/version`);
         }
@@ -631,10 +636,11 @@ export function compileDag(doc, options) {
   const versions = {};
   for (const node of nodes.values()) {
     if (node.kind !== 'task' || node.version === null) continue;
-    setObjectMember(versions, node.id, node.version);
+    const pathPrefix = encodeJSONPointerSegment(node.id);
+    setObjectMember(versions, pathPrefix, node.version);
     if (node.nestedVersions === null) continue;
     for (const [path, version] of Object.entries(node.nestedVersions)) {
-      setObjectMember(versions, `${node.id}/${path}`, version);
+      setObjectMember(versions, `${pathPrefix}/${path}`, version);
     }
   }
   const taskVersions = Object.freeze(Object.fromEntries(

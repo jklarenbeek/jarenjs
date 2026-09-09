@@ -48,7 +48,7 @@ const fingerprint = (value) => hashContent(canonicalizeJson(value ?? null));
  * @param {any} store - an open store with `{ jobs: true }`
  * @param {{ compileDag: Function,
  *   documents: Record<string, any>,
- *   tasks?: Record<string, Function>,
+ *   tasks?: Record<string, Function | { run: Function, version?: string, taskVersions?: Record<string, string> }>,
  *   concurrency?: number, pollInterval?: number, leaseMs?: number,
  *   owner?: string, renew?: boolean, onOutcome?: (event: any) => void,
  *   backoffBase?: number, backoffCap?: number,
@@ -130,14 +130,20 @@ export function createDagJobRunner(store, options) {
    * just as surely as an edited document does.
    */
   const requireSameRun = async (context, jobId, revision, inputHash, taskVersions) => {
-    const loaded = await context.checkpoints.load(jobId);
-    const stored = loaded?.values?.[RUN_IDENTITY_NODE];
+    const loaded = await context.checkpoints.inspect(jobId, RUN_IDENTITY_NODE);
+    const stored = loaded.value;
     const taskVersionsHash = fingerprint(taskVersions);
     const identity = { revision, inputHash, taskVersionsHash, taskVersions };
     if (stored === undefined) {
+      if (loaded.hasValues) throw new DbRuntimeError('JD2069',
+        `run '${jobId}' cannot resume: checkpoint values have no recorded workflow, input or task identity`,
+        { docPath: '/jobs', collection: jobId });
       await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
       return;
     }
+    if (stored === null || typeof stored !== 'object' || Array.isArray(stored))
+      throw new DbRuntimeError('JD2069', `run '${jobId}' has invalid checkpoint identity metadata`,
+        { docPath: '/jobs', collection: jobId });
     const differs = [];
     if (stored.revision !== revision) {
       differs.push(`the workflow (checkpointed under revision ${stored.revision}, `
@@ -152,13 +158,8 @@ export function createDagJobRunner(store, options) {
       // equal: the upgrade is allowed only where nothing can be replayed
       // wrongly — when no node value has been recorded yet, so the run has
       // nothing to inherit from an implementation nobody can name.
-      const recorded = Object.keys(loaded?.values ?? {})
-        .filter((nodeId) => nodeId !== RUN_IDENTITY_NODE);
-      if (recorded.length === 0) {
-        await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
-      }
-      else {
-        differs.push(`the task versions (this run recorded ${recorded.length} node value(s) `
+      if (loaded.hasValues) {
+        differs.push(`the task versions (this run recorded node value(s) `
           + 'before task identity was persisted, so the implementation that produced them '
           + 'cannot be confirmed)');
       }
@@ -169,10 +170,14 @@ export function createDagJobRunner(store, options) {
         : `checkpointed under ${stored.taskVersionsHash}, this runner compiles `
           + `${taskVersionsHash}`})`);
     }
-    if (differs.length === 0) return;
+    if (differs.length === 0) {
+      if (stored.taskVersionsHash === undefined)
+        await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
+      return;
+    }
     throw new DbRuntimeError('JD2069',
       `run '${jobId}' cannot resume: ${differs.join(' and ')} changed since its `
-      + 'checkpoints were written. Enqueue it under a new id, or drop the run — '
+      + 'checkpoints were written. Enqueue it under a new id, or explicitly reset this inactive run with its observed generation — '
       + 'reusing them would answer for a computation nobody asked for',
       { docPath: '/jobs', collection: jobId });
   };

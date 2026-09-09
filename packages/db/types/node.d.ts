@@ -61,7 +61,7 @@ export declare function readDocuments(
 export interface DocumentTarget {
   /** The sibling file being filled, or null for a sink with no file. */
   readonly temporary: string | null;
-  write(document: unknown): Promise<void>;
+  write(document: unknown, collection?: string): Promise<void>;
   /** Flush, rename over the target, and answer what was written. */
   commit(): Promise<{ bytes: number; documents: number }>;
   /** Remove the temporary; the target keeps the bytes it had. */
@@ -72,13 +72,19 @@ export interface DocumentTarget {
  * on `commit`, and removed on `abort`, so a failed run leaves the
  * original byte for byte. */
 export declare function openAtomicTarget(
-  target: string, format: 'json' | 'jsonl',
+  target: string, format: 'json' | 'jsonl' | 'collections',
+  options?: { collections?: string[] },
 ): Promise<DocumentTarget>;
 
 /** Write to an open stream; `abort` cannot take back what has left. */
 export declare function openStreamTarget(
-  stream: DocumentByteSink, format: 'json' | 'jsonl',
+  stream: DocumentByteSink, format: 'json' | 'jsonl' | 'collections',
+  options?: { collections?: string[] },
 ): DocumentTarget;
 
 /** Validate everything and write nothing. */
 export declare function openNullTarget(): DocumentTarget;
+
+/** Read an explicit collection bundle, materialized under the declared bounds. */
+export declare function readCollectionBundle(source: DocumentByteSource,
+  bounds: { maxBytes: number | null; maxRows: number | null }): Promise<Record<string, unknown[]>>;

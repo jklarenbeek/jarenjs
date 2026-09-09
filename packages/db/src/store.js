@@ -2439,6 +2439,7 @@ export function openStore(model, options) {
               checkpointsFor: (job) => {
                 const inner = jobsEngine.checkpointsFor(job);
                 return Object.freeze({
+                  inspect: (runId, nodeId) => gated(() => inner.inspect(runId, nodeId), 'a root checkpoint identity read'),
                   load: (runId) => gated(() => inner.load(runId), 'a root checkpoint read'),
                   save: (runId, nodeId, value) =>
                     gated(() => inner.save(runId, nodeId, value), 'a root checkpoint save'),
@@ -2459,6 +2460,7 @@ export function openStore(model, options) {
                 gated(() => jobsEngine.cancel(id, cancelOptions), 'a root job cancellation'),
                 (outcome) => chain(jobsEngine.settledLocally(id), () => outcome))),
               requeue: lift((...args) => gated(() => jobsEngine.requeue(...args), 'a root job requeue')),
+              reset: lift((...args) => gated(() => jobsEngine.reset(...args), 'a root job reset')),
               sweep: lift((...args) => gated(() => jobsEngine.sweep(...args), 'a root job sweep')),
             }),
             /**
@@ -2875,6 +2877,10 @@ export function openStore(model, options) {
                 checkpointsFor: (/** @type {any} */ job) => {
                   const inner = jobsEngine.checkpointsFor(job);
                   return Object.freeze({
+                    inspect: lift((/** @type {any} */ runId, /** @type {any} */ nodeId) => {
+                      requireScope(identity);
+                      return inner.inspect(runId, nodeId);
+                    }),
                     load: lift((/** @type {any} */ runId) => {
                       requireScope(identity);
                       return inner.load(runId);

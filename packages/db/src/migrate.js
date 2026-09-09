@@ -32,6 +32,8 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { DbCompileError } from './errors.js';
 import { chain, toPromise } from './driver.js';
 import { normalizeModel } from './store.js';
+import { planQuery } from './plan.js';
+import { createQueryEngine, createQueryState } from './query.js';
 import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './capture.js';
 import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './jobs.js';
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
@@ -1013,6 +1015,21 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
 }
 
 /**
+ * Count can use the existing provider planner without assuming an intermediate
+ * schema. A native plan proves both row selection and item cardinality. Typed
+ * aggregates keep ordered engine folds until their current shape is declared.
+ */
+function assertionProvider(query, collection, shape) {
+  if (shape !== '$count') return null;
+  const operand = query.$count;
+  const document = { $count: typeof operand === 'string' && operand.startsWith('$[*]')
+    ? { $for: { row: '$[*]' }, $return: `$row${operand.slice(4)}` } : operand };
+  const source = { collection, schema: { type: 'object' }, columnByCanonical: new Map(), indexes: [] };
+  const planned = planQuery(document, source);
+  return planned.mode === 'native' && planned.plan?.aggregate?.fn === 'count' ? document : null;
+}
+
+/**
  * The batched row walk shared by transforms and post-validation:
  * `SELECT rowid, json(doc) ... WHERE rowid > ? ORDER BY rowid LIMIT ?`
  * — bounded memory over a collection of any size.
@@ -1247,17 +1264,28 @@ function runSteps(connection, migration, options) {
         migrationId: migration.id,
         compileJslt: compileJsltStylesheet,
         compileQuery: compileJsonQuery,
+        assertionBounds: options.assertionBounds,
       });
       const assertOver = operation.assert;
       const readDoc = (row) => (assertionMapping === null
         ? JSON.parse(row.doc)
         : mergeEntityRow(assertionMapping, row, 'doc'));
 
+      const provider = assertionMapping === null ? assertionProvider(current.assert, current.collection, operation.shape) : null;
+      options.onAssertionPlan?.({ ...operation.plan, ...(provider === null ? {} : {
+        strategy: 'provider', reason: 'the existing query planner proves a native count without assuming an intermediate schema',
+      }) });
+      if (provider !== null) {
+        const engine = createQueryEngine({ connection, state: createQueryState(),
+          collection: { name: current.collection, schema: { type: 'object' }, docPath: '' },
+          physicalPlan: { table: current.collection, keyColumn: 'key', docColumn: 'doc', columnByCanonical: new Map() },
+        });
+        return chain(engine.execute(provider, { strict: true }), operation.accept);
+      }
+
       if (operation.fold !== null) {
-        // an associative aggregate: each batch is answered by the engine
-        // and the partial answers combine, so the collection is never
-        // held. The whole-collection read this replaces is the one
-        // statement a cross-document assertion used to cost.
+        // Consume operand items in row order through the query engine's
+        // shared state: regrouping floating-point batch totals is unsound.
         let accumulated = operation.fold.start();
         let folded = 0;
         return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
@@ -1604,6 +1632,8 @@ export function migrate(target, migrations, options) {
       'migrate needs { baseline }: the model the store was first created with '
       + '(the chain anchor and the shadow starting shape)');
   const batchSize = options.batchSize ?? 500;
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1)
+    throw new TypeError('batchSize must be a positive safe integer');
   const runtime = resolveRuntime(options.runtime);
   /**
    * The cancellation boundary: between migrations, between steps and
@@ -1621,6 +1651,7 @@ export function migrate(target, migrations, options) {
     batchSize,
     assertionBounds: normalizeAssertionBounds(options.assertionBounds),
     onProgress: options.onProgress,
+    onAssertionPlan: options.onAssertionPlan,
     registerFunctions: options.registerFunctions,
     // the host's declared index-expression functions ride to every
     // planner and every connection this run opens — the shadow's
@@ -1740,7 +1771,15 @@ export function migrate(target, migrations, options) {
                   }
                   else if (migrationStep.kind === 'jslt')
                     rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
-                  else rendered.push(`-- assert over '${migrationStep.collection}'`);
+                  else {
+                    const operation = compileDocumentStep(migrationStep, migration.steps.indexOf(migrationStep), {
+                      migrationId: migration.id, compileJslt: compileJsltStylesheet, compileQuery: compileJsonQuery,
+                      assertionBounds: runOptions.assertionBounds,
+                    });
+                    const strategy = assertionProvider(migrationStep.assert, migrationStep.collection, operation.shape) === null
+                      ? operation.strategy : 'provider';
+                    rendered.push(`-- assert over '${migrationStep.collection}' (${strategy}; ${operation.reason})`);
+                  }
                 }
                 const jsltCollections = [...new Set(migration.steps
                   .filter((s) => s.kind === 'jslt').map((s) => s.collection))];

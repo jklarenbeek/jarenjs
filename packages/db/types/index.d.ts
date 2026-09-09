@@ -1274,6 +1274,23 @@ export declare function readSchema(connection: unknown, options?: {
   tables?: readonly string[];
 }): unknown;
 
+export interface AssertionBounds {
+  maxRows?: number | null;
+  maxBytes?: number | null;
+  /** Opt into a distinct fold with at most this many unique items. */
+  maxDistinct?: number;
+}
+
+export interface AssertionPlan {
+  migration: string;
+  step: number;
+  collection: string;
+  strategy: 'provider' | 'perDocument' | 'fold' | 'materialize';
+  shape: string | null;
+  reason: string;
+  bounds: AssertionBounds | null;
+}
+
 export interface MigrateOptions {
   baseline: unknown;
   model?: unknown;
@@ -1307,13 +1324,14 @@ export interface MigrateOptions {
   /** An epoch-millisecond deadline on `runtime`'s clock (`JD2075`). */
   deadline?: number;
   /** What a MATERIALIZING assertion may hold. A per-document predicate
-   * and a single associative aggregate over the root are answered in
+   * and a supported ordered aggregate over independent rows are answered in
    * batches and are never bounded by this; anything else must hold the
    * collection at once and crosses these bounds before the excess is
    * held (`JD2007` rows, `JD2076` bytes). Defaults to
    * {@link ASSERTION_BOUNDS_DEFAULT}; `null` on either member removes
    * that bound, deliberately. */
-  assertionBounds?: { maxRows?: number | null; maxBytes?: number | null };
+  assertionBounds?: AssertionBounds;
+  onAssertionPlan?: (plan: AssertionPlan) => void;
 }
 
 /** The finite defaults a materializing assertion runs under when the
@@ -1324,9 +1342,8 @@ export declare const ASSERTION_BOUNDS_DEFAULT: {
 };
 
 /** How a host must run an assertion, and why. `perDocument` walks in
- * batches; `fold` is one associative aggregate whose batch answers
- * combine; `materialize` needs every document at once and is bounded. */
-export declare function classifyAssertion(query: unknown): {
+ * batches; `fold` accumulates query items in order; `materialize` needs every document at once and is bounded. */
+export declare function classifyAssertion(query: unknown, options?: { expect?: string; maxDistinct?: number }): {
   strategy: 'perDocument' | 'fold' | 'materialize';
   shape: string | null;
   reason: string;
@@ -1402,7 +1419,8 @@ export interface DocumentMigrationOptions {
   /** What a MATERIALIZING assertion may hold; the same bounds, and the
    * same refusals, a Store applies. Defaults to
    * {@link ASSERTION_BOUNDS_DEFAULT}. */
-  assertionBounds?: { maxRows?: number | null; maxBytes?: number | null };
+  assertionBounds?: AssertionBounds;
+  onAssertionPlan?: (plan: AssertionPlan) => void;
   /** Documents per assertion batch and per progress event (default 500). */
   batchSize?: number;
   onProgress?: (progress: MigrationProgress) => void;
@@ -1457,6 +1475,7 @@ export declare function compileDocumentStep(
     compileJslt: (stylesheet: unknown) => (document: unknown) => unknown;
     compileQuery: (query: unknown) => unknown;
     keys?: readonly string[];
+    assertionBounds?: { maxRows: number | null; maxBytes: number | null; maxDistinct?: number };
   },
 ): unknown;
 /** Structural validation of one migration document (`JD0023`/`JD0021`). */
@@ -1815,6 +1834,7 @@ export interface JobsApi {
    * written up to it, and a settlement prunes no further, so a stale
    * attempt cannot erase a live one's work. */
   checkpointsFor(job: ClaimedJob): {
+    inspect(runId: string, nodeId: string): unknown;
     load(runId: string): unknown;
     save(runId: string, nodeId: string, value: unknown): unknown;
     complete(runId: string, result: unknown): unknown;
@@ -1840,6 +1860,11 @@ export interface JobPageOptions {
  * schedule: WHEN to sweep or cancel is the host's call.
  */
 export interface JobsAdminApi {
+  /** Discard an inactive run's checkpoints and restart its attempts, atomically.
+   * Requires its observed generation; refuses done jobs and live leases.
+   * External effects are not undone. */
+  reset(id: string, options: { expectedGeneration: number; signal?: AbortSignal; deadline?: number }):
+    Promise<{ reset: true; discarded: number; generation: number }>;
   /** A keyset cursor over the queue by id, admitted per pull under the
    * store gate; each item is the record `get` answers. */
   page(options?: JobPageOptions): QueryCursor<JobRecord>;
@@ -1876,7 +1901,7 @@ export interface JobsOptions {
 export declare function createDagJobRunner(store: Store, options: {
   compileDag: Function;
   documents: Record<string, unknown>;
-  tasks?: Record<string, Function>;
+  tasks?: Record<string, Function | { run: Function; version?: string; taskVersions?: Record<string, string> }>;
   concurrency?: number;
   pollInterval?: number;
   leaseMs?: number;

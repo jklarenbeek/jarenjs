@@ -147,9 +147,10 @@
               "minLength": 1
             },
             "version": {
-              "description": "The declared identity of the handler implementation this node depends on (FLOW-FORMAT section 7.8). REQUIRED when checkpoint is true: a recorded value is replayed only while the handler that produced it is the same one, and that identity is declared, never derived from source. The registry must supply the same token.",
+              "description": "Declared nonblank handler identity (FLOW-FORMAT section 7.8). The compiler requires it on every task in a workflow containing checkpoints, including recomputed tasks that can affect saved downstream results. The registry must supply the same token; identity is never derived from source.",
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "\\S"
             },
             "with": {
               "description": "Handler props: a query resolved against the node's input scope (null when absent or empty).",

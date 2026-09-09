@@ -1094,6 +1094,18 @@ here, queries inside schemas there. Compiled queries expose `query.ebv`
 beside `first`/`exists` for exactly this. See the `@jarenjs/validate`
 README's "`$query` — cross-field assertions" section.
 
+`query.items(data, externals?)` returns sequence items as an array: empty
+is `[]`, and a singleton JSON array remains one array item. It honors the
+same `resultItems` limit as the ordinary query result. Streaming hosts can
+feed these items to `createQueryAccumulator(operator, { admit? })` from
+`@jarenjs/json/query`, then use `add(item)`, `value()` or `ebv()`.
+Supported operators are `$count`, `$sum`, `$avg`, `$min`, `$max`,
+`$distinct` and `$ebv`. Items must arrive in query order. The optional
+`admit(item)` hook runs before each new distinct item is retained and may
+throw to enforce a host budget; other aggregates retain fixed state.
+`$ebv` retains only the first two items needed for its eventual verdict;
+its `value()` exposes that retained prefix, not the full input sequence.
+
 ---
 
 ### 8.12 Registered functions, operators, collations, and execution limits

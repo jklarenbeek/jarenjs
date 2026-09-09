@@ -425,19 +425,21 @@ await dag.run(input, { runId: 'run-42' });
   runs twice after a crash is the caller's bug, bluntly. The
   mitigation is an idempotency key threaded through the node's
   `with` props and honoured by the effectful system itself.
-- Resuming under a DIFFERENT document than the one that saved is
-  undefined behaviour — keep the document stable with the run (the
-  `@jarenjs/db` queue stores it on the job row for exactly this
-  reason). Values recorded for node ids the current document does not
+- A standalone checkpoint store owns run identity: it must bind the run
+  id to the workflow, input and `taskVersions` before returning saved
+  values. `compileDag` validates the registry but cannot infer the
+  provenance of an arbitrary host store. Use the `@jarenjs/db` DAG job
+  runner for persisted identity comparison before node-value loading. Values recorded for node ids the current document does not
   declare (or no longer declares `checkpoint`) are ignored.
 
 ### §7.8 Declared task versions
 
 A checkpointed node's value is REPLAYED on a later run instead of being
 recomputed. That is sound only while the handler that produced it is the
-same handler. So a `task` node that declares `checkpoint: true` must also
-declare `version`: a non-empty string naming the identity of the
-implementation it depends on.
+same handler. Every `task` in a workflow containing any checkpoint must
+declare `version`: a nonblank string naming its implementation identity.
+This includes recomputed tasks: an upstream implementation can affect a
+downstream checkpoint even when its own result is never saved.
 
 ```jsonc
 { "kind": "task", "run": "summarise", "version": "2026-09-05", "checkpoint": true }
@@ -463,9 +465,13 @@ declared identity it depends on, keyed by node id and SORTED, so two
 compiles of the same document produce the same map — byte for byte —
 whatever order the declarations were written in. A handler that is itself
 a compiled workflow may expose its own `taskVersions`; those compose under
-the node's path (`outer`, `outer/inner`), so a composed run has one
+the node's path (`outer`, `outer/inner`), with each node-id segment escaped
+as JSON Pointer (`~` becomes `~0`, `/` becomes `~1`), so a composed run has one
 identity rather than two. Every task id is retained as an own member,
-including names inherited by ordinary JavaScript objects.
+including names inherited by ordinary JavaScript objects. Registry nested
+maps must contain nonblank string versions and valid escaped paths.
+A literal `outer/inner` node is `outer~1inner`, distinct from a nested
+`inner` task under `outer`.
 
 ```js
 compileDag(doc, { tasks: { summarise: { version: '2026-09-05', run: handler } } })

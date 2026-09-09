@@ -65,19 +65,6 @@ export function appendItem(list, v) {
 }
 
 /**
- * Number of items in a sequence value.
- * @param {any} v - a sequence value (EMPTY, item, or Seq)
- * @returns {number}
- */
-export function itemCount(v) {
-  if (v === EMPTY)
-    return 0;
-  if (v instanceof Seq)
-    return v.items.length;
-  return 1;
-}
-
-/**
  * First item of a sequence value, or EMPTY for the empty sequence.
  * @param {any} v - a sequence value (EMPTY, item, or Seq)
  * @returns {any}

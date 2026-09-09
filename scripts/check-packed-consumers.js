@@ -595,6 +595,10 @@ try {
     }
     let program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
     if (name === '@jarenjs/json') program += `
+const { compileJsonQuery, createQueryAccumulator } = await import('@jarenjs/json/query');
+const state = createQueryAccumulator('$sum');
+for (const item of compileJsonQuery('$[*]').items([1e16, 1, -1e16, 1])) state.add(item);
+if (state.value() !== 1) throw new Error('packed ordered accumulator changed addition order');
 for (const suffix of ['schema', 'draft-07.schema']) {
   const { default: grammar } = await import('@jarenjs/json/schemas/jaren-jtlt.' + suffix + '.json', { with: { type: 'json' } });
   if (!grammar.$id.includes('jaren-jtlt/0.1')) throw new Error('Packed JTLT grammar is missing its version');
@@ -602,6 +606,11 @@ for (const suffix of ['schema', 'draft-07.schema']) {
 `;
     if (name === '@jarenjs/db') program += `
 const { openStore } = await import('@jarenjs/db');
+const { readCollectionBundle } = await import('@jarenjs/db/node');
+const bundle = await readCollectionBundle((async function* () {
+  yield new TextEncoder().encode('{"users":[{"id":"u"}],"events":[]}');
+})(), { maxBytes: 1024, maxRows: 10 });
+if (bundle.users[0].id !== 'u' || bundle.events.length !== 0) throw new Error('packed collection bundle mismatch');
 const { nodeWorkerDriver } = await import('@jarenjs/db/node-worker');
 const { nodeWorkerPoolDriver } = await import('@jarenjs/db/node-pool');
 for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })]) {

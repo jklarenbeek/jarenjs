@@ -52,10 +52,10 @@ function foldVerdict(operation, documents, batchSize) {
       accumulated = operation.fold.combine(accumulated, documents.slice(at, at + batchSize));
     }
     operation.fold.finish(accumulated);
-    return { ok: true, message: null, value: accumulated };
+    return { ok: true, message: null, value: operation.fold.value(accumulated) };
   }
   catch (error) {
-    return { ok: false, message: /** @type {Error} */ (error).message, value: accumulated };
+    return { ok: false, message: /** @type {Error} */ (error).message, value: operation.fold.value(accumulated) };
   }
 }
 
@@ -80,6 +80,7 @@ const SHAPES = [
   { name: '$sum over a member', query: { $sum: { $for: { it: '$[*]' }, $return: '$it.n' } }, expect: 'ebv' },
   { name: '$max over a member', query: { $max: { $for: { it: '$[*]' }, $return: '$it.n' } }, expect: 'ebv' },
   { name: '$min over a member', query: { $min: { $for: { it: '$[*]' }, $return: '$it.n' } }, expect: 'ebv' },
+  { name: '$avg over a path', query: { $avg: '$[*].n' }, expect: 'ebv' },
   { name: '$sum over a path', query: { $sum: '$[*].n' }, expect: 'ebv' },
   { name: '$max over a path', query: { $max: '$[*].n' }, expect: 'ebv' },
   { name: '$min over a path', query: { $min: '$[*].n' }, expect: 'ebv' },
@@ -98,7 +99,7 @@ describe('what classifies as what', () => {
     for (const shape of SHAPES) {
       const classified = classifyAssertion(shape.query);
       assert.strictEqual(classified.strategy, 'fold', shape.name);
-      assert.ok(['$count', '$sum', '$max', '$min'].includes(/** @type {string} */ (classified.shape)),
+      assert.ok(['$count', '$sum', '$avg', '$max', '$min'].includes(/** @type {string} */ (classified.shape)),
         `${shape.name}: ${classified.shape}`);
     }
   });
@@ -110,7 +111,6 @@ describe('what classifies as what', () => {
       { $for: { a: '$[*]', b: '$[*]' }, $where: { $eq: ['$a.n', '$b.n'] }, $return: '$a.id' },
       // two aggregates are not ONE aggregate
       { $count: '$[*]', $sum: '$[*].n' },
-      { $avg: '$[*].n' },
     ];
     for (const query of others) {
       const classified = classifyAssertion(query);

@@ -1037,6 +1037,10 @@ shutdown limits, the browser persistence matrix and measured latency/memory loss
   and `worker.stop()` quiesces every claim, renewal, checkpoint and
   settlement before it resolves, so closing the store releases the
   database file deterministically.
+  DAG jobs inspect persisted workflow/input/task identity before reading
+  checkpoint values. `jobs.reset(id, { expectedGeneration })` explicitly
+  discards an inactive run's checkpoints and restarts it under a new fence;
+  live leases and stale observations refuse (JOBS-FORMAT §10).
 - **The browser** (`@jarenjs/db/wasm`): the same store, the same
   queries, the same live updates run on the official SQLite wasm build
   over a probed persistence ladder: isolated SharedArrayBuffer OPFS,
@@ -1353,3 +1357,10 @@ transaction's synchronous collection facade so another SQLite connection on the
 same event loop cannot block an awaiting writer. A rejected callback changes
 neither records nor counters; ledger id minting and guarded multi-record updates
 use that boundary.
+
+Document-only migrations also accept named files:
+`jaren-db documents --migrations migrations --in users=users.json --in events=events.jsonl --out migrated.json`.
+The output is one atomically published collection bundle; read it with
+`--format collections`. Assertion plans expose provider, ordered-fold and
+bounded materialization strategies through `onAssertionPlan`.
+See [MIGRATION-FORMAT §6 and §11](docs/MIGRATION-FORMAT.md).

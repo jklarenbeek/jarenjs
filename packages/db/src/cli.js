@@ -21,8 +21,10 @@ import {
   migrateDocuments, streamDocuments, classifyAssertion,
 } from './index.js';
 import { nodeDriver } from './drivers/node.js';
+import { prepareDocumentRun } from './documents.js';
+import { normalizeAssertionBounds, createAssertionBoundGuard } from './document-steps.js';
 import {
-  readDocuments, openAtomicTarget, openStreamTarget, openNullTarget,
+  readDocuments, readCollectionBundle, openAtomicTarget, openStreamTarget, openNullTarget,
   formatOf, DOCUMENT_FORMATS,
 } from './document-files.js';
 
@@ -37,7 +39,9 @@ Usage:
   jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db shape    --model <model>
   jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
-                     [--format json|jsonl] [--out-format json|jsonl] [--collection <name>] [--batch-size <n>]
+                     [--format json|jsonl|collections] [--out-format json|jsonl|collections]
+                     [--in collection=file ...] [--collection <name>] [--batch-size <n>]
+                     [--max-rows <n|none>] [--max-bytes <n|none>] [--max-distinct <n>]
 
 A <model> or a migration is a .json file, or a MODULE (.js, .mjs, .cjs —
 or .ts where Node strips types) whose default export, or its 'model' /
@@ -96,6 +100,7 @@ function parseArgs(argv) {
     command: argv[2], from: null, to: null, model: null, store: null,
     baseline: null, migrations: null, id: null, out: null,
     snapshot: null, types: null,
+    inputs: [], maxRows: undefined, maxBytes: undefined, maxDistinct: undefined,
     in: null, format: null, outFormat: null, collection: null,
     batchSize: null, inPlace: false, check: false,
     dryRun: false, yes: false, help: false,
@@ -112,7 +117,10 @@ function parseArgs(argv) {
       case '--out': options.out = argv[++i]; break;
       case '--snapshot': options.snapshot = argv[++i]; break;
       case '--types': options.types = argv[++i]; break;
-      case '--in': options.in = argv[++i]; break;
+      case '--in': options.in = argv[++i]; options.inputs.push(options.in); break;
+      case '--max-rows': options.maxRows = argv[++i]; break;
+      case '--max-bytes': options.maxBytes = argv[++i]; break;
+      case '--max-distinct': options.maxDistinct = argv[++i]; break;
       case '--out-format': options.outFormat = argv[++i]; break;
       case '--format': options.format = argv[++i]; break;
       case '--collection': options.collection = argv[++i]; break;
@@ -435,94 +443,107 @@ async function commandShape(options) {
  */
 async function commandDocuments(options) {
   if (options.migrations === null) misuse('documents needs --migrations <dir>');
-  if (options.in === null) misuse('documents needs --in <file> (or - for standard input)');
+  if (options.inputs.length === 0) misuse('documents needs --in <file> (or - for standard input)');
+  if (options.inputs.some((input) => typeof input !== 'string' || input.startsWith('--')))
+    misuse('--in requires a file or collection=file');
+  const multiple = options.inputs.length > 1 || /^[A-Za-z_][A-Za-z0-9_]*=/.test(options.in);
+  if (multiple && options.inPlace)
+    misuse('multiple sources require one --out collection bundle; several in-place renames are not atomic');
   const sinks = [options.out !== null, options.inPlace, options.check].filter(Boolean).length;
-  if (sinks === 0)
-    misuse('documents needs one of --out <file>, --in-place or --check');
-  if (sinks > 1)
-    misuse('documents takes exactly one of --out, --in-place and --check');
-  if (options.inPlace && options.in === '-')
-    misuse('--in-place needs a file to replace, not standard input');
-  if (options.inPlace && !options.yes)
-    misuse('--in-place rewrites the input file — pass --yes to confirm, or --out to write elsewhere');
+  if (sinks !== 1) misuse('documents takes exactly one of --out <file>, --in-place and --check');
+  if (options.inPlace && options.in === '-') misuse('--in-place needs a file to replace, not standard input');
+  if (options.inPlace && !options.yes) misuse('--in-place rewrites the input file — pass --yes to confirm, or --out to write elsewhere');
   const batchSize = options.batchSize === null ? 500 : Number(options.batchSize);
-  if (!Number.isInteger(batchSize) || batchSize < 1)
-    misuse(`--batch-size must be a positive integer, not '${options.batchSize}'`);
-
-  const fromStdin = options.in === '-';
-  const inFormat = options.format ?? (fromStdin ? 'jsonl' : formatOf(options.in));
-  if (!DOCUMENT_FORMATS.includes(inFormat))
-    misuse(`--format must be one of ${DOCUMENT_FORMATS.join(', ')}, not '${inFormat}'`);
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) misuse('--batch-size must be a positive integer');
+  const declared = {};
+  for (const name of ['maxRows', 'maxBytes', 'maxDistinct']) {
+    if (options[name] === undefined) continue;
+    declared[name] = options[name] === 'none' ? null : Number(options[name]);
+  }
+  let assertionBounds;
+  try { assertionBounds = normalizeAssertionBounds(declared); }
+  catch (error) { misuse(error.message); }
+  const inFormat = options.format;
+  const bundleInput = inFormat === 'collections';
+  if (inFormat !== null && ![...DOCUMENT_FORMATS, 'collections'].includes(inFormat))
+    misuse('--format must be one of json, jsonl or collections');
+  if (bundleInput && multiple) misuse('--format collections takes one bundle file');
   const target = options.inPlace ? options.in : options.out;
   const toStdout = target === '-';
-  const outFormat = options.outFormat
-    ?? (options.check || toStdout ? inFormat : formatOf(/** @type {string} */ (target)));
-  if (!DOCUMENT_FORMATS.includes(outFormat))
-    misuse(`--out-format must be one of ${DOCUMENT_FORMATS.join(', ')}, not '${outFormat}'`);
-  if (!fromStdin && !fs.existsSync(options.in)) fail(`no such file: '${options.in}'`);
-
   const migrations = await loadMigrationsDir(options.migrations);
   if (migrations.length === 0) fail(`no migration documents in '${options.migrations}'`);
-
-  // A document file holds ONE collection. The migrations say which:
-  // every document step must name it, or this chain cannot be applied to
-  // a file at all — running only the steps that match would leave the
-  // rest silently unapplied, which is the one outcome a migration runner
-  // may never produce.
   const documentSteps = migrations.flatMap((migration) => migration.steps)
     .filter((step) => step.kind === 'jslt' || step.kind === 'query');
   const named = [...new Set(documentSteps.map((step) => step.collection))];
-  if (named.length > 1) {
-    fail(`a document file holds one collection, and these migrations touch ${named.length} `
-      + `(${named.join(', ')}) — run them against a store, or split the chain so each `
-      + 'migration touches the collection its file holds');
+  const files = {};
+  if (multiple) {
+    if (options.collection !== null) misuse('named --in sources already declare their collections');
+    for (const input of options.inputs) {
+      const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.+)$/.exec(input);
+      if (match === null) misuse('each named --in must be collection=file');
+      if (Object.hasOwn(files, match[1])) misuse(`duplicate input collection '${match[1]}'`);
+      Object.defineProperty(files, match[1], { value: match[2], enumerable: true });
+    }
+    if (Object.values(files).filter((file) => file === '-').length > 1) misuse('standard input can supply only one collection');
   }
-  if (options.collection !== null && named.length === 1 && options.collection !== named[0]) {
-    misuse(`--collection names '${options.collection}', but these migrations touch `
-      + `'${named[0]}' — is this the right file for them?`);
+  else if (!bundleInput) {
+    if (named.length > 1) fail(`a document file holds one collection, but these migrations touch ${named.join(', ')}; supply --in collection=file for every collection, or --format collections`);
+    const name = named[0] ?? options.collection ?? 'documents';
+    if (options.collection !== null && options.collection !== name) misuse(`--collection names '${options.collection}', but these migrations touch '${name}'`);
+    Object.defineProperty(files, name, { value: options.in, enumerable: true });
   }
-  // with no document step at all there is no collection to infer; the
-  // run still proceeds, because a physical step must be REFUSED by name
-  // rather than reported as a missing collection
-  const collection = named[0] ?? options.collection ?? 'documents';
-
-  // only a MATERIALIZING assertion needs the collection at once; a
-  // per-document predicate and an associative aggregate are both
-  // answered one batch at a time, so they stream
-  const materializes = documentSteps.some((step) => step.collection === collection
-    && step.kind === 'query' && classifyAssertion(step.assert).strategy === 'materialize');
-
-  const source = () => (fromStdin ? process.stdin : options.in);
+  const runOptions = { batchSize, assertionBounds };
+  // Physical and compilation refusals precede every document read, including
+  // the materializing route. A bundle's actual collection inventory is checked
+  // again after its bounded parse.
+  prepareDocumentRun(bundleInput ? named : Object.keys(files), migrations, runOptions);
+  let state;
+  if (bundleInput) state = await readCollectionBundle(options.in === '-' ? process.stdin : options.in, assertionBounds);
+  const names = bundleInput ? Object.keys(state) : Object.keys(files);
+  prepareDocumentRun(names, migrations, runOptions);
+  const outFormat = options.outFormat ?? (multiple || bundleInput ? 'collections'
+    : options.check || toStdout ? inFormat ?? (options.in === '-' ? 'jsonl' : formatOf(options.in)) : formatOf(target));
+  if (!['json', 'jsonl', 'collections'].includes(outFormat)) misuse('--out-format must be json, jsonl or collections');
+  if (names.length > 1 && outFormat !== 'collections') misuse('multiple collections require --out-format collections');
+  const materializes = bundleInput || documentSteps.some((step) => step.kind === 'query'
+    && classifyAssertion(step.assert, { expect: step.expect, maxDistinct: assertionBounds.maxDistinct }).strategy === 'materialize');
+  const sources = Object.fromEntries(Object.entries(files).map(([name, file]) => [name,
+    readDocuments(file === '-' ? process.stdin : file, inFormat ?? (file === '-' ? 'jsonl' : formatOf(file)))]));
   let sink;
   if (options.check) sink = openNullTarget();
-  else if (toStdout) sink = openStreamTarget(process.stdout, outFormat);
-  else sink = await openAtomicTarget(/** @type {string} */ (target), outFormat);
-
+  else if (toStdout) sink = openStreamTarget(process.stdout, outFormat, { collections: names });
+  else sink = await openAtomicTarget(target, outFormat, { collections: names });
   try {
     let report;
     if (materializes) {
-      const documents = [];
-      for await (const document of readDocuments(source(), inFormat)) documents.push(document);
-      const out = await migrateDocuments({ [collection]: documents }, migrations, { batchSize });
+      if (!bundleInput) {
+        state = {};
+        for (const name of names) {
+          const documents = [], guard = createAssertionBoundGuard(assertionBounds, name, 'the file runner');
+          for await (const document of sources[name]) { guard.admit(document); documents.push(document); }
+          Object.defineProperty(state, name, { value: documents, enumerable: true });
+        }
+      }
+      const out = await migrateDocuments(state, migrations, runOptions);
       report = out.report;
-      for (const document of out.documents[collection]) await sink.write(document);
+      for (const name of names) for (const document of out.documents[name]) await sink.write(document, name);
     }
-    else {
-      report = await streamDocuments({ [collection]: readDocuments(source(), inFormat) },
-        migrations, { batchSize, write: (name, document) => sink.write(document) });
-    }
+    else report = await streamDocuments(sources, migrations,
+      { ...runOptions, write: (name, document) => sink.write(document, name) });
     const written = await sink.commit();
-    const counts = report.counts[collection] ?? { read: 0, transformed: 0, asserted: 0 };
-    console.log(`${options.check ? 'checked' : 'migrated'} '${collection}': `
-      + `${counts.read} read, ${counts.transformed} transformed, ${counts.asserted} asserted `
-      + `(${report.strategy[collection]})`);
+    for (const name of names) {
+      const counts = report.counts[name] ?? { read: 0, transformed: 0, asserted: 0 };
+      console.log(`${options.check ? 'checked' : 'migrated'} '${name}': ${counts.read} read, `
+        + `${counts.transformed} transformed, ${counts.asserted} asserted (${report.strategy[name]})`);
+    }
     console.log(`applied: ${report.applied.join(', ')}`);
     if (options.check) console.log('checked only — nothing was written');
     else if (toStdout) console.log(`wrote ${written.documents} document(s) to standard output`);
     else console.log(`wrote ${written.documents} document(s) to ${target} (${written.bytes} bytes)`);
   }
   catch (error) {
-    await sink.abort();
+    try { await sink.abort(); }
+    catch (cleanupError) { error.cleanupError = cleanupError; }
     return fail(error.message);
   }
 }

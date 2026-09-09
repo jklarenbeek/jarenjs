@@ -30,6 +30,7 @@
 // All runtime error conditions of the operator library (JQ2xxx,
 // QUERY-FORMAT.md section 10.3) are raised here.
 
+import { aggregateSequence } from './accumulator.js';
 import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
 import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
@@ -84,8 +85,8 @@ import {
 } from '@jarenjs/core/geo';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 import {
-  EMPTY, Seq, seqOf, appendItem, ebv, itemCount, firstItem,
-  stableKeyString, describeItem,
+  EMPTY, Seq, seqOf, appendItem, ebv, firstItem,
+  describeItem,
 } from './runtime.js';
 import {
   CARD_ZERO, CARD_ONE, CARD_OPT, CARD_MANY, joinCard, sumCard,
@@ -533,66 +534,13 @@ function compileReplace(gets, args) {
 
 //#region aggregate operators
 
-function aggregateNumber(v, docPath) {
-  if (typeof v !== 'number')
-    throw runtimeError('JQ2001', `aggregate items must be numbers, got ${describeItem(v)}`, docPath);
-  return v;
-}
-
-function minmaxError(v, docPath) {
-  return runtimeError('JQ2001', `'$min'/'$max' items must be all numbers or all strings, got ${describeItem(v)}`, docPath);
-}
-
-// $min/$max (section 8.8): empty -> empty; items all numbers or all
-// strings (Unicode scalar value order), mixed or anything else JQ2001;
-// any NaN item makes a numeric result NaN (F&O fn:min/fn:max)
-function minmaxEntry(isMax) {
+/** The engine and streaming consumers share one ordered aggregate kernel. */
+function aggregateEntry(operator, result, resultType) {
   return {
-    params: UNARY,
-    result: resultEmptyPropagates,
-    resultType: RT_MINMAX,
+    params: UNARY, result, resultType,
     compile: (gets, args) => {
-      const get = gets[0];
-      const docPath = args[0].docPath;
-      return (f) => {
-        const v = get(f);
-        if (v === EMPTY)
-          return EMPTY;
-        if (!(v instanceof Seq)) {
-          const t = typeof v;
-          if (t !== 'number' && t !== 'string')
-            throw minmaxError(v, docPath);
-          return v;
-        }
-        const items = v.items;
-        let best = items[0];
-        const numeric = typeof best === 'number';
-        if (!numeric && typeof best !== 'string')
-          throw minmaxError(best, docPath);
-        let sawNaN = numeric && best !== best;
-        for (let i = 1; i < items.length; i++) {
-          const item = items[i];
-          if (typeof item === 'number') {
-            if (!numeric)
-              throw minmaxError(item, docPath);
-            if (item !== item)
-              sawNaN = true;
-            else if (isMax ? item > best : item < best)
-              best = item;
-          }
-          else if (typeof item === 'string') {
-            if (numeric)
-              throw minmaxError(item, docPath);
-            const c = compareCodePoints(item, best);
-            if (isMax ? c > 0 : c < 0)
-              best = item;
-          }
-          else {
-            throw minmaxError(item, docPath);
-          }
-        }
-        return sawNaN ? NaN : best;
-      };
+      const get = gets[0], docPath = args[0].docPath;
+      return (f) => aggregateSequence(operator, get(f), docPath);
     },
   };
 }
@@ -1300,94 +1248,17 @@ export const OPERATORS = Object.freeze({
   // Aggregates see their operand sequence as-is: an array item is one
   // item - D4 unpacking is a $for/quantifier rule, not a sequence rule.
 
-  '$count': {
-    params: UNARY,
-    result: RESULT_ONE,
-    resultType: RT_INTEGER,
-    compile: (gets) => {
-      const get = gets[0];
-      return (f) => itemCount(get(f));
-    },
-  },
-
-  '$sum': {
-    params: UNARY,
-    result: RESULT_ONE,
-    resultType: RT_NUMBER,
-    compile: (gets, args) => {
-      const get = gets[0];
-      const docPath = args[0].docPath;
-      return (f) => {
-        const v = get(f);
-        if (v === EMPTY) // $sum of the empty sequence is 0 (F&O)
-          return 0;
-        if (v instanceof Seq) {
-          const items = v.items;
-          let sum = 0;
-          for (let i = 0; i < items.length; i++)
-            sum += aggregateNumber(items[i], docPath);
-          return sum;
-        }
-        return aggregateNumber(v, docPath);
-      };
-    },
-  },
-
-  '$avg': {
-    params: UNARY,
-    result: resultEmptyPropagates,
-    resultType: RT_NUMBER,
-    compile: (gets, args) => {
-      const get = gets[0];
-      const docPath = args[0].docPath;
-      return (f) => {
-        const v = get(f);
-        if (v === EMPTY) // $avg of the empty sequence is empty (F&O)
-          return EMPTY;
-        if (v instanceof Seq) {
-          const items = v.items;
-          let sum = 0;
-          for (let i = 0; i < items.length; i++)
-            sum += aggregateNumber(items[i], docPath);
-          return sum / items.length;
-        }
-        return aggregateNumber(v, docPath);
-      };
-    },
-  },
-
-  '$min': minmaxEntry(false),
-  '$max': minmaxEntry(true),
+  '$count': aggregateEntry('$count', RESULT_ONE, RT_INTEGER),
+  '$sum': aggregateEntry('$sum', RESULT_ONE, RT_NUMBER),
+  '$avg': aggregateEntry('$avg', resultEmptyPropagates, RT_NUMBER),
+  '$min': aggregateEntry('$min', resultEmptyPropagates, RT_MINMAX),
+  '$max': aggregateEntry('$max', resultEmptyPropagates, RT_MINMAX),
 
   //#endregion
 
   //#region section 8.9 - sequence operators
 
-  '$distinct': {
-    params: UNARY,
-    result: resultOfOperand,
-    compile: (gets) => {
-      const get = gets[0];
-      return (f) => {
-        const v = get(f);
-        if (!(v instanceof Seq)) // zero or one item: already distinct
-          return v;
-        // deep equality via the grouping key relation (section 6.5):
-        // NaN is one distinct value, -0 deduplicates with 0
-        const items = v.items;
-        const seen = new Set();
-        const out = [];
-        for (let i = 0; i < items.length; i++) {
-          const key = stableKeyString(items[i]);
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push(items[i]);
-          }
-        }
-        return seqOf(out);
-      };
-    },
-  },
+  '$distinct': aggregateEntry('$distinct', resultOfOperand, undefined),
 
   '$reverse': {
     params: UNARY,

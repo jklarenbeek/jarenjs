@@ -557,6 +557,12 @@ export function createJobEngine(options) {
     const lease = job?.lease;
     const generation = isLease(lease) ? lease.generation : 0;
     return {
+      inspect: (runId, nodeId) => chain(
+        prepared('cpIdentity', `SELECT value FROM "${JOB_CHECKPOINTS_TABLE}"
+          WHERE run_id=? AND node_id=? AND generation <= ?`).get([runId, nodeId, generation]),
+        (row) => chain(prepared('cpHasValues', `SELECT 1 AS present FROM "${JOB_CHECKPOINTS_TABLE}"
+          WHERE run_id=? AND node_id<>? AND generation <= ? LIMIT 1`).get([runId, nodeId, generation]),
+        (other) => ({ value: row === undefined ? undefined : JSON.parse(row.value), hasValues: other !== undefined }))),
       load: (runId) => chain(
         prepared('cpLoad', `SELECT node_id, value FROM "${JOB_CHECKPOINTS_TABLE}"
           WHERE run_id = ? AND generation <= ?`).all([runId, generation]),
@@ -770,6 +776,39 @@ export function createJobEngine(options) {
           { docPath: '/jobs', collection: JOBS_TABLE, key: id });
       });
     });
+  };
+
+  /**
+   * Explicitly discard one inactive run's checkpoints and start a new attempt
+   * budget. The caller must name the observed generation; a concurrent claim
+   * or reset invalidates that authorization. External task effects are not undone.
+   * @param {string} id
+   * @param {{ expectedGeneration: number, signal?: AbortSignal, deadline?: number }} resetOptions
+   */
+  const reset = (id, resetOptions) => {
+    if (typeof id !== 'string' || id === '') throw new TypeError('reset: id is a non-empty string');
+    const expected = resetOptions?.expectedGeneration;
+    if (!Number.isSafeInteger(expected) || expected < 0)
+      throw new TypeError('reset: expectedGeneration is the observed non-negative lease generation');
+    refuseCancelled(resetOptions, now, { abortCode: 'JD2081', aborted: 'reset() ran', passed: 'reset() ran' });
+    const at = now();
+    return connection.transaction(() => chain(
+      prepared('resetJob', `UPDATE "${JOBS_TABLE}" SET state='pending', attempts=0,
+        result=NULL, last_error=NULL, run_at=?, updated_at=?, lease_until=NULL,
+        lease_owner=NULL, lease_token=NULL, lease_generation=lease_generation+1
+        WHERE id=? AND lease_generation=? AND state<>'done'
+          AND (state<>'leased' OR lease_until<=?)`).run([at, at, id, expected, at]),
+      (out) => {
+        if (Number(out.changes ?? 0) === 0) return chain(get(id), (job) => {
+          const code = job?.state === 'leased' && job.leaseUntil > at ? 'JD2068'
+            : job !== undefined && job.leaseGeneration !== expected ? 'JD2066' : 'JD2065';
+          throw new DbRuntimeError(code,
+            `reset() refused: job '${id}' is unknown, completed, actively leased, or its generation changed; read it again before resetting`,
+            { docPath: '/jobs', collection: JOBS_TABLE, key: id });
+        });
+        return chain(prepared('resetCheckpoints', `DELETE FROM "${JOB_CHECKPOINTS_TABLE}" WHERE run_id=?`).run([id]),
+          (removed) => { wakeAll(); return { reset: true, discarded: Number(removed.changes ?? 0), generation: expected + 1 }; });
+      }));
   };
 
   /**
@@ -1014,6 +1053,8 @@ export function createJobEngine(options) {
       // so a checkpoint can neither join an unrelated application
       // transaction nor still be writing when stop() has resolved
       attempt.checkpoints = {
+        inspect: (runId, nodeId) => io(() =>
+          checkpointsFor({ ...job, lease: attempt.lease }).inspect(runId, nodeId), 'a checkpoint identity read'),
         load: (runId) => io(() =>
           checkpointsFor({ ...job, lease: attempt.lease }).load(runId), 'a checkpoint read'),
         save: (runId, nodeId, value) => io(() =>
@@ -1297,6 +1338,7 @@ export function createJobEngine(options) {
     cancel,
     settledLocally,
     requeue,
+    reset,
     sweep,
     /** Stop every worker, bounded. Resolves to the per-worker outcome so
      * `close()` can report a handler it could not wait out rather than

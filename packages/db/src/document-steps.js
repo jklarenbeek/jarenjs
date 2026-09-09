@@ -16,6 +16,7 @@
  * differing in answer.
  */
 
+import { analyzeQuery, createQueryAccumulator } from '@jarenjs/json/query';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
 
@@ -54,115 +55,73 @@ export function stepFailure(migrationId, index, kind, reason, cause) {
     undefined, cause);
 }
 
-/**
- * Whether an assertion is a PER-DOCUMENT predicate — a FLWOR over the
- * collection's documents whose `$where` and `$return` read only the
- * binding — so evaluating it over each batch of documents answers
- * exactly what evaluating it over the whole collection would. Anything
- * that reads the root (`$count: '$[*]'`, a `$let`, a `$distinct`, a
- * nested `$for`) is cross-document and keeps its whole-collection read.
- * @param {any} query
- * @returns {boolean}
- */
+/** A path with no filter capable of reading the collection root. */
+function localPath(path) {
+  return path.segments.every((segment) => !segment.descendant
+    && segment.selectors.every((selector) => ['name', 'index', 'wildcard'].includes(selector.kind)));
+}
+
+/** Every item of this root scan belongs to exactly one input document. */
+function rootScan(node) {
+  return node?.kind === 'path' && node.rootSlot === 0 && localPath(node)
+    && node.segments[0]?.selectors.length === 1
+    && node.segments[0].selectors[0].kind === 'wildcard';
+}
+
+/** Expressions local to one binding; global/root and positional reads refuse. */
+function bindingLocal(node, slot) {
+  if (node === null || typeof node !== 'object') return true;
+  if (node.kind === 'literal' || node.kind === 'raw') return true;
+  if (node.kind === 'var') return node.slot === slot && !node.external;
+  if (node.kind === 'path') return node.rootSlot === slot && localPath(node);
+  if (node.kind === 'flwor' || node.kind === 'call') return false;
+  return Object.values(node).every((value) => Array.isArray(value)
+    ? value.every((item) => bindingLocal(item, slot)) : bindingLocal(value, slot));
+}
+
+/** A single unwindowed root binding whose body cannot observe other rows. */
+function independentPhrase(node) {
+  if (node?.kind !== 'flwor' || node.forBindings.length !== 1
+    || node.letBindings.length > 0 || node.groupby || node.orderby || node.count
+    || node.fold || node.limits || node.asChecks) return false;
+  const binding = node.forBindings[0];
+  return rootScan(binding.expr) && binding.atSlot < 0 && !binding.allowingEmpty
+    && !binding.window && bindingLocal(node.where, binding.slot) && bindingLocal(node.ret, binding.slot);
+}
+
+/** Invalid/unknown documents conservatively retain their materializing classification. */
+function assertionAst(query) {
+  try { return analyzeQuery(query).root; }
+  catch { return null; }
+}
+
+/** Whether a query's result is a concatenation of independent per-row results. */
 export function isPerDocumentAssertion(query) {
-  if (query === null || typeof query !== 'object' || Array.isArray(query)) return false;
-  const keys = Object.keys(query);
-  if (!keys.includes('$for') || !keys.includes('$return')
-    || keys.some((key) => !['$for', '$where', '$return'].includes(key))) return false;
-  const bindings = query.$for;
-  if (bindings === null || typeof bindings !== 'object' || Array.isArray(bindings)) return false;
-  const names = Object.keys(bindings);
-  if (names.length !== 1 || bindings[names[0]] !== '$[*]') return false;
-  // a root reference anywhere in the body is a cross-document read
-  const body = JSON.stringify({ $where: query.$where ?? null, $return: query.$return });
-  return !/"\$(?:[[.]|")/.test(body.replace(/"\$[A-Za-z_][A-Za-z0-9_]*/g, '"'));
+  return independentPhrase(assertionAst(query));
 }
 
 /**
- * The aggregate shapes whose answer over a whole collection is the
- * COMBINATION of its answers over any partition of that collection —
- * which is what lets a host compute them one batch at a time and never
- * hold the collection.
- *
- * Each entry says only how two partial answers combine. What the
- * operator MEANS over a batch — its null handling, its empty-sequence
- * answer, its type coercions — is the engine's, because every batch is
- * answered by the engine's own compiled query. Nothing here reimplements
- * an operator; a fold that disagreed with the engine on any input would
- * be caught by the parity suite, which runs every shape both ways.
- *
- * `$distinct` is here only under an explicit cardinality bound: its
- * partial answer grows with the data, so without one it is not a fold
- * at all.
- * @type {Record<string, { start: any, combine: (accumulated: any, partial: any) => any,
- *   growing?: boolean }>}
- */
-const ASSOCIATIVE_AGGREGATES = {
-  // fn:count of a partition sums; the empty collection answers 0
-  $count: { start: 0, combine: (accumulated, partial) => accumulated + (partial ?? 0) },
-  // fn:sum of the empty sequence is 0, so the identity is 0
-  $sum: { start: 0, combine: (accumulated, partial) => accumulated + (partial ?? 0) },
-  // fn:min/fn:max of the empty sequence is the empty sequence, so the
-  // identity is `undefined` and a partial that is empty contributes
-  // nothing
-  $max: {
-    start: undefined,
-    combine: (accumulated, partial) => (partial === undefined ? accumulated
-      : (accumulated === undefined || partial > accumulated ? partial : accumulated)),
-  },
-  $min: {
-    start: undefined,
-    combine: (accumulated, partial) => (partial === undefined ? accumulated
-      : (accumulated === undefined || partial < accumulated ? partial : accumulated)),
-  },
-};
-
-/** An assertion that is exactly one aggregate over the root. */
-function aggregateShapeOf(query) {
-  if (query === null || typeof query !== 'object' || Array.isArray(query)) return null;
-  const keys = Object.keys(query);
-  if (keys.length !== 1) return null;
-  const operator = keys[0];
-  return Object.hasOwn(ASSOCIATIVE_AGGREGATES, operator) ? operator : null;
-}
-
-/**
- * How a host must run an assertion, and why.
- *
- * - `perDocument` — its answer over each batch is its answer over the
- *   whole, so it walks in batches and fails at the first that violates.
- * - `fold` — it is one associative aggregate over the root, so each
- *   batch is answered by the engine and the partial answers combine.
- * - `materialize` — nothing above holds: it needs every document at
- *   once, which is a cost the host must be told about and bound.
- *
- * The one classifier every host shares, so the Store and a file cannot
- * disagree about what an assertion costs.
+ * Classify before execution. Folds consume operand ITEMS in their original
+ * order; addition is never regrouped into partition totals. Distinct folds
+ * require an explicit cardinality bound. EBV applies to the complete sequence.
  * @param {any} query
- * @returns {{ strategy: 'perDocument' | 'fold' | 'materialize', shape: string | null, reason: string }}
+ * @param {{ expect?: string, maxDistinct?: number }} [options]
+ * @returns {{ strategy: 'perDocument'|'fold'|'materialize', shape: string|null, reason: string }}
  */
-export function classifyAssertion(query) {
-  if (isPerDocumentAssertion(query)) {
-    return {
-      strategy: 'perDocument',
-      shape: null,
-      reason: 'a predicate over each document, whose answer per batch is its answer over the whole',
-    };
+export function classifyAssertion(query, options = {}) {
+  const ast = assertionAst(query);
+  if (independentPhrase(ast)) return options.expect === 'ebv'
+    ? { strategy: 'fold', shape: '$ebv', reason: 'sequence EBV retains at most two items across all batches' }
+    : { strategy: 'perDocument', shape: null, reason: 'an independent predicate over each document' };
+  if (ast?.kind === 'op' && Object.keys(query).length === 1 && Object.hasOwn(query, ast.name) && ['$count', '$sum', '$avg', '$min', '$max', '$distinct'].includes(ast.name)
+    && (rootScan(ast.args[0]) || independentPhrase(ast.args[0]))
+    && (ast.name !== '$distinct' || Number.isSafeInteger(options.maxDistinct) && options.maxDistinct > 0)) {
+    return { strategy: 'fold', shape: ast.name,
+      reason: ast.name === '$distinct' ? 'distinct items are retained under an explicit cardinality bound'
+        : 'the operand is partition-independent and items accumulate in original order' };
   }
-  const aggregate = aggregateShapeOf(query);
-  if (aggregate !== null) {
-    return {
-      strategy: 'fold',
-      shape: aggregate,
-      reason: `${aggregate} over the root is associative, so batch answers combine`,
-    };
-  }
-  return {
-    strategy: 'materialize',
-    shape: null,
-    reason: 'the assertion reads the whole root in a way that does not decompose '
-      + 'into independent batches, so every document must be held at once',
-  };
+  return { strategy: 'materialize', shape: null,
+    reason: 'the assertion may observe the whole root or position, so every document must be held under declared bounds' };
 }
 
 /**
@@ -181,6 +140,7 @@ export function classifyAssertion(query) {
  *   compileJslt: (stylesheet: any) => (document: any) => any,
  *   compileQuery: (query: any) => any,
  *   keys?: string[],
+ *   assertionBounds?: { maxRows: number | null, maxBytes: number | null, maxDistinct?: number },
  * }} context - the host's compilers and the key members a document of
  *   this collection carries, which a transform may not move
  * @returns {any} the compiled operation
@@ -244,17 +204,12 @@ export function compileDocumentStep(step, index, context) {
     fail(`the assertion does not compile: ${/** @type {Error} */ (cause).message}`,
       /** @type {Error} */ (cause));
   }
-  const classification = classifyAssertion(step.assert);
-  // the engine's own effective-boolean-value, reached through a query
-  // that answers its input unchanged: a fold checks the value it
-  // computed with exactly the rule the whole-collection path uses
-  const identity = compileQuery('$');
-  // and the engine's verdict on the EMPTY SEQUENCE, which `$max`/`$min`
-  // answer over a collection that offered them nothing. It cannot be
-  // asked of `identity` — a query's input may not be `undefined` — so it
-  // is evaluated once, by the engine, over a wildcard that selects
-  // nothing. The fold never decides this itself.
-  const emptySequenceEbv = compileQuery('$[*]').ebv([]);
+  const classification = classifyAssertion(step.assert, { expect: step.expect,
+    maxDistinct: context.assertionBounds?.maxDistinct });
+  const operand = classification.shape === '$ebv' ? step.assert
+    : classification.shape === null ? null : step.assert[classification.shape];
+  const items = classification.strategy === 'fold' ? compileQuery(operand) : null;
+  const scalar = compileQuery('$');
 
   /** The verdict on a computed result, whichever way it was computed. */
   const check = (result, ebvOf) => {
@@ -272,6 +227,10 @@ export function compileDocumentStep(step, index, context) {
   return {
     kind: 'query',
     collection: step.collection,
+    plan: { migration: migrationId, step: index, collection: step.collection, ...classification,
+      bounds: classification.strategy === 'materialize' || classification.shape === '$distinct'
+        ? context.assertionBounds ?? ASSERTION_BOUNDS_DEFAULT : null },
+    accept: (value) => check(value, () => scalar.ebv(value)),
     perDocument: classification.strategy === 'perDocument',
     strategy: classification.strategy,
     shape: classification.shape,
@@ -286,17 +245,28 @@ export function compileDocumentStep(step, index, context) {
     assert: (documents) => check(compiled(documents), () => compiled.ebv(documents)),
     /**
      * The same answer, one batch at a time. `start` is the aggregate's
-     * identity, `combine` folds the engine's answer for a batch into
-     * what earlier batches answered, and `finish` applies the step's own
+     * initial state, `combine` adds the operand's items in row order,
+     * and `finish` applies the step's own
      * verdict to the total — the same verdict `assert` applies.
      * Null when this assertion does not fold.
      */
     fold: classification.strategy !== 'fold' ? null : {
-      start: () => ASSOCIATIVE_AGGREGATES[/** @type {string} */ (classification.shape)].start,
-      combine: (accumulated, documents) => ASSOCIATIVE_AGGREGATES[
-        /** @type {string} */ (classification.shape)].combine(accumulated, compiled(documents)),
-      finish: (accumulated) => check(accumulated,
-        () => (accumulated === undefined ? emptySequenceEbv : identity.ebv(accumulated))),
+      start: () => {
+        const bounds = context.assertionBounds;
+        const guard = classification.shape === '$distinct' ? createAssertionBoundGuard({
+          maxRows: bounds.maxDistinct, maxBytes: bounds.maxBytes,
+        }, step.collection, `distinct items of migration '${migrationId}' step ${index}`) : null;
+        return createQueryAccumulator(classification.shape, {
+          docPath: `/${classification.shape}`,
+          ...(guard === null ? {} : { admit: (item) => guard.admit(item) }),
+        });
+      },
+      combine: (state, documents) => {
+        for (const item of items.items(documents)) state.add(item);
+        return state;
+      },
+      value: (state) => state.value(),
+      finish: (state) => check(state.value(), state.ebv),
     },
   };
 }
@@ -351,7 +321,7 @@ export function checkMigrationDocument(migration) {
 
 /**
  * What a MATERIALIZING assertion — one that is neither a per-document
- * predicate nor a single associative aggregate — is allowed to hold.
+ * predicate nor a supported ordered fold — is allowed to hold.
  *
  * The defaults are deliberately generous and deliberately finite: a
  * migration that used to read a large collection whole now refuses
@@ -377,7 +347,11 @@ export function normalizeAssertionBounds(declared) {
       throw new TypeError(`assertionBounds.${name} must be a positive integer, or null for no bound`);
     return value;
   };
-  return Object.freeze({ maxRows: read('maxRows'), maxBytes: read('maxBytes') });
+  if (declared.maxDistinct !== undefined
+    && (!Number.isSafeInteger(declared.maxDistinct) || declared.maxDistinct < 1))
+    throw new TypeError('assertionBounds.maxDistinct must be a positive integer');
+  return Object.freeze({ maxRows: read('maxRows'), maxBytes: read('maxBytes'),
+    ...(declared.maxDistinct === undefined ? {} : { maxDistinct: declared.maxDistinct }) });
 }
 
 /**

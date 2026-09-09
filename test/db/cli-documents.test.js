@@ -319,3 +319,55 @@ describe('what a file cannot be asked to do', () => {
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(out, 'utf8')), SEED);
   });
 });
+
+describe('named collection bundles', () => {
+  it('streams two source files into one atomic bundle, retaining empty collections and round-tripping it', () => {
+    const events = path.join(dir, 'bundle-events.jsonl');
+    fs.writeFileSync(events, '');
+    const target = path.join(dir, 'bundle.json');
+    const result = run('--migrations', splitDir, '--in', `users=${path.join(dir, 'users.json')}`,
+      '--in', `events=${events}`, '--out', target, '--batch-size', '1');
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(target, 'utf8')), { users: EXPECTED, events: [] });
+    assert.match(result.stdout, /'events': 0 read/);
+    const identity = migrationsIn('bundle-identity', [documentMigration('identity', [])]);
+    const again = run('--migrations', identity, '--in', target, '--format', 'collections', '--in-place', '--yes');
+    assert.strictEqual(again.status, 0, again.stderr);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(target, 'utf8')), { users: EXPECTED, events: [] });
+  });
+
+  it('a late failure in a second collection publishes neither collection and removes its temporary', () => {
+    const events = path.join(dir, 'bad-bundle-events.jsonl');
+    fs.writeFileSync(events, '{"n":1}\n');
+    const target = path.join(dir, 'bundle-preserved.json');
+    fs.writeFileSync(target, 'original');
+    const folder = migrationsIn('bundle-refusal', [documentMigration('bad', [SPLIT_NAME,
+      { kind: 'query', collection: 'events', assert: { $count: '$[*]' } }])]);
+    const result = run('--migrations', folder, '--in', `users=${path.join(dir, 'users.json')}`,
+      '--in', `events=${events}`, '--out', target, '--batch-size', '1');
+    assert.strictEqual(result.status, 1, result.stderr);
+    assert.strictEqual(fs.readFileSync(target, 'utf8'), 'original');
+    assert.deepStrictEqual(fs.readdirSync(dir).filter((file) => file.startsWith('.bundle-preserved')), []);
+  });
+
+  it('preflights physical steps before reading input and enforces admission and bundle budgets', () => {
+    const physical = migrationsIn('bundle-physical', [documentMigration('physical', [
+      { kind: 'ddl', sql: 'CREATE TABLE never (id INT)' }])]);
+    const preflight = run('--migrations', physical, '--in', path.join(dir, 'does-not-exist.json'), '--check');
+    assert.strictEqual(preflight.status, 1);
+    assert.match(preflight.stderr, /physical|storeless|ddl/);
+    assert.doesNotMatch(preflight.stderr, /ENOENT/);
+    const global = migrationsIn('bundle-budget', [documentMigration('global', [
+      { kind: 'query', collection: 'users', assert: { $count: { $distinct: '$[*].id' } }, expect: 'ebv' }])]);
+    const result = run('--migrations', global, '--in', path.join(dir, 'users.json'), '--check', '--max-rows', '1');
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /bound|row/);
+    const bundle = path.join(dir, 'small-budget-bundle.json');
+    fs.writeFileSync(bundle, JSON.stringify({ users: SEED }));
+    for (const [flag, bound] of [['--max-bytes', '2'], ['--max-rows', '1']]) {
+      const limited = run('--migrations', splitDir, '--in', bundle, '--format', 'collections', '--check', flag, bound);
+      assert.strictEqual(limited.status, 1);
+      assert.match(limited.stderr, /bound/);
+    }
+  });
+});

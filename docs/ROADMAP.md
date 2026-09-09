@@ -648,21 +648,15 @@ what each does is its own documentation's job
   startup/throughput/RSS losses. Scope is explicit: root Store admission remains
   serial, and native SQLite calls cannot be preempted by V8 worker termination;
   deadline failure fences the connection without promising a rollback.
-- [ ] **A migration assertion cannot be pushed into SQL.** Every
-  assertion is now classified before it runs and none reads a collection
-  whole: an associative aggregate over the root (`$count`, `$sum`,
-  `$min`, `$max`) folds one batch at a time, and anything else gathers
-  through the same paged walk under declared row and byte bounds
-  (MIGRATION-FORMAT §6). What remains unavailable is D3's FIRST choice —
-  letting the provider execute the aggregate. A migration assertion runs
-  BETWEEN models: the documents are in whatever shape the preceding steps
-  left, which is neither the baseline's nor the target's, so the planner
-  has no settled shape to bind a profile to. Closing it means giving a
-  migration a per-step declared shape, at which point the promotion is
-  one branch in the classifier and a provider probe. `$distinct` and
-  `$avg` also still materialize: neither combines from the engine's own
-  per-batch answer alone, which is the property that makes the current
-  folds provably equal to it.
+- [ ] **Typed SQL migration aggregates need an intermediate schema.**
+  Proven collection counts now execute through the existing SQL query planner.
+  Other independent `$count`, `$sum`, `$avg`, `$min`, `$max` operands use
+  the query engine's ordered accumulator; bounded `$distinct` retains only
+  admitted unique items. Global and positional shapes materialize under
+  declared row and byte limits (MIGRATION-FORMAT §6). Promoting typed
+  aggregates between migration steps still needs a trustworthy schema for
+  those intermediate documents and proof of equivalent numeric/order
+  semantics. The baseline and target alone cannot provide that guarantee.
 - [ ] **A declared task version is only as honest as the host that bumps
   it.** A checkpointed task node now declares the identity of the
   implementation it depends on, the registry must supply the same token,
@@ -672,9 +666,10 @@ what each does is its own documentation's job
   (FLOW-FORMAT §7.8, JOBS-FORMAT §7). What no format can check is whether
   the host actually moved the token when it changed the code; that is the
   same limit the workflow revision has always had, now inherited by
-  tasks. A run whose version legitimately moved also has no path but a new
-  id or a dropped run — deliberate, but an operator-driven reset is the
-  obvious follow-up if the need appears.
+  tasks. An explicit `jobs.reset(id, { expectedGeneration })` now atomically
+  clears an inactive run and advances its fence for recomputation; it
+  refuses stale observations and live leases. Standalone flow checkpoint
+  stores must enforce their own run provenance before returning values.
 - [ ] **A stored interval cannot be declared well-formed, so `$overlaps`
   narrows but never seeks.** The promotion pushes the half-open conjunction
   over the two declared bound columns and the engine's own operator decides,
@@ -688,17 +683,6 @@ what each does is its own documentation's job
   migration parity, plus `createIntervalIndex` as the resident shape it would
   then serve.
 
-- [ ] **A document migration file holds ONE collection.** `migrateDocuments`,
-  `streamDocuments` and `jaren-db documents` run a migration's document
-  steps over arrays, JSON, JSONL and stdio, sharing one implementation of
-  what a step MEANS with the store runner — so the array answer equals the
-  store answer, on the same step, in the same words (MIGRATION-FORMAT
-  §6.1, §11). What is not covered is a chain whose document steps touch
-  more than one collection: a file is one collection, so such a chain is
-  refused rather than partly applied. Closing it means a multi-source
-  invocation (`--in users=…  --in events=…`) and deciding what atomicity
-  means across several files, since the whole-or-nothing rename that makes
-  one file safe does not compose across two.
 
 ## @jarenjs/ai
 

@@ -164,7 +164,7 @@ describe('the composition end to end', () => {
         nodes: {
           in: { kind: 'input' },
           a: { kind: 'task', run: 'a', checkpoint: true, version: '1' },
-          b: { kind: 'task', run: 'b' },
+          b: { kind: 'task', run: 'b', version: '1' },
           out: { kind: 'output' },
         },
         edges: [
@@ -172,10 +172,10 @@ describe('the composition end to end', () => {
       } },
       tasks: {
         a: { version: '1', run: () => ({ step: 'a done' }) },
-        b: ({ input }) => {
+        b: { version: '1', run: ({ input }) => {
           if (crash) throw new Error('downstream down');
           return input;
-        },
+        } },
       },
       pollInterval: 10,
     });

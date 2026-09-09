@@ -235,25 +235,34 @@ hash of the `baseline` model when no migration has run.
 
   | strategy | which assertions | what it costs |
   |---|---|---|
-  | per-document | a FLWOR over `$[*]` whose `$where`/`$return` read only the binding | one keyset batch at a time; fails fast at the first batch that violates |
-  | fold | exactly one of `$count`, `$sum`, `$min`, `$max` over the root | one batch at a time; each batch is answered by the ENGINE and the partial answers combine |
-  | materialize | everything else (`$let`, `$distinct`, a nested `$for`, two aggregates) | every document at once, under `assertionBounds` |
+  | provider | a collection `$count` that the existing query planner proves native without a typed intermediate schema | one aggregate result, with no assertion document fetch |
+  | per-document | an independent, unwindowed FLWOR over `$[*]`, with the default empty-sequence expectation | one keyset batch; fails at the first violation |
+  | fold | `$count`, `$sum`, `$avg`, `$min`, `$max` over a partition-independent operand; sequence EBV of an independent FLWOR | one batch plus fixed accumulator state |
+  | fold with bounds | `$distinct` over such an operand with an explicit positive `maxDistinct` | one batch plus unique items under cardinality and byte bounds |
+  | materialize | global or positional operands, nested scans, unsupported shapes, or unbounded distinct | the collection under `assertionBounds` |
 
-  A fold is sound because the operator is associative: the answer over a
-  collection is the combination of the answers over any partition of it.
-  Nothing reimplements an operator — each batch is evaluated by the same
-  compiled query the whole-collection path would use, and only the
-  COMBINE step is written here, so null handling, empty-sequence answers
-  and type coercions are the engine's. A suite runs every fold shape both
-  ways, over ten corpora and six partitions, and requires the value and
-  the verdict to be indistinguishable; a shape that cannot pass it is not
-  in the set.
+  Folds feed the operand's sequence items, in original order, into the
+  query engine's shared accumulator. Floating-point addition is **not
+  associative**: combining batch totals changes answers. The ordered state
+  preserves the whole-query result, including singleton arrays, negative
+  zero, NaN, mixed-type refusals and Unicode code-point ordering. Sequence
+  EBV is checked once across all batches, including an empty source.
+  `$[0]`, root-dependent filters and positional bindings never qualify as
+  independent merely because they occur inside an aggregate.
+
+  `classifyAssertion(query, { expect, maxDistinct })` exposes the portable
+  strategy. `onAssertionPlan(plan)` reports migration, step, collection,
+  strategy, shape, reason and bounds before the assertion reads documents;
+  Store dry-run query statements also expose strategy and reason. Provider
+  promotion reuses the query planner with no assumed typed columns. Typed
+  SQL aggregates still need a trustworthy intermediate schema and proof
+  that their numeric/order semantics match; otherwise the ordered fold runs.
 
   **A materializing assertion is bounded.** `options.assertionBounds`
   defaults to `{ maxRows: 100000, maxBytes: 67108864 }` and is crossed
   BEFORE the excess is held — the walk stops at the row that would break
   it, refusing `JD2007` (rows) or `JD2076` (bytes) and naming the two
-  assertion shapes that are answered in batches instead. `null` on either
+  assertion strategies that are answered in batches instead. `null` on either
   member removes that bound, which a caller must ask for: an unbounded
   read nobody declared is exactly what this classification removes. This
   is a deliberate behavior change — a migration that used to read a very
@@ -265,14 +274,11 @@ hash of the `baseline` model when no migration has run.
   transformed | derived | asserted }`, one event per batch), and never
   hold the whole collection in memory. A PER-DOCUMENT assertion — a
   FLWOR over `$[*]` whose `$where` and `$return` read only the binding
-  — walks the same batches and fails fast at the first batch that
-  violates, because its answer over each batch is its answer over the
-  whole. A cross-document assertion (one that reads the root: `$count:
-  '$[*]'`, a `$let`, a `$distinct`, a nested `$for`) reads the whole
-  collection into one array — a stated cost; keep such assertions
-  early, before the data grows. A cross-document assertion that is one
-  associative aggregate no longer costs that read at all — see the
-  classification table above.
+  — with the default empty expectation walks the same batches and fails
+  fast. Other assertions follow the classification table above.
+  `batchSize` must be a positive safe integer. `maxDistinct` opts into a
+  distinct fold and bounds retained unique items; `maxBytes` applies to
+  those items. Duplicates do not consume additional cardinality.
 - A transform MUST NOT change a caller-keyed document's key member —
   the key column would go stale; the run refuses (`JD0023`).
 
@@ -510,10 +516,23 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   line-delimited, everything else one JSON array) unless `--format` /
   `--out-format` says otherwise, and stdio defaults to JSONL. Input and
   output encodings are independent, so this is also the converter.
-  - **A file holds ONE collection.** The migrations name it; a chain
-    whose document steps touch more than one cannot be applied to a
-    file, and is refused rather than partly run. `--collection` asserts
-    which collection the file holds and refuses a mismatch.
+  - **Named sources share one collection bundle.** Repeat
+    `--in users=users.json --in events=events.jsonl --out migrated.json`.
+    Output defaults to `--out-format collections`: a standard JSON object
+    mapping collection names to arrays, including empty collections.
+    Publication is one atomic rename after every collection succeeds.
+    Multiple source files cannot use `--in-place`, because separate
+    renames cannot give this guarantee. Single-source `--collection`
+    still asserts the collection name and refuses a mismatch.
+  - **A bundle can be read explicitly** with `--format collections`, then
+    replaced using `--in-place --yes`. Bundle input is materialized under
+    a whole-file `maxBytes` ceiling before parsing and per-collection
+    `maxRows` validation after parsing. JSON and JSONL single-collection
+    sources remain streaming. `--max-rows`, `--max-bytes`, and
+    `--max-distinct` configure assertion admission too; the first two
+    accept `none` to remove their limit deliberately. A materializing
+    file run admits rows before retaining them. Physical-step and query
+    compilation refusals precede every input read.
   - **`--out` writes elsewhere; `--in-place` replaces the input and
     needs `--yes`.** Either way the documents land in a sibling
     temporary that is renamed over the target only once every document

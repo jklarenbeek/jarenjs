@@ -121,7 +121,7 @@ export function nodeDriver() {
 }
 
 export {
-  readDocuments, readJsonDocuments, readJsonlDocuments,
+  readDocuments, readJsonDocuments, readJsonlDocuments, readCollectionBundle,
   openAtomicTarget, openStreamTarget, openNullTarget,
   formatOf, DOCUMENT_FORMATS,
 } from '../document-files.js';

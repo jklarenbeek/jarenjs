@@ -21,6 +21,7 @@ import { JsonQueryRuntimeError } from './errors.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
 export { NODE_KINDS };
+export { createQueryAccumulator } from './accumulator.js';
 export { annotateTypes, TYPE_TAGS } from './types.js';
 
 const hasOwn = Object.hasOwn;
@@ -137,6 +138,7 @@ const hasOwn = Object.hasOwn;
  * function itself, carrying its helper methods and metadata.
  * @typedef {((data: any, externals?: Record<string, any>) => any) & {
  *   first: (data: any, externals?: Record<string, any>) => any,
+ *   items: (data: any, externals?: Record<string, any>) => any[],
  *   exists: (data: any, externals?: Record<string, any>) => boolean,
  *   ebv: (data: any, externals?: Record<string, any>) => boolean,
  *   externals: readonly string[],
@@ -246,6 +248,14 @@ export function compileJsonQuery(doc, options = {}) {
       return v.items;
     }
     return v;
+  };
+  query.items = (data, ext) => {
+    const v = evaluate(data, ext);
+    const items = v === EMPTY ? [] : v instanceof Seq ? v.items : [v];
+    if (resultCap > 0 && items.length > resultCap)
+      throw new JsonQueryRuntimeError('JQ2009',
+        `the query result has ${items.length} items, more than limits.resultItems (${resultCap})`, '');
+    return items;
   };
   query.first = (data, ext) => {
     const v = evaluate(data, ext);

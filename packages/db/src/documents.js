@@ -36,7 +36,7 @@ import {
  * document is read, anything this host cannot honour.
  * @param {any[]} migrations
  * @param {Set<string>} present - the collections the caller supplied
- * @param {{ compileJslt: Function, compileQuery: Function, keys: Record<string, string[]> }} context
+ * @param {{ compileJslt: Function, compileQuery: Function, keys: Record<string, string[]>, assertionBounds: { maxRows: number | null, maxBytes: number | null, maxDistinct?: number } }} context
  * @returns {{ id: string, to: string, from: string, operations: any[] }[]}
  */
 function planStorelessRun(migrations, present, context) {
@@ -74,6 +74,7 @@ function planStorelessRun(migrations, present, context) {
         migrationId: migration.id,
         compileJslt: context.compileJslt,
         compileQuery: context.compileQuery,
+        assertionBounds: context.assertionBounds,
         keys: Object.hasOwn(context.keys, step.collection) ? (context.keys[step.collection] ?? []) : [],
       })),
     });
@@ -84,9 +85,12 @@ function planStorelessRun(migrations, present, context) {
 /** The shared option surface both surfaces read. */
 function runContext(options) {
   const runtime = resolveRuntime(options.runtime);
+  if (!Number.isSafeInteger(options.batchSize ?? 500) || (options.batchSize ?? 500) < 1)
+    throw new TypeError('batchSize must be a positive safe integer');
   return {
     batchSize: options.batchSize ?? 500,
     onProgress: options.onProgress,
+    onAssertionPlan: options.onAssertionPlan,
     keys: options.keys ?? {},
     compileJslt: options.compileJslt ?? compileJsltStylesheet,
     compileQuery: options.compileQuery ?? compileJsonQuery,
@@ -98,6 +102,12 @@ function runContext(options) {
           + 'already written where they are',
       }),
   };
+}
+
+/** Compile all steps before a file host reads any document or opens its sink. */
+export function prepareDocumentRun(names, migrations, options = {}) {
+  const context = runContext(options);
+  return planStorelessRun(migrations, new Set(names), context);
 }
 
 /** The report both surfaces answer with, before its counts are filled. */
@@ -162,10 +172,12 @@ export async function migrateDocuments(collections, migrations, options = {}) {
   for (const plan of plans) {
     for (const operation of plan.operations) {
       context.check();
+      if (operation.kind === 'query') context.onAssertionPlan?.({ ...operation.plan });
       const documents = state[operation.collection];
       const counters = countersFor(report, operation.collection);
       if (operation.kind === 'jslt') {
         for (let i = 0; i < documents.length; i++) {
+          context.check();
           documents[i] = operation.apply(documents[i], i);
           counters.transformed++;
           if ((i + 1) % context.batchSize === 0) {
@@ -180,7 +192,7 @@ export async function migrateDocuments(collections, migrations, options = {}) {
         continue;
       }
       if (operation.fold !== null) {
-        // an associative aggregate: the same batches, combined
+        // Ordered aggregate state consumes the same batches item by item.
         let accumulated = operation.fold.start();
         for (let at = 0; at < documents.length; at += context.batchSize) {
           context.check();
@@ -198,7 +210,8 @@ export async function migrateDocuments(collections, migrations, options = {}) {
         // bound is what the caller was promised, so it is checked
         const guard = createAssertionBoundGuard(context.assertionBounds, operation.collection,
           `the assertion of migration '${plan.id}'`);
-        for (const document of documents) guard.admit(document);
+        for (const document of documents) { context.check(); guard.admit(document); }
+        counters.asserted += documents.length;
         operation.assert(documents);
         continue;
       }
@@ -260,10 +273,11 @@ export async function streamDocuments(sources, migrations, options) {
   const plans = planStorelessRun(migrations, new Set(Object.keys(sources)), context);
 
   // the second refusal a single pass owes before it reads anything: a
-  // MATERIALIZING assertion. An associative aggregate is not one — its
-  // batches combine, so a single pass answers it exactly.
+  // MATERIALIZING assertion. An ordered fold only retains its state,
+  // so a single pass answers it exactly.
   for (const plan of plans) {
     for (const operation of plan.operations) {
+      if (operation.kind === 'query') context.onAssertionPlan?.({ ...operation.plan });
       if (operation.kind === 'query' && operation.strategy === 'materialize') {
         operation.fail('a cross-document assertion needs every document of '
           + `'${operation.collection}' at once, which a single pass does not hold — `
@@ -296,8 +310,10 @@ export async function streamDocuments(sources, migrations, options) {
       if (batch.length === 0) return;
       context.check();
       for (const stage of stages) {
+        context.check();
         if (stage.operation.kind === 'jslt') {
           for (let i = 0; i < batch.length; i++) {
+            context.check();
             batch[i] = stage.operation.apply(batch[i], counters.read - batch.length + i);
             counters.transformed++;
           }
@@ -315,10 +331,12 @@ export async function streamDocuments(sources, migrations, options) {
         context.onProgress?.({ migration: stage.migration, collection: name,
           asserted: counters.asserted });
       }
-      for (const document of batch) await options.write(name, document);
+      for (const document of batch) { context.check(); await options.write(name, document); }
+      context.check();
       batch = [];
     };
     for await (const document of sources[name]) {
+      context.check();
       counters.read++;
       batch.push(document);
       if (batch.length >= context.batchSize) await flush();

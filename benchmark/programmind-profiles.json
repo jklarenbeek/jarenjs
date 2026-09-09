@@ -72,19 +72,19 @@
     },
     {
       "grammar": "dag",
-      "sourceHash": "d4d78378ecc8b9e5bb4209d650b3da616c927ba82fcfd39c7561164d9afd2c15",
+      "sourceHash": "10fde5220cfbe12f496c1112e9e0874c30d1cc0b51d9c79fbb05be75a4b9cf9f",
       "seamHash": "3212745ee17fb35df53b9b8046cce2995d4d92d22d2eef34a68676462f3d4e4d",
-      "profileHash": "15c470f773afea52ba3ff25fed814b3511729a82f81ca7bf349bfd73ed7b7b23",
+      "profileHash": "878742d5ab5e438ba341d2c2681f7c33caf6d013109a01a9a2bc57be3af3d56a",
       "open": [
         "queryDocument",
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 49573,
+        "bytes": 49558,
         "branches": 112
       },
       "profile": {
-        "bytes": 5143,
+        "bytes": 5128,
         "branches": 6
       }
     }

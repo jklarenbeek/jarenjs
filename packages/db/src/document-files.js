@@ -209,6 +209,65 @@ export function readDocuments(source, format) {
 }
 
 /**
+ * Read an explicitly materialized collection-map bundle under a byte ceiling.
+ * JSON/JSONL collection readers remain streaming; a bundle holds named arrays.
+ * @param {string | AsyncIterable<any>} source
+ * @param {{ maxBytes: number | null, maxRows: number | null }} bounds
+ */
+export async function readCollectionBundle(source, bounds) {
+  let text = '', bytes = 0;
+  for await (const chunk of textChunks(source)) {
+    bytes += Buffer.byteLength(chunk);
+    if (bounds.maxBytes !== null && bytes > bounds.maxBytes)
+      throw refuse(`the collection bundle exceeds its maxBytes bound of ${bounds.maxBytes}`);
+    text += chunk;
+  }
+  const value = parseDocument(text, 'collection bundle');
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.values(value).some((documents) => !Array.isArray(documents)))
+    throw refuse('a collection bundle is an object mapping collection names to document arrays');
+  for (const [name, documents] of Object.entries(value))
+    if (bounds.maxRows !== null && documents.length > bounds.maxRows)
+      throw refuse(`collection '${name}' exceeds its maxRows bound of ${bounds.maxRows}`);
+  return value;
+}
+
+/** One encoder for file and stream output, including atomic collection bundles. */
+function documentEncoder(format, collections = []) {
+  if (!['json', 'jsonl', 'collections'].includes(format)) throw refuse(`unknown document format '${format}'`);
+  if (format === 'collections' && (new Set(collections).size !== collections.length
+    || collections.some((name) => typeof name !== 'string')))
+    throw refuse('collection bundle names must be unique strings');
+  let documents = 0, index = -1, members = 0;
+  const advance = (next) => {
+    let text = '';
+    while (index < next) {
+      text += index < 0 ? '{\n' : '\n],\n';
+      index++;
+      text += `${JSON.stringify(collections[index])}: [`;
+      members = 0;
+    }
+    return text;
+  };
+  return {
+    write: (document, collection) => {
+      const value = JSON.stringify(document);
+      if (value === undefined) throw refuse('a document must be JSON serializable');
+      if (format === 'jsonl') { documents++; return `${value}\n`; }
+      if (format === 'json') return documents++ === 0 ? `[\n${value}` : `,\n${value}`;
+      const next = collections.indexOf(collection);
+      if (next < index || next < 0) throw refuse('collection bundle writes must follow the declared collection order');
+      const prefix = advance(next);
+      documents++;
+      return prefix + (members++ === 0 ? '\n' : ',\n') + value;
+    },
+    finish: () => format === 'jsonl' ? '' : format === 'json' ? documents === 0 ? '[]\n' : '\n]\n'
+      : collections.length === 0 ? '{}\n' : advance(collections.length - 1) + '\n]\n}\n',
+    count: () => documents,
+  };
+}
+
+/**
  * A sink that publishes whole or not at all.
  *
  * `write` appends to a sibling temporary; `commit` flushes it, renames
@@ -217,17 +276,18 @@ export function readDocuments(source, format) {
  * a target that never changed.
  *
  * @param {string} target - the file to replace
- * @param {'json' | 'jsonl'} format
- * @returns {Promise<{ write: (document: any) => Promise<void>,
+ * @param {'json' | 'jsonl' | 'collections'} format
+ * @param {{ collections?: string[] }} [options]
+ * @returns {Promise<{ write: (document: any, collection?: string) => Promise<void>,
  *   commit: () => Promise<{ bytes: number, documents: number }>,
  *   abort: () => Promise<void>, temporary: string }>}
  */
-export async function openAtomicTarget(target, format) {
+export async function openAtomicTarget(target, format, options = {}) {
+  const encoder = documentEncoder(format, options.collections);
   const directory = path.dirname(path.resolve(target));
   const temporary = path.join(directory,
     `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
   const handle = await fsp.open(temporary, 'wx');
-  let documents = 0;
   let bytes = 0;
   let settled = false;
 
@@ -243,21 +303,20 @@ export async function openAtomicTarget(target, format) {
 
   return {
     temporary,
-    write: async (document) => {
-      const text = JSON.stringify(document);
-      if (format === 'jsonl') { documents++; return put(`${text}\n`); }
-      return put(documents++ === 0 ? `[\n${text}` : `,\n${text}`);
+    write: async (document, collection) => {
+      if (settled) throw refuse('this target was already settled');
+      await put(encoder.write(document, collection));
     },
     commit: async () => {
       if (settled) throw refuse('this target was already settled');
       settled = true;
       try {
-        if (format === 'json') await put(documents === 0 ? '[]\n' : '\n]\n');
+        await put(encoder.finish());
         // Publish only after the temporary has been durably flushed.
         await handle.sync();
         await handle.close();
         await fsp.rename(temporary, target);
-        return { bytes, documents };
+        return { bytes, documents: encoder.count() };
       }
       catch (error) {
         try { await discard(); }
@@ -277,23 +336,20 @@ export async function openAtomicTarget(target, format) {
  * A sink that writes to an open stream (standard output) and can never
  * be taken back — `abort` is honest that what left has left.
  * @param {{ write: (chunk: string, callback: (error?: any) => void) => any }} stream
- * @param {'json' | 'jsonl'} format
+ * @param {'json' | 'jsonl' | 'collections'} format
+ * @param {{ collections?: string[] }} [options]
  */
-export function openStreamTarget(stream, format) {
-  let documents = 0;
+export function openStreamTarget(stream, format, options = {}) {
+  const encoder = documentEncoder(format, options.collections);
   const put = (text) => new Promise((resolve, reject) => {
     stream.write(text, (error) => (error ? reject(error) : resolve(undefined)));
   });
   return {
     temporary: null,
-    write: async (document) => {
-      const text = JSON.stringify(document);
-      if (format === 'jsonl') { documents++; return put(`${text}\n`); }
-      return put(documents++ === 0 ? `[\n${text}` : `,\n${text}`);
-    },
+    write: async (document, collection) => put(encoder.write(document, collection)),
     commit: async () => {
-      if (format === 'json') await put(documents === 0 ? '[]\n' : '\n]\n');
-      return { bytes: 0, documents };
+      await put(encoder.finish());
+      return { bytes: 0, documents: encoder.count() };
     },
     abort: async () => undefined,
   };

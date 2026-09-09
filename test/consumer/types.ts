@@ -1753,3 +1753,25 @@ void createMemoryStorage().mutate('test/', async (current) => ({ next: current }
 void createLedger({ goalLimits: { maxChars: '100' } });
 
 void createLedger({ artifacts: [{ id: 'source', kind: 'slot', locator: 'round-1' }] });
+
+// REPLAYSAFE public surfaces: sequence boundaries, bounded plans and explicit reset.
+import { createQueryAccumulator } from '@jarenjs/json/query';
+import { readCollectionBundle } from '@jarenjs/db/node';
+const orderedAggregate = createQueryAccumulator('$avg');
+orderedAggregate.add(1);
+const aggregateVerdict: boolean = orderedAggregate.ebv();
+const queryItems: unknown[] = compileJsonQuery('$[*]').items([1, 2]);
+const boundedOptions: DocumentMigrationOptions = { assertionBounds: { maxDistinct: 10 },
+  onAssertionPlan: (plan) => { const reason: string = plan.reason; void reason; } };
+void [aggregateVerdict, queryItems, boundedOptions];
+void readCollectionBundle('/tmp/bundle.json', { maxBytes: 1000, maxRows: 10 });
+
+void (async (store: import('@jarenjs/db').Store) => {
+  if (!store.jobs) return;
+  const job = await store.jobs.get('run');
+  if (job) {
+    const reset: { reset: true; discarded: number; generation: number } =
+      await store.jobs.reset(job.id, { expectedGeneration: job.leaseGeneration });
+    void reset;
+  }
+});

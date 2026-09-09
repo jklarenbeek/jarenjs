@@ -31,7 +31,7 @@ const DAG = {
   nodes: {
     in: { kind: 'input' },
     expensive: { kind: 'task', run: 'expensive', checkpoint: true, version: '1' },
-    fragile: { kind: 'task', run: 'fragile' },
+    fragile: { kind: 'task', run: 'fragile', version: '1' },
     out: { kind: 'output' },
   },
   edges: [
@@ -62,11 +62,11 @@ describe('recovery: the reclaimed job RESUMES from its checkpoint', () => {
           counts.expensive += 1;
           return { loaded: input.day };
         } },
-        fragile: ({ input }) => {
+        fragile: { version: '1', run: ({ input }) => {
           counts.fragile += 1;
           if (crash) throw new Error('the process died here');
           return input;
-        },
+        } },
       },
     });
 

@@ -241,3 +241,24 @@ describe('the legacy shorthand, explicitly', () => {
     assert.deepStrictEqual(dag.taskVersions, { first: '1', second: '2' });
   });
 });
+
+it('every task in a checkpointed workflow declares identity, including recomputed upstream tasks', () => {
+  const doc = docWith({ first: { kind: 'task', run: 'alpha' },
+    second: { kind: 'task', run: 'beta', version: '2', checkpoint: true } });
+  assert.throws(() => compileDag(doc, { tasks: registry() }), { code: 'JF0011' });
+});
+
+it('nested version paths cannot collide with literal node ids and invalid identities refuse', () => {
+  const doc = { $dag: '0.1', nodes: { i: { kind: 'input' },
+    outer: { kind: 'task', run: 'alpha', version: '1' },
+    'outer/inner': { kind: 'task', run: 'beta', version: '2' }, o: { kind: 'output' } },
+  edges: [{ from: 'i', to: 'outer' }, { from: 'outer', to: 'outer/inner' }, { from: 'outer/inner', to: 'o' }] };
+  const tasks = registry({ alpha: { run: () => 1, version: '1', taskVersions: { inner: '3', 'a~0b': '4' } } });
+  assert.deepStrictEqual(compileDag(doc, { tasks }).taskVersions,
+    { outer: '1', 'outer/a~0b': '4', 'outer/inner': '3', 'outer~1inner': '2' });
+  for (const taskVersions of [{ inner: 1 }, { inner: ' ' }, { 'a~b': '1' }])
+    assert.throws(() => compileDag(doc, { tasks: registry({ alpha: { run: () => 1, version: '1', taskVersions } }) }), TypeError);
+  assert.throws(() => compileDag(doc, { tasks: registry({ alpha: { run: () => 1, version: ' ' } }) }), TypeError);
+  doc.nodes.outer.version = ' ';
+  assert.throws(() => compileDag(doc, { tasks }), { code: 'JF0011' });
+});

@@ -390,7 +390,10 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 
   **The legacy rule is deterministic, and never reads unknown as equal.**
   A run checkpointed by a release that did not record task identity has
-  no `taskVersionsHash`. If it recorded no node value yet, there is
+  no `taskVersionsHash`. Identity inspection reads only the reserved metadata
+  value and probes whether other rows exist; it does not load or parse node
+  values. Missing metadata with saved values refuses `JD2069`. Refused
+  legacy upgrades leave the original identity untouched. If it recorded no node value yet, there is
   nothing that could be replayed wrongly, so the identity is upgraded in
   place and the run proceeds. If it DID record values, the implementation
   that produced them cannot be confirmed and the resume is refused,
@@ -471,6 +474,16 @@ a cancellation policy, a retry policy are the host's.
   and counts it under `stats().cancellations`; an attempt held by
   another process meets the fence at its next settling call and records
   a loss, as any superseded attempt does.
+- **`reset(id, { expectedGeneration })`** — explicitly discard one inactive
+  run's checkpoints and restart its attempts at zero. Read the job's
+  `leaseGeneration` first and pass that observation. One transaction
+  conditionally updates the job, increments its fence generation and deletes
+  its checkpoint rows. A concurrent generation change refuses `JD2066`, a
+  live lease `JD2068`, an unknown or completed job `JD2065`; no refusal
+  discards values. The next claim recomputes the workflow under current
+  identity. Reset does not undo external task effects; their idempotency
+  keys remain the host's responsibility. It is root-only administration,
+  with the same signal/deadline options as requeue.
 - **`requeue(id)`** — returns a failed, dead, cancelled or lease-expired
   job to `pending` at the clock's instant (the queue's own order). The
   attempt history is KEPT: `attempts` counts every claim the job ever

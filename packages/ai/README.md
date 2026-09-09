@@ -1573,7 +1573,7 @@ source, named seam, profile hashes and generated output for drift.
 | jslt | 23515 | 3491 | 59 | 6 |
 | app | 47275 | 2799 | 106 | 0 |
 | fsm | 24140 | 3026 | 51 | 4 |
-| dag | 49573 | 5143 | 112 | 6 |
+| dag | 49558 | 5128 | 112 | 6 |
 
 <!--/fact-->
 

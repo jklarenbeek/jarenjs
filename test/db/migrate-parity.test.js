@@ -172,23 +172,21 @@ describe('batched assertions', () => {
     }
   });
 
-  it('an aggregate assertion FOLDS: paged reads only, never a whole-collection one', async () => {
+  it('a proven count assertion uses the provider without fetching documents', async () => {
     const { dbPath, cleanup } = await seeded(3);
     try {
       const { driver, prepared } = tracingDriver();
       const migration = assertionMigration({ assert: { $count: '$[*]' }, expect: 'ebv' });
+      const plans = [];
       const done = await migrate({ driver, path: dbPath }, [migration],
-        { baseline: M0, model: M1, batchSize: 1, shadow: false });
+        { baseline: M0, model: M1, batchSize: 1, shadow: false, onAssertionPlan: (plan) => plans.push(plan) });
       assert.deepStrictEqual(done.applied, ['0001-with-assertion']);
-      // `$count` over the root is associative, so each batch is answered
-      // by the engine and the partial answers combine: the collection is
-      // never held, and the unbounded statement this assertion used to
-      // cost is gone
+      assert.deepStrictEqual(plans.map((plan) => plan.strategy), ['provider']);
       const reads = prepared.filter((sql) => /FROM "users"/.test(sql));
-      const whole = reads.filter((sql) => !/LIMIT/.test(sql));
-      assert.deepStrictEqual(whole, [], 'no whole-collection read remains');
-      assert.ok(reads.length > 0);
-      for (const sql of reads) assert.match(sql, /LIMIT 1\b/, sql);
+      assert.deepStrictEqual(reads.filter((sql) => !/LIMIT/.test(sql)),
+        ['SELECT COUNT(*) AS "value" FROM "users"']);
+      // The final model validation still pages through documents.
+      for (const sql of reads.filter((sql) => /LIMIT/.test(sql))) assert.match(sql, /LIMIT 1\b/);
       // and on an EMPTY collection the count assertion still fails, as
       // it always did — the fold answers 0 and its EBV is false
       const empty = tempDbPath();
