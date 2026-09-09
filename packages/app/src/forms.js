@@ -88,8 +88,9 @@ export function formEventFields() {
  *   standard action names (`input`/`check`/`number`/`add`/`remove`).
  * @property {string} [addLabel] - Add-item button text (default `'+'`).
  * @property {string} [removeLabel] - Remove-item button text (default `'×'`).
- * @property {{addItem?: string, removeItem?: string}} [labels] - Accessible
- *   names for the two symbol buttons. `@jarenjs/forms`'
+ * @property {string} [requiredMarker] - Decorative required marker (default `'*'`).
+ * @property {{addItem?: string, removeItem?: string, jsonPlaceholder?: string}} [labels] - Accessible
+ *   names for the symbol buttons and the JSON editor's hint. `@jarenjs/forms`'
  *   `formChromeLabels(catalog)` resolves them from a message catalog;
  *   the English defaults apply when absent.
  * @property {string} [dataPointer] - (actions) JSON Pointer to the form
@@ -108,7 +109,7 @@ export function createFormView(options = {}) {
   const root = options.root ?? '$.form';
   const cls = options.classPrefix ?? 'jaren-form';
   const act = { ...DEFAULT_ACTIONS, ...options.actions };
-  const labels = { addItem: 'Add item', removeItem: 'Remove item', ...options.labels };
+  const labels = { addItem: 'Add item', removeItem: 'Remove item', jsonPlaceholder: 'Enter a JSON value', ...options.labels };
   /** Match any view-model node under `root` with the given control. */
   const ctl = (control) => `${root}..[?@.control == '${control}']`;
 
@@ -123,17 +124,17 @@ export function createFormView(options = {}) {
       type: 'button',
       class: `${cls}-remove`,
       // the glyph is decoration; the accessible name is the label
-      'aria-label': labels.removeItem,
-      title: labels.removeItem,
+      'aria-label': { $const: labels.removeItem },
+      title: { $const: labels.removeItem },
       disabled: writeDisabled,
       on: { click: { action: act.remove, with: { pointer: '$.pointer' } } },
-    }, options.removeLabel ?? '×']] };
+    }, { $const: options.removeLabel ?? '×' }]] };
 
   /** The shared field chrome around one control vnode. */
   const field = (control) => ['div', { class: `${cls}-field`, 'data-pointer': '$.pointer' },
     ['label', {},
       '$.label',
-      { $if: ['$.required', ['span', { class: `${cls}-required`, 'aria-hidden': 'true' }, ' *']] },
+      { $if: ['$.required', ['span', { class: `${cls}-required`, 'aria-hidden': 'true' }, { $const: ` ${options.requiredMarker ?? '*'}` }]] },
       control,
     ],
     { $if: ['$.description', ['p', { class: `${cls}-description` }, '$.description']] },
@@ -153,6 +154,7 @@ export function createFormView(options = {}) {
     placeholder: '$.placeholder',
     readonly: '$.readOnly',
     disabled,
+    'aria-required': { $if: ['$.required', 'true'] },
     on: { input: { action, with: writeWith } },
   }];
 
@@ -170,6 +172,7 @@ export function createFormView(options = {}) {
     placeholder: '$.placeholder',
     readonly: '$.readOnly',
     disabled,
+    'aria-required': { $if: ['$.required', 'true'] },
     min: '$.constraints.formatMinimum',
     max: '$.constraints.formatMaximum',
     on: { input: { action, with: writeWith } },
@@ -205,11 +208,11 @@ export function createFormView(options = {}) {
           ['button', {
             type: 'button',
             class: `${cls}-add`,
-            'aria-label': labels.addItem,
-            title: labels.addItem,
+            'aria-label': { $const: labels.addItem },
+            title: { $const: labels.addItem },
             disabled: writeDisabled,
             on: { click: { action: act.add, with: { pointer: '$.pointer', value: '$.addValue' } } },
-          }, options.addLabel ?? '+']] },
+          }, { $const: options.addLabel ?? '+' }]] },
         [{ $apply: '$.errors[*]' }],
         remove,
       ],
@@ -229,6 +232,7 @@ export function createFormView(options = {}) {
       match: ctl('select'),
       body: field(['select', {
         disabled: writeDisabled,
+        'aria-required': { $if: ['$.required', 'true'] },
         on: {
           change: { action: act.json, with: writeWith, event: [JSON_FIELD] },
         },
@@ -241,6 +245,7 @@ export function createFormView(options = {}) {
         type: 'checkbox',
         checked: '$.value',
         disabled: writeDisabled,
+        'aria-required': { $if: ['$.required', 'true'] },
         on: { change: { action: act.check, with: writeWith } },
       }]),
     },
@@ -249,6 +254,7 @@ export function createFormView(options = {}) {
       match: ctl('textarea'),
       body: field(['textarea', {
         placeholder: '$.placeholder',
+        'aria-required': { $if: ['$.required', 'true'] },
         readonly: '$.readOnly',
         disabled,
         on: { input: { action: act.input, with: writeWith } },
@@ -266,6 +272,9 @@ export function createFormView(options = {}) {
         class: `${cls}-json`,
         rows: 4,
         spellcheck: 'false',
+        placeholder: { $const: labels.jsonPlaceholder },
+        'aria-description': { $const: labels.jsonPlaceholder },
+        'aria-required': { $if: ['$.required', 'true'] },
         readonly: '$.readOnly',
         disabled,
         on: { change: { action: act.json, with: writeWith, event: [JSON_FIELD] } },

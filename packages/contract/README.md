@@ -739,3 +739,35 @@ Every subpath a consumer can import, derived from the manifest by
 Author JSON template catalogs and MessageSpec references with the
 [messages pen](../linq/docs/MESSAGES-PEN.md); existing locale render functions
 retain their pluralization and formatting behavior.
+
+## Structured query inputs and app reconnect
+
+Object- and array-typed query members use one JSON-encoded parameter,
+including empty arrays, nulls and nested values. Scalar strings stay
+literal; parsed JSON is validated without coercion. The client, URL
+builder, server dispatcher and OpenAPI projection share this codec.
+Malformed or repeated JSON members are `JC2012`. Handwritten callers
+must migrate repeated array keys (`tag=a&tag=b`) to one encoded JSON array;
+deploy matching client/server versions and revise the contract's `version`
+for revision negotiation. See [the wire rules](docs/CONTRACT-FORMAT.md#4-the-http-binding-and-member-locations).
+
+Opt into HTTP subscription recovery per operation:
+
+```javascript
+const binding = contractAppBinding(contract, {
+  subs: { 'board.feed': { reconnect: { max: 2 } } },
+});
+```
+
+The generated subscription forwards the option to `client.subscribe`.
+The slot stays live with its id and last value while reconnecting; replay
+continues from the last delivered sequence. Exhaustion surfaces `JC2097`.
+Stop, reset and app destruction stop recovery. Without the option,
+network loss is surfaced immediately; an explicit server end remains
+terminal. Port and local channel lifecycles are unchanged.
+
+The fixed-heap host-seam test measures the Node response's writable queue
+and the producer's unwritten chunk separately from bytes already accepted
+by TCP. The in-process Fetch leg can measure produced-minus-consumed
+bytes directly. Complete-byte hashes, cursor pulls and cancellation
+finalizers remain part of the same end-to-end test.

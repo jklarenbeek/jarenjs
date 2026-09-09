@@ -565,7 +565,7 @@ function compareNumberKeys(a, b) {
 }
 
 function rangeBoundError(v, docPath) {
-  return runtimeError('JQ2001', `'$range' bounds must be integral numbers, got ${describeItem(v)}`, docPath);
+  return runtimeError('JQ2001', `'$range' bounds must be safe integers, got ${describeItem(v)}`, docPath);
 }
 
 /**
@@ -575,16 +575,17 @@ function rangeBoundError(v, docPath) {
  * @param {any} v - an evaluated bound
  * @param {string} docPath - the bound's document pointer
  * @returns {number} the bound
- * @throws {JsonQueryRuntimeError} JQ2001 when it is not an integer
+ * @throws {JsonQueryRuntimeError} JQ2001 when it is not a safe integer
  */
 export function checkRangeBound(v, docPath) {
-  if (typeof v !== 'number' || !Number.isInteger(v))
+  if (typeof v !== 'number' || !Number.isSafeInteger(v))
     throw rangeBoundError(v, docPath);
   return v;
 }
 
-// the resource guard of $range (section 10.3, JQ2007)
-const RANGE_LIMIT = 4294967296; // 2^32
+// Bound allocation before touching the heap. Direct iteration uses the
+// compiler's counting loop and does not allocate this array (§8.9).
+const RANGE_LIMIT = 1000000;
 
 //#endregion
 
@@ -1397,7 +1398,7 @@ export const OPERATORS = Object.freeze({
       const toGet = gets[1];
       const toPath = args[1].docPath;
       // the compilation's limits.sequenceItems tightens the resource
-      // guard below its 2^32 ceiling
+      // guard below its materialization ceiling
       const cap = node !== undefined && node.limits != null && node.limits.sequenceItems !== null
         ? Math.min(node.limits.sequenceItems, RANGE_LIMIT)
         : RANGE_LIMIT;
@@ -1412,7 +1413,7 @@ export const OPERATORS = Object.freeze({
           return EMPTY;
         const n = b - a + 1;
         if (n > cap)
-          throw runtimeError('JQ2007', `'$range' of ${n} items exceeds the ${cap === RANGE_LIMIT ? '2^32-item' : String(cap) + '-item'} resource guard`, docPath);
+          throw runtimeError('JQ2007', `'$range' of ${n} items exceeds the ${cap}-item resource guard`, docPath);
         const out = new Array(n);
         for (let i = 0; i < n; i++)
           out[i] = a + i;

@@ -54,7 +54,7 @@ function mountForm(options = {}) {
   const appDoc = {
     state: { data: createInitialData(model) },
     view: [
-      ...createFormView({ labels: options.labels }),
+      ...createFormView({ labels: options.labels, requiredMarker: options.requiredMarker }),
       { match: '$', body: ['main', {}, { $apply: '$.form' }] },
     ],
     actions: createFormActions({ dataPointer: '/data' }),
@@ -77,6 +77,16 @@ function mountForm(options = {}) {
 }
 
 describe('the standard forms stylesheet', function () {
+  it('localizes JSON instructions as literal text and exposes required semantics independently of the marker', function () {
+    const { container } = mountForm({ labels: { jsonPlaceholder: '$Voer JSON in' }, requiredMarker: '$' });
+    const json = fieldControl(container, '/meta', 'textarea');
+    assert.strictEqual(json.attributes.get('placeholder'), '$Voer JSON in');
+    assert.strictEqual(json.attributes.get('aria-description'), '$Voer JSON in');
+    assert.strictEqual(fieldControl(container, '/name').attributes.get('aria-required'), 'true');
+    const marker = find(container, (node) => node.attributes?.get('class') === 'jaren-form-required');
+    assert.strictEqual(marker.attributes.get('aria-hidden'), 'true');
+    assert.strictEqual(marker.childNodes[0].nodeValue, ' $');
+  });
   it('renders every control family from the schema alone', function () {
     const { container } = mountForm();
     assert.strictEqual(fieldControl(container, '/name').attributes.get('type'), 'text');

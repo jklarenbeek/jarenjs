@@ -94,6 +94,7 @@ const SAMPLE_PARAMS = {
   // form chrome takes no params: the accessible names of the array buttons
   'form/addItem': {},
   'form/removeItem': {},
+  'form/jsonPlaceholder': {},
   // the contract wire errors: params are protocol facts, never request
   // content (operation ids, declared limits, media types, header names)
   'contract/not-found': {},

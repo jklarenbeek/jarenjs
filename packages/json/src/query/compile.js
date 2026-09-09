@@ -1084,19 +1084,27 @@ function compileRowComparator(specs, keyPaths) {
 }
 
 function compileFlwor(node) {
+  const seqLimit = node.limits?.sequenceItems ?? 0;
+  const checkFold = seqLimit > 0 ? (value) => {
+    const size = value instanceof Seq ? value.items.length : value === EMPTY ? 0 : 1;
+    if (size > seqLimit)
+      throw new JsonQueryRuntimeError('JQ2009',
+        `a fold accumulator exceeded ${seqLimit} items (limits.sequenceItems)`, node.docPath);
+    return value;
+  } : null;
   // final sink: $return collects into the accumulator; the $count clause
   // numbers surviving tuples through its own frame slot (0-based, D6),
   // reset once per phrase evaluation by the drivers below
   const retGet = compileNode(node.ret);
   // $fold (section 6.9) replaces the collecting sink with an assigning
   // one: $return names the accumulator's next value instead of an item
-  // of the result, and nothing is materialized.
+  // of the result. It avoids collecting intermediate return values.
   const foldSlot = node.fold === null ? -1 : node.fold.slot;
   let sink;
   if (foldSlot >= 0) {
-    sink = (f) => {
-      f[foldSlot] = retGet(f);
-    };
+    sink = checkFold === null
+      ? (f) => { f[foldSlot] = retGet(f); }
+      : (f) => { f[foldSlot] = checkFold(retGet(f)); };
   }
   else if (node.ret.card === CARD_ONE)
     sink = (f, out) => out.push(retGet(f));
@@ -1114,12 +1122,8 @@ function compileFlwor(node) {
   // limits.sequenceItems bounds every phrase materialization: the guard
   // fires while the accumulator grows, deterministically, inside the
   // synchronous engine (never a wall-clock claim)
-  const seqLimit = node.limits !== null && node.limits !== undefined
-    && node.limits.sequenceItems !== null
-    ? node.limits.sequenceItems
-    : 0;
-  // a $fold materializes nothing, so the phrase-output cap has nothing
-  // to bound and is not installed
+  // A fold does not collect returns; its accumulator can nevertheless
+  // be a sequence. That value is checked by the fold driver below.
   if (seqLimit > 0 && foldSlot < 0) {
     const inner = sink;
     const limitPath = node.docPath;
@@ -1274,7 +1278,7 @@ function compileFlwor(node) {
     return drive;
   const initGet = compileNode(node.fold.expr);
   return (f) => {
-    f[foldSlot] = initGet(f);
+    f[foldSlot] = checkFold === null ? initGet(f) : checkFold(initGet(f));
     drive(f);
     return f[foldSlot];
   };

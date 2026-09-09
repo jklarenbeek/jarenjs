@@ -158,8 +158,6 @@ function prepare(op, handler, tag) {
   const pathMembers = [];
   /** @type {Set<string>} */
   const queryMembers = new Set();
-  /** @type {Set<string>} */
-  const repeated = new Set();
   /** @type {string[]} */
   const headerMembers = [];
   /** @type {string[]} */
@@ -177,10 +175,6 @@ function prepare(op, handler, tag) {
       headerMembers.push(m);
       headerNames.push(headerNameOf(m));
       headerArray.push(transport.members.repeated.includes(m));
-    }
-    for (let i = 0; i < transport.members.repeated.length; i++) {
-      const m = transport.members.repeated[i];
-      if (queryMembers.has(m)) repeated.add(m);
     }
   }
   const members = Object.keys(http.in);
@@ -203,7 +197,7 @@ function prepare(op, handler, tag) {
     nonBody,
     pathMembers,
     queryMembers,
-    repeated,
+    queryJson: new Set(transport === null ? [] : transport.queryJson),
     headerMembers,
     headerNames,
     headerArray,

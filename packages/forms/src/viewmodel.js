@@ -184,7 +184,7 @@ export function buildFormViewModel(model, data, options = {}) {
   const session = options.session !== undefined
     ? compileSession(options.session, data)
     : null;
-  const root = buildNode(model, '', data, ruleState, fieldErrors, false, false, session);
+  const root = buildNode(model, '', data, ruleState, fieldErrors, false, false, session, session?.initial);
   if (root !== null && session !== null) {
     root.session = {
       dirty: session.dirtyPaths.length > 0,
@@ -286,19 +286,19 @@ function pointerId(prefix, pointer) {
  * @param {string} pointer - The concrete RFC 6901 pointer of this node
  *   (segments encoded with `encodeJSONPointerSegment`, the walk
  *   convention shared with the model, rule and validation pointers).
- * @param {any} data - The form data root.
+ * @param {any} raw - The data cursor at this field (before computed values).
  * @param {Record<string, any>} ruleState
  * @param {Record<string, any>} fieldErrors
  * @param {boolean} element
  * @param {boolean} removable
  * @param {ReturnType<typeof compileSession> | null} [session]
+ * @param {any} [initialValue] - The baseline cursor at this field.
  * @returns {FormViewNode|null}
  */
-function buildNode(field, pointer, data, ruleState, fieldErrors, element, removable, session = null) {
+function buildNode(field, pointer, raw, ruleState, fieldErrors, element, removable, session = null, initialValue = undefined) {
   const rs = ruleState[pointer];
   if (rs !== undefined && rs.visible === false) return null;
 
-  const raw = getValueAtPointer(data, pointer);
   let value = field.kind === 'const' ? field.constValue : raw;
   if (rs !== undefined && rs.computed !== undefined) value = rs.computed;
 
@@ -369,7 +369,6 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
     if (session.hasInitial) {
       // presence-aware: adding or removing a member whose value is
       // null is a membership change, so it is dirty
-      const initialValue = getValueAtPointer(session.initial, pointer);
       node.dirty = (initialValue === undefined) !== (raw === undefined)
         || (initialValue !== undefined && !equalsJson(initialValue, raw));
     }
@@ -381,9 +380,11 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
   if (field.children !== null && field.children !== undefined) {
     const children = [];
     for (const child of field.children) {
+      const segment = `/${encodeJSONPointerSegment(child.key)}`;
       const built = buildNode(
-        child, `${pointer}/${encodeJSONPointerSegment(child.key)}`, data, ruleState,
-        fieldErrors, false, false, session);
+        child, pointer + segment, getValueAtPointer(raw, segment), ruleState,
+        fieldErrors, false, false, session,
+        session?.hasInitial ? getValueAtPointer(initialValue, segment) : undefined);
       if (built !== null) children.push(built);
     }
     node.children = children;
@@ -404,7 +405,8 @@ function buildNode(field, pointer, data, ruleState, fieldErrors, element, remova
       // still valid is `minItems`' answer to give, not this layer's.
       const removable = !isTupleSlot || i === array.length - 1;
       const built = buildNode(
-        template, `${pointer}/${i}`, data, ruleState, fieldErrors, true, removable, session);
+        template, `${pointer}/${i}`, array[i], ruleState, fieldErrors, true, removable, session,
+        session?.hasInitial ? getValueAtPointer(initialValue, `/${i}`) : undefined);
       if (built !== null) items.push(built);
     }
     node.items = items;

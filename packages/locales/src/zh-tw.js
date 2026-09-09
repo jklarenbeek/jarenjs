@@ -127,6 +127,7 @@ export const zhTW = {
   'x-form/assert': '無效的值',
   'form/addItem': '新增項目',
   'form/removeItem': '移除項目',
+  'form/jsonPlaceholder': '請輸入 JSON 值',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

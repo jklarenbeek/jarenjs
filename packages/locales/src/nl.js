@@ -128,6 +128,7 @@ export const nl = {
   'x-form/assert': 'Ongeldige waarde',
   'form/addItem': 'Item toevoegen',
   'form/removeItem': 'Item verwijderen',
+  'form/jsonPlaceholder': 'Voer een JSON-waarde in',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

@@ -34,6 +34,9 @@ import { ContractHostError } from '../errors.js';
  * @property {string} [statePath] - where the slice lives in app state, as a
  *   chain of identifier-safe segments; default `/contract`
  * @property {readonly string[]} [ops] - the operations the app uses; default every operation
+ * @property {Record<string, { reconnect: { max: number } }>} [subs] - per
+ *   subscribe-operation options. Reconnect is opt-in; the slot stays live
+ *   while the HTTP client resumes, and reports error after exhaustion.
  */
 
 /**
@@ -145,8 +148,9 @@ function replace(path, value) {
  * @param {Record<string, any>} actions
  * @param {any[]} subs
  * @param {Record<string, any>} properties
+ * @param {{ max: number } | undefined} reconnect
  */
-function appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuery, nextId, actions, subs, properties) {
+function appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuery, nextId, actions, subs, properties, reconnect) {
   const idGuard = { $eq: ['$payload.id', idQuery] };
 
   setObjectMember(actions, `${namespace}${id}/start`, {
@@ -224,6 +228,7 @@ function appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuer
       snapshot: `${namespace}${id}/snapshot`,
       patch: `${namespace}${id}/patch`,
       error: `${namespace}${id}/error`,
+      ...(reconnect === undefined ? {} : { reconnect: { $const: { max: reconnect.max } } }),
     },
   });
 
@@ -302,6 +307,21 @@ export function contractAppBinding(contract, options = {}) {
   }
   const ops = options.ops === undefined ? contract.ids : options.ops;
   if (!Array.isArray(ops)) throw host('ops must be an array of operation ids');
+  const streamOptions = options.subs === undefined ? {} : options.subs;
+  if (streamOptions === null || typeof streamOptions !== 'object' || Array.isArray(streamOptions))
+    throw host('subs must be an operation-options object');
+  for (const id of Object.keys(streamOptions)) {
+    if (!ops.includes(id) || !Object.hasOwn(contract.operations, id) || contract.operations[id].kind !== 'subscribe')
+      throw host(`subs names '${id}', which is not a selected subscribe operation`);
+    const entry = streamOptions[id];
+    const reconnect = entry?.reconnect;
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).some((key) => key !== 'reconnect')
+      || reconnect === null || typeof reconnect !== 'object' || Array.isArray(reconnect)
+      || Object.keys(reconnect).some((key) => key !== 'max')
+      || !Number.isSafeInteger(reconnect.max) || reconnect.max < 0)
+      throw host(`subs['${id}'] must be { reconnect: { max } } with a non-negative safe integer max`);
+  }
   const queryRoot = '$' + statePath.replaceAll('/', '.');
 
   /** @type {Record<string, TaskSlot | StreamSlot>} */
@@ -328,7 +348,8 @@ export function contractAppBinding(contract, options = {}) {
     const done = `${namespace}${id}/done`;
 
     if (op.kind === 'subscribe') {
-      appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuery, nextId, actions, subs, properties);
+      appendSubscription(contract, op, id, namespace, slot, slotQuery, idQuery, nextId, actions, subs, properties,
+        Object.hasOwn(streamOptions, id) ? streamOptions[id].reconnect : undefined);
       setObjectMember(slice, id, { id: 0, status: 'idle', kind: null, input: null, value: null, error: null, meta: null, seq: 0 });
       required.push(id);
       continue;

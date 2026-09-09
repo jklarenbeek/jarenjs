@@ -116,7 +116,7 @@ describe('hostile requests', () => {
     await settles(server, req('GET', '/api/products?limit=%ZZ'), 400, 'JC2012');
     await settles(server, req('GET', '/api/products?limit=1e400'), 400, 'JC2006');
     await settles(server, req('GET', '/api/products?limit=1&limit=2&limit=3&limit=101'), 400, 'JC2006');
-    await settles(server, req('GET', '/api/products?tag=' + 'x'.repeat(10000)), 200, null);
+    await settles(server, req('GET', '/api/products?tag=' + encodeURIComponent(JSON.stringify(['x'.repeat(10000)]))), 200, null);
     await settles(server, req('GET', '/api/products?flag=TRUE'), 400, 'JC2006');
     await settles(server, req('GET', '/api/products?flag=true&flag=maybe'), 400, 'JC2006');
     await settles(server, req('GET', '/api/catalog#fragment'), 404, 'JC2001');

@@ -127,6 +127,7 @@ export const ko = {
   'x-form/assert': '유효하지 않은 값입니다',
   'form/addItem': '항목 추가',
   'form/removeItem': '항목 삭제',
+  'form/jsonPlaceholder': 'JSON 값을 입력하세요',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

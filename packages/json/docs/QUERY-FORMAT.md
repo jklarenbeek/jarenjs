@@ -655,6 +655,21 @@ expressible; passing a function to an operator still is not.
 over the *sorted* tuples; with `$groupby` it updates once per group; `$where`
 selects which tuples update it at all.
 
+**Barrier visibility is part of the clause order.** Without `$groupby` or
+`$orderby`, `$let` and `$where` read the accumulator after the previous
+surviving tuple's update. A group/order barrier consumes the earlier
+clauses before any `$return` runs, so those earlier clauses read the
+**initial** accumulator. Group keys and sort keys therefore cannot depend
+on a running total. To compute a next value in sorted/grouped order, put
+its `$let` inside `$return`. The accumulator is never snapshotted as a
+tuple variable or collected into a group.
+
+Function values are deliberately outside the JSON item model. Mapping
+and projection use `$for`/`$return`, filtering uses `$where`, reduction
+uses `$fold`, and sorting by a projection uses `$orderby`. Named host
+functions (`$call`) and string collations cover the host extension seams;
+none requires serializing an executable value into a query document.
+
 ```json
 { "$fold": { "total": 0 },
   "$for": { "b": "$.store.book[*]" },
@@ -672,7 +687,12 @@ lookup, a fold over a runtime path is a pointer walk:
 ```
 
 resolves `$.path` — a sequence of member names and array indexes — against
-`$.doc`, one segment per tuple.
+`$.doc`, one segment per tuple. These are **typed segments**, with strings
+for object names and numbers for array indexes. This example does not
+parse an RFC 6901 pointer string: `"/a/0"` requires escape decoding and
+container-sensitive index handling (`"0"` is an object name while `0` is
+an array index for `$get`). Hosts addressing RFC 6901 pointers should use
+`compileJSONPointer`; splitting on `/` alone is not equivalent.
 
 ### 6.10 `$allowing-empty` and window clauses
 
@@ -983,7 +1003,7 @@ clause/operator collision note.
 | `$tail` | `{"$tail": e}` | Every item but the first; empty for operands of one or zero items (`fn:tail`). |
 | `$subsequence` | `[seq, start, len?]` (2–3) | The items of *seq* at the 0-based (D6) positions selected by the `$substring` bound rules (§8.7, F&O `fn:subsequence`): `round(start) ≤ p`, and `p < round(start) + round(len)` when *len* is given. *start*/*len* MUST each be a single number (`JQ2001`). |
 | `$index-of` | `[seq, item]` | The 0-based (D6) positions in *seq* of the items deep-equal to *item*, as a sequence, in order (`fn:index-of`). Equality is the `$eq` item relation (D2) — `NaN` matches nothing. *item* MUST be exactly one item (`JQ2001`). |
-| `$range` | `[start, end]` | The integers from *start* to *end* **inclusive** (the XQuery `to` operator). Either operand empty → empty; *start* > *end* → empty. A non-integral or non-number operand is `JQ2001`. A result of more than 2³² items is runtime error `JQ2007` (resource guard). |
+| `$range` | `[start, end]` | The integers from *start* to *end* **inclusive** (the XQuery `to` operator). Either operand empty → empty; *start* > *end* → empty. Each bound must be a safe integer (±(2⁵³−1)), otherwise `JQ2001`. Materializing more than **1,000,000 items** is runtime error `JQ2007`, checked before allocation. `limits.sequenceItems` can lower this ceiling. Direct `$for`/quantifier iteration uses counting loops and is not subject to the allocation ceiling. |
 | `$get` | `[target, key]` | Dynamic lookup, the runtime counterpart of a path leaf: an object *target* with a string *key* yields the member value or empty; an array *target* with an integer *key* yields the element at that 0-based (D6) index — a negative index counts from the end, like the RFC 9535 index selector — or empty. **Every other combination** (wrong type pairing, non-integral index, empty or multi-item operands) is simply the empty sequence, never an error. |
 | `$entries` | `{"$entries": e}` | The member-pair counterpart of a `[*]` path segment (which yields values only): each OBJECT item of the operand contributes one `{"key": name, "value": v}` pair per member, in member order; non-object items contribute nothing, and an empty operand yields the empty sequence. `$from-entries` is the inverse; the `$map` constructor (§3.5.2) is the fixed-arity form for computed keys. |
 | `$from-entries` | `{"$from-entries": e}` | The inverse of `$entries`: assembles ONE object from the operand's `{"key": name, "value": v}` items, in sequence order — later pairs win on duplicate keys, exactly like the `$map` constructor. Items without a string `key` contribute nothing; a pair missing its `value` member reads as `null`; an empty operand constructs the empty object. |
@@ -1158,8 +1178,9 @@ phrase or the query hands onward, NOT memory, fan-out or intermediate
 accumulation.
 
 - `sequenceItems` — bounds every FLWOR phrase materialization (the
-  sequence a phrase *returns*) and tightens `$range`'s resource guard
-  below its 2³² ceiling; exceeding it is `JQ2009` (`$range` keeps its
+  sequence a phrase *returns*), including the initial and each subsequent
+  `$fold` accumulator, and tightens `$range`'s resource guard
+  below its 1,000,000-item ceiling; exceeding it is `JQ2009` (`$range` keeps its
   historical `JQ2007`). A `$groupby`/`$orderby` barrier may accumulate
   arbitrarily many items — and a collation may run arbitrarily many
   comparisons — behind a small final output; bare paths, `$count` and
@@ -1804,7 +1825,7 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2004` | `$map` key expression not a single string (§3.5.2) | XPTY0004 |
 | `JQ2005` | Incomparable `$orderby`/`$sort` keys (§6.6, §8.9) | XPTY0004 |
 | `JQ2006` | Reference to an unbound external parameter (§9) | XPDY0002 |
-| `JQ2007` | Resource guard: an operator result exceeding an implementation limit (`$range` over 2³² items, §8.9) | XPDY0130 |
+| `JQ2007` | Resource guard: an operator result exceeding an implementation limit (materialized `$range` over 1,000,000 items, or a lower `sequenceItems` limit, §8.9) | XPDY0130 |
 | `JQ2008` | Schema assertion failure: an item rejected by `$assert`'s schema, or a bound variable rejected by its `$as` schema (§6.8, §8.11) | XPTY0004 |
 | `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, `limits.resultItems` at the query boundary, or `limits.steps` expression evaluations (§8.12) | XPDY0130 |
 | `JQ2010` | A registered `$call` function threw (§8.12) | FOER0000 |

@@ -340,18 +340,19 @@ export function formatEntityTag(tag, strong) {
 /**
  * Decode a query string into the declared members of an input object:
  * only declared names are set (an undeclared key is never merged, so no
- * request can smuggle a member); a `repeated` member collects every
- * occurrence into an array, every other member is last-wins; a `+` is a
+ * request can smuggle a member); JSON members decode exactly one value,
+ * scalar members are last-wins; a `+` is a
  * space and escapes decode as `application/x-www-form-urlencoded`
  * (`URLSearchParams`). Returns `false` when the query is not decodable
- * (a malformed percent-escape or invalid UTF-8) — the `JC2012` case.
+ * (malformed percent-escape, UTF-8 or JSON, or a repeated JSON member)
+ * — the `JC2012` case.
  * @param {string} query - the part after `?`, possibly empty
  * @param {ReadonlySet<string>} declared - the query member names
- * @param {ReadonlySet<string>} repeated - the array-typed ones
  * @param {Record<string, unknown>} out - the input object under assembly
+ * @param {ReadonlySet<string>} json - schema-directed JSON members
  * @returns {boolean} false when not decodable
  */
-export function decodeQuery(query, declared, repeated, out) {
+export function decodeQuery(query, declared, out, json) {
   if (query.length === 0) return true;
   // URLSearchParams never throws: it keeps a malformed escape as its
   // literal text and replaces invalid UTF-8; both are "not decodable"
@@ -368,12 +369,16 @@ export function decodeQuery(query, declared, repeated, out) {
   const params = new URLSearchParams(query);
   for (const [name, value] of params) {
     if (!declared.has(name)) continue;
-    if (repeated.has(name)) {
-      const list = out[name];
-      if (Array.isArray(list)) list.push(value);
-      else setObjectMember(out, name, [value]);
+    if (json.has(name)) {
+      // One JSON value per declared structured member. Scalar strings
+      // are untouched; repeated JSON members are ambiguous and refused.
+      const values = params.getAll(name);
+      if (values.length !== 1) return false;
+      try { setObjectMember(out, name, JSON.parse(value)); }
+      catch { return false; }
+      continue;
     }
-    else setObjectMember(out, name, value);
+    setObjectMember(out, name, value);
   }
   return true;
 }

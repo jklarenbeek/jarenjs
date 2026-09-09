@@ -1026,7 +1026,8 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     sc = normalizeForBindings(obj.$for, docPath + '/$for', sc, ctx, phraseNames, forBindings, tupleSlots);
   // the accumulator binds after $for - a $for source is iterated once and
   // must not depend on a value that changes per tuple - and before $let,
-  // so every later clause sees the accumulation so far
+  // so later clauses can read it. Group/order barriers consume their
+  // prefix before returns update the accumulator; that prefix sees init.
   if (fold !== null)
     sc = { name: fold.name, slot: fold.slot, card: CARD_MANY, parent: sc };
   if (hasOwn(obj, '$let')) {

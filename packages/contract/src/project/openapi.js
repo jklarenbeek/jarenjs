@@ -324,7 +324,7 @@ function docLines(doc) {
 function operationView(op, projected, ctx) {
   const base = at('/operations', op.id);
   const http = op.http;
-  /** @type {{ name: string, in: string, required: boolean, schema: any }[]} */
+  /** @type {any[]} */
   const parameters = [];
   /** @type {Record<string, any>} */
   const bodyMembers = {};
@@ -351,6 +351,8 @@ function operationView(op, projected, ctx) {
       bodyCount++;
       if (name === http.body) bodyMemberRequired = required;
     }
+    else if (loc === 'query' && op.input?.transport?.queryJson.includes(name))
+      parameters.push({ name, in: loc, required, content: { 'application/json': { schema: mapped } } });
     else parameters.push({ name, in: loc, required, schema: mapped });
   }
   if (op.policy.idempotency !== 'none') {

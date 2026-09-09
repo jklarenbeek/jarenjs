@@ -189,7 +189,7 @@ These two externals are the whole vocabulary: any other free name in a rule is a
 
 ### Array item templates
 
-A rule on an array item template (`/lines/-/amount`) compiles **once** and evaluates **per element** of the actual array, binding `$value`/`$pointer` per index — results are keyed by the expanded pointer (`/lines/2/amount`). That compiled-once/dispatch-per-node generalization now exists as the [`@jarenjs/json/jslt`](../json/docs/JSLT-FORMAT.md) `$apply` engine: a future forms computed-view layer can generalize `x-form.computed` into schema-dispatched view-model stylesheets without changing forms' validator-independent boundary.
+A rule on an array item template (`/lines/-/amount`) compiles **once** and evaluates **per element** of the actual array, binding `$value`/`$pointer` per index — results are keyed by the expanded pointer (`/lines/2/amount`). Rendering uses [`@jarenjs/json/jslt`](../json/docs/JSLT-FORMAT.md) rules over the composed view model. Composition retains the model, data and session cursors together; see the addressing measurement below.
 
 ### Schema literals in rules
 
@@ -383,6 +383,39 @@ Form data keeps plain JSON semantics — an untouched field is *absent*, not an 
 
 `buildFormViewModel(model, data, options)` composes everything above — the field tree, the current data, per-field validation and `x-form` rule state — into **one plain-JSON render tree**: the "computed view" layer this README promised. Each node carries `pointer`, `label`, `control`, `value` (`x-form.computed` wins, `null` when absent), precomputed select `options` (with `selected`), localized `errors`, `enabled`, and the write discipline flags (`element`: array elements must be written with RFC 6902 `replace`, since `add` inserts; `removable`; `addValue` from `createItemValue`). Rule-hidden fields are *excluded* — a renderer cannot leak hidden data by accident. Array item templates expand per data element with concrete pointers (`/lines/2/amount`), matching the pointer keys of `evaluateFormRules` and `validateAllFields`. A short tuple's `addValue` comes from its next prefix slot; the tail item template supplies starters only after the prefix is filled.
 
+The composition walk carries the current **raw data cursor** and the
+session's **initial cursor** down beside each field. It reads one pointer
+suffix per descent instead of starting from the document root per field;
+computed container values do not replace the raw cursor used by children.
+Missing baseline ancestors stay missing, preserving dirty-state detection.
+
+`$fold` can implement a second cursor with typed segments, but this alone
+is not a reason to replace the composer. The executable experiment in
+`benchmark/forms-composition.js` compares a fold-based JSLT rule with root
+pointer getters and carried cursors on the same expanded fields. Its
+parity tests include escaped keys, array indexes and missing ancestors.
+
+<!--fact:forms.addressing-->
+
+Measured on v24.19.0, linux/x64; median milliseconds per expanded-field projection. Compilation and field expansion are excluded from all contenders.
+
+| Depth | Nodes | Root pointers | Carried cursors | Fold stylesheet |
+|---|---|---|---|---|
+| 1 | 33 | 0.0043 | 0.0040 | 0.0817 |
+| 8 | 136 | 0.0314 | 0.0101 | 0.6325 |
+| 24 | 536 | 0.2811 | 0.0319 | 5.1716 |
+
+<!--/fact-->
+
+The shallow timings are close and do not justify a universal speedup
+claim; deeper trees benefit from carrying cursors. The fold stylesheet loses on every
+fixture even with expansion excluded. These measurements cover addressing
+only, not the complete session/validation/render pipeline. The production
+composer therefore keeps the JS walk. A complete stylesheet replacement
+still needs evidence for array-template expansion, hidden fields, enum
+values, errors and session state; first-class functions are not a
+prerequisite.
+
 ```javascript
 const model = buildFormModel(schema);
 const rules = compileFormRules(model);
@@ -478,3 +511,17 @@ Every subpath a consumer can import, derived from the manifest by
 ## Development
 
 Unit tests live in `test/forms/` at the repository root. See the repository [README](../../README.md) for the full Jaren documentation, and the [ROADMAP](../../docs/ROADMAP.md) for planned forms work (rule dependency memoization, hidden-field pruning on submit, computed views through JSLT).
+
+## Form chrome policy
+
+`formChromeLabels(catalog)` supplies `addItem`, `removeItem` and
+`jsonPlaceholder`, with English fallbacks and translations in every
+locale pack. Pass them to `createFormView({ labels })`; the JSON hint is
+both an empty-editor placeholder and an accessible description. A label
+beginning with `$` remains literal text.
+
+The add/remove glyphs and required marker are decoration, not message
+keys: customize `addLabel`, `removeLabel` and `requiredMarker` on the
+stylesheet. Required controls carry `aria-required`; the decorative
+marker stays hidden from assistive technology. JSON syntax and the name
+“JSON” retain their wire spelling; instructions around them are localized.

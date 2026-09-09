@@ -66,24 +66,6 @@ delete it or fix it.
   the closure compiler staying the default. The no-`eval` rule is absolute in this
   package today, which is the guarantee this must not quietly cost.
 
-## @jarenjs/json — query engine & language
-
-- [ ] **Materializing `$range` still meets the heap before the guard** —
-  iterating a range no longer materializes it (`$for` and quantifiers over a
-  static `$range` compile to counting loops), so the shape the QT3
-  resource-bomb skips exercised is fixed. A range that is genuinely
-  materialized — bound by `$let`, handed to an aggregate — still has only the
-  2³² `JQ2007` ceiling, which no heap survives; `options.limits.sequenceItems`
-  tightens it deterministically, and a lower default would be a spec change
-  to §10.3 rather than an implementation choice.
-- [ ] **Function *values*** — `$fold` (§6.9) gave the language its fold, and
-  it turned out not to need function values at all: the accumulator is a
-  binding, so map/filter/fold shapes are all FLWOR. What is still missing is
-  passing a *rule* to an operator — a comparator to `$sort`, a projection to
-  a hypothetical `$map-seq`. `$call` covers host functions over scalars; a
-  first-class function value would need an encoding the JSON surface
-  deliberately does not have.
-
 ## @jarenjs/json — JSLT
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
@@ -130,48 +112,18 @@ delete it or fix it.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
-## @jarenjs/contract
-
-- [ ] **The app binding's subscription slot passes no `reconnect`** — the
-  HTTP client's opt-in reconnect (`subscribe(op, input, { reconnect: {
-  max } })`, CONTRACT-FORMAT.md §19) re-establishes a stream after a
-  network loss from the last delivered seq, but `contractAppBinding`'s
-  `contract-stream` handler calls `client.subscribe` with the callbacks
-  only, so a slot that lost its stream is re-entered by the view with a
-  fresh `start`. A per-operation `reconnect` on the binding's `subs`
-  entry, threaded into that call, is the one-line door; deciding whether
-  a slot should reconnect silently or surface the loss first is the
-  design question it waits on.
-- [ ] **Query-located object members do not survive the HTTP wire** —
-  the transport coercion is deliberately scalar-only (query strings,
-  form fields), so a `subscribe`/`read` input member typed `object`/
-  `array` round-trips over `port`/`local` but arrives as its JSON text
-  in a query string over http. Whether the transport should JSON-decode
-  a member whose declared type is non-scalar (a D3 extension) is open;
-  until then such operations belong on the JSON-framed bindings or key
-  their stream by scalars.
-
 ## @jarenjs/forms
 
-- [ ] **Stylesheets replacing the JS composition step** — `buildFormViewModel`
-  composes the render tree in JS. A stylesheet cannot replace it because
-  rendering a form is a **two-cursor walk**: the schema-derived model says what
-  a field is, the data says what it holds, and a JSLT rule descends only the
-  one input document it matched. Two primitives would each unblock it, and
-  **one now exists**: the query engine's `$fold` clause (QUERY-FORMAT §6.9)
-  makes walking a runtime pointer a reduce over its segments with `$get`, so
-  a rule can reach the data cursor for the node it matched. The alternative,
-  **a parameterized `$apply`** carrying a second cursor down with the matched
-  node, is still unbuilt. The open work is therefore no longer a language
-  question but a stylesheet one: rewrite `buildFormViewModel`'s composition as
-  rules that fold to their data cursor, and find out where the fold's
-  per-field re-walk costs more than the JS pass it replaces.
-- [ ] **Form chrome beyond the two array buttons** — `form/addItem` and
-  `form/removeItem` are catalog messages resolved by `formChromeLabels`; the
-  `+`/`×` glyphs, the `*` required marker and the `json` editor's affordances
-  are still literal. They want a decision about how much of a stylesheet's
-  static text belongs in the message keyspace before more keys land in eleven
-  packs.
+- [ ] **Complete stylesheet composition needs a demonstrated benefit** —
+  `$fold` already supports typed-segment cursor walks; it does not parse
+  RFC 6901 pointer strings or carry an array template's instance cursor
+  through `$apply`. The addressing experiment and its losses are published
+  in `packages/forms/README.md`; the production composer now carries data
+  and initial-session cursors through its JS walk. A replacement must
+  demonstrate full parity for nested array/tuple expansion, hidden fields,
+  computed values, enum encoding, errors and session state, then measure
+  the complete pipeline. Parameterized `$apply` remains one possible path;
+  function values are neither needed nor planned for this purpose.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -620,13 +572,6 @@ still open is listed here, each with its reason.
   (~577k), and records the loss here rather than pretending the gap is small.
 
 ## Benchmarks & tooling
-
-- [ ] **Portable streaming backpressure measurement** — the fixed-heap host-seam
-  test's encoded-minus-consumed count includes platform TCP buffers. Its existing
-  bound can fail during a parallel suite run while the unchanged isolated test
-  and full rerun pass. Define a portable measurement of queued application data
-  while retaining the fixed-heap, complete-byte, hash and cancellation assertions
-  in `test/contract/host-seam-e2e.test.js`.
 
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident

@@ -126,6 +126,7 @@ export const tr = {
   'x-form/assert': 'Geçersiz değer',
   'form/addItem': 'Öğe ekle',
   'form/removeItem': 'Öğeyi kaldır',
+  'form/jsonPlaceholder': 'Bir JSON değeri girin',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

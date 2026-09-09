@@ -63,6 +63,7 @@ export const formsMessagesEn = {
   // message like every other string an operator can hear.
   'form/addItem': 'Add item',
   'form/removeItem': 'Remove item',
+  'form/jsonPlaceholder': 'Enter a JSON value',
 };
 
 /** The compiled built-in English catalog (module-level singleton). */
@@ -127,14 +128,14 @@ export function renderFormsMessage(catalog, msgid, params) {
 
 /**
  * The localized chrome strings a form renderer needs: the accessible
- * names of the array add/remove buttons.
+ * names of the array add/remove buttons and the JSON editor's hint.
  *
  * The stylesheet that renders a form is plain JSON built once, so it
  * cannot look anything up at render time — the host resolves these and
  * hands them to `createFormView`. Kept next to the error catalog on
  * purpose: one keyspace, one parity gate across every locale pack.
  * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - A compiled catalog, or undefined for English
- * @returns {{addItem: string, removeItem: string}}
+ * @returns {{addItem: string, removeItem: string, jsonPlaceholder: string}}
  * @example
  * createFormView({ labels: formChromeLabels(catalogs[locale]) });
  */
@@ -142,6 +143,7 @@ export function formChromeLabels(catalog = undefined) {
   return {
     addItem: renderFormsMessage(catalog, 'form/addItem', {}),
     removeItem: renderFormsMessage(catalog, 'form/removeItem', {}),
+    jsonPlaceholder: renderFormsMessage(catalog, 'form/jsonPlaceholder', {}),
   };
 }
 

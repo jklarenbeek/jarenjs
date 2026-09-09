@@ -26,6 +26,7 @@ import { penCoverage } from './generate-pen-census.js';
 import { generateAuthoringProfiles } from './generate-authoring-profiles.js';
 import { programFacts } from './generate-program-facts.js';
 import { ledgerFacts } from './generate-ledger-facts.js';
+import { formsFacts } from './generate-forms-facts.js';
 import { recallFacts } from './generate-recall-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -37,6 +38,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts, formsFacts],
   argv: process.argv.slice(2),
 }));

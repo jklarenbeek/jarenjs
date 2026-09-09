@@ -43,7 +43,11 @@ import type {
 } from '@jarenjs/formats';
 import { getSchemaDraftByVersion } from '@jarenjs/refs';
 import type { SchemaDraftInfo } from '@jarenjs/refs';
-import { buildFormModel } from '@jarenjs/forms';
+import { buildFormModel, formChromeLabels } from '@jarenjs/forms';
+import { createFormView } from '@jarenjs/app';
+const chromeLabels = formChromeLabels();
+const jsonHint: string = chromeLabels.jsonPlaceholder;
+void [jsonHint, createFormView({ labels: chromeLabels, requiredMarker: '*' })];
 
 const validator = new JarenValidator();
 validator.addFormats(stringFormats);
@@ -753,6 +757,9 @@ const negotiation: Promise<Negotiation> = httpClient.negotiate({ signal: new Abo
 void [negotiation, httpClient.url('product.save', { id: 1 }), httpClient.pending(), httpClient.capabilities.name === 'http', httpClient.contract.ids, httpClient.describe(), CLIENT_ERRORS.JC2050.msgid];
 httpClient.close();
 const appBinding: ContractAppBinding = contractAppBinding(shopContract, { namespace: 'contract/', statePath: '/contract', ops: ['product.save'] });
+void contractAppBinding(shopContract, { subs: { 'board.feed': { reconnect: { max: 2 } } } });
+// @ts-expect-error reconnect attempts are numeric
+void contractAppBinding(shopContract, { subs: { 'board.feed': { reconnect: { max: '2' } } } });
 // a slice entry is a task slot or — for a subscribe operation — a stream
 // slot, so the record's value type is the union the binding declares
 const slot: TaskSlot | StreamSlot = appBinding.slice['product.save'];

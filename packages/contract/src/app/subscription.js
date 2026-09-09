@@ -48,7 +48,7 @@ import { PORT_LOCAL_ERRORS } from '../pipeline.js';
 /**
  * The props of one generated subs entry: the operation, the slot id and
  * input resolved from state, and the action names to dispatch.
- * @typedef {{ op: string, id: number, input: unknown, snapshot: string, patch: string, error: string }} StreamProps
+ * @typedef {{ op: string, id: number, input: unknown, snapshot: string, patch: string, error: string, reconnect?: { max: number } }} StreamProps
  */
 
 /**
@@ -86,12 +86,18 @@ export function createContractSubscription(client, options = {}) {
     const { op, id } = p;
     /** @type {unknown} */
     let doc = null;
+    let seq = -1;
+    let stopped = false;
     const sub = client.subscribe(op, p.input === undefined ? null : p.input, {
+      ...(p.reconnect === undefined ? {} : { reconnect: p.reconnect }),
       onSnapshot: (/** @type {unknown} */ value, /** @type {{ seq: number }} */ info) => {
+        if (stopped) return;
         doc = value;
+        seq = info.seq;
         dispatch(p.snapshot, { id, value, seq: info.seq });
       },
       onPatch: (/** @type {{ patch: any[], seq: number }} */ emission) => {
+        if (stopped || emission.seq <= seq) return;
         try {
           doc = compileJSONPatch(/** @type {any} */ (emission.patch))(doc);
         }
@@ -107,10 +113,12 @@ export function createContractSubscription(client, options = {}) {
           });
           return;
         }
+        seq = emission.seq;
         dispatch(p.patch, { id, value: doc, seq: emission.seq });
       },
-      onError: (/** @type {Outcome} */ outcome) => dispatch(p.error, { id, outcome }),
+      onError: (/** @type {Outcome} */ outcome) => { if (!stopped) dispatch(p.error, { id, outcome }); },
       onEnd: () => {
+        if (stopped) return;
         // the server ended the stream: the slot must say the channel is
         // gone, so a view can offer a reconnect (a fresh start)
         dispatch(p.error, {
@@ -121,7 +129,7 @@ export function createContractSubscription(client, options = {}) {
         });
       },
     });
-    return () => sub.stop();
+    return () => { stopped = true; sub.stop(); };
   };
 }
 

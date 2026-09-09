@@ -535,7 +535,7 @@ describe('Jaren JSON Query operator library', () => {
       runtimeFails({ $range: [1, { $div: [1, 0] }] }, null, 'JQ2001', '/$range/1');
     });
 
-    it('should raise JQ2007 beyond the 2^32-item resource guard', () => {
+    it('should raise JQ2007 beyond the materialization resource guard', () => {
       runtimeFails({ $range: [0, 4294967296] }, null, 'JQ2007', '/$range');
       runtimeFails({ $range: [1, 1e15] }, null, 'JQ2007', '/$range');
     });

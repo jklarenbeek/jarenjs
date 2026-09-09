@@ -1199,3 +1199,13 @@ excluded from schema-acceptance evidence because that early harness omitted the
 schema; its usage remains recorded.
 
 Provider comparison: <!--fact:ledger.decoding-->openrouter, google/gemini-3.7-flash: oneOf valid; if-then rejected-full-schema (2 calls, $0.00567000 reported cost). One trial per syntax is provider acceptance evidence, not proof of grammar enforcement. Two excluded preparatory calls cost $0.00293850 and remain recorded.<!--/fact-->
+
+## Forms composition addressing
+
+Run `node benchmark/forms-composition.js` to reproduce
+`forms-composition-result.json`. Root pointer getters, carried cursors and
+a fold-based JSLT stylesheet project identical expanded fields to pointer/
+value rows; correctness is checked before timing. Compilation and expansion
+are excluded. This isolates the addressing decision and does not claim
+complete composer or renderer throughput. The measured losses and table
+are derived into `packages/forms/README.md`.

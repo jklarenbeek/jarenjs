@@ -129,6 +129,7 @@ export const de = {
   'x-form/assert': 'Ungültiger Wert',
   'form/addItem': 'Element hinzufügen',
   'form/removeItem': 'Element entfernen',
+  'form/jsonPlaceholder': 'Einen JSON-Wert eingeben',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

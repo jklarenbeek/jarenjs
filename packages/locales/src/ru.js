@@ -147,6 +147,7 @@ export const ru = {
   'x-form/assert': 'Недопустимое значение',
   'form/addItem': 'Добавить элемент',
   'form/removeItem': 'Удалить элемент',
+  'form/jsonPlaceholder': 'Введите значение JSON',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

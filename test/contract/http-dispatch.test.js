@@ -145,11 +145,11 @@ describe('dispatch — happy paths over the shop fixture', () => {
     assert.strictEqual(seen.ctx.fail, ContractFailure);
   });
 
-  it('product.search: query coercion — integer, boolean, and a repeated array member; undeclared keys are ignored, last wins otherwise', async () => {
+  it('product.search: query coercion — integer, boolean, and a JSON array member; undeclared keys are ignored, last wins otherwise', async () => {
     /** @type {any} */
     let seen;
     const server = serve({ 'product.search': (input) => { seen = input; return []; } });
-    const r = await server.dispatch(req('GET', '/api/products?q=first&q=last&limit=20&flag=true&tag=a&tag=b&nope=1&limit=5'));
+    const r = await server.dispatch(req('GET', '/api/products?q=first&q=last&limit=20&flag=true&tag=%5B%22a%22%2C%22b%22%5D&nope=1&limit=5'));
     assert.strictEqual(r.status, 200);
     assert.deepStrictEqual(seen, { q: 'last', limit: 5, flag: true, tag: ['a', 'b'] });
     assert.strictEqual(Object.hasOwn(seen, 'nope'), false);
@@ -160,8 +160,8 @@ describe('dispatch — happy paths over the shop fixture', () => {
     // a plus is a space, an escape decodes
     await server.dispatch(req('GET', '/api/products?q=a+b%20c'));
     assert.deepStrictEqual(seen, { q: 'a b c' });
-    // a single repeated-member occurrence is still an array
-    await server.dispatch(req('GET', '/api/products?tag=solo'));
+    // a singleton JSON array retains its array shape
+    await server.dispatch(req('GET', '/api/products?tag=%5B%22solo%22%5D'));
     assert.deepStrictEqual(seen, { tag: ['solo'] });
   });
 

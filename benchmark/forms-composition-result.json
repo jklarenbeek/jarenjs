@@ -1,0 +1,32 @@
+{
+  "node": "v24.19.0",
+  "platform": "linux",
+  "arch": "x64",
+  "scope": "Expanded-field addressing only; compilation and expansion excluded; median milliseconds per projection.",
+  "rows": [
+    {
+      "depth": 1,
+      "width": 32,
+      "nodes": 33,
+      "rootPointers": 0.004320320000000067,
+      "carriedCursors": 0.003982989999999944,
+      "foldStylesheet": 0.08172563999999995
+    },
+    {
+      "depth": 8,
+      "width": 128,
+      "nodes": 136,
+      "rootPointers": 0.03137711999999993,
+      "carriedCursors": 0.01007236000000006,
+      "foldStylesheet": 0.6324766099999999
+    },
+    {
+      "depth": 24,
+      "width": 512,
+      "nodes": 536,
+      "rootPointers": 0.2811027300000001,
+      "carriedCursors": 0.031944220000000315,
+      "foldStylesheet": 5.171641009999998
+    }
+  ]
+}

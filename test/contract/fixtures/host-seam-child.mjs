@@ -5,8 +5,7 @@
 // `typedHttpClient(...).bytes()` into an incremental hash/count sink —
 // under a V8 old space far below the payload (`--max-old-space-size=48`
 // for 100 MiB). Backpressure is measured where it matters: the rows the
-// cursor pulled while the client had consumed a quarter, and the most
-// encoded bytes ever ahead of the consumer. A halfway cancellation must
+// cursor pulled while the client had consumed a quarter, and the application writable queue (independent of TCP buffers). A halfway cancellation must
 // reach every finalizer exactly once: the byte source's `return()`, the
 // DB cursor's `return()`, the acquired release and the identity release,
 // with no later pull once cancellation reaches the byte source. The
@@ -78,7 +77,8 @@ const contract = compileContract(pen.document);
 
 /** The counters of one served body, from the cursor to the socket. */
 function counters() {
-  return { pulls: 0, cursorReturns: 0, bodyReturns: 0, encoded: 0, pullsAfterCancel: 0, cancelled: false };
+  return { pulls: 0, cursorReturns: 0, bodyReturns: 0, encoded: 0, pullsAfterCancel: 0, cancelled: false,
+    written: 0, maxChunk: 0, maxProducerAhead: 0, maxApplicationQueued: 0, highWaterMark: 0 };
 }
 
 /**
@@ -126,6 +126,8 @@ function encoded(text, c) {
           if (step.done) return step;
           const bytes = encoder.encode(step.value);
           c.encoded += bytes.byteLength;
+          c.maxChunk = Math.max(c.maxChunk, bytes.byteLength);
+          c.maxProducerAhead = Math.max(c.maxProducerAhead, c.encoded - c.written);
           return { done: false, value: bytes };
         },
         async return(value) {
@@ -203,7 +205,21 @@ async function settle(until) {
 
 // ——— the Node carrier: CSV and JOSL whole, then CSV cancelled halfway ———
 const dispatcher = server();
-const nodeServer = http.createServer(toNodeHandler(dispatcher));
+const nodeHandler = toNodeHandler(dispatcher);
+const nodeServer = http.createServer((request, response) => {
+  const write = response.write.bind(response);
+  response.write = function (chunk, ...args) {
+    const c = request.url === '/rows.josl' ? live.josl : live.csv;
+    const accepted = write(chunk, ...args);
+    c.written += chunk.byteLength;
+    c.highWaterMark = response.writableHighWaterMark;
+    // Writable queue bytes belong to the application. Bytes already
+    // accepted by the kernel do not, regardless of TCP autotuning.
+    c.maxApplicationQueued = Math.max(c.maxApplicationQueued, response.writableLength);
+    return accepted;
+  };
+  void nodeHandler(request, response);
+});
 nodeServer.listen(0, '127.0.0.1');
 await once(nodeServer, 'listening');
 const client = typedHttpClient(openHttpClient(contract, { baseUrl: `http://127.0.0.1:${nodeServer.address().port}` }), pen);
@@ -213,13 +229,13 @@ const csv = await client.bytes('rows.csv', null);
 if (!csv.ok) throw new Error(`csv failed: ${JSON.stringify(csv)}`);
 const csvRead = await sink(csv.value.body, () => live.csv, null);
 await settle(() => releases.identity === 1);
-const csvSummary = { ...csvRead, pulls: live.csv.pulls, cursorReturns: live.csv.cursorReturns, bodyReturns: live.csv.bodyReturns, bytes: live.csv.encoded, releases: { ...releases } };
+const csvSummary = { ...csvRead, ...live.csv, bytes: live.csv.encoded, releases: { ...releases } };
 
 const josl = await client.bytes('rows.josl', null);
 if (!josl.ok) throw new Error(`josl failed: ${JSON.stringify(josl)}`);
 const joslRead = await sink(josl.value.body, () => live.josl, null);
 await settle(() => releases.identity === 2);
-const joslSummary = { ...joslRead, pulls: live.josl.pulls, cursorReturns: live.josl.cursorReturns, bodyReturns: live.josl.bodyReturns, bytes: live.josl.encoded, releases: { ...releases } };
+const joslSummary = { ...joslRead, ...live.josl, bytes: live.josl.encoded, releases: { ...releases } };
 
 const cancelled = await client.bytes('rows.csv', null);
 if (!cancelled.ok) throw new Error(`cancel run failed: ${JSON.stringify(cancelled)}`);
@@ -238,7 +254,7 @@ const fcsv = await fetchClient.bytes('rows.csv', null);
 if (!fcsv.ok) throw new Error(`fetch csv failed: ${JSON.stringify(fcsv)}`);
 const fetchRead = await sink(fcsv.value.body, () => live.csv, null);
 await settle(() => releases.identity === 4);
-const fetchSummary = { ...fetchRead, pulls: live.csv.pulls, cursorReturns: live.csv.cursorReturns, bodyReturns: live.csv.bodyReturns, bytes: live.csv.encoded, releases: { ...releases } };
+const fetchSummary = { ...fetchRead, ...live.csv, bytes: live.csv.encoded, releases: { ...releases } };
 const fcancel = await fetchClient.bytes('rows.csv', null);
 if (!fcancel.ok) throw new Error(`fetch cancel run failed: ${JSON.stringify(fcancel)}`);
 const fetchCancelRead = await sink(fcancel.value.body, () => live.csv, CANCEL_AT);

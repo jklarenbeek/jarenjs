@@ -135,7 +135,8 @@ export const CATALOGS = deepFreeze({
     ],
     "x-form/assert": [],
     "form/addItem": [],
-    "form/removeItem": []
+    "form/removeItem": [],
+    "form/jsonPlaceholder": []
   },
   "contract": {
     "contract/not-found": [],

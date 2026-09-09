@@ -186,6 +186,7 @@ export const ar = {
   'x-form/assert': 'قيمة غير صالحة',
   'form/addItem': 'إضافة عنصر',
   'form/removeItem': 'إزالة عنصر',
+  'form/jsonPlaceholder': 'أدخل قيمة JSON',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

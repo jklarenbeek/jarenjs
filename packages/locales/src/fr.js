@@ -129,6 +129,7 @@ export const fr = {
   'x-form/assert': 'Valeur invalide',
   'form/addItem': 'Ajouter un élément',
   "form/removeItem": "Supprimer l'élément",
+  'form/jsonPlaceholder': 'Saisissez une valeur JSON',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

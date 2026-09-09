@@ -61,8 +61,8 @@ function fakeClient() {
 }
 
 /** Mount the doc's composition headless. */
-function mount() {
-  const { slice, actions, subs, schema } = contractAppBinding(contract);
+function mount(options = {}) {
+  const { slice, actions, subs, schema } = contractAppBinding(contract, options);
   const { sessions, client } = fakeClient();
   const validate = new JarenValidator().compile({ type: 'object', required: ['contract'], properties: { contract: schema } });
   /** @type {any[]} */
@@ -84,6 +84,24 @@ function mount() {
 }
 
 describe('the generated subscription in a headless app (the doc example, verbatim)', () => {
+  it('threads opt-in reconnect through JSON subscription props and keeps the default absent', async () => {
+    for (const reconnect of [undefined, { max: 2 }]) {
+      const { app, sessions } = mount(reconnect === undefined ? {} : { subs: { 'board.feed': { reconnect } } });
+      app.dispatch('contract/board.feed/start', { room: 'r1' });
+      await drain();
+      assert.deepStrictEqual(sessions[0].callbacks.reconnect, reconnect);
+      assert.strictEqual(Object.hasOwn(sessions[0].callbacks, 'reconnect'), reconnect !== undefined);
+      app.destroy();
+    }
+  });
+
+  it('refuses malformed and unselected subscription configuration at generation time', () => {
+    for (const subs of [null, [], { missing: { reconnect: { max: 1 } } },
+      { 'board.feed': { reconnect: { max: -1 } } }, { 'board.feed': { reconnect: { max: 1.5 } } },
+      { 'board.feed': { reconnect: { max: 1, unknown: true } } }, { 'board.feed': {} }])
+      assert.throws(() => contractAppBinding(contract, { subs }), { code: 'JC1007' });
+    assert.throws(() => contractAppBinding(contract, { ops: [], subs: { 'board.feed': { reconnect: { max: 1 } } } }), { code: 'JC1007' });
+  });
   it('start → live with the input stored; the subscription starts with the resolved props; a second start is a no-op', async () => {
     const { app, sessions, slot } = mount();
     assert.deepStrictEqual(slot(), { id: 0, status: 'idle', kind: null, input: null, value: null, error: null, meta: null, seq: 0 });
@@ -127,6 +145,11 @@ describe('the generated subscription in a headless app (the doc example, verbati
     assert.deepStrictEqual(slot().value, { rows: [{ id: 'a' }, { id: 'b' }] });
     assert.strictEqual(slot().seq, 4);
 
+    feed.onPatch({ patch: [{ op: 'add', path: '/rows/-', value: { id: 'c' } }], seq: 5 });
+    await drain();
+    assert.deepStrictEqual(slot().value, { rows: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] },
+      'a rejected sequence cannot corrupt the cached document used by the next patch');
+
     // a stale instance (an old id) cannot write: restart, then let the
     // OLD session dispatch — the id guard rejects it
     app.dispatch('contract/board.feed/stop');
@@ -138,8 +161,8 @@ describe('the generated subscription in a headless app (the doc example, verbati
     assert.strictEqual(slot().id, 2);
     feed.onPatch({ patch: [{ op: 'remove', path: '/rows/0' }], seq: 9 });
     await drain();
-    assert.deepStrictEqual(slot().value, { rows: [{ id: 'a' }, { id: 'b' }] }, "the stale session's patch is a no-op");
-    assert.strictEqual(slot().seq, 4);
+    assert.deepStrictEqual(slot().value, { rows: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }, "the stale session's patch is a no-op");
+    assert.strictEqual(slot().seq, 5);
     app.destroy();
   });
 

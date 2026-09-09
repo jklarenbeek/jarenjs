@@ -136,7 +136,7 @@ Streaming clauses never materialize the tuple stream:
 - `$orderby` runs a Schwartzian sort: each surviving tuple appends a `[key₁, ..., keyₙ, snapshot]` row, `Array.prototype.sort` (stable) compares precomputed keys, then the snapshots replay into the frame. Key type errors (`JQ2005`) are raised eagerly at key evaluation; empty keys order per `$empty` (least/greatest as ±∞ before direction).
 - `$groupby` accumulates a `Map` from a composite `stableKeyString` key to the group, in first-appearance order; grouping-key variables rebind to the key values, every other live variable rebinds to the *sequence* of its values across the group's tuples.
 
-`$fold` needs no fifth driver pair. It replaces the collecting sink with one that assigns the accumulator slot, then wraps whichever of the four drivers was built: seed the slot, run the tuple stream unchanged, read the slot back. Both barriers, `$count` and `$where` therefore compose with it for free — a fold under `$orderby` reduces over sorted tuples because the replay loop calls the same sink.
+`$fold` needs no fifth driver pair. It replaces the collecting sink with one that assigns the accumulator slot, then wraps whichever of the four drivers was built: seed the slot, run the tuple stream unchanged, read the slot back. A fold under `$orderby` reduces over sorted tuples because the replay loop calls the same sink. Prefix clauses consumed before a group/order barrier see the initial accumulator; nested clauses inside `$return` see the running value. A configured `sequenceItems` bound checks the seed and every updated sequence accumulator.
 
 ### FLWOR: the two compile-time rewrites
 

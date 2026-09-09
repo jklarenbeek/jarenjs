@@ -376,7 +376,14 @@ queryJson({
 }, bookstore); // 17.939999999999998 — every number is an IEEE double (D1)
 ```
 
-Because `$get` is a real dynamic lookup, a fold over a runtime path is a pointer walk: `{"$fold": {"cur": "$.doc"}, "$for": {"seg": "$.path[*]"}, "$return": {"$get": ["$cur", "$seg"]}}`.
+Grouping and sorting buffer their input before `$return` updates the
+accumulator: earlier clauses see its initial value. Put accumulator-dependent
+`$let` expressions inside `$return` when reducing sorted/grouped tuples.
+`limits.sequenceItems` also bounds each sequence-valued accumulator.
+Materialized `$range` values are capped at 1,000,000 items before allocation;
+direct iteration remains allocation-free. Bounds must be safe integers.
+
+Because `$get` is a real dynamic lookup, a fold over typed segments (string object names, numeric array indexes) is a cursor walk, not a parser for RFC 6901 pointer strings: `{"$fold": {"cur": "$.doc"}, "$for": {"seg": "$.path[*]"}, "$return": {"$get": ["$cur", "$seg"]}}`.
 
 **Extended `$for` bindings** cover the two remaining XQuery iteration shapes. `{"$in": e, "$allowing-empty": true}` is outer-join iteration: when the source yields no tuple, one tuple is emitted with the variable bound to the empty sequence (position `-1` if `$at` is present), so the enclosing row survives. `{"$in": e, "$window": "tumbling"|"sliding", "$size": n, "$step": m}` iterates runs instead of items — a tumbling window *partitions* the stream, so its short final window is kept; a sliding window is a fixed-width moving view, so only full windows are emitted.
 
@@ -800,7 +807,7 @@ Unmatched nodes follow the XSLT built-in template rules, restated for JSON: cont
 
 ## Roadmap
 
-This package's roadmap lives in the repository-wide [ROADMAP](../../docs/ROADMAP.md), under its `@jarenjs/json` sections: hoisting `$`-absolute comparables out of filter loops, first-class function values, the JSLT single-walk matcher, XQuery front-end `xs:*` casts, and more. Recently landed from that list: hash-joined equijoins and counting-loop `$range` iteration, the `$fold` accumulator clause, `$allowing-empty` and window bindings, the RFC 3339 date operators, closed-world compilation and the `steps`/`depth` execution limits.
+Open work lives in the repository-wide [ROADMAP](../../docs/ROADMAP.md), under the remaining `@jarenjs/json` sections. Function values are deliberately outside the JSON item model: use FLWOR for map/filter/fold and projection ordering, with named host functions and collations for host extensions.
 
 ## Exports
 

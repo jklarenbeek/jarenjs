@@ -59,7 +59,7 @@ describe('openHttpClient — happy paths through the fetch adapter', () => {
     let seen;
     const { client, sent, received } = pair({ 'product.search': (input, ctx) => { seen = { input, params: ctx.params }; ctx.etag('s1'); return [PRODUCT]; } });
     const o = await client.invoke('product.search', { q: 'a b', limit: 5, tag: ['x', 'y'], flag: true }, { attempt: 3 });
-    assert.strictEqual(sent[0].url, 'http://shop.test/api/products?q=a+b&limit=5&tag=x&tag=y&flag=true');
+    assert.strictEqual(sent[0].url, 'http://shop.test/api/products?q=a+b&limit=5&tag=%5B%22x%22%2C%22y%22%5D&flag=true');
     assert.strictEqual(sent[0].init.method, 'GET');
     assert.strictEqual(sent[0].init.body, undefined, 'a read sends no body');
     assert.strictEqual(sent[0].init.headers['content-type'], undefined);
@@ -146,7 +146,7 @@ describe('openHttpClient — happy paths through the fetch adapter', () => {
   it('url() builds the URL of any operation, opaque included, validating only path/query members', () => {
     const { client } = pair();
     assert.strictEqual(client.url('image.bytes', { id: 3 }), 'http://shop.test/api/images/3');
-    assert.strictEqual(client.url('product.search', { q: 'x y', tag: ['a'] }), 'http://shop.test/api/products?q=x+y&tag=a');
+    assert.strictEqual(client.url('product.search', { q: 'x y', tag: ['a'] }), 'http://shop.test/api/products?q=x+y&tag=%5B%22a%22%5D');
     assert.strictEqual(client.url('product.search'), 'http://shop.test/api/products');
     assert.strictEqual(client.url('catalog.load', null), 'http://shop.test/api/catalog');
     assert.strictEqual(client.url('product.save', { id: 2 }), 'http://shop.test/api/products/2/master', 'body members are not required by url()');

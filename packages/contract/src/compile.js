@@ -370,20 +370,18 @@ function checkRefs(node, docPath, scope, isRoot) {
  */
 
 /**
- * The transport half of an operation's input: the members that travel
- * as strings (path, query, header) and the normalizer that decodes them
- * with `coerceTypes` scoped to exactly those members. `repeated` lists
- * the query and header members whose effective schema type is `array` —
- * a decoder collects repeats of those into an array (a repeated query
- * key; a repeated header line or a comma-separated header list) before
- * normalizing; every other query member is last-wins and every other
- * header member is a single line. Body members are never here.
- * `schemas` holds each transport member's declared schema (what the
- * normalizer was compiled over) and `required` the transport members the
- * input schema requires — what a URL builder validates without the body.
+ * The transport half of an operation's input. Scalar path/query/header
+ * members use a compiled coercing normalizer; queryJson members carry
+ * one JSON value and bypass coercion. `repeated` marks array types (the
+ * header decoder collects their repeated lines or comma-separated list;
+ * JSON query encoding takes precedence for query members). Body members
+ * are never here. `schemas` and `required` describe every transport
+ * member for URL validation, including those excluded from normalization.
  * @typedef {Object} InputTransport
  * @property {(value: any) => any} normalize
  * @property {{ path: readonly string[], query: readonly string[], header: readonly string[], repeated: readonly string[] }} members
+ * @property {readonly string[]} queryJson - query members with a declared
+ *   object/array type, encoded as one JSON value (including nullable unions)
  * @property {Readonly<Record<string, any>>} schemas
  * @property {readonly string[]} required
  */
@@ -1074,6 +1072,7 @@ export function compileContract(doc, options = {}) {
       const queryMembers = [];
       const headerMembers = [];
       const repeated = [];
+      const queryJson = [];
       /** @type {Record<string, any>} */
       const pick = {};
       for (let i = 0; i < p.members.length; i++) {
@@ -1089,18 +1088,24 @@ export function compileContract(doc, options = {}) {
           const eff = effectiveSchema(schema, scope);
           const type = isJsonObject(eff) ? eff.type : undefined;
           if (type === 'array' || (Array.isArray(type) && type.includes('array'))) repeated.push(m);
+          if (loc === 'query' && (type === 'object' || type === 'array'
+            || (Array.isArray(type) && (type.includes('object') || type.includes('array'))))) queryJson.push(m);
         }
       }
       if (pathMembers.length + queryMembers.length + headerMembers.length > 0) {
         // the sub-schema is rooted on the document itself, so every
         // same-document `$ref` a member schema carries resolves exactly as
         // it does for the validator
-        const sub = { ...src, type: 'object', properties: pick };
+        // JSON query values have the same typing discipline as a JSON
+        // body: validate them verbatim, never coerce their descendants.
+        const scalarPick = Object.fromEntries(Object.entries(pick).filter(([name]) => !queryJson.includes(name)));
+        const sub = { ...src, type: 'object', properties: scalarPick };
         const normalize = compileNormalizer(sub, { coerceTypes: true });
         const declaredRequired = Array.isArray(p.inputEffective.required) ? p.inputEffective.required : [];
         transport = {
           normalize,
           members: { path: pathMembers, query: queryMembers, header: headerMembers, repeated },
+          queryJson,
           schemas: pick,
           required: declaredRequired.filter((/** @type {unknown} */ r) => typeof r === 'string' && Object.hasOwn(pick, r)),
         };

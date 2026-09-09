@@ -124,6 +124,7 @@ export const ja = {
   'x-form/assert': '無効な値です',
   'form/addItem': '項目を追加',
   'form/removeItem': '項目を削除',
+  'form/jsonPlaceholder': 'JSON 値を入力してください',
   //#endregion
 
   //#region @jarenjs/contract (wire-error voice)

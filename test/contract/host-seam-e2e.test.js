@@ -7,7 +7,7 @@
  * bytes()` → an incremental hash/count sink — 100 MiB of rows in a child
  * whose V8 old space is 48 MiB. Backpressure reaches the cursor: at a
  * quarter consumed the cursor has pulled a bounded prefix of the rows,
- * and the encoded bytes ahead of the consumer stay bounded. A halfway
+ * and queued application bytes stay bounded independently of TCP buffers. A halfway
  * cancellation reaches the byte source's `return()`, the cursor's
  * `return()`, the acquired release and the identity release exactly
  * once, with no pull after cancellation reaches the byte source. The
@@ -39,7 +39,17 @@ describe('the host seam end to end — a fixed-heap child', () => {
       assert.strictEqual(run.pulls, out.rows, `${carrier}: every row pulled exactly once`);
       assert.ok(run.pullsAtQuarter !== null && run.pullsAtQuarter < out.rows,
         `${carrier}: at a quarter consumed the cursor had pulled ${run.pullsAtQuarter} of ${out.rows} rows — it did not run ahead to the end`);
-      assert.ok(run.maxAhead < 8 * 1024 * 1024, `${carrier}: at most ${run.maxAhead} encoded bytes ahead of the consumer — the socket's buffers, never the payload`);
+      if (carrier === 'node') {
+        assert.ok(run.highWaterMark > 0, 'the real writable queue was observed');
+        assert.ok(run.maxProducerAhead <= run.maxChunk, 'the adapter pulls at most one unwritten chunk');
+        assert.ok(run.maxApplicationQueued <= run.highWaterMark + run.maxChunk + 8192,
+          `the application queued ${run.maxApplicationQueued} bytes (watermark ${run.highWaterMark}, chunk ${run.maxChunk}, HTTP framing allowance 8192)`);
+      }
+      else {
+        // This carrier has no TCP layer: produced minus consumed is
+        // entirely application data, bounded by the stream's pull queue.
+        assert.ok(run.maxAhead <= 4 * run.maxChunk, `fetch queued ${run.maxAhead} bytes`);
+      }
       assert.strictEqual(run.cursorReturns, 0, `${carrier}: an exhausted cursor is done, not returned`);
       assert.strictEqual(run.bodyReturns, 0, `${carrier}: an exhausted body is done, not returned`);
     }

@@ -289,7 +289,7 @@ function transportString(v) {
  * @property {string} method
  * @property {readonly import('../path.js').PathSegment[]} segments
  * @property {readonly string[]} queryMembers
- * @property {ReadonlySet<string>} queryRepeated
+ * @property {ReadonlySet<string>} queryJson
  * @property {readonly string[]} headerMembers
  * @property {readonly string[]} headerNames
  * @property {readonly string[]} bodyMembers - body-located members when the body is their object
@@ -315,8 +315,6 @@ function prepare(op) {
   const http = op.http;
   /** @type {string[]} */
   const queryMembers = [];
-  /** @type {Set<string>} */
-  const queryRepeated = new Set();
   /** @type {string[]} */
   const headerMembers = [];
   /** @type {string[]} */
@@ -324,14 +322,12 @@ function prepare(op) {
   /** @type {string[]} */
   const bodyMembers = [];
   const transport = op.input === null ? null : op.input.transport;
-  const repeated = new Set(transport === null ? [] : transport.members.repeated);
   const members = Object.keys(http.in);
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
     const loc = http.in[m];
     if (loc === 'query') {
       queryMembers.push(m);
-      if (repeated.has(m)) queryRepeated.add(m);
     }
     else if (loc === 'header') {
       headerMembers.push(m);
@@ -345,7 +341,7 @@ function prepare(op) {
     method: http.method,
     segments: http.template.segments,
     queryMembers,
-    queryRepeated,
+    queryJson: new Set(transport === null ? [] : transport.queryJson),
     headerMembers,
     headerNames,
     bodyMembers,
@@ -535,13 +531,12 @@ export function openHttpClient(contract, options = {}) {
     for (let i = 0; i < route.queryMembers.length; i++) {
       const m = route.queryMembers[i];
       const v = value[m];
-      if (v === undefined || v === null) continue;
-      if (route.queryRepeated.has(m) && Array.isArray(v)) {
-        for (let j = 0; j < v.length; j++) {
-          if (v[j] !== undefined && v[j] !== null) params.append(m, transportString(v[j]));
-        }
+      if (route.queryJson.has(m)) {
+        if (v !== undefined) params.append(m, JSON.stringify(v));
+        continue;
       }
-      else params.append(m, transportString(v));
+      if (v === undefined || v === null) continue;
+      params.append(m, transportString(v));
     }
     const query = params.toString();
     return query.length === 0 ? path : path + '?' + query;

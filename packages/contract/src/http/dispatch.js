@@ -133,7 +133,7 @@ import {
  * @property {ReadonlySet<string>} nonBody - path/query/header member names, never taken from the body
  * @property {readonly string[]} pathMembers
  * @property {ReadonlySet<string>} queryMembers
- * @property {ReadonlySet<string>} repeated - array-typed query members
+ * @property {ReadonlySet<string>} queryJson - JSON-encoded query members
  * @property {readonly string[]} headerMembers - member names
  * @property {readonly string[]} headerNames - the lowercase header of each
  * @property {readonly boolean[]} headerArray - array-typed, per header member
@@ -597,7 +597,7 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
     const m = route.pathMembers[i];
     setObjectMember(input, m, params[m]);
   }
-  if (!decodeQuery(query, route.queryMembers, route.repeated, input)) {
+  if (!decodeQuery(query, route.queryMembers, input, route.queryJson)) {
     return refuse(server, 'JC2012', trace, {}, undefined, null, null);
   }
   /** @type {Record<string, string>} */

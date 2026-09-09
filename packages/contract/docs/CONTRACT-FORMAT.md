@@ -261,25 +261,44 @@ top-level `input.properties` member gets exactly one location:
    does not declare);
 4. otherwise the default: `query` for a `read`, `body` for a `command`.
 
-Path, query and header members arrive as strings and are decoded by a
-normalizer compiled **over those members only** with `coerceTypes`
-(`@jarenjs/validate/normalize`); **a body member is never coerced**. The
-compiled operation carries this as
-`input.transport = { normalize, members: { path, query, header, repeated }, schemas, required }`
-(`null` when nothing travels as a string) beside `input.effective` —
-the object schema the declared `input` resolves to (itself, or the end
-of its `$ref` chain), whose `properties` are the operation's members;
-`schemas` holds each
-transport member's declared schema and `required` the transport members
-the input requires (what a URL builder validates without the body), and
-`repeated` lists the
-query and header members whose effective schema type is `array` — a
-decoder collects repeats of those into an array (a repeated query key; a
-repeated header line or a comma-separated header list, RFC 9110 §5.3)
-before normalizing; every other query member is last-wins and every
-other header member is one line (§7.4). The server validates the
-reassembled input object with the operation's compiled validator; the
-client validates the same object before it splits it.
+Scalar path, query and header members arrive as strings and are decoded
+by a normalizer compiled over those members with `coerceTypes`
+(`@jarenjs/validate/normalize`). **JSON query members and body members are
+never coerced**, including nested values.
+
+A query member whose effective declared `type` is `object` or `array`
+(or a type array including either) uses **one JSON value in one query
+parameter**. The client applies `JSON.stringify`, then `URLSearchParams`;
+the server percent-decodes and applies `JSON.parse` before validation.
+This includes nullable and scalar/structured unions: their values always
+use JSON encoding. Empty arrays, nulls, arrays of objects, numeric object
+keys and strings inside those unions round-trip without guessing from
+text. An absent member is omitted. Plain `string` members remain literal,
+even when their text looks like JSON. `$ref` chains are resolved at
+compilation; unconstrained schemas and unions expressed only with
+`anyOf`/`oneOf` do not imply a codec — declare a top-level `type` to choose
+one. Malformed JSON or multiple occurrences of a JSON member are `JC2012`;
+a well-formed value of the wrong type is `JC2006`. Undeclared query keys
+are ignored. Scalar query members remain last-wins.
+
+The compiled operation carries
+`input.transport = { normalize, members: { path, query, header, repeated }, queryJson, schemas, required }`
+(`null` when nothing travels as a string), beside `input.effective`, the
+resolved input object schema. `schemas` and `required` describe all
+transport members for URL validation; `queryJson` lists the JSON members
+excluded from scalar normalization. `repeated` identifies array-typed
+query/header members; JSON query encoding takes precedence. Array headers
+still collect repeated lines or comma-separated values (RFC 9110 §5.3)
+before normalization; other headers require one line (§7.4). The server
+validates the reassembled input; the client validates before splitting it.
+
+**Wire migration:** array query members use `tag=["a","b"]` (URL-encoded),
+replacing `tag=a&tag=b`. Update handwritten callers and deploy matching
+client/server versions together; published contracts should change their
+`version` so revision negotiation detects a mismatched deployment. The
+OpenAPI projection declares these parameters with
+`content: { "application/json": { schema: ... } }`, rather than an
+exploded array schema.
 
 An operation bound to `GET` or `HEAD` MUST NOT carry a body-located
 member (`JC0016`) — including a `command` whose members default to the
@@ -601,12 +620,12 @@ is `JC2008`.
    stripped by the decoder); then `JSON.parse` (a failure is `JC2005`).
 7. **Assemble** the input object through a prototype-safe setter only, in
    this order: path members (raw decoded strings), query members
-   (`URLSearchParams` semantics — `+` is a space; a member listed in
-   `transport.members.repeated` collects every occurrence into an array,
-   every other member is last-wins; an **undeclared query key is
-   ignored, never merged**; an undecodable query is `JC2012`), declared
-   header members (by their lowercased name; §7.4), then the transport
-   normalizer over exactly those members (`coerceTypes`), then the body,
+   (`URLSearchParams` semantics — `+` is a space; `queryJson` members
+   decode one JSON value, scalar members are last-wins; an **undeclared
+   query key is ignored, never merged**; malformed encoding/JSON or a
+   repeated JSON member is `JC2012`), declared header members (by their
+   lowercased name; §7.4), then the scalar transport normalizer (JSON
+   members excluded), then the body,
    **never coerced**: `http.body` names a member → the parsed value is
    that member; otherwise the parsed value must be an object (`JC2006`
    with `path: ""` otherwise) and each of its own members is set unless
@@ -747,7 +766,7 @@ below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
 | `JC2009` | 409 | `contract/idempotency-conflict` | see §8 | the ledger says `in-progress` (retryable, `retry-after: 1`) or `mismatch` (not retryable, `details: [{ "kind": "mismatch" }]`) |
 | `JC2010` | 500 | `contract/invalid-output` | no | the handler value fails the output validator, cannot be serialized, a raw response is malformed, or a declared error's details fail their schema — the server broke the contract |
 | `JC2011` | 400 | `contract/malformed-path` | no | the path carries a malformed percent-escape |
-| `JC2012` | 400 | `contract/malformed-query` | no | the query string is not decodable (a malformed escape, invalid UTF-8) |
+| `JC2012` | 400 | `contract/malformed-query` | no | the query string is not decodable (malformed escape/UTF-8/JSON, or a repeated JSON member) |
 | `JC2013` | 501 | `contract/not-implemented` | no | a `partial` server has no handler for the operation |
 | `JC2014` | 412 | `contract/precondition-failed` | no | `If-Match` does not match the armed tag (strong comparison), or `If-None-Match` matches on a non-GET/HEAD |
 | `JC2015` | 400 | `contract/invalid-header` | no | a declared scalar header member arrived repeated, or a header value is not a string |
@@ -1341,9 +1360,9 @@ is true exactly for a 304.
    by `policy.errors.details`; **nothing was sent**.
 3. **Split by location** (`http.in`): path variables → `encodeURIComponent`
    per segment into the canonical template; query members →
-   `URLSearchParams` (an array-typed member repeats the key per element;
-   `null`/`undefined` members are omitted; a scalar is its string, a
-   non-scalar its JSON); header members → the header named by the
+   `URLSearchParams` (`queryJson` members use one JSON value, including
+   null and empty arrays; undefined is omitted; scalar transport members
+   omit null/undefined and otherwise use their string); header members → the header named by the
    member lowercased (an array as a `, `-joined list); the body: `http.body`
    names a member → `JSON.stringify` of that member's value; otherwise
    the object of the body-located members, stringified. `method` from
@@ -1712,6 +1731,23 @@ The generated actions:
 - `<ns><op>/reset` — as for tasks: `status "idle"`, `kind`/`error`
   cleared, everything else kept.
 
+Reconnect is an opt-in **binding choice**, not a new stream policy:
+`contractAppBinding(contract, { subs: { "data.live": { reconnect: { max: 2 } } } })`
+embeds the per-operation option in its generated `withQuery` props and
+`createContractSubscription` forwards it to `client.subscribe`. During
+retry/backoff the slot stays `live`, retaining its id, value and sequence;
+replay patches continue against the same cached document. Exhaustion
+surfaces `JC2097` in the slot. Explicit server end and non-network errors
+are terminal. Stop/reset/destroy cancel the active stream and prevent
+further retries. Without the option a lost stream surfaces immediately.
+Unknown/unselected/non-subscribe operations and malformed reconnect
+options are `JC1007`. Reconnection is supplied by the HTTP client; port
+and local clients retain their existing terminal channel lifecycle.
+
+The subscription handler rejects stale sequence numbers **before**
+applying a patch to its cached document, and ignores callbacks after
+cleanup; the generated action guards provide the state-side check too.
+
 The binding additionally returns `subs` — one entry per subscribe
 operation — and names its handler in `subscription`:
 
@@ -1807,7 +1843,7 @@ point). The mapping:
 |---|---|
 | — | `openapi: "3.1.0"`, `jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema"`, `info` (title/version defaulting to the contract id/version), `servers` when given |
 | operation | `paths[<canonical path>][<lowercased method>]`, paths sorted by path then method; `operationId` = the id; `summary` = `doc`'s first line (`description` = the whole `doc` when it has more); `tags` = the id's first dotted segment |
-| `http.in` `path`/`query`/`header` members | `parameters` (name, `in`, `schema`; `required` from the effective input's `required`, a path parameter always required); an idempotent operation gains the `Idempotency-Key` header parameter (required under `"required"`) |
+| `http.in` `path`/`query`/`header` members | `parameters` (name, `in`, `schema`, or `content.application/json.schema` for JSON query members; `required` from the effective input's `required`, a path parameter always required); an idempotent operation gains the `Idempotency-Key` header parameter (required under `"required"`) |
 | body members | `requestBody`: the object of the body-located members (their `required` intersection, the input's `additionalProperties`); the whole input schema when every member is body-located; the member's own schema under `http.body`; `content[<http.media>]` |
 | `output`, `http.status` | `responses[<status>]` with the output schema; no content on `204`; opaque → `content[<media>]: { type: "string", format: "binary" }` |
 | declared `errors` | one response per status: the D7 wire-error schema (`code` **enum-pinned** to the codes of that status, `details` the declared schema when present) |

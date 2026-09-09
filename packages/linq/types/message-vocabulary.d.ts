@@ -1,7 +1,7 @@
 // Derived from the English catalogs by scripts/generate-message-pen.js.
 export interface CatalogIds {
   validate: "type" | "required" | "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" | "multipleOf" | "minLength" | "maxLength" | "pattern" | "additionalProperties" | "minProperties" | "maxProperties" | "minItems" | "maxItems" | "uniqueItems" | "contains" | "items" | "allOf" | "anyOf" | "oneOf" | "not" | "format" | "if" | "then" | "else" | "false schema" | "$query" | "JQ2001" | "JQ2003";
-  forms: "form/required" | "form/type" | "form/const" | "form/enum" | "form/minLength" | "form/maxLength" | "form/pattern" | "form/format" | "form/minimum" | "form/maximum" | "form/exclusiveMinimum" | "form/exclusiveMaximum" | "form/multipleOf" | "form/minItems" | "form/maxItems" | "form/uniqueItems" | "form/minProperties" | "form/maxProperties" | "x-form/assert" | "form/addItem" | "form/removeItem";
+  forms: "form/required" | "form/type" | "form/const" | "form/enum" | "form/minLength" | "form/maxLength" | "form/pattern" | "form/format" | "form/minimum" | "form/maximum" | "form/exclusiveMinimum" | "form/exclusiveMaximum" | "form/multipleOf" | "form/minItems" | "form/maxItems" | "form/uniqueItems" | "form/minProperties" | "form/maxProperties" | "x-form/assert" | "form/addItem" | "form/removeItem" | "form/jsonPlaceholder";
   contract: "contract/not-found" | "contract/method-not-allowed" | "contract/body-too-large" | "contract/unsupported-media" | "contract/malformed-json" | "contract/invalid-input" | "contract/idempotency-key-required" | "contract/handler-failed" | "contract/idempotency-conflict" | "contract/invalid-output" | "contract/malformed-path" | "contract/malformed-query" | "contract/not-implemented" | "contract/precondition-failed" | "contract/invalid-header" | "contract/handler-error" | "contract/client-invalid-input" | "contract/network" | "contract/cancelled" | "contract/invalid-response" | "contract/key-storage-failed" | "contract/undeclared-response" | "contract/not-a-contract" | "contract/incompatible" | "contract/host-failed" | "contract/local-handler-failed" | "contract/unknown-operation" | "contract/port-timeout" | "contract/malformed-frame" | "contract/channel-closed" | "contract/not-a-stream" | "contract/invalid-snapshot" | "contract/seq-regression" | "contract/stream-error" | "contract/heartbeat-missed" | "contract/slow-consumer" | "contract/reconnect-exhausted";
 }
 export interface MessageParameters {
@@ -56,6 +56,7 @@ export interface MessageParameters {
   "x-form/assert": never;
   "form/addItem": never;
   "form/removeItem": never;
+  "form/jsonPlaceholder": never;
   "contract/not-found": never;
   "contract/method-not-allowed": "allow";
   "contract/body-too-large": "limit" | "op";

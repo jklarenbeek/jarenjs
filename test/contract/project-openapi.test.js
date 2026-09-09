@@ -119,7 +119,7 @@ describe('toOpenApi — the mapping', () => {
     assert.strictEqual(save.parameters[1].required, true, 'policy.idempotency required');
     assert.strictEqual(paths['/product.remove'].post.parameters[0].required, false, 'policy.idempotency optional');
     assert.strictEqual(paths['/api/products'].get.parameters.length, 4);
-    assert.deepStrictEqual(paths['/api/products'].get.parameters[2].schema, { type: 'array', items: { type: 'string' } });
+    assert.deepStrictEqual(paths['/api/products'].get.parameters[2].content['application/json'].schema, { type: 'array', items: { type: 'string' } });
   });
 
   it('builds the request body: the object of the body members, the whole input, or a whole-body member', () => {
