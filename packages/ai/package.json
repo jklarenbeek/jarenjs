@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/ai",
   "private": false,
-  "version": "0.70.0",
+  "version": "0.71.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -130,10 +130,26 @@
       "types": "./dist/types/schemas/program.d.ts",
       "default": "./src/schemas/program.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./guarded": {
+      "types": "./dist/types/guarded.d.ts",
+      "default": "./src/guarded.js"
+    },
+    "./evidence": {
+      "types": "./dist/types/evidence.d.ts",
+      "default": "./src/evidence.js"
+    },
+    "./retention": {
+      "types": "./dist/types/retention.d.ts",
+      "default": "./src/retention.js"
+    },
+    "./schemas/evidence": {
+      "types": "./dist/types/schemas/evidence.d.ts",
+      "default": "./src/schemas/evidence.js"
+    }
   },
   "dependencies": {
-    "@jarenjs/core": "^0.70.0",
-    "@jarenjs/validate": "^0.70.0"
+    "@jarenjs/core": "^0.71.0",
+    "@jarenjs/validate": "^0.71.0"
   }
 }

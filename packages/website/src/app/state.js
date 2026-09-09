@@ -156,6 +156,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
       goal: null,            // { objective, progress: [ { at, note, evidence } ] }
       goalDraft: '',         // the objective composer
       memories: 0,           // evidenced facts carried into every turn
+      persistence: null, retention: null,
       archived: 0,           // dropped rounds sitting in slots, recallable
       remembering: false,    // a refinement is in flight
       remembered: null,      // what the last refinement did, in one line

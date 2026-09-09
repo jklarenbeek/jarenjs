@@ -156,3 +156,31 @@ live subscription. Store and host failures retain their message and stringify
 numeric error codes. Web Locks identify an owner even while its worker is busy;
 without them, a held OPFS access handle triggers a longer discovery retry and a
 specific refusal if no owner answers, instead of selecting private memory.
+
+
+## Assistant ledger persistence
+
+The assistant's JSON ledger slot uses Web Locks when available. It reloads inside
+the shared lock and retains that lock through localStorage's task publication
+boundary, including Firefox. Chromium and Firefox tabs preserve independent minted ids
+and progress; WebKit elects one writer, as described below. Hosts without locks report single-writer mode in the assistant.
+Quota, denied locks and corrupt slot contents surface as persistence failures;
+a failed atomic write never overwrites the last durable ledger.
+
+The ledger supports host-set archive/goal limits through `createLedger` and reports
+every eviction with durable tombstones. The assistant shows retention decisions,
+and conversation clear removes archived rounds, indexes and tombstones together.
+The active goal and learned memories survive conversation clear. Bounds are opt-in;
+the site's default configuration does not assume a universal browser quota.
+
+
+WebKit host limit: the measured localStorage process caches can remain stale after
+an exclusive Web Lock and task boundary. The adapter therefore elects one owner
+with a lifetime Web Lock on WebKit, refuses other tabs before reading or writing,
+and permits takeover after the owner closes. `storage.status()` reports
+`single-writer`; its atomic mutation capability still protects accepted batches.
+Chromium and Firefox use serialized concurrent writers. Hosts can explicitly
+request owner election with `singleWriter: true`; overriding it requires a storage
+slot whose cross-writer coherence the host has established. Browser-engine detection
+is a conservative host policy, not a Web Locks guarantee. `storage.close()` releases
+ownership deliberately. No fixed delay is treated as a cure for WebKit coherence.

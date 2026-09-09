@@ -77,7 +77,7 @@ describe('opt-in exact-evidence refinement', () => {
   it('restores byte-identical state when a later write throws', async () => {
     const backing = new Map(), base = createMemoryStorage(backing);
     let writes = 0, armed = false;
-    const storage = { ...base, set: async (key, value) => {
+    const storage = { ...base, mutate: undefined, set: async (key, value) => {
       if (armed && key.startsWith('ai/state/memory/') && ++writes === 2) { armed = false; throw new Error('disk failure'); }
       await base.set(key, value);
     } };
@@ -93,7 +93,7 @@ describe('opt-in exact-evidence refinement', () => {
   it('restores a replacement after a deletion throws and exposes failed rollback honestly', async () => {
     const base = createMemoryStorage();
     let failDelete = false, failRestore = false;
-    const storage = { ...base, delete: async (key) => {
+    const storage = { ...base, mutate: undefined, delete: async (key) => {
       if (failDelete) { failDelete = false; throw new Error('delete failed'); }
       await base.delete(key);
     }, set: async (key, value) => {

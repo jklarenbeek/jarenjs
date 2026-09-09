@@ -95,6 +95,23 @@ export async function createDbStorage({ path = ':memory:', dims } = {}) {
   };
 
   return {
+    mutate: async (prefix, transform) => store.transaction((tx) => {
+      const rows = tx.sync.collection('slots');
+      const prefixes = typeof prefix === 'string' ? [prefix] : prefix.prefixes ?? [];
+      const keys = [...new Set([...(prefix.keys ?? []), ...prefixes.flatMap((part) => many(rows.execute(forPrefix(part).keys)))])].sort();
+      const matches = (key) => (prefix.keys ?? []).includes(key) || prefixes.some((part) => key.startsWith(part));
+      const current = Object.fromEntries(keys.map((key) => [key, rows.get(key)?.value]));
+      for (const key of Object.keys(current)) if (current[key] === undefined) delete current[key];
+      const outcome = transform(current);
+      if (!outcome || typeof outcome.then === 'function') throw new TypeError('mutate callback must be synchronous');
+      if (outcome.next !== undefined) {
+        const next = JSON.parse(JSON.stringify(outcome.next));
+        if (Object.keys(next).some((key) => !matches(key))) throw new TypeError('mutation escaped its namespace');
+        for (const key of keys) if (!Object.hasOwn(next, key)) rows.delete(key);
+        for (const [key, value] of Object.entries(next)) rows.put({ key, value });
+      }
+      return outcome.result;
+    }, { mode: 'immediate' }),
     get: async (key) => (await slots.get(key))?.value,
     set: async (key, value) => { await slots.put({ key, value }); },
     delete: async (key) => { await slots.delete(key); },

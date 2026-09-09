@@ -718,8 +718,9 @@ the ranker is the case that has now run its course: the instrument was committed
 first, scored the policies that already existed, and only then was the ranked path
 added and published whichever way it fell. It turned out to be the harder and more
 valuable half both times. Repeated-refinement measurements now support opt-in
-suppression of exact text/evidence/tag repeats; broader semantic merging and
-automatic eviction still need their own outcome evidence.
+suppression of exact text/evidence/tag repeats. Seeded retention measurements
+support reported archive budgets and lossless goal checkpoints; broader semantic
+merging still needs its own outcome evidence.
 
 - [ ] **Program reuse calibration beyond the scripted question stream.** Verified opt-in
   reuse now ships with current-environment compilation, suitability approval, an outcome
@@ -747,88 +748,12 @@ automatic eviction still need their own outcome evidence.
   the small reference corpus cannot establish that claim. New contenders use
   the optional rank capability and the same predeclared recall/cost bars.
 
-- [ ] **The goal section has no ceiling.** Progress is appended and never
-  rewritten, and every entry composes into the system prompt of every request —
-  which is exactly what stops a resumed session redoing finished work. It also
-  means a long run's pinned system message grows without bound, and the
-  compaction planner pins it whole: past some length a tight `historyBudget`
-  spends its whole allowance on the goal. Superseding or pruning the goal is the
-  only lever today. Bounding it automatically means deciding what may be dropped
-  from a record whose entire purpose is that nothing is forgotten, so the missing
-  input is a measurement — what does dropping the oldest progress cost a resumed
-  run? — rather than a summarizer.
-
-- [ ] **The site's own ledger adapter sits outside the single-writer
-  contract.** A storage adapter's mutation contract is four async methods, not
-  a transaction; an adapter may also expose the optional `rank` capability —
-  but the website's assistant keeps its ledger in
-  one browser storage slot that it caches in memory and rewrites whole on every
-  write, so two tabs are two writers over one adapter and the last one to write
-  wins wholesale. It predates the contract sentence rather than regressing
-  against it, and a durable adapter does not close it either: an immediate
-  transaction narrows the cross-process race but cannot end it, because minting
-  an id is a read and then a write across two adapter calls. Closing it means
-  either electing one writer (a lock, an owner tab) or moving the mint into the
-  adapter as an atomic operation — another optional capability whose extra
-  weight has to be justified against the deliberately small mutation contract.
-
-- [ ] **Archived rounds have no automatic budget eviction.** Compaction writes
-  every dropped round to a slot and never deletes one during a live conversation,
-  which is exactly the property that makes
-  a synopsis address trustworthy — and it means a ledger grows for as long as a
-  conversation does. In memory that is a session's worth of strings; over a
-  browser slot it eventually meets the storage quota, where the site degrades by
-  keeping the session correct (the in-memory map still answers every address) and
-  losing the next visit. The site deletes those slots when the user explicitly
-  clears the conversation; it does not enforce a storage budget before that.
-  An eviction rule needs to answer what may be dropped
-  from a store whose promise is that nothing was, so the honest shape is probably
-  a host-set budget with the ledger REPORTING what it evicted, not a silent LRU.
-
-- [ ] **The per-path record shape lives in the prompt, not the schema.** One
-  `value` union serves `/memories/-`, `/skills/-` and `/goal/progress/-`, so a
-  progress entry written in a memory's shape is legal against the patch schema
-  and is caught only when the record is validated against the ledger's own. On
-  the qwen tier that cost every first attempt until a shape table and a worked
-  example went into the prompt. `if`/`then` per path would move the constraint
-  into decoding itself, at the price of a keyword provider implementations
-  support unevenly — worth revisiting once that support is measurable rather
-  than assumed.
-
-- [ ] **The guarded-document refiner is ledger-shaped.** `createRefiner` runs
-  four stages — the patch's shape against a constrained schema, the patch
-  applied to a COPY through the injected engine, every record the candidate
-  would store validated, then commit through the ledger's own API with a
-  snapshot to roll back to — and every one of them is hard-wired to the
-  ledger's supplemental state: the reader is `getGoal`/`listMemories`/
-  `listSkills`, the legal paths are `/memories`, `/skills` and
-  `/goal/progress`, the commit is `addMemory`/`addSkill`/`recordProgress`.
-  The mechanism is reusable and the shape is not: a host with a different
-  durable document (a learned skill file, a forecast checkpoint, a research
-  plan) wants the same read → validate shape → apply to a copy → validate
-  candidate → derive a commit plan → commit-or-rollback, behind an injected
-  contract — the patch schema, the patch engine, the candidate validator and
-  the commit transaction as seams, pointered problems out, and the rule that
-  a model's generation never gets a weaker gate than a hand-written patch.
-  The constraint that keeps this open is that the generic layer must not
-  invent one universal artifact schema, and the only honest proof that it
-  has not is `createRefiner` itself rewritten as its first consumer without
-  losing a ledger rule or a test — an extraction, not a second refiner.
-
-- [ ] **A claim/evidence envelope has no record to validate.** Grounded
-  answers, clinical assistants, graph retrieval, trading notes and research
-  logs all repeat the same structural checks — a claim has a stable id, an
-  evidence reference resolves to an admitted artifact, a visible citation
-  names evidence that was used, an unresolved critical claim is explicit —
-  and each host writes them again, subtly differently. A generic schema plus
-  a pure referential validator would end that, and it must stop exactly
-  there: it may check structure and reference integrity, never that prose is
-  supported, never source authority, never fetch a URL, never a domain's
-  policy. What is missing is the internal consumer: the ledger's memory
-  carries free-text `evidence`, not a reference, so there is nothing in the
-  suite for such a validator to validate. The entry lifts when the
-  memory/evidence pair grows a referential form and a bad-reference fixture
-  comes with it.
+- [ ] **WebKit multi-writer localStorage coherence.** Exclusive Web Locks and
+  reload-inside-lock still lost updates in the tested WebKit process model. The
+  website therefore elects one writer tab in WebKit and explicitly refuses a
+  second; closing the owner permits takeover. Chromium and Firefox use serialized
+  multi-writer mutation. Re-enabling concurrent WebKit writers requires a storage
+  host with demonstrated coherent reads; timing delays are not evidence of safety.
 
 ## Dates & times (cross-package)
 

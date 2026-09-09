@@ -1531,7 +1531,7 @@ async function ledgerTypedBlock() {
   }
   else {
     const record: LedgerMemory = stored;
-    const evidence: string = record.evidence;
+    const evidence: string | import('@jarenjs/ai/schemas/evidence').ClaimEvidenceEnvelope = record.evidence;
     void evidence;
     // the vector pair is both-or-neither in the TYPE: narrowing on one
     // member settles the other, the way the schema's dependencies rule
@@ -1730,3 +1730,26 @@ async function typedVerifiedProgram() {
   createProgramSession({ environment: { ledger }, reuse: { check: () => true } });
 }
 void [typedVerifiedProgram, createGrammarAuthor, createRoutedClient];
+
+
+// Atomic lifecycle seams must remain available from packed declarations.
+import { createGuardedRefiner } from '@jarenjs/ai/guarded';
+import { validateClaimEvidence, createClaimRefiner } from '@jarenjs/ai/evidence';
+import { ledgerFootprint, checkpointProgress } from '@jarenjs/ai/retention';
+void createClaimRefiner; void checkpointProgress;
+const guardedConsumer = createGuardedRefiner({ read: async () => ({ count: 1 }),
+  validateProposal: () => true, apply: (doc, value) => ({ ...doc, count: value }),
+  validateCandidate: () => true, planCommit: (doc) => doc, commit: async (doc) => doc });
+void guardedConsumer.commit(2);
+void validateClaimEvidence({});
+void ledgerFootprint({});
+const boundedLedger = createLedger({ archiveLimits: { maxItems: 10, maxBytes: 16384 },
+  goalLimits: { maxEntries: 4, maxChars: 2048, maxBytes: 8192 } });
+void boundedLedger.composeGoal(); void boundedLedger.retentionReport(); void boundedLedger.clearArchives();
+void createMemoryStorage().mutate('test/', (current) => ({ next: current, result: 1 }));
+// @ts-expect-error — an async callback is not an atomic storage transform
+void createMemoryStorage().mutate('test/', async (current) => ({ next: current }));
+// @ts-expect-error — limits are numbers, never a silent unlimited string
+void createLedger({ goalLimits: { maxChars: '100' } });
+
+void createLedger({ artifacts: [{ id: 'source', kind: 'slot', locator: 'round-1' }] });

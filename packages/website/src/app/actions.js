@@ -843,6 +843,8 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/goal', value: '$payload.goal' },
       { op: 'replace', path: '/ai/memories', value: '$payload.memories' },
       { op: 'replace', path: '/ai/archived', value: '$payload.archived' },
+      { op: 'replace', path: '/ai/persistence', value: '$payload.persistence' },
+      { op: 'replace', path: '/ai/retention', value: '$payload.retention' },
     ],
   },
   'ai/goal-draft': {
@@ -857,6 +859,8 @@ export const ACTIONS = {
       { op: 'replace', path: '/ai/goal', value: '$payload.goal' },
       { op: 'replace', path: '/ai/memories', value: '$payload.memories' },
       { op: 'replace', path: '/ai/archived', value: '$payload.archived' },
+      { op: 'replace', path: '/ai/persistence', value: '$payload.persistence' },
+      { op: 'replace', path: '/ai/retention', value: '$payload.retention' },
       { op: 'replace', path: '/ai/goalDraft', value: '' },
     ],
   },

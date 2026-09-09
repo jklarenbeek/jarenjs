@@ -17,11 +17,9 @@
  *    `@jarenjs/db` over OPFS, with `localStorage`, or with nothing. This
  *    package keeps exactly two dependencies, so it still loads in a
  *    static page — `createLedger()` with no arguments works, in memory.
- *    One writer at a time: a ledger serializes its own mutations through
- *    one queue, so concurrent calls in one process cannot interleave;
- *    two processes — or two ledgers — writing one adapter at once are
- *    outside the contract, because the adapter is four methods, not a
- *    transaction.
+ *    Optional `mutate` atomically transforms a detached record map. Ledger
+ *    writes stage outside storage and publish with comparison against current
+ *    state. Four-method adapters retain the explicit single-writer contract.
  *  - **Nothing enters without passing its schema**, compiled by
  *    `JarenValidator` here at construction. A rejected write answers the
  *    same `{ error, errors, inputSchema }` the toolbox answers with (one
@@ -63,7 +61,11 @@ import { excerpt } from '@jarenjs/core/chunk';
 import { isVector, cosineSimilarity } from '@jarenjs/core/vector';
 
 import { checkOutcome, invalidInput } from './check.js';
+import { validateClaimEvidence } from './evidence.js';
 import { AiError } from './errors.js';
+import { retainArchives } from './archive.js';
+import { jsonBytes, checkpointProgress, validateCheckpoint, goalPrompt } from './retention.js';
+import { atomicTask, isAtomicView } from './storage/transaction.js';
 import { createMemoryStorage } from './storage/memory.js';
 import { LEDGER_SCHEMAS } from './schemas/ledger.js';
 
@@ -281,6 +283,8 @@ const EMBED_BATCH = 64;
  *     set: (key: string, value: any) => Promise<void>,
  *     delete: (key: string) => Promise<void>,
  *     keys: (prefix?: string) => Promise<string[]>,
+ *     status?: () => any,
+ *     mutate?: import('./storage/transaction.js').StorageMutation,
  *     rank?: (request: { prefix: string, vector: number[], model: string, dims: number,
  *       limit?: number, minScore?: number }) => Promise<{ hits: { key: string, score: number }[],
  *       skipped: number, identities: LedgerEmbeddedBy[], ranking?: LedgerRanking }> },
@@ -288,7 +292,11 @@ const EMBED_BATCH = 64;
  *   embedder?: Embedder,
  *   embedOnWrite?: boolean,
  *   validator?: any,
- *   now?: () => string }} [options]
+ *   now?: () => string,
+ *   archiveLimits?: { maxItems?: number, maxBytes?: number },
+ *   goalLimits?: { maxEntries?: number, maxBytes?: number, maxChars?: number },
+ *   checkpointReducer?: (goal: any) => any,
+ *   artifacts?: import('./schemas/evidence.js').ArtifactRecord[] }} [options]
  *   - `storage` defaults to an in-memory adapter, so a ledger works with
  *     nothing wired. Anything durable is the host's to inject. Its four
  *     methods are the contract; an adapter that can rank vectors itself
@@ -315,6 +323,16 @@ const EMBED_BATCH = 64;
  */
 export function createLedger(options = {}) {
   const storage = options.storage ?? createMemoryStorage();
+  for (const [limits, names] of [[options.archiveLimits, ['maxItems', 'maxBytes']],
+    [options.goalLimits, ['maxEntries', 'maxBytes', 'maxChars']]]) {
+    for (const [name, value] of Object.entries(limits ?? {})) {
+      if (!names.includes(name)) throw new TypeError(`unknown ledger budget '${name}'`);
+      if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${name} must be a non-negative safe integer`);
+    }
+  }
+  const admittedArtifacts = options.artifacts === undefined ? undefined : JSON.parse(JSON.stringify(options.artifacts));
+  if (admittedArtifacts !== undefined && !validateClaimEvidence({ version: 1, artifacts: admittedArtifacts,
+    evidence: [], claims: [], visibleEvidence: [] }).valid) throw new TypeError('artifacts must be unique, valid admitted records');
   const compileQuery = typeof options.compileQuery === 'function' ? options.compileQuery : null;
   /** @type {Embedder | null} */
   const embedder = options.embedder ?? null;
@@ -364,11 +382,12 @@ export function createLedger(options = {}) {
    * reads as. A rejected operation does not stall the queue: the next
    * one runs regardless, and only its own caller sees the rejection.
    * @template T
-   * @param {() => Promise<T>} task
+   * @param {(view: any) => Promise<T>} task
+   * @param {import('./storage/transaction.js').StorageScope} [scope]
    * @returns {Promise<T>}
    */
-  function enqueue(task) {
-    const result = queue.then(task);
+  function enqueue(task, scope = 'ai/') {
+    const result = queue.then(() => atomicTask(storage, scope, task));
     queue = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -393,6 +412,26 @@ export function createLedger(options = {}) {
   function validate(kind, record) {
     const outcome = checkOutcome(checks[kind](record));
     if (!outcome.valid) return invalidInput(kind, outcome, LEDGER_SCHEMAS[kind]);
+    if (kind === 'goal') {
+      const ids = new Set();
+      const errors = [];
+      const entries = [...(record.checkpoint?.sources ?? []), ...record.progress];
+      for (const entry of entries) {
+        if (entry.id !== undefined && ids.has(entry.id)) errors.push({ keyword: 'uniqueId', instancePath: '/progress', message: 'progress source ids must be unique' });
+        if (entry.id !== undefined) ids.add(entry.id);
+      }
+      for (const source of record.checkpoint?.sources ?? []) {
+        if (source.record >= record.checkpoint.records.length)
+          errors.push({ keyword: 'reference', instancePath: '/checkpoint/sources', message: 'checkpoint source refers to a missing record' });
+      }
+      if (errors.length) return invalidInput(kind, { errors }, LEDGER_SCHEMAS[kind]);
+    }
+    if (kind === 'memory' && typeof record.evidence !== 'string') {
+      const references = validateClaimEvidence(record.evidence, { artifacts: admittedArtifacts });
+      if (!references.valid) return invalidInput(kind, { errors: references.errors.map((error) => ({
+        ...error, keyword: error.code ?? error.keyword, instancePath: `/evidence${error.instancePath ?? error.docPath ?? ''}`,
+      })) }, LEDGER_SCHEMAS[kind]);
+    }
     // the schema has said the pair is present together and shaped; what
     // it cannot say is that the vector IS what its identity declares —
     // `isVector` is the suite's one definition of that
@@ -470,9 +509,9 @@ export function createLedger(options = {}) {
   }
 
   /** Read every value under a prefix, in key order. */
-  async function readAll(prefix) {
-    const keys = await storage.keys(prefix);
-    return Promise.all(keys.map((key) => storage.get(key)));
+  async function readAll(prefix, view = storage) {
+    const keys = await view.keys(prefix);
+    return Promise.all(keys.map((key) => view.get(key)));
   }
 
   /**
@@ -483,8 +522,12 @@ export function createLedger(options = {}) {
    * and the store that follows it are one step, so no second writer can
    * read the same highest in between.
    */
-  async function mintId(kind, prefix) {
-    return `${kind}-${now()}-${seq(nextSequence(await storage.keys(prefix)))}`;
+  async function mintId(kind, prefix, view) {
+    const counter = `ai/counters/${kind}`;
+    const n = Math.max(await view.get(counter) ?? 0, nextSequence(await view.keys(prefix)));
+    if (!Number.isSafeInteger(n) || n >= Number.MAX_SAFE_INTEGER) throw new RangeError('ledger id sequence exhausted');
+    await view.set(counter, n + 1);
+    return `${kind}-${now()}-${seq(n)}`;
   }
 
   //#region goal
@@ -499,8 +542,8 @@ export function createLedger(options = {}) {
    * @returns {Promise<LedgerGoal | LedgerRejection>} the stored goal, or a rejection
    */
   function setGoal(input) {
-    return enqueue(async () => {
-      const goal = defined({
+    return enqueue(async (storage) => {
+      let goal = defined({
         objective: input?.objective,
         createdAt: input?.createdAt ?? now(),
         status: input?.status ?? 'active',
@@ -509,6 +552,9 @@ export function createLedger(options = {}) {
       const rejected = validate('goal', goal);
       if (rejected !== null) return rejected;
 
+      const bounded = await boundGoal(goal, storage);
+      if (bounded.error) return bounded;
+      goal = bounded;
       const previous = await storage.get(KEYS.goal);
       if (previous !== undefined) {
         const archived = await storage.keys(KEYS.goalArchive);
@@ -517,7 +563,7 @@ export function createLedger(options = {}) {
       }
       await storage.set(KEYS.goal, goal);
       return goal;
-    });
+    }, { prefixes: [KEYS.goalArchive], keys: [KEYS.goal, 'ai/counters/progress'] });
   }
 
   /**
@@ -546,10 +592,10 @@ export function createLedger(options = {}) {
    *   active goal", which is a state problem, not a validation one
    */
   function recordProgress(entry) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const goal = await storage.get(KEYS.goal);
       if (goal === undefined) return { error: 'no active goal — call setGoal first' };
-      const next = {
+      let next = {
         ...goal,
         progress: [...goal.progress, defined({
           at: entry?.at ?? now(),
@@ -559,9 +605,11 @@ export function createLedger(options = {}) {
       };
       const rejected = validate('goal', next);
       if (rejected !== null) return rejected;
+      next = await boundGoal(next, storage);
+      if (next.error) return next;
       await storage.set(KEYS.goal, next);
       return next;
-    });
+    }, { keys: [KEYS.goal, 'ai/counters/progress'] });
   }
 
   /**
@@ -571,7 +619,7 @@ export function createLedger(options = {}) {
    * @returns {Promise<LedgerGoal | LedgerRejection | { error: string }>}
    */
   function setGoalStatus(status) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const goal = await storage.get(KEYS.goal);
       if (goal === undefined) return { error: 'no active goal — call setGoal first' };
       const next = { ...goal, status };
@@ -579,7 +627,57 @@ export function createLedger(options = {}) {
       if (rejected !== null) return rejected;
       await storage.set(KEYS.goal, next);
       return next;
-    });
+    }, { keys: [KEYS.goal] });
+  }
+
+  /** Bound a goal only through validated, lossless coverage, or visibly refuse. */
+  async function boundGoal(goal, view) {
+    const limits = options.goalLimits;
+    if (!limits) return goal;
+    if (typeof storage.mutate !== 'function' && !isAtomicView(storage))
+      return { error: 'goal budgets require atomic storage', code: 'ATOMIC_REQUIRED' };
+    const next = JSON.parse(JSON.stringify(goal));
+    let counter = await view.get('ai/counters/progress') ?? 0;
+    const ids = new Set([...(next.checkpoint?.sources ?? []), ...next.progress].map((entry) => entry.id));
+    for (const entry of next.progress) {
+      if (entry.id !== undefined) continue;
+      while (ids.has(`progress-${seq(counter)}`)) counter++;
+      if (!Number.isSafeInteger(counter) || counter >= Number.MAX_SAFE_INTEGER) throw new RangeError('progress sequence exhausted');
+      entry.id = `progress-${seq(counter++)}`;
+      ids.add(entry.id);
+    }
+    const fits = (candidate) => candidate.progress.length <= (limits.maxEntries ?? Infinity)
+      && jsonBytes(candidate) <= (limits.maxBytes ?? Infinity)
+      && goalPrompt(candidate).length <= (limits.maxChars ?? Infinity);
+    if (!fits(next)) {
+      let checkpoint;
+      try { checkpoint = options.checkpointReducer ? options.checkpointReducer(JSON.parse(JSON.stringify(next))) : checkpointProgress(next); }
+      catch (error) { return { error: `checkpoint reducer failed: ${error instanceof Error ? error.message : String(error)}`, code: 'GOAL_CHECKPOINT' }; }
+      const checked = validateCheckpoint(checkpoint, next);
+      if (!checked.valid) return { error: 'invalid goal checkpoint', errors: checked.errors, code: 'GOAL_CHECKPOINT' };
+      const compacted = { ...next, progress: [], checkpoint,
+        retention: { version: 1, reason: 'goal-budget', retired: next.progress.map((entry) => entry.id) } };
+      const rejected = validate('goal', compacted);
+      if (rejected) return rejected;
+      if (!fits(compacted)) return { error: 'goal budget cannot preserve the objective and evidence; host action required',
+        code: 'GOAL_BUDGET', retention: { refused: true, bytes: jsonBytes(compacted), chars: goalPrompt(compacted).length, limits } };
+      await view.set('ai/counters/progress', counter);
+      return compacted;
+    }
+    await view.set('ai/counters/progress', counter);
+    return next;
+  }
+
+  /** Render the complete goal under the host's hard character budget. */
+  async function composeGoal() {
+    const goal = await getGoal();
+    if (!goal || goal.status !== 'active') return { text: '' };
+    const rejected = validate('goal', goal);
+    if (rejected) return rejected;
+    const text = goalPrompt(goal);
+    if (text.length > (options.goalLimits?.maxChars ?? Infinity))
+      return { error: 'goal prompt exceeds its character budget; host action required', code: 'GOAL_BUDGET' };
+    return { text };
   }
 
   //#endregion
@@ -596,7 +694,7 @@ export function createLedger(options = {}) {
    * with the same `additionalProperties` answer `validate()` gives,
    * never silently dropped. A write that quietly stored less than it
    * was handed would let "it was accepted" and "it is there" diverge.
-   * @param {{ id?: string, text: string, evidence: string,
+   * @param {{ id?: string, text: string, evidence: LedgerMemory['evidence'],
    *   tags?: string[], at?: string } & LedgerEmbeddingPair} input
    *   `embedding` + `embeddedBy` travel together (plain numbers, never a
    *   typed array — the pair type says so, and an orphan does not
@@ -609,19 +707,23 @@ export function createLedger(options = {}) {
    *   is stored WITHOUT a vector and the member is not part of it
    */
   function addMemory(input) {
-    return enqueue(async () => {
+    let embedded;
+    return enqueue(async (storage) => {
       const memory = defined({
         ...input,
-        id: input?.id ?? await mintId('memory', KEYS.memory),
+        id: input?.id ?? '(pending)',
         tags: input?.tags ?? [],
         at: input?.at ?? now(),
       });
       const rejected = validate('memory', memory);
       if (rejected !== null) return rejected;
-      const { record, embedError } = await embedOnWriteStep(memory, memory.text);
+      if (input?.id === undefined || input?.id === null) memory.id = await mintId('memory', KEYS.memory, storage);
+      embedded ??= await embedOnWriteStep(memory, memory.text);
+      const record = { ...embedded.record, id: memory.id, at: memory.at };
+      const { embedError } = embedded;
       await storage.set(`${KEYS.memory}${record.id}`, record);
       return embedError === undefined ? record : { ...record, embedError };
-    });
+    }, { prefixes: [KEYS.memory], keys: ['ai/counters/memory'] });
   }
 
   /**
@@ -646,12 +748,12 @@ export function createLedger(options = {}) {
    * @param {string} id
    */
   function deleteMemory(id) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const key = `${KEYS.memory}${id}`;
       const existed = (await storage.get(key)) !== undefined;
       await storage.delete(key);
       return existed;
-    });
+    }, { keys: [`${KEYS.memory}${id}`] });
   }
 
   /**
@@ -665,19 +767,23 @@ export function createLedger(options = {}) {
    *   name, when and instructions
    */
   function addSkill(input) {
-    return enqueue(async () => {
+    let embedded;
+    return enqueue(async (storage) => {
       const skill = defined({
         ...input,
-        id: input?.id ?? await mintId('skill', KEYS.skill),
+        id: input?.id ?? '(pending)',
         tools: input?.tools ?? [],
         at: input?.at ?? now(),
       });
       const rejected = validate('skill', skill);
       if (rejected !== null) return rejected;
-      const { record, embedError } = await embedOnWriteStep(skill, skillText(skill));
+      if (input?.id === undefined || input?.id === null) skill.id = await mintId('skill', KEYS.skill, storage);
+      embedded ??= await embedOnWriteStep(skill, skillText(skill));
+      const record = { ...embedded.record, id: skill.id, at: skill.at };
+      const { embedError } = embedded;
       await storage.set(`${KEYS.skill}${record.id}`, record);
       return embedError === undefined ? record : { ...record, embedError };
-    });
+    }, { prefixes: [KEYS.skill], keys: ['ai/counters/skill'] });
   }
 
   /**
@@ -702,12 +808,12 @@ export function createLedger(options = {}) {
    * @param {string} id
    */
   function deleteSkill(id) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const key = `${KEYS.skill}${id}`;
       const existed = (await storage.get(key)) !== undefined;
       await storage.delete(key);
       return existed;
-    });
+    }, { keys: [`${KEYS.skill}${id}`] });
   }
 
   //#endregion
@@ -1012,17 +1118,18 @@ export function createLedger(options = {}) {
    * @returns {Promise<{ embedded: number, remaining: number, error?: string }>}
    */
   function embedMissing(options = {}) {
-    return enqueue(async () => {
+    const batches = new Map();
+    return enqueue(async (storage) => {
       const batch = typeof options.batch === 'number' && options.batch > 0 ? Math.max(1, Math.floor(options.batch)) : EMBED_BATCH;
       /** @type {Array<{ key: string, record: any, text: string }>} */
       const pending = [];
       /** @type {Map<string, LedgerEmbeddedBy>} */
       const held = new Map();
-      for (const memory of await readAll(KEYS.memory)) {
+      for (const memory of await readAll(KEYS.memory, storage)) {
         if (memory.embedding === undefined) pending.push({ key: `${KEYS.memory}${memory.id}`, record: memory, text: memory.text });
         else held.set(describeIdentity(memory.embeddedBy), memory.embeddedBy);
       }
-      for (const skill of await readAll(KEYS.skill)) {
+      for (const skill of await readAll(KEYS.skill, storage)) {
         if (skill.embedding === undefined) pending.push({ key: `${KEYS.skill}${skill.id}`, record: skill, text: skillText(skill) });
         else held.set(describeIdentity(skill.embeddedBy), skill.embeddedBy);
       }
@@ -1046,7 +1153,9 @@ export function createLedger(options = {}) {
       let embedded = 0;
       for (let i = 0; i < todo.length; i += batch) {
         const slice = todo.slice(i, i + batch);
-        const answer = await embedThrough(slice.map((entry) => entry.text));
+        const texts = slice.map((entry) => entry.text), key = JSON.stringify(texts);
+        if (!batches.has(key)) batches.set(key, await embedThrough(texts));
+        const answer = batches.get(key);
         if (answer.error !== undefined)
           return { embedded, remaining: total - embedded, error: `embedMissing: the embedder seam failed — ${answer.error}` };
         if (i === 0) {
@@ -1061,7 +1170,7 @@ export function createLedger(options = {}) {
         }
       }
       return { embedded, remaining: total - embedded };
-    });
+    }, { prefixes: [KEYS.memory, KEYS.skill] });
   }
 
   //#endregion
@@ -1075,13 +1184,13 @@ export function createLedger(options = {}) {
    * name a hundred of them without carrying any of their content.
    * @param {string} name
    * @param {string} content
-   * @param {{ kind?: string, at?: string, count?: number }} [meta]
+   * @param {{ kind?: string, at?: string, count?: number, pinned?: boolean }} [meta]
    *   `count` is what the content HOLDS (lines, records, pieces) where
    *   the writer knows it; absent where it does not, rather than guessed.
    * @returns {Promise<LedgerSlot | LedgerRejection>}
    */
   function putSlot(name, content, meta = {}) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const text = typeof content === 'string' ? content : JSON.stringify(content ?? null);
       const slot = defined({
         name,
@@ -1090,13 +1199,18 @@ export function createLedger(options = {}) {
         excerpt: excerpt(text, SLOT_EXCERPT_CHARS),
         at: meta.at ?? now(),
         count: meta.count,
+        pinned: meta.pinned,
       });
       const rejected = validate('slot', slot);
       if (rejected !== null) return rejected;
+      if (options.archiveLimits && (slot.kind === 'agent-round' || slot.kind === 'agent-round-index')) {
+        const result = await storeArchive(storage, [{ slot, text }]);
+        return result.error ? result : slot;
+      }
       await storage.set(`${KEYS.slotContent}${name}`, text);
       await storage.set(`${KEYS.slot}${name}`, slot);
       return slot;
-    });
+    }, options.archiveLimits && (meta.kind === 'agent-round' || meta.kind === 'agent-round-index') ? 'ai/state/' : { keys: [`${KEYS.slot}${name}`, `${KEYS.slotContent}${name}`, `ai/state/evicted/${name}`] });
   }
 
   /**
@@ -1111,10 +1225,11 @@ export function createLedger(options = {}) {
   /**
    * A slot's content, or undefined. The one call that returns the bytes.
    * @param {string} name
-   * @returns {Promise<string | undefined>}
+   * @returns {Promise<string | undefined | { status: 'evicted', name: string, bytes: number, reason: string }>}
    */
   async function readSlot(name) {
-    return storage.get(`${KEYS.slotContent}${name}`);
+    return (await storage.get(`${KEYS.slotContent}${name}`))
+      ?? (await storage.get(`ai/state/evicted/${name}`));
   }
 
   /**
@@ -1130,12 +1245,73 @@ export function createLedger(options = {}) {
    * @param {string} name
    */
   function deleteSlot(name) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const key = `${KEYS.slot}${name}`;
       const existed = (await storage.get(key)) !== undefined;
       await storage.delete(key);
       await storage.delete(`${KEYS.slotContent}${name}`);
+      await storage.delete(`ai/state/evicted/${name}`);
       return existed;
+    }, { keys: [`${KEYS.slot}${name}`, `${KEYS.slotContent}${name}`, `ai/state/evicted/${name}`] });
+  }
+
+  /** Apply a complete archive plan only after retention accepts its exact bytes. */
+  async function storeArchive(view, entries, protection = {}) {
+    if (options.archiveLimits && typeof storage.mutate !== 'function' && !isAtomicView(storage))
+      return { error: 'archive budgets require atomic storage', code: 'ATOMIC_REQUIRED' };
+    const keys = await view.keys('ai/state/');
+    const current = Object.fromEntries(await Promise.all(keys.map(async (key) => [key, await view.get(key)])));
+    const planned = retainArchives(current, entries, options.archiveLimits ?? {}, protection);
+    if (planned.error) return planned;
+    for (const key of Object.keys(current)) if (!Object.hasOwn(planned.next, key)) await view.delete(key);
+    for (const [key, value] of Object.entries(planned.next))
+      if (JSON.stringify(value) !== JSON.stringify(current[key])) await view.set(key, value);
+    return { ok: true, retention: planned.report, footprint: planned.footprint };
+  }
+
+  /** Atomically store rounds and their index before removing any transcript. */
+  function putArchive(entries, protection = {}) {
+    return enqueue(async (view) => {
+      const records = [];
+      for (const entry of entries) {
+        if ((entry.kind !== 'agent-round' && entry.kind !== 'agent-round-index') || typeof entry.text !== 'string')
+          return { error: 'archive entries require round/index kind and string content', code: 'ARCHIVE_INPUT' };
+        const held = await view.get(`${KEYS.slot}${entry.name}`);
+        const unchanged = held?.kind === entry.kind && await view.get(`${KEYS.slotContent}${entry.name}`) === entry.text;
+        records.push({ text: entry.text, slot: unchanged ? held : {
+          name: entry.name, kind: entry.kind, size: entry.text.length,
+          excerpt: excerpt(entry.text, SLOT_EXCERPT_CHARS), at: now(),
+          ...(held?.pinned === undefined ? {} : { pinned: held.pinned }),
+        } });
+      }
+      for (const entry of records) {
+        const rejected = validate('slot', entry.slot);
+        if (rejected) return rejected;
+      }
+      return storeArchive(view, records, protection);
+    });
+  }
+
+  /** Read the last durable archive decision and current host capability. */
+  async function retentionReport() {
+    return (await storage.get('ai/state/retention/archive')) ?? null;
+  }
+
+  /** Intentionally remove all conversation archives, tombstones and their report. */
+  function clearArchives(prefix = '') {
+    return enqueue(async (view) => {
+      for (const slot of await readAll(KEYS.slot, view)) {
+        if (!slot.name.startsWith(prefix) || (slot.kind !== 'agent-round' && slot.kind !== 'agent-round-index')) continue;
+        await view.delete(`${KEYS.slot}${slot.name}`);
+        await view.delete(`${KEYS.slotContent}${slot.name}`);
+      }
+      for (const key of await view.keys(`ai/state/evicted/${prefix}`)) await view.delete(key);
+      const report = await view.get('ai/state/retention/archive');
+      if (prefix === '') await view.delete('ai/state/retention/archive');
+      else if (report) await view.set('ai/state/retention/archive', { ...report,
+        evicted: report.evicted.filter((entry) => !entry.name.startsWith(prefix)),
+        written: report.written.filter((name) => !name.startsWith(prefix)) });
+      return true;
     });
   }
 
@@ -1153,7 +1329,7 @@ export function createLedger(options = {}) {
    * @returns {Promise<string>} an opaque token for `rollback`
    */
   function snapshot() {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const keys = await storage.keys(STATE);
       const entries = await Promise.all(keys.map(async (key) => [key, await storage.get(key)]));
       const token = `snap-${seq(nextSequence(await storage.keys(SNAP)))}`;
@@ -1171,7 +1347,7 @@ export function createLedger(options = {}) {
    * @returns {Promise<true | { error: string }>}
    */
   function rollback(token) {
-    return enqueue(async () => {
+    return enqueue(async (storage) => {
       const entries = await storage.get(`${SNAP}${token}`);
       if (entries === undefined) return { error: `unknown snapshot '${token}'` };
       for (const key of await storage.keys(STATE)) await storage.delete(key);
@@ -1182,13 +1358,37 @@ export function createLedger(options = {}) {
 
   //#endregion
 
+  /**
+   * Commit guarded supplemental work against the exact document it read.
+   * Atomic adapters publish the snapshot and all writes together. A stale
+   * proposal is refused, never rebased onto different record indices.
+   * @param {any} expected
+   * @param {(ledger: any) => Promise<any>} work
+   */
+  function transaction(expected, work) {
+    return enqueue(async (view) => {
+      const scoped = createLedger({ ...options, artifacts: admittedArtifacts, storage: view });
+      const current = { goal: await scoped.getGoal(), memories: await scoped.listMemories(),
+        skills: await scoped.listSkills() };
+      if (JSON.stringify(current) !== JSON.stringify(expected))
+        return { error: 'the refinement was rejected: supplemental state changed; regenerate the proposal',
+          errors: [{ code: 'LEDGER_CONFLICT', docPath: '', message: 'supplemental state changed' }] };
+      const outcome = await work(scoped);
+      if (outcome?.error) throw Object.assign(new Error(outcome.error), { outcome });
+      return outcome;
+    });
+  }
+
   return {
+    storageStatus: () => typeof storage.status === 'function' ? storage.status()
+      : { concurrency: typeof storage.mutate === 'function' ? 'atomic' : 'single-writer', durability: 'host-defined', error: null },
+    concurrency: typeof storage.mutate === 'function' ? 'atomic' : 'single-writer',
     validate,
-    setGoal, getGoal, listArchivedGoals, recordProgress, setGoalStatus,
+    setGoal, getGoal, listArchivedGoals, recordProgress, setGoalStatus, composeGoal,
     addMemory, getMemory, listMemories, deleteMemory,
     addSkill, getSkill, listSkills, deleteSkill,
     recall, recallSkills, embedMissing,
-    putSlot, getSlot, readSlot, listSlots, deleteSlot,
-    snapshot, rollback,
+    putSlot, getSlot, readSlot, listSlots, deleteSlot, putArchive, clearArchives, retentionReport,
+    snapshot, rollback, transaction,
   };
 }

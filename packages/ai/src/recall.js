@@ -144,6 +144,7 @@ export function createRecallTool(ledger, options = {}) {
     },
     execute: async ({ slot }) => {
       const content = await ledger.readSlot(slot);
+      if (content?.status === 'evicted') return { error: `slot '${slot}' was evicted`, ...content };
       if (content === undefined || content === null) {
         return {
           error: `unknown slot '${slot}'`,

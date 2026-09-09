@@ -52,6 +52,7 @@ export {
   createGeoToolbox, geoToolDefs, overlayRefusal, GEO_TOOL_NAMES, OVERLAY_TOOL_NAMES,
   GEOJSON_SCHEMA_ID,
 } from './geo-tools.js';
+export { createGuardedRefiner } from './guarded.js';
 export { createRefiner, describeTrajectory } from './refine.js';
 export { createMemoryStorage } from './storage/memory.js';
 export {
@@ -64,3 +65,8 @@ export {
 export {
   PROGRAM_SCHEMA, programSchema, PROGRAM_OPS, MAX_STEPS, MAX_PROGRAM_CHARS, NAME_PATTERN,
 } from './schemas/program.js';
+
+export { validateClaimEvidence, createClaimRefiner } from './evidence.js';
+export { CLAIM_EVIDENCE_SCHEMA, ARTIFACT_SCHEMA, EVIDENCE_SCHEMA, CLAIM_SCHEMA } from './schemas/evidence.js';
+
+export { ledgerFootprint, checkpointProgress, validateCheckpoint, goalPrompt } from './retention.js';

@@ -686,9 +686,12 @@ server — or with nothing. The package gains no dependency either way, which is
 posture: it loads in a static page with two dependencies and degrades to in-memory and
 schema-only. This site's assistant backs it with a single JSON slot
 ([`ledgerStore.js`](../website/src/lib/ledgerStore.js)), which is all a browser session
-needs. The ledger serializes its own writes, so a `Promise.all` of adds is safe; two
-processes — two tabs, a worker and a page — writing one adapter at once are outside the
-contract, because the adapter is four methods, not a transaction.
+needs. The ledger serializes its own writes. An adapter with `mutate` also
+serializes other writers at storage; `ledger.concurrency` reports `atomic` or
+`single-writer`. Four-method adapters require host coordination between writers.
+The website uses Web Locks, reads fresh bytes inside the lock, and holds it across
+the browser's localStorage publication boundary. Quota and lock failures are visible.
+
 
 The ledger holds four kinds, and they differ in every dimension that matters — lifetime,
 retrieval and who may write them:
@@ -868,6 +871,23 @@ export async function createDbStorage({ path = ':memory:', dims } = {}) {
   };
 
   return {
+    mutate: async (prefix, transform) => store.transaction((tx) => {
+      const rows = tx.sync.collection('slots');
+      const prefixes = typeof prefix === 'string' ? [prefix] : prefix.prefixes ?? [];
+      const keys = [...new Set([...(prefix.keys ?? []), ...prefixes.flatMap((part) => many(rows.execute(forPrefix(part).keys)))])].sort();
+      const matches = (key) => (prefix.keys ?? []).includes(key) || prefixes.some((part) => key.startsWith(part));
+      const current = Object.fromEntries(keys.map((key) => [key, rows.get(key)?.value]));
+      for (const key of Object.keys(current)) if (current[key] === undefined) delete current[key];
+      const outcome = transform(current);
+      if (!outcome || typeof outcome.then === 'function') throw new TypeError('mutate callback must be synchronous');
+      if (outcome.next !== undefined) {
+        const next = JSON.parse(JSON.stringify(outcome.next));
+        if (Object.keys(next).some((key) => !matches(key))) throw new TypeError('mutation escaped its namespace');
+        for (const key of keys) if (!Object.hasOwn(next, key)) rows.delete(key);
+        for (const [key, value] of Object.entries(next)) rows.put({ key, value });
+      }
+      return outcome.result;
+    }, { mode: 'immediate' }),
     get: async (key) => (await slots.get(key))?.value,
     set: async (key, value) => { await slots.put({ key, value }); },
     delete: async (key) => { await slots.delete(key); },
@@ -1042,8 +1062,8 @@ await agent.resume();                                        // no new instructi
 The active objective and everything recorded against it are composed into the **system
 prompt of every request** — unconditionally, because it is the thing being worked on.
 Memories and skills are *retrieved* (`retrieval`, using the ledger's own query shape) and
-are absent unless you ask for them. Progress is appended and never rewritten
-(`{ at, note, evidence }`), which is what stops a resumed session redoing finished work: a
+are absent unless you ask for them. Progress is appended with evidence
+(`{ at, note, evidence }`; bounded goals also mint a stable `id`), which is what stops a resumed session redoing finished work: a
 new agent built over the same storage reads what has already been tried rather than being
 told.
 
@@ -1061,6 +1081,106 @@ them, so a budget survives a reload. Token accounting uses the provider's report
 and falls back to deterministic character accounting (4 chars ≈ 1 token) when a provider
 reports none — stated here because a budget that silently did not apply on the runtimes
 that report no usage would be worse than no budget.
+
+### Atomic storage and reported lifecycle limits
+
+The optional storage capability is
+`mutate(scope, current => ({ next, result }))`. A scope is a key prefix string or
+`{ prefixes: [...], keys: [...] }`. The callback is synchronous, receives a detached
+JSON record map, and either returns a replacement map under that scope or omits
+`next` for a read-only decision. Exceptions publish nothing; keys cannot escape
+the scope. Every adapter write must participate in the same serialization.
+The memory adapter executes without yielding; the DB recipe uses one immediate
+transaction with synchronous scoped collection operations. Ledger work stages in
+an isolated map, then compares and atomically publishes it. Contention retries
+against current records; embedding batches are reused during retries. Exact-key
+scopes keep ordinary slot writes independent of corpus size. Record counters
+survive deletion and rollback so minted memory/skill addresses are never reused.
+
+```js
+const ledger = createLedger({
+  storage,
+  archiveLimits: { maxItems: 24, maxBytes: 262144 },
+  goalLimits: { maxEntries: 8, maxChars: 8192, maxBytes: 16384 },
+});
+const report = await ledger.retentionReport();
+const composed = await ledger.composeGoal(); // { text } or a visible refusal
+```
+
+Limits are optional, nonnegative safe integers; unknown limit names are errors.
+Automatic retention requires atomic storage. Archive `maxItems` counts live
+round and index slots. `maxBytes` measures the serialized archive sub-map in
+UTF-8, including slot metadata, content, durable tombstones and the latest report.
+Oldest unreferenced slots are evicted deterministically by timestamp and name.
+Pinned slots, newly archived batches, addresses in retained transcript context,
+and memory/goal references are protected. Free-text references are protected
+conservatively by address occurrence. `putArchive` commits rounds, their index,
+evictions and reports together. An impossible budget refuses without changing
+storage or discarding the current transcript.
+
+`readSlot(name)` returns text, `undefined` for an absent address, or a typed
+`{ status: 'evicted', name, bytes, reason }` tombstone. Recall and environment
+reads preserve that distinction. Reports and tombstones are durable; they also
+consume the byte budget, so an indefinitely growing audit trail eventually needs
+host action. `clearArchives()` intentionally removes conversation rounds,
+indexes, tombstones and the archive report. Memories, goals and snapshots remain.
+
+Goal limits apply to the active goal: raw entry count, serialized goal bytes and
+complete prompt characters. A deterministic lossless checkpoint stores unique
+note/evidence pairs plus every source entry id and timestamp. Only after exact
+coverage validates does the atomic commit replace raw entries. `checkpointReducer`
+may supply a synchronous host/model-authored checkpoint; invented, missing,
+duplicated or changed source evidence is rejected. This is exact evidence
+preservation, not semantic summarization. `composeGoal()` includes the objective,
+checkpoint and uncovered entries without excerpting; `createAgent` refuses an
+over-budget goal before requesting a model. Increasing limits or superseding the
+goal is explicit host action. Distinct evidence cannot be compressed indefinitely.
+Archived goals, durable snapshots and ordinary corpus slots are separate classes;
+these limits do not claim to cap an entire host's storage usage.
+
+Measured tradeoffs: <!--fact:ledger.retention-->On 48 seeded rounds, an eight-round oldest policy retains 16.7% of referenced addresses; protected eviction retains 100.0%, while retaining only 4.8% of unreferenced addresses. A lossless checkpoint reduces goal context from 14,841 to 4,216 characters. Impossible protected budgets are refused.<!--/fact-->
+
+The [retention instrument](../../benchmark/README.md#ledger-retention) reports all
+address loss, exact serialized bytes, restart correctness, retrieval and refused
+writes. Its seeded corpus is a reproducible policy test, not a universal quota or
+real-world language-quality claim. `ledgerFootprint(records)` accounts every
+serialized adapter byte by class, with braces reported as overhead.
+
+### Generic guarded documents and referential evidence
+
+`createGuardedRefiner({ read, validateProposal, apply, validateCandidate,
+planCommit, commit, snapshot?, restore? })` owns validation, copy/apply, candidate
+validation, planning and commit. `prepare(document, proposal)` is synchronous and
+returns pointered errors or a candidate/plan; `commit(proposal)` serializes the
+whole flow. The injected committer supplies atomic persistence. Snapshot/restore
+are paired fallback hooks; failed restoration is attempted once and retains both
+causes. No ledger paths or universal document schema exist in this engine.
+`createRefiner` and `createClaimRefiner` are its two production consumers.
+
+Memory evidence accepts legacy nonempty strings unchanged, or a versioned
+`CLAIM_EVIDENCE_SCHEMA` envelope:
+
+```json
+{
+  "version": 1,
+  "artifacts": [{ "id": "source", "kind": "slot", "locator": "round-1" }],
+  "evidence": [{ "id": "citation", "artifact": "source", "quote": "42 rows" }],
+  "visibleEvidence": ["citation"],
+  "claims": [{ "id": "count", "text": "There are 42 rows", "critical": true,
+    "status": "supported", "evidence": ["citation"] }]
+}
+```
+
+`validateClaimEvidence(envelope, { artifacts? })` checks shape, unique ids within
+each record class, artifact/evidence resolution, visible evidence membership and
+unresolved critical claims. An optional external artifact list checks admission
+and descriptor identity; `createClaimRefiner` requires that list. `createLedger({ artifacts })` applies the same immutable host admission list
+to memory writes and refinement. When that option is omitted, ledger memories
+validate self-contained envelopes. The validator never fetches locators, judges
+source authority or decides prose entailment. Host admission establishes which
+artifacts may be named; it does not establish the truth of a claim. Existing
+stored string evidence needs no migration; typed consumers narrow the evidence
+union. Envelope and checkpoint versions reject unknown versions.
 
 ### Refinement — the only way durable state changes
 
@@ -1110,16 +1230,26 @@ Results include `deduplicated`, with each skipped proposal's `path`, its
 `retainedPath` in the proposed document, and `retainedId` when the witness was
 already stored. A repeated batch that changes nothing creates no snapshot and
 preserves timestamps. Calls on one refiner serialize through generation and
-commit. Hosts coordinating multiple refiners or other ledger writers must
-provide their own single-writer coordination. Thrown storage failures also
-trigger rollback; if storage prevents rollback, the result explicitly reports
-that recovery is required and returns the snapshot token.
+commit. On atomic storage, a refinement publishes its snapshot and every write
+in one mutation; a changed supplemental document is refused before any patch
+index can name a different record. Four-method adapters require host coordination
+between refiners. Their commit failures restore once; a failed restore reports
+both causes and the recovery snapshot. Explicit rollback is a host-authorized
+restore of recorded state and can intentionally remove later writes.
 
 Refinement result: <!--fact:recall.dedup-->After 12 labelled waves, opt-in exact-evidence suppression stores 21 records instead of 78; state bytes fall 73.1%. Evidence recall@10 is 1.000 versus 0.667, with all labelled conflict and complement units retained. Proposals are scripted; vectors are baai/bge-m3.<!--/fact-->
 
 The option remains off by default. The [full policy comparison](../../benchmark/README.md#labelled-recall-and-repeated-refinement)
 includes the rejected normalization, similarity and merge controls, and clearly
 separates scripted proposals from live embeddings.
+
+The patch schema discriminates `oneOf` branches by operation and JSON Pointer
+path. Memory, skill and progress values cannot be exchanged; progress is append
+only, remove carries no value, and replace/remove require a canonical numeric
+index. Provider decoding uses the full schema with `strict: false`. Any custom
+validator is an additional check and cannot weaken local full-schema validation.
+
+Provider comparison: <!--fact:ledger.decoding-->openrouter, google/gemini-3.7-flash: oneOf valid; if-then rejected-full-schema (2 calls, $0.00567000 reported cost). One trial per syntax is provider acceptance evidence, not proof of grammar enforcement. Two excluded preparatory calls cost $0.00293850 and remain recorded.<!--/fact-->
 
 ### What the cheap tier does with it (measured)
 
@@ -1585,4 +1715,20 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/ai/schemas/patch` | JavaScript | declared |
 | `@jarenjs/ai/schemas/program` | JavaScript | declared |
 | `@jarenjs/ai/package.json` | metadata | — |
+| `@jarenjs/ai/guarded` | JavaScript | declared |
+| `@jarenjs/ai/evidence` | JavaScript | declared |
+| `@jarenjs/ai/retention` | JavaScript | declared |
+| `@jarenjs/ai/schemas/evidence` | JavaScript | declared |
 <!--/fact-->
+
+
+WebKit host limit: the measured localStorage process caches can remain stale after
+an exclusive Web Lock and task boundary. The adapter therefore elects one owner
+with a lifetime Web Lock on WebKit, refuses other tabs before reading or writing,
+and permits takeover after the owner closes. `storage.status()` reports
+`single-writer`; its atomic mutation capability still protects accepted batches.
+Chromium and Firefox use serialized concurrent writers. Hosts can explicitly
+request owner election with `singleWriter: true`; overriding it requires a storage
+slot whose cross-writer coherence the host has established. Browser-engine detection
+is a conservative host policy, not a Web Locks guarantee. `storage.close()` releases
+ownership deliberately. No fixed delay is treated as a cure for WebKit coherence.

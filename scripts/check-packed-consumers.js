@@ -140,7 +140,10 @@ if (!bun) console.log('(no bun binary on PATH — the Bun consumer leg is skippe
  */
 const SEMANTIC_SNIPPETS = {
   '@jarenjs/ai': `
-import { createChatClient, createToolbox, createAgent, registerModelContext, resolveEndpoint } from '@jarenjs/ai';
+import { createChatClient, createToolbox, createAgent, registerModelContext, resolveEndpoint, createLedger, createGuardedRefiner, validateClaimEvidence, ledgerFootprint } from '@jarenjs/ai';
+void validateClaimEvidence({}); void ledgerFootprint({});
+void createGuardedRefiner({ read: async () => ({}), validateProposal: () => true, apply: (d: any) => d, validateCandidate: () => true, planCommit: (d: any) => d, commit: async (d: any) => d });
+void createLedger({ goalLimits: { maxChars: 2048 }, archiveLimits: { maxItems: 8 } }).retentionReport();
 const endpoint = resolveEndpoint({ provider: 'ollama', model: 'm' });
 void endpoint.url;
 const client = createChatClient({ provider: 'ollama', model: 'm', fetch: (globalThis.fetch) });

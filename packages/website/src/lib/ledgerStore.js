@@ -1,67 +1,103 @@
 //@ts-check
-/**
- * The assistant ledger's storage adapter, over one JSON slot.
- *
- * `@jarenjs/ai`'s `createLedger` takes a four-method async adapter
- * (`get`/`set`/`delete`/`keys`) and never imports a store — durability
- * is the host's to supply. This site already has exactly one persistence
- * idiom: a named localStorage slot read and written as JSON, degrading
- * to in-memory when storage is unavailable (private mode, quota). So the
- * adapter is built over that idiom rather than beside it: the whole
- * ledger is one record map in one slot.
- *
- * Rewriting the whole slot per write is the right trade here and not
- * laziness — a ledger is a goal, a handful of memories and the archived
- * rounds of one conversation, measured in kilobytes, and the alternative
- * (a key per record) would spread one logical thing across a namespace
- * this site would then have to sweep. A host that needs more injects
- * `@jarenjs/db` over OPFS instead; that is what the seam is for.
- *
- * The in-memory record map is authoritative for the session and the slot
- * is a mirror of it. That matters when the mirror fails: `jsonStore`
- * swallows a quota error, so a session that outgrows the browser's
- * storage keeps working — every address the conversation names still
- * resolves — and loses only the part that was never in memory to begin
- * with, which is the next visit. Durability degrades; correctness does
- * not. Nothing evicts old rounds yet (`docs/ROADMAP.md`).
- */
-
-/** A JSON value, copied — the same isolation the in-memory adapter gives. */
-const copy = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+/** A whole-slot ledger adapter. Reload under the shared Web Lock before writes. */
+const copy = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
 /**
- * @param {{ read: () => any, write: (data: any) => void }} slot - a JSON
- *   slot (the site's `jsonStore`); `read` may answer null when empty or
- *   unavailable, and `write` may silently do nothing.
- * @returns {{ get: (key: string) => Promise<any>,
- *   set: (key: string, value: any) => Promise<void>,
- *   delete: (key: string) => Promise<void>,
- *   keys: (prefix?: string) => Promise<string[]> }}
+ * JSON slots must report failed writes by throwing or returning false. A legacy
+ * slot that swallows errors cannot promise durability; status says unverified.
+ * Web Locks serialize tabs using the same slot name. Without them the adapter
+ * explicitly exposes only the four-method, single-writer contract.
+ * @param {{ read: () => any, write: (data: any) => any, key?: string, reliable?: boolean }} slot
+ * @param {{ locks?: any, name?: string, singleWriter?: boolean }} [options]
  */
-export function createSlotLedgerStorage(slot) {
-  /** @type {Record<string, any> | null} */
-  let cache = null;
-
+export function createSlotLedgerStorage(slot, options = {}) {
+  const locks = options.locks === undefined ? globalThis.window?.navigator?.locks : options.locks;
+  const name = options.name ?? slot.key ?? 'jaren-ai-ledger';
+  let cache = {};
+  let error = null;
+  let durable = slot.reliable === true ? 'durable' : 'unverified';
   const load = () => {
-    if (cache === null) {
-      const raw = slot.read();
-      cache = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    }
+    const raw = slot.read();
+    if (raw !== null && raw !== undefined && (typeof raw !== 'object' || Array.isArray(raw)))
+      throw new TypeError('invalid ledger slot: expected a record map');
+    cache = copy(raw ?? {});
     return cache;
   };
-
+  const publish = (next) => {
+    try {
+      if (slot.write(next) === false) throw new Error('ledger storage write failed');
+      cache = copy(next);
+      error = null;
+      durable = slot.reliable === true ? 'durable' : 'unverified';
+    }
+    catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+      durable = 'failed';
+      throw cause;
+    }
+  };
+  const atomic = typeof locks?.request === 'function';
+  // WebKit's process-local storage snapshots can remain stale even across a
+  // locked task boundary. Elect one owner there instead of claiming coherence.
+  const userAgent = globalThis.navigator?.userAgent ?? '';
+  const singleWriter = options.singleWriter ?? (/AppleWebKit/.test(userAgent) && !/Chrome|Chromium|Edg/.test(userAgent));
+  let ownership;
+  let releaseOwner;
+  let ownerRequest;
+  const own = () => {
+    if (!atomic || !singleWriter) return Promise.resolve();
+    ownership ??= new Promise((resolve, reject) => {
+      const held = new Promise((release) => { releaseOwner = release; });
+      ownerRequest = locks.request(`ledger-owner:${name}`, { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          reject(new Error('single-writer ledger: another tab owns this storage; close that tab before writing here'));
+          return;
+        }
+        resolve();
+        return held;
+      });
+      ownerRequest.catch(reject);
+    });
+    ownership.catch(() => { ownership = undefined; });
+    return ownership;
+  };
+  // Firefox publishes localStorage snapshots at task boundaries. Keep the
+  // lock until that publication completes, and enter a fresh task before read.
+  const taskBoundary = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const locked = (fn) => atomic ? locks.request(`ledger:${name}`, async () => {
+    await taskBoundary();
+    try { return fn(); }
+    finally { await taskBoundary(); }
+  }) : Promise.resolve().then(fn);
+  const mutate = async (prefix, transform) => {
+    await own();
+    return locked(() => {
+    const matches = (key) => typeof prefix === 'string' ? key.startsWith(prefix)
+      : (prefix.keys ?? []).includes(key) || (prefix.prefixes ?? []).some((part) => key.startsWith(part));
+    const current = load();
+    const scoped = Object.fromEntries(Object.keys(current).sort()
+      .filter((key) => matches(key)).map((key) => [key, copy(current[key])]));
+    const outcome = transform(scoped);
+    if (!outcome || typeof outcome.then === 'function') throw new TypeError('mutate callback must be synchronous');
+    if (outcome.next !== undefined) {
+      const next = copy(outcome.next);
+      if (Object.keys(next).some((key) => !matches(key))) throw new TypeError('mutation escaped its namespace');
+      for (const key of Object.keys(current)) if (matches(key)) delete current[key];
+      publish({ ...current, ...next });
+    }
+    return outcome.result;
+    });
+  };
   return {
-    get: async (key) => copy(load()[key]),
-    set: async (key, value) => {
-      load()[key] = copy(value);
-      slot.write(cache);
-    },
-    delete: async (key) => {
-      delete load()[key];
-      slot.write(cache);
-    },
-    keys: async (prefix = '') => Object.keys(load())
-      .filter((key) => key.startsWith(prefix))
-      .sort(),
+    ...(atomic ? { mutate } : {}),
+    status: () => ({ concurrency: atomic && !singleWriter ? 'atomic' : 'single-writer', durability: durable, error }),
+    close: async () => { releaseOwner?.(); await ownerRequest; ownership = undefined; },
+    get: async (key) => { await own(); return copy(load()[key]); },
+    set: (key, value) => mutate('', (current) => ({ next: { ...current, [key]: copy(value) } })),
+    delete: (key) => mutate('', (current) => {
+      delete current[key];
+      return { next: current };
+    }),
+    keys: async (prefix = '') => { await own(); return Object.keys(load()).filter((key) => key.startsWith(prefix)).sort(); },
   };
 }

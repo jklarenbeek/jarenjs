@@ -339,3 +339,18 @@ describe('the recipe and the documentation are one thing', function () {
       'the storage contract is the whole interface: an adapter that imported the ledger would be a fork of it');
   });
 });
+
+it('two DB connections atomically mint ids and a failed transform rolls back entirely', async () => {
+  const path = join(dir, 'atomic.db');
+  const first = await storage({ path }), second = await storage({ path });
+  const one = createLedger({ storage: first, now: () => '2026-09-09T00:00:00Z' });
+  const two = createLedger({ storage: second, now: () => '2026-09-09T00:00:00Z' });
+  await Promise.all(Array.from({ length: 12 }, (_, i) => [one, two][i % 2].addMemory({ text: String(i), evidence: 'source' })));
+  assert.strictEqual((await one.listMemories()).length, 12);
+  await assert.rejects(first.mutate('ai/', (current) => {
+    current['ai/state/partial'] = 'never committed';
+    throw new Error('aborted');
+  }), /aborted/);
+  assert.strictEqual(await second.get('ai/state/partial'), undefined);
+  assert.strictEqual((await two.listMemories()).length, 12);
+});

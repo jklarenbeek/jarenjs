@@ -35,6 +35,8 @@
  * ordering everything downstream depends on is not the model's to set.
  */
 
+import { CLAIM_EVIDENCE_SCHEMA } from './evidence.js';
+
 /**
  * Where a refinement may write. Anchored, and read as: append or address
  * one memory, append or address one skill, append one progress entry.
@@ -63,12 +65,7 @@ export const MEMORY_PROPOSAL_SCHEMA = {
   type: 'object',
   properties: {
     text: { type: 'string', minLength: 1, description: 'The fact worth carrying, in one sentence.' },
-    evidence: {
-      type: 'string',
-      minLength: 1,
-      description: 'What in the run establishes it — a tool result, a quoted line, a slot address.'
-        + ' Not a justification: a citation.',
-    },
+    evidence: { anyOf: [{ type: 'string', minLength: 1 }, CLAIM_EVIDENCE_SCHEMA] },
     tags: { type: 'array', items: { type: 'string', minLength: 1 } },
   },
   required: ['text', 'evidence'],
@@ -100,60 +97,39 @@ export const PROGRESS_PROPOSAL_SCHEMA = {
 };
 
 /**
- * The refinement patch schema, capped at `maxOps` operations.
- *
- * `value` is `anyOf` the three proposal shapes rather than one open
- * object: on a provider that constrains decoding, that is the difference
- * between a model emitting a memory and a model emitting a shape nobody
- * can store. `anyOf` and not `oneOf` — the shapes are disjoint by their
- * required members, and `oneOf` is the keyword provider implementations
- * most often refuse.
- *
- * A `remove` carries no `value`, so `value` is optional. That is also
- * why a generated refinement is asked for with `strict: false`: OpenAI's
- * strict `json_schema` mode requires every declared property to be
- * required, which would force a `value` onto a `remove`. An `add`
- * missing its `value` is caught one stage later by the patch engine,
- * with a pointer — the error class this package's field notes say small
- * models repair well.
- *
+ * Path-discriminated RFC 6902 operations. Provider decoding uses this same
+ * schema in non-strict mode; local validation remains authoritative.
  * @param {{ maxOps?: number }} [options]
- * @returns {any} a JSON Schema document
+ * @returns {any}
  */
 export function refinementPatchSchema(options = {}) {
   const maxOps = options.maxOps ?? DEFAULT_MAX_OPS;
+  if (!Number.isSafeInteger(maxOps) || maxOps < 0)
+    throw new TypeError('maxOps must be a non-negative safe integer');
+  const branch = (op, pattern, value) => ({
+    type: 'object',
+    properties: { op: { enum: op }, path: { type: 'string', pattern },
+      ...(value ? { value } : {}) },
+    required: value ? ['op', 'path', 'value'] : ['op', 'path'],
+    additionalProperties: false,
+  });
+  const index = '(0|[1-9][0-9]*)';
   return {
     $id: 'https://jarenjs.github.io/schemas/ai/refinement-patch.json',
     title: 'Refinement patch',
-    description: 'An RFC 6902 JSON Patch over the agent\'s supplemental state.'
-      + ' It may only append or replace memories and skills, and append progress entries.',
-    // no `minItems`: the EMPTY patch is a legal, and often the correct,
-    // answer. A schema that demanded at least one operation would be
-    // asking a model that learned nothing to invent something — which is
-    // precisely the failure `evidence` exists to prevent, arriving
-    // through the front door instead.
-    type: 'array',
-    maxItems: maxOps,
-    items: {
-      type: 'object',
-      properties: {
-        op: { enum: ['add', 'replace', 'remove'] },
-        path: {
-          type: 'string',
-          pattern: REFINEMENT_PATH_PATTERN,
-          description: 'One of /memories/-, /memories/{index}, /skills/-, /skills/{index}'
-            + ' or /goal/progress/- . Nothing else is addressable.',
-        },
-        value: {
-          anyOf: [MEMORY_PROPOSAL_SCHEMA, SKILL_PROPOSAL_SCHEMA, PROGRESS_PROPOSAL_SCHEMA],
-          description: 'The record to store. Omitted for remove.',
-        },
-      },
-      required: ['op', 'path'],
-      additionalProperties: false,
-    },
+    type: 'array', maxItems: maxOps,
+    $defs: { memory: MEMORY_PROPOSAL_SCHEMA, skill: SKILL_PROPOSAL_SCHEMA,
+      progress: PROGRESS_PROPOSAL_SCHEMA },
+    items: { oneOf: [
+      ...[['memories', 'memory'], ['skills', 'skill']].flatMap(([path, kind]) => [
+        branch(['add'], `^/${path}/(-|${index})$`, { $ref: `#/$defs/${kind}` }),
+        branch(['replace'], `^/${path}/${index}$`, { $ref: `#/$defs/${kind}` }),
+        branch(['remove'], `^/${path}/${index}$`, null),
+      ]),
+      branch(['add'], '^/goal/progress/-$', { $ref: '#/$defs/progress' }),
+    ] },
   };
 }
 
-/** The schema at the default cap — what `createRefiner` uses unasked. */
+/** The full schema used for handwritten and generated proposals alike. */
 export const REFINEMENT_PATCH_SCHEMA = refinementPatchSchema();

@@ -1344,3 +1344,12 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/node-worker` | JavaScript | declared |
 | `@jarenjs/db/node-pool` | JavaScript | declared |
 <!--/fact-->
+
+
+The [durable AI ledger recipe](../ai/README.md#a-durable-ledger-over-jarenjsdb)
+exposes optional atomic namespace mutation as well as its base storage and rank
+capabilities. It reads and publishes through one immediate transaction, using the
+transaction's synchronous collection facade so another SQLite connection on the
+same event loop cannot block an awaiting writer. A rejected callback changes
+neither records nor counters; ledger id minting and guarded multi-record updates
+use that boundary.

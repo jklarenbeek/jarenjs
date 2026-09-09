@@ -18,6 +18,8 @@
  * evidence), a slot is written by the harness and never proposed.
  */
 
+import { CLAIM_EVIDENCE_SCHEMA } from './evidence.js';
+
 /**
  * A timestamp property: RFC 3339, the suite's only date representation.
  *
@@ -102,6 +104,7 @@ export const GOAL_SCHEMA = {
         type: 'object',
         properties: {
           at: AT,
+          id: ID,
           note: { type: 'string', minLength: 1 },
           // an unevidenced progress note is a claim, not a record
           evidence: { type: 'string', minLength: 1 },
@@ -110,6 +113,23 @@ export const GOAL_SCHEMA = {
         additionalProperties: false,
       },
     },
+    checkpoint: {
+      type: 'object',
+      properties: {
+        version: { const: 1 },
+        records: { type: 'array', items: { type: 'object', properties: {
+          note: ID, evidence: ID,
+        }, required: ['note', 'evidence'], additionalProperties: false } },
+        sources: { type: 'array', items: { type: 'object', properties: {
+          id: ID, at: AT, record: { type: 'integer', minimum: 0 },
+        }, required: ['id', 'at', 'record'], additionalProperties: false } },
+      },
+      required: ['version', 'records', 'sources'], additionalProperties: false,
+    },
+    retention: { type: 'object', properties: {
+      version: { const: 1 }, reason: { const: 'goal-budget' },
+      retired: { type: 'array', items: ID, uniqueItems: true },
+    }, required: ['version', 'reason', 'retired'], additionalProperties: false },
   },
   required: ['objective', 'createdAt', 'status', 'progress'],
   additionalProperties: false,
@@ -135,7 +155,7 @@ export const MEMORY_SCHEMA = {
   properties: {
     id: ID,
     text: { type: 'string', minLength: 1 },
-    evidence: { type: 'string', minLength: 1 },
+    evidence: { anyOf: [{ type: 'string', minLength: 1 }, CLAIM_EVIDENCE_SCHEMA] },
     tags: { type: 'array', items: { type: 'string', minLength: 1 } },
     at: AT,
     // OPTIONAL, as a pair: the vector `recall({ near })` ranks by, and
@@ -212,6 +232,7 @@ export const SLOT_SCHEMA = {
     // lines" beside a size, and a slot whose writer could not say is
     // better off saying nothing than guessing.
     count: { type: 'integer', minimum: 0 },
+    pinned: { type: 'boolean' },
   },
   required: ['name', 'kind', 'size', 'excerpt', 'at'],
   additionalProperties: false,
@@ -239,6 +260,7 @@ export const LEDGER_SCHEMAS = {
 /**
  * One evidenced progress entry on the active goal.
  * @typedef {object} LedgerProgressEntry
+ * @property {string} [id]
  * @property {string} at RFC 3339
  * @property {string} note
  * @property {string} evidence
@@ -251,6 +273,8 @@ export const LEDGER_SCHEMAS = {
  * @property {string} createdAt RFC 3339
  * @property {'active'|'done'|'abandoned'|'superseded'} status
  * @property {LedgerProgressEntry[]} progress
+ * @property {{ version: 1, records: { note: string, evidence: string }[], sources: { id: string, at: string, record: number }[] }} [checkpoint]
+ * @property {{ version: 1, reason: 'goal-budget', retired: string[] }} [retention]
  */
 
 /**
@@ -280,7 +304,7 @@ export const LEDGER_SCHEMAS = {
  * @typedef {object} LedgerMemoryFields
  * @property {string} id
  * @property {string} text
- * @property {string} evidence
+ * @property {string | import('./evidence.js').ClaimEvidenceEnvelope} evidence
  * @property {string[]} tags
  * @property {string} at RFC 3339
  */
@@ -318,6 +342,7 @@ export const LEDGER_SCHEMAS = {
  * @property {string} excerpt
  * @property {string} at RFC 3339
  * @property {number} [count]
+ * @property {boolean} [pinned]
  */
 
 /**

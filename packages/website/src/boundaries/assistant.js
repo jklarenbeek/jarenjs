@@ -839,10 +839,12 @@ async function readLedger(ledger) {
   const slots = await ledger.listSlots();
   return {
     goal: goal !== null && goal.status === 'active'
-      ? { objective: goal.objective, progress: goal.progress }
+      ? { objective: goal.objective, progress: goal.progress, checkpoint: goal.checkpoint }
       : null,
     memories: (await ledger.listMemories()).length,
     archived: slots.filter((slot) => slot.kind === 'agent-round').length,
+    persistence: ledger.storageStatus?.() ?? null,
+    retention: await ledger.retentionReport?.() ?? null,
   };
 }
 
@@ -979,10 +981,10 @@ export function createAssistantEffects(deps) {
     // that nothing can ever name again. Memories and the goal survive:
     // they are what was LEARNED, not what was said.
     'ai-clear-archive': (props, dispatch) => {
-      deps.ledger.listSlots()
-        .then((slots) => Promise.all(slots
+      (typeof deps.ledger.clearArchives === 'function' ? deps.ledger.clearArchives()
+        : deps.ledger.listSlots().then((slots) => Promise.all(slots
           .filter((slot) => slot.kind === 'agent-round' || slot.kind === 'agent-round-index')
-          .map((slot) => deps.ledger.deleteSlot(slot.name))))
+          .map((slot) => deps.ledger.deleteSlot(slot.name)))))
         .then(() => readLedger(deps.ledger))
         .then((view) => dispatch('ai/ledger', view),
           (err) => dispatch('ai/failed', err?.message ?? String(err)));

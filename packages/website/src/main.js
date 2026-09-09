@@ -28,12 +28,14 @@ const GAME_KEY = 'jaren-game';
 
 /** A localStorage-backed JSON slot; failures degrade to in-memory. */
 const jsonStore = (key) => ({
+  key, reliable: true,
   read: () => {
     try {
       const raw = localStorage.getItem(key);
       return raw === null ? null : JSON.parse(raw);
     }
-    catch {
+    catch (error) {
+      if (key === AI_LEDGER_KEY) throw error;
       return null;
     }
   },
@@ -41,7 +43,8 @@ const jsonStore = (key) => ({
     try {
       localStorage.setItem(key, JSON.stringify(data));
     }
-    catch {
+    catch (error) {
+      if (key === AI_LEDGER_KEY) throw error;
       // storage full or unavailable: the session keeps working
     }
   },

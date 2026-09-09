@@ -124,8 +124,18 @@ function scopedLedger(ledger, scope) {
     putSlot: async (name, content, meta) =>
       relative(await ledger.putSlot(within(name), content, meta)),
     getSlot: async (name) => relative(await ledger.getSlot(within(name))),
-    readSlot: (name) => ledger.readSlot(within(name)),
+    readSlot: async (name) => relative(await ledger.readSlot(within(name))),
     deleteSlot: (name) => ledger.deleteSlot(within(name)),
+    putArchive: typeof ledger.putArchive !== 'function' ? undefined : (entries, protection = {}) =>
+      ledger.putArchive(entries.map((entry) => ({ ...entry, name: within(entry.name) })),
+        { ...protection, protectedNames: (protection.protectedNames ?? []).map(within) }),
+    clearArchives: () => ledger.clearArchives(scope),
+    retentionReport: async () => {
+      const report = await ledger.retentionReport?.();
+      return !report ? null : { ...report,
+        evicted: report.evicted.filter((entry) => entry.name.startsWith(scope)).map(relative),
+        written: report.written.filter((name) => name.startsWith(scope)).map((name) => name.slice(scope.length)) };
+    },
     listSlots: async () => (await ledger.listSlots())
       .filter((slot) => slot.name.startsWith(scope))
       .map(relative),
@@ -542,10 +552,12 @@ export function createEnvironment(options = {}) {
     return { prefix, removed: slots.length };
   }
 
-  const unknown = (name) => ({
-    error: `no slot '${name}'`,
-    hint: 'call digest() for what the environment holds',
-  });
+  const unknown = async (name) => {
+    const content = await ledger.readSlot(name);
+    return content?.status === 'evicted'
+      ? { error: `slot '${name}' was evicted`, ...content }
+      : { error: `no slot '${name}'`, hint: 'call digest() for what the environment holds' };
+  };
 
   return {
     ledger, put, ingest, peek, chunk, grep, select, stat, digest, read, forget,

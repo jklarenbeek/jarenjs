@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "instrument": {
+      "const": "ledger-retention"
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "rounds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "bars": {
+      "type": "object"
+    },
+    "decision": {
+      "type": "object"
+    },
+    "quota": {
+      "type": "object"
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "enum": [
+              "none",
+              "oldest",
+              "unreferenced",
+              "checkpoint"
+            ]
+          },
+          "maxItems": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "footprint": {
+            "type": "object",
+            "properties": {
+              "bytes": {
+                "type": "number",
+                "minimum": 0
+              },
+              "overhead": {
+                "const": 2
+              },
+              "classes": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "bytes": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "items": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "bytes",
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "bytes",
+              "overhead",
+              "classes"
+            ],
+            "additionalProperties": false
+          },
+          "evicted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "addressResolution": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "referencedResolution": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "unreferencedResolution": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "resumedCorrectness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "retrievalRecall10": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "failedWrites": {
+            "type": "number",
+            "minimum": 0
+          },
+          "goalChars": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "policy",
+          "maxItems",
+          "footprint",
+          "evicted",
+          "addressResolution",
+          "referencedResolution",
+          "unreferencedResolution",
+          "resumedCorrectness",
+          "retrievalRecall10",
+          "failedWrites",
+          "goalChars"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "instrument",
+    "seed",
+    "rounds",
+    "bars",
+    "decision",
+    "quota",
+    "rows"
+  ],
+  "additionalProperties": false
+}

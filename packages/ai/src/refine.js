@@ -48,6 +48,7 @@
 import { JarenValidator } from '@jarenjs/validate';
 
 import { checkOutcome } from './check.js';
+import { createGuardedRefiner } from './guarded.js';
 import { createStructuredOutput } from './structured.js';
 import { REFINEMENT_PATCH_SCHEMA, refinementPatchSchema } from './schemas/patch.js';
 import { excerpt, truncate } from '@jarenjs/core/chunk';
@@ -215,10 +216,12 @@ export function createRefiner(options) {
   // the shape check, compiled once — the same schema the generator
   // constrains decoding with, so a hand-written patch handed to
   // `commit` is held to exactly what a generated one is held to
-  const compiled = options.validator
-    ?? new JarenValidator({ skipErrors: false, collectErrors: true, unknownFormats: 'ignore' })
+  const compiled = new JarenValidator({ skipErrors: false, collectErrors: true, unknownFormats: 'ignore' })
       .compile(patchSchema);
-  const checkShape = (patch) => checkOutcome(compiled(patch));
+  const checkShape = (patch) => {
+    const full = checkOutcome(compiled(patch));
+    return full.valid && options.validator ? checkOutcome(options.validator(patch)) : full;
+  };
 
   const noEngine = {
     error: 'refinement needs the applyPatch seam — inject '
@@ -307,7 +310,7 @@ export function createRefiner(options) {
       }
       if (kind === 'memory' && options.deduplicate === 'exact-evidence' && entry.id === undefined
         && Object.keys(entry).every((key) => key === 'text' || key === 'evidence' || key === 'tags')) {
-        const match = witnesses.find(({ record: held }) => held.text === record.text && held.evidence === record.evidence
+        const match = witnesses.find(({ record: held }) => held.text === record.text && sameJson(held.evidence, record.evidence)
           && sameJson([...held.tags].sort(), [...record.tags].sort()));
         if (match) {
           deduplicated.push({ path: at, retainedPath: match.path,
@@ -383,31 +386,48 @@ export function createRefiner(options) {
    * @returns {{ valid: boolean, errors: any[], plan?: any, next?: any }}
    */
   function dryRun(document, patch) {
-    const shape = checkShape(patch);
-    if (!shape.valid) return { valid: false, errors: shape.errors };
-
-    /** @type {any} */
-    let next;
-    try {
-      // a COPY, always: the seam is injected and this module does not get
-      // to assume it is copy-on-write, however much the one we ship is
-      next = applyPatch(JSON.parse(JSON.stringify(document)), patch);
-    }
-    catch (error) {
-      return { valid: false, errors: [patchFailure(error)] };
-    }
-    if (!isRecord(next)) {
-      return { valid: false,
-        errors: [problem('AI0106', 'the patched state is not an object', '')] };
-    }
-
-    const memories = planKind('memory', document.memories, next.memories ?? [], 'memories');
-    const skills = planKind('skill', document.skills, next.skills ?? [], 'skills');
-    const progress = planProgress(document.goal, next.goal ?? null);
-    const errors = [...memories.errors, ...skills.errors, ...progress.errors];
-    if (errors.length > 0) return { valid: false, errors };
-    return { valid: true, errors: [], next, plan: { memories, skills, progress } };
+    return guarded.prepare(document, patch);
   }
+
+  const guarded = createGuardedRefiner({
+    read: state,
+    validateProposal: checkShape,
+    apply: (document, patch) => applyPatch(document, patch),
+    applyFailure: patchFailure,
+    validateCandidate: (next) => isRecord(next)
+      ? { valid: true, errors: [] }
+      : { valid: false, errors: [problem('AI0106', 'the patched state is not an object', '')] },
+    planCommit: (next, document) => {
+      const memories = planKind('memory', document.memories, next.memories ?? [], 'memories');
+      const skills = planKind('skill', document.skills, next.skills ?? [], 'skills');
+      const progress = planProgress(document.goal, next.goal ?? null);
+      const errors = [...memories.errors, ...skills.errors, ...progress.errors];
+      return { valid: errors.length === 0, errors, plan: { memories, skills, progress } };
+    },
+    snapshot: () => ledger.snapshot(),
+    restore: (token) => ledger.rollback(token),
+    commit: async (plan) => {
+      const written = { memories: [], skills: [], progress: [] };
+      const accept = (outcome, what) => {
+        if (outcome?.error !== undefined) throw Object.assign(new Error(`${what}: ${outcome.error}`), { outcome, what });
+      };
+      for (const record of plan.memories.add) {
+        accept(await ledger.addMemory(record), 'a memory could not be stored');
+        written.memories.push(record);
+      }
+      for (const record of plan.skills.add) {
+        accept(await ledger.addSkill(record), 'a skill could not be stored');
+        written.skills.push(record);
+      }
+      for (const id of plan.memories.remove) await ledger.deleteMemory(id);
+      for (const id of plan.skills.remove) await ledger.deleteSkill(id);
+      for (const entry of plan.progress.append) {
+        accept(await ledger.recordProgress(entry), 'a progress entry could not be recorded');
+        written.progress.push(entry);
+      }
+      return written;
+    },
+  });
 
   /** Whether a plan would write anything at all. */
   const empty = (plan) => plan.memories.add.length === 0 && plan.memories.remove.length === 0
@@ -434,65 +454,35 @@ export function createRefiner(options) {
         ...(options.deduplicate ? { deduplicated: plan.memories.deduplicated } : {}) };
     }
 
-    const token = await ledger.snapshot();
-    /** @type {{ memories: any[], skills: any[], progress: any[] }} */
-    const written = { memories: [], skills: [], progress: [] };
-    /**
-     * A ledger rejection, turned into the rolled-back answer. Reached
-     * only when stage 3 said a record was storable and the ledger
-     * disagreed — which would be a defect in this module rather than in
-     * the patch, and is therefore reported rather than swallowed.
-     * @param {any} outcome
-     * @param {string} what
-     */
-    const failure = (outcome, what) => (outcome?.error === undefined
-      ? null
-      : { error: `the refinement was rolled back: ${what} — ${outcome.error}`,
-        errors: outcome.errors ?? [], patchSchema, snapshot: token });
-
-    // stored BEFORE the removals, which is not cosmetic: a minted id
-    // continues from the highest sequence still stored, so removing the
-    // newest record first could hand its replacement the address it just
-    // vacated. Two different claims sharing one address is exactly what
-    // an auditable ledger may not do.
-    try {
-      for (const record of plan.memories.add) {
-        const stop = failure(await ledger.addMemory(record), 'a memory could not be stored');
-        if (stop !== null) {
-          await ledger.rollback(token);
-          return stop;
-        }
-        written.memories.push(record);
+    if (ledger.concurrency === 'atomic' && typeof ledger.transaction === 'function') {
+      try {
+        return await ledger.transaction(document, (scoped) =>
+          createRefiner({ ...options, ledger: scoped }).commit(patch));
       }
-      for (const record of plan.skills.add) {
-        const stop = failure(await ledger.addSkill(record), 'a skill could not be stored');
-        if (stop !== null) {
-          await ledger.rollback(token);
-          return stop;
-        }
-        written.skills.push(record);
-      }
-      for (const id of plan.memories.remove) await ledger.deleteMemory(id);
-      for (const id of plan.skills.remove) await ledger.deleteSkill(id);
-      for (const entry of plan.progress.append) {
-        const stop = failure(await ledger.recordProgress(entry),
-          'a progress entry could not be recorded');
-        if (stop !== null) {
-          await ledger.rollback(token);
-          return stop;
-        }
-        written.progress.push(entry);
+      catch (error) {
+        if (error?.outcome) return { ...error.outcome, snapshot: null };
+        return { error: `the refinement was rolled back after a storage failure: ${error instanceof Error ? error.message : String(error)}`,
+          snapshot: null, patchSchema };
       }
     }
-    catch (error) {
-      try { await ledger.rollback(token); }
-      catch {
-        return { error: 'the refinement failed and rollback failed; storage requires recovery',
-          snapshot: token, patchSchema };
-      }
-      return { error: `the refinement was rolled back after a storage failure: ${error instanceof Error ? error.message : String(error)}`,
+
+    const outcome = await guarded.commitPrepared(document, dry);
+    const token = outcome.snapshot;
+    if (!outcome.ok) {
+      if (outcome.stage === 'snapshot') return { error: 'the refinement could not take a snapshot; nothing was written',
+        cause: outcome.cause, errors: outcome.errors, patchSchema };
+      if (outcome.restoreError !== undefined) return {
+        error: 'the refinement failed and rollback failed; storage requires recovery',
+        snapshot: token, patchSchema, cause: outcome.cause, restoreError: outcome.restoreError,
+      };
+      if (outcome.cause?.outcome) return {
+        error: `the refinement was rolled back: ${outcome.cause.what} — ${outcome.cause.outcome.error}`,
+        errors: outcome.cause.outcome.errors ?? [], patchSchema, snapshot: token,
+      };
+      return { error: `the refinement was rolled back after a storage failure: ${outcome.cause instanceof Error ? outcome.cause.message : String(outcome.cause)}`,
         snapshot: token, patchSchema };
     }
+    const written = outcome.value;
 
     return {
       ok: true,
@@ -541,13 +531,7 @@ export function createRefiner(options) {
       '- Append with /memories/-, /skills/- and /goal/progress/-. Replace or remove an existing',
       '  record by its index. Nothing else is addressable.',
       '',
-      // the shape table and the worked example are not decoration. Every
-      // trial on the qwen tier failed its FIRST attempt without them, and
-      // always the same way: a progress entry written in the memory's
-      // shape (`text` where the goal wants `note`). The schema cannot
-      // rule that out — `value` is one union for three paths — so it is
-      // the prompt's job, and this is the package's own field note
-      // ("a few-shot example fixes shape") applied to its own harness.
+      // Examples help authoring; the schema enforces the path/value relationship.
       'Each path takes its own shape:',
       '  /memories/-       {"text": …, "evidence": …, "tags": [ … ]}',
       '  /skills/-         {"name": …, "when": …, "instructions": …, "tools": [ … ]}',

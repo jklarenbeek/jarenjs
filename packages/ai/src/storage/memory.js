@@ -10,7 +10,7 @@
  * dependencies, and a store is the largest thing it could have been made
  * to import.
  *
- * The adapter contract, in full:
+ * The base adapter contract:
  *
  *   get(key)      -> Promise<any | undefined>   a JSON value, or undefined
  *   set(key, val) -> Promise<void>              val is a JSON value
@@ -25,7 +25,11 @@
  * unavoidably async, and a synchronous default would let a caller write
  * code that silently breaks the moment real storage is wired in.
  *
- * And one OPTIONAL fifth, for an adapter that can rank vectors where
+ * Optional `mutate(scope, fn)` reads and replaces a detached record map in one
+ * indivisible step. Scopes select prefixes and/or exact keys; omitting the next
+ * map is read-only. The ledger uses it for staged, atomic publication.
+ *
+ * Another optional capability, for an adapter that can rank vectors where
  * they live instead of handing every record over:
  *
  *   rank({ prefix, vector, model, dims, limit, minScore })
@@ -72,10 +76,31 @@
  * @returns {{ get: (key: string) => Promise<any>,
  *   set: (key: string, value: any) => Promise<void>,
  *   delete: (key: string) => Promise<void>,
- *   keys: (prefix?: string) => Promise<string[]> }}
+ *   keys: (prefix?: string) => Promise<string[]>,
+ *   mutate: import('./transaction.js').StorageMutation }}
  */
 export function createMemoryStorage(backing = new Map()) {
   return {
+    mutate: async (prefix, transform) => {
+      const matches = (key) => typeof prefix === 'string' ? key.startsWith(prefix)
+        : (prefix.keys ?? []).includes(key) || (prefix.prefixes ?? []).some((part) => key.startsWith(part));
+      // No await between read and publication: even separate adapters sharing
+      // this map observe one complete mutation. Serialize every value first.
+      const current = Object.fromEntries([...backing].filter(([key]) => matches(key))
+        .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([key, raw]) => [key, JSON.parse(raw)]));
+      const outcome = transform(current);
+      if (!outcome || typeof outcome.then === 'function') throw new TypeError('mutate callback must be synchronous');
+      if (outcome.next !== undefined) {
+        const entries = Object.entries(outcome.next).map(([key, value]) => {
+          if (!matches(key)) throw new TypeError('mutation escaped its namespace');
+          return [key, JSON.stringify(value)];
+        });
+        for (const key of backing.keys()) if (matches(key)) backing.delete(key);
+        for (const [key, raw] of entries) backing.set(key, raw);
+      }
+      return outcome.result;
+    },
     get: async (key) => {
       const raw = backing.get(key);
       return raw === undefined ? undefined : JSON.parse(raw);

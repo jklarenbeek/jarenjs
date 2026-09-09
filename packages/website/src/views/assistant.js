@@ -118,6 +118,7 @@ const goalPanel =
     ],
     ['p', { class: 'ai-goal-text' }, '$.goal.objective'],
     ['ul', { class: 'ai-goal-progress' }, [{ $apply: '$.goal.progress[*]' }]],
+    { $if: ['$.goal.checkpointLabel', ['p', { class: 'ai-hint' }, '$.goal.checkpointLabel']] },
     { $if: ['$.goal.more', ['p', { class: 'ai-hint' }, '…and ', '$.goal.more', ' earlier entries']] },
     ['div', { class: 'ai-goal-actions' },
       ['button', {
@@ -162,6 +163,8 @@ const panel =
       // a compacted session says so: the rounds that left the request are
       // in slots with addresses, not gone, and the panel is where that
       // stops being an implementation detail
+      { $if: ['$.persistenceLabel', ['p', { class: 'ai-archived' }, '$.persistenceLabel']] },
+      { $if: ['$.retentionLabel', ['p', { class: 'ai-archived' }, '$.retentionLabel']] },
       { $if: ['$.archived', ['p', { class: 'ai-archived' }, '$.archivedLabel']] },
     ],
     { $if: ['$.configured', composer] },

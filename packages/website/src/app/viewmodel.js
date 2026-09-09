@@ -322,7 +322,8 @@ const assistantView = memo1((ai) => {
     // memory the store does not hold.
     goal: ai.goal === null ? null : {
       objective: ai.goal.objective,
-      entries: ai.goal.progress.length,
+      entries: ai.goal.progress.length + (ai.goal.checkpoint?.sources.length ?? 0),
+      checkpointLabel: ai.goal.checkpoint ? `${ai.goal.checkpoint.sources.length} earlier progress entries retained with their evidence.` : '',
       // newest first: the last thing that happened is the thing a reader
       // wants, and the whole log would push the conversation off screen
       progress: [...ai.goal.progress].reverse().slice(0, PROGRESS_SHOWN)
@@ -332,6 +333,10 @@ const assistantView = memo1((ai) => {
     goalDraft: ai.goalDraft,
     memories: ai.memories,
     memoryLabel: `${ai.memories} remembered fact${ai.memories === 1 ? '' : 's'}`,
+    persistenceLabel: ai.persistence?.error ? `Storage failed: ${ai.persistence.error}`
+      : ai.persistence?.concurrency === 'single-writer' ? 'Use one tab at a time to update remembered state.' : '',
+    retentionLabel: ai.retention?.evicted?.length
+      ? `${ai.retention.evicted.length} earlier archive address(es) evicted under the storage budget.` : '',
     archived: ai.archived,
     // said in full sentences, because "12" beside a chat is not
     // information: a compacted session has to LOOK recoverable

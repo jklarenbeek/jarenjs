@@ -28,10 +28,11 @@
  * accumulating yesterday's.
  */
 
+import { goalPrompt } from './retention.js';
 import { AiError } from './errors.js';
 import { createToolbox } from './toolbox.js';
 import {
-  RECALL_TOOL_NAME, createRecallTool, roundSlotName, indexSlotName, slotAddress, slotRef,
+  slotAddressesIn, RECALL_TOOL_NAME, createRecallTool, roundSlotName, indexSlotName, slotAddress, slotRef,
 } from './recall.js';
 import { environmentTools } from './environment.js';
 import { excerpt, truncate, sizeOf } from '@jarenjs/core/chunk';
@@ -204,7 +205,12 @@ export function createAgent(options) {
     if (typeof ledger.getGoal === 'function') {
       const goal = await ledger.getGoal();
       if (goal !== null && goal !== undefined && goal.status === 'active') {
-        sections.push(goalSection(goal));
+        if (typeof ledger.composeGoal === 'function') {
+          const composed = await ledger.composeGoal();
+          if (composed.error) throw new AiError('AI0001', composed.error);
+          sections.push(composed.text);
+        }
+        else sections.push(goalPrompt(goal));
       }
     }
     if (retrieval !== null) {
@@ -437,36 +443,10 @@ function composeRequest(messages, composed) {
   return [{ role: 'system', content: composed }, ...messages];
 }
 
-/**
- * The goal section: the objective, and the progress recorded against it.
- *
- * The progress log is the part that earns its place. A resumed session
- * that cannot see what has already been tried redoes it — which is the
- * failure a persistent objective exists to prevent, and the reason a
- * long-horizon harness needs an artifact that outlives the context
- * rather than a bigger context. It grows as the run does, deliberately;
- * a host that needs it bounded supersedes the goal or prunes it.
- * @param {any} goal
- * @returns {string}
- */
-function goalSection(goal) {
-  const lines = ['## Your objective (persistent, across sessions)', goal.objective];
-  const progress = Array.isArray(goal.progress) ? goal.progress : [];
-  if (progress.length > 0) {
-    lines.push('', `Progress recorded so far (${progress.length} entr${progress.length === 1 ? 'y' : 'ies'})`
-      + ' — this work is DONE, do not repeat it:');
-    for (const entry of progress) {
-      lines.push(`- [${entry.at}] ${excerpt(entry.note, PROMPT_LINE_CHARS)}`
-        + ` (evidence: ${excerpt(entry.evidence, PROMPT_LINE_CHARS)})`);
-    }
-  }
-  return lines.join('\n');
-}
-
 /** One retrieved memory, as a prompt line. */
 const memoryLine = (memory) => `- ${excerpt(memory.text, PROMPT_LINE_CHARS)}`
   + `${(memory.tags ?? []).length > 0 ? ` [${memory.tags.join(', ')}]` : ''}`
-  + ` (evidence: ${excerpt(memory.evidence, PROMPT_LINE_CHARS)})`;
+  + ` (evidence: ${excerpt(typeof memory.evidence === 'string' ? memory.evidence : JSON.stringify(memory.evidence), PROMPT_LINE_CHARS)})`;
 
 /** One retrieved skill, as a prompt line. */
 const skillLine = (skill) => `- ${skill.name} — when ${excerpt(skill.when, PROMPT_LINE_CHARS)}:`
@@ -953,7 +933,12 @@ function synopsizeAddressed(dropped, archive, hostWriter) {
  * @param {any} ledger
  * @param {{ entries: any[], index: any }} archive
  */
-async function writeArchive(ledger, archive) {
+async function writeArchive(ledger, archive, referenceText, protectedNames) {
+  if (typeof ledger.putArchive === 'function') {
+    const written = await ledger.putArchive([...archive.entries, archive.index], { referenceText, protectedNames });
+    if (written?.error) throw new AiError('AI0001', `compaction could not archive rounds: ${written.error}`);
+    return;
+  }
   for (const entry of [...archive.entries, archive.index]) {
     const existing = await ledger.getSlot(entry.name);
     if (existing !== null && existing !== undefined && existing.size === entry.size) continue;
@@ -1000,7 +985,9 @@ async function compactToLedger(messages, budget, hostWriter, ledger, recallOptio
   if (plan === null) return messages;
 
   const archive = planArchive(plan.dropped);
-  await writeArchive(ledger, archive);
+  const retained = [...plan.pins, ...plan.tail];
+  await writeArchive(ledger, archive, JSON.stringify(retained),
+    slotAddressesIn(retained.map((message) => message.content ?? '').join('\n')));
   recallOptions.index = archive.index.name;
 
   const content = synopsizeAddressed(plan.dropped, archive, hostWriter);
