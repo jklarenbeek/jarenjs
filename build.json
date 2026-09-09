@@ -1,8 +1,8 @@
 {
-  "version": "0.70.0",
-  "commit": "f3af94b56dbdfa01e298562b14510b28e5b4cb61",
-  "built": "2026-09-09T08:57:25+02:00",
+  "version": "0.71.0",
+  "commit": "3d1d8099ee5b87daaca834086d023d069211cc1a",
+  "built": "2026-09-09T10:10:18+02:00",
   "reproducible": true,
-  "node": "v24.19.0",
+  "node": "v24.20.0",
   "platform": "linux x64"
 }
