@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-09T18:52:28+02:00",
-  "commit": "a5ef0d342fdb56b58f5bd1301af4a23d0cc3ec00",
+  "generated": "2026-09-09T20:40:50+02:00",
+  "commit": "7f700942ad404a8203452f3b263b05c2aec2fe05",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -6876,7 +6876,7 @@
       "name": "@jarenjs/flow",
       "card": {
         "title": "Flow — executable workflows",
-        "blurb": "Executable workflows as JSON: jaren-fsm state machines compiled to a pure step function, and jaren-dag dataflow over the suite’s own engines. Guards are query documents, effects come back as data, and @jarenjs/mermaid projects a diagram both ways — the Flow studio edits, runs and animates them live.",
+        "blurb": "Executable workflows as JSON: pure state machines and statecharts, concurrent dataflow, and composed workflows with durable wait/resume. Guards are query documents and effects come back as data. The Flow studio edits, runs and animates flat machines and DAGs live.",
         "perf": "a machine survives a JSON round trip with its guards; XState’s functions do not"
       },
       "engines": [
@@ -6885,7 +6885,7 @@
           "suite": "flow",
           "card": {
             "title": "Flow",
-            "blurb": "Executable workflows as JSON: jaren-fsm state machines compiled to a pure step function, and jaren-dag dataflow over the suite’s own engines. Guards are query documents, effects come back as data, and @jarenjs/mermaid projects a diagram both ways — the Flow studio edits, runs and animates them live.",
+            "blurb": "Executable workflows as JSON: pure state machines and statecharts, concurrent dataflow, and composed workflows with durable wait/resume. Guards are query documents and effects come back as data. The Flow studio edits, runs and animates flat machines and DAGs live.",
             "perf": "a machine survives a JSON round trip with its guards; XState’s functions do not"
           }
         }
@@ -6896,7 +6896,7 @@
           "package": "@jarenjs/flow",
           "card": {
             "title": "Flow — executable workflows",
-            "blurb": "Executable workflows as JSON: jaren-fsm state machines compiled to a pure step function, and jaren-dag dataflow over the suite’s own engines. Guards are query documents, effects come back as data, and @jarenjs/mermaid projects a diagram both ways — the Flow studio edits, runs and animates them live.",
+            "blurb": "Executable workflows as JSON: pure state machines and statecharts, concurrent dataflow, and composed workflows with durable wait/resume. Guards are query documents and effects come back as data. The Flow studio edits, runs and animates flat machines and DAGs live.",
             "perf": "a machine survives a JSON round trip with its guards; XState’s functions do not"
           },
           "engines": [
@@ -6917,7 +6917,7 @@
               },
               {
                 "type": "text",
-                "value": " makes the suite’s machines executable, in two document formats."
+                "value": " makes the suite’s machines and workflows executable as JSON."
               },
               {
                 "type": "softBreak"
@@ -6979,6 +6979,94 @@
               {
                 "type": "text",
                 "value": "compile fail-closed with coded, docPath-carrying errors, and neither uses eval."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The statechart vocabulary ("
+              },
+              {
+                "type": "inlineCode",
+                "value": "$fsm: '0.2'"
+              },
+              {
+                "type": "text",
+                "value": ") adds compound states, parallel"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "regions, shallow and deep history, and transitions driven by an explicit"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "clock. A composed workflow ("
+              },
+              {
+                "type": "inlineCode",
+                "value": "$workflow: '0.2'"
+              },
+              {
+                "type": "text",
+                "value": ") lowers tasks, DAG fan-out,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "choices, bounded loops, nested flows and event or timed waits onto the existing"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "DAG scheduler and the statechart engine. Its checkpoints bind the document,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "input and task versions to the run; a host store supplies atomic generation"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "checks, and effectful tasks honor stable activation keys for idempotency. The"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "repository’s flow benchmark harness consumes this format, including a review"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "wait that resumes in a later process. Mermaid also projects the compound-state"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "subset in both directions; the Flow studio continues to edit flat FSMs and DAGs."
               }
             ]
           },
@@ -7289,7 +7377,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/flow/site.md",
-          "hash": "1vc0j9q",
+          "hash": "1etygkk",
           "frontmatterLang": "yaml"
         }
       },
