@@ -232,10 +232,9 @@ describe('a nested shape of member paths and literals projects into the statemen
       assert.match(/** @type {any} */ (error).message, /'\$return'/);
       return true;
     });
-    // a projection of pure literals has no leaf for a statement to
-    // fetch, so it stays where it is rather than inventing a column
+    // A constant projection needs only the number of selected rows.
     const literalsOnly = ordered({ k: 7, t: true });
-    assert.strictEqual((await rows.explain(literalsOnly)).mode, 'row');
+    assert.strictEqual((await rows.explain(literalsOnly)).mode, 'native');
     assert.deepStrictEqual(await Promise.resolve(rows.execute(literalsOnly)), engine(literalsOnly));
     // and the binding itself is a whole-document read, never a leaf
     const wholeItem = ordered({ id: '$it.id', all: '$it' });

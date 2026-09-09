@@ -1503,10 +1503,10 @@ The token is a promise about the FOLD, and three rules enforce it:
   the promotion needs the same schema-typed path the core `$sum` and
   `$avg` need. An absent member contributes nothing on either side.
 
-A grouped fold is not promoted — a `$groupby` outside the fixed
-temporal bucket is engine work (§6) — and neither is an aggregate under
-a window. Both answer what the engine answers, and `explain()` names
-the reason. As with the scalar hatch, a profiled document triggers no
+A registered fold inside a `$groupby` return is not promoted — the
+grouped SQL fold currently handles the built-in aggregate set only — and
+neither is an aggregate under a window. Both answer what the engine answers,
+and `explain()` names the reason. As with the scalar hatch, a profiled document triggers no
 registration: the same `$mean` under a profile folds in the residual,
 and `strict: true` refuses it by name (`JD0010`).
 
@@ -1826,15 +1826,23 @@ paths stay residual.
 
 ### 10.2 Joins
 
-Two bindings joined by one equality between their column references
-become an INNER equijoin — exactly the engine's
+Bindings connected by equalities between their column references
+become an INNER equijoin graph — exactly the engine's
 cross-product-plus-filter semantics. Result order is deterministic:
-any `$orderby` keys first, then BOTH bindings' row identities in
+any `$orderby` keys first, then all bindings' row identities in
 binding order, which is the engine's nested-loop order. `explain()`
 reports the join (`{ left, right }`) and the `EXPLAIN QUERY PLAN`
 narrative; the paired foreign key carries an index (every foreign key
 does — unique for a strict one-to-one, plain otherwise), so the probe
 side of the join is a `SEARCH`, never a second scan.
+
+Projection trees of singular member paths and constants lower over one or
+several bindings. Counts over those trees count their items; a single-path
+count or window first excludes rows where that path is absent. Boolean
+predicates may span bindings when each leaf uses one binding's proven total
+forms. The mandatory column equalities still establish the join graph;
+a disjunction is never treated as a mandatory join edge. Compatible path
+comparisons within one binding also lower for non-null numbers and strings.
 
 On the `load` surface the join KIND is derived from the schema
 (§10.4): a `oneToOne` include reports `inner (fk required)` when the
@@ -2034,16 +2042,24 @@ a number appears only where `capabilities.rowEstimates` is filled):
   must never emit by accident; every binding past the first attaches by
   a column equality to one already joined, and a graph that does not
   close is the engine's;
-- non-equality join predicates, and disjunctions spanning bindings;
-- a `$groupby` whose key is untyped or admits `null`, whose `$return`
-  reads the binding (after a grouping it holds the group's ROWS), or
-  whose `$orderby` names anything but a group key; a window over the
-  groups, or an aggregate of them;
-- projections (`$return` objects) ACROSS a join — over one binding a
-  nested shape of member paths lowers (§ the projection tree);
+- a non-equality predicate used as the only join anchor, or a boolean
+  predicate whose individual leaf cannot be assigned to one binding;
+- collection grouping with untyped keys, row-binding returns, or ordering by
+  anything except an orderable key; entity grouping; aggregates over groups
+  beyond a count of singleton constructors containing keys, literals and row
+  counts; windows over group returns that may omit an item;
+- projection trees containing operators, whole binding references or
+  non-singular paths; windows over those opaque projections;
+- `$distinct` over ordered, untyped or compound projections; unordered typed
+  scalar projections use the same grouping relation and first-occurrence order;
 - externals against document paths; booleans and `null` at bind time;
 - everything phase A already listed (§8 of `QUERY-FORMAT.md`
   notwithstanding, the truth table is the contract).
+
+Collection group keys may include null or boolean values, but ordering those
+keys stays residual to preserve `JQ2005`. Group ordering is stable under ties.
+Literal windows over singleton group constructors lower directly, and the
+proven constructor count wraps the grouped statement in `COUNT(*)`.
 
 Two deviations between a pushed answer and the engine's are DECLARED
 rather than refused, because in both the database is right by its own

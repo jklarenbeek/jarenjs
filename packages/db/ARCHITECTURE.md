@@ -177,8 +177,18 @@ stable code, an object and a detail, sorted, once:
 | `unmapped-table` | a table with neither a document column nor a key |
 | `unmapped-column` | a generated column whose expression is not a member path this dialect wrote |
 | `unmapped-index` | an index over an expression, a predicate, or a column no member path explains |
+| `unmapped-constraint` | a CHECK that is not a complete scalar enum of a mapped entity column |
 | `unmapped-type` | a column type no schema type maps back from — the member is derived untyped |
 | `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, and whether the other holds many, is not in the shape |
+
+Scalar entity enum CHECKs are recovered on both dialects. SQLite reads its
+stored CREATE text; PostgreSQL reads `pg_constraint` expressions, including
+its `ANY (ARRAY[...])` rendering and numeric literal casts. The parser accepts
+only the entire enum expression. Unknown predicates, NULL lists, non-binary SQLite collations, nondeterministic
+PostgreSQL collations and casts whose meaning is not proven remain `unmapped-constraint`. Partial indexes and
+expression terms retain their catalog flags; they are never converted into
+unconditional uniqueness. Optional `introspect.checks`/`readChecks` hooks leave
+injected dialects compatible with the earlier catalog surface.
 
 `strict: true` refuses instead of returning a partial model, because a
 caller about to diff the result against a declared model needs to know
@@ -351,7 +361,8 @@ A single-binding FLWOR over the collection (`$for: { <name>: '$[*]' }`
 — the examples here write `it`, but the binding is the **document's** to
 name and nothing translates differently under another one)
 with: comparison predicates (`$eq $ne $lt $le $gt $ge`) between a
-singular member path and a literal or external; `$and`/`$or`/`$not`
+singular member path and a literal or external, or two paths in the same
+non-null number/string family; `$and`/`$or`/`$not`
 composition; `$exists`/`$empty`; `$starts-with`/`$ends-with`/
 `$contains` on schema-typed string paths with literal patterns;
 `$orderby` over singular schema-typed paths (`$dir`, `$empty`, no
@@ -363,6 +374,25 @@ JSON type; and a nested SHAPE of objects, arrays, literals and member
 paths, projected as one value/type pair per distinct leaf and rebuilt
 by the decoder — never by parsing a JSON text the database assembled,
 which could not tell an absent member from a present `null`.
+
+Constant projection trees fetch a row marker instead of a document. A
+window over a single path removes absent members before its SQL limit;
+a window over an opaque projection stays set-residual because that projection
+may emit zero or several items per source row.
+
+General scalar grouping preserves absent and null keys separately through
+value/type pairs. Null and boolean keys may group, but ordering them stays
+residual to preserve `JQ2005`. Explicit group ordering appends first appearance
+as its tie-breaker. Literal windows lower over singleton group constructors;
+`$count` over such constructors with only row-count aggregates counts a grouped
+subquery. `$distinct` over an unordered typed scalar projection uses the same
+key relation and first-appearance order, with absent members removed first.
+
+Entity projection trees, constants, counts and single-path windows follow the
+same cardinality rules. An equijoin graph can additionally filter through
+boolean trees whose leaves belong to individual bindings. The entity emitter
+resolves each leaf's binding alias before composing the total predicates;
+a disjunction never supplies a mandatory join edge.
 
 Plus the spatial predicates a **derived** index makes decidable:
 `$bbox-intersects` against a literal or external region, a geohash
@@ -396,15 +426,16 @@ mode, `knn`, beside native, row and set.
 | construct | reason |
 |---|---|
 | `$let` bindings, `$fold`, positional/window bindings | no equivalence proof exists yet; residual by default |
-| a `$groupby` whose key is untyped or nullable, whose `$return` reads the binding, or whose `$orderby` names anything but a key | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take |
-| a window over the GROUPS, or an aggregate of them | the plan groups whole; a `LIMIT` over the groups would cut a different set |
+| a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take |
+| a window over a group return that may omit an item, or a group aggregate beyond the proven constructor count | SQL group cardinality must equal the projected item cardinality; numeric and error semantics need their own proof |
 | a `$for` binding nothing joins to — a cartesian product | the engine builds the product; a plan that emitted one by accident is the thing an equi-join graph exists to prevent |
 | non-singular path expansion | one relation per binding in this version |
 | `$match` and other unlisted operators, `$call` | no native spelling proven equivalent |
 | `$orderby` with a `$collation` | a collation the dialect cannot reproduce is refused, not approximated |
-| a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path, a projection with no member path at all | the WHOLE projection runs per row (the row residual) — pushed, ordered and windowed rows, projected by the engine; promoting the part that composes would answer a shape nobody asked for |
+| a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path | the WHOLE projection runs per row (the row residual) — pushed and ordered rows, projected by the engine; a window over these items runs in the set residual; promoting the part that composes would answer a shape nobody asked for |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
-| comparisons where both sides are paths | join territory |
+| path comparisons with untyped, nullable, boolean or differing comparison families | the total typed comparison proof does not cover these shapes |
+| `$distinct` over ordered, untyped or compound projections | first-occurrence order and structural equality need additional lowering |
 | array/object literals in comparisons | deep-equality has no guarded native form |
 | `$within` over a `derive: 'bbox'` column | a bounding-box pre-filter is pushed; exact containment refines in the engine |
 | a bounded `$distance` over a `derive: 'bbox'` column | a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine |
@@ -788,7 +819,7 @@ exactly what an honest explain may not print.
 ### The two residual modes
 
 - **Row residual** — only the projection is untranslated: predicates,
-  ordering and the window are fully pushed; each fetched row runs
+  and ordering are fully pushed, with no output window; each fetched row runs
   `{ $for: { <the document's own binding>: '$[*]' },
   $return: [ <the document's $return> ] }` (the array wrapper keeps
   array-valued items unambiguous) and the items concatenate in row

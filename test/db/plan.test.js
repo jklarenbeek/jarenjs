@@ -594,7 +594,7 @@ describe('the planner\'s reason vocabulary', () => {
     'kind.let': [collection, F({ $let: { z: 1 } })],
     'predicate.notPredicate': [collection, F({ $where: 5 })],
     'predicate.existence': [collection, F({ $where: { $exists: { $eq: [1, 1] } } })],
-    'predicate.joinTerritory': [collection, F({ $where: { $eq: ['$it.n', '$it.f'] } })],
+    'predicate.joinTerritory': [collection, F({ $where: { $eq: ['$it.n', '$it.s'] } })],
     'predicate.operands': [collection, F({ $where: { $eq: [1, 2] } })],
     'predicate.compoundLiteral': [collection,
       F({ $where: { $eq: ['$it.o', { $const: { k: 1 } }] } })],
@@ -622,12 +622,13 @@ describe('the planner\'s reason vocabulary', () => {
       { $for: { it: '$[*]' }, $return: { a: { $abs: '$it.f' } } }],
     'plan.aggregatePath': [collection,
       { $sum: { $for: { it: '$[*]' }, $return: '$it.s' } }],
-    // a window over the GROUPS: the grouping is recognized, and cutting
-    // the groups in SQL would cut a different set
+    // A bare key can omit an absent group's item, so its window still
+    // needs the engine's output cardinality.
     'plan.windowedGroup': [collection, { $subsequence: [
-      { $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $return: { g: '$g' } }, 0, 2] }],
-    'plan.groupedAggregate': [collection, { $count: {
+      { $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $return: '$g' }, 0, 2] }],
+    'plan.groupedAggregate': [collection, { $sum: {
       $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $return: { g: '$g' } } }],
+    'plan.distinctProjection': [collection, { $distinct: F({}) }],
     'entity.notFlwor': [entity, { $count: '$.Person[*]' }],
     'entity.bindingRoot': [entity, { $for: { p: { $in: '$.Person[*]', $at: 'i' } }, $return: '$p' }],
     'entity.joinKey': [entity, { $for: { a: '$.Person[*]', b: '$.Pet[*]' }, $return: '$a' }],

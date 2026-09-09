@@ -38,6 +38,42 @@ const MODEL = {
 const open = () => openStore(MODEL, { driver: nodeDriver(), capture: true });
 const WHERE_ADULT = { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 18] }, $return: '$it' };
 
+describe('live set-level SQL promotions', () => {
+  const group = { $for: { it: '$[*]' }, $groupby: { dept: '$it.dept' },
+    $return: { dept: '$dept', count: { $count: '$it' } } };
+  const cases = [
+    ['group count', { $count: group }],
+    ['distinct', { $distinct: { $for: { it: '$[*]' }, $return: '$it.dept' } }],
+    ['multiple group keys', { ...group, $groupby: { dept: '$it.dept', age: '$it.age' },
+      $return: { dept: '$dept', age: '$age', count: { $count: '$it' } } }],
+  ];
+  for (const [name, document] of cases) it(`${name} preserves set semantics through captured writes`, async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      for (const row of [{ id: 'a', dept: 'x', age: 30 }, { id: 'b', dept: 'x', age: 30 },
+        { id: 'c', dept: 'y', age: 40 }]) await users.insert(row);
+      assert.strictEqual((await users.explain(document)).mode, 'native');
+      const live = await users.live(document);
+      let mirror = live.result;
+      live.subscribe(({ patch }) => { mirror = applyJSONPatch(mirror, patch); });
+      const verify = async () => {
+        assert.deepStrictEqual(live.result.rows, await users.execute([document], { pushdown: false }));
+        assert.deepStrictEqual(mirror, live.result);
+      };
+      await verify();
+      await users.insert({ id: 'd', dept: 'x', age: 30 });
+      await verify();
+      await users.put({ id: 'a', dept: 'z', age: 30 }, 'a');
+      await verify();
+      await users.delete('c');
+      await verify();
+      assert.strictEqual(live.mode.strategy, 'rerun');
+    }
+    finally { await store.close(); }
+  });
+});
+
 describe('live rows (where + select)', () => {
   it('maintains inserts, flips, deletes and in-place updates', async () => {
     const store = await open();

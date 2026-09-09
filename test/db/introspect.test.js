@@ -99,6 +99,88 @@ const of = (report, code) => report.filter((row) => row.code === code)
   .map((row) => row.object).sort();
 
 describe('introspectModel — the derivation', () => {
+
+  it('recovers scalar enum CHECKs without interpreting quoted SQL as syntax', async () => {
+    const connection = handMade([
+      `CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY,
+        "state" TEXT CHECK ("state" IN ('open', 'it''s (CHECK)', 'closed')),
+        "level" INTEGER CHECK ("level" IN (-1, 0, 2)),
+        "score" REAL CHECK ("score" IN (0.5, 1e2)),
+        "other" TEXT CHECK (length("other") > 2))`,
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      const props = model.entities.Choice.schema.properties;
+      assert.deepStrictEqual(props.state.enum, ['open', "it's (CHECK)", 'closed']);
+      assert.deepStrictEqual(props.level.enum, [-1, 0, 2]);
+      assert.deepStrictEqual(props.score.enum, [0.5, 100]);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['Choice.check_4']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('never strengthens partial uniqueness or silently drops expression index terms', async () => {
+    const connection = handMade([
+      'CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY, "state" TEXT, "level" INTEGER)',
+      `CREATE UNIQUE INDEX "Choice_partial" ON "Choice" ("state") WHERE "level" > 0`,
+      'CREATE INDEX "Choice_expr" ON "Choice" ("state", length("state"))',
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      assert.deepStrictEqual(model.entities.Choice.schema.properties.state, { type: 'string' });
+      assert.deepStrictEqual(of(report, 'unmapped-index'), ['Choice.Choice_expr', 'Choice.Choice_partial']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('does not derive enums from NULL lists, coercing affinity or larger predicates', async () => {
+    const connection = handMade([
+      `CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY,
+        "a" TEXT CHECK ("a" IN ('open', NULL)),
+        "b" INTEGER CHECK ("b" IN ('1', '2')),
+        "c" TEXT CHECK ("c" IN ('open') OR length("c") > 2))`,
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      for (const name of ['a', 'b', 'c']) assert.strictEqual(model.entities.Choice.schema.properties[name].enum, undefined);
+      assert.strictEqual(of(report, 'unmapped-constraint').length, 3);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('does not interpret a collation-dependent CHECK as JSON enum equality', async () => {
+    const connection = handMade([
+      `CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY,
+        "state" TEXT COLLATE NOCASE CHECK ("state" IN ('open', 'closed')))`,
+      `INSERT INTO "Choice" VALUES ('one', 'OPEN')`,
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      assert.strictEqual(model.entities.Choice.schema.properties.state.enum, undefined);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['Choice.check_1']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('round-trips the enum CHECK emitted for a mapped entity property', async () => {
+    const store = await sqliteStore({ $model: '0.1', entities: { Choice: { schema: {
+      type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } },
+        state: { type: 'string', enum: ['open', "it's closed"], 'x-entity': { index: true } },
+        fixed: { type: 'string', enum: ['only'], 'x-entity': { index: true } },
+      },
+    } } } });
+    try {
+      const { model, report } = await store.introspect();
+      assert.deepStrictEqual(model.entities.Choice.schema.properties.state.enum, ['open', "it's closed"]);
+      assert.deepStrictEqual(model.entities.Choice.schema.properties.fixed.enum, ['only']);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), []);
+      const rebuilt = await sqliteStore(model);
+      await rebuilt.close();
+    }
+    finally { await store.close(); }
+  });
+
   it('a collection comes back with its key, its identity and every index path', async () => {
     const store = await sqliteStore();
     try {
@@ -436,6 +518,33 @@ describe('introspectModel — the derivation', () => {
         }),
       });
     };
+
+    it('recovers PostgreSQL array and singleton enum checks and reports partial indexes', async () => {
+      const connection = pgConnection({
+        'relkind IN': [{ name: 'Choice', type: 'table' }],
+        'FROM pg_attribute a': [
+          { name: 'doc', type: 'jsonb', hidden: 0 },
+          { name: 'state', type: 'text', hidden: 0 },
+          { name: 'score', type: 'numeric', hidden: 0 },
+          { name: 'fixed', type: 'text', hidden: 0 },
+        ],
+        'CASE WHEN i.indisunique': [{ name: 'Choice_partial', uniq: 1, origin: 'c', partial: 1 }],
+        'FROM pg_index i': [{ name: 'state' }],
+        "c.contype = 'c'": [
+          { name: 'state_check', expression: "(state = ANY (ARRAY['open'::text, 'it''s closed'::text]))" },
+          { name: 'score_check', expression: '((score = ANY (ARRAY[(1)::numeric, (2.5)::numeric])))' },
+          { name: 'fixed_check', expression: "(fixed = 'only'::text)" },
+          { name: 'other_check', expression: '(score > (0)::numeric)' },
+        ],
+      });
+      const { model, report } = await introspectModel(connection);
+      const props = model.entities.Choice.schema.properties;
+      assert.deepStrictEqual(props.state, { type: 'string', enum: ['open', "it's closed"] });
+      assert.deepStrictEqual(props.score.enum, [1, 2.5]);
+      assert.deepStrictEqual(props.fixed.enum, ['only']);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['Choice.other_check']);
+      assert.deepStrictEqual(of(report, 'unmapped-index'), ['Choice.Choice_partial']);
+    });
 
     it('equivalent fixtures derive the same logical model', async () => {
       const sqlite = await sqliteStore();

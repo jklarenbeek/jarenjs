@@ -95,13 +95,16 @@ function readTable(connection, table) {
               (rows) => withColumns(i + 1, [...out, {
                 name: String(declared[i].name),
                 unique: Number(declared[i].uniq) !== 0,
-                columns: rows.map((row) => String(row.name)),
+                partial: Number(declared[i].partial ?? 0) !== 0,
+                columns: rows.map((row) => row.name == null ? null : String(row.name)),
               }]));
           };
           return chain(withColumns(0, []), (indexes) =>
             chain(keyIndex === undefined
               ? []
-              : all(dialect.introspect.indexColumns(String(keyIndex.name))), (keyRows) => ({
+              : all(dialect.introspect.indexColumns(String(keyIndex.name))), (keyRows) =>
+              chain(dialect.introspect.checks === undefined ? []
+                : all(dialect.introspect.checks(table)), (checkRows) => ({
               name: table,
               primaryKey: keyRows.map((row) => String(row.name)),
               columns: columnRows.map((row) => ({
@@ -111,6 +114,7 @@ function readTable(connection, table) {
               })),
               generated: dialect.readGenerated(generatedRows),
               indexes,
+              checks: dialect.readChecks?.(checkRows) ?? [],
               foreignKeys: fkRows.map((row) => ({
                 column: String(row.source_column),
                 target: String(row.target),
@@ -118,7 +122,7 @@ function readTable(connection, table) {
                   ? null : String(row.target_column),
                 onDelete: String(row.on_delete ?? 'NO ACTION').toUpperCase(),
               })),
-            })));
+            }))));
         }))));
 }
 
@@ -229,6 +233,11 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
 
   const indexes = [];
   for (const index of table.indexes) {
+    if (index.partial || index.columns.some((column) => column === null)) {
+      report(loss('unmapped-index', `${table.name}.${index.name}`,
+        'a partial predicate or expression term cannot be represented by an unconditional member index'));
+      continue;
+    }
     if (index.columns.length === 1 && computed.has(index.columns[0])) {
       const declared = { name: indexName(table.name, index.name),
         expression: computed.get(index.columns[0]) };
@@ -416,9 +425,10 @@ function deriveEntity(dialect, table, report) {
   const uniqueColumns = new Set();
   const indexedColumns = new Set();
   for (const index of table.indexes) {
-    if (index.columns.length !== 1) {
+    if (index.partial || index.columns.some((column) => column === null)
+      || index.columns.length !== 1) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
-        'a composite index over an entity is not a property-level declaration'));
+        'a partial, expression or composite entity index is not a property-level declaration'));
       continue;
     }
     (index.unique ? uniqueColumns : indexedColumns).add(index.columns[0]);
@@ -460,6 +470,26 @@ function deriveEntity(dialect, table, report) {
     else if (indexedColumns.has(column.name)) entity.index = true;
     if (Object.keys(entity).length > 0) property['x-entity'] = entity;
     properties[column.name] = property;
+  }
+  for (const check of table.checks) {
+    const property = properties[check.column];
+    const family = property?.type === 'integer' ? 'number'
+      : property?.type === 'string' ? 'string' : property?.type;
+    if (check.values === undefined || property === undefined
+      || check.values.some((value) => typeof value !== family
+        || (property.type === 'integer' && !Number.isInteger(value)))) {
+      report(loss('unmapped-constraint', `${table.name}.${check.name}`,
+        'the CHECK is not a complete scalar enum of the mapped column type'));
+      continue;
+    }
+    // Several enum CHECKs constrain the same column by intersection.
+    const values = property.enum === undefined ? check.values
+      : property.enum.filter((value) => check.values.includes(value));
+    if (values.length === 0) {
+      report(loss('unmapped-constraint', `${table.name}.${check.name}`,
+        'the enum CHECKs have an empty intersection, which a non-empty schema enum cannot declare'));
+    }
+    else property.enum = values;
   }
   report(loss('document-members', table.name,
     'an entity\'s document column holds every property the mapping did not give a column, '
@@ -530,6 +560,8 @@ export function introspectModel(connection, options = undefined) {
       if (joinTables.has(table.name)) continue;
       if (looksLikeCollection(dialect, table)) {
         collections[table.name] = deriveCollection(dialect, table, add, options?.keys, byName);
+        for (const check of table.checks) add(loss('unmapped-constraint', `${table.name}.${check.name}`,
+          'a CHECK over physical collection columns does not constrain the document schema'));
         continue;
       }
       const hasDocument = table.columns.some((column) => column.name === DOC_COLUMN);

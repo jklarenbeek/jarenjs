@@ -50,6 +50,8 @@ export const PLAN_VERSION = 2;
  *   { p: 'not', item: PlanPredicate } |
  *   { p: 'cmp', op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge',
  *     ref: PlanRef, operand: PlanOperand } |
+ *   { p: 'refCmp', op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge',
+ *     left: PlanRef, right: PlanRef } |
  *   { p: 'typeIs', ref: PlanRef, types: string[], positive: boolean } |
  *   { p: 'strop', kind: 'starts' | 'ends' | 'contains',
  *     ref: PlanRef, operand: PlanOperand } |
@@ -133,7 +135,8 @@ export const PLAN_VERSION = 2;
  *   an `agg` node reads one aggregate under its `empty` rule. `order` is
  *   `'first-seen'`, the engine's own order of first appearance, or the
  *   group-key ordering an `$orderby` declared. A plan carrying a group
- *   carries no `bucket`, no `aggregate` and no `rank`.
+ *   carries no `bucket` or `rank`. A `count` aggregate may wrap a
+ * singleton group constructor, counting groups through a subquery.
  *
  * @typedef {{ ref: PlanRef, every: number, origin: number, as: string,
  *   order: 'asc' | 'desc' | 'first-seen',

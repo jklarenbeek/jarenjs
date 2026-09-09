@@ -113,6 +113,22 @@
     { "name": "object projection is residual",
       "query": { "$for": { "u": "$.User[*]" }, "$where": { "$gt": ["$u.age", 21] }, "$orderby": ["$u.id"], "$return": { "n": "$u.name" } } },
     { "name": "bare return with no filter",
-      "query": { "$for": { "u": "$.User[*]" }, "$orderby": ["$u.id"], "$return": "$u" } }
+      "query": { "$for": { "u": "$.User[*]" }, "$orderby": ["$u.id"], "$return": "$u" } },
+    {"name": "count projected entity member age", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": "$u.age"}}},
+    {"name": "window counts entity member items age", "query": {"$subsequence": [{"$for": {"u": "$.User[*]"}, "$return": "$u.age"}, 1, 2]}},
+    {"name": "count projected entity member active", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": "$u.active"}}},
+    {"name": "window counts entity member items active", "query": {"$subsequence": [{"$for": {"u": "$.User[*]"}, "$return": "$u.active"}, 1, 2]}},
+    {"name": "count projected entity member profile.bio", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": "$u.profile.bio"}}},
+    {"name": "window counts entity member items profile.bio", "query": {"$subsequence": [{"$for": {"u": "$.User[*]"}, "$return": "$u.profile.bio"}, 1, 2]}},
+    {"name": "entity constant or tree null", "query": {"$for": {"u": "$.User[*]"}, "$return": null}},
+    {"name": "entity count constant or tree null", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": null}}},
+    {"name": "entity constant or tree {}", "query": {"$for": {"u": "$.User[*]"}, "$return": {}}},
+    {"name": "entity count constant or tree {}", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": {}}}},
+    {"name": "entity constant or tree []", "query": {"$for": {"u": "$.User[*]"}, "$return": []}},
+    {"name": "entity count constant or tree []", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": []}}},
+    {"name": "entity constant or tree {\"fixed\": true}", "query": {"$for": {"u": "$.User[*]"}, "$return": {"fixed": true}}},
+    {"name": "entity count constant or tree {\"fixed\": true}", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": {"fixed": true}}}},
+    {"name": "entity constant or tree {\"id\": \"$u.id\", \"bio\": \"$u.profile.bio\"}", "query": {"$for": {"u": "$.User[*]"}, "$return": {"id": "$u.id", "bio": "$u.profile.bio"}}},
+    {"name": "entity count constant or tree {\"id\": \"$u.id\", \"bio\": \"$u.profile.bio\"}", "query": {"$count": {"$for": {"u": "$.User[*]"}, "$return": {"id": "$u.id", "bio": "$u.profile.bio"}}}}
   ]
 }

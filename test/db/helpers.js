@@ -343,6 +343,7 @@ export function fullDoubleDialect(createDialect) {
       declaredSql: (t) => `GET declared ${t}`,
       tables: () => 'GET tables',
       generated: (t) => `GET generated ${t}`,
+      checks: (t) => `GET checks ${t}`,
       dataVersion: () => 'GET data-version',
       schemaDump: () => 'GET schema-dump',
     },

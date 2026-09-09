@@ -39,6 +39,7 @@
 
 import { createDialect } from '../dialect.js';
 import { readExpression } from './expression-read.js';
+import { postgresChecks } from './check-read.js';
 
 /** PostgreSQL truncates an identifier past this many BYTES, silently
  * and with only a notice — so two long generated names would collide
@@ -519,6 +520,7 @@ export function postgresDialect(options = undefined) {
     memberPathOf,
     expressionOf,
     // the catalog already answers one row per generated column
+    readChecks: postgresChecks,
     readGenerated: (rows) => rows.map((row) => ({
       name: String(row.name), expression: String(row.expression ?? ''),
     })),
@@ -571,7 +573,8 @@ export function postgresDialect(options = undefined) {
       // key's is the engine's own
       indexes: (table) =>
         'SELECT ci.relname AS name, CASE WHEN i.indisunique THEN 1 ELSE 0 END AS uniq, '
-        + "CASE WHEN i.indisprimary THEN 'pk' ELSE 'c' END AS origin "
+        + "CASE WHEN i.indisprimary THEN 'pk' ELSE 'c' END AS origin, "
+        + 'CASE WHEN i.indpred IS NULL THEN 0 ELSE 1 END AS partial '
         + 'FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid '
         + 'JOIN pg_class ct ON ct.oid = i.indrelid '
         + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
@@ -584,7 +587,7 @@ export function postgresDialect(options = undefined) {
         + 'JOIN pg_class ci ON ci.oid = i.indexrelid '
         + 'JOIN pg_namespace n ON n.oid = ci.relnamespace '
         + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '
-        + 'JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
+        + 'LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
         + `WHERE ci.relname = ${stringLiteral(index)} AND ${inNamespace} ORDER BY k.ord`,
       // every table this store might own; a view is reported rather
       // than derived, and the engine's own schemas are never in scope
@@ -602,6 +605,15 @@ export function postgresDialect(options = undefined) {
         + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE c.relname = ${stringLiteral(table)} AND ${inNamespace} `
         + "AND a.attgenerated <> '' ORDER BY a.attnum",
+      checks: (table) =>
+        'SELECT c.conname AS name, pg_get_expr(c.conbin, c.conrelid) AS expression, '
+        + 'EXISTS (SELECT 1 FROM pg_attribute ca JOIN pg_collation co ON co.oid = ca.attcollation '
+        + 'WHERE ca.attrelid = c.conrelid AND ca.attnum = ANY(c.conkey) '
+        + 'AND NOT co.collisdeterministic) AS unsafe_collation '
+        + 'FROM pg_constraint c JOIN pg_class ct ON ct.oid = c.conrelid '
+        + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
+        + `WHERE c.contype = 'c' AND ct.relname = ${stringLiteral(table)} AND ${inNamespace} `
+        + 'ORDER BY c.conname',
       foreignKeyList: (table) => {
         const action = (column) => `CASE ${column} `
           + "WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' "

@@ -120,7 +120,7 @@ describe('the store answers what the engine answers, or names the residual', () 
     const store = await seeded();
     const grouped = { $for: { it: '$[*]' }, $groupby: { g: '$it.b' }, $return: { key: '$g', n: { $count: '$it' } } };
     const document = { $count: grouped };
-    assert.strictEqual((await store.collection('rows').explain(document)).mode, 'set');
+    assert.strictEqual((await store.collection('rows').explain(document)).mode, 'native');
     assert.deepStrictEqual(await native(store, document), { value: 2 });
     assert.deepStrictEqual(await native(store, document), reference(document));
     await store.close();

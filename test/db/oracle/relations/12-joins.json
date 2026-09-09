@@ -86,6 +86,12 @@
     { "name": "aggregates over the grouped join",
       "query": { "$for": { "u": "$.User[*]", "p": "$.Post[*]" }, "$where": { "$eq": ["$p.authorId", "$u.id"] }, "$groupby": { "who": "$u.id" }, "$return": { "who": "$who", "top": { "$max": "$p.stars" }, "avg": { "$avg": "$p.stars" } } } },
     { "name": "a whole-set sum over one binding",
-      "query": { "$sum": { "$for": { "p": "$.Post[*]" }, "$return": "$p.stars" } } }
+      "query": { "$sum": { "$for": { "p": "$.Post[*]" }, "$return": "$p.stars" } } },
+    {"name": "disjunction across joined bindings", "query": {"$for": {"u": "$.User[*]", "p": "$.Post[*]"}, "$where": {"$and": [{"$eq": ["$p.authorId", "$u.id"]}, {"$or": [{"$gt": ["$u.age", 30]}, {"$lt": ["$p.stars", 4]}]}]}, "$return": {"u": "$u.id", "p": "$p.pid"}}},
+    {"name": "negated disjunction across joined bindings", "query": {"$for": {"u": "$.User[*]", "p": "$.Post[*]"}, "$where": {"$and": [{"$eq": ["$p.authorId", "$u.id"]}, {"$not": {"$or": [{"$gt": ["$u.age", 30]}, {"$lt": ["$p.stars", 4]}]}}]}, "$return": {"u": "$u.id", "p": "$p.pid"}}},
+    {"name": "nested conjunction across joined bindings", "query": {"$for": {"u": "$.User[*]", "p": "$.Post[*]"}, "$where": {"$and": [{"$eq": ["$p.authorId", "$u.id"]}, {"$or": [{"$and": [{"$gt": ["$u.age", 30]}, {"$lt": ["$p.stars", 4]}]}, {"$eq": ["$p.title", "missing"]}]}]}, "$return": {"u": "$u.id", "p": "$p.pid"}}},
+    {"name": "external across joined bindings", "query": {"$for": {"u": "$.User[*]", "p": "$.Post[*]"}, "$where": {"$and": [{"$eq": ["$p.authorId", "$u.id"]}, {"$or": [{"$gt": ["$u.age", "$minimum"]}, {"$lt": ["$p.stars", 4]}]}]}, "$return": {"u": "$u.id", "p": "$p.pid"}}, "externals": {"minimum": 40}},
+    {"name": "null external across joined bindings", "query": {"$for": {"u": "$.User[*]", "p": "$.Post[*]"}, "$where": {"$and": [{"$eq": ["$p.authorId", "$u.id"]}, {"$or": [{"$gt": ["$u.age", "$minimum"]}, {"$lt": ["$p.stars", 4]}]}]}, "$return": {"u": "$u.id", "p": "$p.pid"}}, "externals": {"minimum": null}},
+    {"name": "existence across joined bindings", "query": {"$for": {"u": "$.User[*]", "p": "$.Post[*]"}, "$where": {"$and": [{"$eq": ["$p.authorId", "$u.id"]}, {"$or": [{"$empty": "$u.profile.bio"}, {"$exists": "$p.stars"}]}]}, "$return": {"u": "$u.id", "p": "$p.pid"}}}
   ]
 }

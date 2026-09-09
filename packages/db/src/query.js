@@ -1193,7 +1193,7 @@ export function createQueryEngine(context) {
             return items;
           })) });
     }
-    if (entry.plan.group !== null) {
+    if (entry.plan.group !== null && entry.plan.aggregate === null) {
       // a native grouping is a barrier: the groups are the answer
       return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
@@ -1295,6 +1295,10 @@ export function createQueryEngine(context) {
       else if (pred.p === 'bboxRtree') touchedVirtual.add(pred.table);
       else if (pred.p === 'cellIn' || pred.p === 'cellPrefix')
         touchedColumns.add(pred.column);
+      else if (pred.p === 'refCmp') {
+        if (pred.left.column) touchedColumns.add(pred.left.column);
+        if (pred.right.column) touchedColumns.add(pred.right.column);
+      }
       else if ('ref' in pred && pred.ref?.column) touchedColumns.add(pred.ref.column);
     };
     collectColumns(entry.plan.filter);

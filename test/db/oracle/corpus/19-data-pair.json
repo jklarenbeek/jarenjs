@@ -1,0 +1,808 @@
+{
+ "group": "data pair scalar grouping and cardinality",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "n": {
+    "type": [
+     "number",
+     "null"
+    ]
+   },
+   "s": {
+    "type": [
+     "string",
+     "null"
+    ]
+   },
+   "b": {
+    "type": "boolean"
+   },
+   "m": {
+    "type": "number"
+   },
+   "k": {
+    "type": "number"
+   },
+   "a": {
+    "type": "string"
+   },
+   "z": {
+    "type": "string"
+   },
+   "tags": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_n",
+   "path": "$.n"
+  },
+  {
+   "name": "by_s",
+   "path": "$.s"
+  }
+ ],
+ "documents": [
+  {
+   "id": "a",
+   "n": 2,
+   "s": "x",
+   "b": true,
+   "m": 1,
+   "k": 2,
+   "a": "a",
+   "z": "c",
+   "tags": [
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "id": "b",
+   "n": null,
+   "s": null,
+   "b": false,
+   "m": 3,
+   "k": 3,
+   "a": "b",
+   "z": "c"
+  },
+  {
+   "id": "c",
+   "k": 4,
+   "a": "c",
+   "z": "c",
+   "tags": [
+    4,
+    5
+   ]
+  },
+  {
+   "id": "d",
+   "n": 2,
+   "s": "x",
+   "b": true,
+   "m": 5,
+   "a": "d",
+   "z": "c"
+  },
+  {
+   "id": "e",
+   "n": 1,
+   "s": "y",
+   "m": 8,
+   "k": 3,
+   "a": "e",
+   "z": "c"
+  }
+ ],
+ "cases": [
+  {
+   "name": "distinct n",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "distinct window n",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$return": "$it.n"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "nullable grouping n",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.n"
+    },
+    "$return": {
+     "key": "$g",
+     "count": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "distinct s",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct window s",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$return": "$it.s"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "nullable grouping s",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.s"
+    },
+    "$return": {
+     "key": "$g",
+     "count": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "distinct b",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.b"
+    }
+   }
+  },
+  {
+   "name": "distinct window b",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$return": "$it.b"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "nullable grouping b",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.b"
+    },
+    "$return": {
+     "key": "$g",
+     "count": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "constant null",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": null
+   }
+  },
+  {
+   "name": "count constant null",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": null
+    }
+   }
+  },
+  {
+   "name": "constant true",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": true
+   }
+  },
+  {
+   "name": "count constant true",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": true
+    }
+   }
+  },
+  {
+   "name": "constant 7",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": 7
+   }
+  },
+  {
+   "name": "count constant 7",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": 7
+    }
+   }
+  },
+  {
+   "name": "constant \"literal\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": "literal"
+   }
+  },
+  {
+   "name": "count constant \"literal\"",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "literal"
+    }
+   }
+  },
+  {
+   "name": "constant {}",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": {}
+   }
+  },
+  {
+   "name": "count constant {}",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {}
+    }
+   }
+  },
+  {
+   "name": "constant []",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": []
+   }
+  },
+  {
+   "name": "count constant []",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": []
+    }
+   }
+  },
+  {
+   "name": "constant {\"fixed\": true}",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$return": {
+     "fixed": true
+    }
+   }
+  },
+  {
+   "name": "count constant {\"fixed\": true}",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "fixed": true
+     }
+    }
+   }
+  },
+  {
+   "name": "path comparison $eq m False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.m",
+      "$it.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $eq m True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$eq": [
+       "$it.m",
+       "$it.k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $eq a False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.a",
+      "$it.z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $eq a True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$eq": [
+       "$it.a",
+       "$it.z"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ne m False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.m",
+      "$it.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ne m True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$ne": [
+       "$it.m",
+       "$it.k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ne a False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.a",
+      "$it.z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ne a True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$ne": [
+       "$it.a",
+       "$it.z"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $lt m False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.m",
+      "$it.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $lt m True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$lt": [
+       "$it.m",
+       "$it.k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $lt a False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.a",
+      "$it.z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $lt a True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$lt": [
+       "$it.a",
+       "$it.z"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $le m False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.m",
+      "$it.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $le m True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$le": [
+       "$it.m",
+       "$it.k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $le a False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.a",
+      "$it.z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $le a True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$le": [
+       "$it.a",
+       "$it.z"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $gt m False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.m",
+      "$it.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $gt m True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$gt": [
+       "$it.m",
+       "$it.k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $gt a False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.a",
+      "$it.z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $gt a True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$gt": [
+       "$it.a",
+       "$it.z"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ge m False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.m",
+      "$it.k"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ge m True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$ge": [
+       "$it.m",
+       "$it.k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ge a False",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.a",
+      "$it.z"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "path comparison $ge a True",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$ge": [
+       "$it.a",
+       "$it.z"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "window counts row residual items",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$return": "$it.tags[*]"
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "partial group key ordering is stable",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "a": "$it.z",
+     "b": "$it.k"
+    },
+    "$orderby": [
+     "$a"
+    ],
+    "$return": {
+     "a": "$a",
+     "b": "$b"
+    }
+   }
+  }
+ ]
+}

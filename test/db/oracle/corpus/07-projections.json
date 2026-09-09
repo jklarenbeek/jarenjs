@@ -728,6 +728,134 @@
      }
     }
    }
+  },
+  {
+   "name": "nested windows over first-seen groups",
+   "query": {
+    "$subsequence": [
+     {
+      "$subsequence": [
+       {
+        "$for": {
+         "it": "$[*]"
+        },
+        "$groupby": {
+         "g": "$it.s"
+        },
+        "$return": {
+         "g": "$g",
+         "n": {
+          "$count": "$it"
+         }
+        }
+       },
+       1,
+       3
+      ]
+     },
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "zero group window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$groupby": {
+       "g": "$it.s"
+      },
+      "$return": {
+       "g": "$g",
+       "n": {
+        "$count": "$it"
+       }
+      }
+     },
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "window past all groups",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$groupby": {
+       "g": "$it.s"
+      },
+      "$return": {
+       "g": "$g",
+       "n": {
+        "$count": "$it"
+       }
+      }
+     },
+     999,
+     2
+    ]
+   }
+  },
+  {
+   "name": "window over absent group keys stays item based",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$groupby": {
+       "g": "$it.s"
+      },
+      "$return": "$g"
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "ordering boolean group keys preserves the engine error",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.b"
+    },
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    },
+    "$orderby": [
+     "$g"
+    ]
+   }
+  },
+  {
+   "name": "projection path window counts present items",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$return": "$it.n"
+     },
+     1,
+     3
+    ]
+   }
   }
  ]
 }

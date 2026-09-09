@@ -280,6 +280,8 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     if (planned.mode !== 'native' || planned.plan.aggregate === null) {
       return rerun(refinedOnly(planned, false) ? SPATIAL_RERUN.aggregate : plannerReason(planned));
     }
+    if (planned.plan.group !== null || planned.plan.bucket !== null)
+      return rerun('an aggregate over groups needs group-level maintenance');
     if (!keyed) return rerun('rows without a document key cannot be tracked');
     return {
       strategy: 'accumulator',
@@ -345,6 +347,13 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     };
   }
   if (!keyed) return rerun('rows without a document key cannot be tracked');
+
+  // SQL can group a complete selection without proving that evaluating
+  // the document once per changed row maintains its result. Canonical
+  // maintained groups were handled above; the remaining groups and
+  // distinct projections need set-level invalidation.
+  if (planned.plan.group !== null || planned.plan.bucket !== null)
+    return rerun('this grouping or distinct projection needs set-level maintenance');
 
   if (planned.plan.order !== null) {
     if (offset > 0 || (planned.plan.window?.offset ?? 0) > 0) {

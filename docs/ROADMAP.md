@@ -326,7 +326,11 @@ beyond a textarea, which is what the first two entries are about.
   registered operators (`$sqrt`, `$npv`) keep resolving, which means it can
   never be gated by the project's closed grammar. A single whole-project gate
   is therefore not merely unbuilt but undesirable — and the worker is the one
-  sanctioned side-effecting host inside an otherwise effect-free sandbox.
+  sanctioned side-effecting host inside an otherwise effect-free sandbox. **Host architecture
+  boundary:** model execution also needs per-file worker ownership, database
+  lifetime and query-to-model routing. The current project runner's closed
+  file-kind dispatch and effect-free file host do not supply that lifecycle;
+  adding a store only to validation would not make model files executable.
 - [ ] **Fragment assembly — a file is always a whole document** — `app`, `fsm`,
   `dag` and `model` files each hold one complete document, which is what made
   the migration a move rather than a rewrite. Splitting an app into separate
@@ -380,122 +384,86 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **Pushdown promotions.** A general `$groupby` over a collection,
-  a projection TREE (`$return` objects and arrays of member paths) and
-  an N-way equi-join graph all lower now, each proved against the
-  differential oracle first. What the deliberate-residual table still
-  holds, and why, is unchanged in kind: a `$groupby` whose key is
-  untyped or nullable, whose `$return` reads the binding (after a
-  grouping it holds the group's ROWS), or whose `$orderby` names
-  anything but a key; a window over the GROUPS or an aggregate of them;
-  a comparison whose two sides are both paths (join territory) and a
-  disjunction spanning bindings; a `$for` binding nothing joins to — the
-  cartesian product an equi-join graph exists to prevent; a projection
-  ACROSS a join on the entity engine; and `$match`, `$call` and the
-  other unlisted operators, which reach the deterministic-function
-  hatch or nothing. Each remaining promotion needs its oracle proof
-  first; the forced-residual mode is the regression net that makes one
-  safe.
-- [ ] **No shipped pack marks an aggregate operator.** Both halves of
-  the registered-operator ring now exist: `pushable:'scalar'` pushes as
-  a deterministic UDF, and `pushable:'aggregate'` registers a
-  `db.aggregate` step/final pair and lowers into a `GROUP BY` (a plan
-  whose `aggregate.fn` is `'registered'` carries the registered NAME,
-  never a fragment of SQL), on the drivers whose `aggregateFunctions`
-  capability is probed and reported. What is missing is a pack that
-  declares one: the finance and stats aggregators fold a per-document
-  sequence — a per-row scalar to SQL — rather than a cross-row column,
-  and whole-series functions like `$irr` are never index-eligible. The
-  ceiling is stated, not hidden.
-- [ ] **Projection pushdown on the entity engine.** A collection FLWOR
-  projects one member path, and now a whole TREE of them — `$return`
-  objects and arrays rebuilt from the distinct leaves the statement
-  fetched, each leaf's value beside its JSON type, with
-  `explain().projection.paths` naming them and `$count` over one a
-  `COUNT(*)`. What stays residual, deliberately: a projection the tree
-  cannot rebuild (an operator over a member, a reference to the binding
-  itself, a non-singular path, no member path at all), every projection
-  on the ENTITY engine — one binding or across a join (MODEL-FORMAT
-  §10.6) — and a `$distinct` over a projected path, which the engine
-  still folds over the projected items. The rule that governs each
-  promotion stays: project only when no residual conjunct still needs a
-  member the projection would drop, because a projection that dropped
-  one is a wrong answer rather than a slow one.
+- [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
+  group returns that read the grouped row binding, ordering by aggregate
+  expressions, entity grouping, and numeric aggregates over groups still run
+  in the engine. A window over a group return that can omit an item needs an
+  output-cardinality proof; the proven singleton constructors already lower.
+  Path comparisons outside one non-null number/string family, predicates
+  whose individual leaves span bindings, and unlisted operators remain
+  residual. **Semantic boundary:** promotions must preserve missing/null,
+  first-occurrence order and engine errors under the indexed, unindexed and
+  forced-residual oracle. A disconnected binding graph remains a deliberate
+  cartesian-product refusal; removing that guard changes the join contract.
+- [ ] **Projection and distinct beyond reconstructible trees.** A return
+  containing an operator, a whole binding inside a constructor or a non-singular
+  path still needs the engine. Windows over such returns are set-residual:
+  source-row limits cannot stand in for projected-item limits. `$distinct`
+  over an ordered, untyped or compound projection also remains residual.
+  **Proof still needed:** preserve output cardinality, structural equality,
+  ordering and errors, and never drop a member a residual predicate reads.
+
 - [ ] **A third SQL dialect, and the two capability slots still empty.**
-  PostgreSQL 16+ ships (`@jarenjs/db/postgres`): the same model, the
-  same query documents and the same differential oracle run on both
-  engines, and what differs is declared in the portability matrix rather
-  than discovered. What is still open is narrower than it was.
-  `statementTimeout` and `rowEstimates` are empty on BOTH engines —
-  PostgreSQL has a server-side `statement_timeout`, but the store's
-  cancellation is an `AbortSignal` and a server timeout is not the same
-  promise, so filling that slot honestly needs a cancellation hook the
-  injected client contract does not yet name. A third dialect would also
-  want the two SQLite-only subsystems (the durable job queue, the change
-  ledger) to have a portable form; today they are declared absent
-  (`capabilities.jobs`, `capabilities.changeCapture`) and refuse at open.
-- [ ] **Introspection that recovers what a CHECK or a partial index
-  meant.** `store.introspect()` derives a `jaren-model` from a live
-  database on both engines, read-only, with a sorted loss report; the
-  same logical model comes back from equivalent SQLite and PostgreSQL
-  databases. What it cannot derive it REPORTS, and two of those rows are
-  worth closing: an entity's `enum` becomes a CHECK on the way out and
-  is not read back into one, and a partial or expression index the model
-  has no vocabulary for is `unmapped-index` rather than a narrowed
-  declaration.
-- [ ] **A federation joins two sides, not three.** Two entity sets of
-  one store join in one document (a shared provider `scope`, QUERY-PEN
-  §8; one statement for a bare-binding equijoin), and a join across two
-  DIFFERENT sources now has its explicit door: `federate({ sources,
-  maxRows, maxBytes })` (QUERY-PEN §12.1) hands back one provider source
-  per name, pushes each side's own filters and projection to its own
-  source, reduces the probe side by the build side's keys and lets the
-  engine decide over the two bounded sets. An ordinary `join()` across
-  unrelated sources stays `JL0005` — that is the design, not a gap. What
-  is unbuilt: a federation of THREE or more sides, which needs a join
-  order this boundary deliberately does not invent; a merge strategy,
-  which needs sources that declare an ordering; and the same door on the
-  entity translator's own three-plus-binding residual (MODEL-FORMAT
-  §10.6).
-- [ ] **Replication beyond bounded SQLite histories.** Portable JSON envelopes,
-  replica identities, causal frontiers, durable replay receipts, transactional
-  apply, explicit conflicts and bounded snapshot resets are implemented in
-  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md). Session and
-  journal capture agree on Node and wasm; transport and resolver policy are
-  host-injected. Remaining work: PostgreSQL capture/persistence, paged snapshots
-  and causally safe receipt/tombstone compaction for histories beyond the
-  configured reset credits, and journal capture of child cascade/set-null effects. Whole-row conflicts remain conservative; independent
-  field merges require a declared resolver policy.
-- [ ] **Remaining incremental live shapes.** Indexed inner/left entity joins,
-  multi-entity tuple projections, bounded nested graph projections and explicit
-  two-level collection groups are maintained through changed-key dependencies.
-  [The matrix](../packages/db/docs/LIVE-FORMAT.md) names the residuals:
-  self joins, non-equality and unindexed joins, reverse many-to-many edges with
-  no declared index, ordered/windowed entity joins, load-spec graphs, global-root
-  graph projections and LINQ group-of-groups emission. Offset windows remain
-  rerun. [Equal-correctness measurements](../packages/db/docs/REPLICATION-FORMAT.md#measurements)
-  publish initialization and high-fan-out losses beside selective maintenance.
+  PostgreSQL and SQLite share the model, query documents and differential
+  oracle. `statementTimeout` and `rowEstimates` remain absent on both.
+  **Driver boundary:** the injected client contract names neither an in-flight
+  cancellation hook nor an estimate-returning operation; a server timeout is
+  not the store's `AbortSignal` promise. A third dialect also needs an explicit
+  disposition for the SQLite-only job queue and change ledger, currently
+  capability-gated refusals. This requires a driver/subsystem design, not
+  setting capability flags optimistically.
+- [ ] **Introspection outside the model vocabulary.** Partial indexes,
+  direct SQL expression indexes and
+  CHECK expressions outside the complete scalar enum grammar remain sorted
+  loss rows. **Format boundary:** a partial predicate or physical expression
+  index has no equivalent model declaration; emitting an unconditional index
+  would strengthen its meaning. Boolean-versus-integer origins and numeric
+  precision erased by storage also cannot be inferred without metadata.
+- [ ] **Federation beyond two sources.** `federate({ sources, maxRows,
+  maxBytes })` still accepts only a two-sided equijoin, pushes each side's own
+  query, bounds both sets and lets the query engine decide the resident result.
+  **Provider boundary:** QUERY-PEN §12.1 explicitly refuses more than two sides;
+  extending it needs a declared join-order and combined-budget policy. A merge
+  strategy needs a source-ordering guarantee. Ordinary unrelated-source
+  `join()` remains `JL0005`.
+- [ ] **Replication beyond bounded SQLite histories.** Portable envelopes,
+  causal frontiers, durable receipts, transactional apply, explicit conflicts
+  and bounded snapshot resets are implemented in
+  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md).
+  **Capture/persistence boundary:** PostgreSQL declares no change capture;
+  paged snapshots need snapshot identity and continuation consistency;
+  receipt/tombstone compaction needs causal stability evidence beyond current
+  reset credits. Journal replication explicitly refuses child cascade/set-null
+  relations at open because its write journal cannot observe those database
+  side effects. Removing that refusal requires transactional child before/after
+  capture across all delete paths, including replay and unit-of-work writes.
+  Independent field merges require a declared resolver policy.
+- [ ] **Remaining incremental live shapes.**
+  [The matrix](../packages/db/docs/LIVE-FORMAT.md) retains self joins,
+  non-equality and unindexed joins, reverse many-to-many edges without an
+  index, ordered/windowed entity joins, load-spec graphs, global-root graph
+  projections, SQL-native distinct projections, multiple-key groups, aggregates
+  over groups and LINQ group-of-groups emission. **Maintenance boundary:**
+  entity caches currently evaluate subsets keyed by distinct entity roots;
+  self aliases need independent root addressing, ordered tuples need maintained
+  global ordering, and group-of-groups needs another dependency level. A native
+  SQL plan alone proves none of those. Offset windows remain rerun. Preserve
+  row/byte credits, transactional invalidation and equal-correctness measurements
+  when extending these strategies.
 - [ ] **Typed SQL migration aggregates need an intermediate schema.**
-  Proven collection counts now execute through the existing SQL query planner.
-  Other independent `$count`, `$sum`, `$avg`, `$min`, `$max` operands use
-  the query engine's ordered accumulator; bounded `$distinct` retains only
-  admitted unique items. Global and positional shapes materialize under
-  declared row and byte limits (MIGRATION-FORMAT §6). Promoting typed
-  aggregates between migration steps still needs a trustworthy schema for
-  those intermediate documents and proof of equivalent numeric/order
-  semantics. The baseline and target alone cannot provide that guarantee.
-- [ ] **A stored interval cannot be declared well-formed, so `$overlaps`
-  narrows but never seeks.** The promotion pushes the half-open conjunction
-  over the two declared bound columns and the engine's own operator decides,
-  which is the fetch it was built for — but §8.16 RAISES on a span whose end
-  is at or before its start, and no JSON Schema keyword compares two members,
-  so such a row is storable. The statement therefore keeps every one of them
-  (`start >= end`, a comparison of two columns), and no index bounds that
-  disjunct: the fetch scans. Closing it means declaring the pair AS an
-  interval — a `CHECK` the DDL carries, so an inverted span is unwritable and
-  the conjunction alone is exact — which is a model-format change with its own
-  migration parity, plus `createIntervalIndex` as the resident shape it would
-  then serve.
+  Collection counts execute through the SQL planner; other independent
+  aggregates use ordered accumulators and bounded distinct retains admitted
+  unique items. **Schema boundary:** a migration's baseline and target do not
+  describe documents between transform steps. Typed SQL promotion needs an
+  intermediate-schema contract and equivalent numeric/order/error semantics;
+  inferring that schema from either endpoint can return a wrong answer.
+- [ ] **An interval declaration is needed before `$overlaps` can seek.**
+  The current prefilter retains malformed stored spans so the engine can raise
+  the required error; that extra disjunct prevents an index seek.
+  **Model-format boundary:** declaring a start/end pair as well-formed requires
+  a cross-member constraint carried into DDL CHECKs, migration parity and
+  introspection, plus the corresponding `createIntervalIndex` resident shape.
+  Silently dropping inverted spans would violate QUERY-FORMAT §8.16.
 
 ## @jarenjs/ai
 
@@ -638,13 +606,20 @@ still open is listed here, each with its reason.
   radius are literals: an external on either side would need a parameter slot
   that composes the bound value with the radius, and the derived slot kind is
   closed at one axis of one bound value. Such a query is correct and reads
-  every row. `$within` and `$bbox-intersects` do bind an external region.
+  every row. `$within` and `$bbox-intersects` do bind an external region. **Plan boundary:** this needs a
+  derived parameter that names both centre and radius, with bind-time diversion
+  for invalid, polar and antimeridian probes. The current `bboxAxis` slot names
+  one external only; extending it needs an explicit slot contract and the same
+  spatial oracle on both dialects.
 - [ ] **A live ordering by `$distance` re-runs.** The geofence maintains a
   `$where` per row; an `$orderby` over `$distance` (or over a member beside a
   refined predicate) and a spatial aggregate re-run on invalidation with the
   reason in `live.mode`. Maintaining a distance-ordered window incrementally is
   an incremental spatial index, which is a different campaign; the honest
-  re-run is the shipped answer until it is built.
+  re-run is the shipped answer until it is built. **Maintenance boundary:** a new ordered spatial
+  strategy must account for changed distances, window membership, ties and
+  declared state credits; native bounding-box filtering alone supplies none of
+  that state.
 - [ ] **Overlay operations (union, intersection, difference, buffer)** —
   deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
   exists for, it is where floating-point robustness problems concentrate, and

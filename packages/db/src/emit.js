@@ -26,6 +26,15 @@ import { codePointPrefixSuccessor } from '@jarenjs/core/string';
  */
 export class UnrepresentablePath extends Error {}
 
+/** A comparison of schema-compatible paths is false if either is absent.
+ * @param {any} pred @param {(ref: any) => { value: string, present: string }} read */
+function compareRefs(pred, read) {
+  const left = read(pred.left);
+  const right = read(pred.right);
+  const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+  return `(${left.present} AND ${right.present} AND ${left.value} ${symbol} ${right.value})`;
+}
+
 /**
  * @typedef {{ external: string } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
@@ -120,6 +129,11 @@ function probeEdge(probe, param, axis) {
  * @returns {{ sql: string, slots: ParamSlot[] }}
  */
 export function emitPlan(plan, dialect, physical) {
+  if (plan.group !== null && plan.aggregate?.fn === 'count') {
+    const inner = emitPlan({ ...plan, aggregate: null }, dialect, physical);
+    return { ...inner, sql: `SELECT COUNT(*) AS ${dialect.quoteIdentifier('value')} `
+      + `FROM (${inner.sql}) AS ${dialect.quoteIdentifier('_groups')}` };
+  }
   const q = dialect.quoteIdentifier;
   const docColumn = q(physical.docColumn);
   /** @type {ParamSlot[]} */
@@ -297,6 +311,9 @@ export function emitPlan(plan, dialect, physical) {
    */
   const emitPred = (pred) => {
     switch (pred.p) {
+      case 'refCmp':
+        return compareRefs(pred, (ref) => ({ value: valueOf(ref, kindOf(ref)),
+          present: `${typeOf(ref)} IS NOT NULL` }));
       case 'and':
         return `(${pred.items.map(emitPred).join(' AND ')})`;
       case 'or':
@@ -461,7 +478,8 @@ export function emitPlan(plan, dialect, physical) {
             // a projection TREE: the same value/type pair per DISTINCT
             // leaf, numbered, and nothing else — the document blob is
             // never selected, and a leaf named twice is fetched once
-            : plan.project.leaves.map((ref, i) => projectedPair(ref, String(i))).join(', '))
+            : (plan.project.leaves.map((ref, i) => projectedPair(ref, String(i))).join(', ')
+              || `1 AS ${q('_row')}`))
         : plan.aggregate.fn === 'count'
           ? `COUNT(*) AS ${q('value')}`
           // a REGISTERED aggregate calls the function the store
@@ -486,10 +504,11 @@ export function emitPlan(plan, dialect, physical) {
     // the groups' order: the engine's own order of first appearance —
     // over a collection, each group's earliest row identity — or the
     // key ordering an `$orderby` declared
-    sql += ` ORDER BY ${plan.group.order === 'first-seen'
-      ? dialect.groupAggregate('min', dialect.rowIdentity())
+    const order = plan.group.order === 'first-seen' ? []
       : plan.group.order.map((term) => `${q(`vk${term.index}`)} `
-        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`).join(', ')}`;
+        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
+    order.push(dialect.groupAggregate('min', dialect.rowIdentity()));
+    sql += ` ORDER BY ${order.join(', ')}`;
   }
   if (plan.bucket !== null) {
     // `first-seen` is the engine's own group order (§6.5, first
@@ -518,7 +537,7 @@ export function emitPlan(plan, dialect, physical) {
     terms.push(dialect.rowIdentity());
     sql += ` ORDER BY ${terms.join(', ')}`;
   }
-  if (plan.window !== null && plan.aggregate === null && plan.group === null) {
+  if (plan.window !== null && plan.aggregate === null) {
     sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
   return { sql, slots, seeks: (plan.seeks ?? []).map((seek) => emitSeek(seek)) };
@@ -682,6 +701,15 @@ export function createEntityPredicateEmitters(dialect, param) {
   };
 
   const emitPred = (aliasSql, docSql, pred) => {
+    if (pred.p === 'refCmp') return compareRefs(pred, (ref) => {
+      if (ref.flavor === 'entity-column') {
+        const value = `${aliasSql}.${q(ref.column)}`;
+        return { value, present: `${value} IS NOT NULL` };
+      }
+      // Epoch columns retain the document's lexical comparison rule.
+      return { value: memberAt(docSql, ref, ref.type === 'string' ? 'text' : 'number'),
+        present: `${dialect.jsonTypeOf(docSql, pathTextOf(ref))} IS NOT NULL` };
+    });
     if (pred.p === 'and')
       return `(${pred.items.map((item) => emitPred(aliasSql, docSql, item)).join(' AND ')})`;
     if (pred.p === 'or')
@@ -745,8 +773,13 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
 
   const entityOf = new Map(plan.bindings.map((binding) => [binding.name, binding.entity]));
   const emitters = createEntityPredicateEmitters(dialect, param);
-  const emitPred = (bindingName, pred) =>
-    emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
+  const emitPred = (bindingName, pred) => {
+    if (pred.p === 'binding') return emitPred(pred.binding, pred.filter);
+    if (pred.p === 'and' || pred.p === 'or') return `(${pred.items
+      .map((item) => emitPred(bindingName, item)).join(pred.p === 'and' ? ' AND ' : ' OR ')})`;
+    if (pred.p === 'not') return `NOT (${emitPred(bindingName, pred.item)})`;
+    return emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
+  };
 
   /**
    * One projected member of a binding: its value beside its JSON type,
@@ -794,7 +827,8 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     : plan.project != null
       // `p`-prefixed, because a bare `t0` would collide with this
       // plan's own binding aliases
-      ? plan.project.leaves.map((leaf, i) => projectedPair(leaf, `p${i}`)).join(', ')
+      ? (plan.project.leaves.map((leaf, i) => projectedPair(leaf, `p${i}`)).join(', ')
+        || `1 AS ${q('_row')}`)
       // a join-table root IS its two key columns: it has no document
       // column, so the merge is handed an empty one
       : physicalOf(entityOf.get(ret)).document === false

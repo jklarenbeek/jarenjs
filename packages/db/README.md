@@ -214,7 +214,7 @@ no continuation to emit.
   `explain().projection` names the path or the leaf `paths`, and
   reading a shape no longer reads every document. A shape the tree
   cannot rebuild — an operator over a member, a reference to the
-  binding itself, a projection with no path at all — refuses WHOLE and
+  binding itself, a non-singular path — refuses WHOLE and
   runs per row, with `explain().residualProjection` naming what stayed
   behind: promoting the half that composes would answer a shape nobody
   asked for. Every `explain()` also carries `budget`: the profile
@@ -227,6 +227,10 @@ no continuation to emit.
   arithmetic deviation declared rather than hidden (MODEL-FORMAT §10.6: SQLite's
   compensated `SUM` and the engine's naive one differ in the last
   bit). `strict: true` turns any residual into a compile error.
+  Constant trees fetch only a row marker. Counts over entity projection trees
+  lower too; a single-path count or window excludes absent members before
+  counting items. A window over a projection that can emit several items runs
+  in the engine.
 - **Registered operators, correct in the residual, pushed where it
   pays.** Open with a registry (`operators:
   createJsltRegistry().use(mathPack).use(financePack)`) and a query may
@@ -254,6 +258,11 @@ no continuation to emit.
   `openStore` by name — and the promotion still needs a numeric member
   the schema forbids `null` on, because SQL cannot tell a stored `null`
   from an absent one and the engine can.
+- **Typed path comparisons and distinct scalar projections.** Comparisons
+  between two paths in the same non-null number/string family lower without
+  a UDF. `$distinct` over an unordered typed scalar projection groups by its
+  value and JSON type, preserving first occurrence and excluding missing
+  members. Literal windows apply to those distinct items.
 - **Grouping and joins lower whole, or not at all.** A `$groupby` over
   schema-typed member keys becomes a real `GROUP BY`: the keys come back
   with their JSON types beside them, so a group whose key is ABSENT
@@ -269,6 +278,13 @@ no continuation to emit.
   cartesian product, so it is the residual, named, and `strict: true`
   refuses it. `explain()` lists the join order with the equalities that
   attached each binding, and the group's keys, aggregates and order.
+  Nullable scalar keys also group; ordering null or boolean keys remains
+  residual to preserve the engine's error. Windows over singleton group
+  constructors lower, and counts over constructors containing only keys,
+  literals and row counts count the grouped subquery. Ties under a partial
+  group ordering retain first appearance.
+  Boolean predicates may span joined bindings when each leaf belongs to one
+  binding; the equality graph still establishes every join.
   A join predicate that is not an equality — a range between two mapped
   columns of one family — refines a match it never makes: the anchor is
   still an equality, so a range alone stays the residual. A projected
@@ -1177,6 +1193,13 @@ be declared (`unmapped-view`), a foreign key cannot say which side
 declared the edge (`ambiguous-relation`). `strict: true` refuses rather
 than answering a partial model.
 
+Scalar enum CHECKs on mapped entity columns are recovered from both
+catalogs. A partial index or an expression term is reported as `unmapped-index`
+without inventing unconditional uniqueness. CHECKs outside the complete scalar
+enum grammar, including NULL lists, collation-dependent equality and unproven
+type conversions, remain
+`unmapped-constraint`.
+
 The derived model is usable as a migration's `from`: read a database,
 plan against your declared model, and an unchanged shape plans nothing.
 SQLite and PostgreSQL derive the same logical model from equivalent
@@ -1309,10 +1332,10 @@ its side-effect-free status read are in
   capture after a disposable live probe. Failed session probes select journal
   capture. OPFS, IndexedDB snapshots and memory have explicit capability and
   durability differences; see [execution hosts](docs/HOSTS.md).
-- **Named future work, not silent gaps**: `$groupby` pushdown beyond
-  the `$time-bucket` ladder, a many-to-many hop on the chain, membership
-  on an auto-keyed pending insert, additional join/group shapes, other SQL dialects,
-  transport policy, database introspection (MODEL-FORMAT §10.6, the roadmap).
+- **Remaining boundaries**: untyped and opaque grouped/projection shapes,
+  federation beyond two sources, richer incremental live queries, portable
+  capture and introspection outside the model vocabulary (MODEL-FORMAT §10.6
+  and the roadmap).
 
 The normative formats are
 [docs/MODEL-FORMAT.md](docs/MODEL-FORMAT.md) (storage §§1–7, safe

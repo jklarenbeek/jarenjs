@@ -99,7 +99,7 @@ const PREDICATE_REASONS = {
   negatedPrefilter: 'a negated predicate cannot ride an implied pre-filter '
     + '(negating a superset drops rows)',
   existence: 'existence tests translate only over a singular member path on the binding',
-  joinTerritory: 'comparisons where both sides are paths are join territory',
+  joinTerritory: 'path comparisons require the same non-null numeric or string family',
   operands: 'comparisons translate only between a singular member path and a literal or external',
   compoundLiteral: 'array and object literals have no guarded native comparison form',
   stringSubject: 'string operators translate only over schema-typed string paths '
@@ -130,8 +130,8 @@ const PLAN_REASONS = {
   countProjection: 'count translates only over the bare binding or one member path '
     + '(a projected return can change the item count)',
   groupedAggregate: 'an aggregate over a grouped phrase folds its groups, which the engine does',
-  windowedGroup: 'a window over the GROUPS is engine work: the plan groups whole, '
-    + 'and a LIMIT over the groups would cut a different set',
+  distinctProjection: 'distinct translates over an unordered selection of one typed scalar member path',
+  windowedGroup: 'a window over groups whose return can omit an item needs the engine cardinality',
   aggregatePath: 'aggregates translate only over a singular schema-typed path '
     + '(the engine ERRORS on non-conforming operands)',
 };
@@ -1305,8 +1305,14 @@ function planPredicate(node, itSlot, shape) {
     const ref = pathRef(left, itSlot, shape);
     const operand = operandOf(right);
     if (ref === null || operand === null) {
-      if (pathRef(left, itSlot, shape) !== null && pathRef(right, itSlot, shape) !== null)
+      const other = pathRef(right, itSlot, shape);
+      if (ref !== null && other !== null) {
+        const family = (item) => isNumericType(item.type) ? 'number' : item.type;
+        if (orderable(ref, shape.schema) && orderable(other, shape.schema)
+          && family(ref) === family(other))
+          return exactly({ p: 'refCmp', op, left: ref, right: other });
         return { refusal: refusal(node.name, PREDICATE_REASONS.joinTerritory) };
+      }
       return { refusal: refusal(node.name, PREDICATE_REASONS.operands) };
     }
     if ('lit' in operand) {
@@ -2057,7 +2063,7 @@ function planSeriesOperator(root, shape) {
  * The rules that make it agree with the engine, each one a refusal
  * rather than an approximation:
  *
- * - a key is a singular schema-typed path that cannot hold `null`, so
+ * - a key is a singular schema-typed scalar path, so
  *   the group SQL forms is the group the engine forms. An ABSENT key is
  *   its own group, and its value comes back with its JSON type beside
  *   it, so the decoder can leave the member out exactly as the object
@@ -2080,7 +2086,7 @@ function planGeneralGrouping(node, itSlot, shape) {
   const keySlot = new Map();
   for (const key of node.groupby.keys) {
     const ref = pathRef(key.expr, itSlot, shape);
-    if (ref === null || ref.type === 'unknown' || admitsNull(shape.schema, ref.segments))
+    if (ref === null || ref.type === 'unknown')
       return null;
     keySlot.set(key.slot, keys.length);
     keys.push({ as: key.name, ref });
@@ -2131,6 +2137,10 @@ function planGeneralGrouping(node, itSlot, shape) {
   if (tree === null) return null;
   const order = groupOrder(node.orderby, keySlot);
   if (order === null) return null;
+  // Group equality accepts null and boolean keys; ordering them raises
+  // JQ2005. SQL ordering must not hide that engine error.
+  if (order !== 'first-seen' && order.some((term) =>
+    !orderable(keys[term.index].ref, shape.schema))) return null;
   return { keys, aggregates, tree, order };
 }
 
@@ -2194,9 +2204,8 @@ function groupOrder(orderby, keySlot) {
  * answer, not a partial one.
  *
  * Distinct paths are collected once: a path named twice is one fetched
- * column and two leaves pointing at it. A projection with NO path is
- * refused too — a statement needs a column to select, and a projection
- * of pure literals has nothing the database could contribute.
+ * column and two leaves pointing at it. A constant tree needs only a
+ * row marker from SQL: the selection contributes its cardinality.
  * @param {any} node - the `$return` AST node
  * @param {number} itSlot
  * @param {any} shape
@@ -2243,7 +2252,7 @@ function projectionTree(node, itSlot, shape) {
     return null;
   };
   const tree = build(node);
-  return tree === null || leaves.length === 0 ? null : { tree, leaves };
+  return tree === null ? null : { tree, leaves };
 }
 
 /**
@@ -2581,10 +2590,16 @@ function planCollectionCore(document, shape, options = undefined) {
   // pushable at all — a SQL fold over zero rows never sees a second
   // operand, and `aggregateSpec` refuses the declaration at open — so
   // the recognizer here reads the phrase and nothing else
+  const distinct = root.kind === 'op' && root.name === '$distinct';
+  if (distinct) {
+    root = root.args[0];
+    rawInner = rawInner?.$distinct;
+    assertDecidedKind(root);
+  }
   let aggregate = null;
   const registeredAggregate = root.kind === 'op' && !AGGREGATES.has(root.name)
     ? (options?.aggregate?.(root.name) ?? null) : null;
-  if (root.kind === 'op' && (AGGREGATES.has(root.name) || registeredAggregate !== null)) {
+  if (!distinct && root.kind === 'op' && (AGGREGATES.has(root.name) || registeredAggregate !== null)) {
     if (windows.length > 0) {
       return {
         analysis, plan: null, mode: 'set',
@@ -2603,7 +2618,7 @@ function planCollectionCore(document, shape, options = undefined) {
   // a document that IS a series operator over the collection: the
   // operand's own conjuncts (and what the frozen spec implies) narrow
   // through the index, and the kernel decides over what comes back
-  if (aggregate === null && root.kind === 'op' && SERIES_ROOT_OPS.includes(root.name)) {
+  if (!distinct && aggregate === null && root.kind === 'op' && SERIES_ROOT_OPS.includes(root.name)) {
     const temporal = planSeriesOperator(root, shape);
     if (temporal !== null) {
       // a peeled `$subsequence` composes as it does everywhere — over a
@@ -2637,6 +2652,24 @@ function planCollectionCore(document, shape, options = undefined) {
   const { plan } = flwor;
   const fullyPushed = flwor.whereFullyPushed && flwor.orderPushed;
 
+  if (distinct) {
+    const ref = flwor.projectedPath;
+    if (fullyPushed && root.orderby === null && ref !== null && ref.type !== 'unknown'
+      && flwor.group === null && flwor.bucket === null) {
+      // DISTINCT and GROUP BY share the query language's key relation.
+      // An absent path contributes no item, including under a window.
+      plan.filter = conjoin(plan.filter, { p: 'typeIs', ref, types: [], positive: true });
+      plan.group = { keys: [{ as: 'distinct', ref }], aggregates: [],
+        tree: { p: 'key', index: 0 }, order: 'first-seen' };
+      plan.window = windows.length === 0 ? null : composeWindows(windows);
+      return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
+        udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+    }
+    return { analysis, plan: null, mode: 'set',
+      reasons: [refusal('$distinct', PLAN_REASONS.distinctProjection)],
+      rowReturn: null, udfs: [], prefilters: [], series: null };
+  }
+
   if (flwor.knn !== null) {
     // the k-nearest mode: the recognized ordering under a window with
     // a finite limit, composed exactly as pushed windows are. The plan
@@ -2661,6 +2694,14 @@ function planCollectionCore(document, shape, options = undefined) {
         rowReturn: null, udfs: [], prefilters: flwor.prefilters, series: null };
     }
     if (flwor.bucket !== null || flwor.group !== null || flwor.bucketRefusal != null) {
+      if (aggregate.fn === 'count' && flwor.group !== null
+        && ['object', 'array', 'lit'].includes(flwor.group.tree.p)
+        && flwor.group.aggregates.every((entry) => entry.fn === 'rows')) {
+        plan.group = flwor.group;
+        plan.aggregate = { fn: 'count', ref: null };
+        return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
+          udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+      }
       // the phrase's items are its GROUPS; a COUNT(*) over the rows
       // answered the row count for a `$count` of the groups
       return {
@@ -2722,7 +2763,10 @@ function planCollectionCore(document, shape, options = undefined) {
   // the temporal bucket: only over a WHOLE pushed selection, because a
   // conjunct the residual would still apply would arrive after the rows
   // were already summed
-  if (flwor.group !== null && fullyPushed && windows.length === 0 && aggregate === null) {
+  if (flwor.group !== null && fullyPushed && aggregate === null
+    && (windows.length === 0 || ['object', 'array', 'lit'].includes(flwor.group.tree.p)
+      || (flwor.group.tree.p === 'agg'
+        && flwor.group.aggregates[flwor.group.tree.index].empty === 'zero'))) {
     plan.group = flwor.group;
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
       udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
@@ -2759,7 +2803,13 @@ function planCollectionCore(document, shape, options = undefined) {
 
   if (!groupedResidual && fullyPushed && flwor.projectionNative
     && (windows.length === 0 || plan.window !== null)) {
-    if (flwor.projectedPath !== null) plan.project = { path: flwor.projectedPath };
+    if (flwor.projectedPath !== null) {
+      plan.project = { path: flwor.projectedPath };
+      // A path yields no item for an absent member. Windows count the
+      // projected items, so discard those rows before applying LIMIT.
+      if (windows.length > 0) plan.filter = conjoin(plan.filter,
+        { p: 'typeIs', ref: flwor.projectedPath, types: [], positive: true });
+    }
     else if (flwor.projectedTree !== null) plan.project = flwor.projectedTree;
     return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
       udfs: flwor.udfs, prefilters: flwor.prefilters,
@@ -2768,7 +2818,7 @@ function planCollectionCore(document, shape, options = undefined) {
 
   // the row residual: everything but the projection pushed
   if (!groupedResidual && fullyPushed && !flwor.projectionNative
-    && (windows.length === 0 || plan.window !== null)) {
+    && windows.length === 0) {
     const rawFlwor = rawInner;
     const name = flwor.itName ?? 'it';
     return {
@@ -2930,9 +2980,8 @@ export function entityPathRef(node, slot, shape) {
  * collection projection composes — objects, arrays, literals and
  * singular member paths — with each leaf carrying the BINDING it reads
  * from, so the statement extracts it from that binding's alias. `null`
- * when the shape is not one the plan can rebuild, and a projection with
- * no path at all is refused for the same reason a collection's is: a
- * statement needs a column to select.
+ * when the shape is not one the plan can rebuild. A constant tree
+ * fetches a row marker, preserving the selection's cardinality.
  * @param {any} node - the `$return` AST node
  * @param {Map<number, any>} byName - binding slot → binding
  * @returns {{ tree: any, leaves: { binding: string, ref: any }[] } | null}
@@ -2979,7 +3028,7 @@ function entityProjectionTree(node, byName) {
     return null;
   };
   const tree = build(node);
-  return tree === null || leaves.length === 0 ? null : { tree, leaves };
+  return tree === null ? null : { tree, leaves };
 }
 
 /**
@@ -3037,6 +3086,10 @@ export function planEntityPredicate(node, slot, shape) {
     if (pred.p === 'and' || pred.p === 'or')
       return { ...pred, items: pred.items.map(reflavor) };
     if (pred.p === 'not') return { ...pred, item: reflavor(pred.item) };
+    if (pred.p === 'refCmp') {
+      const flavor = (ref) => reflavor({ p: 'typeIs', ref, types: [], positive: true }).ref;
+      return { ...pred, left: flavor(pred.left), right: flavor(pred.right) };
+    }
     if (!('ref' in pred) || pred.ref === null) return pred;
     const canonical = canonicalOf(pred.ref.segments);
     const flavored = shape.entityFlavors.get(canonical);
@@ -3155,6 +3208,29 @@ function planEntityQueryCore(document, entities, mapping, operators) {
    * that turns a product into a join. */
   const refinements = [];
   const filters = new Map(bindings.map((binding) => [binding.slot, null]));
+  const scopedFilters = [];
+  // Boolean composition may span bindings once mandatory equijoin
+  // edges establish the candidate tuples. Each leaf still has exactly
+  // one owner and uses that binding's existing total predicate forms.
+  const scopedPredicate = (node) => {
+    if (node.kind === 'op' && (node.name === '$and' || node.name === '$or')) {
+      const items = node.args.map(scopedPredicate);
+      return items.some((item) => item === null) ? null
+        : { p: node.name === '$and' ? 'and' : 'or', items };
+    }
+    if (node.kind === 'op' && node.name === '$not') {
+      const item = scopedPredicate(node.args[0]);
+      return item === null ? null : { p: 'not', item };
+    }
+    const slots = new Set();
+    collectBindingSlots(node, byName, slots);
+    if (slots.size !== 1) return null;
+    const slot = [...slots][0];
+    const binding = byName.get(slot);
+    const outcome = planEntityPredicate(node, slot, binding.shape);
+    return 'refusal' in outcome ? null
+      : { p: 'binding', binding: binding.name, filter: outcome.pred };
+  };
   const reasons = [];
   let whereFullyPushed = true;
   for (const conjunct of conjuncts) {
@@ -3190,6 +3266,8 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     const slots = new Set();
     collectBindingSlots(conjunct, byName, slots);
     if (slots.size !== 1) {
+      const scoped = scopedPredicate(conjunct);
+      if (scoped !== null) { scopedFilters.push(scoped); continue; }
       reasons.push(refusal('$where', ENTITY_REASONS.conjunctBinding));
       whereFullyPushed = false;
       continue;
@@ -3255,10 +3333,16 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // SHAPE the projection tree rebuilds from the bindings' members
   const retBinding = root.ret.kind === 'var' && root.ret.external !== true
     ? byName.get(root.ret.slot) : undefined;
-  const projection = retBinding === undefined && aggregate === null
+  const projection = retBinding === undefined
     ? entityProjectionTree(root.ret, byName) : null;
   if (retBinding === undefined && projection === null) {
     reasons.push(refusal('$return', ENTITY_REASONS.projection));
+  }
+  if (projection?.tree.p === 'leaf' && (aggregate === 'count' || windows.length > 0)) {
+    const leaf = projection.leaves[projection.tree.index];
+    const binding = bindings.find((entry) => entry.name === leaf.binding);
+    filters.set(binding.slot, conjoin(filters.get(binding.slot),
+      { p: 'typeIs', ref: leaf.ref, types: [], positive: true }));
   }
 
   // ordering over flavored refs of either binding
@@ -3291,6 +3375,10 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     && (retBinding !== undefined || projection !== null);
   if (!fullyPushed) {
     return { analysis, mode: 'set', plan: null, referenced, reasons };
+  }
+  for (const filter of scopedFilters) {
+    const slot = bindings[0].slot;
+    filters.set(slot, conjoin(filters.get(slot), filter));
   }
 
   let window = null;

@@ -423,6 +423,27 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
   });
 
   describe('introspection, against the server', () => {
+    it('recovers emitted enum CHECKs from the PostgreSQL catalog', async () => {
+      const model = { $model: '0.1', entities: { Choice: { schema: {
+        type: 'object', required: ['id'], properties: {
+          id: { type: 'string', 'x-entity': { key: true } },
+          state: { type: 'string', enum: ['open', "it's closed"], 'x-entity': { index: true } },
+          score: { type: 'number', enum: [-1, 0.5, 100], 'x-entity': { index: true } },
+          fixed: { type: 'string', enum: ['only'], 'x-entity': { index: true } },
+        },
+      } } } };
+      const store = await openStore(model, { driver: await freshDriver() });
+      try {
+        const derived = await store.introspect();
+        const props = derived.model.entities.Choice.schema.properties;
+        assert.deepStrictEqual(props.state.enum, model.entities.Choice.schema.properties.state.enum);
+        assert.deepStrictEqual(props.score.enum, model.entities.Choice.schema.properties.score.enum);
+        assert.deepStrictEqual(props.fixed.enum, ['only']);
+        assert.deepStrictEqual(derived.report.filter((row) => row.code === 'unmapped-constraint'), []);
+      }
+      finally { await store.close(); }
+    });
+
     /** The model both engines will be read back into. */
     const SHAPES = {
       $model: '0.1',

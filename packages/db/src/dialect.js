@@ -185,6 +185,7 @@ function normalizeCapabilities(declared) {
  *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
+ *   readChecks?: (rows: any[]) => { name: string, column?: string, values?: any[] }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -640,6 +641,7 @@ export function createDialect(spec) {
      * one that can read it.
      */
     readGenerated: spec.readGenerated,
+    readChecks: spec.readChecks,
     explainQuery: spec.explainQuery,
     /** The plan narrative, one line per row the engine answered. */
     explainLines: spec.explainLines,

@@ -11,6 +11,7 @@
 import { createDialect } from '../dialect.js';
 import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
+import { sqliteChecks } from './check-read.js';
 
 /** @param {string} s */
 function quoteIdentifier(s) {
@@ -439,7 +440,7 @@ export const sqliteDialect = createDialect({
     columns: (table) =>
       `SELECT name, type, hidden FROM pragma_table_xinfo(${stringLiteral(table)})`,
     indexes: (table) =>
-      `SELECT name, "unique" AS uniq, origin FROM pragma_index_list(${stringLiteral(table)})`,
+      `SELECT name, "unique" AS uniq, origin, partial FROM pragma_index_list(${stringLiteral(table)})`,
     indexColumns: (index) =>
       `SELECT name FROM pragma_index_info(${stringLiteral(index)})`,
     foreignKeysOn: () => 'SELECT foreign_keys AS enabled FROM pragma_foreign_keys',
@@ -467,10 +468,13 @@ export const sqliteDialect = createDialect({
     // the CREATE text is where a generated column's expression lives
     generated: (table) =>
       `SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ${stringLiteral(table)}`,
+    checks: (table) =>
+      `SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ${stringLiteral(table)}`,
     // the whole declared schema, for shape-equality comparison after a
     // rebuild: every object that carries SQL text, in a stable order
     schemaDump: () =>
       "SELECT type, name, tbl_name AS owner, sql FROM sqlite_schema "
       + "WHERE sql IS NOT NULL ORDER BY type, name",
   },
+  readChecks: sqliteChecks,
 });

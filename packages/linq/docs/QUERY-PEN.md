@@ -472,8 +472,9 @@ time:
   emits `{ "$for": { "it": "$.Post[*]", "it2": "$.User[*]" }, "$where":
   { "$eq": ["$it.authorId", "$it2.id"] }, "$return": "$it" }` — the shape
   the store's translator answers in ONE statement when the result is a
-  bare binding (MODEL-FORMAT §10.2), and the declared residual over both
-  fetched roots when it is a projection (§10.6). `concat` stays
+  bare binding or a projection tree of member paths and constants
+  (MODEL-FORMAT §10.2). An opaque projection remains a declared residual
+  over the fetched roots (§10.6). `concat` stays
   same-source even within a scope: one input per document. A scope MAY
   carry `relations` — the relation tables of every root of the scope,
   keyed by root name (a store's does) — which is where a chained hop
@@ -1706,7 +1707,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->174<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->628<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->632<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
