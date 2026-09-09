@@ -1691,6 +1691,17 @@ async function replays(): Promise<number | undefined> {
 }
 void replays;
 
+// The public client selects one token field without changing request budgets.
+import { createChatClient as createWireChatClient } from '@jarenjs/ai/client';
+const completionClient = createWireChatClient({
+  provider: 'custom', baseUrl: 'https://api.openai.com/v1', model: 'fixture-model',
+  maxTokens: 3000, maxTokensField: 'max_completion_tokens',
+});
+void completionClient.complete({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 27 });
+void createChatClient({ maxTokensField: 'max_tokens' });
+// @ts-expect-error Responses API fields do not belong to Chat Completions.
+void createWireChatClient({ maxTokensField: 'max_output_tokens' });
+
 // Synchronous entity streaming preserves the async page/continuation shapes.
 import type { SyncEntitySet, SyncQueryCursor, Page } from '@jarenjs/db';
 declare const syncHostItems: SyncEntitySet<{ id: number }>;

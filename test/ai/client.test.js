@@ -13,6 +13,109 @@ function sseBody(chunks) {
 const delta = (d, finish = null) => ({ choices: [{ delta: d, finish_reason: finish }] });
 
 describe('ai — the chat client', function () {
+  for (const maxTokensField of ['max_tokens', 'max_completion_tokens']) {
+    for (const stream of [false, true]) {
+      it(`${maxTokensField} keeps client and request budgets on the wire (stream: ${stream})`, async function () {
+        const sent = [];
+        const messages = [{ role: 'user', content: 'Antwoord in het Nederlands als JSON.' }];
+        const usage = { completion_tokens: 24, completion_tokens_details: { reasoning_tokens: 12 } };
+        const client = createChatClient({
+          provider: 'custom', baseUrl: 'https://api.openai.com/v1', apiKey: 'fixture-key', model: 'fixture-model',
+          maxTokens: 3000, maxTokensField,
+          fetch: async (url, init) => {
+            assert.strictEqual(url, 'https://api.openai.com/v1/chat/completions');
+            assert.strictEqual(new Headers(init.headers).get('authorization'), 'Bearer fixture-key');
+            sent.push(JSON.parse(init.body));
+            return stream
+              ? new Response(sseBody([
+                delta({ content: '{"description":"Goed"}' }, 'stop'), { usage },
+              ]))
+              : Response.json({ choices: [{ message: { content: '{"description":"Goed"}' }, finish_reason: 'stop' }], usage });
+          },
+        });
+        for (const maxTokens of [undefined, 27]) {
+          const result = await client.complete({ messages, maxTokens, stream, responseFormat: { type: 'json' } });
+          assert.strictEqual(result.message.content, '{"description":"Goed"}');
+          assert.strictEqual(result.finishReason, 'stop');
+          assert.deepStrictEqual(result.usage, usage);
+        }
+        assert.deepStrictEqual(sent, [3000, 27].map((tokens) => ({
+          model: 'fixture-model', messages, stream,
+          [maxTokensField]: tokens, response_format: { type: 'json_object' },
+        })), 'exactly one token field, with no implicit temperature or reasoning control');
+      });
+    }
+  }
+
+  it('keeps max_tokens as the default and omits an unconfigured budget in either mode', async function () {
+    const sent = [];
+    const options = {
+      provider: 'ollama', model: 'fixture-model',
+      fetch: async (_url, init) => {
+        sent.push(JSON.parse(init.body));
+        return Response.json({ choices: [{ message: { content: 'hi' } }] });
+      },
+    };
+    const request = { messages: [{ role: 'user', content: 'hi' }], stream: false };
+    await createChatClient(options).complete({ ...request, maxTokens: 27 });
+    assert.strictEqual(sent[0].max_tokens, 27);
+    assert.strictEqual(Object.hasOwn(sent[0], 'max_completion_tokens'), false);
+    for (const maxTokensField of ['max_tokens', 'max_completion_tokens']) {
+      await createChatClient({ ...options, maxTokensField }).complete(request);
+      assert.strictEqual(Object.hasOwn(sent.at(-1), 'max_tokens'), false);
+      assert.strictEqual(Object.hasOwn(sent.at(-1), 'max_completion_tokens'), false);
+    }
+  });
+
+  it('rejects an unknown token field before any transport call', function () {
+    for (const maxTokensField of ['max_output_tokens', '', '__proto__', 123]) {
+      assert.throws(() => createChatClient({ maxTokensField }),
+        (err) => err instanceof AiError && err.code === 'AI0001' && /maxTokensField/.test(err.message));
+    }
+  });
+
+  it('keeps the completion-token budget on every retry and honors the attempt ceiling', async function () {
+    for (const attempts of [1, 3]) {
+      const sent = [];
+      const client = createChatClient({
+        provider: 'custom', baseUrl: 'https://api.openai.com/v1', model: 'fixture-model',
+        maxTokens: 3000, maxTokensField: 'max_completion_tokens',
+        retry: { attempts, sleep: async () => {} },
+        fetch: async (_url, init) => {
+          sent.push(JSON.parse(init.body));
+          return Response.json({ error: 'busy' }, { status: 503 });
+        },
+      });
+      await assert.rejects(client.complete({ messages: [{ role: 'user', content: 'hi' }], stream: false }),
+        (err) => err instanceof AiError && err.status === 503 && err.attempts === attempts);
+      assert.strictEqual(sent.length, attempts);
+      for (const body of sent) {
+        assert.strictEqual(body.max_completion_tokens, 3000);
+        assert.strictEqual(Object.hasOwn(body, 'max_tokens'), false);
+      }
+    }
+  });
+
+  it('cancels a completion-token request during transport without retrying', async function () {
+    const controller = new AbortController();
+    let calls = 0;
+    const client = createChatClient({
+      provider: 'custom', baseUrl: 'https://api.openai.com/v1', model: 'fixture-model',
+      maxTokens: 3000, maxTokensField: 'max_completion_tokens',
+      fetch: async (_url, init) => {
+        calls++;
+        assert.strictEqual(JSON.parse(init.body).max_completion_tokens, 3000);
+        assert.strictEqual(init.signal, controller.signal);
+        controller.abort();
+        throw init.signal.reason;
+      },
+    });
+    await assert.rejects(client.complete({
+      messages: [{ role: 'user', content: 'hi' }], signal: controller.signal,
+    }), (err) => err === controller.signal.reason);
+    assert.strictEqual(calls, 1);
+  });
+
   it('streams: SSE deltas accumulate, onDelta fires per text fragment', async function () {
     /** @type {any[]} */
     const calls = [];

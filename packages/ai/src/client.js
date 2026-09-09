@@ -162,10 +162,11 @@ function completionFromText(text) {
  * @property {any} [toolChoice] - `tool_choice` passthrough
  * @property {string} [model] - overrides the client's configured model
  * @property {number} [temperature]
- * @property {number} [maxTokens] - `max_tokens` ceiling for this reply.
- *   Unset means the PROVIDER picks, and it picks the model's context
- *   window — which a credit-metered aggregator must be able to afford up
- *   front or it refuses the call outright. Overrides the client default.
+ * @property {number} [maxTokens] - token ceiling for this reply, sent under
+ *   the client's `maxTokensField`. Overrides the client default; when
+ *   both are unset, the provider chooses the limit. With
+ *   `max_completion_tokens`, reasoning tokens share this budget with
+ *   visible output tokens.
  * @property {boolean} [stream] - default true
  * @property {{ name?: string, schema?: any, strict?: boolean, type?: 'json' }} [responseFormat]
  *   - structured output: `{ name, schema, strict? }` emits the OpenAI
@@ -189,10 +190,16 @@ function completionFromText(text) {
  * @param {{ provider?: string, baseUrl?: string, apiKey?: string,
  *   model?: string, headers?: Record<string, string>,
  *   fetch?: typeof fetch, maxTokens?: number,
+ *   maxTokensField?: 'max_tokens' | 'max_completion_tokens',
  *   reasoning?: { effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high',
  *     enabled?: boolean, exclude?: boolean, max_tokens?: number },
  *   retry?: import('./retry.js').RetryOptions,
  *   cache?: import('./replay.js').ReplayCache }} [options]
+ *   - `maxTokensField` selects the wire field for client and request
+ *     `maxTokens` budgets (default `'max_tokens'`). Select
+ *     `'max_completion_tokens'` for OpenAI Chat Completions, including
+ *     reasoning models. The selection is explicit, not inferred from
+ *     the URL or model; exactly one field is sent when a budget is set.
  *   - `reasoning` is the default thinking control for every request (see
  *     `ChatRequest.reasoning`); a per-request value overrides it.
  *   - `cache` is the replay seam: `{ get(key), set(key, value) }`, each
@@ -222,6 +229,9 @@ function completionFromText(text) {
  */
 export function createChatClient(options = {}) {
   const endpoint = resolveEndpoint(options);
+  const maxTokensField = options.maxTokensField ?? 'max_tokens';
+  if (maxTokensField !== 'max_tokens' && maxTokensField !== 'max_completion_tokens')
+    throw new AiError('AI0001', "maxTokensField must be 'max_tokens' or 'max_completion_tokens'");
   const fetchFn = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const retry = normalizeRetry(options.retry);
   const cache = normalizeCache(options.cache);
@@ -248,7 +258,7 @@ export function createChatClient(options = {}) {
     // (OpenRouter answers 402 naming the number it wanted). A caller that
     // knows its answer is a few thousand tokens should be able to say so.
     const maxTokens = request.maxTokens ?? options.maxTokens;
-    if (typeof maxTokens === 'number') body.max_tokens = maxTokens;
+    if (typeof maxTokens === 'number') body[maxTokensField] = maxTokens;
     // the thinking control rides through untouched — a hybrid model needs
     // it to answer WITHOUT reasoning first, and a body that silently drops
     // it is indistinguishable from a provider that ignores it

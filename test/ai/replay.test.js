@@ -105,6 +105,21 @@ describe('ai — the replay seam on the chat client', function () {
     assert.strictEqual(whole.message.content, 'Hello');
   });
 
+  it('token fields and budgets separate replay entries; equivalent defaults still replay', async function () {
+    const cache = mapCache();
+    const legacy = chatClient(cache, { maxTokens: 3000 });
+    const modern = chatClient(cache, { maxTokens: 3000, maxTokensField: 'max_completion_tokens' });
+    await legacy.client.complete(ASK);
+    assert.strictEqual((await modern.client.complete(ASK)).replayed, undefined);
+    assert.strictEqual(modern.calls.length, 1, 'a different token field buys its own reply');
+    assert.ok((await modern.client.complete({ ...ASK, maxTokens: 3000 })).replayed);
+    await modern.client.complete({ ...ASK, maxTokens: 27 });
+    assert.strictEqual(modern.calls.length, 2, 'a different budget buys its own reply');
+    assert.ok((await legacy.client.complete(ASK)).replayed);
+    assert.strictEqual(legacy.calls.length, 1);
+    assert.strictEqual(cache.map.size, 3);
+  });
+
   it('credentials and headers never enter the key; a different base does', async function () {
     const cache = mapCache();
     const a = chatClient(cache, { apiKey: 'sk-one', headers: { 'x-trace': '1' } });

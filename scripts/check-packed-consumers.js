@@ -146,7 +146,9 @@ void createGuardedRefiner({ read: async () => ({}), validateProposal: () => true
 void createLedger({ goalLimits: { maxChars: 2048 }, archiveLimits: { maxItems: 8 } }).retentionReport();
 const endpoint = resolveEndpoint({ provider: 'ollama', model: 'm' });
 void endpoint.url;
-const client = createChatClient({ provider: 'ollama', model: 'm', fetch: (globalThis.fetch) });
+const client = createChatClient({ provider: 'ollama', model: 'm', fetch: (globalThis.fetch), maxTokens: 3000, maxTokensField: 'max_completion_tokens' });
+// @ts-expect-error only Chat Completions token fields are accepted
+createChatClient({ maxTokensField: 'max_output_tokens' });
 const toolbox = createToolbox();
 toolbox.add({
   name: 'echo', description: 'echo', inputSchema: { type: 'object' },

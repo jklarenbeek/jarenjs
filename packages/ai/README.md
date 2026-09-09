@@ -54,6 +54,39 @@ from it, never re-derived from one another. `fetch` is injectable
 Node, and in tests against a scripted stub. Failures carry stable codes: `AI0001` (caller
 error), `AI0002` (HTTP error status), `AI0003` (malformed payload).
 
+**Token limits are configurable.** `maxTokens` sets the client's default budget;
+`complete({ maxTokens })` overrides its amount for one call. The client option
+`maxTokensField` selects the JSON field: `'max_tokens'` by default for existing
+compatible providers, or `'max_completion_tokens'` for OpenAI Chat Completions.
+The client sends exactly one of these fields when a budget is set, and neither
+when it is unset. Selection is explicit, independent of the URL and model.
+
+```js
+import { createChatClient } from '@jarenjs/ai/client';
+
+const client = createChatClient({
+  provider: 'custom',
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_API_KEY,
+  model: process.env.OPENAI_MODEL,
+  maxTokens: 3000,
+  maxTokensField: 'max_completion_tokens',
+});
+const reply = await client.complete({
+  messages: [{ role: 'user', content: 'Say hi.' }],
+  stream: false,
+});
+```
+
+OpenAI's `max_completion_tokens` bounds visible output **and reasoning tokens**;
+3,000 is their combined budget, not a promise of 3,000 visible tokens. OpenAI
+documents `max_tokens` as deprecated and incompatible with o-series models.
+Both parameters belong to Chat Completions; the Responses API is a different
+endpoint. No OpenAI SDK is needed for this client. Other options still depend on
+the selected model: `temperature` is omitted unless supplied, and `reasoning`
+is a provider-specific passthrough, not a translation to OpenAI's
+`reasoning_effort`. See the [OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
+
 **Retries are built in.** Transient failures — network errors, 408, 429, 5xx — back off
 exponentially with full jitter and try again (`retry: { attempts, baseMs, maxMs }`,
 default 3 total tries; `attempts: 1` disables). A provider `Retry-After` header (seconds
@@ -87,7 +120,7 @@ tool use.
 directory of files in a host — and answers a repeated request from it with **zero**
 transport calls. The client builds the key, not the host: after endpoint resolution and
 default application, from the exact credential-free body it would POST — provider,
-normalized base, model, messages, tools, `tool_choice`, `temperature`, `max_tokens`,
+normalized base, model, messages, tools, `tool_choice`, `temperature`, the selected token-limit field,
 `reasoning`, `response_format` — canonicalized collision-free (`semanticKey` from
 `@jarenjs/core/object`). `stream`, the signal, the callbacks and the headers never enter
 it, and because the key is the body rather than an allow-list, an option added later
