@@ -100,6 +100,75 @@ const joined = (federation) => fromAsync(federation.source('orders'))
   .join(fromAsync(federation.source('customers')),
     (o) => o.cust, (c) => c.key, (o, c) => ({ id: o.id, name: c.name }));
 
+describe('federation over connected source graphs', () => {
+  const inputs = { orders: ORDERS, customers: CUSTOMERS,
+    events: [{ order: 1, label: 'first' }, { order: 3, label: 'third' }, { order: 3, label: 'again' }] };
+  const document = { $for: { o: '$.orders[*]', c: '$.customers[*]', e: '$.events[*]' },
+    $where: { $and: [{ $eq: ['$o.cust', '$c.key'] }, { $and: [{ $eq: ['$e.order', '$o.id'] }] }] },
+    $return: { id: '$o.id', who: '$c.name', label: '$e.label' } };
+
+  it('three flat bindings preserve the resident order under every estimated fetch order', async () => {
+    for (const cursor of [false, true]) for (const smallest of Object.keys(inputs)) {
+      const providers = Object.fromEntries(Object.entries(inputs).map(([name, rows]) => [name, fake(rows, { cursor })]));
+      const federation = federate({ sources: Object.fromEntries(Object.entries(providers).map(([name, child]) =>
+        [name, { provider: child.source, estimatedRows: name === smallest ? 1 : 100 }])), maxRows: 100, maxBytes: 10000 });
+      const source = federation.source('orders');
+      const plan = source.explain(document);
+      assert.strictEqual(plan.order[0].source, smallest);
+      assert.deepStrictEqual(await source.execute([document]), resident(document, inputs));
+      if (cursor) assert.ok(Object.values(providers).every((child) => child.closed.length === 1));
+    }
+  });
+
+  it('chained joins execute nested projected intermediates and preserve aggregate wrappers', async () => {
+    const federation = federate({ sources: Object.fromEntries(Object.entries(inputs).map(([name, rows]) => [name, fake(rows).source])),
+      maxRows: 100, maxBytes: 10000 });
+    const chain = joined(federation).join(fromAsync(federation.source('events')),
+      (row) => row.id, (event) => event.order, (row, event) => ({ row, event }));
+    const expected = resident(chain.toDocument(), inputs);
+    assert.deepStrictEqual(await chain.toArray(), expected);
+    assert.strictEqual(await chain.count(), expected.length);
+    assert.ok(federation.source('orders').explain(chain.toDocument()).order.some((side) => side.children?.length === 2));
+  });
+
+  it('shared credits refuse aggregate retained state even when each individual side fits', async () => {
+    const providers = Object.fromEntries(Object.entries(inputs).map(([name, rows]) => [name, fake(rows, { cursor: true })]));
+    const federation = federate({ sources: Object.fromEntries(Object.entries(providers).map(([name, child]) => [name, child.source])),
+      maxRows: 100, maxBytes: 10000, maxTotalRows: 6 });
+    await assert.rejects(() => federation.source('orders').execute(document), codeIs('JL2008', /combined/));
+    assert.ok(Object.values(providers).every((child) => child.closed.length === child.opened()));
+  });
+
+  it('intermediate fan-out is bounded while the engine produces it', async () => {
+    const one = fake([{ id: 1 }, { id: 1 }, { id: 1 }], { cursor: true });
+    const two = fake([{ id: 1 }, { id: 1 }, { id: 1 }], { cursor: true });
+    const three = fake([{ id: 1 }], { cursor: true });
+    const federation = federate({ sources: { one: one.source, two: two.source, three: three.source },
+      maxRows: 3, maxBytes: 10000, maxTotalRows: 100 });
+    const chain = fromAsync(federation.source('one')).join(fromAsync(federation.source('two')),
+      (a) => a.id, (b) => b.id, (a) => a).join(fromAsync(federation.source('three')),
+      (a) => a.id, (b) => b.id, (a) => a);
+    await assert.rejects(() => chain.toArray(), codeIs('JL2008', /intermediate/));
+    assert.strictEqual(one.closed.length, 1);
+    assert.strictEqual(two.closed.length, 1);
+  });
+
+  it('aliases of one source retain independent projections', async () => {
+    const federation = fed(fake(ORDERS).source, fake(CUSTOMERS).source);
+    const doc = { $for: { a: '$.orders[*]', b: [{ $for: { it: '$.orders[*]' },
+      $where: { $gt: ['$it.total', 15] }, $return: '$it' }] },
+    $where: { $eq: ['$a.cust', '$b.cust'] }, $return: { a: '$a.id', b: '$b.id' } };
+    assert.deepStrictEqual(await federation.source('orders').execute([doc]), resident(doc, { orders: ORDERS }));
+  });
+
+  it('buffered sources preserve array-valued rows through the array frame', async () => {
+    const federation = fed(fake(ORDERS).source, fake(CUSTOMERS).source);
+    const doc = { $for: { a: [{ $for: { it: '$.orders[*]' }, $return: ['$it.cust', '$it.total'] }],
+      b: '$.customers[*]' }, $where: { $eq: ['$a[0]', '$b.key'] }, $return: '$a' };
+    assert.deepStrictEqual(await federation.source('orders').execute([doc]), resident(doc, { orders: ORDERS, customers: CUSTOMERS }));
+  });
+});
+
 describe('federate() — the explicit cross-source boundary', () => {
   it('an ordinary cross-source join is still JL0005; only federate opts in', () => {
     const a = fake(ORDERS);
@@ -162,9 +231,9 @@ describe('federate() — the explicit cross-source boundary', () => {
     // the predicate travelled: each source saw its own $where, over its
     // OWN root, and neither saw the other's
     assert.strictEqual(a.calls.length, 1);
-    assert.deepStrictEqual(a.calls[0].$where, { $gt: ['$it.total', 15] });
-    assert.strictEqual(a.calls[0].$for.it, '$[*]');
-    assert.deepStrictEqual(b.calls[0].$where, { '$starts-with': ['$it.name', 'A'] });
+    assert.deepStrictEqual(a.calls[0][0].$where, { $gt: ['$it.total', 15] });
+    assert.strictEqual(a.calls[0][0].$for.it, '$[*]');
+    assert.deepStrictEqual(b.calls[0][0].$where, { '$starts-with': ['$it.name', 'A'] });
   });
 
   it("a side's projection travels too, and the join reads what came back", async () => {
@@ -182,8 +251,8 @@ describe('federate() — the explicit cross-source boundary', () => {
       { who: 'Ada', amount: 10 }, { who: 'Bo', amount: 20 },
       { who: 'Ada', amount: 30 }, { who: 'Nil', amount: 40 }]);
     // the source shaped its own rows: the projection is in ITS document
-    assert.deepStrictEqual(a.calls[0].$return, { cust: '$it.cust', amount: '$it.total' });
-    assert.deepStrictEqual(b.calls[0].$return, { key: '$it.key', who: '$it.name' });
+    assert.deepStrictEqual(a.calls[0][0].$return, { cust: '$it.cust', amount: '$it.total' });
+    assert.deepStrictEqual(b.calls[0][0].$return, { key: '$it.key', who: '$it.name' });
   });
 
   it('the probe side is reduced by the build side, so unpairable rows never arrive', async () => {
@@ -374,11 +443,11 @@ describe('federate() — the explicit cross-source boundary', () => {
     assert.strictEqual(b.opened(), 0);
   });
 
-  it('a third binding, an unfederated root and a bindingless document all refuse', async () => {
+  it('a disconnected third binding, an unfederated root and a bindingless document all refuse', async () => {
     const federation = fed(fake(ORDERS).source, fake(CUSTOMERS).source);
     const run = (document) => federation.source('orders').execute(document, {});
     await assert.rejects(() => run({ $for: { a: '$.orders[*]', b: '$.customers[*]',
-      c: '$.orders[*]' }, $return: '$a' }), codeIs('JL0005', /exactly two sources/));
+      c: '$.orders[*]' }, $return: '$a' }), codeIs('JL0005', /connected binding graph/));
     await assert.rejects(() => run({ $for: { a: '$.orders[*]', b: '$.nope[*]' },
       $where: { $eq: ['$a.cust', '$b.key'] }, $return: '$a' }),
     codeIs('JL0005', /not one of this federation's sources/));

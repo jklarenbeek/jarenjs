@@ -1,0 +1,425 @@
+{
+  "group": "parameterized distance bounds",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "at": {
+        "type": [
+          "array",
+          "object"
+        ]
+      }
+    }
+  },
+  "indexes": [
+    {
+      "name": "by_box",
+      "path": "$.at",
+      "derive": "bbox"
+    }
+  ],
+  "documents": [
+    {
+      "id": "near",
+      "at": [
+        4.5,
+        52.5
+      ]
+    },
+    {
+      "id": "amsterdam",
+      "at": [
+        4.9041,
+        52.3676
+      ]
+    },
+    {
+      "id": "far",
+      "at": [
+        20,
+        0
+      ]
+    },
+    {
+      "id": "west",
+      "at": [
+        179.98,
+        0
+      ]
+    },
+    {
+      "id": "east",
+      "at": [
+        -179.98,
+        0
+      ]
+    },
+    {
+      "id": "pole",
+      "at": [
+        0,
+        89.995
+      ]
+    },
+    {
+      "id": "absent"
+    },
+    {
+      "id": "empty",
+      "at": {
+        "type": "FeatureCollection",
+        "features": []
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "external centre",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            60000
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ]
+      }
+    },
+    {
+      "name": "external radius",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                [
+                  4.5,
+                  52.5
+                ]
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "radius": 60000
+      }
+    },
+    {
+      "name": "external centre and radius",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ],
+        "radius": 60000
+      }
+    },
+    {
+      "name": "mirrored external bound",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$ge": [
+            "$radius",
+            {
+              "$distance": [
+                "$centre",
+                "$row.at"
+              ]
+            }
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ],
+        "radius": 60000
+      }
+    },
+    {
+      "name": "zero radius",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ],
+        "radius": 0
+      }
+    },
+    {
+      "name": "wrapped circle diverts",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          179.99,
+          0
+        ],
+        "radius": 5000
+      }
+    },
+    {
+      "name": "polar circle diverts",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          0,
+          89.99
+        ],
+        "radius": 5000
+      }
+    },
+    {
+      "name": "negative radius diverts",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ],
+        "radius": -1
+      }
+    },
+    {
+      "name": "string radius preserves error",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ],
+        "radius": "near"
+      }
+    },
+    {
+      "name": "null radius preserves error",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ],
+        "radius": null
+      }
+    },
+    {
+      "name": "invalid centre preserves error",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": null,
+        "radius": 5000
+      }
+    },
+    {
+      "name": "empty centre diverts",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": {
+          "type": "FeatureCollection",
+          "features": []
+        },
+        "radius": 5000
+      }
+    },
+    {
+      "name": "absent radius preserves error",
+      "query": {
+        "$for": {
+          "row": "$[*]"
+        },
+        "$where": {
+          "$le": [
+            {
+              "$distance": [
+                "$row.at",
+                "$centre"
+              ]
+            },
+            "$radius"
+          ]
+        },
+        "$return": "$row.id"
+      },
+      "externals": {
+        "centre": [
+          4.5,
+          52.5
+        ]
+      }
+    }
+  ]
+}

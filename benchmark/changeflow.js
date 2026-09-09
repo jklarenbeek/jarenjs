@@ -59,7 +59,10 @@ const groupedModel = { $model: '0.1', collections: { rows: { key: '/id', schema:
 const nested = { $for: { row: '$[*]' }, $groupby: { region: '$row.region' }, $return: {
   region: '$region', teams: [{ $for: { leaf: '$row' }, $groupby: { team: '$leaf.team' }, $return: { team: '$team', n: { $count: '$leaf' } } }],
 } };
-for (const [shape, query] of [['nested groups', [nested]], ['offset groups', [{ $subsequence: [nested, 1, 3] }]]]) {
+const multiple = { $for: { row: '$[*]' }, $groupby: { region: '$row.region', team: '$row.team' },
+  $return: { region: '$region', team: '$team', total: { $sum: '$row.score' } } };
+for (const [shape, query] of [['multiple-key groups', [multiple]], ['group aggregate', [{ $sum: { ...multiple, $return: { $sum: '$row.score' } } }]],
+  ['distinct', [{ $distinct: { $for: { row: '$[*]' }, $return: '$row.team' } }]], ['nested groups', [nested]], ['offset groups', [{ $subsequence: [nested, 1, 3] }]]]) {
   for (const mode of ['auto', 'rerun']) {
     const store = await openStore(groupedModel, { driver: nodeDriver(), capture: true });
     try {

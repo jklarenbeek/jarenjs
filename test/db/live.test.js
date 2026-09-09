@@ -68,7 +68,7 @@ describe('live set-level SQL promotions', () => {
       await verify();
       await users.delete('c');
       await verify();
-      assert.strictEqual(live.mode.strategy, 'rerun');
+      assert.strictEqual(live.mode.strategy, name === 'distinct' ? 'distinct' : 'group');
     }
     finally { await store.close(); }
   });
@@ -256,6 +256,102 @@ describe('live accumulators', () => {
 });
 
 describe('live per-group deltas', () => {
+  it('numeric aggregates over group returns agree with a fresh engine fold after mutations', async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      for (const row of [{ id: 'a', dept: 'x', pay: 10 }, { id: 'b', dept: 'y', pay: 2 },
+        { id: 'c', dept: 'x', pay: 3 }, { id: 'd' }]) await users.insert(row);
+      const documents = ['$sum', '$avg', '$min', '$max', '$count'].map((op) => ({ [op]: {
+        $for: { it: '$[*]' }, $groupby: { dept: '$it.dept' }, $return: { $sum: '$it.pay' } } }));
+      const watches = [];
+      for (const document of documents) {
+        const live = await users.live(document, { mode: 'incremental' });
+        const watch = { document, live, mirror: live.result };
+        live.subscribe(({ patch }) => { watch.mirror = applyJSONPatch(watch.mirror, patch); });
+        watches.push(watch);
+      }
+      const verify = async () => {
+        for (const { live, document, mirror } of watches) {
+          assert.deepStrictEqual(live.result.rows, await users.execute([document], { pushdown: false }));
+          assert.deepStrictEqual(mirror, live.result);
+          assert.strictEqual(live.stats().reruns, 0);
+        }
+      };
+      await verify();
+      await users.put({ id: 'b', dept: 'x', pay: 5 }, 'b'); await verify();
+      await users.delete('a'); await verify();
+      for (const id of ['b', 'c', 'd']) { await users.delete(id); await verify(); }
+    }
+    finally { await store.close(); }
+  });
+
+  it('multiple keys retain source order, missing/null identity and unaffected references after every mutation', async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      const document = { $for: { it: '$[*]' }, $groupby: { dept: '$it.dept', age: '$it.age' },
+        $return: { dept: '$dept', age: '$age', n: { $count: '$it' }, total: { $sum: '$it.pay' } } };
+      for (const row of [{ id: 'a', dept: 'x', age: 1, pay: 1e16 },
+        { id: 'b', dept: 'y', age: 1, pay: 2 }, { id: 'c', dept: 'x', age: 1, pay: -1e16 },
+        { id: 'd', dept: 'x', age: 1, pay: 1 }, { id: 'e', dept: null }, { id: 'f' }]) await users.insert(row);
+      const live = await users.live(document, { mode: 'incremental' });
+      let mirror = live.result;
+      live.subscribe(({ patch }) => { mirror = applyJSONPatch(mirror, patch); });
+      const verify = async () => {
+        assert.deepStrictEqual(live.result.rows, await users.execute([document], { pushdown: false }));
+        assert.deepStrictEqual(mirror, live.result);
+        assert.strictEqual(live.stats().reruns, 0);
+      };
+      await verify();
+      const untouched = live.result.rows.find((row) => row.dept === 'y');
+      await users.put({ id: 'a', dept: 'x', age: 1, pay: 1e16, bio: 'irrelevant' }, 'a');
+      await verify();
+      assert.strictEqual(live.result.rows.find((row) => row.dept === 'y'), untouched);
+      await users.delete('a'); // the first x holder leaves: y now precedes x
+      await verify();
+      await users.put({ id: 'b', dept: 'x', age: 2, pay: 3 }, 'b');
+      await verify();
+      await store.transaction(async (tx) => {
+        await tx.collection('users').put({ id: 'c', dept: 'x', age: 2, pay: 4 }, 'c');
+        await tx.collection('users').delete('d');
+      });
+      await verify();
+      await users.put({ id: 'f', dept: null }, 'f');
+      await verify();
+    }
+    finally { await store.close(); }
+  });
+
+  it('group maintenance preserves aggregate errors and charges retained source bytes', async () => {
+    const document = { $for: { it: '$[*]' }, $groupby: { dept: '$it.dept', age: '$it.age' },
+      $return: { n: { $count: '$it' }, total: { $sum: '$it.pay' } } };
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      await users.insert({ id: 'a', dept: 'x', pay: 1 });
+      const live = await users.live(document, { mode: 'incremental' });
+      const failures = [];
+      live.subscribe((event) => { if (event.error) failures.push(event.error); });
+      await users.put({ id: 'a', dept: 'x', pay: null }, 'a');
+      let expected;
+      try { await users.execute([document], { pushdown: false }); } catch (error) { expected = error; }
+      assert.ok(expected);
+      assert.strictEqual(failures[0].code, expected.code);
+      assert.strictEqual(store.stats().liveQueries, 0);
+    }
+    finally { await store.close(); }
+    const bounded = await openStore(MODEL, { driver: nodeDriver(), capture: true,
+      live: { maxBytes: 100, maxMaintained: 100 } });
+    try {
+      await bounded.collection('users').insert({ id: 'a', dept: 'x', bio: 'x'.repeat(200) });
+      await assert.rejects(() => bounded.collection('users').live(document, { mode: 'incremental' }),
+        (error) => error.code === 'JD2060');
+      assert.strictEqual(bounded.stats().liveQueries, 0);
+    }
+    finally { await bounded.close(); }
+  });
+
   const GROUPED = {
     $for: { it: '$[*]' },
     $groupby: { g: '$it.dept' },

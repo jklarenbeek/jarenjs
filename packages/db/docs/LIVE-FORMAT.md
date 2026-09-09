@@ -192,11 +192,11 @@ Choosing how much history to keep is the host's decision
 (`retention`); what the reader owes is that when rows go, it reports
 the gap instead of hiding it.
 
-**Replication is not built here**, and this log alone does not make
-it safe: there is no conflict resolution, no site identity, no causal
-ordering across writers. The bounded reader with its watermarks and
-its explicit gap is the precondition a replication protocol would be
-built on — not the protocol. That sentence is the whole claim.
+**The log alone is not replication.** Replica identity, causal frontiers,
+durable receipts, conflicts and bounded reset snapshots belong to the opt-in
+[replication subsystem](REPLICATION-FORMAT.md). Its protocol builds on these
+watermarks; a change-log cursor by itself supplies no conflict policy or causal
+ordering across writers.
 
 ## 6. Cross-connection behaviour and non-claims
 
@@ -208,8 +208,8 @@ which changes when ANOTHER connection commits; poll it and treat a
 change as "re-read what you care about". Cross-tab delivery is §7's
 story (the live-query layer).
 
-Non-claims, in one place: no replication, no conflict resolution, no
-capture of writes made by other connections, no capture on stores
+Capture-layer non-claims: no conflict resolution or capture of writes made
+by other connections, no capture on stores
 opened without `capture`, and no statement-level ordering within a
 commit (§2).
 
@@ -255,9 +255,8 @@ the maintenance are this table's — an entity chain re-runs, declared —
 and this document stays the only place they are decided.
 
 **This table is normative.** Every row is implemented and tested;
-nothing outside it is attempted. Classification reads the compiled
-PLAN (never the raw document), so "extractable" below means exactly
-what the pushdown planner already means by it.
+nothing outside it is attempted. Classification combines canonical document shapes with the compiled selection
+plan; "extractable" below means what the pushdown planner already proves.
 
 | Construct (as planned) | Strategy | Maintained state |
 |---|---|---|
@@ -265,8 +264,10 @@ what the pushdown planner already means by it.
 | the same with a per-row `select` projection (row-mode plan) | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
 | `orderBy` over extractable paths, optional `limit`, offset 0 | **maintained window**: a sorted structure; ties broken by the collection key, appended as the final sort term; an insert sorting beyond a full window is a no-op | the window rows and their sort keys |
 | whole-query `count` / `sum` / `avg` / `min` / `max` (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost | one contribution per matching row |
-| single-level `groupBy` with aggregate returns, in the canonical form below | **per-group deltas**: the accumulator machinery, one instance per group; groups appear in first-appearance order, exactly the engine's order | per-group, per-row contributions |
-| SQL-native distinct projections, multiple-key groups and aggregates over groups | **re-run on invalidation**: the SQL plan operates over the set; per-row evaluation cannot maintain its grouping or distinctness | the previous result, for diffing |
+| single-level `groupBy` with one or more keys and canonical returns below | **group maintenance**: reevaluate affected groups through the engine in source-row order; first surviving source occurrence determines group order | source documents and group outputs, with entry and byte credits |
+| unordered SQL-native typed scalar distinct projections | **distinct maintenance**: keep the source holders of each value; deleting its earliest holder may move the value in first-occurrence order | source documents and unique outputs, with entry and byte credits |
+| count/sum/avg/min/max over canonical unwindowed groups | **group maintenance** followed by an engine fold over the retained group outputs in first-occurrence order | source documents and group outputs, with entry and byte credits |
+| ordered/windowed distinct or other aggregates over groups | **re-run on invalidation** | the previous result, for diffing |
 | `where` whose spatial predicate is **refined** (the plan pushed a bounding-box or cell-range pre-filter and left the exact `$within`, bounded `$distance` or over-long cell prefix to the residual — `explain().prefilters` with `exact: false`), no order, no aggregate; optional per-row `select` | **incremental rows** — the geofence: the initial fetch narrows through the derived index, and every touched row is re-evaluated by the engine's EXACT predicate, so a point emits `add` when it enters the region, `remove` when it leaves, and nothing while it moves within (a whole-document return sees a `replace` carrying the new position) | the result rows |
 | a refined spatial predicate over a collection with **no document key** (`key: null`, rowid identity) | **re-run on invalidation** — the per-row strategy tracks a row by its declared key, and a rowid is not one; the reason says `rows without a document key cannot be tracked` | the previous result, for diffing |
 | `orderBy` beside a refined spatial predicate — over `$distance` (not a path) or over a member (the set residual drops the planner's order terms) | **re-run on invalidation**, the ordering named as the reason | the previous result, for diffing |
@@ -327,8 +328,8 @@ nested groups have a separate bounded strategy below):
 
 After `$groupby`, `$it` is the group's item sequence and `$g` its key;
 return members are the group key or an aggregate over `$it` (a path
-below it selects the aggregated member). Anything else in the return
-is not canonical and re-runs.
+below it selects the aggregated member). A bare key or a single aggregate is also canonical; other return shapes
+re-run. Multiple declared keys follow the same rule.
 
 ## 8. Invalidation
 
@@ -658,3 +659,36 @@ Count, sum, average, minimum and maximum recompute from only the affected
 parent's bounded leaves. An offset, an unsupported operator, a global input to
 the nested group, or a group-of-groups LINQ emission remains a named rerun.
 Replicated writes enter the same committed capture stream as local writes.
+
+### Group maintenance details
+
+Canonical single-level groups accept one or more key expressions over one
+collection binding, an optional fully translated filter, and either a bare
+key, one count/sum/avg/min/max expression, or an object containing key,
+`$default: [key, null]`, and aggregate members. Global-root reads, ordering,
+and windows remain rerun shapes. Aggregate expressions are evaluated by the
+query engine, including empty results and errors; maintenance does not
+substitute JavaScript arithmetic for query operators.
+
+Keys preserve structural equality and distinguish missing from null. Source
+holders retain physical row positions: changing a holder preserves its
+position, and deleting a group's earliest holder may move that group's
+output. Unaffected group outputs retain reference identity. Only affected
+groups are reevaluated, followed by an optional final aggregate over all group
+outputs. This costs work proportional to the affected groups plus group-output
+ordering/folding, rather than constant-time arithmetic deltas.
+
+`live.maxMaintained` counts source holders and group output items;
+`live.maxBytes` counts their serialized documents. This includes document
+members omitted from a small aggregate result. Exceeding a bound refuses
+registration or closes an active query with `JD2060`; the last delivered
+result remains unchanged. Engine failures follow the same invalidation path.
+
+`node --expose-gc benchmark/changeflow.js` compares every mutation against a
+fresh query and a patch-only consumer. The
+[generated comparison table](REPLICATION-FORMAT.md#measurements) includes
+multiple-key groups, an aggregate of groups and distinct beside forced reruns.
+It reports initialization allocations and both median and tail mutation time;
+heap deltas before collection are not precise retained-state sizes. The fixture
+has 200 initial rows and 15 mutations per case, so these measurements establish
+correctness and costs for that fixture rather than a universal crossover.

@@ -58,7 +58,9 @@ export const PLAN_VERSION = 2;
  *   { p: 'const', value: boolean } |
  *   { p: 'udf', name: string, key: string } |
  *   { p: 'bboxOverlap', columns: { w: string, s: string, e: string,
- *     n: string }, probe: { box: number[] } | { ext: string } } |
+ *     n: string }, probe: { box: number[] } | { ext: string } |
+ *     { circle: { centre: { external: string } | { literal: unknown },
+ *       radius: { external: string } | { literal: unknown } } } } |
  *   { p: 'cellIn', column: string, cells: string[], keepEmpty?: boolean } |
  *   { p: 'cellPrefix', column: string, prefix: string } |
  *   { p: 'interval', columns: { start: string, end: string },
@@ -125,7 +127,8 @@ export const PLAN_VERSION = 2;
  *   aggregates: { as: string, fn: 'rows' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null, empty: 'zero' | 'omit' | 'null' }[],
  *   tree: PlanProjectionNode,
- *   order: 'first-seen' | { index: number, desc: boolean, nullsFirst: boolean }[]
+ *   order: 'first-seen' | { index?: number, aggregate?: number,
+ *     desc: boolean, nullsFirst: boolean }[]
  * }} PlanGroup
  *   The GENERAL `GROUP BY`: one key per declared grouping name, the
  *   closed aggregate set over the group's rows, and the projection tree

@@ -39,6 +39,8 @@ function compareRefs(pred, read) {
  * @typedef {{ external: string } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
+ *   { derived: { kind: 'circleAxis', centre: { external: string } | { literal: unknown },
+ *     radius: { external: string } | { literal: unknown }, axis: 'w' | 's' | 'e' | 'n' } } |
  *   { typed: { seek: string, type: 'number' | 'text' } }} ParamSlot
  *   Four kinds, closed. A DERIVED slot is the escape for a value SQL
  *   cannot bind at all: a GeoJSON region arrives as an external object,
@@ -94,7 +96,7 @@ function stropForm(dialect, param, valueSql, pred) {
  */
 function slotName(slot) {
   if ('external' in slot) return slot.external;
-  if ('derived' in slot) return slot.derived.external;
+  if ('derived' in slot) return slot.derived.kind === 'bboxAxis' ? slot.derived.external : 'circle';
   if ('typed' in slot) return slot.typed.seek;
   return 'value';
 }
@@ -116,6 +118,8 @@ const BOX_AT = { w: 0, s: 1, e: 2, n: 3 };
  * @returns {string}
  */
 function probeEdge(probe, param, axis) {
+  if ('circle' in probe)
+    return param({ derived: { kind: 'circleAxis', ...probe.circle, axis } });
   return 'box' in probe
     ? param({ literal: probe.box[BOX_AT[axis]] })
     : param({ derived: { kind: 'bboxAxis', external: probe.ext, axis } });
@@ -456,9 +460,12 @@ export function emitPlan(plan, dialect, physical) {
       + `${q(plan.rank.alternatives[0].column)} AS ${q('vec')}`
     : plan.group !== null
       ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`)),
-        ...plan.group.aggregates.map((entry, i) =>
-          `${dialect.groupAggregate(entry.fn, foldValue(entry.fn, entry.ref))} `
-          + `AS ${q(`a${i}`)}`)].join(', ')
+        ...plan.group.aggregates.map((entry, i) => {
+          const value = dialect.groupAggregate(entry.fn, foldValue(entry.fn, entry.ref));
+          // Empty sums order as zero, the same value reconstruction
+          // returns. Naming that value also works in PostgreSQL ORDER BY.
+          return `${entry.empty === 'zero' ? `COALESCE(${value}, 0)` : value} AS ${q(`a${i}`)}`;
+        })].join(', ')
       : plan.bucket !== null
         ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
         ...plan.bucket.aggregates.map((entry) =>
@@ -505,7 +512,7 @@ export function emitPlan(plan, dialect, physical) {
     // over a collection, each group's earliest row identity — or the
     // key ordering an `$orderby` declared
     const order = plan.group.order === 'first-seen' ? []
-      : plan.group.order.map((term) => `${q(`vk${term.index}`)} `
+      : plan.group.order.map((term) => `${q(term.aggregate === undefined ? `vk${term.index}` : `a${term.aggregate}`)} `
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
     order.push(dialect.groupAggregate('min', dialect.rowIdentity()));
     sql += ` ORDER BY ${order.join(', ')}`;

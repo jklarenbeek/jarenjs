@@ -385,8 +385,8 @@ what each does is its own documentation's job
 [db](../packages/db/README.md)). What remains open:
 
 - [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
-  group returns that read the grouped row binding, ordering by aggregate
-  expressions, entity grouping, and numeric aggregates over groups still run
+  group returns that read the grouped row binding, ordering by sum/avg
+  or other unproven aggregate expressions, entity grouping, and numeric aggregates over groups still run
   in the engine. A window over a group return that can omit an item needs an
   output-cardinality proof; the proven singleton constructors already lower.
   Path comparisons outside one non-null number/string family, predicates
@@ -396,10 +396,11 @@ what each does is its own documentation's job
   forced-residual oracle. A disconnected binding graph remains a deliberate
   cartesian-product refusal; removing that guard changes the join contract.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
-  containing an operator, a whole binding inside a constructor or a non-singular
+  containing an operator, a whole entity binding inside a constructor or a non-singular
   path still needs the engine. Windows over such returns are set-residual:
   source-row limits cannot stand in for projected-item limits. `$distinct`
-  over an ordered, untyped or compound projection also remains residual.
+  over an untyped or compound projection, or ordering by paths other than the
+  projected scalar, also remains residual.
   **Proof still needed:** preserve output cardinality, structural equality,
   ordering and errors, and never drop a member a residual predicate reads.
 
@@ -419,13 +420,13 @@ what each does is its own documentation's job
   index has no equivalent model declaration; emitting an unconditional index
   would strengthen its meaning. Boolean-versus-integer origins and numeric
   precision erased by storage also cannot be inferred without metadata.
-- [ ] **Federation beyond two sources.** `federate({ sources, maxRows,
-  maxBytes })` still accepts only a two-sided equijoin, pushes each side's own
-  query, bounds both sets and lets the query engine decide the resident result.
-  **Provider boundary:** QUERY-PEN §12.1 explicitly refuses more than two sides;
-  extending it needs a declared join-order and combined-budget policy. A merge
-  strategy needs a source-ordering guarantee. Ordinary unrelated-source
-  `join()` remains `JL0005`.
+- [ ] **Federation merge strategy and spilling.** Connected N-way joins and
+  nested fluent joins now have an explicit fetch order and combined admission
+  credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
+  guarantee. Buffered providers and intermediate byte checks cannot prevent
+  allocation inside the producer; spilling or a streaming intermediate engine
+  needs a separate execution contract. Ordinary unrelated-source `join()`
+  remains `JL0005`.
 - [ ] **Replication beyond bounded SQLite histories.** Portable envelopes,
   causal frontiers, durable receipts, transactional apply, explicit conflicts
   and bounded snapshot resets are implemented in
@@ -442,7 +443,7 @@ what each does is its own documentation's job
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) retains self joins,
   non-equality and unindexed joins, reverse many-to-many edges without an
   index, ordered/windowed entity joins, load-spec graphs, global-root graph
-  projections, SQL-native distinct projections, multiple-key groups, aggregates
+  projections, ordered/windowed distinct projections, non-canonical aggregates
   over groups and LINQ group-of-groups emission. **Maintenance boundary:**
   entity caches currently evaluate subsets keyed by distinct entity roots;
   self aliases need independent root addressing, ordered tuples need maintained
@@ -601,16 +602,6 @@ still open is listed here, each with its reason.
   `@jarenjs/ai` README. Its intent reader is an English word list — a question
   that says "in the neighbourhood of" without a listed word is not read as
   proximity, so a prefix document passes; a host can pass its own `gates`.
-- [ ] **A parameterized `$distance` bound is not promoted.** A bounded
-  `$distance` pushes its circle's box only when BOTH the probe position and the
-  radius are literals: an external on either side would need a parameter slot
-  that composes the bound value with the radius, and the derived slot kind is
-  closed at one axis of one bound value. Such a query is correct and reads
-  every row. `$within` and `$bbox-intersects` do bind an external region. **Plan boundary:** this needs a
-  derived parameter that names both centre and radius, with bind-time diversion
-  for invalid, polar and antimeridian probes. The current `bboxAxis` slot names
-  one external only; extending it needs an explicit slot contract and the same
-  spatial oracle on both dialects.
 - [ ] **A live ordering by `$distance` re-runs.** The geofence maintains a
   `$where` per row; an `$orderby` over `$distance` (or over a member beside a
   refined predicate) and a spatial aggregate re-run on invalidation with the

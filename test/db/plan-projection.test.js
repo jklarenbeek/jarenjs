@@ -236,9 +236,9 @@ describe('a nested shape of member paths and literals projects into the statemen
     const literalsOnly = ordered({ k: 7, t: true });
     assert.strictEqual((await rows.explain(literalsOnly)).mode, 'native');
     assert.deepStrictEqual(await Promise.resolve(rows.execute(literalsOnly)), engine(literalsOnly));
-    // and the binding itself is a whole-document read, never a leaf
+    // A whole binding is a root leaf and retains its JSON type.
     const wholeItem = ordered({ id: '$it.id', all: '$it' });
-    assert.strictEqual((await rows.explain(wholeItem)).mode, 'row');
+    assert.strictEqual((await rows.explain(wholeItem)).mode, 'native');
     assert.deepStrictEqual(await Promise.resolve(rows.execute(wholeItem)), engine(wholeItem));
     await store.close();
   });

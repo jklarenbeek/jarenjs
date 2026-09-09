@@ -47,7 +47,7 @@ import {
 } from './residual.js';
 import { createCursor, createSyncCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
 import { deepFreeze } from '@jarenjs/core/object';
-import { derivedSlotValue, probeBox, probeVector, columnScore } from './derive.js';
+import { derivedSlotValue, probeVector, columnScore } from './derive.js';
 import { cutCandidates, identityBatches } from './knn.js';
 import {
   deterministicFragment, registerFragment, registerAggregateOperator,
@@ -149,7 +149,8 @@ function slotValue(slot, externals, anchors = null) {
     return value === undefined ? undefined : JSON.stringify(value);
   }
   if ('derived' in slot)
-    return derivedSlotValue(slot.derived, externals[slot.derived.external]);
+    return derivedSlotValue(slot.derived, slot.derived.kind === 'bboxAxis'
+      ? externals[slot.derived.external] : externals);
   if ('typed' in slot) {
     // a typed slot is only ever emitted beside the seek that fills it,
     // so a bind that never resolved the seeks is a defect in the
@@ -179,8 +180,14 @@ function externalSlotKinds(slots, rank) {
   const kinds = new Map();
   for (const slot of slots) {
     if ('external' in slot) kinds.set(slot.external, 'plain');
-    else if ('derived' in slot && !kinds.has(slot.derived.external))
-      kinds.set(slot.derived.external, 'derived');
+    else if ('derived' in slot) {
+      const inputs = slot.derived.kind === 'bboxAxis'
+        ? [slot.derived] : [slot.derived.centre, slot.derived.radius];
+      for (const input of inputs) {
+        if ('external' in input && !kinds.has(input.external))
+          kinds.set(input.external, 'derived');
+      }
+    }
   }
   if (rank !== null && 'ext' in rank.probe && !kinds.has(rank.probe.ext))
     kinds.set(rank.probe.ext, 'probe');
@@ -792,7 +799,15 @@ export function createQueryEngine(context) {
   const divertingExternal = (entry, externals) =>
     entry.externalNames.find((name) => {
       const kind = entry.externalSlotKinds.get(name);
-      if (kind === 'derived') return probeBox(externals[name]) === null;
+      const invalidDerived = entry.slots.some((slot) => {
+        if (!('derived' in slot)) return false;
+        const inputs = slot.derived.kind === 'bboxAxis'
+          ? [slot.derived] : [slot.derived.centre, slot.derived.radius];
+        return inputs.some((input) => 'external' in input && input.external === name)
+          && !bindable(slotValue(slot, externals));
+      });
+      if (invalidDerived) return true;
+      if (kind === 'derived') return false;
       // a probe binds when SOME declared width takes it; a width the
       // model does not declare is the diversion it always was
       if (kind === 'probe') return rankAlternativeFor(entry, externals[name]) === null;
@@ -1387,7 +1402,10 @@ export function createQueryEngine(context) {
             fn: entry2.fn, path: entry2.ref === null ? null : segmentsOf(entry2.ref) })),
           order: entry.plan.group.order === 'first-seen' ? 'first-seen'
             : entry.plan.group.order.map((term) => ({
-              key: entry.plan.group.keys[term.index].as, desc: term.desc })),
+              ...(term.aggregate === undefined ? { key: entry.plan.group.keys[term.index].as }
+                : { aggregate: entry.plan.group.aggregates[term.aggregate].fn,
+                  path: entry.plan.group.aggregates[term.aggregate].ref?.segments ?? null }),
+              desc: term.desc })),
         },
         // a chain's element window (`[<phrase>]`): the phrase planned as
         // if bare, its rows answered as the one array item
@@ -1860,7 +1878,8 @@ export function createEntityQueryEngine(context) {
     for (const slot of entry.slots) {
       if (bindable(slotValue(slot, externals))) continue;
       const name = 'external' in slot ? slot.external
-        : 'derived' in slot ? slot.derived.external : null;
+        : 'derived' in slot ? (slot.derived.kind === 'bboxAxis' ? slot.derived.external
+          : [slot.derived.centre, slot.derived.radius].find((input) => 'external' in input)?.external) : null;
       return { construct: 'external', reason: BIND_REASONS.external(name, 'root') };
     }
     return null;

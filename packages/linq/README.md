@@ -730,3 +730,10 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/linq/messages` | JavaScript | declared |
 | `@jarenjs/linq/ai` | JavaScript | declared |
 <!--/fact-->
+
+Explicit cross-provider joins use `federate({ sources, maxRows, maxBytes,
+maxTotalRows, maxTotalBytes })`. Connected joins across three or more sources,
+including successive fluent `.join()` calls, preserve the engine's result
+order while sharing cumulative admission credits. See
+[QUERY-PEN §12.1](docs/QUERY-PEN.md#121-the-federation-boundary-federate) for
+planning, buffering limits and cleanup guarantees.

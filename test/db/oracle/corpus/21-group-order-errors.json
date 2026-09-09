@@ -1,0 +1,85 @@
+{
+ "group": "group ordering preserves numeric accumulation",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "g": {
+    "type": "string"
+   },
+   "n": {
+    "type": "number"
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_g",
+   "path": "$.g"
+  },
+  {
+   "name": "by_n",
+   "path": "$.n"
+  }
+ ],
+ "documents": [
+  {
+   "id": "a",
+   "g": "x",
+   "n": 1e+16
+  },
+  {
+   "id": "b",
+   "g": "x",
+   "n": 1
+  },
+  {
+   "id": "c",
+   "g": "x",
+   "n": -1e+16
+  },
+  {
+   "id": "d",
+   "g": "y",
+   "n": 0.5
+  }
+ ],
+ "cases": [
+  {
+   "name": "$sum ordering retains the engine accumulation order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$sum": "$it.n"
+     }
+    ],
+    "$return": "$g"
+   }
+  },
+  {
+   "name": "$avg ordering retains the engine accumulation order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$avg": "$it.n"
+     }
+    ],
+    "$return": "$g"
+   }
+  }
+ ]
+}

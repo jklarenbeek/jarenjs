@@ -214,7 +214,7 @@ no continuation to emit.
   `explain().projection` names the path or the leaf `paths`, and
   reading a shape no longer reads every document. A shape the tree
   cannot rebuild — an operator over a member, a reference to the
-  binding itself, a non-singular path — refuses WHOLE and
+  whole entity binding, a non-singular path — refuses WHOLE and
   runs per row, with `explain().residualProjection` naming what stayed
   behind: promoting the half that composes would answer a shape nobody
   asked for. Every `explain()` also carries `budget`: the profile
@@ -260,9 +260,10 @@ no continuation to emit.
   from an absent one and the engine can.
 - **Typed path comparisons and distinct scalar projections.** Comparisons
   between two paths in the same non-null number/string family lower without
-  a UDF. `$distinct` over an unordered typed scalar projection groups by its
-  value and JSON type, preserving first occurrence and excluding missing
-  members. Literal windows apply to those distinct items.
+  a UDF. `$distinct` over a typed scalar projection groups by its value and JSON
+  type, excluding missing members. Unordered inputs retain first occurrence;
+  ordering solely by the projected path also lowers. Literal windows apply
+  to the distinct items.
 - **Grouping and joins lower whole, or not at all.** A `$groupby` over
   schema-typed member keys becomes a real `GROUP BY`: the keys come back
   with their JSON types beside them, so a group whose key is ABSENT
@@ -271,7 +272,7 @@ no continuation to emit.
   in SQL under the ENGINE's empty rules (`0` for a count or a sum, no
   member at all for the other three), and the groups come out in the
   engine's own order of first appearance unless an `$orderby` over the
-  keys says otherwise. Entity queries join any number of bindings: every
+  keys or count/min/max says otherwise. Entity queries join any number of bindings: every
   binding past the first must be attached by a column equality to one
   already joined, which is what makes the plan a nested loop the engine
   can be compared against — a binding nothing attaches would be a
@@ -1391,3 +1392,17 @@ The output is one atomically published collection bundle; read it with
 `--format collections`. Assertion plans expose provider, ordered-fold and
 bounded materialization strategies through `onAssertionPlan`.
 See [MIGRATION-FORMAT §6 and §11](docs/MIGRATION-FORMAT.md).
+
+Collection constructor projections can include a whole row beside member
+paths. Group ordering lowers count/min/max expressions, including aggregates
+used only for sorting; SUM/AVG ordering remains in the engine to preserve
+floating-point accumulation order. Parameterized distance bounds bind both
+centre and radius through the spatial index, with full-query fallback for
+invalid, polar and antimeridian probes.
+
+Live collection groups now maintain multiple keys, unordered typed scalar
+distinct projections, and count/sum/avg/min/max over canonical group results.
+Only affected groups are reevaluated in source order; a final aggregate folds
+the retained group outputs in first-appearance order. Input documents and
+group outputs consume both state-entry and byte credits. See
+[LIVE-FORMAT](docs/LIVE-FORMAT.md) for the supported shapes and measured costs.

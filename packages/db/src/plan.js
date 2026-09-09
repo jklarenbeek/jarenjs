@@ -130,7 +130,7 @@ const PLAN_REASONS = {
   countProjection: 'count translates only over the bare binding or one member path '
     + '(a projected return can change the item count)',
   groupedAggregate: 'an aggregate over a grouped phrase folds its groups, which the engine does',
-  distinctProjection: 'distinct translates over an unordered selection of one typed scalar member path',
+  distinctProjection: 'distinct translates over one typed scalar member path, unordered or ordered by that same path',
   windowedGroup: 'a window over groups whose return can omit an item needs the engine cardinality',
   aggregatePath: 'aggregates translate only over a singular schema-typed path '
     + '(the engine ERRORS on non-conforming operands)',
@@ -756,7 +756,8 @@ function planDistanceBound(node, itSlot, shape) {
   const distanceNode = upperOnLeft ? node.args[0] : node.args[1];
   const radiusNode = upperOnLeft ? node.args[1] : node.args[0];
   const radius = constantOf(radiusNode);
-  if (radius === null || typeof radius.value !== 'number')
+  const radiusExternal = radiusNode.kind === 'var' && radiusNode.external === true;
+  if (!radiusExternal && (radius === null || typeof radius.value !== 'number'))
     return { refusal: refusal('$distance', SPATIAL_REASONS.operand) };
 
   let subjectAt = 0;
@@ -769,21 +770,33 @@ function planDistanceBound(node, itSlot, shape) {
 
   const probeNode = distanceNode.args[subjectAt === 0 ? 1 : 0];
   const constant = constantOf(probeNode);
-  // an EXTERNAL centre would need a slot that composes the bound value
-  // with the radius, and the derived slot kind is closed at one axis of
-  // one bound value; such a query diverts to the full scan as before
-  if (constant === null) return { refusal: refusal('$distance', SPATIAL_REASONS.operand) };
-  const at = probePosition(constant.value);
-  if (at === null) return { refusal: refusal('$distance', SPATIAL_REASONS.unbounded) };
-  if (!Number.isFinite(radius.value) || radius.value < 0) {
+  const centreExternal = probeNode.kind === 'var' && probeNode.external === true;
+  if (!centreExternal && constant === null)
+    return { refusal: refusal('$distance', SPATIAL_REASONS.operand) };
+  if (!radiusExternal && (!Number.isFinite(radius.value) || radius.value < 0)) {
     return { refusal: refusal('$distance', SPATIAL_REASONS.radius) };
   }
-  const box = probeCircleBox(at, radius.value);
-  if (box === null) return { refusal: refusal('$distance', SPATIAL_REASONS.pole) };
-  if (box[0] < -180 || box[2] > 180)
-    return { refusal: refusal('$distance', SPATIAL_REASONS.wrapped) };
+  let probe;
+  if (centreExternal || radiusExternal) {
+    // Both inputs belong to one closed derived slot. Bind-time failure
+    // diverts the whole query, preserving the engine's errors and the
+    // candidates on the far side of a pole or the antimeridian.
+    probe = { circle: {
+      centre: centreExternal ? { external: probeNode.name } : { literal: constant.value },
+      radius: radiusExternal ? { external: radiusNode.name } : { literal: radius.value },
+    } };
+  }
+  else {
+    const at = probePosition(constant.value);
+    if (at === null) return { refusal: refusal('$distance', SPATIAL_REASONS.unbounded) };
+    const box = probeCircleBox(at, radius.value);
+    if (box === null) return { refusal: refusal('$distance', SPATIAL_REASONS.pole) };
+    if (box[0] < -180 || box[2] > 180)
+      return { refusal: refusal('$distance', SPATIAL_REASONS.wrapped) };
+    probe = { box };
+  }
 
-  const conjunct = boxConjunct(columns, rtreeTableOf(shape, subject.canonical), { box });
+  const conjunct = boxConjunct(columns, rtreeTableOf(shape, subject.canonical), probe);
   return promotion(conjunct.pred,
     { construct: '$distance', via: conjunct.via, columns: conjunct.columns, exact: false },
     [refusal('$distance', SPATIAL_REASONS.distance)]);
@@ -2135,12 +2148,12 @@ function planGeneralGrouping(node, itSlot, shape) {
   };
   const tree = build(node.ret);
   if (tree === null) return null;
-  const order = groupOrder(node.orderby, keySlot);
+  const order = groupOrder(node.orderby, keySlot, build);
   if (order === null) return null;
   // Group equality accepts null and boolean keys; ordering them raises
   // JQ2005. SQL ordering must not hide that engine error.
   if (order !== 'first-seen' && order.some((term) =>
-    !orderable(keys[term.index].ref, shape.schema))) return null;
+    term.aggregate === undefined && !orderable(keys[term.index].ref, shape.schema))) return null;
   return { keys, aggregates, tree, order };
 }
 
@@ -2174,21 +2187,32 @@ function groupAggregate(node, itSlot, shape) {
 /**
  * How the groups come out: the engine's order of FIRST APPEARANCE
  * (§6.5) when nothing declares otherwise, else the group-key ordering
- * an `$orderby` asked for. `null` when the ordering names anything but
- * group keys — after a grouping there is nothing else a row can order
- * by that the plan could reproduce.
+ * an `$orderby` asked for. Proven aggregate expressions share the
+ * return's aggregate slots, including aggregates used only to order.
  * @param {any} orderby
  * @param {Map<number, number>} keySlot
- * @returns {'first-seen' | { index: number, desc: boolean, nullsFirst: boolean }[] | null}
+ * @param {(node: any) => any} build
+ * @returns {any}
  */
-function groupOrder(orderby, keySlot) {
+function groupOrder(orderby, keySlot, build) {
   if (orderby === null) return 'first-seen';
   const terms = [];
   for (const spec of orderby.specs) {
     if (spec.collation !== null || spec.collationName !== null) return null;
     const key = spec.key;
-    if (key.kind !== 'var' || key.external === true || !keySlot.has(key.slot)) return null;
-    terms.push({ index: keySlot.get(key.slot), desc: spec.desc === true,
+    let target;
+    if (key.kind === 'var' && key.external !== true && keySlot.has(key.slot))
+      target = { index: keySlot.get(key.slot) };
+    else {
+      // SQL SUM/AVG may accumulate in a different order (SQLite also
+      // compensates rounding). Such a value cannot safely decide group
+      // order. Counts and extrema have no accumulation-order ambiguity.
+      if (!['$count', '$min', '$max'].includes(key.name)) return null;
+      const aggregate = key.kind === 'op' ? build(key) : null;
+      if (aggregate?.p !== 'agg') return null;
+      target = { aggregate: aggregate.index };
+    }
+    terms.push({ ...target, desc: spec.desc === true,
       nullsFirst: (spec.emptyGreatest === true) === (spec.desc === true) });
   }
   return terms;
@@ -2197,9 +2221,8 @@ function groupOrder(orderby, keySlot) {
 /**
  * The projection TREE one `$return` compiles to, or `null` when the
  * shape is not one the plan can rebuild. Object and array constructors,
- * literals and singular member paths compose; anything else — a
- * function call, a conditional, a dynamic member, a reference to the
- * binding itself — refuses the WHOLE projection, because a projection
+ * literals, whole collection bindings and singular member paths compose;
+ * a function call, conditional or dynamic member refuses the WHOLE projection, because a projection
  * that dropped part of what the caller asked for would be a wrong
  * answer, not a partial one.
  *
@@ -2219,8 +2242,9 @@ function projectionTree(node, itSlot, shape) {
   const build = (child) => {
     assertDecidedKind(child);
     if (child.kind === 'literal') return { p: 'lit', value: child.value };
-    if (child.kind === 'path') {
-      const ref = pathRef(child, itSlot, shape);
+    if (child.kind === 'path' || isItVar(child, itSlot)) {
+      const ref = isItVar(child, itSlot)
+        ? { segments: [], type: 'unknown', column: null } : pathRef(child, itSlot, shape);
       if (ref === null) return null;
       const canonical = canonicalOf(ref.segments);
       let index = byCanonical.get(canonical);
@@ -2654,13 +2678,18 @@ function planCollectionCore(document, shape, options = undefined) {
 
   if (distinct) {
     const ref = flwor.projectedPath;
-    if (fullyPushed && root.orderby === null && ref !== null && ref.type !== 'unknown'
+    const sameOrder = root.orderby === null || (ref !== null && plan.order !== null
+      && plan.order.every((term) => canonicalOf(term.ref.segments) === canonicalOf(ref.segments)));
+    if (fullyPushed && sameOrder && ref !== null && ref.type !== 'unknown'
       && flwor.group === null && flwor.bucket === null) {
       // DISTINCT and GROUP BY share the query language's key relation.
       // An absent path contributes no item, including under a window.
       plan.filter = conjoin(plan.filter, { p: 'typeIs', ref, types: [], positive: true });
       plan.group = { keys: [{ as: 'distinct', ref }], aggregates: [],
-        tree: { p: 'key', index: 0 }, order: 'first-seen' };
+        tree: { p: 'key', index: 0 }, order: root.orderby === null ? 'first-seen'
+          : plan.order.map((term) => ({ index: 0, desc: term.desc,
+            nullsFirst: (term.emptyGreatest === true) === (term.desc === true) })) };
+      plan.order = null;
       plan.window = windows.length === 0 ? null : composeWindows(windows);
       return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
         udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };

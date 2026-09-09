@@ -795,15 +795,18 @@ export interface FederatedSide {
   readonly document: unknown;
   /** Whether this side is pulled row by row, or answered whole. */
   readonly streaming: 'row' | 'buffered';
+  readonly children?: readonly FederatedSide[];
 }
 
 /** What a federated document will do, without doing any of it (§12.1). */
 export interface FederationPlan {
   readonly strategy: 'hash';
   readonly budget: { readonly maxRows: number; readonly maxBytes: number };
+  readonly combinedBudget: { readonly maxTotalRows: number; readonly maxTotalBytes: number };
+  readonly order: readonly FederatedSide[];
   readonly build: FederatedSide;
   readonly probe: FederatedSide;
-  /** The join itself is the engine's, over the two reduced sides. */
+  /** The engine evaluates the original binding order over the reduced sets. */
   readonly resident: { readonly document: unknown };
 }
 
@@ -822,13 +825,18 @@ export interface FederatedSource<T = unknown> extends AsyncProvider<T> {
  * out of that, by naming the sources and the bounds together: each
  * side's own filters and projection run at its source, the smaller side
  * fills a bounded hash table, the other is probed against it, and the
- * caller's own document decides over the two reduced sets. A side that
+ * caller's own document decides over the reduced sets. Connected N-way
+ * graphs and nested fluent joins share cumulative admission credits. A side that
  * reaches `maxRows` or `maxBytes` raises `JL2008` at the row that would
  * have broken the bound. */
 export function federate(spec: {
   sources: Record<string, AsyncProvider | { provider: AsyncProvider; estimatedRows?: number }>;
   maxRows: number;
   maxBytes: number;
+  /** Shared admission credits across source reads and intermediate sets; defaults to 2 * maxRows. */
+  maxTotalRows?: number;
+  /** Defaults to 2 * maxBytes. Buffered providers/intermediates are checked after production. */
+  maxTotalBytes?: number;
   strategy?: 'hash';
 }): {
   source<T = unknown>(name: string): FederatedSource<T>;

@@ -1,5 +1,5 @@
 //@ts-check
-/** Two-level groups use bounded per-parent recomputation over maintained leaves. */
+/** Collection groups use bounded per-group recomputation over maintained leaves. */
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { stableStringify } from '@jarenjs/core/object';
 import { DbRuntimeError } from './errors.js';
@@ -47,6 +47,8 @@ export function nestedGroupStrategy(description, context) {
   const keyOf = compileJsonQuery([{ $for: { [binding]: '$[*]' },
     ...(inner.$where === undefined ? {} : { $where: inner.$where }), $return: [key] }]);
   const evaluate = compileJsonQuery([inner]);
+  const aggregate = description.aggregate === undefined ? null
+    : compileJsonQuery([{ [description.aggregate]: '$[*]' }]);
   const docs = new Map();
   const groups = new Map();
   const results = new Map();
@@ -55,18 +57,25 @@ export function nestedGroupStrategy(description, context) {
   let resultCount = 0;
   const bytesOf = (value) => utf8Length(stableStringify(value));
   const stats = { refreshedGroups: 0, dependencyReads: 0, reruns: 0 };
-  const groupOf = (doc) => stableStringify(keyOf([doc], context.externals));
+  const groupOf = (doc) => {
+    const keys = keyOf([doc], context.externals);
+    return keys.length === 0 ? null : stableStringify(keys);
+  };
   const sorted = (keys) => [...keys].sort((a, b) => positions.get(a) - positions.get(b));
   const check = () => {
-    const entries = docs.size + resultCount;
+    const entries = docs.size + resultCount + (aggregate === null ? 0 : 1);
     if (entries > context.maxMaintained) throw new DbRuntimeError('JD2060', 'nested group dependencies exceed live.maxMaintained');
     if (maintainedBytes > context.maxBytes) throw new DbRuntimeError('JD2060', 'nested group dependencies exceed live.maxBytes');
     return entries;
   };
   const add = (token, doc) => {
     const group = groupOf(doc);
+    if (group === null) return null;
+    const bytes = bytesOf(doc);
+    if (docs.size + resultCount + 1 > context.maxMaintained || maintainedBytes + bytes > context.maxBytes)
+      throw new DbRuntimeError('JD2060', 'group dependencies exceed live state credits');
     docs.set(token, doc);
-    maintainedBytes += bytesOf(doc);
+    maintainedBytes += bytes;
     positions.set(token, context.rowPosition(token));
     if (!groups.has(group)) groups.set(group, new Set());
     groups.get(group).add(token);
@@ -87,20 +96,25 @@ export function nestedGroupStrategy(description, context) {
     stats.refreshedGroups++;
     check();
   };
-  const flatten = () => [...groups.keys()].sort((a, b) =>
-    positions.get(sorted(groups.get(a))[0]) - positions.get(sorted(groups.get(b))[0]))
-    .flatMap((group) => results.get(group) ?? []);
+  const flatten = () => {
+    const rows = [...groups.keys()].sort((a, b) =>
+      positions.get(sorted(groups.get(a))[0]) - positions.get(sorted(groups.get(b))[0]))
+      .flatMap((group) => results.get(group) ?? []);
+    return aggregate === null ? rows : aggregate(rows, context.externals);
+  };
   return {
     close() { docs.clear(); groups.clear(); results.clear(); positions.clear(); },
     init() {
-      const source = [{ $subsequence: [{ $for: { it: '$[*]' }, $return: '$it' }, 0, context.maxMaintained + 1] }];
+      const carrier = description.carrier ?? { $for: { [binding]: '$[*]' },
+        ...(inner.$where === undefined ? {} : { $where: inner.$where }), $return: `$${binding}` };
+      const source = [{ $subsequence: [carrier, 0, context.maxMaintained + 1] }];
       for (const doc of context.execute(source, { externals: context.externals })) add(context.keyOf(doc), doc);
       check();
       for (const group of groups.keys()) refresh(group);
       return flatten();
     }, entries: check, stats: () => ({ ...stats }),
     apply(record, previousRows) {
-      const changes = context.touchedKeys(record, { whole: true, members: new Set() });
+      const changes = context.touchedKeys(record, description.deps ?? { whole: true, members: new Set() });
       if (changes === null) return null;
       const affected = new Set();
       for (const token of changes.keys()) {
@@ -110,7 +124,10 @@ export function nestedGroupStrategy(description, context) {
           docs.delete(token); positions.delete(token); maintainedBytes -= bytesOf(previous);
         }
         const doc = context.readRow(token); stats.dependencyReads++;
-        if (doc !== undefined) affected.add(add(token, doc));
+        if (doc !== undefined) {
+          const group = add(token, doc);
+          if (group !== null) affected.add(group);
+        }
       }
       check();
       for (const group of affected) refresh(group);

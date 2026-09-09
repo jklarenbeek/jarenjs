@@ -4,6 +4,31 @@ import { it } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { loadGroups, loadRelationGroups, storeForGroup, storeForEntityGroup, runCase, runEntityCase } from './oracle/harness.js';
 
+it('distance parameters seek with either input external and divert unsafe circles, including R*Trees', async () => {
+  const corpus = loadGroups().find((entry) => entry.group === 'parameterized distance bounds');
+  for (const physical of ['columns', 'rtree']) {
+    const group = { ...corpus, indexes: corpus.indexes.map((index) => ({ ...index, physical })) };
+    const { store, collection } = await storeForGroup(group);
+    try {
+      for (const kase of group.cases) {
+        const explained = await collection.explain(kase.query, { externals: kase.externals });
+        const safe = group.cases.indexOf(kase) < 5;
+        if (safe) {
+          assert.equal(explained.prefilters[0].construct, '$distance', kase.name);
+          assert.equal(explained.prefilters[0].exact, false);
+          assert.equal(explained.params.length, 4);
+          assert.ok(explained.params.every((param) => param.derived?.kind === 'circleAxis'));
+          assert.match(explained.scanNarrative, physical === 'columns' ? /SEARCH/ : /VIRTUAL TABLE INDEX/);
+        }
+        else assert.ok(explained.residual.reasons.some((reason) => reason.construct === 'external'), kase.name);
+        assert.equal(await runCase(collection, group.documents, kase, 'native'), null, kase.name);
+        assert.equal(await runCase(collection, group.documents, kase, 'residual'), null, kase.name);
+      }
+    }
+    finally { await store.close(); }
+  }
+});
+
 it('scalar distinct, nullable groups, constants and path comparisons lower without a UDF', async () => {
   const group = loadGroups().find((entry) => entry.group === 'data pair scalar grouping and cardinality');
   for (const side of ['indexed', 'unindexed']) {
@@ -11,7 +36,7 @@ it('scalar distinct, nullable groups, constants and path comparisons lower witho
     try {
       for (const kase of group.cases) {
         const explained = await collection.explain(kase.query, { profile: { maxRows: 100 } });
-        if (kase.name === 'window counts row residual items') {
+        if (kase.name === 'window counts row residual items' || /^groups ordered by \$(sum|avg)/.test(kase.name)) {
           assert.equal(explained.mode, 'set');
         }
         else {

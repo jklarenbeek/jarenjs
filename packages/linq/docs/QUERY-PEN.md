@@ -733,46 +733,55 @@ const rows = await fromAsync(fed.source('orders'))
 spaces or other characters), and all of a federation's sources share one scope — which
 is exactly what admits the join. The federation is what executes it:
 
-1. each side's own document — the filters and the projection the chain
-   already packed per side — runs against ITS source, over that
-   source's own root;
-2. the smaller side (by declared `estimatedRows`, else the first named)
-   is streamed into a hash table keyed by the join key, counting rows
-   and serialized bytes against the budget as it fills;
-3. the other side is streamed and PROBED: a row whose key no build row
-   carries cannot pair, so it is dropped before it costs anything;
-4. the caller's own document runs in the engine over the two reduced
-   sets — the **resident join**, which is what decides.
+1. Each side's own filters and projection run at its source. Cursor sources
+   receive that document directly; buffered sources receive an array wrapper
+   so array-valued projected rows retain their item boundaries.
+2. Mandatory equality predicates form a connected binding graph. The smallest
+   declared `estimatedRows` starts the fetch. Each subsequent side is the
+   smallest estimated side connected to an already fetched side. Missing or
+   equal estimates preserve binding declaration order. Equality inside an OR
+   does not establish an edge; disconnected bindings refuse `JL0005` before
+   any source opens.
+3. Each next side is reduced against the retained keys of its already fetched
+   neighbours. Singular member/index paths are supported, including quoted
+   names and negative array indexes. Compound key values are conservatively
+   retained for the engine to compare.
+4. The original query engine decides the result over those sets, in the
+   original binding order. Fetch order never changes tuple or result order.
+   Packed joins emitted by successive `.join()` calls execute inside out;
+   their projected results become bounded intermediate sides. Aliases of one
+   source retain independent fetched sets.
 
-Step 4 is the contract. This boundary spells no join semantics of its
-own: the engine's `$eq` decides which rows pair, its ordering orders
-them, its projection shapes them. The hash table bounds the FETCH and
-nothing else, so a reduction that cannot key a value (a compound join
-key) keeps the row rather than guessing at it.
+`explain(document)` reports `strategy`, per-side `budget`, `combinedBudget`,
+`order` (the ordered side descriptions), and `resident.document`. Each side
+names its source, estimate, join key, child document and `row`/`buffered`
+streaming mode. Nested sides additionally expose `children`. `build` and
+`probe` remain the first two sides for compatibility.
 
-`fed.source(name).explain(document)` answers the plan without running
-any of it: the `strategy`, the `budget`, the `build` and `probe` sides
-with their estimates, their own documents and whether each streams, and
-the `resident` document the engine answers.
+**Budgets are admission credits.** `maxRows` and `maxBytes` apply separately
+at each source or intermediate. `maxTotalRows` and `maxTotalBytes` cover all
+retained source and intermediate admissions in the entire call, and default
+to twice their corresponding per-side budget. All four are positive safe
+integers. Credits are cumulative: freeing an intermediate's inputs does not
+refund them. This conservative rule makes a nested plan's total explicit.
 
-**A budget is a refusal, not a spill.** A side that reaches `maxRows` or
-`maxBytes` stops at the row that WOULD have broken it and raises
-`JL2008`; every cursor the call opened is closed exactly once, whether
-it answered, refused, failed or was aborted. A `signal` on the call is
-read at the ROW boundary — where a cursor can be let go without
-abandoning a pull the source is still inside — and a declared
-`estimatedRows` decides only which side BUILDS, never how much is held:
-a source that under-reports is refused by the budget all the same. A source offering a
-cursor (§12) is pulled row by row, so the bound is enforced before the
-memory is spent; one offering only `execute` answers whole, and
-`explain()` says `buffered` rather than pretending otherwise.
+A cursor refuses with `JL2008` before retaining the row that would exceed a
+credit. Buffered sources are checked after they produce their array. Nested
+resident phrases additionally cap `sequenceItems` and `resultItems` at
+`maxRows` (or a stricter caller limit); exceeding those intermediate limits
+raises `JL2008`. Intermediate bytes are checked after projection. These are
+bounds on admitted data and intermediate item counts, **not** a promise to
+bound a buffered provider's heap, the size of one constructed value, or the
+final resident result. A caller can also supply query-engine limits for that
+final result. Estimates affect planning only, never admission.
 
-Refused, by name: more than two sides in one federated document, a
-binding over a root the federation does not carry, and a join with no
-equality between one member of each side — without one the fetch is the
-cross product of two sources, which is what the budget exists to
-refuse. Non-goals: no spill, no distributed transaction, no
-cross-source write.
+Every opened cursor closes exactly once on success, budget refusal, child
+failure or cancellation. `signal` is checked at row boundaries and passed to
+providers. Cleanup failures preserve a primary execution failure and never
+strand another opened cursor.
+
+There is no spill, distributed transaction or cross-source write. A merge
+strategy remains unavailable because providers declare no ordering guarantee.
 
 ## 13. Worked examples
 
@@ -1196,7 +1205,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL2004` | a provider's `execute()` answered a promise on the synchronous surface |
 | `JL2005` | a push queue was fed after `end()` |
 | `JL2006` | a provider answered an element terminal with something other than one array |
-| `JL2008` | a federated fetch reached one side's row or byte budget (§12.1) |
+| `JL2008` | a federated fetch or intermediate reached a per-side or combined row/byte budget (§12.1) |
 
 `JL2007` is the client door's, not the chain's: `createDbLedger`'s stale
 settlement ([DB-CLIENT.md §2.6](DB-CLIENT.md#26-the-ledger)); it is
@@ -1707,7 +1716,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->174<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->632<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->634<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 

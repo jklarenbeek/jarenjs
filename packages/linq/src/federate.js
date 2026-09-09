@@ -1,51 +1,26 @@
 //@ts-check
 /**
- * @file The federation boundary (QUERY-PEN.md §13): an EXPLICIT opt-in
- * to reading two different provider sources under one query document.
+ * @file Explicit bounded federation (QUERY-PEN §12.1). Source-local
+ * documents execute at their providers; a connected mandatory equality
+ * graph chooses the fetch order by declared estimates, with binding order
+ * breaking ties. Hash membership only removes impossible candidates: the
+ * query engine decides the resident result and its original tuple order.
  *
- * The rule everywhere else in this package is that a query document
- * reads ONE input, and a join whose sides come from two unrelated
- * sources is `JL0005` at build time. That refusal is not a limitation
- * to route around — it is what keeps a chain honest about where the
- * work happens. A cross-source join cannot be pushed anywhere: someone
- * has to hold rows in memory, and a surface that did it implicitly
- * would turn a one-line chain into an unbounded fetch of two
- * databases.
+ * Packed joins emitted by successive LINQ joins execute inside out. Every
+ * source and intermediate has a per-side budget, and one shared admission
+ * counter covers the entire call. Intermediate phrase materialization is
+ * capped through the query engine's own limits. Buffered providers and
+ * intermediate byte sizes can only be checked after they produce an array;
+ * cursor providers admit each retained row before holding it.
  *
- * So it is spelled out instead. `federate()` takes the sources by
- * name, takes the budgets that make the fetch finite, and hands back
- * one provider-compatible source per name, all sharing one scope — so
- * the join the chain already knows how to build is admitted, and the
- * federation is what executes it:
- *
- *   1. each binding's own document — the filters and the projection the
- *      chain already packed per side — runs against ITS source;
- *   2. the smaller side (declared estimate, else the first named) is
- *      streamed into a hash table keyed by the join key, counting rows
- *      and serialized bytes against the budget as it fills;
- *   3. the other side is streamed and PROBED: a row whose key no build
- *      row carries cannot join, so it is dropped before it costs
- *      anything;
- *   4. the caller's own document runs in the engine over the two
- *      reduced sets — the resident join, which is what decides.
- *
- * Step 4 is why this file spells no join semantics of its own. The
- * engine's `$eq` decides which rows pair, its ordering orders them and
- * its projection shapes them; the hash table exists to bound the FETCH,
- * never to answer the query. A reduction that dropped a row the engine
- * would have joined would be a wrong answer, so the probe keeps
- * anything it cannot key (a compound key value) rather than guessing.
- *
- * Non-goals, named rather than discovered: no spill (a budget is a
- * refusal, not a disk), no distributed transaction, no cross-source
- * write, and no non-equality join — without an equality key the fetch
- * is the cross product, which is exactly what the budget exists to
- * refuse.
+ * No spill, distributed transaction, cross-source writes, or disconnected
+ * cartesian products. Ordinary unrelated-source join() still refuses JL0005.
  */
 
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { compileDocument, isProviderSource, providerRoot } from './provider.js';
 import { memberSegment } from './expression.js';
+import { parseJSONPath } from '@jarenjs/json/path';
 
 /** The strategies this boundary knows. One, for now, and it says so. */
 const STRATEGIES = new Set(['hash']);
@@ -57,7 +32,7 @@ const STRATEGIES = new Set(['hash']);
  * @returns {number}
  */
 function budgetOf(value, what) {
-  if (!Number.isInteger(value) || value < 1) {
+  if (!Number.isSafeInteger(value) || value < 1) {
     throw new LinqBuildError('JL0005',
       `federate() needs a positive integer ${what} — a federated fetch holds rows in memory, `
       + 'and a bound is what makes that finite');
@@ -69,15 +44,22 @@ function budgetOf(value, what) {
  * The one member path a `'$it.a.b'` operand names, or `null` for
  * anything else (an operator call, a literal, the binding itself).
  * @param {any} node
- * @returns {{ binding: string, path: string[] } | null}
+ * @returns {{ binding: string, path: (string | number)[] } | null}
  */
 function memberPathOf(node) {
   if (typeof node !== 'string' || !node.startsWith('$')) return null;
-  const parts = node.slice(1).split('.');
-  if (parts.length < 2) return null;
-  const [binding, ...path] = parts;
-  if (binding === '' || path.some((name) => name === '')) return null;
-  return { binding, path };
+  const match = /^\$([^.[\]]+)([.[])/.exec(node);
+  if (match === null) return null;
+  try {
+    const { segments } = parseJSONPath(`$${node.slice(match[1].length + 1)}`);
+    if (!segments.every((segment) => !segment.descendant && segment.selectors.length === 1
+      && ['name', 'index'].includes(segment.selectors[0].kind))) return null;
+    return { binding: match[1], path: segments.map((segment) => {
+      const selector = segment.selectors[0];
+      return selector.kind === 'name' ? selector.name : selector.index;
+    }) };
+  }
+  catch { return null; }
 }
 
 /** Read one member path out of a row; `undefined` where it is absent. */
@@ -85,7 +67,14 @@ function valueAt(row, path) {
   let value = row;
   for (const name of path) {
     if (value === null || typeof value !== 'object') return undefined;
-    value = value[name];
+    if (typeof name === 'number') {
+      if (!Array.isArray(value)) return undefined;
+      value = value[name < 0 ? value.length + name : name];
+    }
+    else {
+      if (Array.isArray(value) || !Object.hasOwn(value, name)) return undefined;
+      value = value[name];
+    }
   }
   return value;
 }
@@ -169,7 +158,7 @@ function locateFlwor(document) {
  * @param {Map<string, any>} members - federated name → member record
  * @returns {any}
  */
-function planFederation(document, members) {
+function planFederation(document, members, nested = false) {
   const located = locateFlwor(document);
   const query = located === null ? document : located.flwor;
   const bindings = query?.$for;
@@ -178,10 +167,8 @@ function planFederation(document, members) {
       'a federated document ranges over its sources with $for — this one has no bindings');
   }
   const names = Object.keys(bindings);
-  if (names.length !== 2) {
-    throw new LinqBuildError('JL0005',
-      `a federated fetch joins exactly two sources, not ${names.length} — `
-      + 'federate one pair at a time, or load the third side yourself');
+  if (names.length < (nested ? 1 : 2)) {
+    throw new LinqBuildError('JL0005', 'a federated fetch needs at least two source bindings');
   }
 
   /** @type {any[]} */
@@ -191,15 +178,20 @@ function planFederation(document, members) {
     // the two spellings the chain builds: a bare root, or the side's
     // own packed document (its `$where`, its `$orderby`, its `$return`)
     const packed = Array.isArray(value) && value.length === 1 ? value[0] : null;
-    // a packed side ranges over ONE root: a side that is itself a join
-    // is a federation of a federation, which this boundary does not
-    // plan and will not guess at
+    // A source-local phrase has one bare root; a packed join is planned
+    // recursively and becomes a bounded intermediate side.
     const inner = packed === null ? [] : Object.keys(packed.$for ?? {});
     const root = packed === null ? value
       : (inner.length === 1 ? packed.$for[inner[0]] : null);
     if (typeof root !== 'string') {
-      throw new LinqBuildError('JL0005',
-        `the binding '${binding}' does not range over a federated source`);
+      if (packed === null || inner.length === 0) {
+        throw new LinqBuildError('JL0005',
+          `the binding '${binding}' does not range over a federated source`);
+      }
+      const child = planFederation(packed, members, true);
+      sides.push({ binding, nested: child, packed, root: null,
+        member: { name: binding, estimatedRows: undefined } });
+      continue;
     }
     const member = members.get(root);
     if (member === undefined) {
@@ -210,52 +202,57 @@ function planFederation(document, members) {
     sides.push({ binding, member, packed, root });
   }
 
-  const key = joinKey(query.$where, sides);
-  // the estimate decides which side fills the table: a hash join holds
-  // the BUILD side whole, so the smaller declared side is the one to
-  // hold. Undeclared estimates keep the caller's own order, which is
-  // stable and says so in `explain()`
-  const [first, second] = sides;
-  const build = (second.member.estimatedRows ?? Infinity)
-    < (first.member.estimatedRows ?? Infinity) ? second : first;
-  const probe = build === first ? second : first;
-  return {
-    strategy: 'hash',
-    build: { ...build, key: key[build.binding] },
-    probe: { ...probe, key: key[probe.binding] },
-    // the resident document is the caller's own with each side reduced
-    // to its root: the packed work has already run at the source, and
-    // whatever the terminal wrapped around the query is put back
-    resident: located.rewrap({ ...query,
-      $for: Object.fromEntries(sides.map((side) => [side.binding, side.root])) }),
-  };
-}
-
-/**
- * The equality key that links the two sides, or the refusal.
- * @param {any} where
- * @param {any[]} sides
- * @returns {Record<string, string[]>}
- */
-function joinKey(where, sides) {
-  const conjuncts = where === undefined || where === null ? []
-    : (Array.isArray(where?.$and) ? where.$and : [where]);
-  const [a, b] = sides;
-  for (const conjunct of conjuncts) {
-    const operands = conjunct?.$eq;
-    if (!Array.isArray(operands) || operands.length !== 2) continue;
+  // A mandatory equality graph supplies the fetch order. OR branches
+  // never prove an edge. Estimates choose among connected candidates;
+  // equal or absent estimates retain binding declaration order.
+  const edges = [];
+  const visit = (where) => {
+    if (Array.isArray(where?.$and)) { where.$and.forEach(visit); return; }
+    const operands = where?.$eq;
+    if (!Array.isArray(operands) || operands.length !== 2) return;
     const left = memberPathOf(operands[0]);
     const right = memberPathOf(operands[1]);
-    if (left === null || right === null) continue;
-    if (left.binding === a.binding && right.binding === b.binding)
-      return { [a.binding]: left.path, [b.binding]: right.path };
-    if (left.binding === b.binding && right.binding === a.binding)
-      return { [b.binding]: left.path, [a.binding]: right.path };
+    if (left && right && left.binding !== right.binding
+      && names.includes(left.binding) && names.includes(right.binding)) edges.push({ left, right });
+  };
+  visit(query.$where);
+  const remaining = [...sides];
+  const order = [];
+  const selected = new Set();
+  while (remaining.length > 0) {
+    const candidates = remaining.filter((side) => selected.size === 0 || edges.some(({ left, right }) =>
+      (left.binding === side.binding && selected.has(right.binding))
+      || (right.binding === side.binding && selected.has(left.binding))));
+    if (candidates.length === 0) throw new LinqBuildError('JL0005',
+      'a federated join needs an equality between one member of each side in a connected binding graph');
+    candidates.sort((a, b) => (a.member.estimatedRows ?? Infinity) - (b.member.estimatedRows ?? Infinity));
+    const side = candidates[0];
+    side.links = edges.flatMap(({ left, right }) => {
+      const [own, other] = left.binding === side.binding ? [left, right] : [right, left];
+      return own.binding === side.binding && selected.has(other.binding)
+        ? [{ key: own.path, binding: other.binding, otherKey: other.path }] : [];
+    });
+    const edge = edges.find(({ left, right }) => left.binding === side.binding || right.binding === side.binding);
+    side.key = edge === undefined ? [] : (edge.left.binding === side.binding ? edge.left.path : edge.right.path);
+    order.push(side); selected.add(side.binding); remaining.splice(remaining.indexOf(side), 1);
   }
-  throw new LinqBuildError('JL0005',
-    'a federated join needs an equality between one member of each side — without one the '
-    + 'fetch is the cross product of two sources, which is what the budget exists to refuse '
-    + '(a non-equality condition still applies, but it cannot bound the fetch)');
+  // Bindings may independently project or alias the same source. Give
+  // those sets separate input members so one cannot overwrite another.
+  const used = new Set(sides.filter((side) => side.root !== null).map((side) => side.member.name));
+  const roots = new Set();
+  for (const side of sides) {
+    side.inputName = side.member.name;
+    if (side.root === null || roots.has(side.root)) {
+      let name = `_federated${sides.indexOf(side)}`;
+      while (used.has(name)) name += '_';
+      used.add(name); side.inputName = name; side.root = `$${memberSegment(name)}[*]`;
+    }
+    roots.add(side.root);
+  }
+  return { strategy: 'hash', sides: order, build: order[0], probe: order[1],
+    resident: located.rewrap({ ...query,
+      $for: Object.fromEntries(sides.map((side) => [side.binding,
+        side.packed === null ? side.root : [side.root]])) }) };
 }
 
 /**
@@ -274,7 +271,7 @@ function joinKey(where, sides) {
  * @param {any[]} open - cursors to close, in order
  * @returns {Promise<{ rows: any[], read: number, bytes: number, streamed: boolean }>}
  */
-async function fetchSide(member, document, options, budget, keep, open) {
+async function fetchSide(member, document, options, budget, keep, open, combined) {
   const kept = [];
   let read = 0;
   let bytes = 0;
@@ -292,6 +289,11 @@ async function fetchSide(member, document, options, budget, keep, open) {
         `the federated fetch of '${member.name}' reached its ${budget.maxBytes}-byte budget `
         + `at row ${kept.length + 1} — narrow the sides, or raise maxBytes`);
     }
+    if (combined.rows + 1 > combined.maxRows || combined.bytes + size > combined.maxBytes) {
+      throw new LinqRuntimeError('JL2008',
+        'the federated fetch reached its combined row or byte budget — narrow the sides, or raise maxTotalRows/maxTotalBytes');
+    }
+    combined.rows++; combined.bytes += size;
     bytes += size;
     kept.push(row);
   };
@@ -321,19 +323,18 @@ async function fetchSide(member, document, options, budget, keep, open) {
     return { rows: kept, read, bytes, streamed: true };
   }
   stopIfAborted();
-  const answer = await member.provider.execute(document, options);
-  for (const row of itemsOf(answer)) admit(row);
+  // Frame the sequence as one array so an array-valued row is still
+  // one row. Cursor sources already supply that item boundary.
+  const answer = await member.provider.execute([document], options);
+  if (!Array.isArray(answer)) throw new LinqRuntimeError('JL2008',
+    `the federated source '${member.name}' did not answer the requested array frame`);
+  for (const row of answer) { stopIfAborted(); admit(row); }
   return { rows: kept, read, bytes, streamed: false };
-}
-
-/** The engine's answer shape as a row list: none, one, or many. */
-function itemsOf(answer) {
-  if (answer === undefined) return [];
-  return Array.isArray(answer) ? answer : [answer];
 }
 
 /** One side's document, with the federated root rewritten to the source's own. */
 function childDocument(side) {
+  if (side.nested) return side.packed;
   const own = providerRoot(side.member.provider);
   if (side.packed === null) return { $for: { it: own }, $return: '$it' };
   const binding = Object.keys(side.packed.$for)[0];
@@ -344,7 +345,7 @@ function childDocument(side) {
  * An explicit federation boundary over two or more provider sources.
  *
  * @param {{ sources: Record<string, any>, maxRows: number, maxBytes: number,
- *   strategy?: string }} spec
+ *   maxTotalRows?: number, maxTotalBytes?: number, strategy?: string }} spec
  * @returns {{ source: (name: string) => any, names: readonly string[] }}
  * @example
  * const fed = federate({
@@ -376,6 +377,11 @@ export function federate(spec) {
   const budget = {
     maxRows: budgetOf(spec.maxRows, 'maxRows'),
     maxBytes: budgetOf(spec.maxBytes, 'maxBytes'),
+  };
+
+  const totals = {
+    maxRows: budgetOf(spec.maxTotalRows ?? budget.maxRows * 2, 'maxTotalRows'),
+    maxBytes: budgetOf(spec.maxTotalBytes ?? budget.maxBytes * 2, 'maxTotalBytes'),
   };
 
   /** The scope every member shares: what admits the join, and nothing else. */
@@ -415,34 +421,43 @@ export function federate(spec) {
     const plan = planFederation(document, members);
     /** @type {any[]} */
     const open = [];
-    try {
-      const buildDoc = childDocument(plan.build);
-      const built = await fetchSide(plan.build.member, buildDoc, options, budget,
-        () => true, open);
-      // the table is the REDUCTION, never the answer: it says which
-      // keys can pair, and the engine decides which rows do
-      const keys = new Set();
-      let unkeyed = false;
-      for (const row of built.rows) {
-        const key = hashKey(valueAt(row, plan.build.key));
-        if (key === null) unkeyed = true;
-        else keys.add(key);
+    const combined = { ...totals, rows: 0, bytes: 0 };
+    const run = async (current, intermediate = false) => {
+      const fetched = new Map();
+      for (const side of current.sides) {
+        const tables = side.links.map((link) => {
+          const keys = new Set();
+          let unkeyed = false;
+          for (const row of fetched.get(link.binding)) {
+            const key = hashKey(valueAt(row, link.otherKey));
+            if (key === null) unkeyed = true; else keys.add(key);
+          }
+          return { ...link, keys, unkeyed };
+        });
+        const keep = (row) => tables.every((table) => {
+          const key = hashKey(valueAt(row, table.key));
+          return table.unkeyed || key === null || table.keys.has(key);
+        });
+        const member = side.nested ? { ...side.member,
+          provider: { execute: () => run(side.nested, true) } } : side.member;
+        const found = await fetchSide(member, childDocument(side), options, budget, keep, open, combined);
+        fetched.set(side.binding, found.rows);
       }
-      const probeDoc = childDocument(plan.probe);
-      const probed = await fetchSide(plan.probe.member, probeDoc, options, budget,
-        (row) => {
-          if (unkeyed) return true;
-          const key = hashKey(valueAt(row, plan.probe.key));
-          return key === null || keys.has(key);
-        }, open);
-
-      const input = {
-        [plan.build.member.name]: built.rows,
-        [plan.probe.member.name]: probed.rows,
-      };
-      const compiled = compileDocument(plan.resident,
-        { ...options, externals: options?.externalNames ?? [] });
-      const answer = compiled(input, options?.externals ?? {});
+      const input = Object.fromEntries(current.sides.map((side) => [side.inputName, fetched.get(side.binding)]));
+      const limits = intermediate ? { ...options?.limits,
+        sequenceItems: Math.min(options?.limits?.sequenceItems ?? Infinity, budget.maxRows),
+        resultItems: Math.min(options?.limits?.resultItems ?? Infinity, budget.maxRows) } : options?.limits;
+      const compiled = compileDocument(intermediate ? [current.resident] : current.resident,
+        { ...options, limits, externals: options?.externalNames ?? [] });
+      try { return compiled(input, options?.externals ?? {}); }
+      catch (error) {
+        if (intermediate && error.code === 'JQ2009' && /sequenceItems|resultItems/.test(error.message)) throw new LinqRuntimeError('JL2008',
+          'a federated intermediate join reached its row budget');
+        throw error;
+      }
+    };
+    try {
+      const answer = await run(plan);
       // the fetch answered, so a cursor that will not close IS this
       // call's failure rather than something to swallow
       await closeAll(open);
@@ -484,13 +499,16 @@ export function federate(spec) {
       source: side.member.name,
       root: side.root,
       estimatedRows: side.member.estimatedRows ?? null,
-      key: `$${side.binding}.${side.key.join('.')}`,
+      key: `$${side.binding}${side.key.map((part) => typeof part === 'number' ? `[${part}]` : memberSegment(part)).join('')}`,
       document: childDocument(side),
-      streaming: typeof side.member.provider.cursor === 'function' ? 'row' : 'buffered',
+      streaming: typeof side.member.provider?.cursor === 'function' ? 'row' : 'buffered',
+      ...(side.nested ? { children: side.nested.sides.map(describe) } : {}),
     });
     return {
       strategy: plan.strategy,
       budget: { ...budget },
+      combinedBudget: { maxTotalRows: totals.maxRows, maxTotalBytes: totals.maxBytes },
+      order: plan.sides.map(describe),
       build: describe(plan.build),
       probe: describe(plan.probe),
       // the join itself is the engine's, over what the two fetches

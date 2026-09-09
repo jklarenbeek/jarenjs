@@ -184,25 +184,31 @@ allocations observed after initialization, not precise retained-heap sizes.
 
 <!--fact:db.changeflow-->
 
-Measured 2026-09-08, v24.19.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutations per case.
+Measured 2026-09-09, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutations per case.
 
 | Shape | Strategy | Initialize ms | Mutation p50 ms | Mutation p95 ms | Initialization heap bytes |
 |---|---|---:|---:|---:|---:|
-| selective join | join | 16.663 | 0.323 | 2.119 | 4878848 |
-| selective join | rerun | 0.899 | 0.746 | 1.622 | 347160 |
-| high fan-out join | join | 7.314 | 1.901 | 3.179 | 4851232 |
-| high fan-out join | rerun | 0.860 | 0.850 | 1.188 | 340328 |
-| graph | graph | 7.462 | 0.459 | 0.750 | 4811712 |
-| graph | rerun | 4.539 | 4.042 | 4.979 | 1417928 |
-| nested groups | nested-group | 6.775 | 0.252 | 0.795 | 2057832 |
-| nested groups | rerun | 0.897 | 0.472 | 0.685 | 295808 |
-| offset groups | rerun | 1.519 | 0.459 | 0.547 | 383648 |
-| offset groups | rerun | 0.884 | 0.426 | 0.585 | 282280 |
+| selective join | join | 15.740 | 0.349 | 2.173 | 4854712 |
+| selective join | rerun | 1.040 | 0.850 | 1.321 | 347640 |
+| high fan-out join | join | 8.115 | 1.984 | 3.040 | 4769632 |
+| high fan-out join | rerun | 0.744 | 0.973 | 1.303 | 353768 |
+| graph | graph | 7.742 | 0.429 | 0.728 | 4811904 |
+| graph | rerun | 4.606 | 4.170 | 7.953 | 1418576 |
+| multiple-key groups | group | 8.417 | 0.285 | 0.882 | 2107240 |
+| multiple-key groups | rerun | 0.663 | 0.405 | 0.464 | 116960 |
+| group aggregate | group | 3.839 | 0.236 | 0.398 | 1932544 |
+| group aggregate | rerun | 0.846 | 0.449 | 0.670 | 275560 |
+| distinct | distinct | 3.731 | 0.179 | 0.317 | 1616800 |
+| distinct | rerun | 0.480 | 0.238 | 0.333 | 86128 |
+| nested groups | nested-group | 4.565 | 0.206 | 0.377 | 1757528 |
+| nested groups | rerun | 0.779 | 0.551 | 0.675 | 293560 |
+| offset groups | rerun | 1.274 | 0.474 | 0.623 | 383792 |
+| offset groups | rerun | 0.773 | 0.527 | 1.158 | 299416 |
 
 | Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| session | 15 | 15 | 3169 | 0.458 | 0.118 | 0.204 |
-| journal | 15 | 15 | 3169 | 0.294 | 0.092 | 0.161 |
+| session | 15 | 15 | 3169 | 0.463 | 0.119 | 0.213 |
+| journal | 15 | 15 | 3169 | 0.333 | 0.097 | 0.160 |
 
 Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.
 

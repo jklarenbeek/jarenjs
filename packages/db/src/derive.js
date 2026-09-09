@@ -383,12 +383,23 @@ export function cellNeighbourhood(cell) {
  * external's bounding box, computed at bind time because a GeoJSON
  * object is not a value any database can bind. `null` when the value
  * has no box, which is what tells the caller to divert.
- * @param {{ kind: string, external: string, axis: string }} derived
- * @param {any} value - the bound external
+ * @param {any} derived
+ * @param {any} value - the bound external for bboxAxis; all externals for circleAxis
  * @returns {number | null}
  */
 export function derivedSlotValue(derived, value) {
-  const box = bboxOf(value);
+  let box;
+  if (derived.kind === 'bboxAxis') box = bboxOf(value);
+  else if (derived.kind === 'circleAxis') {
+    const read = (input) => 'external' in input ? value[input.external] : input.literal;
+    const at = probePosition(read(derived.centre));
+    const radius = read(derived.radius);
+    if (at === null || typeof radius !== 'number' || !Number.isFinite(radius) || radius < 0)
+      return null;
+    box = probeCircleBox(at, radius);
+    if (box !== null && (box[0] < -180 || box[2] > 180)) return null;
+  }
+  else throw new TypeError(`unknown derived parameter kind '${derived.kind}'`);
   return box === null ? null : box[BBOX_AT[derived.axis]];
 }
 

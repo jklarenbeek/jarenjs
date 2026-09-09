@@ -8,7 +8,7 @@ it('the registered benchmark publishes correct comparisons, byte costs and losin
   const load = (name) => JSON.parse(readFileSync(new URL(`../../benchmark/${name}`, import.meta.url), 'utf8'));
   const report = load('changeflow-results.json');
   assert.equal(new JarenValidator().compile(load('changeflow-results.schema.json'))(report), true);
-  for (const shape of ['selective join', 'high fan-out join', 'graph', 'nested groups', 'offset groups']) {
+  for (const shape of ['selective join', 'high fan-out join', 'graph', 'nested groups', 'offset groups', 'multiple-key groups', 'group aggregate', 'distinct']) {
     const rows = report.live.filter((row) => row.shape === shape);
     assert.equal(rows.length, 2);
     assert.ok(rows.every((row) => row.mutationMs.p95 >= row.mutationMs.p50 && row.initializationMs >= 0));

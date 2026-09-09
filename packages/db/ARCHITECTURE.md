@@ -370,7 +370,7 @@ collation); a top-level `$subsequence` window with literal bounds; the
 top-level aggregates `$count` and `$sum`/`$avg`/`$min`/`$max` over a
 singular schema-typed path; the whole-document projection that returns
 the bare binding; ONE member path, projected as its value beside its
-JSON type; and a nested SHAPE of objects, arrays, literals and member
+JSON type; and a nested SHAPE of objects, arrays, literals, whole collection bindings and member
 paths, projected as one value/type pair per distinct leaf and rebuilt
 by the decoder — never by parsing a JSON text the database assembled,
 which could not tell an absent member from a present `null`.
@@ -382,11 +382,14 @@ may emit zero or several items per source row.
 
 General scalar grouping preserves absent and null keys separately through
 value/type pairs. Null and boolean keys may group, but ordering them stays
-residual to preserve `JQ2005`. Explicit group ordering appends first appearance
-as its tie-breaker. Literal windows lower over singleton group constructors;
+residual to preserve `JQ2005`. Explicit group ordering accepts orderable keys and proven count/min/max
+expressions, including aggregates absent from the return; first appearance
+breaks ties. SUM/AVG ordering remains residual: compensated or differently
+ordered SQL accumulation can change which group sorts first. Literal windows lower over singleton group constructors;
 `$count` over such constructors with only row-count aggregates counts a grouped
-subquery. `$distinct` over an unordered typed scalar projection uses the same
-key relation and first-appearance order, with absent members removed first.
+subquery. `$distinct` over a typed scalar projection uses the same key relation, with
+absent members removed first. Unordered inputs retain first appearance; an
+ordering composed solely of the projected path lowers to group-key order.
 
 Entity projection trees, constants, counts and single-path windows follow the
 same cardinality rules. An equijoin graph can additionally filter through
@@ -426,7 +429,7 @@ mode, `knn`, beside native, row and set.
 | construct | reason |
 |---|---|
 | `$let` bindings, `$fold`, positional/window bindings | no equivalence proof exists yet; residual by default |
-| a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take |
+| a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key or count/min/max | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take |
 | a window over a group return that may omit an item, or a group aggregate beyond the proven constructor count | SQL group cardinality must equal the projected item cardinality; numeric and error semantics need their own proof |
 | a `$for` binding nothing joins to — a cartesian product | the engine builds the product; a plan that emitted one by accident is the thing an equi-join graph exists to prevent |
 | non-singular path expansion | one relation per binding in this version |
@@ -435,7 +438,7 @@ mode, `knn`, beside native, row and set.
 | a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path | the WHOLE projection runs per row (the row residual) — pushed and ordered rows, projected by the engine; a window over these items runs in the set residual; promoting the part that composes would answer a shape nobody asked for |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
 | path comparisons with untyped, nullable, boolean or differing comparison families | the total typed comparison proof does not cover these shapes |
-| `$distinct` over ordered, untyped or compound projections | first-occurrence order and structural equality need additional lowering |
+| `$distinct` over untyped/compound projections or ordering by other paths | first-occurrence order and structural equality need additional lowering |
 | array/object literals in comparisons | deep-equality has no guarded native form |
 | `$within` over a `derive: 'bbox'` column | a bounding-box pre-filter is pushed; exact containment refines in the engine |
 | a bounded `$distance` over a `derive: 'bbox'` column | a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine |
@@ -1147,3 +1150,12 @@ by refreshing affected parents from bounded leaves. Source and result payloads
 consume row and byte credits; unsupported shapes keep named reruns. See
 [the replication contract](docs/REPLICATION-FORMAT.md) and
 [the strategy matrix](docs/LIVE-FORMAT.md).
+
+Parameterized distance bounds use the closed `circleAxis` derived parameter:
+`{ kind: 'circleAxis', centre: { external } | { literal }, radius: { external }
+| { literal }, axis: 'w' | 's' | 'e' | 'n' }`. Both inputs are named in every
+edge slot. The binder uses the shared geographic kernel and diverts the whole
+query for missing/invalid values, negative radii, polar or antimeridian boxes.
+The exact distance predicate still refines the candidates. The shared oracle
+covers SQLite column/R*Tree indexes and PostgreSQL, including repeated cached
+calls with different bound values.

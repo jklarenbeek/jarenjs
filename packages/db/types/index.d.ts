@@ -978,7 +978,7 @@ export interface LiveEventTime {
 }
 
 export interface LiveMode {
-  readonly strategy: 'rows' | 'window' | 'accumulator' | 'group'
+  readonly strategy: 'rows' | 'window' | 'accumulator' | 'group' | 'distinct'
     | 'bucket' | 'rolling' | 'join' | 'graph' | 'nested-group' | 'rerun';
   readonly mode: 'incremental' | 'rerun';
   /** Present exactly when the strategy is 'rerun': the named reason. */

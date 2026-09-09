@@ -112,11 +112,11 @@ function documentsSource(binding, where) {
 
 /**
  * Recognise the canonical single-level group form (§7): one binding
- * over `$[*]`, optional `$where`, `$groupby` with ONE binding, and a
+ * over `$[*]`, optional `$where`, one or more group keys, and a
  * `$return` object whose members are the group key (`$g` plain or
  * defaulted) or a single-member aggregate over the group sequence.
  * @param {any} inner
- * @returns {null | { binding: string, group: string, groupExpr: any,
+ * @returns {null | { binding: string, groups: string[], key: any,
  *   where: any, members: { name: string, kind: 'key' | 'aggregate',
  *   fn?: string, operand?: any, defaulted?: boolean }[] }}
  */
@@ -126,18 +126,30 @@ function recogniseGroupForm(inner) {
   const allowed = new Set(['$for', '$where', '$groupby', '$return']);
   if (!Object.keys(inner).every((key) => allowed.has(key))) return null;
   const groupNames = Object.keys(inner.$groupby);
-  if (groupNames.length !== 1) return null;
-  const group = groupNames[0];
+  if (groupNames.length === 0) return null;
+  // Subset evaluation must never read the global collection root.
+  const local = (node) => {
+    if (typeof node === 'string') return node !== '$' && !/^\$(?:\.|\[)/.test(node);
+    if (Array.isArray(node)) return node.every(local);
+    if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
+    return Object.values(node).every(local);
+  };
+  if (![inner.$where, inner.$groupby, inner.$return].every(local)) return null;
+  const scalar = groupNames.some((name) => inner.$return === `$${name}`)
+    || (isJsonObject(inner.$return) && Object.keys(inner.$return).length === 1
+      && AGGREGATE_MEMBERS.has(Object.keys(inner.$return)[0]));
+  if (scalar) return { binding, groups: groupNames,
+    key: groupNames.map((name) => [inner.$groupby[name]]), where: inner.$where, members: [] };
   if (!isJsonObject(inner.$return)) return null;
   const members = [];
   for (const name of Object.keys(inner.$return)) {
     const expr = inner.$return[name];
-    if (expr === `$${group}`) {
+    if (groupNames.some((group) => expr === `$${group}`)) {
       members.push({ name, kind: 'key', defaulted: false });
       continue;
     }
     if (isJsonObject(expr) && Array.isArray(expr.$default)
-      && expr.$default.length === 2 && expr.$default[0] === `$${group}`
+      && expr.$default.length === 2 && groupNames.some((group) => expr.$default[0] === `$${group}`)
       && expr.$default[1] === null && Object.keys(expr).length === 1) {
       members.push({ name, kind: 'key', defaulted: true });
       continue;
@@ -150,7 +162,8 @@ function recogniseGroupForm(inner) {
     }
     return null;
   }
-  return { binding, group, groupExpr: inner.$groupby[group], where: inner.$where, members };
+  return { binding, groups: groupNames, key: groupNames.map((name) => [inner.$groupby[name]]),
+    where: inner.$where, members };
 }
 
 /**
@@ -276,6 +289,10 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
 
   if (aggregate !== null) {
     if (windowed) return rerun('a windowed aggregate maintains no accumulator');
+    if (recogniseGroupForm(inner) !== null) {
+      const grouped = classifyLiveQuery(inner, queryShape, keyed, eventTime);
+      if (grouped.strategy === 'group') return { ...grouped, aggregate: aggregate.name };
+    }
     const planned = planQuery({ [aggregate.name]: inner }, queryShape, {});
     if (planned.mode !== 'native' || planned.plan.aggregate === null) {
       return rerun(refinedOnly(planned, false) ? SPATIAL_RERUN.aggregate : plannerReason(planned));
@@ -302,19 +319,9 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
         : `the group filter did not translate: ${plannerReason(planned)}`);
     }
     if (!keyed) return rerun('rows without a document key cannot be tracked');
-    const rowDocument = {
-      $for: { [group.binding]: '$[*]' },
-      ...(group.where !== undefined ? { $where: group.where } : {}),
-      $return: {
-        k: [group.groupExpr],
-        ...Object.fromEntries(group.members
-          .filter((member) => member.kind === 'aggregate')
-          .map((member) => [member.name, [member.operand]])),
-      },
-    };
     return {
-      strategy: 'group', group, carrier, rowDocument,
-      deps: memberDeps(analyzeQuery([rowDocument]).root),
+      strategy: 'group', inner, binding: group.binding, key: group.key, carrier,
+      deps: memberDeps(analyzeQuery(inner).root),
     };
   }
 
@@ -326,6 +333,16 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     return rerun('a k-nearest ranking re-runs (the vector column cuts the candidates and the engine orders them)');
 
   const planned = planQuery(inner, queryShape, {});
+  const distinct = isJsonObject(inner) ? inner.$distinct : null;
+  if (!windowed && keyed && planned.mode === 'native' && isJsonObject(distinct)
+    && distinct.$orderby === undefined && bindingNameOf(distinct) !== null) {
+    const binding = bindingNameOf(distinct);
+    const name = binding === '_distinct' ? '_distinctKey' : '_distinct';
+    const grouped = { ...distinct, $groupby: { [name]: distinct.$return }, $return: `$${name}` };
+    return { strategy: 'distinct', inner: grouped, binding, key: [distinct.$return],
+      carrier: documentsSource(binding, distinct.$where),
+      deps: memberDeps(analyzeQuery(grouped).root) };
+  }
   if (planned.mode === 'set') {
     // §7's spatial rows: the fetch is SQL-narrowed by the pushed box or
     // cell range and the exact predicate is what per-row re-evaluation
@@ -723,121 +740,6 @@ function accumulatorStrategy(description, context) {
 }
 
 /**
- * Canonical single-level `groupBy` with aggregate returns: §7's
- * per-group deltas — the accumulator machinery once per group, groups
- * in first-appearance order.
- * @param {any} description
- * @param {any} context
- */
-function groupStrategy(description, context) {
-  const { group, rowDocument, carrier } = description;
-  const evaluate = compileJsonQuery([rowDocument]);
-
-  /** @type {Map<string, { key: any[], rows: Map<string, any>, row: any }>}
-   * group token → per-row contributions, in first-appearance order */
-  const groups = new Map();
-
-  const contributionOf = (doc) => {
-    const evaluated = /** @type {any[]} */ (evaluate([doc], context.externals));
-    return evaluated.length === 0 ? undefined : evaluated[0];
-  };
-  const buildRow = (entry) => {
-    /** @type {any} */
-    const row = {};
-    for (const member of group.members) {
-      if (member.kind === 'key') {
-        if (entry.key.length > 0) row[member.name] = entry.key[0];
-        else if (member.defaulted) row[member.name] = null;
-        continue;
-      }
-      let sum = 0;
-      let count = 0;
-      let extreme;
-      let n = 0;
-      for (const contribution of entry.rows.values()) {
-        const items = /** @type {any[]} */ (contribution[member.name] ?? []);
-        n += items.length;
-        for (const value of items) {
-          sum += value;
-          count += 1;
-          if (extreme === undefined
-            || (member.fn === 'min' ? value < extreme : value > extreme)) extreme = value;
-        }
-      }
-      if (member.fn === 'count') row[member.name] = n;
-      else if (member.fn === 'sum') row[member.name] = sum;
-      else if (count > 0) row[member.name] = member.fn === 'avg' ? sum / count : extreme;
-      // an empty avg/min/max leaves the member absent, the engine's
-      // empty-sequence rule
-    }
-    return row;
-  };
-  const rowsOf = () => [...groups.values()].map((entry) => entry.row);
-
-  const placeRow = (token, doc, changedGroups) => {
-    const contribution = doc === undefined ? undefined : contributionOf(doc);
-    for (const [groupToken, entry] of groups) {
-      if (!entry.rows.has(token)) continue;
-      if (contribution !== undefined
-        && stableStringify(entry.rows.get(token)) === stableStringify(contribution)) {
-        return; // unchanged in place
-      }
-      entry.rows.delete(token);
-      changedGroups.add(groupToken);
-      break;
-    }
-    if (contribution === undefined) return;
-    const groupToken = stableStringify(contribution.k) ?? '';
-    let entry = groups.get(groupToken);
-    if (entry === undefined) {
-      entry = { key: contribution.k, rows: new Map(), row: null };
-      groups.set(groupToken, entry);
-    }
-    entry.rows.set(token, contribution);
-    changedGroups.add(groupToken);
-  };
-  const settle = (changedGroups) => {
-    for (const groupToken of changedGroups) {
-      const entry = groups.get(groupToken);
-      if (entry === undefined) continue;
-      if (entry.rows.size === 0) groups.delete(groupToken);
-      else entry.row = sharedRow(entry.row, buildRow(entry));
-    }
-  };
-
-  return {
-    init: () => chain(context.execute([carrier], { externals: context.externals }),
-      (docs) => {
-        const changedGroups = new Set();
-        for (const doc of /** @type {any[]} */ (docs)) {
-          placeRow(context.keyOf(doc), doc, changedGroups);
-        }
-        settle(changedGroups);
-        return rowsOf();
-      }),
-    entries: () => {
-      let total = groups.size;
-      for (const entry of groups.values()) total += entry.rows.size;
-      return total;
-    },
-    apply(record, previousRows) {
-      const touched = touchedKeys(record, context.name, description.deps);
-      if (touched === null) return null;
-      const changedGroups = new Set();
-      for (const [token, change] of touched) {
-        const doc = change.kind === 'delete'
-          ? undefined
-          : change.kind === 'insert' ? change.doc : context.readRow(token);
-        placeRow(token, doc, changedGroups);
-      }
-      if (changedGroups.size === 0) return null;
-      settle(changedGroups);
-      return diffAgainst(previousRows, rowsOf());
-    },
-  };
-}
-
-/**
  * Everything outside the table: re-run the WHOLE query on
  * invalidation and diff against the previous result with value-equal
  * reference reuse — declared, honest, reported through `live.mode`.
@@ -912,7 +814,8 @@ export function createLiveRegistry(bounds) {
     };
     const STRATEGIES = {
       rows: rowsStrategy, window: windowStrategy, accumulator: accumulatorStrategy,
-      group: groupStrategy, bucket: bucketStrategy, rolling: rollingStrategy, join: joinStrategy, graph: joinStrategy,
+      group: nestedGroupStrategy, distinct: nestedGroupStrategy,
+      bucket: bucketStrategy, rolling: rollingStrategy, join: joinStrategy, graph: joinStrategy,
       'nested-group': nestedGroupStrategy,
     };
     const strategy = (STRATEGIES[classification.strategy] ?? rerunStrategy)(

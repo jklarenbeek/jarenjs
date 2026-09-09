@@ -2045,13 +2045,14 @@ a number appears only where `capabilities.rowEstimates` is filled):
 - a non-equality predicate used as the only join anchor, or a boolean
   predicate whose individual leaf cannot be assigned to one binding;
 - collection grouping with untyped keys, row-binding returns, or ordering by
-  anything except an orderable key; entity grouping; aggregates over groups
+  anything except an orderable key or count/min/max expression; entity grouping; aggregates over groups
   beyond a count of singleton constructors containing keys, literals and row
   counts; windows over group returns that may omit an item;
-- projection trees containing operators, whole binding references or
+- projection trees containing operators, whole entity binding references or
   non-singular paths; windows over those opaque projections;
-- `$distinct` over ordered, untyped or compound projections; unordered typed
-  scalar projections use the same grouping relation and first-occurrence order;
+- `$distinct` over untyped/compound projections or ordering by other paths;
+  typed scalar projections lower when unordered or ordered solely by the
+  projected path, preserving first occurrence or that declared order;
 - externals against document paths; booleans and `null` at bind time;
 - everything phase A already listed (§8 of `QUERY-FORMAT.md`
   notwithstanding, the truth table is the contract).
