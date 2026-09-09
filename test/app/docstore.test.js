@@ -42,6 +42,45 @@ describe('@jarenjs/app — createDocStore', () => {
     assert.strictEqual(storage.peek().other, 1, 'an unrelated key survives the write-back');
   });
 
+  it('shares persisted collections across stores using one adapter', () => {
+    let raw = null;
+    let reads = 0;
+    const writes = [];
+    const storage = {
+      read() { reads++; return raw === null ? null : JSON.parse(raw); },
+      write(value) { writes.push(value); raw = JSON.stringify(value); },
+    };
+    const experiments = createDocStore({ storage });
+    const play = createDocStore({ storage, key: 'play' });
+    experiments.save('project', { v: 1 });
+    play.save('session', { v: 2 });
+    assert.deepStrictEqual(JSON.parse(raw), {
+      experiments: { project: { v: 1 } }, play: { session: { v: 2 } },
+    });
+    experiments.remove('project');
+    play.save('second', { v: 3 });
+    assert.deepStrictEqual(JSON.parse(raw), {
+      experiments: {}, play: { session: { v: 2 }, second: { v: 3 } },
+    });
+    const reopened = createDocStore({ storage, key: 'play' });
+    assert.strictEqual(reopened.all(), play.all());
+    assert.deepStrictEqual(reopened.load('session'), { v: 2 });
+    assert.strictEqual(reads, 1);
+    assert.ok(writes.every((value) => value === writes[0]));
+  });
+
+  it('keeps shared collections in memory when the adapter cannot persist', () => {
+    const storage = { read: () => null, write: () => {} };
+    const experiments = createDocStore({ storage });
+    experiments.save('project', { v: 1 });
+    const play = createDocStore({ storage, key: 'play' });
+    play.save('session', { v: 2 });
+    assert.deepStrictEqual(createDocStore({ storage }).load('project'), { v: 1 });
+    assert.deepStrictEqual(createDocStore({ storage, key: 'play' }).load('session'), { v: 2 });
+    const other = { read: () => null, write: () => {} };
+    assert.deepStrictEqual(createDocStore({ storage: other }).names(), []);
+  });
+
   it('honours a custom collection key', () => {
     const storage = memStorage();
     const store = createDocStore({ storage, key: 'sessions' });

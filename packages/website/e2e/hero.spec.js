@@ -36,6 +36,16 @@ const stages = (page) => page.locator('.hero-stage');
 const artifact = (page) => page.locator('.hero-artifact');
 const focused = (page) => page.locator('.hero-stage.is-focus');
 
+test('the hero stacks at the shared tablet breakpoint without widening the page', async ({ page }) => {
+  await openHero(page, 'reduce');
+  for (const width of [1280, 1025, 1024, 901, 760, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(() => page.locator('.hero-demo-grid').evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(width > 1024 ? 2 : 1);
+    expect(await page.evaluate(() => document.scrollingElement.scrollWidth)).toBe(width);
+  }
+});
+
 /** The editor's text, replaced wholesale — a reader retyping the document. */
 async function typeInput(page, text) {
   const editor = page.locator('textarea.hero-editor');

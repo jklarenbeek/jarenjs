@@ -39,6 +39,43 @@ async function using(under, body) {
   }
 }
 
+/** @param {LedgerFactory} factory @param {boolean} failure */
+async function expiredSettlement(factory, failure) {
+  for (const explicit of [true, false]) {
+    for (const when of [1049, 1050, 1051]) {
+      let at = 1000;
+      let reads = 0;
+      const under = await factory({ ttlMs: 50, now: () => { reads++; return at; } });
+      await using(under, async () => {
+        const { ledger, staleCode } = under;
+        const claimed = await ledger.claim({ ...CLAIM, now: 1000 });
+        at = when;
+        reads = 0;
+        const now = explicit ? at : undefined;
+        const settle = async () => failure
+          ? ledger.fail(claimed.ref, false, RESPONSE, now)
+          : ledger.commit(claimed.ref, RESPONSE, now);
+        if (at < 1050) {
+          await settle();
+          assert.strictEqual(reads, explicit ? 0 : 1, 'one instant judges and stamps a settlement');
+          const record = await ledger.lookup({ ...CLAIM, now: at });
+          assert.strictEqual(record.status, failure ? 'failed' : 'committed');
+          assert.strictEqual(record.updatedAt, 1049);
+        }
+        else {
+          await assert.rejects(settle, (/** @type {any} */ err) => err.code === staleCode,
+            `a ${failure ? 'failure' : 'commit'} at ${at} cannot settle a claim expiring at 1050`);
+          assert.strictEqual(reads, explicit ? 0 : 1, 'expiry uses the same single clock read');
+          const renewed = await ledger.claim({ ...CLAIM, now: at });
+          assert.strictEqual(renewed.state, 'new');
+          assert.notStrictEqual(renewed.ref.generation, claimed.ref.generation);
+          assert.deepStrictEqual(await ledger.claim({ ...CLAIM, now: at }), { state: 'in-progress' });
+        }
+      });
+    }
+  }
+}
+
 /**
  * The cases, each over a fresh ledger from the factory; exported one by
  * one so a test can prove a case FAILS against a ledger whose fence was
@@ -174,6 +211,8 @@ export function ledgerContract(name, factory) {
     it('claim → commit → replay verbatim; mismatch; in-progress; lookup answers a copy', () => cases.states(factory));
     it('a retryable failure re-runs under a new generation; a non-retryable one replays the stored failure', () => cases.failures(factory));
     it('expiry on claim and lookup; sweep() drops the rest', () => cases.expiry(factory));
+    it('an expired claim refuses commit without needing a lookup, sweep or reclaim first', () => expiredSettlement(factory, false));
+    it('an expired claim refuses fail without needing a lookup, sweep or reclaim first', () => expiredSettlement(factory, true));
     it('the generation fence: a stale ref, a repeated settlement and a foreign ref are refused by code and change nothing', () => cases.fence(factory));
     it('the id is the versioned JSON tuple: separators, controls and Unicode in a member never collide', () => cases.ids(factory));
   });

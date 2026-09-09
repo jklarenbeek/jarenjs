@@ -11,6 +11,8 @@
  * an async iterator of completed top-level blocks.
  */
 
+import { createBoundedCache } from '@jarenjs/core/cache';
+
 import { createIncrementalParser } from './parser.js';
 import { compileMarkdown } from './compiler.js';
 
@@ -37,35 +39,19 @@ import { compileMarkdown } from './compiler.js';
  */
 
 /**
- * A small LRU cache (Map re-insertion order).
+ * The shared core LRU with Markdown's numeric-capacity policy: fractions
+ * round down, values below one retain nothing, and Infinity or NaN
+ * disable capacity eviction.
  * @param {number} [limit]
  * @returns {MdCache}
  */
 export function createMdCache(limit = 64) {
-  /** @type {Map<string, any>} */
-  const entries = new Map();
+  const cache = createBoundedCache(Math.floor(limit));
   return {
-    get(key) {
-      const entry = entries.get(key);
-      if (entry !== undefined) {
-        entries.delete(key);
-        entries.set(key, entry);
-      }
-      return entry;
-    },
-    set(key, entry) {
-      entries.delete(key);
-      entries.set(key, entry);
-      if (entries.size > limit) {
-        entries.delete(entries.keys().next().value);
-      }
-    },
-    delete(key) {
-      return entries.delete(key);
-    },
-    clear() {
-      entries.clear();
-    },
+    get: cache.get,
+    set: limit < 1 ? () => {} : cache.set,
+    delete: cache.delete,
+    clear: cache.clear,
   };
 }
 

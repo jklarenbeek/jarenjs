@@ -139,6 +139,15 @@ if (!bun) console.log('(no bun binary on PATH — the Bun consumer leg is skippe
  * @type {Record<string, string>}
  */
 const SEMANTIC_SNIPPETS = {
+  '@jarenjs/core': `
+import { isJsonNumberString } from '@jarenjs/core/number';
+import { createBoundedCache } from '@jarenjs/core/cache';
+const jsonNumber: boolean = isJsonNumberString('1.25e2');
+const boundedCache = createBoundedCache<string, number>(2);
+boundedCache.set('entry', 1);
+const removed: boolean = boundedCache.delete('entry');
+void [jsonNumber, removed];
+`,
   '@jarenjs/ai': `
 import { createChatClient, createToolbox, createAgent, registerModelContext, resolveEndpoint, createLedger, createGuardedRefiner, validateClaimEvidence, ledgerFootprint } from '@jarenjs/ai';
 void validateClaimEvidence({}); void ledgerFootprint({});

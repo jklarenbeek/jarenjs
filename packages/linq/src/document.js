@@ -39,6 +39,19 @@
 
 import { LinqBuildError } from './errors.js';
 
+/**
+ * Validate a sequence window's count or a positional terminal's index.
+ * @param {number} value
+ * @param {string} what - The operator named by a refusal
+ * @returns {number} The unchanged count or index
+ */
+export function requireNonNegativeInteger(value, what) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new LinqBuildError('JL0005', `${what} takes a non-negative integer, got ${value}`);
+  }
+  return value;
+}
+
 /** The binding names the emitted documents own (QUERY-PEN §7): the
  * item bindings, the accumulator and the group — and the relation-hop
  * bindings `r1`, `r2`, … a capture allocates (expression.js). A

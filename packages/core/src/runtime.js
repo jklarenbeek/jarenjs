@@ -1,17 +1,14 @@
 //@ts-check
 /**
- * @file The runtime record: the host facts every subsystem that needs
- * one used to take separately — the clock, secure identifiers,
- * randomness and the zone provider — as one frozen record a host builds
+ * @file The runtime record: the clock, secure identifiers, randomness
+ * and the zone provider as one frozen record a host builds
  * once and hands to the store, the jobs engine, the migration runner and
  * the http binding. Nothing here IS a clock, a random source or a zone
  * database: the defaults are the platform's own (`Date.now`,
- * `crypto.randomUUID`, `Math.random`, and no zone provider, which keeps
- * a named zone the refusal it always was), so adopting the record changes
- * nothing a consumer can observe. What it buys is that a deterministic
- * run — a fixed clock, a seeded generator, a counting identifier — is
- * configured in one place, and that four subsystems can no longer
- * disagree about what time it is.
+ * `crypto.randomUUID`, `Math.random`, and no zone provider). Named zones
+ * require an injected provider. A deterministic run — a fixed clock,
+ * a seeded generator, a counting identifier — is configured in one place
+ * so the subsystems agree about time and identity.
  *
  * Precedence is fixed: a subsystem's own explicit option wins over the
  * record's member, which wins over the built-in default. The options are

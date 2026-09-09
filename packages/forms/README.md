@@ -120,7 +120,7 @@ depends on it — the schema is the contract.
 - **enum/const**: deep equality (`equalsDeep`)
 - **arrays**: `minItems`/`maxItems`/`uniqueItems` (`isUniqueDeepArray`)
 
-`validateAllFields(model, data)` walks the whole tree and returns a `{ '/pointer': errors }` map — ideal for rendering inline errors next to every field.
+`validateAllFields(model, data)` walks the whole tree and returns a `{ '/pointer': errors }` map — ideal for rendering inline errors next to every field. It reads own JSON members, like the pointer helpers: a field named `constructor`, `toString` or `__proto__` is absent until the data supplies that member.
 
 ## Layer 2 — `x-form` rules: cross-field behavior per keystroke
 

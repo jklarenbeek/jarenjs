@@ -49,6 +49,10 @@ document (`{ $count: … }`), and `groupBy` packs its default return as
 `{ key: …, items: [ '$it' ] }` because an object member takes exactly
 one item.
 
+The emitter also owns `requireNonNegativeInteger`, the shared count/index guard
+for synchronous and asynchronous sequence windows and positional terminals.
+Both surfaces report the same `JL0005` refusal at their existing call boundary.
+
 ## The typed surface (`types/index.d.ts`)
 
 Hand-authored declarations are the public type contract (the runtime

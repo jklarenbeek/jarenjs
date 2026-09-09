@@ -1,5 +1,5 @@
 //@ts-check
-/** Number formatting for benchmark displays (ported from the website's utils). */
+/** Number formatting and projection memoization for the website. */
 
 import { Float64 } from '@jarenjs/core/math';
 
@@ -17,6 +17,8 @@ export const formatJson = (value) => JSON.stringify(value, null, 2);
  * its derivations with this so an unchanged input slice returns the
  * PREVIOUS node by reference — which makes the JSLT memo (and through
  * it the renderer's === fast path) fire for the whole subtree.
+ * Only successful calls populate the memo; a throwing call keeps the
+ * previous successful entry available.
  * @template {(...args: any[]) => any} F
  * @param {F} fn
  * @returns {F}
@@ -31,8 +33,9 @@ export function memo1(fn) {
       && lastArgs.every((value, i) => value === args[i])) {
       return lastResult;
     }
+    const result = fn(...args);
     lastArgs = args;
-    lastResult = fn(...args);
+    lastResult = result;
     return lastResult;
   });
 }

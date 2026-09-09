@@ -281,6 +281,24 @@ describe('Preemptive Field Validation', function () {
   });
 
   describe('#validateAllFields()', function () {
+    it('validates only own JSON members for prototype-named fields', () => {
+      for (const key of ['constructor', 'toString', '__proto__']) {
+        const schema = { type: 'object', properties: { [key]: { type: 'string' } } };
+        const optional = buildFormModel(schema);
+        const required = buildFormModel({ ...schema, required: [key] });
+        assert.deepStrictEqual(validateAllFields(optional, {}), {});
+        assert.deepStrictEqual(validateAllFields(required, {}), {
+          ['/' + key]: [{ keyword: 'required', params: {}, msgid: 'form/required',
+            message: 'This field is required' }],
+        });
+        assert.deepStrictEqual(validateAllFields(required, { [key]: 'saved' }), {});
+        assert.deepStrictEqual(validateAllFields(optional, { [key]: 3 }), {
+          ['/' + key]: [{ keyword: 'type', params: { type: 'string' }, msgid: 'form/type',
+            message: 'Must be a string' }],
+        });
+      }
+    });
+
     it('should report errors per data pointer', function () {
       const model = buildFormModel({
         type: 'object',

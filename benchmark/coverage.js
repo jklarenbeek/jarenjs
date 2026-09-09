@@ -8,13 +8,18 @@
  * 
  * Usage:
  *   node benchmark/coverage.js <testfile.json> [options]
+ *   node benchmark/coverage.js --dead-code [audit options]
  *   
  * Options:
  *   --threshold <n>    Filter out files with coverage <= n% (default: 0)
  *   --functions        Show TOUCHED and NOT touched functions with hit counts
  *   --touched-only     Show only TOUCHED functions (hides NOT touched)
  *   --iterations <n>   Number of profiling iterations (default: 1000)
- *   --temp-dir <dir>   Temporary directory for c8 coverage data (default: coverage/tmp)
+ *   --temp-dir <dir>   c8 temporary directory in either mode (default: coverage/tmp;
+ *                     coverage/tmp-dead for the audit)
+ *   --dead-code        Audit untouched shipped functions across the full test suite
+ *   --json             Print audit data as JSON
+ *   --no-fail          Report dead code without failing; failed tests still fail
  * 
  * Examples:
  *   # Show files with >0% coverage after profiling required.json
@@ -49,99 +54,105 @@ function reportRunFailure(run, label) {
   return true;
 }
 
-// Check for help first
+/** Print the two modes and the options each can honor. */
+function printHelp() {
+  console.log(`Usage: node benchmark/coverage.js <testfile.json> [options]
+       node benchmark/coverage.js --dead-code [audit options]
+
+Shared options:
+  --temp-dir <dir>   Temporary directory for c8 (default: coverage/tmp;
+                    coverage/tmp-dead in audit mode)
+  --help, -h         Show this help message
+
+Single-fixture options:
+  --threshold <n>    Filter out files with coverage <= n% (default: 0;
+                    use -1 to include files with zero coverage)
+  --functions        Show individual function-level coverage
+  --touched-only     Show only TOUCHED functions (hides NOT touched)
+  --iterations <n>   Positive integer profiling iterations (default: 1000)
+
+Audit options:
+  --dead-code        Audit the whole test suite for untouched source functions
+  --json             Print audit data as JSON after the run banner
+  --no-fail          Report dead code without failing; a failed suite still fails
+
+Examples:
+  node benchmark/coverage.js '/required.json' --threshold 25
+  node benchmark/coverage.js '/required.json' --functions
+  node benchmark/coverage.js --dead-code --json`);
+}
+
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
-  console.log(`Usage: node benchmark/coverage.js <testfile.json> [options]`);
-  console.log('');
-  console.log('Options:');
-  console.log('  --threshold <n>    Filter out files with coverage <= n% (default: 0)');
-  console.log('  --functions        Show individual function-level coverage');
-  console.log('  --touched-only     Show only TOUCHED functions (hides NOT touched)');
-  console.log('  --iterations <n>   Number of profiling iterations (default: 1000)');
-  console.log('  --temp-dir <dir>   Temporary directory for c8 (default: coverage/tmp)');
-  console.log('  --help, -h         Show this help message');
-  console.log('');
-  console.log('Examples:');
-  console.log(`  node benchmark/coverage.js '/required.json'`);
-  console.log(`  node benchmark/coverage.js '/required.json' --threshold 25`);
-  console.log(`  node benchmark/coverage.js '/required.json' --functions`);
-  console.log(`  node benchmark/coverage.js '/required.json' --touched-only`);
+  printHelp();
   process.exit(0);
 }
 
-// --- Whole-suite dead-code audit -------------------------------------------
-// `--dead-code` runs the ENTIRE test suite under c8 (with `--all`, so a
-// module no test ever imports still surfaces at 0%) and reports every
-// source function with zero hits and every source file whose functions are
-// all unhit — the stale/dead-code candidates a refactor must resolve.
-// Unlike the profiler mode below, it takes no target file.
-if (args.includes('--dead-code')) {
-  const exitCode = runDeadCodeAudit({
-    tempDir: path.join(rootDir, 'coverage', 'tmp-dead'),
-    fail: !args.includes('--no-fail'),
-    json: args.includes('--json'),
-  });
-  // Pipes are asynchronous: a failed suite can exceed their buffers, and an
-  // immediate exit would discard the assertion near the end of its output.
-  await Promise.all([process.stdout, process.stderr].map((stream) =>
-    new Promise((resolve) => stream.write('', resolve))));
-  process.exit(exitCode);
-}
-
-// Parse arguments
+const deadCode = args.includes('--dead-code');
 let targetFile = null;
 let threshold = 0;
 let showFunctions = false;
 let touchedOnly = false;
 let iterations = 1000;
-let tempDir = path.join(rootDir, 'coverage', 'tmp');
+let tempDir = path.join(rootDir, 'coverage', deadCode ? 'tmp-dead' : 'tmp');
+let failOnDeadCode = true;
+let json = false;
 
-for (let i = 0; i < args.length; i++) {
-  const arg = args[i];
-  if (arg.startsWith('--')) {
-    switch (arg) {
-      case '--threshold':
-        threshold = parseFloat(args[++i]) || 0;
-        break;
-      case '--functions':
-        showFunctions = true;
-        break;
-      case '--touched-only':
-        touchedOnly = true;
-        showFunctions = true; // implied
-        break;
-      case '--iterations':
-        iterations = parseInt(args[++i], 10) || 1000;
-        break;
-      case '--temp-dir':
-        tempDir = path.resolve(args[++i]);
-        break;
-      default:
-        console.error(`Unknown option: ${arg}`);
-        process.exit(1);
+// Validate before touching coverage files or launching a child. A switch
+// belonging to another mode is a mistake, never an ignored instruction.
+try {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (['--threshold', '--functions', '--touched-only', '--iterations'].includes(arg) && deadCode)
+      throw new Error(`${arg} is only available in single-fixture mode`);
+    if (['--json', '--no-fail'].includes(arg) && !deadCode)
+      throw new Error(`${arg} requires --dead-code`);
+    let value;
+    if (['--threshold', '--iterations', '--temp-dir'].includes(arg)) {
+      value = args[++i];
+      if (value === undefined || value.trim() === '' || value.startsWith('--'))
+        throw new Error(`${arg} requires a value`);
     }
-  } else if (!targetFile) {
-    targetFile = arg;
+    switch (arg) {
+      case '--dead-code': break;
+      case '--no-fail': failOnDeadCode = false; break;
+      case '--json': json = true; break;
+      case '--threshold':
+        threshold = Number(value);
+        if (!Number.isFinite(threshold)) throw new Error('--threshold must be a finite number');
+        break;
+      case '--functions': showFunctions = true; break;
+      case '--touched-only': touchedOnly = true; showFunctions = true; break;
+      case '--iterations':
+        iterations = Number(value);
+        if (!Number.isSafeInteger(iterations) || iterations < 1)
+          throw new Error('--iterations must be a positive safe integer');
+        break;
+      case '--temp-dir': tempDir = path.resolve(value); break;
+      default:
+        if (arg === '') throw new Error('the target file must not be empty');
+        if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
+        if (deadCode) throw new Error('--dead-code does not take a target file');
+        if (targetFile !== null) throw new Error(`Unexpected extra target file: ${arg}`);
+        targetFile = arg;
+    }
   }
 }
+catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
-if (!targetFile) {
-  console.log(`Usage: node benchmark/coverage.js <testfile.json> [options]`);
-  console.log('');
-  console.log('Options:');
-  console.log('  --threshold <n>    Filter out files with coverage <= n% (default: 0)');
-  console.log('  --functions        Show individual function-level coverage');
-  console.log('  --touched-only     Show only TOUCHED functions (hides NOT touched)');
-  console.log('  --iterations <n>   Number of profiling iterations (default: 1000)');
-  console.log('  --temp-dir <dir>   Temporary directory for c8 (default: coverage/tmp)');
-  console.log('  --help, -h         Show this help message');
-  console.log('');
-  console.log('Examples:');
-  console.log(`  node benchmark/coverage.js '/required.json'`);
-  console.log(`  node benchmark/coverage.js '/required.json' --threshold 25`);
-  console.log(`  node benchmark/coverage.js '/required.json' --functions`);
-  console.log(`  node benchmark/coverage.js '/required.json' --touched-only`);
+// Pipes are asynchronous: drain a failed suite's full diagnosis before exit.
+if (deadCode) {
+  const exitCode = runDeadCodeAudit({ tempDir, fail: failOnDeadCode, json });
+  await Promise.all([process.stdout, process.stderr].map((stream) =>
+    new Promise((resolve) => stream.write('', resolve))));
+  process.exit(exitCode);
+}
+
+if (targetFile === null) {
+  printHelp();
   process.exit(1);
 }
 
@@ -364,7 +375,7 @@ if (uncoveredFiles.length > 0) {
   console.log('='.repeat(80));
   console.log(`FILES WITH 0% COVERAGE (${uncoveredFiles.length} files) - Hidden by default`);
   console.log('='.repeat(80));
-  console.log('(Use --threshold 0 to include these)');
+  console.log('(Use --threshold -1 to include these)');
 }
 
 console.log('');

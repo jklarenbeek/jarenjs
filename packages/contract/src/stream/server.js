@@ -53,6 +53,7 @@
 import { toPromise, isThenable } from '@jarenjs/core/function';
 import { createAwaitedSink } from '@jarenjs/core/async';
 import { isJsonValue } from '@jarenjs/core/object';
+import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { verdict } from '../http/wire.js';
 
@@ -337,7 +338,7 @@ function pageFault(page, after, bounds) {
       if (item.kind !== 'patch') return `replay item ${i} is not { patch, seq }`;
       if (item.seq <= last) return `replay item ${i} does not advance the seq (${item.seq} after ${last})`;
       last = item.seq;
-      bytes += JSON.stringify(item.patch).length;
+      bytes += utf8ByteLength(JSON.stringify(item.patch));
       if (bytes > bounds.maxBytes) return `a replay page holds ${bytes} patch bytes over the ${bounds.maxBytes} asked for`;
     }
     if (p.next !== undefined && p.items.length > 0 && p.next < last) return 'a replay page\'s next is below its last item';
@@ -617,7 +618,7 @@ export function runSubscription(route, sub, hooks, options) {
       return;
     }
     if (item.seq <= lastSeq && lastSeq !== 0) return; // already delivered, or reflected by a snapshot
-    if (maxPatchBytes !== null && JSON.stringify(item.patch).length > maxPatchBytes) {
+    if (maxPatchBytes !== null && utf8ByteLength(JSON.stringify(item.patch)) > maxPatchBytes) {
       // the consumer swaps its document instead of patching it (§18.1)
       emitSnapshot(item.seq, { reset: false, earliestAvailable: null, highWatermark: null });
       return;

@@ -179,6 +179,10 @@ Collection keys and document names such as `__proto__` are ordinary own
 members of the document store and survive persistence. Loading a name
 that has not been saved returns `undefined`, including prototype-member names.
 
+Stores created with the same storage adapter share one in-memory root, read
+once. Saves and removals preserve other collections, including when the
+adapter cannot persist writes. A new adapter starts a new read of storage.
+
 ## Invariants the model can't cheat
 
 ```javascript

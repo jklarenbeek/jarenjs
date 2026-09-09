@@ -132,7 +132,8 @@ export function createDbLedger(client, options = {}) {
     return inside(async (tx) => {
       const c = rows(tx);
       const record = await c.get(r.id);
-      if (record === undefined || record.generation !== r.generation || record.status !== 'started') {
+      if (record === undefined || record.generation !== r.generation || record.status !== 'started'
+        || record.expiresAt <= at) {
         throw stale(ref, 'the key expired, was reclaimed under a newer generation, or was settled already');
       }
       await c.put({ ...record, ...changes, updatedAt: at }, r.id);

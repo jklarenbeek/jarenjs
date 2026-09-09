@@ -20,7 +20,7 @@ import {
 } from './expression.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES,
+  PROJECTING_STAGES, requireNonNegativeInteger,
 } from './document.js';
 import {
   classifySource, compileDocument, executeInMemory, providerRoot, providerRelations, sharesScope,
@@ -30,14 +30,6 @@ import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { schemaOf } from './schema-of.js';
 
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/** @param {number} value @param {string} what */
-function requireIndex(value, what) {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new LinqBuildError('JL0005', `${what} takes a non-negative integer, got ${value}`);
-  }
-  return value;
-}
 
 /** The immutable query sequence. Construct via `from`/`fromDocument`. */
 export class Sequence {
@@ -315,11 +307,11 @@ export class Sequence {
   }
 
   skip(count) {
-    return this.#with({ kind: 'skip', count: requireIndex(count, 'skip') });
+    return this.#with({ kind: 'skip', count: requireNonNegativeInteger(count, 'skip') });
   }
 
   take(count) {
-    return this.#with({ kind: 'take', count: requireIndex(count, 'take') });
+    return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') });
   }
 
   distinct() {
@@ -557,7 +549,7 @@ export class Sequence {
   }
 
   elementAt(index) {
-    requireIndex(index, 'elementAt');
+    requireNonNegativeInteger(index, 'elementAt');
     const w = this.#window('elementAt', [index]);
     if (w.length === 0) throw new LinqRuntimeError('JL2003', `elementAt(${index}) is out of range`);
     return w[0];
@@ -565,7 +557,7 @@ export class Sequence {
 
   /** @param {number} index @param {any} [defaultValue] */
   elementAtOrDefault(index, defaultValue) {
-    requireIndex(index, 'elementAtOrDefault');
+    requireNonNegativeInteger(index, 'elementAtOrDefault');
     const w = this.#window('elementAt', [index]);
     return w.length === 0 ? defaultValue : w[0];
   }

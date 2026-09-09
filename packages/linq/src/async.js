@@ -45,7 +45,7 @@ import {
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES,
+  PROJECTING_STAGES, requireNonNegativeInteger,
 } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
@@ -369,8 +369,8 @@ export class AsyncSequence {
     }, params);
   }
 
-  skip(count) { return this.#with({ kind: 'skip', count: requireIndex(count, 'skip') }); }
-  take(count) { return this.#with({ kind: 'take', count: requireIndex(count, 'take') }); }
+  skip(count) { return this.#with({ kind: 'skip', count: requireNonNegativeInteger(count, 'skip') }); }
+  take(count) { return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') }); }
   distinct() { return this.#with({ kind: 'distinct' }); }
   reverse() { return this.#with({ kind: 'reverse' }); }
 
@@ -722,7 +722,7 @@ export class AsyncSequence {
 
   /** @param {number} index */
   async elementAt(index) {
-    requireIndex(index, 'elementAt');
+    requireNonNegativeInteger(index, 'elementAt');
     const w = this.#pushable()
       ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
     if (w.length === 0) throw new LinqRuntimeError('JL2003', `elementAt(${index}) is out of range`);
@@ -731,7 +731,7 @@ export class AsyncSequence {
 
   /** @param {number} index @param {any} [defaultValue] */
   async elementAtOrDefault(index, defaultValue) {
-    requireIndex(index, 'elementAtOrDefault');
+    requireNonNegativeInteger(index, 'elementAtOrDefault');
     const w = this.#pushable()
       ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
     return w.length === 0 ? defaultValue : w[0];
@@ -830,14 +830,6 @@ async function collect(stream) {
     : iterateAndClose(/** @type {AsyncIterator<any>} */ (stream));
   for await (const item of iterable) out.push(item);
   return out;
-}
-
-/** @param {number} value @param {string} what */
-function requireIndex(value, what) {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new LinqBuildError('JL0005', `${what} takes a non-negative integer, got ${value}`);
-  }
-  return value;
 }
 
 /** @param {any} bindings */

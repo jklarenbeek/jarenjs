@@ -19,7 +19,10 @@ let report = 'OLD_REPORT_MARKER';
 const isReport = name => String(name).endsWith('coverage-final.json');
 fs.existsSync = name => isReport(name) ? report !== null
   : String(name).includes('coverage') ? false : exists(name);
-fs.rmSync = name => { if (isReport(name)) report = null; };
+fs.rmSync = name => {
+  if (options.inspectArgs) console.log('FS_MUTATION_MARKER');
+  if (isReport(name)) report = null;
+};
 fs.unlinkSync = name => { if (isReport(name)) report = null; };
 fs.mkdirSync = () => {};
 fs.writeFileSync = () => {};
@@ -32,7 +35,8 @@ fs.readFileSync = (name, ...args) => {
     },
   });
 };
-cp.spawnSync = () => {
+cp.spawnSync = (_command, args) => {
+  if (options.inspectArgs) console.log('CHILD_ARGS_MARKER ' + JSON.stringify(args));
   if (options.writesReport) report = 'CURRENT_REPORT_MARKER';
   return {
     status: options.status,
@@ -45,11 +49,11 @@ cp.spawnSync = () => {
 };
 syncBuiltinESMExports();
 process.argv = [process.execPath, 'benchmark/coverage.js',
-  ...(options.deadCode ? ['--dead-code'] : ['/required.json', '--functions'])];
+  ...(options.args ?? (options.deadCode ? ['--dead-code'] : ['/required.json', '--functions']))];
 await import('./benchmark/coverage.js');
 `;
 
-/** @param {{ deadCode: boolean, writesReport: boolean, status: number | null, launchError?: boolean, padding?: number }} options */
+/** @param {{ deadCode?: boolean, writesReport: boolean, status: number | null, launchError?: boolean, padding?: number, args?: string[], inspectArgs?: boolean }} options */
 function invoke(options) {
   const result = spawnSync(process.execPath,
     ['--input-type=module', '--eval', HARNESS, JSON.stringify(options)],
@@ -114,5 +118,47 @@ describe('coverage CLI failure reporting', () => {
       assert.match(result.stdout, /Functions (?:executed|hit): 1\/1/);
       assert.doesNotMatch(result.stdout, /DIAGNOSTIC_MARKER|OLD_REPORT_MARKER/);
     }
+  });
+});
+
+describe('coverage CLI option boundaries', () => {
+  it('honors the supplied temporary directory in both modes', () => {
+    for (const prefix of [['--dead-code'], ['/required.json']]) {
+      const result = invoke({ writesReport: true, status: 0, inspectArgs: true,
+        args: [...prefix, '--temp-dir', 'coverage/custom temp'] });
+      assert.equal(result.status, 0, result.stderr);
+      const args = JSON.parse(result.stdout.match(/CHILD_ARGS_MARKER (.+)/)[1]);
+      const directory = args[args.indexOf('--temp-directory') + 1];
+      assert.equal(directory.replaceAll('\\', '/'), ROOT.replaceAll('\\', '/').replace(/\/$/, '') + '/coverage/custom temp');
+    }
+  });
+
+  it('refuses unknown, missing, extra and wrong-mode arguments before any work', () => {
+    for (const args of [
+      [], [''], ['--functions'],
+      ['--dead-code', '--typo'], ['--dead-code', '--temp-dir'],
+      ['--dead-code', '--temp-dir', '--json'], ['--dead-code', '--iterations', '1'],
+      ['--dead-code', '/required.json'], ['/required.json', '--json'],
+      ['/required.json', '--no-fail'], ['/required.json', '/extra.json'],
+      ['/required.json', '--threshold', 'abc'], ['/required.json', '--threshold', 'Infinity'],
+      ['/required.json', '--iterations', 'abc'], ['/required.json', '--iterations', '0'],
+      ['/required.json', '--iterations', '1.5'], ['/required.json', '--iterations'],
+    ]) {
+      const result = invoke({ writesReport: true, status: 0, inspectArgs: true, args });
+      assert.notEqual(result.status, 0, args.join(' '));
+      assert.doesNotMatch(result.stdout, /FS_MUTATION_MARKER|CHILD_ARGS_MARKER/, args.join(' '));
+    }
+  });
+
+  it('keeps valid profiler controls and explains audit controls in help', () => {
+    const result = invoke({ writesReport: true, status: 0, inspectArgs: true,
+      args: ['/required.json', '--functions', '--touched-only', '--iterations', '2', '--threshold', '-1'] });
+    assert.equal(result.status, 0, result.stderr);
+    const args = JSON.parse(result.stdout.match(/CHILD_ARGS_MARKER (.+)/)[1]);
+    assert.equal(args[args.indexOf('--iterations') + 1], '2');
+    const help = invoke({ writesReport: true, status: 0, args: ['--help'] });
+    assert.equal(help.status, 0);
+    for (const option of ['--dead-code', '--json', '--no-fail', '--temp-dir'])
+      assert.ok(help.stdout.includes(option), option);
   });
 });

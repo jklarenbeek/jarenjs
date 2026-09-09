@@ -162,12 +162,14 @@ export function createMemoryLedger(options = {}) {
   /**
    * The started record a ref settles, or the `JC1011` refusal.
    * @param {unknown} ref
+   * @param {number} at - The settlement instant, also used for updatedAt
    * @returns {LedgerRecord}
    */
-  function settling(ref) {
+  function settling(ref, at) {
     const r = /** @type {any} */ (ref);
     const record = r !== null && typeof r === 'object' && typeof r.id === 'string' ? records.get(r.id) : undefined;
-    if (record === undefined || record.generation !== r.generation || record.status !== 'started') throw staleSettlement(ref);
+    if (record === undefined || record.generation !== r.generation || record.status !== 'started'
+      || record.expiresAt <= at) throw staleSettlement(ref);
     return record;
   }
 
@@ -194,18 +196,20 @@ export function createMemoryLedger(options = {}) {
       return { state: 'new', ref: Object.freeze({ id, generation }) };
     },
     commit(ref, response, now = undefined) {
-      const record = settling(ref);
+      const at = instant(now);
+      const record = settling(ref, at);
       record.status = 'committed';
       record.response = response;
       record.retryable = null;
-      record.updatedAt = instant(now);
+      record.updatedAt = at;
     },
     fail(ref, retryable, response, now = undefined) {
-      const record = settling(ref);
+      const at = instant(now);
+      const record = settling(ref, at);
       record.status = 'failed';
       record.retryable = retryable === true;
       record.response = response === undefined ? null : response;
-      record.updatedAt = instant(now);
+      record.updatedAt = at;
     },
     lookup({ op, scope, key, now = undefined }) {
       const record = records.get(ledgerId(op, scope, key));

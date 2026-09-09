@@ -12,7 +12,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
 | `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging |
 | `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
-| `@jarenjs/core/cache` | the bounded LRU (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS, for caches whose entries decide a result |
+| `@jarenjs/core/cache` | the bounded LRU with key deletion (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS, for caches whose entries decide a result |
 | `@jarenjs/core/random` | the suite's one seeded generator (`mulberry32`, pinned sequence, ToUint32 seed) and the draws built on it: `randomInt` over a half-open range, in-place Fisher–Yates `shuffle`, and `drawDistinct` — `k` distinct indices from one stream |
 | `@jarenjs/core/runtime` | the runtime record — `createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting member for member to the platform's own (`Date.now`, `crypto.randomUUID`, `Math.random`, no zone provider) — that the store (its query deadlines included), the jobs engine, the migration runner, every contract binding and the contract memory ledger take as `runtime`, so a deterministic run is configured once; a subsystem's own explicit option wins over the record, and the record reaches hosts, never query compilation |
 | `@jarenjs/core/stats` | descriptive statistics over a sample: `mean`, sample `variance`/`stddev`, the midpoint `median`, and `quantile(values, p, { method })` — `p` on 0..1 under a NAMED rule, `'nearest-rank'` or `'linear'`, because a default would decide silently; an empty sample answers `undefined`, never `0` |
@@ -21,7 +21,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/scan` | char-code constants and predicates for recursive-descent parsers |
 | `@jarenjs/core/message` | the message template/catalog compiler shared by the validator and the form layer |
 | `@jarenjs/core/color` | pure color math (`lerpColor` — hex `#rrggbb` interpolation) |
-| `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) |
+| `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) and `isJsonNumberString`, the strict lexical JSON-number predicate shared by query casts and schema normalization; conversion and overflow policy stay with each caller |
 | `@jarenjs/core/integer` | `int8` ... `uint64` ranges and validators |
 | `@jarenjs/core/float` | `float16` ... `float64` constants, validators, increment/decrement |
 | `@jarenjs/core/bigint` | bigint helpers (`BigInt_min`, `BigInt_MinMax`, ...) |

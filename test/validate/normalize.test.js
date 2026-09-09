@@ -464,6 +464,32 @@ describe('compileNormalizer — per-node control', () => {
 });
 
 describe('compileNormalizer — member schemas compose', () => {
+  it('normalizes materialized defaults through every matching pattern on the first application', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        count: { default: '42' },
+        label: { type: 'integer', default: ' 7 ' },
+        cfg: { default: { port: '8080' } },
+      },
+      patternProperties: {
+        '^count$': { type: 'integer' },
+        '^label$': { type: 'string' },
+        'label$': {},
+        '^cfg$': { properties: { port: { type: 'integer' } } },
+      },
+    };
+    const normalize = compileNormalizer(schema, { useDefaults: true, coerceTypes: true, trimStrings: true });
+    const input = {};
+    const once = normalize(input);
+    deepStrictEqual(once, { count: 42, label: '7', cfg: { port: 8080 } });
+    deepStrictEqual(normalize({ count: '42', label: ' 7 ', cfg: { port: '8080' } }), once);
+    strictEqual(normalize(once), once);
+    deepStrictEqual(input, {});
+    deepStrictEqual(schema.properties.cfg.default, { port: '8080' });
+    notStrictEqual(normalize({}).cfg, once.cfg);
+  });
+
   it('applies properties and every matching patternProperties in turn', () => {
     const both = compileNormalizer({
       type: 'object', patternProperties: { '^a': { type: 'integer' }, 'b$': { type: 'string' } },

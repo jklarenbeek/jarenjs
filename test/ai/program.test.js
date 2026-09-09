@@ -404,7 +404,7 @@ describe('ai — the runner answers with metadata and stores content in slots', 
 describe('ai — the root pays the same for any corpus', function () {
   it('holds its size while the corpus sweeps three orders of magnitude', async function () {
     const rows = [];
-    // three orders of magnitude, 3 kB → 3 MB, which is HORIZON_06's claim
+    // three orders of magnitude, 3 kB → 3 MB: metadata stays bounded
     // re-asserted with a program actually running over it
     for (const count of [12, 120, 1200, 12000]) {
       const environment = createEnvironment();
@@ -485,8 +485,8 @@ describe('ai — authoring a program', function () {
       sizes.push(sent.length);
     }
 
-    // the digest carries a CAPPED excerpt per slot by design (HORIZON_06's
-    // metadata view), so the honest claim is not "no corpus text" but "no
+    // the metadata digest carries a CAPPED excerpt per slot, so the
+    // contract is not "no corpus text" but "no
     // corpus text that grows": a hundredfold corpus moves the authoring
     // request by the digits it takes to say how big it got
     assert.ok(Math.abs(sizes[1] - sizes[0]) <= 32,
@@ -541,7 +541,7 @@ describe('ai — the question compaction cannot answer', function () {
     assert.strictEqual(result.valuesReached, corpus.n,
       'the reduce did not see every value, so the answer was not determined');
     assert.strictEqual(ceilingFor('pairwise', { valuePresent: result.valuesReached, n: corpus.n }), 1,
-      'the pairwise ceiling is still 0 — this order has not done its job');
+      'the pairwise ceiling must reach 1 when every value reaches the reduce');
     assert.ok(scorePairwise(result.answerText, corpus),
       `the answer named the wrong pair: ${result.answerText}`);
     // and it cost the root a plan and a report, against a corpus of

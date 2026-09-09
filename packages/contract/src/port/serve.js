@@ -21,6 +21,7 @@
  */
 
 import { compileMessageCatalog } from '@jarenjs/core/message';
+import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
@@ -503,8 +504,8 @@ export function servePort(contract, handlers, options) {
           return pushFrame(id, 'error', seq, wireError(code, renderMessage(catalog, row.msgid, { op: opId }), trace, undefined, row.retryable));
         },
         end: (reason, seq) => pushFrame(id, 'end', seq, { reason }),
-        // the byte account is the frame as posted: its JSON text
-        size: (frame) => JSON.stringify(frame).length,
+        // Account for the UTF-8 encoding of the posted frame's JSON text.
+        size: (frame) => utf8ByteLength(JSON.stringify(frame)),
         write: (frame) => post(frame, pushCtx),
         done: () => {
           streams.delete(id);

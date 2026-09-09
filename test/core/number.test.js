@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import * as assert from '../assert.node.js';
 
 import {
+  isJsonNumberString,
   isBoolishType,
   getBoolishType,
   isNumbishType,
@@ -9,6 +10,24 @@ import {
   getNumbishType,
   getIntishType,
 } from '@jarenjs/core/number';
+
+describe('isJsonNumberString', () => {
+  it('recognizes complete JSON-number spellings without imposing a numeric range', () => {
+    for (const value of ['0', '-0', '42', '-1.25', '1e5', '1E+5', '1e-5', '1e999', '-1e999', '9007199254740993'])
+      assert.isTrue(isJsonNumberString(value), value);
+  });
+
+  it('rejects other numeric grammars, malformed numbers and surrounding whitespace', () => {
+    for (const value of ['', '+1', '01', '-01', '.5', '1.', '-', '1e', '1e+', '0x10', '1_000', 'Infinity', 'NaN', ' 1', '1 ', '1\n', '1\r', '1\u2028', '1\u2029'])
+      assert.isFalse(isJsonNumberString(value), JSON.stringify(value));
+  });
+
+  it('rejects nonstrings without invoking conversion hooks', () => {
+    const hostile = { toString() { throw new Error('must not coerce'); } };
+    for (const value of [0, 1, NaN, Infinity, 1n, true, null, undefined, ['1'], Symbol('1'), hostile])
+      assert.isFalse(isJsonNumberString(value));
+  });
+});
 
 describe('isBoolishType', () => {
   it('should return true for boolean values', () => {

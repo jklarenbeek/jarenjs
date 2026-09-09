@@ -998,7 +998,9 @@ The `ref` a `new` claim hands back is `{ id, generation }` — the
 record's id and the **generation** the claim minted for it — and is
 portable: it names the record across processes rather than holding it.
 A settlement is fenced by both: `commit`/`fail` settle the record whose
-`id` AND `generation` the ref names while it is still `started`, and a
+`id` AND `generation` the ref names while it is still `started` and its
+`expiresAt` is greater than the settlement instant. Expiry is checked by
+the settlement itself, without waiting for a lookup or sweep. A
 ref whose record expired, was reclaimed under a newer generation, or was
 settled already is refused with `JC1011` (thrown or rejected) — the
 binding reports it to `onError` and the response still goes out, so a
@@ -1114,8 +1116,8 @@ export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date
   const put = db.prepare("INSERT INTO ledger (id, generation, op, scope, key, hash, status, createdAt, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?, ?)");
   const drop = db.prepare('DELETE FROM ledger WHERE id = ?');
   // the fence: a settlement names the id AND the generation of the claim
-  // that started the record, so a ref of an earlier claim matches no row
-  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE id = ? AND generation = ? AND status = 'started'");
+  // that started the record, and the record must still be unexpired
+  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE id = ? AND generation = ? AND status = 'started' AND expiresAt > ?");
   const reap = db.prepare('DELETE FROM ledger WHERE expiresAt <= ?');
   const stored = (row) => (row.response === null ? null : JSON.parse(row.response));
   const at = (now) => (typeof now === 'number' ? now : clock());
@@ -1147,10 +1149,12 @@ export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date
       }
     },
     commit(ref, response, now) {
-      settled(ref, settle.run('committed', JSON.stringify(response), null, at(now), (ref)?.id ?? '', (ref)?.generation ?? '').changes);
+      const time = at(now);
+      settled(ref, settle.run('committed', JSON.stringify(response), null, time, (ref)?.id ?? '', (ref)?.generation ?? '', time).changes);
     },
     fail(ref, retryable, response, now) {
-      settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, at(now), (ref)?.id ?? '', (ref)?.generation ?? '').changes);
+      const time = at(now);
+      settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, time, (ref)?.id ?? '', (ref)?.generation ?? '', time).changes);
     },
     lookup({ op, scope, key, now }) {
       const row = (one.get(ledgerId(op, scope, key)));
@@ -2395,7 +2399,7 @@ no-store`, `x-jaren-trace`. Events, in order:
 - `end` — data `{ "reason": "closed" | "server-shutdown" }`.
 
 `seq` is strictly increasing per stream; a violation is the client's
-`JC2092`. An emission whose serialized patch exceeds
+`JC2092`. An emission whose serialized patch's UTF-8 byte length exceeds
 `policy.stream.maxPatchBytes` is replaced by a fresh `snapshot` event
 at that emission's seq — the consumer swaps its document instead of
 patching it; nothing is dropped.
@@ -2423,10 +2427,11 @@ informational, never an outcome).
 **Bounds.** `serveHttp`/`servePort` take `streamLimits: { replay: {
 limit, maxBytes }, queue: { events, bytes } }` (defaults 256 / 1 MiB
 for both): a replay page asks for at most `replay.limit` emissions and
-`replay.maxBytes` serialized patch bytes; the undelivered queue — the
-events that arrived while a carrier write was pending or a page was
+`replay.maxBytes` serialized patch bytes, measured in UTF-8; the undelivered
+queue — the events that arrived while a carrier write was pending or a page was
 loading, the SSE text or port frame as it will go on the wire — holds
-at most `queue.events` frames and `queue.bytes` bytes, each charged
+at most `queue.events` frames and `queue.bytes` UTF-8 bytes (the JSON
+encoding of a port frame), each charged
 until its write settled. When the next event would cross either bound
 the stream ends with the terminal `error` event `JC2096` (`kind:
 network`, retryable — the consumer reads slower than the source

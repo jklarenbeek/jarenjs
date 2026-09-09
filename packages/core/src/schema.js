@@ -1,14 +1,11 @@
 //@ts-check
 /**
  * @file The JSON Schema constraint-keyword vocabulary, grouped by the
- * value family each keyword constrains. Before this file the same
- * keyword lists were spelled four times (forms' constraint extraction,
- * emit's dropped-constraint table, the validator's `$data` dispatch
- * order and its `$ref`-sibling detection) — and a keyword added to one
- * list silently missed the others. Each site composes the list it wants
- * from these groups and appends its own extras; the loops stay where
- * they are, because the drift risk was always in the data, not the
- * code.
+ * value family each keyword constrains. Forms' constraint extraction,
+ * emit's dropped-constraint table and the validator's dispatch and
+ * `$ref`-sibling detection compose their lists from these shared groups
+ * and append their own extras. Consumers own their processing loops;
+ * the shared vocabulary keeps keyword membership consistent.
  *
  * ORDER IS PART OF THE CONTRACT: the validator's `$data` dispatch
  * applies keywords in list order and its error order is observable

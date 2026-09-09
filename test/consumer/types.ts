@@ -1,5 +1,7 @@
 import { isStringType } from '@jarenjs/core';
 import { getStringLength } from '@jarenjs/core/string';
+import { isJsonNumberString } from '@jarenjs/core/number';
+import { createBoundedCache } from '@jarenjs/core/cache';
 import {
   compileJsonQuery, analyzeQuery, annotateTypes,
   NODE_KINDS, TYPE_TAGS, AST_VERSION,
@@ -58,6 +60,11 @@ const form = buildFormModel({
 });
 
 isStringType(query({ name: 'Jaren' }));
+const jsonNumber: boolean = isJsonNumberString('1.25e2');
+const boundedCache = createBoundedCache<string, number>(2);
+boundedCache.set('entry', 1);
+const removed: boolean = boundedCache.delete('entry');
+void [jsonNumber, removed];
 getStringLength(render({ name: 'Jaren' }));
 validate('Jaren');
 createTypeTestCompiler(validator);

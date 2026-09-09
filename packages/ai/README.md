@@ -87,13 +87,15 @@ the selected model: `temperature` is omitted unless supplied, and `reasoning`
 is a provider-specific passthrough, not a translation to OpenAI's
 `reasoning_effort`. See the [OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
 
-**Retries are built in.** Transient failures — network errors, 408, 429, 5xx — back off
+**Retries are built in.** Transient failures — network errors, 408, 429, 5xx,
+and malformed HTTP 200 payloads in either streaming mode — back off
 exponentially with full jitter and try again (`retry: { attempts, baseMs, maxMs }`,
 default 3 total tries; `attempts: 1` disables). A provider `Retry-After` header (seconds
 or HTTP-date) overrides the computed delay, capped at `maxMs`. Two hard rules: a request
 never retries once `onDelta` or `onReasoning` has received output, and an abort cancels the
-backoff immediately. The final `AI0002` reports what happened: `status`, `attempts`,
-`retryAfterMs`.
+backoff immediately, preserving the signal's exact cancellation reason. The final
+transport `AI0002` reports `status`, `attempts`, and `retryAfterMs`; an exhausted
+malformed reply reports `AI0003` with `attempts`.
 
 **Reasoning models are first-class.** Thinking streamed as `delta.reasoning` (or
 `reasoning_details`) reaches the caller through `onReasoning`, and the final message

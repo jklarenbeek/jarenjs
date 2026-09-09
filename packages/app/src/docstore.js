@@ -6,13 +6,18 @@
  * the host so the package stays free of `localStorage`.
  *
  * `createDocStore` is a keyed CRUD over an injected `storage` ({ read, write }):
- * the store is one JSON object `{ [key]: { name → value } }`, read once at
- * creation and written back on every mutation. `encodeShare` / `decodeShare`
+ * the store is one JSON object `{ [key]: { name → value } }`, read once per
+ * storage adapter, shared by its collections and written back on every
+ * mutation. `encodeShare` / `decodeShare`
  * turn a small snapshot into a Unicode-safe base64url token and back —
  * forgivingly: a corrupt token decodes to `null`, never a throw.
  */
 
 import { setObjectMember } from '@jarenjs/core/object';
+import { createWeakCache } from '@jarenjs/core/cache';
+
+/** Collection handles share their adapter's root, including unsaved fallback data. */
+const storesByStorage = createWeakCache();
 
 /**
  * @param {Object} opts
@@ -29,8 +34,8 @@ import { setObjectMember } from '@jarenjs/core/object';
  * }}
  */
 export function createDocStore({ storage, key = 'experiments' }) {
-  // read once; keep the SAME object reference for every write-back
-  const store = storage.read() ?? {};
+  // Read once per adapter; every collection writes the same current root.
+  const store = storesByStorage.getOrCreate(storage, () => storage.read() ?? {});
   if (!Object.hasOwn(store, key) || store[key] == null) setObjectMember(store, key, {});
   return {
     save(name, value) { setObjectMember(store[key], name, value); storage.write(store); },

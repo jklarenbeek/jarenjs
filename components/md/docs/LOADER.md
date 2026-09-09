@@ -39,8 +39,10 @@ callbacks key by identity, so equally named plugins with different
 implementations never alias. Treat plugin objects and callbacks as
 immutable for the lifetime of a compiled document.
 
-- `createMdCache(limit = 64)` — an LRU cache instance; the default
-  shared instance is exported as `defaultMdCache`.
+- `createMdCache(limit = 64)` — an LRU cache backed by
+  `@jarenjs/core/cache`; the default shared instance is exported as
+  `defaultMdCache`. Numeric capacities round down; values below one
+  retain no entries. `Infinity` and `NaN` do not trigger eviction.
 - `cache: false` — bypass entirely.
 - `cache.delete(url)` — invalidate the normalized URL's default-options
   entry; `cache.clear()` invalidates every entry, including option variants.

@@ -137,6 +137,57 @@ function pageOf(/** @type {any[]} */ items, /** @type {Partial<any>} */ extra = 
 }
 const patchAt = (/** @type {number} */ seq) => ({ patch: [{ op: 'add', path: '/rows/-', value: seq }], seq });
 
+describe('stream runner — UTF-8 patch budgets', () => {
+  it('sends a patch at maxPatchBytes and a fresh snapshot one byte over it', async () => {
+    const patch = [{ op: 'add', path: '/rows/-', value: '界'.repeat(10) }];
+    assert.strictEqual(JSON.stringify(patch).length, 52);
+    assert.strictEqual(new TextEncoder().encode(JSON.stringify(patch)).byteLength, 72);
+    for (const maxPatchBytes of [72, 71]) {
+      const source = makeSource({ rows: ['界'.repeat(10)] });
+      const carrier = makeCarrier({ sync: true });
+      const route = { ...ROUTE, op: { ...ROUTE.op, policy: {
+        ...ROUTE.op.policy, stream: { ...ROUTE.op.policy.stream, maxPatchBytes },
+      } } };
+      const runner = runSubscription(route, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+      try {
+        source.emit({ patch, seq: 1 });
+        assert.deepStrictEqual(carrier.log, ['snapshot:0', maxPatchBytes === 72 ? 'patch:1' : 'snapshot:1']);
+        assert.deepStrictEqual(carrier.frames[1].data, maxPatchBytes === 72
+          ? { patch, seq: 1 }
+          : { value: { rows: ['界'.repeat(10)] }, resumed: false, reset: false, earliestAvailable: null, highWatermark: null });
+      }
+      finally {
+        runner.stop(null);
+        await runner.done;
+      }
+    }
+  });
+
+  it('refuses a replay page one UTF-8 byte over maxBytes and accepts the exact bound', async () => {
+    const patch = [{ op: 'add', path: '/rows/-', value: '界'.repeat(10) }];
+    for (const maxBytes of [72, 71]) {
+      const source = makeSource({ rows: [] }, { replay: () => pageOf([{ patch, seq: 1 }]) });
+      const carrier = makeCarrier({ sync: true });
+      const limits = resolveStreamLimits({ replay: { maxBytes } }, (r) => new Error(r));
+      const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: 0, validate: true, limits });
+      try {
+        assert.strictEqual(carrier.frames[0].event, maxBytes === 72 ? 'patch' : 'error');
+        if (maxBytes === 72) assert.deepStrictEqual(carrier.frames[0].data, { patch, seq: 1 });
+        else {
+          assert.strictEqual(carrier.frames[0].data.intent, 'source');
+          assert.strictEqual(carrier.frames[0].data.cause.message,
+            "the replay of 'feed' answered an invalid page: a replay page holds 72 patch bytes over the 71 asked for");
+        }
+      }
+      finally {
+        runner.stop(null);
+        await runner.done;
+      }
+      assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    }
+  });
+});
+
 describe('stream runner — ordered, awaited frames', () => {
   it('frames are written in source order and never overlap: the next starts only after the previous settled', async () => {
     const source = makeSource({ rows: [] });

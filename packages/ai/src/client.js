@@ -134,10 +134,10 @@ function fromCompletion(payload) {
 /**
  * A reply that arrived as text rather than as a stream of events: one
  * JSON completion document — a provider or proxy that ignores `stream`
- * — or nothing this client can read. One implementation for both places
- * that can happen (a fetch without a readable body, and a stream that
- * closed without a single event), so both answer the same way: the
- * message, or `AI0003`. Never a silent empty message.
+ * — or nothing this client can read. One implementation for every place
+ * that can happen (a nonstreaming request, a fetch without a readable
+ * body, and a stream that closed without a single event), so all answer
+ * the same way: the message, or `AI0003`. Never a silent empty message.
  * @param {string} text
  * @returns {any} the normalized result
  */
@@ -306,7 +306,7 @@ export function createChatClient(options = {}) {
       throw transportFailure(err, endpoint.url);
     }
     if (response.ok !== true) throw await httpFailure(response, endpoint.url);
-    if (!stream) return fromCompletion(await response.json());
+    if (!stream) return completionFromText(await response.text());
 
     const decoder = createSseDecoder();
     const accumulator = createStreamAccumulator();

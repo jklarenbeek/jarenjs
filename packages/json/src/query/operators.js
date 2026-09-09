@@ -32,6 +32,7 @@
 
 import { aggregateSequence } from './accumulator.js';
 import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
+import { isJsonNumberString } from '@jarenjs/core/number';
 import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import {
@@ -192,8 +193,6 @@ function castString(v, docPath) {
 
 // the $number cast table (section 8.10): strings must be JSON numbers
 // (strict RFC 8259 grammar - no leading '+', no bare '.', no whitespace)
-const JSON_NUMBER_RE = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
-
 function castNumber(v, docPath) {
   switch (typeof v) {
     case 'number':
@@ -201,7 +200,7 @@ function castNumber(v, docPath) {
     case 'boolean':
       return v ? 1 : 0;
     case 'string':
-      if (JSON_NUMBER_RE.test(v))
+      if (isJsonNumberString(v))
         return Number(v);
       throw runtimeError('JQ2001', `'${v}' is not a JSON number`, docPath);
     default:

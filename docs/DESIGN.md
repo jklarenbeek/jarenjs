@@ -86,8 +86,12 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   prevents: a pale fill under a dark theme gets pale text and the label
   disappears into its own box. A theme-linked fill is the opposite case and
   keeps the theme's ink, because the two move together.
-- Radii: exactly two — `--radius` for cards/callouts/dialogs, `--radius-sm` for controls,
-  inputs, editors, code blocks. No new literal radii above 6px.
+- Corner radii use exactly two tokens — `--radius` for cards/callouts/dialogs,
+  `--radius-sm` for controls, inputs, editors, code blocks. No new literal corner
+  radii above 6px. **Shape exception:** fully rounded badges, chips and progress
+  tracks use `999px` to form capsules; circular marks may use `50%`. These define
+  the shape rather than another corner-radius size, and do not apply to cards,
+  dialogs or editors.
 
 ## 4. Typography
 
@@ -105,9 +109,8 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
 - Breakpoints: **1024 px** (two-column grids collapse or narrow before they cramp),
   **760 px** (mobile), and one recorded exception, **360 px** (very narrow phones: the
   docs README buttons drop from 2-up to full rows so they stay tappable). New
-  intermediate breakpoints need a reason recorded here. The Flow studio's
-  unrecorded **900 px** is gone: the one-pane block below owns that collapse
-  now, at 1024 like everything else.
+  intermediate breakpoints need a reason recorded here. The homepage demo's
+  editor/stage grid and the Flow studio use the shared 1024 px collapse.
 - **Grid tracks that hold arbitrary content are `minmax(0, 1fr)`, never bare `1fr`.**
   `1fr` means `minmax(auto, 1fr)`: the track can never shrink below its largest item's
   min-content width, so a single nowrap scroll strip inside it widens the whole page

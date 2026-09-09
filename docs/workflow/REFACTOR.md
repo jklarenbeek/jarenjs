@@ -94,8 +94,9 @@ names, or defaults differ. Do not rely on grep-by-name alone.
   silently picking one.
 - **One home per concept.** After a move, exactly one implementation exists; every former copy
   is deleted and re-imported. Do not leave a leaf-package re-export shim unless a *published
-  public* export name would otherwise break — prefer the clean rename (these are pre-1.0
-  workspace packages linked by `file:`, so internal renames are free).
+  public* export name would otherwise break — prefer the clean rename for internal symbols.
+  Workspace dependencies use the shared version range; published exports retain their
+  compatibility obligations even while npm links the local workspace during development.
 - **Update export maps + barrels.** New subpaths go in the owning package's `package.json`
   `exports` (mirroring how `@jarenjs/core` maps `./math`/`./math/*`); barrels re-export moved
   symbols; `files`/`sideEffects` stay correct; `npm run test:tree-shaking` still passes.
@@ -244,7 +245,7 @@ logical parent.
       re-imported; the most general accurate name chosen and propagated to all dependents.
 - [ ] Zero-dep and the one-way dependency arrow preserved; the two-layer component rule holds;
       **no circular dependencies**; export maps/barrels/`files`/`sideEffects` updated.
-- [ ] `npm run benchmark:coverage` (dead-code audit, stage 4 of the gate) run on a green suite;
+- [ ] `npm run benchmark:coverage` (dead-code audit in the gate's concurrent phase) run on a green suite;
       every FULLY DEAD FILE and DEAD FUNCTION finding resolved — removed, or covered by a new
       test — with any deliberate "keep" (a true entry point) justified and, ideally, excluded
       from the audit.

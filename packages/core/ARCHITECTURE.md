@@ -83,7 +83,7 @@ flowchart TB
             Integer["integer.js<br/>Int8/16/32/64 validation"]
             Float["float.js<br/>Float16/32/64 validation"]
             BigIntModule["bigint.js<br/>BigInt utilities"]
-            NumberModule["number.js<br/>Number coercion"]
+            NumberModule["number.js<br/>Coercion and JSON number grammar"]
         end
 
         subgraph CollectionModules["Collection Modules"]

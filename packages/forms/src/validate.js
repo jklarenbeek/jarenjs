@@ -229,7 +229,7 @@ export function validateField(field, value, catalog = undefined) {
 }
 
 /**
- * Validate every leaf field of a model against the current data.
+ * Validate every field of a model against the current data's own JSON members.
  * Returns a map of data-pointer -> FieldError[] for fields that fail.
  * @param {import('./model.js').FormField} model - Root field from buildFormModel
  * @param {any} data - Current form data
@@ -252,7 +252,8 @@ function walkFields(field, value, pointer, result, catalog) {
       // RFC 6901-encoded, the walk convention shared with the model
       // and rule pointers — a member name containing '/' or '~' stays
       // addressable and never collides with a nested path
-      walkFields(child, value[child.key], `${pointer}/${encodeJSONPointerSegment(child.key)}`, result, catalog);
+      const childValue = Object.hasOwn(value, child.key) ? value[child.key] : undefined;
+      walkFields(child, childValue, `${pointer}/${encodeJSONPointerSegment(child.key)}`, result, catalog);
     }
   }
   else if (field.kind === 'array' && Array.isArray(value)) {

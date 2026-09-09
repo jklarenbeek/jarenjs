@@ -306,7 +306,7 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 .hero-demo-links { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-4); }
 .hero-demo-caption { color: var(--muted); font-size: 0.85rem; margin-top: var(--space-2); }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .hero-demo-grid { grid-template-columns: minmax(0, 1fr); }
 }
 

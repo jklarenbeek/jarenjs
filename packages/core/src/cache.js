@@ -1,19 +1,14 @@
 //@ts-check
 /**
- * @file The suite's one bounded-cache primitive. Before this file the
- * FIFO-512 delete-oldest map was written five times (the query engine's
- * string cache, the JSONPath query cache, forms' three pointer caches)
- * with a sixth divergent flush-all variant in forms' regex cache and a
- * true LRU in the view projection memo. One implementation, one policy:
+ * @file The suite's bounded-cache primitive for compiled queries,
+ * pointers, regular expressions and view projections. One eviction policy
+ * keeps each consumer's retained working set bounded:
  *
  *  - **LRU with recency refresh**: a `get` hit re-inserts the entry, so
  *    the evicted entry is the least recently USED, not the oldest
- *    inserted. (FIFO versus LRU was never result-observable at any call
- *    site — both bound memory; LRU keeps hot entries hotter.)
+ *    inserted.
  *  - **Evict at `size >= limit` before inserting a new key**, so the
- *    cache never holds more than `limit` entries. (The old sites
- *    disagreed between `>=`-before and `>`-after; the capacity is the
- *    same, the invariant here is simply "never above `limit`".)
+ *    cache never holds more than `limit` entries for a positive integer limit.
  *  - `undefined` is the miss sentinel: a cache MUST NOT store
  *    `undefined` as a value (store `null` for "computed, negative" —
  *    the regex cache does exactly that).
@@ -41,6 +36,8 @@ import { semanticKey } from './object.js';
  *   the least recently used entry when the cache is full.
  * @property {(key: K, create: (key: K) => V) => V} getOrCreate - Lookup
  *   or compute-and-insert in one step.
+ * @property {(key: K) => boolean} delete - Drop one entry; true when the
+ *   key existed, including an entry whose value was undefined.
  * @property {() => void} clear - Drop every entry.
  * @property {() => number} size - Current entry count.
  */
@@ -84,7 +81,8 @@ export function createBoundedCache(limit) {
     return value;
   }
 
-  return { get, set, getOrCreate, clear: () => map.clear(), size: () => map.size };
+  return { get, set, getOrCreate, delete: (key) => map.delete(key),
+    clear: () => map.clear(), size: () => map.size };
 }
 
 /**

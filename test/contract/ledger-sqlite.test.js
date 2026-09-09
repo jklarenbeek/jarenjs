@@ -42,8 +42,8 @@ export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date
   const put = db.prepare("INSERT INTO ledger (id, generation, op, scope, key, hash, status, createdAt, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, 'started', ?, ?, ?)");
   const drop = db.prepare('DELETE FROM ledger WHERE id = ?');
   // the fence: a settlement names the id AND the generation of the claim
-  // that started the record, so a ref of an earlier claim matches no row
-  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE id = ? AND generation = ? AND status = 'started'");
+  // that started the record, and the record must still be unexpired
+  const settle = db.prepare("UPDATE ledger SET status = ?, response = ?, retryable = ?, updatedAt = ? WHERE id = ? AND generation = ? AND status = 'started' AND expiresAt > ?");
   const reap = db.prepare('DELETE FROM ledger WHERE expiresAt <= ?');
   const stored = (/** @type {any} */ row) => (row.response === null ? null : JSON.parse(row.response));
   const at = (/** @type {number | undefined} */ now) => (typeof now === 'number' ? now : clock());
@@ -75,10 +75,12 @@ export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date
       }
     },
     commit(ref, response, now) {
-      settled(ref, settle.run('committed', JSON.stringify(response), null, at(now), /** @type {any} */ (ref)?.id ?? '', /** @type {any} */ (ref)?.generation ?? '').changes);
+      const time = at(now);
+      settled(ref, settle.run('committed', JSON.stringify(response), null, time, /** @type {any} */ (ref)?.id ?? '', /** @type {any} */ (ref)?.generation ?? '', time).changes);
     },
     fail(ref, retryable, response, now) {
-      settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, at(now), /** @type {any} */ (ref)?.id ?? '', /** @type {any} */ (ref)?.generation ?? '').changes);
+      const time = at(now);
+      settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, time, /** @type {any} */ (ref)?.id ?? '', /** @type {any} */ (ref)?.generation ?? '', time).changes);
     },
     lookup({ op, scope, key, now }) {
       const row = /** @type {any} */ (one.get(ledgerId(op, scope, key)));

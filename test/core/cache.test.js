@@ -59,6 +59,19 @@ describe('createBoundedCache', () => {
     assert.strictEqual(cache.size(), 0);
     assert.strictEqual(cache.get('a'), undefined);
   });
+
+  it('deletes an existing key without removing its siblings', () => {
+    const cache = createBoundedCache(2);
+    cache.set('kept', 1);
+    cache.set('empty', undefined);
+    assert.strictEqual(cache.delete('empty'), true);
+    assert.strictEqual(cache.delete('empty'), false);
+    assert.strictEqual(cache.delete('absent'), false);
+    assert.strictEqual(cache.size(), 1);
+    cache.set('new', 2);
+    assert.strictEqual(cache.get('kept'), 1);
+    assert.strictEqual(cache.get('new'), 2);
+  });
 });
 
 describe('createWeakCache', () => {

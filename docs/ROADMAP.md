@@ -121,6 +121,12 @@ delete it or fix it.
 - [ ] **Predicate normalization from the CLI** — `--defaults`/`--coerce` are
   booleans, so the per-node predicate route (`x-trim`, `x-coerce`, `x-default`)
   is programmatic-only; a config-file route would make it usable from the CLI.
+- [ ] **Normalization across `allOf` branches** — branches run once in declaration
+  order. If an earlier branch coerces `count` and a later branch supplies its
+  default `'42'`, the first application returns `{ count: '42' }` and a second
+  returns `{ count: 42 }`. Decide whether to preserve ordered composition or
+  define cross-branch default processing before promising a fixed point; changing
+  that order can affect existing normalizers.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
@@ -681,6 +687,13 @@ still open is listed here, each with its reason.
   (~577k), and records the loss here rather than pretending the gap is small.
 
 ## Benchmarks & tooling
+
+- [ ] **Portable streaming backpressure measurement** — the fixed-heap host-seam
+  test's encoded-minus-consumed count includes platform TCP buffers. Its existing
+  bound can fail during a parallel suite run while the unchanged isolated test
+  and full rerun pass. Define a portable measurement of queued application data
+  while retaining the fixed-heap, complete-byte, hash and cancellation assertions
+  in `test/contract/host-seam-e2e.test.js`.
 
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident

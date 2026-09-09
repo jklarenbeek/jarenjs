@@ -209,17 +209,23 @@ node benchmark/coverage.js '/required.json' --threshold 25
 node benchmark/coverage.js '/required.json' --functions
 
 # Single-fixture options
-  --iterations <n>   Profiling iterations (default: 1000)
+  --iterations <n>   Positive safe integer profiling iterations (default: 1000)
   --threshold <n>    Only show files with function coverage > n% (default: 0)
   --functions        Show TOUCHED and NOT touched functions
   --touched-only     Show only TOUCHED functions
-  --temp-dir <dir>   Temporary directory for c8 coverage data
 
 # Dead-code audit options
   --json            Print the audit data as JSON after the run banner
   --no-fail         Report dead-code findings without failing on them;
                     test failures and missing coverage still fail
+
+# Shared options
+  --temp-dir <dir>   Temporary directory for c8 coverage data in either mode
+  --help, -h        Explain both modes and their options
 ```
+
+Unknown options, missing values, extra targets, and options belonging only to the
+other mode fail before coverage files are touched or a child is launched.
 
 The dead-code audit reports **fully dead files**, **untouched functions** in
 otherwise-used files, and the total function hit count. An empty report or

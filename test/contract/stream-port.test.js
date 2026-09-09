@@ -164,6 +164,44 @@ function record(client, input = { collection: 'notes' }, options = {}) {
 }
 
 describe('stream over port — a MessageChannel pair', () => {
+  it('charges UTF-8 bytes to the actual port queue and refuses a frame one byte over its bound', async () => {
+    const patch = [{ op: 'add', path: '/rows/-', value: '界'.repeat(100) }];
+    const frame = { jaren: 'contract/0.1', id: 'unicode:1', event: 'patch', seq: 1, data: { patch, seq: 1 } };
+    const bytes = new TextEncoder().encode(JSON.stringify(frame)).byteLength;
+    assert.strictEqual(bytes - JSON.stringify(frame).length, 200);
+    for (const limit of [bytes, bytes - 1]) {
+      const { server, client: clientPort, emitted } = pair();
+      const source = makeSource({ rows: [] });
+      const binding = track(servePort(CONTRACT, { 'data.live': () => source.sub, 'data.rows': () => [] }, {
+        channel: server, streamLimits: { queue: { bytes: limit } },
+      }));
+      const client = track(openPortClient(CONTRACT, { channel: clientPort, runtime: { uuid: () => 'unicode' } }));
+      const { seen, sub } = record(client);
+      try {
+        await wait(() => seen.snapshots.length === 1);
+        source.emit({ patch, seq: 1 }, { rows: ['界'.repeat(100)] });
+        await wait(() => seen.patches.length + seen.errors.length === 1);
+        if (limit === bytes) {
+          assert.deepStrictEqual(seen.patches, [{ patch, seq: 1 }]);
+          assert.deepStrictEqual(seen.errors, []);
+          assert.deepStrictEqual(emitted[1], frame);
+        }
+        else {
+          assert.deepStrictEqual(seen.patches, []);
+          assert.strictEqual(seen.errors[0].error.code, 'JC2096');
+          assert.deepStrictEqual(emitted.map((f) => f.event), ['snapshot', 'error']);
+          await wait(() => source.counts.closes === 1);
+          assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+        }
+      }
+      finally {
+        sub.stop();
+        client.close();
+        binding.close();
+      }
+    }
+  });
+
   it('snapshot then patches; unsubscribe releases the subscription exactly once', async () => {
     const { server, client: clientPort } = pair();
     const source = makeSource({ rows: [] });

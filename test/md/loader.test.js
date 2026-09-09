@@ -296,6 +296,60 @@ describe('loadMarkdown', function () {
 });
 
 describe('createMdCache', function () {
+  it('retains nothing when the capacity is below one', function () {
+    for (const limit of [-Infinity, -2, -0.5, -0, 0, 0.5]) {
+      const cache = createMdCache(limit);
+      cache.set('a', 1);
+      cache.set('b', undefined);
+      assert.equal(cache.get('a'), undefined);
+      assert.equal(cache.delete('a'), false);
+      assert.equal(cache.delete('b'), false);
+      cache.clear();
+    }
+  });
+
+  it('rounds fractional capacities down and refreshes recency', function () {
+    const single = createMdCache(1.5);
+    single.set('a', 1);
+    single.set('b', 2);
+    assert.equal(single.get('a'), undefined);
+    assert.equal(single.get('b'), 2);
+
+    const pair = createMdCache(2.5);
+    pair.set('a', 1);
+    pair.set('b', 2);
+    assert.equal(pair.get('a'), 1);
+    pair.set('c', 3);
+    assert.equal(pair.get('b'), undefined);
+    assert.equal(pair.get('a'), 1);
+    assert.equal(pair.get('c'), 3);
+  });
+
+  it('does not evict for an infinite or NaN capacity', function () {
+    for (const limit of [Infinity, NaN]) {
+      const cache = createMdCache(limit);
+      for (let i = 0; i < 128; i++) cache.set(String(i), i);
+      for (let i = 0; i < 128; i++) assert.equal(cache.get(String(i)), i);
+      cache.clear();
+      assert.equal(cache.get('0'), undefined);
+    }
+  });
+
+  it('counts undefined entries without refreshing their recency on get', function () {
+    const cache = createMdCache(2);
+    cache.set('missing', undefined);
+    cache.set('kept', 2);
+    assert.equal(cache.get('missing'), undefined);
+    cache.set('new', 3);
+    assert.equal(cache.delete('missing'), false, 'the miss did not refresh recency');
+    assert.equal(cache.delete('kept'), true);
+    assert.equal(cache.delete('kept'), false);
+    cache.set('empty', undefined);
+    assert.equal(cache.delete('empty'), true, 'a retained undefined entry exists for deletion');
+    assert.equal(cache.delete('empty'), false);
+    assert.equal(cache.get('new'), 3);
+  });
+
   it('evicts least-recently-used entries at the limit', function () {
     const cache = createMdCache(2);
     cache.set('a', 1);

@@ -117,6 +117,7 @@ export async function withRetry(policy, once, options) {
       return await once();
     }
     catch (err) {
+      if (options.signal?.aborted) throw abortError(options.signal);
       const failure = /** @type {any} */ (err);
       const coded = failure instanceof AiError;
       if (!(coded && options.retryable(failure) && attempt < policy.attempts)) {

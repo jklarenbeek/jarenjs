@@ -1,5 +1,19 @@
 //@ts-check
 
+const JSON_NUMBER_RE = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * Whether a string is exactly one JSON number (RFC 8259 section 6), with
+ * no surrounding whitespace. This checks spelling only: `1e999` is valid
+ * even though converting it to a JavaScript number overflows. Callers
+ * choose their own conversion, finiteness and safe-integer policies.
+ * @param {unknown} value - The value to check, without coercion
+ * @returns {boolean} True for a string matching the complete number grammar
+ */
+export function isJsonNumberString(value) {
+  return typeof value === 'string' && JSON_NUMBER_RE.test(value);
+}
+
 /**
  * Checks if the given data is of boolean type or boolean-like (the strings 'true' or 'false').
  * @param {any} data - The data to check.

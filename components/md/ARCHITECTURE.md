@@ -119,7 +119,7 @@ hand-written expectations.
 | `src/to-md.js` | Canonical printer (round-trip fixed point) |
 | `src/to-html.js` | String emitter: AST → HTML bytes, the raw-HTML modes, `wrap` |
 | `src/to-vnode.js` | Vnode emitter (per-node memo, content-hash keys), `createMdRenderer` with hydrate scheduling |
-| `src/loader.js` | LRU cache + validators, in-flight sharing, AbortSignal, `streamMarkdown` |
+| `src/loader.js` | Shared core LRU + HTTP validators, in-flight sharing, AbortSignal, `streamMarkdown` |
 | `src/plugins/` | `definePlugin` + the two reference plugins (highlight, mermaid) |
 | `src/component/` | **the visual component** — `createMdComponent` (memoized `view()`, app `effects`, `hydrate`); imports the engine, never the reverse |
 | `styles/md.css` | the component stylesheet (`.md` rhythm, `tok-*` token colors, mermaid placeholder), light/dark |
@@ -209,14 +209,19 @@ compute once per compiled document.
 
 ## The loader
 
-`loadMarkdown` = normalize URL → cache lookup (keyed on URL + plugin
-names) → fetch. The cache stores the compiled document plus its
+`loadMarkdown` = normalize URL → cache lookup → fetch. Cache keys include
+the URL, compile/render options and plugin/callback identities; the default
+configuration keeps the URL itself as its key. The cache stores the compiled document plus its
 `ETag`/`Last-Modified`; hits resolve immediately and revalidate in the
 background; in-flight promises are cached so concurrent loads share one
 request; failures and aborts evict. Streaming bodies feed
 `createIncrementalParser` chunk by chunk, and `streamMarkdown` exposes
 the same core as an async generator of completed top-level blocks whose
 return value is the finished document.
+
+`createMdCache` adapts `@jarenjs/core/cache`'s bounded LRU to the loader's
+`get`/`set`/`delete`/`clear` interface and numeric-capacity policy. Recency,
+entry deletion and eviction have one implementation in core.
 
 ## Performance notes
 

@@ -111,7 +111,8 @@ Operation overflow is `JD2106`; all credits are positive safe integers. Retentio
 prunes only outgoing envelope history. Replay receipts, row tombstones and
 conflict evidence remain durable. They are deliberately not claimed to be a
 bounded total database size. Internal tables use the reserved `_jaren_replica`
-prefix. No schema migration or revision rewrite of this protocol is implicit.
+prefix and are excluded from model introspection and migration shape comparisons.
+No schema migration or revision rewrite of this protocol is implicit.
 
 ## Conflicts
 

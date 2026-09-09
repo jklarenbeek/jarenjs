@@ -32,15 +32,10 @@ import {
 
 import { parseJSONPointer } from '@jarenjs/json';
 import { createRegExpTester } from '@jarenjs/core/string';
+import { isJsonNumberString } from '@jarenjs/core/number';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
 
 const hasOwn = Object.hasOwn;
-
-// The JSON number grammar (RFC 8259 section 6). A string is coerced to a
-// number only when it is exactly a JSON number - so '1e5' and '-0.5' coerce
-// while '0x10', '1_000', 'Infinity', '  ' and '' stay strings and fail
-// validation with a type error the caller can report.
-const RE_JSON_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/;
 
 /**
  * A compiled normalizer. `In` is what the caller accepts, `Out` what the
@@ -87,7 +82,7 @@ function coerceToType(value, type) {
     case 'number':
     case 'integer': {
       if (typeof value === 'number') return value;
-      if (typeof value !== 'string' || !RE_JSON_NUMBER.test(value)) return value;
+      if (typeof value !== 'string' || !isJsonNumberString(value)) return value;
       const num = Number(value);
       if (!Number.isFinite(num)) return value;
       if (type === 'integer' && !Number.isSafeInteger(num)) return value;
@@ -252,10 +247,8 @@ function buildObjectStep(node, ctx) {
       const step = compileNode(sub, ctx);
       propertySteps.set(key, step);
       if (step !== null) hasStep = true;
-      // The step is stored with the default so a materialized container is
-      // normalized by the same schema an explicitly supplied one would be;
-      // otherwise a defaulted `{ port: '8080' }` keeps its string where a
-      // provided one is coerced.
+      // Keep the property's step with its default. Matching pattern steps
+      // are composed below so absent and supplied members normalize alike.
       if (isJsonObject(sub) && sub.default !== undefined
         && resolveNormalizeSwitch(options.useDefaults, sub))
         defaults.push(key, sub.default, step);
@@ -289,6 +282,14 @@ function buildObjectStep(node, ctx) {
 
   const defaultCount = defaults.length;
   const patternCount = patternSteps.length;
+  for (let i = 0; i < defaultCount; i += 3) {
+    const steps = defaults[i + 2] === null ? [] : [defaults[i + 2]];
+    for (let p = 0; p < patternCount; p += 2) {
+      if (patternSteps[p + 1] !== null && patternSteps[p](defaults[i]))
+        steps.push(patternSteps[p + 1]);
+    }
+    defaults[i + 2] = composeSteps(steps);
+  }
   if (!hasStep && additionalStep === null && !strip && defaultCount === 0)
     return null;
 
@@ -333,8 +334,8 @@ function buildObjectStep(node, ctx) {
       if (out === value) out = { ...value };
       // Each instance gets its own copy: a container default shared across
       // normalized documents would let a mutation of one leak into all. The
-      // copy then runs through the property's own step, so a materialized
-      // default is shaped exactly like a supplied value.
+      // copy runs through the property and every matching pattern, in the
+      // same order as a supplied value.
       const step = defaults[i + 2];
       const materialized = cloneJson(defaults[i + 1]);
       setObjectMember(out, key, step === null ? materialized : step(materialized));
@@ -513,6 +514,8 @@ function compileNode(node, ctx) {
  * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
  * with stripping disabled inside it). A materialized root default passes
  * through the same normalization steps as an explicitly supplied value.
+ * A property default runs through that property's schema and every matching
+ * `patternProperties` schema, in the same order as a supplied member.
  *
  * **What is not, and why.** `anyOf`, `oneOf`, `if`/`then`/`else` and `not`
  * are not descended: which branch applies is only known after validating,

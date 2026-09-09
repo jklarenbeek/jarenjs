@@ -1,11 +1,7 @@
 //#region the Markdown emitter
-// The second target, and the reason the type model exists as a separate,
-// published stage rather than as private state inside the TypeScript printer.
-//
-// It is deliberately as unlike TypeScript as a target can be — prose and
-// tables instead of declarations — so that if the model were secretly shaped
-// around one language, writing this would have required changing it. It did
-// not, which is the evidence the split earned its keep.
+// Render the published, language-neutral type model as prose and tables.
+// Schema analysis stays in the model compiler so documentation and type
+// declarations describe the same constraints.
 
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';

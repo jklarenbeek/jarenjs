@@ -36,6 +36,7 @@ import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
 import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './capture.js';
 import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './jobs.js';
+import { REPLICATION_TABLES } from './replication-tables.js';
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
@@ -79,7 +80,7 @@ export const HISTORY_TABLE = '_jaren_migrations';
  * anybody's drift — the drift check skips them and the introspector
  * does not derive them. */
 export const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE,
-  JOBS_TABLE, JOB_CHECKPOINTS_TABLE]);
+  JOBS_TABLE, JOB_CHECKPOINTS_TABLE, ...Object.values(REPLICATION_TABLES)]);
 
 /**
  * The signature-grade identity of a model SHAPE.
@@ -889,7 +890,7 @@ export function createModelShape(connection, model, expressions = undefined) {
 /**
  * The declared schema of a database, normalized for comparison: every
  * object carrying SQL text (tables, indexes), whitespace-collapsed,
- * history table excluded, sorted. Shape equality after a migration —
+ * engine-owned tables excluded, sorted. Shape equality after a migration —
  * this dump versus a fresh {@link createModelShape} — is the
  * acceptance criterion for every rebuild.
  * @param {any} connection
@@ -900,7 +901,7 @@ export function schemaShapeOf(connection) {
   return chain(connection.prepare(dialect.introspect.schemaDump()), (statement) =>
     chain(statement.all([]), (rows) => rows
       // the engine's own tables — history, the change log and its state
-      // row, the job queue — are never a model's drift
+      // row, the job queue and replication ledger — are never a model's drift
       .filter((row) => !ENGINE_TABLES.has(String(row.name)) && !ENGINE_TABLES.has(String(row.owner)))
       .map((row) => ({
         type: String(row.type),
