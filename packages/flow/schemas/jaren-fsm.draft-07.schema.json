@@ -73,7 +73,7 @@
                 "type": "null"
               },
               {
-                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                "$ref": "#/definitions/queryDocument"
               }
             ]
           },
@@ -113,7 +113,7 @@
             "description": "Handler props: a Jaren JSON Query document evaluated against the scope at fire time; an empty result omits the member.",
             "allOf": [
               {
-                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                "$ref": "#/definitions/queryDocument"
               }
             ]
           }
@@ -122,6 +122,9 @@
           "run"
         ]
       }
+    },
+    "queryDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
     }
   }
 }

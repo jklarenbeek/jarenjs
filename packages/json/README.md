@@ -831,6 +831,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/json/schemas/jaren-jslt.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-jtlt.draft-07.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-jtlt.schema.json` | schema | — |
+| `@jarenjs/json/schemas/jaren-query.authoring.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.draft-07.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.llm-profile.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.schema.json` | schema | — |

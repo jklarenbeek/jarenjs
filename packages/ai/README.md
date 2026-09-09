@@ -317,7 +317,7 @@ const author = createStylesheetAuthor({
   schema: authoring,                // 3,491 chars: the document shape, body open
   canonical,                        // the full grammar, as a local check after decoding
   grammar,                          // the operator vocabulary, for the prompt
-  models: ['qwen/qwen3.6-27b', 'qwen/qwen3.6-35b-a3b'],   // dense first — measured below
+  models: host.authoringModels,   // ordered host configuration
 });
 
 const { value, model } = await author.author(
@@ -406,23 +406,22 @@ the nearest propability to a random upperclass list"* — over fourteen records 
 the authored stylesheet compiles, runs, and returns the record the arithmetic says it
 should: the nearest probability *among the upper class*, which is not the nearest overall.
 
-| response format | model | trials | authored | correct | calls | wall clock | reasoning tokens/attempt |
-| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
-| canonical grammar (18,831 chars) | `qwen3.6-35b-a3b` | 3 | 0 | 0 | 3 | 14 s per empty reply | n/a — the reply was empty |
-| authoring profile (3,491 chars) | `qwen3.6-27b` | 5 | 5 | **5** | 1 each | **3.3–5.5 s** | **0** |
-| authoring profile (3,491 chars) | `qwen3.6-35b-a3b` | 3 | 3 | 2 | 1 each | 40–141 s | 3,000–5,600 |
-| authoring profile (3,491 chars) | 27b → 35b escalation | 2 | 2 | **2** | 1 each | 4.0–61 s | 0 (27b answered both) |
+The earlier dense-model success table had no recoverable measurement artifact and
+has been withdrawn. Current program and JSLT probes retain every failed attempt,
+including timeouts; prompts, schema hashes, sampling options and usage are recorded
+in `benchmark/programmind-authoring-*.json`. These results do not justify a model-family
+routing default.
 
-Read the last two rows before picking a tier. The **dense** 27b model — the one this
-package's older field notes call "the coding model" — answers correctly every time, in one
-call, in seconds, emitting **no reasoning tokens at all**. The sparse-MoE `a3b` model gets
-there two times in three and spends a minute or two thinking to do it. That is the
-opposite of the intuition that a bigger orchestration model should author better, and it
-is the most useful thing measured here: **route document authoring to the dense model.**
-Across every configuration that put 27b first the answer was right **7 times out of 7**.
-Three trials on the 35b rows is a small sample and the error bars are wide — the 5-of-5
-and the 40-to-141-second spread are the numbers, not a claim about model families in
-general.
+<!--fact:program.live-->
+
+| instrument | profile / model | attempts | correct | timeout | other failures |
+|------------|-----------------|----------|---------|---------|----------------|
+| authoring-live | primary / qwen/qwen3.6-35b-a3b | 6 | 0 | 1 | 5 |
+| authoring-live | secondary / qwen/qwen3.6-27b | 6 | 0 | 4 | 2 |
+| authoring-remeasured-live | primary / qwen/qwen3.6-35b-a3b | 6 | 3 | 0 | 3 |
+| authoring-remeasured-live | secondary / qwen/qwen3.6-27b | 6 | 6 | 0 | 0 |
+
+<!--/fact-->
 
 `models` is a list because the *call* can fail — a timeout, a transport error, a candidate
 that never passes the gates — and the next model is then tried with the same messages.
@@ -1325,25 +1324,118 @@ rather than merely discouraged — no check has to remember to run.
 completes. One bad branch is a recorded failure with somewhere to look, not a silent empty
 answer — the propagation failure the research names.
 
-### The one rule a program must follow to survive its own recursion
+### Recursive result contracts
 
-A map element is `{ slot, value }` whether that value came from a leaf model call or from a
-whole child agent — but what is *inside* it is whatever answered. So **a reduce must emit
-the shape its map's elements carry**:
+`createLongHorizonAgent` compiles every level in recursive mode, including depth zero.
+Inject `analyzeQuery` and `annotateTypes` from `@jarenjs/json/query` alongside
+`compileQuery`. Each reduce and the final answer must preserve an item or sequence
+of `{slot:string,value:any}` envelopes. The harness unwraps a child's envelope before
+its value enters the parent's map; a sequence contributes its elements individually.
+Empty query sequences normalize to an empty result.
 
 ```js
-// composes at every depth: output shape === input element shape
-{ value: { $max: { $for: { r: '$[*].value' }, $return: '$r.value' } } }
-
-// right at depth 0, empty at depth 1: the child's answer is a list where
-// the leaf's was an object, so the path finds nothing
-{ $for: { r: '$[*].value' }, $return: '$r.value' }
+const query = {
+  slot: 'corpus',
+  value: { value: { $max: '$[*].value.value' } },
+};
 ```
 
-Both are asserted in `test/ai/recursive.test.js`. This is the research's "distinguishing
-between final answer and thought is brittle" in its concrete form here — and note where it
-lives: it is a property of the **program**, fixable in the program, not something the
-harness can paper over.
+`compileProgram(doc, {recursive: true, compileQuery, analyzeQuery, annotateTypes})`
+refuses incompatible or unknown shapes with `AI0208` and the reduce's document path.
+For unknown inference only, a reduce may declare `outputSchema` with required `slot`
+and `value` members. The runner validates that declaration before writing its result;
+a lying declaration is `AI0209`. Standalone programs may still reduce to arbitrary JSON.
+This is a structural guarantee: correctness of the value still needs a host checker.
+
+### Verified program reuse
+
+`createProgramSession({...authorOptions, reuse})` composes authoring and execution.
+Omit `reuse` for fresh authoring. Opt-in policy requires `environmentId`, `schemaVersion`
+and `check({question,result,reused})`, returning a boolean or validation outcome. The
+host must change the environment identity when its corpus, tools or semantics change.
+Optional `tools` names are compared exactly; `embedder` embeds the question for storage.
+Ledger recall keeps its existing embedder identity checks.
+
+Candidates above `threshold` are compiled and gated against current slot names.
+An identical question fingerprint may proceed; a paraphrase additionally
+requires `accept({question,skill,score}) === true` from the host. Similarity alone grants
+no execution authority. Successful checked programs become validated skill records.
+A rejected or wrong reuse records separate failure evidence and falls back to fresh
+once. A failed fresh outcome ends the request. Returned `reuse.events` explains each
+choice. For long-horizon jobs, the same policy applies at the root.
+
+Fixture scorecard: <!--fact:program.reuse-->25/25 fixture answers correct; 5 author calls and 1125 token proxy with reuse, versus 25 calls and 5000 tokens fresh. Selected threshold 0.9 with 32 hash dimensions, host suitability proof and an outcome checker.<!--/fact-->
+
+The live stream uses the same fixture-family checker and reports real provider token
+usage; retrieval uses the local hash embedder and has no provider token charge.
+
+<!--fact:program.reuseLive-->
+
+| profile | mode | correct | author calls | reported tokens | reused answers |
+|---------|------|---------|--------------|-----------------|----------------|
+| primary | fresh | 0/4 | 4 | 10073 | 0 |
+| primary | reuse | 0/4 | 4 | 3934 | 0 |
+| secondary | fresh | 4/4 | 4 | 3183 | 0 |
+| secondary | reuse | 4/4 | 2 | 1544 | 2 |
+
+<!--/fact-->
+
+The fixture threshold is not calibrated for other embedders or real question streams.
+`benchmark/programmind-reuse.json` retains every threshold, wrong execution and fallback.
+
+### Derived authoring profiles and host routes
+
+Query, JSLT, app, FSM and DAG have generated `*.authoring.schema.json` artifacts.
+`createGrammarAuthor({client, grammar, profile, schema, refs, compile})` always validates
+against the full schema after profile decoding and then invokes the injected compiler.
+Profiles intentionally allow values that the full grammar rejects. `docs:check` checks
+source, named seam, profile hashes and generated output for drift.
+
+<!--fact:program.profiles-->
+
+| grammar | full closure bytes | profile bytes | full branches | profile branches |
+|---------|--------------------|---------------|---------------|------------------|
+| query | 20709 | 3564 | 47 | 10 |
+| jslt | 23515 | 3491 | 59 | 6 |
+| app | 47275 | 2799 | 106 | 0 |
+| fsm | 24140 | 3026 | 51 | 4 |
+| dag | 49573 | 5143 | 112 | 6 |
+
+<!--/fact-->
+
+Authors and program subcalls accept `selectModel({purpose,grammar,depth,limits})`.
+Return `{client,identity}` or an ordered list for transport/timeout fallback. The default
+uses the supplied client. Purposes are `author`, `subcall`, and `stylesheet`; embedding
+routing is deliberately refused by the chat wrapper to protect embedding identity.
+`limits` accepts `deadlineMs`, `outputTokens`, and `reasoningTokens`. Provider-reported
+overruns are charged and refused; a remote provider can exceed a requested token limit
+before the client learns its usage. Each fallback consumes the shared turn budget.
+`onRoute` reports identity, outcome, usage and elapsed time. Tool-bearing requests cannot
+use this retry path. The website retains its existing host selection because live evidence
+does not establish a better default.
+
+### Information-dense depth frontier
+
+The original hierarchical corpus combines accepted leaf revisions into section and
+regional totals, with rejected revisions as distractors. All depths receive identical
+source and questions and use the same answer/evidence checker. Scripted extraction proves
+traversal and accounting; it does not measure intelligence.
+
+<!--fact:program.depth-->
+
+| depth | correct fixture tasks | author calls | subcalls | token proxy |
+|-------|-----------------------|--------------|----------|-------------|
+| 0 | 1/1 | 1 | 2 | 150 |
+| 1 | 1/1 | 3 | 5 | 400 |
+| 2 | 1/1 | 8 | 14 | 1100 |
+| 3 | 1/1 | 22 | 29 | 2550 |
+
+<!--/fact-->
+
+Live depth results: <!--fact:program.depthLive-->0/8 live depth tasks correct; 2 timed-out calls and 6 provider token-ceiling violations. No deeper default is justified.<!--/fact-->
+
+Depth remains one by default, capped at three. A deeper default requires a live correctness
+gain at the cost bound declared in `benchmark/programmind-depth-fixture.json`.
 
 ### What the cheap tier actually managed
 
@@ -1363,14 +1455,12 @@ the single-level program path lost 1 attempt in 3, the recursive path lost 4 in 
 
 The model-free depth numbers in the benchmark are therefore the honest ones for now — they
 say what recursion *costs* (1.5× and 2.0× the calls for the same answer on these tasks) and
-say nothing about what it is worth on a task where depth should pay. Both gaps are open
-entries in `docs/ROADMAP.md` rather than quiet omissions.
+say nothing about what it is worth on a task where depth should pay. The new hierarchical scorecards above retain the open provider-quality limitation.
 
 ### What is not guarded
 
 Guardrails for recursive LM systems are under-explored, and this package does not pretend
-otherwise. **Three bounds exist and they are the only three:** the depth cap, the shared
-budget, and the abort signal. There is no detection of a child that answers confidently and
+otherwise. The depth cap, shared budget and abort signal bound execution; optional route limits also bound individual calls. There is no detection of a child that answers confidently and
 wrongly, no loop detection beyond depth, and no per-branch quality gate. A thinking model
 needs output room for the authoring call, and the finding in §"Thinking can be turned off"
 above is *sharper* here, not exempt: recursion is the extreme case of a tool loop, so
@@ -1396,8 +1486,7 @@ are collected here so nobody has to rediscover them the hard way.
   outside the query language cannot be asked for at all. What buys it is that a generated
   program is checkable *before* it runs, on a tier where free-form code is not.
 - **Guardrails for recursive agents are under-explored** — the research says so plainly, and
-  this package inherits that. Three bounds exist: the depth cap, the shared budget, the
-  abort signal. There is no detection of a child that is confidently wrong.
+  this package inherits that. Depth, shared budgets, cancellation and optional route limits bound execution. There is no detection of a child that is confidently wrong.
 - **Heartbeats and scheduling are the host's.** Re-entering a session on a timer is a
   browser, worker or cron concern; the ledger plus `agent.resume()` is the primitive, and
   keeping the scheduler out is what lets the same agent run in a static page.

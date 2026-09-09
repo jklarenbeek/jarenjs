@@ -108,6 +108,7 @@ function compileWithRefs(schema, refs) {
  *   refs?: any[],
  *   gate?: ((value: any) => any) | Array<(value: any) => any>,
  *   stream?: boolean,
+ *   onAttempt?: (event: { attempt: number, outcome: string, errors: any[] }) => void,
  *   maxRepairs?: number }} options
  *   - `validator` overrides the internally compiled check (any
  *     function returning a boolean or `{ valid, errors }`).
@@ -159,7 +160,7 @@ export function createStructuredOutput(options) {
   const stream = options.stream ?? false;
   const base = options.validator ?? compileWithRefs(schema, options.refs);
   const gates = options.gate === undefined ? [] : [].concat(options.gate);
-  const check = gates.length === 0 ? base : composeChecks(base, ...gates);
+  const check = composeChecks(...gates);
   const tier = PROVIDERS[client.endpoint.provider]?.structured ?? null;
 
   /**
@@ -193,14 +194,20 @@ export function createStructuredOutput(options) {
       }
       catch (err) {
         errors = [{ instancePath: '', keyword: 'parse', message: `the reply is not JSON: ${/** @type {Error} */ (err).message}` }];
+        options.onAttempt?.({ attempt, outcome: 'schema', errors });
         turn = [...turn,
           { role: 'assistant', content: raw },
           { role: 'user', content: 'That reply was not parseable JSON. Reply again with ONLY the JSON value.' }];
         continue;
       }
-      const outcome = checkOutcome(check(value));
-      if (outcome.valid) return { value, raw, attempts: attempt };
+      const shape = checkOutcome(base(value));
+      const outcome = shape.valid ? checkOutcome(check(value)) : shape;
+      if (outcome.valid) {
+        options.onAttempt?.({ attempt, outcome: 'valid', errors: [] });
+        return { value, raw, attempts: attempt };
+      }
       errors = normalizeErrors(outcome.errors);
+      options.onAttempt?.({ attempt, outcome: shape.valid ? 'gate' : 'schema', errors });
       turn = [...turn,
         { role: 'assistant', content: raw },
         { role: 'user', content: `That JSON does not validate against the schema. Fix exactly these and reply with ONLY the corrected JSON value:\n${JSON.stringify(errors)}` }];

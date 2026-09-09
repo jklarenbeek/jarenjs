@@ -39,16 +39,19 @@
  * recursive LM systems are under-explored, and this package does not
  * pretend otherwise. Three bounds exist and they are the only three —
  * the depth cap, the shared budget and the abort signal. There is no
- * detection of a child that answers confidently and wrongly, no loop
- * detection beyond depth, and no per-branch quality gate.
+ * general proof of a child's factual correctness or loop detection beyond
+ * depth. Recursive envelopes are compile/runtime checked; hosts may also
+ * opt into checked root reuse and per-call route limits.
  */
 
 import { excerpt } from '@jarenjs/core/chunk';
+import { recursiveItems } from './program-shape.js';
+import { createProgramSession } from './program-session.js';
 
 /** The deepest a tree may go, whatever it asks for. */
 export const MAX_DEPTH = 3;
 
-/** The depth a run uses unasked — the one the paper finds pays. */
+/** The conservative default; local depth measurements have not justified raising it. */
 export const DEFAULT_DEPTH = 1;
 
 /** How much of a child's answer its parent's trajectory keeps. */
@@ -205,6 +208,8 @@ export const childScope = (depth, index) => `child/${depth}/${index}/`;
  * over all of it, and no user waiting to answer a follow-up.
  *
  * @param {{ client: any, environment: any, compileQuery?: any,
+ *   analyzeQuery?: any, annotateTypes?: any, reuse?: any,
+ *   selectModel?: any, limits?: any, onRoute?: any,
  *   createStructuredOutput: (options: any) => { generate: Function },
  *   createProgramAuthor: (options: any) => { author: Function },
  *   createProgramRunner: (options: any) => { run: Function },
@@ -224,16 +229,10 @@ export function createLongHorizonAgent(options) {
     createProgramRunner: runnerFactory, createEnvironment: environmentFactory,
   } = options;
   const { depth: maxDepth, clamped } = resolveDepth(options.depth);
-  const account = createBudgetAccount(options.budget ?? {}, options.clock);
-  const trajectory = createTrajectory();
+  let account = createBudgetAccount(options.budget ?? {}, options.clock);
+  let trajectory = createTrajectory();
   const subcallChars = options.subcallChars ?? 8000;
-  if (clamped) {
-    trajectory.add({
-      kind: 'note',
-      depth: 0,
-      note: `depth ${options.depth} was asked for; ${maxDepth} is the cap this package runs`,
-    });
-  }
+
 
   /**
    * One level: author a program over `env`, run it, answer.
@@ -253,41 +252,24 @@ export function createLongHorizonAgent(options) {
     // shape of overspend a shared budget exists to stop. The provider's
     // usage is captured here too, which the generator's return value
     // does not carry.
-    const counted = {
-      endpoint: client.endpoint,
-      complete: async (request) => {
-        account.reserve();
-        const reply = await client.complete(request);
-        account.settle(reply?.usage, String(reply?.message?.content ?? ''));
-        return reply;
-      },
-    };
 
     const author = authorFactory({
-      client: counted,
+      client, account, selectModel: options.selectModel, limits: options.limits,
+      depth, onRoute: (event) => { trajectory.add({ kind: 'route', depth, ...event }); options.onRoute?.(event); },
       environment: env,
       compileQuery: options.compileQuery,
       createStructuredOutput: options.createStructuredOutput,
       querySchema: options.querySchema,
+      recursive: true, analyzeQuery: options.analyzeQuery, annotateTypes: options.annotateTypes,
     });
-
-    const authored = await author.author(question, { signal });
-    if (authored.value === undefined) {
-      // §3's second failure mode: a compile failure is a RECORDED,
-      // addressable result, never a silent empty answer
-      const entry = trajectory.add({
-        kind: 'author', depth, ok: false, errors: authored.errors ?? [],
-      });
-      return { ok: false, depth, error: 'the authored program does not compile',
-        errors: authored.errors ?? [], seq: entry.seq, answer: null };
-    }
-    trajectory.add({ kind: 'author', depth, ok: true, attempts: authored.attempts });
 
     const runner = runnerFactory({
       environment: env,
       client,
       compileQuery: options.compileQuery,
-      account,
+      recursive: true, analyzeQuery: options.analyzeQuery, annotateTypes: options.annotateTypes,
+      account, selectModel: options.selectModel, limits: options.limits,
+      depth, onRoute: (event) => { trajectory.add({ kind: 'route', depth, ...event }); options.onRoute?.(event); },
       maxSubcalls: options.maxSubcalls,
       maxConcurrentSubcalls: options.maxConcurrentSubcalls,
       // the recursion point, and the only one: below the cap a piece is
@@ -296,7 +278,17 @@ export function createLongHorizonAgent(options) {
         child(depth + 1, env, name, prompt, sig, index),
     });
 
-    const result = await runner.run(authored.value, { signal });
+    let result;
+    try {
+      result = await createProgramSession({ ...options, environment: env, author, runner,
+        recursive: true, reuse: depth === 0 ? options.reuse : undefined }).run(question, { signal });
+    }
+    catch (error) {
+      trajectory.add({ kind: 'author', depth, ok: false });
+      return { ok: false, depth, stopped: account.stop(), error: /** @type {Error} */ (error).message, answer: null };
+    }
+    trajectory.add({ kind: result.reuse?.reused ? 'reuse' : 'author', depth,
+      ok: result.program !== undefined, attempts: result.reuse?.authorCalls ?? 0, errors: result.errors ?? [] });
     trajectory.add({
       kind: 'program', depth, ok: result.ok, steps: result.steps ?? [],
       subcalls: result.subcalls ?? 0, failed: result.failed ?? 0,
@@ -341,29 +333,47 @@ export function createLongHorizonAgent(options) {
     // never its slots (D2, at every level and not just the root)
     const text = result.answer?.text ?? 'null';
     try {
-      return { slot: name, depth, address: scope, value: JSON.parse(text) };
+      const items = recursiveItems(JSON.parse(text));
+      if (items === null) return { slot: name, depth, error: 'AI0209: child answer violates recursive shape' };
+      return items.length === 1
+        ? { slot: name, depth, address: scope, value: items[0].value }
+        : { slot: name, depth, address: scope, items };
     }
     catch {
-      return { slot: name, depth, address: scope, value: text };
+      return { slot: name, depth, address: scope, error: 'AI0209: child answer is not complete JSON' };
     }
   }
 
+  let pending = Promise.resolve();
   return {
-    async run(question, hooks = {}) {
-      const result = await level(0, environment, question, hooks.signal);
-      const stopped = account.stop();
-      return {
-        ok: result.ok === true,
-        answer: result.answer ?? null,
-        depth: maxDepth,
-        depthClamped: clamped,
-        stopReason: result.stopped ?? stopped ?? null,
-        spent: account.spent(),
-        remaining: account.remaining(),
-        trajectory: trajectory.entries(),
-        summary: trajectory.summary(),
-        ...(result.errors === undefined ? {} : { errors: result.errors }),
-      };
+    run(question, hooks = {}) {
+      const next = pending.then(async () => {
+        account = createBudgetAccount(options.budget ?? {}, options.clock);
+        trajectory = createTrajectory();
+        if (clamped) {
+          trajectory.add({
+            kind: 'note', depth: 0,
+            note: `depth ${options.depth} was asked for; ${maxDepth} is the cap this package runs`,
+          });
+        }
+        const result = await level(0, environment, question, hooks.signal);
+        const stopped = account.stop();
+        return {
+          ok: result.ok === true,
+          answer: result.answer ?? null,
+          depth: maxDepth,
+          depthClamped: clamped,
+          stopReason: result.stopped ?? stopped ?? null,
+          spent: account.spent(),
+          remaining: account.remaining(),
+          trajectory: trajectory.entries(),
+          summary: trajectory.summary(),
+          ...(result.error === undefined ? {} : { error: result.error }),
+          ...(result.errors === undefined ? {} : { errors: result.errors }),
+        };
+      });
+      pending = next.then(() => {}, () => {});
+      return next;
     },
   };
 }

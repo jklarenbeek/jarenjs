@@ -720,79 +720,21 @@ added and published whichever way it fell. It turned out to be the harder and mo
 valuable half both times. The evictor and the de-duplicator are still waiting on
 theirs.
 
-- [ ] **A program is authored per question, and nothing reuses one.** A question
-  over everything at once — which two of forty records are closest — is
-  unanswerable from a compacted transcript at any budget
-  (<!--fact:horizon.pairwise-->0% at every budget that compacts anything except ledger/front at 20000<!--/fact-->)
-  and is answered by a compiled program over the environment, which is what
-  `packages/ai/README.md` now documents. What is open is everything around the
-  single run: an authored program is thrown away after it answers, so a session
-  that asks forty similar questions authors forty similar plans and pays the
-  authoring call every time. The ledger already stores *skills*, and a program
-  that compiled and answered is exactly the evidence a skill wants — and
-  "the same question again" is a similarity judgement, which is the half that
-  has since been built. `recallSkills({ near })` ranks stored skills by meaning
-  through the injected embedder and refuses across model identities, and
-  `benchmark/retrieval.js` is the instrument that scores a ranking rather than
-  asserting it (the retrieval entry below carries its numbers). What is still
-  missing is the measurement for THIS question, which is a different one: a
-  benchmark over a question STREAM rather than a single question — how often is
-  a stored plan the right plan, and what does re-running a wrong one cost?
-  Without it a reuse threshold is a guess, and a wrongly reused plan is more
-  expensive than the authoring call it saved.
+- [ ] **Program reuse calibration beyond the scripted question stream.** Verified opt-in
+  reuse now ships with current-environment compilation, suitability approval, an outcome
+  checker and one fresh fallback. The committed question-stream frontier calibrates only
+  its hash embedder and fixture labels. Real-language/provider calibration remains open.
 
-- [ ] **A program's reduce shape is a convention the compiler cannot check.** A map
-  element is `{ slot, value }` whether that value came from a leaf model call or a
-  whole child agent, so a reduce has to emit the same shape its elements carry or
-  the identical program answers correctly at depth 0 and returns nothing at depth 1.
-  The compile gate catches undeclared names, uncompilable queries and a missing
-  final step; it cannot catch this, because query documents are not typed and the
-  element shape is whatever the sub-calls happened to answer. Both behaviours are
-  pinned in `test/ai/recursive.test.js` so the rule cannot rot, and the README
-  states it — but a rule a reader must remember is weaker than one a compiler
-  enforces. Closing it means type inference over query documents (`annotateTypes`
-  exists in `@jarenjs/json` and is the obvious starting point), which is a
-  query-engine feature with its own justification, not an AI-package patch.
+- [ ] **Depth benefit on live models.** The original hierarchical corpus and depth-neutral
+  evidence checker now run through depths zero through three. Scripted traversal remains
+  correct while cost rises; current live rows fail before producing correct final answers.
+  A deeper default needs the predeclared correctness/cost improvement on live models.
 
-- [ ] **Depth has not been shown to pay on any task this repo measures.** The
-  benchmark runs depths 0–2 and publishes median and p95 cost: deeper answers the
-  same fraction correctly and costs proportionally more. That is consistent with the
-  research — which finds most of its gain at depth 1 and depth 3 helping only on
-  *information-dense* tasks — but it means this package ships a capability whose
-  benefit it cannot demonstrate, only its price. The missing piece is a task with
-  the density the research describes (a corpus where one piece cannot be summarised
-  without reading its own sub-pieces). Until that exists the honest reading is: the
-  depth cap and the shared budget are the useful parts, and depth 1 is the default
-  because deeper has not earned its cost here.
-
-- [ ] **The authoring call is what times out, on the `a3b` tier specifically.** The
-  campaign's live runs lost roughly one authoring attempt in three on the
-  single-level program path and **all four** recursive tasks at depths 1 and 2, every
-  one on a 300-second deadline during its first authoring call — while ordinary
-  sub-calls on the same tier, in the same run, answered 40 out of 40. Recursion needs
-  one authoring call per level, so the failure probability compounds with depth, which
-  is what the numbers show.
-
-  The stylesheet-authoring pass closed the two *mechanical* causes — the oversized
-  `response_format` (a narrowed authoring profile, and `stream` is now an option on
-  `createStructuredOutput`) — and the residue is a property of the model, not the
-  request. On the identical, now-working authoring path, `qwen3.6-35b-a3b` spends
-  3,000–5,600 tokens *reasoning* per attempt at 60–90 s a call, where
-  `qwen3.6-27b` emits **zero** reasoning tokens and answers the same question
-  correctly in one call, five times out of five, in 3–6 seconds. A sparse-MoE tier
-  that cannot stop thinking is not fixed by a smaller schema; it is avoided by
-  routing authoring to a dense model. What is open is whether that routing rule
-  generalises past this one document kind — the program language and the recursive
-  tiers have not been re-measured since, and the depth numbers below still stand on
-  the old runs.
-
-- [ ] **An oversized `response_format` has one measured cure and it is per-grammar.**
-  `jaren-jslt.authoring.schema.json` exists because a JSLT stylesheet is what was
-  measured; the query, app, fsm and dag grammars have no authoring profile and the
-  same failure is available to all of them. The derivation
-  (`deriveAuthoringProfile`, a narrowing at a named `$defs` seam) is general and the
-  artifact is three lines of script — what is missing is the measurement that says
-  where each grammar's seam is, which is not guessable from the schema alone.
+- [ ] **Reliable authoring under provider-enforced budgets.** Program/JSLT authoring and
+  recursive live artifacts retain all failures with route identity, deadlines and usage.
+  The unrecorded dense-model success claim is withdrawn. The injected router supports
+  separate author/subcall routes, but current measurements do not support dense-first
+  website policy; some providers exceed the requested reasoning ceiling.
 
 - [ ] **Retrieval quality has an instrument and no real-language dataset.**
   `recall({ tags, limit })` is the default; `recall({ near })` ranks by meaning

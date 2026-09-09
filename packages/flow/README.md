@@ -270,8 +270,10 @@ Every subpath a consumer can import, derived from the manifest by
 | Import | Kind | Declarations |
 |---|---|---|
 | `@jarenjs/flow` | JavaScript | declared |
+| `@jarenjs/flow/schemas/jaren-dag.authoring.schema.json` | schema | — |
 | `@jarenjs/flow/schemas/jaren-dag.draft-07.schema.json` | schema | — |
 | `@jarenjs/flow/schemas/jaren-dag.schema.json` | schema | — |
+| `@jarenjs/flow/schemas/jaren-fsm.authoring.schema.json` | schema | — |
 | `@jarenjs/flow/schemas/jaren-fsm.draft-07.schema.json` | schema | — |
 | `@jarenjs/flow/schemas/jaren-fsm.schema.json` | schema | — |
 | `@jarenjs/flow/package.json` | metadata | — |

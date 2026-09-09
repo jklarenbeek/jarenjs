@@ -23,11 +23,18 @@ import { measuredFigures } from './generate-benchmark-facts.js';
 import { penTables } from './generate-pen-index.js';
 import { exportInventory } from './generate-export-inventory.js';
 import { penCoverage } from './generate-pen-census.js';
+import { generateAuthoringProfiles } from './generate-authoring-profiles.js';
+import { programFacts } from './generate-program-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const profileDrift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
+if (profileDrift.length) {
+  console.error('Authoring profile drift:', profileDrift.join(', '));
+  process.exit(1);
+}
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts],
   argv: process.argv.slice(2),
 }));

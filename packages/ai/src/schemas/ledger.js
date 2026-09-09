@@ -153,6 +153,22 @@ export const MEMORY_SCHEMA = {
  * needs. Retrieved like a memory and composed into a system prompt by
  * whatever drives the agent — the ledger stores it and nothing more.
  */
+export const PROGRAM_SKILL_SCHEMA = {
+  type: 'object',
+  properties: {
+    version: { const: 1 },
+    question: { type: 'string', minLength: 1 },
+    fingerprint: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    environmentId: { type: 'string', minLength: 1 },
+    schemaVersion: { type: 'string', minLength: 1 },
+    document: { type: 'object' },
+    evidence: { type: 'string', minLength: 1 },
+    checked: { const: true },
+  },
+  required: ['version', 'question', 'fingerprint', 'environmentId', 'schemaVersion', 'document', 'evidence', 'checked'],
+  additionalProperties: false,
+};
+
 export const SKILL_SCHEMA = {
   $id: 'https://jarenjs.github.io/schemas/ai/ledger-skill.json',
   type: 'object',
@@ -161,6 +177,7 @@ export const SKILL_SCHEMA = {
     name: { type: 'string', minLength: 1 },
     when: { type: 'string', minLength: 1 },
     instructions: { type: 'string', minLength: 1 },
+    program: PROGRAM_SKILL_SCHEMA,
     tools: { type: 'array', items: { type: 'string', minLength: 1 } },
     at: AT,
     // the same optional pair as a memory; the text a skill is embedded
@@ -283,6 +300,8 @@ export const LEDGER_SCHEMAS = {
  * @property {string} instructions
  * @property {string[]} tools
  * @property {string} at RFC 3339
+ * @property {{ version: 1, question: string, fingerprint: string, environmentId: string,
+ *   schemaVersion: string, document: any, evidence: string, checked: true }} [program]
  */
 
 /**

@@ -16,7 +16,7 @@
       "description": "The view: a JSLT stylesheet document (bare rule array or envelope form) whose evaluation against the state must produce a single vnode.",
       "allOf": [
         {
-          "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07"
+          "$ref": "#/definitions/stylesheetDocument"
         }
       ]
     },
@@ -24,7 +24,7 @@
       "description": "Named action documents: Jaren JSON Query documents evaluated with $ bound to the state and the externals $event and $payload.",
       "type": "object",
       "additionalProperties": {
-        "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+        "$ref": "#/definitions/queryDocument"
       }
     },
     "subs": {
@@ -45,7 +45,7 @@
             "description": "Liveness query, asserted by effective boolean value against the state; absent means always live.",
             "allOf": [
               {
-                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                "$ref": "#/definitions/queryDocument"
               }
             ]
           },
@@ -53,7 +53,7 @@
             "description": "Dynamic props: a query evaluated against the state per reconciliation; the subscription restarts when its resolved key changes. Under \"for\", \"$item\" is bound per instance. Mutually exclusive with \"with\".",
             "allOf": [
               {
-                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                "$ref": "#/definitions/queryDocument"
               }
             ]
           },
@@ -61,7 +61,7 @@
             "description": "Explicit restart key: a query whose resolved value keys the subscription (by value) instead of the resolved props. Requires \"withQuery\" or \"for\"; \"$item\" is bound per instance under \"for\".",
             "allOf": [
               {
-                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                "$ref": "#/definitions/queryDocument"
               }
             ]
           },
@@ -69,7 +69,7 @@
             "description": "Fan-out: a query whose result is the item set — one running instance per item key, reconciled per state change. \"with\" is not allowed beside it.",
             "allOf": [
               {
-                "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+                "$ref": "#/definitions/queryDocument"
               }
             ]
           }
@@ -82,5 +82,13 @@
   },
   "required": [
     "view"
-  ]
+  ],
+  "definitions": {
+    "stylesheetDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07"
+    },
+    "queryDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1/draft-07"
+    }
+  }
 }

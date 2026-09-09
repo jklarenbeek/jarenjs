@@ -4,9 +4,10 @@ export type Query = Json | ((value: UnknownExpr) => ExprBase<unknown> | Json);
 export interface ChunkOptions { readonly strategy?: 'size' | 'line' | 'separator'; readonly size?: number }
 export interface GrepOptions { readonly pattern: string; readonly flags?: 'i' | 'm' | 'im' | ''; readonly limit?: number }
 export interface AnswerOptions { readonly chars?: number }
+export interface ReduceOptions { readonly outputSchema?: Json }
 export interface StepOptions {
   chunk: ChunkOptions; grep: GrepOptions; select: { readonly query: Json };
-  stat: {}; peek: {}; map: { readonly prompt: string }; reduce: { readonly query: Json }; answer: AnswerOptions;
+  stat: {}; peek: {}; map: { readonly prompt: string }; reduce: { readonly query: Json } & ReduceOptions; answer: AnswerOptions;
 }
 export type Operation = keyof StepOptions;
 export type Step<K extends Operation, F extends string = string, N extends string = string> = {
@@ -20,7 +21,7 @@ export function select<const F extends string, const N extends string>(from: F, 
 export function stat<const F extends string, const N extends string>(from: F, as: N): Step<'stat', F, N>;
 export function peek<const F extends string, const N extends string>(from: F, as: N): Step<'peek', F, N>;
 export function map<const F extends string, const N extends string>(from: F, as: N, prompt: string): Step<'map', F, N>;
-export function reduce<const F extends string, const N extends string>(from: F, as: N, query: Query): Step<'reduce', F, N>;
+export function reduce<const F extends string, const N extends string>(from: F, as: N, query: Query, options?: ReduceOptions): Step<'reduce', F, N>;
 export function answer<const F extends string>(from: F, options?: AnswerOptions): Step<'answer', F>;
 
 type Kind = Exclude<Operation, 'answer'> | 'slot';
@@ -47,7 +48,7 @@ export class ProgramBuilder<B extends Bindings = {}, Done extends boolean = fals
   stat<N extends string>(this: ProgramBuilder<B, false>, from: Names<B>, as: Fresh<B, N>): ProgramBuilder<Add<B, N, 'stat'>>;
   peek<N extends string>(this: ProgramBuilder<B, false>, from: Names<B>, as: Fresh<B, N>): ProgramBuilder<Add<B, N, 'peek'>>;
   map<N extends string>(this: ProgramBuilder<B, false>, from: Names<B>, as: Fresh<B, N>, prompt: string): ProgramBuilder<Add<B, N, 'map'>>;
-  reduce<N extends string>(this: ProgramBuilder<B, false>, from: Names<B, 'map'>, as: Fresh<B, N>, query: Query): ProgramBuilder<Add<B, N, 'reduce'>>;
+  reduce<N extends string>(this: ProgramBuilder<B, false>, from: Names<B, 'map'>, as: Fresh<B, N>, query: Query, options?: ReduceOptions): ProgramBuilder<Add<B, N, 'reduce'>>;
   answer(this: ProgramBuilder<B, false>, from: Single<B>, options?: AnswerOptions): ProgramBuilder<B, true>;
 }
 export function program<const S extends readonly string[] = []>(slots?: S): ProgramBuilder<Record<S[number], 'slot'>>;

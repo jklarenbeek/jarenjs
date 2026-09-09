@@ -295,6 +295,12 @@ export function createEnvironment(options = {}) {
         piece.text, { kind: CHUNK_KIND });
       if (written?.error !== undefined) return written;
     }
+    // A shorter replacement must not leave old pieces reachable by grep/map.
+    const family = chunkFamily(name, strategy, size);
+    for (const old of await ledger.listSlots()) {
+      if (old.name.startsWith(family) && /^\d+$/.test(old.name.slice(family.length))
+        && Number(old.name.slice(family.length)) >= pieces.length) await ledger.deleteSlot(old.name);
+    }
     const preview = Math.min(options_.preview ?? CHUNK_PREVIEW, CHUNK_PREVIEW);
     return {
       source: name,

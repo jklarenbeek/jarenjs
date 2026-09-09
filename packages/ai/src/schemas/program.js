@@ -176,7 +176,9 @@ export function programSchema(options = {}) {
                   + ' supplied automatically, so do not paste any content here.',
               },
             }, ['prompt']),
-            step('reduce', 'Combine a map\'s results with a query, into one slot.', { query }, ['query']),
+            step('reduce', 'Combine a map\'s results with a query, into one slot.', {
+              query, outputSchema: { type: 'object', description: 'Declared JSON Schema for an inference-unknown result; validated before storage.' },
+            }, ['query']),
             {
               title: 'answer',
               description: 'The last step: the slot the answer is read from.',

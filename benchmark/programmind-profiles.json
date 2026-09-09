@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "rows": [
+    {
+      "grammar": "query",
+      "sourceHash": "98ad2c2b24dcbdfcc3e4f5c9a47c578b23099e5ba0daf33b9c0bc38e2a25a6d1",
+      "seamHash": "f0d41be2c687a847bb30b6271a691b76477fbce80460d4aa7388e6a1469ea80e",
+      "profileHash": "72217bd6d84bf3512c2a62df0196ec00dfcc55a73a64e20f9e5ba9877541f035",
+      "open": [
+        "objectExpression"
+      ],
+      "full": {
+        "bytes": 20709,
+        "branches": 47
+      },
+      "profile": {
+        "bytes": 3564,
+        "branches": 10
+      }
+    },
+    {
+      "grammar": "jslt",
+      "sourceHash": "ef1a67dd620abcbca3462adc3d7a787d4b581237a1ed913a42d56c7cf9ad5340",
+      "seamHash": "05e477048a83ec7fd8b9c4578a0a33bc108da17e7043c35d73f420cefe1ec6fd",
+      "profileHash": "8fe3692c07e19b6794712e58f894a526c3d6afa7d486801ff7f94207877f4f8a",
+      "open": [
+        "queryDocument"
+      ],
+      "full": {
+        "bytes": 23515,
+        "branches": 59
+      },
+      "profile": {
+        "bytes": 3491,
+        "branches": 6
+      }
+    },
+    {
+      "grammar": "app",
+      "sourceHash": "7b95677e0f0b3576cd3c570d5a9cccc82c953c4b4321c5baa80ad7a5dee1598e",
+      "seamHash": "3212745ee17fb35df53b9b8046cce2995d4d92d22d2eef34a68676462f3d4e4d",
+      "profileHash": "a1ef08043bd897fda00cf7501a437115dcb798d7609dcd6535421cbe9e10b8b6",
+      "open": [
+        "queryDocument",
+        "stylesheetDocument"
+      ],
+      "full": {
+        "bytes": 47275,
+        "branches": 106
+      },
+      "profile": {
+        "bytes": 2799,
+        "branches": 0
+      }
+    },
+    {
+      "grammar": "fsm",
+      "sourceHash": "88774f9cc250cafdd4b7ad50b132e61fd365719ec4df36afc54ab376e6aa1caa",
+      "seamHash": "6082dff6cd338b5716282b69d20f59bff625dd2edb4feb0a6f7345efd2c36e1f",
+      "profileHash": "5e1f8bf951ae8a6d390a232f6e85b0e48ea2ca2311f0b0eec512a3a381391ec8",
+      "open": [
+        "queryDocument"
+      ],
+      "full": {
+        "bytes": 24140,
+        "branches": 51
+      },
+      "profile": {
+        "bytes": 3026,
+        "branches": 4
+      }
+    },
+    {
+      "grammar": "dag",
+      "sourceHash": "d4d78378ecc8b9e5bb4209d650b3da616c927ba82fcfd39c7561164d9afd2c15",
+      "seamHash": "3212745ee17fb35df53b9b8046cce2995d4d92d22d2eef34a68676462f3d4e4d",
+      "profileHash": "15c470f773afea52ba3ff25fed814b3511729a82f81ca7bf349bfd73ed7b7b23",
+      "open": [
+        "queryDocument",
+        "stylesheetDocument"
+      ],
+      "full": {
+        "bytes": 49573,
+        "branches": 112
+      },
+      "profile": {
+        "bytes": 5143,
+        "branches": 6
+      }
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-query/0.1/authoring",
+  "title": "Jaren JSON Query format 0.1 (authoring profile)",
+  "description": "Authoring profile of the canonical grammar: the document SHAPE only, with objectExpression left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
+  "allOf": [
+    {
+      "$ref": "#/$defs/queryDocument"
+    }
+  ],
+  "$defs": {
+    "queryDocument": {
+      "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/versionEnvelope"
+        },
+        {
+          "$ref": "#/$defs/expression"
+        }
+      ]
+    },
+    "versionEnvelope": {
+      "description": "Top-level version envelope. Only recognized at the top level of a query document.",
+      "type": "object",
+      "properties": {
+        "$query": {
+          "const": "0.1"
+        },
+        "$expr": {
+          "$ref": "#/$defs/expression"
+        }
+      },
+      "required": [
+        "$query",
+        "$expr"
+      ],
+      "additionalProperties": false
+    },
+    "expression": {
+      "description": "Any expression per the encoding rules: scalars are literals, strings split on the leading '$', arrays are array constructors, objects partition into map constructors (no $-prefixed key) and operator phrases (all keys $-prefixed).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/scalarLiteral"
+        },
+        {
+          "$ref": "#/$defs/stringExpression"
+        },
+        {
+          "$ref": "#/$defs/arrayConstructor"
+        },
+        {
+          "$ref": "#/$defs/objectExpression"
+        }
+      ]
+    },
+    "scalarLiteral": {
+      "description": "Numbers, booleans and null are literal items.",
+      "type": [
+        "null",
+        "boolean",
+        "number"
+      ]
+    },
+    "stringExpression": {
+      "description": "Rule 2: a string starting with '$' is a query expression ('$$' escapes a literal); any other string is a literal.",
+      "type": "string",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/literalString"
+        },
+        {
+          "$ref": "#/$defs/escapedStringLiteral"
+        },
+        {
+          "$ref": "#/$defs/absolutePathString"
+        },
+        {
+          "$ref": "#/$defs/variablePathString"
+        }
+      ]
+    },
+    "literalString": {
+      "description": "A string that does not start with '$' denotes itself.",
+      "type": "string",
+      "pattern": "^([^$]|$)"
+    },
+    "escapedStringLiteral": {
+      "description": "A string starting with '$$' denotes the literal string with one leading '$' dropped.",
+      "type": "string",
+      "pattern": "^\\$\\$"
+    },
+    "absolutePathString": {
+      "description": "An absolute RFC 9535 JSONPath query rooted at the input document: '$' alone or starting '$.', '$[' or '$..'. The json-path format asserts the full RFC 9535 grammar where format assertion is enabled (format is annotation-only by default from draft 2020-12). (LLM profile: the 'json-path' format assertion is relaxed here; the canonical schema enforces it)",
+      "type": "string",
+      "pattern": "^\\$($|[.\\[])"
+    },
+    "variablePathString": {
+      "description": "A variable-rooted path: '$name' with name matching [A-Za-z_][A-Za-z0-9_]*, optionally followed by RFC 9535 segments. The pattern checks the head; the json-path-segments format asserts the full segment grammar where format assertion is enabled (the compiler enforces it either way, JQ0004). (LLM profile: the 'json-path-segments' format assertion is relaxed here; the canonical schema enforces it)",
+      "type": "string",
+      "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*($|[.\\[])"
+    },
+    "arrayConstructor": {
+      "description": "An array in expression position constructs an array; element results are concatenated per XQuery sequence flattening.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/expression"
+      }
+    },
+    "objectExpression": {
+      "type": "object",
+      "description": "A Jaren query expression; validate against the full grammar and compile locally."
+    }
+  }
+}

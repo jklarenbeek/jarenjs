@@ -59,6 +59,8 @@ import { JarenValidator } from '@jarenjs/validate';
 import { MAX_PROGRAM_CHARS, NAME_PATTERN, PROGRAM_SCHEMA, programSchema } from './schemas/program.js';
 import { checkOutcome } from './check.js';
 import { unfence } from './structured.js';
+import { recursiveShape, recursiveSchema, recursiveItems } from './program-shape.js';
+import { createRoutedClient } from './routing.js';
 
 /** How much of one piece a sub-call is shown. The sub-call is the only
  * place content reaches a model at all, and it sees ONE piece — a cap
@@ -114,6 +116,8 @@ const NAME_RE = new RegExp(NAME_PATTERN);
  *   AI0205 — the program is longer than its cap
  *   AI0206 — a step needs the query seam and none is wired
  *   AI0207 — a step reading ONE slot was given a family of pieces
+ *   AI0208 — a recursive result has an incompatible or unknown envelope
+ *   AI0209 — a runtime result violates its declared recursive shape
  *
  * A query that does not compile keeps the QUERY engine's own code
  * (`JQ0002`, …) and its pointer is rebased onto the program document,
@@ -122,7 +126,7 @@ const NAME_RE = new RegExp(NAME_PATTERN);
  */
 export class ProgramError extends CodedError {
   /**
-   * @param {string} code - 'AI0200' … 'AI0207'
+   * @param {string} code - 'AI0200' … 'AI0209'
    * @param {string} reason - the bare reason
    * @param {string} [docPath] - JSON Pointer into the program document
    */
@@ -158,7 +162,7 @@ function errorRecord(err) {
  *
  * @param {any} doc - the program document
  * @param {{ compileQuery?: ((document: any) => (data: any) => any) | null,
- *   known?: Iterable<string> }} [options]
+ *   known?: Iterable<string>, recursive?: boolean, analyzeQuery?: any, annotateTypes?: any }} [options]
  *   - `compileQuery` is the D3 seam. Absent, a program using `select` or
  *     `reduce` is refused with AI0206 rather than half-compiled.
  *   - `known` is what the environment already holds. Given, a `from`
@@ -186,6 +190,8 @@ export function compileProgram(doc, options = {}) {
       `the program is ${text.length} characters, over the ${MAX_PROGRAM_CHARS} cap —`
       + ' a plan naming slots is small; one carrying content is not', '');
   }
+  const shape = checkOutcome(new JarenValidator({ skipErrors: false, collectErrors: true }).compile(PROGRAM_SCHEMA)(doc));
+  if (!shape.valid) throw new ProgramError('AI0200', 'the document violates the program schema', shape.errors[0]?.instancePath ?? '');
 
   /** binding name → the step index that produced it and what kind it is */
   const bound = new Map();
@@ -275,6 +281,21 @@ export function compileProgram(doc, options = {}) {
           `${at}/query${e?.docPath ?? ''}`);
       }
       step.query = raw.query;
+      if (options.analyzeQuery && options.annotateTypes) {
+        try { step.outputType = options.annotateTypes(options.analyzeQuery(raw.query)).root; }
+        catch { step.outputType = undefined; }
+      }
+      if (raw.outputSchema !== undefined) {
+        try { step.validateOutput = new JarenValidator({ skipErrors: false, collectErrors: true }).compile(raw.outputSchema); }
+        catch { throw new ProgramError('AI0208', 'invalid outputSchema', `${at}/outputSchema`); }
+      }
+      if (options.recursive === true && op === 'reduce') {
+        const inferred = recursiveShape(step.outputType);
+        if (inferred === 'incompatible' || (inferred === 'unknown' && !recursiveSchema(raw.outputSchema))) {
+          throw new ProgramError('AI0208', `reduce ${as} infers ${inferred}; required {slot:string,value:any} item or sequence. Unknown inference needs outputSchema.`, `${at}/query`);
+        }
+        step.recursive = true;
+      }
     }
 
     if (op === 'map') {
@@ -305,6 +326,8 @@ export function compileProgram(doc, options = {}) {
     throw new ProgramError('AI0203', 'a program ends with an answer step', `/steps/${last.index}/op`);
   if (steps.filter((s) => s.op === 'answer').length > 1)
     throw new ProgramError('AI0203', 'a program has exactly one answer step', '/steps');
+  if (options.recursive === true && !bound.get(last.from)?.recursive)
+    throw new ProgramError('AI0208', 'a recursive answer must read a shape-checked reduce', `/steps/${last.index}/from`);
 
   return {
     steps,
@@ -323,7 +346,7 @@ export function compileProgram(doc, options = {}) {
  * One implementation of "does this program compile", used by the
  * authoring path and by the runner, so a program that authored cleanly
  * cannot fail differently when it runs.
- * @param {{ compileQuery?: any, known?: Iterable<string> }} [options]
+ * @param {{ compileQuery?: any, known?: Iterable<string>, recursive?: boolean, analyzeQuery?: any, annotateTypes?: any }} [options]
  * @returns {(doc: any) => true | { valid: false, errors: any[] }}
  */
 export function programGate(options = {}) {
@@ -354,6 +377,8 @@ const mapFamily = (as) => `${RESULT_PREFIX}${as}/`;
  * @param {{ environment: any,
  *   client?: { complete: (request: any) => Promise<any> },
  *   compileQuery?: any,
+ *   recursive?: boolean, analyzeQuery?: any, annotateTypes?: any,
+ *   selectModel?: any, limits?: any, onRoute?: any, depth?: number,
  *   model?: string,
  *   maxSubcalls?: number, maxConcurrentSubcalls?: number,
  *   subcallChars?: number, maxReduceChars?: number,
@@ -421,7 +446,8 @@ export function createProgramRunner(options) {
         outcome.errors[0]?.instancePath ?? '');
     }
     const names = (await environment.ledger.listSlots()).map((s) => s.name);
-    return compileProgram(doc, { compileQuery, known: names });
+    return compileProgram(doc, { compileQuery, known: names, recursive: options.recursive,
+      analyzeQuery: options.analyzeQuery, annotateTypes: options.annotateTypes });
   }
 
   /**
@@ -457,7 +483,7 @@ export function createProgramRunner(options) {
         const ai = Number(a.slice(a.lastIndexOf('/') + 1));
         const bi = Number(b.slice(b.lastIndexOf('/') + 1));
         return Number.isNaN(ai) || Number.isNaN(bi) ? a.localeCompare(b) : ai - bi;
-      });
+      }).slice(0, target.count ?? Infinity);
   }
 
   /**
@@ -474,9 +500,10 @@ export function createProgramRunner(options) {
     let reply;
     // the turn is taken before the call, not after it: four sub-calls
     // launched together would otherwise each see the same unspent budget
-    account?.reserve();
     try {
-      reply = await client.complete({
+      reply = await createRoutedClient({ client, selectModel: options.selectModel,
+        limits: options.limits, onRoute: options.onRoute, account },
+      { purpose: 'subcall', grammar: 'program', depth: options.depth ?? 0 }).complete({
         // `stream` is deliberately NOT set. A sub-call has no UI to
         // stream to, so `stream: false` looks right — and it is the
         // exact request shape this package's own benchmark measured
@@ -504,7 +531,6 @@ export function createProgramRunner(options) {
     // settled here rather than by the caller: this is where the call
     // actually happened, and an account that only saw the calls someone
     // remembered to report is not a bound
-    account?.settle(reply?.usage, raw);
     try {
       return { slot: name, value: JSON.parse(unfence(raw)) };
     }
@@ -575,6 +601,9 @@ export function createProgramRunner(options) {
         const e = /** @type {any} */ (err);
         return { error: `the query failed: ${e?.reason ?? e?.message ?? err}`, code: e?.code };
       }
+      if ((step.validateOutput && !checkOutcome(step.validateOutput(value)).valid)
+        || (step.recursive && recursiveItems(value) === null))
+        return { error: `reduce ${step.as} violates its output shape before storage`, code: 'AI0209' };
       const written = await environment.put(resultSlot(step.as), JSON.stringify(value ?? null),
         { kind: 'selection', count: Array.isArray(value) ? value.length : undefined });
       if (written.error === undefined) bindings.set(step.as, { slot: resultSlot(step.as) });
@@ -731,7 +760,11 @@ export function createProgramRunner(options) {
                 + ' a map that returns its input is not a reduction; narrow the map prompt',
             });
           }
-          try { collected.push(JSON.parse(text)); }
+          try {
+            const item = JSON.parse(text);
+            if (options.recursive && Array.isArray(item.items)) collected.push(...item.items);
+            else collected.push(item);
+          }
           catch { collected.push({ slot: name, error: 'the stored result is not JSON' }); }
         }
         const stored = await store(step, collected);
@@ -819,6 +852,8 @@ export const PROGRAM_EXAMPLE = EXAMPLE;
  * candidate goes back with its code and its pointer.
  *
  * @param {{ client: any, environment: any, compileQuery?: any,
+ *   recursive?: boolean, analyzeQuery?: any, annotateTypes?: any,
+ *   selectModel?: any, limits?: any, onRoute?: any, depth?: number, account?: any,
  *   createStructuredOutput: (options: any) => { generate: Function },
  *   querySchema?: any, maxRepairs?: number, system?: string }} options
  *   - `createStructuredOutput` is injected rather than imported so a
@@ -830,7 +865,7 @@ export const PROGRAM_EXAMPLE = EXAMPLE;
  * @returns {{ author: (question: string, hooks?: { signal?: AbortSignal }) => Promise<any> }}
  */
 export function createProgramAuthor(options) {
-  const { client, environment, createStructuredOutput: structured } = options;
+  const { environment, createStructuredOutput: structured } = options;
   const compileQuery = options.compileQuery ?? null;
   const querySchema = options.querySchema ?? null;
   const schema = programSchema(querySchema === null ? {} : { queryRef: querySchema.$id });
@@ -839,12 +874,13 @@ export function createProgramAuthor(options) {
     const digest = await environment.digest();
     const known = (await environment.ledger.listSlots()).map((s) => s.name);
     const generate = structured({
-      client,
+      client: createRoutedClient(options, { purpose: 'author', grammar: 'program', depth: options.depth ?? 0 }),
       schema,
       name: 'jaren_program',
       strict: false,
       ...(querySchema === null ? {} : { refs: [querySchema] }),
-      gate: programGate({ compileQuery, known }),
+      gate: programGate({ compileQuery, known, recursive: options.recursive,
+        analyzeQuery: options.analyzeQuery, annotateTypes: options.annotateTypes }),
       maxRepairs: options.maxRepairs ?? 2,
     });
 
@@ -856,7 +892,11 @@ export function createProgramAuthor(options) {
           + ' Write a program whose steps name those slots. Never paste content into a step.'
           + ' Use map to ask a question of every piece — it is the only step that reads text —'
           + ' and reduce to combine what the map found. Here is a program in the right shape:\n'
-          + JSON.stringify(EXAMPLE),
+          + JSON.stringify(options.recursive ? { steps: EXAMPLE.steps.map((step) => step.op === 'reduce'
+            ? { ...step, query: { slot: 'corpus', value: { value: { $max: '$[*].value.value' } } },
+              outputSchema: { type: 'object', properties: { slot: { type: 'string' }, value: {} }, required: ['slot', 'value'] } }
+            : step) } : EXAMPLE)
+          + (options.recursive ? '\nRecursive reduce MUST return {slot:string,value:any}, with value matching the leaf reply, or a sequence of these envelopes. Declare outputSchema on reduce when inference is unavailable.' : ''),
       },
       {
         role: 'user',

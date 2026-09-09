@@ -29,7 +29,7 @@ import {
   createProgramRunner, createStructuredOutput, compileProgram, resolveDepth,
   MAX_DEPTH, DEFAULT_DEPTH, childScope,
 } from '@jarenjs/ai';
-import { compileJsonQuery } from '@jarenjs/json/query';
+import { compileJsonQuery, analyzeQuery, annotateTypes } from '@jarenjs/json/query';
 
 /** Six documents of four records each, one document per line. */
 function corpusText() {
@@ -43,7 +43,7 @@ const PROGRAM = {
   steps: [
     { op: 'chunk', from: 'corpus', as: 'pieces', strategy: 'line', size: 200 },
     { op: 'map', from: 'pieces', as: 'found', prompt: 'Return the highest value as {"value":N}.' },
-    { op: 'reduce', from: 'found', as: 'best', query: { $for: { r: '$[*].value' }, $return: '$r.value' } },
+    { op: 'reduce', from: 'found', as: 'best', query: { slot: 'corpus', value: { value: { $max: '$[*].value.value' } } } },
     { op: 'answer', from: 'best' },
   ],
 };
@@ -86,6 +86,7 @@ async function agentOver(client, extra = {}) {
     environment,
     compileQuery: compileJsonQuery,
     createStructuredOutput,
+    analyzeQuery, annotateTypes,
     createProgramAuthor,
     createProgramRunner,
     createEnvironment,
@@ -200,7 +201,7 @@ describe('ai — a child\'s failure is a value, not a silence', function () {
     const broken = {
       steps: [
         { op: 'map', from: 'not_a_slot_here', as: 'found', prompt: 'x' },
-        { op: 'reduce', from: 'found', as: 'r', query: { $for: { r: '$[*].value' }, $return: '$r.value' } },
+        { op: 'reduce', from: 'found', as: 'r', query: { slot: 'corpus', value: { value: { $max: '$[*].value.value' } } } },
         { op: 'answer', from: 'r' },
       ],
     };
@@ -258,7 +259,7 @@ describe('ai — a program has to survive its own recursion', function () {
     // OUTPUT matches its input's elements is the same program at every
     // depth. This is the paper's "final answer confused with thought",
     // in the concrete form it takes here.
-    const composing = { value: { $max: { $for: { r: '$[*].value' }, $return: '$r.value' } } };
+    const composing = { slot: 'corpus', value: { value: { $max: '$[*].value.value' } } };
     for (const depth of [0, 1, 2]) {
       const client = scripted({ program: planWith(composing) });
       const { agent } = await agentOver(client, { depth });
@@ -269,22 +270,19 @@ describe('ai — a program has to survive its own recursion', function () {
     }
   });
 
-  it('and stops composing when it emits a bare list instead', async function () {
-    // the same plan with a reduce that flattens to a list: right at
-    // depth 0, empty at depth 1, because the child's answer is then a
-    // list where the leaf's was an object. Asserted so the rule above is
-    // a rule and not a coincidence.
+  it('refuses the formerly shallow-correct, deep-null reduce before execution', async function () {
     const flattening = { $for: { r: '$[*].value' }, $return: '$r.value' };
-    const shallow = await agentOver(scripted({ program: planWith(flattening) }), { depth: 0 });
-    const zero = await shallow.agent.run('What is the highest value?');
-    assert.match(zero.answer.text, /153/);
-
-    const deep = await agentOver(scripted({ program: planWith(flattening) }), { depth: 1 });
-    const one = await deep.agent.run('What is the highest value?');
-    assert.strictEqual(one.answer.text, 'null',
-      `depth 1 answered ${one.answer.text} — the shape mismatch has been fixed elsewhere,`
-      + ' and this test is now asserting the wrong thing');
+    const plan = planWith(flattening);
+    assert.throws(() => compileProgram(plan, { compileQuery: compileJsonQuery,
+      analyzeQuery, annotateTypes, recursive: true }), (error) => error.code === 'AI0208');
+    for (const depth of [0, 1, 2]) {
+      const { agent } = await agentOver(scripted({ program: plan }), { depth });
+      const result = await agent.run('What is the highest value?');
+      assert.equal(result.ok, false);
+      assert.equal(result.errors[0].code, 'AI0208');
+    }
   });
+
 });
 
 describe('ai — D2 holds at every depth', function () {

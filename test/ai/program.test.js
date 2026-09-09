@@ -85,7 +85,7 @@ describe('ai — the program grammar cannot carry content (D2)', function () {
     // reference, a bounded instruction, a bounded pattern, small option
     // scalars, and one query document — nothing a corpus fits in
     const allowed = new Set(['op', 'from', 'as', 'prompt', 'pattern', 'flags',
-      'limit', 'strategy', 'size', 'query', 'chars']);
+      'limit', 'strategy', 'size', 'query', 'chars', 'outputSchema']);
     for (const branch of branches) {
       const op = branch.properties.op.const;
       assert.strictEqual(branch.additionalProperties, false,

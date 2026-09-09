@@ -29,7 +29,7 @@ step. Every non-answer step writes `op`, `from` and `as` before its options.
 | `stat(from, as)`, `.stat(...)` | stat | result slot | native |
 | `peek(from, as)`, `.peek(...)` | peek | result slot | native |
 | `map(from, as, prompt)`, `.map(...)` | map; bounded instruction | result family | native |
-| `reduce(from, as, query)`, `.reduce(...)` | reduce; query JSON | result slot | native |
+| `reduce(from, as, query, options?)`, `.reduce(...)` | reduce; query JSON and optional `outputSchema` | result slot | native |
 | `answer(from, options?)`, `.answer(...)` | answer; optional chars, no as | terminal program | native |
 | `.step(step)` | appends a public step | tracks its input/result names | native |
 | `from(document)` | raw program | no binding-order inference | native |
@@ -94,5 +94,5 @@ sub-call budgets, storage and result interpretation remain runner concerns.
 
 ## 7. Cost
 
-The isolated AI program pen costs **<!--fact:bundle.ai-->16,841<!--/fact--> bytes**.
+The isolated AI program pen costs **<!--fact:bundle.ai-->16,904<!--/fact--> bytes**.
 Its tree probe excludes AI, other target engines and the query chain.

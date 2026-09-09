@@ -103,10 +103,18 @@ function parseArgs(argv) {
     model: null,
     output: 'console',
     filepath: null,
+    authoring: false,
+    questionStream: false,
+    hierarchical: false,
+    profiles: null,
   };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--live': options.live = true; break;
+      case '--authoring': options.authoring = true; break;
+      case '--question-stream': options.questionStream = true; break;
+      case '--hierarchical': options.hierarchical = true; break;
+      case '--profiles': options.profiles = argv[++i]; break;
       case '--fresh': options.fresh = true; break;
       case '--quick': options.quick = true; break;
       case '--verbose': case '-v': options.verbose = true; break;
@@ -121,6 +129,9 @@ function parseArgs(argv) {
       case '--help': case '-h':
         console.log('Usage: node [--env-file-if-exists=.env] benchmark/long-horizon.js [options]\n');
         console.log('  --live              also score a real model over the same corpora');
+        console.log('  --authoring         program/JSLT authoring evidence; --profiles PATH selects named host routes');
+        console.log('  --question-stream   seeded fresh/reuse frontier and production session scorecard');
+        console.log('  --hierarchical      depth-neutral hierarchical accuracy, evidence and cost');
         console.log(`  --fresh             live tier: ignore the replay store under ${REPLAY_CACHE_DIR} (what is bought is still remembered)`);
         console.log(`  --quick             live tier: one trial per row (default $${AI_ENV.trials})`);
         console.log('  --rounds N          tool rounds gathered (default 40)');
@@ -1185,6 +1196,19 @@ function programTable(corpus, programs, scheduling, livePrograms) {
 //#endregion
 
 async function main() {
+  if (flags.authoring || flags.questionStream || flags.hierarchical) {
+    let result;
+    if (flags.authoring) result = await (await import('./lib/authoring-probes.js')).authoringScorecard(flags);
+    else if (flags.questionStream) result = await (await import('./lib/question-stream.js')).questionStreamScorecard(flags);
+    else result = await (await import('./lib/hierarchical.js')).hierarchicalScorecard(flags);
+    const text = JSON.stringify(result, null, 2) + '\n';
+    if (flags.filepath !== null) {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(flags.filepath, text);
+    }
+    else console.log(text);
+    return;
+  }
   const env = readAiEnv();
   const config = {
     ...env,

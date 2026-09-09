@@ -19,11 +19,12 @@ const hands = {
   stat: { op: 'stat', from: 'corpus', as: 'stats' },
   peek: { op: 'peek', from: 'corpus', as: 'meta' },
   map: { op: 'map', from: 'pieces', as: 'found', prompt: 'Return the record as JSON' },
-  reduce: { op: 'reduce', from: 'found', as: 'total', query: { $count: '$[*]' } },
+  reduce: { op: 'reduce', from: 'found', as: 'total', query: { $count: '$[*]' }, outputSchema: { type: 'integer' } },
   answer: { op: 'answer', from: 'corpus', chars: 50 },
 };
 function factory({ op, from, as, ...extra }) {
-  if (op === 'select' || op === 'reduce') return p[op](from, as, extra.query);
+  if (op === 'reduce') return p.reduce(from, as, extra.query, { outputSchema: extra.outputSchema });
+  if (op === 'select') return p.select(from, as, extra.query);
   if (op === 'map') return p.map(from, as, extra.prompt);
   if (op === 'answer') return p.answer(from, extra);
   return p[op](from, as, extra);
@@ -31,7 +32,8 @@ function factory({ op, from, as, ...extra }) {
 function rebuild(hand) {
   let pen = p.program(['corpus', 'data']);
   for (const { op, from, as, ...extra } of hand.steps) {
-    if (op === 'select' || op === 'reduce') pen = pen[op](from, as, extra.query);
+    if (op === 'reduce') pen = pen.reduce(from, as, extra.query, extra.outputSchema ? { outputSchema: extra.outputSchema } : {});
+    else if (op === 'select') pen = pen.select(from, as, extra.query);
     else if (op === 'map') pen = pen.map(from, as, extra.prompt);
     else if (op === 'answer') pen = pen.answer(from, extra);
     else pen = pen[op](from, as, extra);

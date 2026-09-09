@@ -43,6 +43,7 @@
 
 import { JarenValidator } from '@jarenjs/validate';
 import { checkOutcome } from './check.js';
+import { createRoutedClient } from './routing.js';
 
 /**
  * The check-outcome shape the structured-output gate seam speaks — a
@@ -594,6 +595,7 @@ export function stylesheetSystemMessage(crib, options = {}) {
  *   grammar?: any,
  *   operators?: string[],
  *   models?: string[],
+ *   selectModel?: any, limits?: any, onRoute?: any,
  *   reasoning?: any,
  *   maxTokens?: number | null,
  *   stream?: boolean,
@@ -607,7 +609,8 @@ export function stylesheetSystemMessage(crib, options = {}) {
  *   - `canonical` is the full grammar. Given, an authored document is
  *     validated against it AFTER the profile has done its decoding job:
  *     the profile is deliberately weaker, and this is where that weakness
- *     is paid back. Absent, the compiler alone carries it.
+ *     is paid back. A generated authoring profile requires it; other response
+ *     schemas may omit it and rely on the compiler alone.
  *   - `grammar` is the artifact {@link operatorCrib} reads the operator
  *     vocabulary off (the query schema). Absent, the prompt names no
  *     operators.
@@ -639,6 +642,8 @@ export function createStylesheetAuthor(options) {
     throw new TypeError('createStylesheetAuthor needs a compile function (the engine, injected)');
   if (schema === null || typeof schema !== 'object')
     throw new TypeError('createStylesheetAuthor needs a response-format schema');
+  if (schema.$id?.endsWith('/authoring') && !options.canonical)
+    throw new TypeError('an authoring profile requires the full canonical schema');
 
   const models = Array.isArray(options.models) && options.models.length > 0
     ? options.models
@@ -718,7 +723,7 @@ export function createStylesheetAuthor(options) {
         }),
       };
       const generate = structured({
-        client: bounded,
+        client: createRoutedClient({ ...options, client: bounded }, { purpose: 'stylesheet', grammar: 'jslt' }),
         schema,
         name: 'jaren_jslt',
         strict: false,

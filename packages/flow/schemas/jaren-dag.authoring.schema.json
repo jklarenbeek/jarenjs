@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-dag/0.1/authoring",
+  "title": "Jaren dataflow graph 0.1 (authoring profile)",
+  "description": "Authoring profile of the canonical grammar: the document SHAPE only, with queryDocument, stylesheetDocument left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
+  "type": "object",
+  "required": [
+    "$dag",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "$dag": {
+      "description": "The dag format version; required.",
+      "const": "0.1"
+    },
+    "nodes": {
+      "description": "Node declarations, id to declaration. The id is what edges reference.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "description": "The wiring: data flows from a node's result to a consumer's input scope, in document order for port-object assembly.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    }
+  },
+  "$defs": {
+    "node": {
+      "anyOf": [
+        {
+          "description": "Yields the run's input value (null when absent). Accepts no inbound edge.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "input"
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The run's result is this node's input scope value. Exactly one per document; no outbound edge.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "output"
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Yields its literal value. Accepts no inbound edge.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "const"
+            },
+            "value": {
+              "description": "Any JSON value, delivered by reference."
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "description": "A Jaren JSON Query evaluated with $ bound to the node's input scope; an empty result yields null.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "query"
+            },
+            "query": {
+              "description": "The query document.",
+              "allOf": [
+                {
+                  "$ref": "#/$defs/queryDocument"
+                }
+              ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind",
+            "query"
+          ]
+        },
+        {
+          "description": "A JSLT stylesheet transforming the node's input scope; an empty result yields null.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "jslt"
+            },
+            "stylesheet": {
+              "description": "The stylesheet document (bare rule array or envelope form).",
+              "allOf": [
+                {
+                  "$ref": "#/$defs/stylesheetDocument"
+                }
+              ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind",
+            "stylesheet"
+          ]
+        },
+        {
+          "description": "A registered async handler, called as handler({ with, input }, signal); the handler must honor the run's shared AbortSignal.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "task"
+            },
+            "run": {
+              "description": "The compile-time registry handler name.",
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "description": "The declared identity of the handler implementation this node depends on (FLOW-FORMAT section 7.8). REQUIRED when checkpoint is true: a recorded value is replayed only while the handler that produced it is the same one, and that identity is declared, never derived from source. The registry must supply the same token.",
+              "type": "string",
+              "minLength": 1
+            },
+            "with": {
+              "description": "Handler props: a query resolved against the node's input scope (null when absent or empty).",
+              "allOf": [
+                {
+                  "$ref": "#/$defs/queryDocument"
+                }
+              ]
+            },
+            "checkpoint": {
+              "type": "boolean",
+              "description": "Opt-in durable checkpointing (FLOW-FORMAT §7.6): asserts this node's output is JSON-serializable; recorded values are seeded on resume instead of re-evaluated."
+            }
+          },
+          "required": [
+            "kind",
+            "run"
+          ]
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The producing node id.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The consuming node id.",
+          "type": "string"
+        },
+        "port": {
+          "description": "Names this delivery in the consumer's input-scope object; when any inbound edge of a node is ported, all must be, uniquely.",
+          "type": "string",
+          "minLength": 1
+        },
+        "select": {
+          "description": "A query applied to the source value before delivery; an empty result delivers null.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/queryDocument"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ]
+    },
+    "queryDocument": {
+      "description": "A Jaren query expression; validate against the full grammar and compile locally."
+    },
+    "stylesheetDocument": {
+      "description": "A JSLT stylesheet; validate and compile locally."
+    }
+  }
+}

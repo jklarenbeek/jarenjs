@@ -1,0 +1,30 @@
+//@ts-check
+/** Public evidence shape. Unknown timeout usage is null rather than a fabricated zero. */
+export const AUTHORING_ATTEMPT_SCHEMA = {
+  type: 'object',
+  required: ['attempt', 'phase', 'grammar', 'profile', 'provider', 'providerVersion', 'model',
+    'measuredAt', 'sampling', 'schemaBytes', 'schemaHash', 'requestHash', 'deadlineMs', 'streamed',
+    'ms', 'finishReason', 'usage', 'responseHash', 'outcome', 'codes'],
+  properties: {
+    attempt: { type: 'integer', minimum: 1 },
+    phase: { enum: ['author', 'subcall'] },
+    grammar: { type: 'string', minLength: 1 },
+    profile: { type: 'string', minLength: 1 },
+    provider: { type: 'string', minLength: 1 },
+    providerVersion: { type: ['string', 'null'] },
+    model: { type: 'string', minLength: 1 },
+    measuredAt: { type: 'string' },
+    sampling: { type: 'object' },
+    schemaBytes: { type: 'integer', minimum: 1 },
+    schemaHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    requestHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    deadlineMs: { type: 'number', exclusiveMinimum: 0 },
+    streamed: { type: 'boolean' }, ms: { type: 'number', minimum: 0 },
+    finishReason: { type: ['string', 'null'] },
+    usage: { type: 'object', required: ['prompt', 'output', 'reasoning', 'total'],
+      additionalProperties: { type: ['number', 'null'], minimum: 0 } },
+    responseHash: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' },
+    outcome: { enum: ['valid', 'correct', 'wrong', 'schema', 'compile', 'gate', 'timeout', 'aborted', 'provider'] },
+    codes: { type: 'array', items: { type: 'string' } },
+  },
+};

@@ -11,14 +11,19 @@
     },
     "initial": {
       "description": "The id of the machine's initial state, or null when the document does not choose one (a session must then be started with an explicit state).",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "states": {
       "description": "Declared states, in document order. A string is shorthand for { id }.",
       "type": "array",
       "items": {
         "anyOf": [
-          { "type": "string" },
+          {
+            "type": "string"
+          },
           {
             "type": "object",
             "properties": {
@@ -26,14 +31,20 @@
                 "description": "The state id transitions refer to.",
                 "type": "string"
               },
-              "entry": { "$ref": "#/$defs/effects" },
-              "exit": { "$ref": "#/$defs/effects" },
+              "entry": {
+                "$ref": "#/$defs/effects"
+              },
+              "exit": {
+                "$ref": "#/$defs/effects"
+              },
               "final": {
                 "description": "Marks a terminal state; a session reports done here.",
                 "type": "boolean"
               }
             },
-            "required": ["id"]
+            "required": [
+              "id"
+            ]
           }
         ]
       }
@@ -50,26 +61,42 @@
           },
           "event": {
             "description": "The event name this transition answers; null or absent matches any event (a wildcard). A transition never fires spontaneously.",
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "guard": {
             "description": "A Jaren JSON Query document asserted by effective boolean value against the evaluation scope { state, event, payload, context }; null or absent means no guard. A plain string not starting with '$' is a literal and therefore always true — projection-produced display guards are vacuous by design.",
             "anyOf": [
-              { "type": "null" },
-              { "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
             ]
           },
           "to": {
             "description": "The state this transition enters.",
             "type": "string"
           },
-          "effects": { "$ref": "#/$defs/effects" }
+          "effects": {
+            "$ref": "#/$defs/effects"
+          }
         },
-        "required": ["from", "to"]
+        "required": [
+          "from",
+          "to"
+        ]
       }
     }
   },
-  "required": ["initial", "states", "transitions"],
+  "required": [
+    "initial",
+    "states",
+    "transitions"
+  ],
   "$defs": {
     "effects": {
       "description": "Effect descriptors, returned as resolved data when their state or transition fires — the engine never executes them.",
@@ -84,11 +111,20 @@
           },
           "with": {
             "description": "Handler props: a Jaren JSON Query document evaluated against the scope at fire time; an empty result omits the member.",
-            "allOf": [{ "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1" }]
+            "allOf": [
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
+            ]
           }
         },
-        "required": ["run"]
+        "required": [
+          "run"
+        ]
       }
+    },
+    "queryDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
     }
   }
 }

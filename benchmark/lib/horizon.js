@@ -759,7 +759,7 @@ export async function recursionProbe({
       state.calls += 1;
       state.tokens += 50;
       if (request.responseFormat !== undefined) {
-        return { message: { content: JSON.stringify(program) }, usage: { total_tokens: 50 } };
+        return { message: { content: JSON.stringify(recursiveProgram(program)) }, usage: { total_tokens: 50 } };
       }
       const last = String(request.messages[request.messages.length - 1].content);
       const hit = /"id":"(REC\d+)"[^\n]*?"value":(\d+)/.exec(last);
@@ -805,3 +805,12 @@ export async function recursionProbe({
 
 //#endregion
 //#endregion
+
+/** Adapt the benchmark's standalone reducers to the explicit recursive envelope.
+ * @param {any} program */
+export function recursiveProgram(program) {
+  return { ...program, steps: program.steps.map((step) => step.op === 'reduce'
+    ? { ...step, query: { slot: 'corpus', value: step.query },
+      outputSchema: { type: 'object', properties: { slot: { type: 'string' }, value: {} }, required: ['slot', 'value'] } }
+    : step) };
+}

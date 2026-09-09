@@ -251,6 +251,7 @@ Every subpath a consumer can import, derived from the manifest by
 | Import | Kind | Declarations |
 |---|---|---|
 | `@jarenjs/app` | JavaScript | declared |
+| `@jarenjs/app/schemas/jaren-app.authoring.schema.json` | schema | — |
 | `@jarenjs/app/schemas/jaren-app.draft-07.schema.json` | schema | — |
 | `@jarenjs/app/schemas/jaren-app.schema.json` | schema | — |
 | `@jarenjs/app/package.json` | metadata | — |

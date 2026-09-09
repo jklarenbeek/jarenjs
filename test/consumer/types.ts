@@ -1701,3 +1701,19 @@ async function typedWorkerHosts() {
   return [metrics.generation, poolMetrics.waitMs.p95];
 }
 void [typedWorkerHosts, indexedDbSnapshotHandle, openSnapshotStorage];
+
+import { createProgramSession, createGrammarAuthor, createRoutedClient, questionFingerprint } from '@jarenjs/ai';
+async function typedVerifiedProgram() {
+  const ledger = createLedger();
+  const fingerprint: string = await questionFingerprint('total');
+  await ledger.addSkill({ name: 'total', when: 'total', instructions: 'run checked program',
+    program: { version: 1, question: 'total', fingerprint, environmentId: 'env-v1',
+      schemaVersion: 'program-v1', document: { steps: [] }, evidence: 'host outcome check', checked: true } });
+  const session = createProgramSession({ environment: { ledger },
+    author: { author: async () => ({ value: { steps: [] } }) },
+    reuse: { environmentId: 'env-v1', schemaVersion: 'program-v1', check: () => true } });
+  await session.run('total');
+  // @ts-expect-error reuse must name the environment and full schema identity
+  createProgramSession({ environment: { ledger }, reuse: { check: () => true } });
+}
+void [typedVerifiedProgram, createGrammarAuthor, createRoutedClient];

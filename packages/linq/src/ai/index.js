@@ -6,7 +6,7 @@ import { LinqBuildError } from '../errors.js';
 
 const FIELDS = {
   chunk: ['strategy', 'size'], grep: ['pattern', 'flags', 'limit'], select: ['query'],
-  stat: [], peek: [], map: ['prompt'], reduce: ['query'], answer: ['chars'],
+  stat: [], peek: [], map: ['prompt'], reduce: ['query', 'outputSchema'], answer: ['chars'],
 };
 function make(op, from, as, options) {
   if (typeof from !== 'string' || !from || (op !== 'answer' && (typeof as !== 'string' || !as)))
@@ -31,7 +31,9 @@ export function peek(from, as) { return make('peek', from, as, {}); }
 /** Ask one bounded prompt per member of a slot/family. */
 export function map(from, as, prompt) { return make('map', from, as, { prompt }); }
 /** Query the collected results of an earlier map. */
-export function reduce(from, as, query) { return make('reduce', from, as, { query: expression(query) }); }
+export function reduce(from, as, query, options = {}) {
+  return make('reduce', from, as, { query: expression(query), ...optionsOf(options, ['outputSchema'], 'reduce()') });
+}
 /** Declare the final answer slot and optional excerpt bound. */
 export function answer(from, options = {}) { return make('answer', from, undefined, options); }
 
@@ -59,7 +61,7 @@ export class ProgramBuilder extends DocumentBuilder {
   /** Append a map step. */
   map(from, as, prompt) { return this.step(map(from, as, prompt)); }
   /** Append a reduce step. */
-  reduce(from, as, query) { return this.step(reduce(from, as, query)); }
+  reduce(from, as, query, options = {}) { return this.step(reduce(from, as, query, options)); }
   /** Append the terminal answer. */
   answer(from, options = {}) { return this.step(answer(from, options)); }
 }

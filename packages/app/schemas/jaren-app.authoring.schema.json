@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-app/0.1/authoring",
+  "title": "Jaren app document 0.1 (authoring profile)",
+  "description": "Authoring profile of the canonical grammar: the document SHAPE only, with queryDocument, stylesheetDocument left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
+  "type": "object",
+  "properties": {
+    "$app": {
+      "description": "The app format version; absent implies 0.1.",
+      "const": "0.1"
+    },
+    "state": {
+      "description": "The initial state: any JSON value, treated as immutable by every boundary."
+    },
+    "view": {
+      "description": "The view: a JSLT stylesheet document (bare rule array or envelope form) whose evaluation against the state must produce a single vnode.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/stylesheetDocument"
+        }
+      ]
+    },
+    "actions": {
+      "description": "Named action documents: Jaren JSON Query documents evaluated with $ bound to the state and the externals $event and $payload.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/queryDocument"
+      }
+    },
+    "subs": {
+      "description": "Subscription entries reconciled against the state after every transition.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "description": "The registered subscription handler name.",
+            "type": "string",
+            "minLength": 1
+          },
+          "with": {
+            "description": "Handler props, passed verbatim (never evaluated). Mutually exclusive with \"withQuery\" and \"for\"."
+          },
+          "when": {
+            "description": "Liveness query, asserted by effective boolean value against the state; absent means always live.",
+            "allOf": [
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
+            ]
+          },
+          "withQuery": {
+            "description": "Dynamic props: a query evaluated against the state per reconciliation; the subscription restarts when its resolved key changes. Under \"for\", \"$item\" is bound per instance. Mutually exclusive with \"with\".",
+            "allOf": [
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
+            ]
+          },
+          "key": {
+            "description": "Explicit restart key: a query whose resolved value keys the subscription (by value) instead of the resolved props. Requires \"withQuery\" or \"for\"; \"$item\" is bound per instance under \"for\".",
+            "allOf": [
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
+            ]
+          },
+          "for": {
+            "description": "Fan-out: a query whose result is the item set — one running instance per item key, reconciled per state change. \"with\" is not allowed beside it.",
+            "allOf": [
+              {
+                "$ref": "#/$defs/queryDocument"
+              }
+            ]
+          }
+        },
+        "required": [
+          "run"
+        ]
+      }
+    }
+  },
+  "required": [
+    "view"
+  ],
+  "$defs": {
+    "stylesheetDocument": {
+      "description": "A JSLT stylesheet; validate and compile locally."
+    },
+    "queryDocument": {
+      "description": "A Jaren query expression; validate against the full grammar and compile locally."
+    }
+  }
+}

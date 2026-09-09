@@ -20,13 +20,13 @@ import {
   createEnvironment, createLedger, createLongHorizonAgent, createProgramAuthor,
   createProgramRunner, createStructuredOutput, createBudgetAccount,
 } from '@jarenjs/ai';
-import { compileJsonQuery } from '@jarenjs/json/query';
+import { compileJsonQuery, analyzeQuery, annotateTypes } from '@jarenjs/json/query';
 
 const PROGRAM = {
   steps: [
     { op: 'chunk', from: 'corpus', as: 'pieces', strategy: 'line', size: 200 },
     { op: 'map', from: 'pieces', as: 'found', prompt: 'Return the highest value as {"value":N}.' },
-    { op: 'reduce', from: 'found', as: 'best', query: { $for: { r: '$[*].value' }, $return: '$r.value' } },
+    { op: 'reduce', from: 'found', as: 'best', query: { slot: 'corpus', value: { value: { $max: '$[*].value.value' } } } },
     { op: 'answer', from: 'best' },
   ],
 };
@@ -68,6 +68,7 @@ async function agentOver(client, extra = {}) {
       environment,
       compileQuery: compileJsonQuery,
       createStructuredOutput,
+      analyzeQuery, annotateTypes,
       createProgramAuthor,
       createProgramRunner,
       createEnvironment,
@@ -78,6 +79,15 @@ async function agentOver(client, extra = {}) {
 }
 
 describe('ai — one account, charged at every depth', function () {
+  it('starts each job with its own account and trajectory, including queued jobs', async function () {
+    const client = counting();
+    const { agent } = await agentOver(client, { depth: 0, budget: { turns: 20 } });
+    const [first, second] = await Promise.all([agent.run('highest'), agent.run('highest')]);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(first.spent.turns, second.spent.turns);
+    assert.equal(first.trajectory.length, second.trajectory.length);
+  });
   it('counts a call wherever in the tree it happened', async function () {
     const client = counting();
     const { agent } = await agentOver(client, { depth: 2 });

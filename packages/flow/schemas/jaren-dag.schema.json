@@ -95,7 +95,7 @@
               "description": "The query document.",
               "allOf": [
                 {
-                  "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+                  "$ref": "#/$defs/queryDocument"
                 }
               ]
             },
@@ -120,7 +120,7 @@
               "description": "The stylesheet document (bare rule array or envelope form).",
               "allOf": [
                 {
-                  "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1"
+                  "$ref": "#/$defs/stylesheetDocument"
                 }
               ]
             },
@@ -155,7 +155,7 @@
               "description": "Handler props: a query resolved against the node's input scope (null when absent or empty).",
               "allOf": [
                 {
-                  "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+                  "$ref": "#/$defs/queryDocument"
                 }
               ]
             },
@@ -191,7 +191,7 @@
           "description": "A query applied to the source value before delivery; an empty result delivers null.",
           "allOf": [
             {
-              "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+              "$ref": "#/$defs/queryDocument"
             }
           ]
         }
@@ -200,6 +200,12 @@
         "from",
         "to"
       ]
+    },
+    "queryDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"
+    },
+    "stylesheetDocument": {
+      "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1"
     }
   }
 }

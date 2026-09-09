@@ -645,8 +645,8 @@ export function createLedger(options = {}) {
   /**
    * Store a reusable recipe. Built and validated exactly as a memory is:
    * every input member, defaults filled, the whole record checked.
-   * @param {{ id?: string, name: string, when: string,
-   *   instructions: string, tools?: string[], at?: string }
+ * @param {{ id?: string, name: string, when: string,
+   *   instructions: string, tools?: string[], at?: string, program?: LedgerSkill['program'] }
    *   & LedgerEmbeddingPair} input
    * @returns {Promise<(LedgerSkill & { embedError?: string }) | LedgerRejection>}
    *   as `addMemory`; under `embedOnWrite` the skill is embedded from its

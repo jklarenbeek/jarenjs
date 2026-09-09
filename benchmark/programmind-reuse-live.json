@@ -1,0 +1,969 @@
+{
+  "version": 1,
+  "mode": "live",
+  "threshold": 0.9,
+  "suitability": "fixture family proof and outcome checker; no general language claim",
+  "rows": [
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "fresh",
+      "index": 0,
+      "measuredAt": "2026-09-08T22:30:51.201Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 624,
+      "usageComplete": true,
+      "ms": 5043.453347999999,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 4992.703379,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 424,
+            "total_tokens": 624,
+            "cost": 0.00057848,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00057848,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.00053848
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 294,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "fresh",
+      "index": 1,
+      "measuredAt": "2026-09-08T22:31:14.080Z",
+      "family": "sum",
+      "question": "Please find the total value of all records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 4296,
+      "usageComplete": true,
+      "ms": 22878.691263,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "token-limit",
+          "ms": 22867.135877,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 4096,
+            "total_tokens": 4296,
+            "cost": 0.00524192,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00524192,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.00520192
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 3375,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "length",
+          "errorCode": "Error"
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "fresh",
+      "index": 2,
+      "measuredAt": "2026-09-08T22:31:19.374Z",
+      "family": "active",
+      "question": "What is the total value of active records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 878,
+      "usageComplete": true,
+      "ms": 5294.3895470000025,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "token-limit",
+          "ms": 5292.686986000001,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 678,
+            "total_tokens": 878,
+            "cost": 0.00090106,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00090106,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.00086106
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 528,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": "Error"
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "fresh",
+      "index": 3,
+      "measuredAt": "2026-09-08T22:31:41.788Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 4275,
+      "usageComplete": true,
+      "ms": 22414.007015000003,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "token-limit",
+          "ms": 22412.281617,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 4075,
+            "total_tokens": 4275,
+            "cost": 0.00521525,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00521525,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.00517525
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 3639,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": "Error"
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "reuse",
+      "index": 0,
+      "measuredAt": "2026-09-08T22:31:52.733Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 1884,
+      "usageComplete": true,
+      "ms": 10936.880187999996,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "token-limit",
+          "ms": 10931.392575999998,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 1684,
+            "total_tokens": 1884,
+            "cost": 0.00217868,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00217868,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.00213868
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 1520,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": "Error"
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "reuse",
+      "index": 1,
+      "measuredAt": "2026-09-08T22:31:58.024Z",
+      "family": "sum",
+      "question": "Please find the total value of all records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 1080,
+      "usageComplete": true,
+      "ms": 5291.521913999997,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "token-limit",
+          "ms": 5284.176767000012,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 880,
+            "total_tokens": 1080,
+            "cost": 0.0011576,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.0011576,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.0011176
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 749,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": "Error"
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "reuse",
+      "index": 2,
+      "measuredAt": "2026-09-08T22:32:01.759Z",
+      "family": "active",
+      "question": "What is the total value of active records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [
+        {
+          "kind": "retrieval",
+          "error": null
+        }
+      ],
+      "authorCalls": 1,
+      "tokens": 610,
+      "usageComplete": true,
+      "ms": 3734.845433999988,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 3730.1398210000043,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 410,
+            "total_tokens": 610,
+            "cost": 0.0005607,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.0005607,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.0005207
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 336,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "primary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-35b-a3b",
+      "mode": "reuse",
+      "index": 3,
+      "measuredAt": "2026-09-08T22:32:04.180Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": false,
+      "outcome": "failed",
+      "reused": false,
+      "fallback": false,
+      "events": [
+        {
+          "kind": "retrieval",
+          "error": null
+        }
+      ],
+      "authorCalls": 1,
+      "tokens": 360,
+      "usageComplete": true,
+      "ms": 2420.4269679999998,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 2412.0043980000046,
+          "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 160,
+            "total_tokens": 360,
+            "cost": 0.0002432,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.0002432,
+              "upstream_inference_prompt_cost": 0.00004,
+              "upstream_inference_completions_cost": 0.0002032
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 136,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "fresh",
+      "index": 0,
+      "measuredAt": "2026-09-08T22:32:12.465Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 802,
+      "usageComplete": true,
+      "ms": 8280.997487,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 8253.26582,
+          "usage": {
+            "prompt_tokens": 202,
+            "completion_tokens": 600,
+            "total_tokens": 802,
+            "cost": 0.0017109,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.0017109,
+              "upstream_inference_prompt_cost": 0.0000909,
+              "upstream_inference_completions_cost": 0.00162
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "fresh",
+      "index": 1,
+      "measuredAt": "2026-09-08T22:32:20.417Z",
+      "family": "sum",
+      "question": "Please find the total value of all records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 772,
+      "usageComplete": true,
+      "ms": 7952.057150000008,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 7905.985626000009,
+          "usage": {
+            "prompt_tokens": 220,
+            "completion_tokens": 552,
+            "total_tokens": 772,
+            "cost": 0.0015894,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.0015894,
+              "upstream_inference_prompt_cost": 0.000099,
+              "upstream_inference_completions_cost": 0.0014904
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "fresh",
+      "index": 2,
+      "measuredAt": "2026-09-08T22:32:29.260Z",
+      "family": "active",
+      "question": "What is the total value of active records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 790,
+      "usageComplete": true,
+      "ms": 8842.303484999997,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 8813.025001000002,
+          "usage": {
+            "prompt_tokens": 220,
+            "completion_tokens": 570,
+            "total_tokens": 790,
+            "cost": 0.001638,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.001638,
+              "upstream_inference_prompt_cost": 0.000099,
+              "upstream_inference_completions_cost": 0.001539
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "fresh",
+      "index": 3,
+      "measuredAt": "2026-09-08T22:32:39.449Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": false,
+      "fallback": false,
+      "events": [],
+      "authorCalls": 1,
+      "tokens": 819,
+      "usageComplete": true,
+      "ms": 10189.005374,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 10166.513665999999,
+          "usage": {
+            "prompt_tokens": 219,
+            "completion_tokens": 600,
+            "total_tokens": 819,
+            "cost": 0.00171855,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00171855,
+              "upstream_inference_prompt_cost": 0.00009855,
+              "upstream_inference_completions_cost": 0.00162
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "reuse",
+      "index": 0,
+      "measuredAt": "2026-09-08T22:32:47.991Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": false,
+      "fallback": false,
+      "events": [
+        {
+          "kind": "retrieval",
+          "error": null
+        },
+        {
+          "kind": "stored",
+          "skill": "skill-2026-09-08T22:32:47.988Z-000000"
+        }
+      ],
+      "authorCalls": 1,
+      "tokens": 754,
+      "usageComplete": true,
+      "ms": 8533.694772000003,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 8495.499599000002,
+          "usage": {
+            "prompt_tokens": 202,
+            "completion_tokens": 552,
+            "total_tokens": 754,
+            "cost": 0.0015813,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.0015813,
+              "upstream_inference_prompt_cost": 0.0000909,
+              "upstream_inference_completions_cost": 0.0014904
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "reuse",
+      "index": 1,
+      "measuredAt": "2026-09-08T22:32:48.011Z",
+      "family": "sum",
+      "question": "Please find the total value of all records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": true,
+      "fallback": false,
+      "events": [
+        {
+          "kind": "retrieval",
+          "error": null
+        },
+        {
+          "kind": "reused",
+          "skill": "skill-2026-09-08T22:32:47.988Z-000000"
+        }
+      ],
+      "authorCalls": 0,
+      "tokens": 0,
+      "usageComplete": true,
+      "ms": 17.811376999990898,
+      "routes": []
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "reuse",
+      "index": 2,
+      "measuredAt": "2026-09-08T22:32:56.330Z",
+      "family": "active",
+      "question": "What is the total value of active records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": false,
+      "fallback": true,
+      "events": [
+        {
+          "kind": "retrieval",
+          "error": null
+        },
+        {
+          "kind": "rejected",
+          "skill": "skill-2026-09-08T22:32:47.988Z-000000",
+          "reason": "unsuitable"
+        },
+        {
+          "kind": "stored",
+          "skill": "skill-2026-09-08T22:32:56.329Z-000001"
+        }
+      ],
+      "authorCalls": 1,
+      "tokens": 790,
+      "usageComplete": true,
+      "ms": 8319.02476500001,
+      "routes": [
+        {
+          "purpose": "author",
+          "grammar": "program",
+          "depth": 0,
+          "identity": "default",
+          "fallback": 0,
+          "limits": {
+            "deadlineMs": 30000,
+            "outputTokens": 4096,
+            "reasoningTokens": 512
+          },
+          "outcome": "complete",
+          "ms": 8302.023323000001,
+          "usage": {
+            "prompt_tokens": 220,
+            "completion_tokens": 570,
+            "total_tokens": 790,
+            "cost": 0.001638,
+            "is_byok": false,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.001638,
+              "upstream_inference_prompt_cost": 0.000099,
+              "upstream_inference_completions_cost": 0.001539
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 512,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            }
+          },
+          "schemaBytes": 5343,
+          "finishReason": "stop",
+          "errorCode": null
+        }
+      ]
+    },
+    {
+      "profile": "secondary",
+      "provider": "openrouter",
+      "providerVersion": null,
+      "model": "qwen/qwen3.6-27b",
+      "mode": "reuse",
+      "index": 3,
+      "measuredAt": "2026-09-08T22:32:56.335Z",
+      "family": "sum",
+      "question": "What is the total value of all records?",
+      "correct": true,
+      "outcome": "correct",
+      "reused": true,
+      "fallback": false,
+      "events": [
+        {
+          "kind": "retrieval",
+          "error": null
+        },
+        {
+          "kind": "reused",
+          "skill": "skill-2026-09-08T22:32:47.988Z-000000"
+        }
+      ],
+      "authorCalls": 0,
+      "tokens": 0,
+      "usageComplete": true,
+      "ms": 5.4489900000044145,
+      "routes": []
+    }
+  ]
+}
