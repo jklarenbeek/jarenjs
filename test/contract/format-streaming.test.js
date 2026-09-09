@@ -54,7 +54,7 @@ let dispatcher;
 /** @type {string} */
 let origin;
 /** the cursor of the last export, with pull/return counters */
-const cursors = { pulled: 0, returned: 0, opened: 0 };
+const cursors = { pulled: 0, returned: 0, opened: 0, pulledAtClose: /** @type {number | null} */ (null) };
 
 /** A cursor over the rows collection that counts its pulls and returns. */
 function countedCursor() {
@@ -88,7 +88,11 @@ before(async () => {
     'rows.csv': () => ({ status: 200, headers: { 'content-type': 'text/csv' }, body: encode(stringifyCsvStream(countedCursor())) }),
     'rows.josl': () => ({ status: 200, headers: { 'content-type': 'application/josl' }, body: encode(stringifyJoslStream(countedCursor())) }),
   }, { trace: () => 't' });
-  server = http.createServer(toNodeHandler(dispatcher));
+  const handle = toNodeHandler(dispatcher);
+  server = http.createServer((req, res) => {
+    res.once('close', () => { cursors.pulledAtClose = cursors.pulled; });
+    handle(req, res);
+  });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   origin = `http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (server.address()).port}`;
@@ -183,6 +187,7 @@ describe('a store cursor as a streamed CSV and JOSL export', () => {
   it('a client that cancels halfway releases the cursor exactly once, and the cursor never ran ahead of the socket', async () => {
     cursors.pulled = 0;
     cursors.returned = 0;
+    cursors.pulledAtClose = null;
     const client = typedHttpClient(openHttpClient(CONTRACT, { baseUrl: origin }), Export);
     const outcome = await client.bytes('rows.csv', null);
     assert.strictEqual(outcome.ok, true);
@@ -201,10 +206,17 @@ describe('a store cursor as a streamed CSV and JOSL export', () => {
     const pulledAtCancel = cursors.pulled;
     assert.ok(pulledAtCancel < ROWS, `the cursor had pulled ${pulledAtCancel} of ${ROWS} rows when the client stopped`);
     await reader.cancel();
-    await wait(() => cursors.returned === 1);
+    await wait(() => cursors.returned === 1 && cursors.pulledAtClose !== null);
+    const pulledAtReturn = cursors.pulled;
     await new Promise((r) => setTimeout(r, 50));
     assert.strictEqual(cursors.returned, 1, 'released exactly once');
-    assert.ok(cursors.pulled - pulledAtCancel <= 2, `at most a row or two pulled after the cancel (${cursors.pulled - pulledAtCancel})`);
+    assert.strictEqual(cursors.pulled, pulledAtReturn, 'no pulls after the cursor is released');
+    // Client cancellation crosses the socket before the server can observe
+    // it. Buffered writes may drain in between, especially on Windows.
+    // Bound the in-flight pull at the server's close event instead.
+    const afterClose = cursors.pulled - /** @type {number} */ (cursors.pulledAtClose);
+    assert.ok(afterClose <= 2, `at most a row or two pulled after the server observes close (${afterClose})`);
+    assert.ok(cursors.pulled < ROWS, 'cancellation releases the cursor before the export finishes');
     // the socket buffers held what the client had not read: the rows
     // pulled beyond the 64 KiB the client took are the transport's
     // buffering, and stay far below the table
