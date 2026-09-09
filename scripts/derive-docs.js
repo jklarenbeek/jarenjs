@@ -25,6 +25,7 @@ import { exportInventory } from './generate-export-inventory.js';
 import { penCoverage } from './generate-pen-census.js';
 import { generateAuthoringProfiles } from './generate-authoring-profiles.js';
 import { programFacts } from './generate-program-facts.js';
+import { recallFacts } from './generate-recall-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const profileDrift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
@@ -35,6 +36,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts],
   argv: process.argv.slice(2),
 }));

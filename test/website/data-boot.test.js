@@ -388,7 +388,9 @@ describe('quirks pinned after the boot protocol landed', () => {
     const runtime = createDataRuntime({ transport: () => {
       const world = fakeWorld({ init: OWNER_STATUS, open: () => new Promise((resolve) => setTimeout(resolve, 15)) });
       worlds.push(world);
-      return createTransport(world.deps);
+      // This proves supersession, not a deadline. A successful 15 ms mock must
+      // not race the 20 ms hang-test budget when the full suite loads the host.
+      return createTransport({ ...world.deps, budgets: DEFAULT_BOOT_BUDGETS });
     } });
     /** @type {string[]} */
     const names = [];

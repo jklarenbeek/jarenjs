@@ -688,6 +688,15 @@ opinion: <!--fact:vector.ceiling-->5.142 ns per vector component — one query r
 Past that this design is the wrong tool and no margin changes it; what
 lies beyond is an approximate index, and this store does not have one.
 
+The [labelled retrieval comparison](../../benchmark/README.md#labelled-recall-and-repeated-refinement)
+also scores an optional storage adapter with approximate candidates against
+exact cosine on cached live embeddings. The AI ledger reports the adapter's
+algorithm, exhaustive flag and returned candidate count, validates candidate
+identity/vector shape, and re-scores candidates itself. The DB ledger recipe
+continues to normalize as an exact adapter. No ANN runtime dependency is added.
+
+Index decision: <!--fact:recall.annDecision-->0/6 contender rows cleared all bars; retain exact. Required exact-top-10 recall ≥ 0.95, p95 speedup ≥ 2×, and a measured exact p95 ≥ 100 ms. The largest reference corpus contains 5183 documents; scale beyond it remains unmeasured.<!--/fact-->
+
 **One document, three executors, proven to agree.** As with the spatial
 family, the k-nearest shapes of a committed corpus
 (`test/json/fixtures/vector-corpus.json`) run through the JavaScript

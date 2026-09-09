@@ -1558,6 +1558,10 @@ async function ledgerTypedBlock() {
     // the ranked shape a `near` recall answers: memories, scores, skipped
     const scores: number[] = recalled.scores;
     const skipped: number = recalled.skipped;
+    const exhaustive: boolean = recalled.ranking.exhaustive;
+    const algorithm: string = recalled.ranking.algorithm;
+    const candidateCount: number = recalled.ranking.candidateCount;
+    void exhaustive; void algorithm; void candidateCount;
     void scores; void skipped;
   }
 
@@ -1570,6 +1574,15 @@ async function ledgerTypedBlock() {
   void firstSkill?.instructions;
 }
 void ledgerTypedBlock;
+
+// Refinement policy is an explicit, closed option; arbitrary similarity policies refuse.
+import { createRefiner as createQualityRefiner } from '@jarenjs/ai';
+function qualityRefinerTypes(ledger: Parameters<typeof createQualityRefiner>[0]['ledger']) {
+  createQualityRefiner({ ledger, client: {}, deduplicate: 'exact-evidence' });
+  // @ts-expect-error — similarity alone cannot select a production deletion policy
+  createQualityRefiner({ ledger, client: {}, deduplicate: 'cosine' });
+}
+void qualityRefinerTypes;
 
 // A schema held as a plain unknown-map — the natural type for a
 // document that crossed a package boundary — is accepted at the

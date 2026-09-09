@@ -717,8 +717,9 @@ evictor or a de-duplicator before the number that would say whether it helps, an
 the ranker is the case that has now run its course: the instrument was committed
 first, scored the policies that already existed, and only then was the ranked path
 added and published whichever way it fell. It turned out to be the harder and more
-valuable half both times. The evictor and the de-duplicator are still waiting on
-theirs.
+valuable half both times. Repeated-refinement measurements now support opt-in
+suppression of exact text/evidence/tag repeats; broader semantic merging and
+automatic eviction still need their own outcome evidence.
 
 - [ ] **Program reuse calibration beyond the scripted question stream.** Verified opt-in
   reuse now ships with current-environment compilation, suitability approval, an outcome
@@ -736,36 +737,15 @@ theirs.
   separate author/subcall routes, but current measurements do not support dense-first
   website policy; some providers exceed the requested reasoning ceiling.
 
-- [ ] **Retrieval quality has an instrument and no real-language dataset.**
-  `recall({ tags, limit })` is the default; `recall({ near })` ranks by meaning
-  through an injected embedder and refuses without one, and
-  `benchmark/retrieval.js` scores both — recall@k and MRR over a seeded corpus,
-  the ranked row through the deterministic hashed-trigram reference embedder,
-  published whichever way it falls (<!--fact:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/fact-->).
-  What is open is what that instrument cannot say. The corpus is synthetic and the
-  reference embedder is lexical, so the numbers are mechanism scores: they prove
-  the sweep, the identity check and the ranking work over the shipped code path
-  and say nothing about whether the right memory is found by *meaning*. Measuring
-  QUALITY needs a real-language dataset with human-labelled relevance, embedded
-  through the `--live` tier by a model a host injects — and this suite publishes
-  no model's number as its own, so the dataset and the run are a host's to bring.
-  The other open edge is scale, and it now has numbers instead of an intuition.
-  Ranked recall is EXACT on both of its paths — an in-process sweep of one
-  cosine per embedded record, or, when the storage adapter offers the optional
-  `rank` capability (the `@jarenjs/db` one does, over a packed vector column),
-  a cut the store performs and the ledger re-scores; `benchmark/retrieval.js
-  --store=db` runs both and asserts their quality columns equal, so only
-  latency moves. Both are linear in candidates times dimensions, and the
-  constant is fitted rather than guessed: <!--fact:vector.ceiling-->5.142 ns per vector component — one query reaches 100 ms at about 24,000 vectors of 768 dimensions and one second at about 252,000<!--/fact-->.
-  Past that ceiling the answer is an approximate index, and it is deliberately
-  not built: approximation trades the exactness that lets one query document
-  answer identically in the JavaScript engine, in SQLite through the Node
-  driver and in a real wasm build for a recall number nobody here has
-  measured. If it is ever built, the terms are the ones
-  already on the table — it starts by benchmarking against the extension this
-  design already publishes itself against (<!--fact:vector.rival-->35 ms against 191 ms at 50,000 × 768 — 5.5× in sqlite-vec's favour, out of a database 6.6× smaller that holds no documents<!--/fact-->),
-  it publishes the RECALL it loses against exact top-k and not only the
-  latency it wins, and the committed instrument above is what scores it.
+- [ ] **Retrieval beyond the reference corpus remains externally unmeasured.**
+  The [labelled instrument](../benchmark/README.md#labelled-recall-and-repeated-refinement)
+  ships a checksum-pinned BEIR SciFact importer, live embedding cache and exact/
+  approximate scorecards. The measured sparse-projection contender loses labelled
+  relevance and end-to-end latency, so exact remains the choice. What remains
+  open is a larger externally supplied labelled corpus and vectors sufficient to
+  demonstrate a quality-preserving crossover beyond the measured exact ceiling;
+  the small reference corpus cannot establish that claim. New contenders use
+  the optional rank capability and the same predeclared recall/cost bars.
 
 - [ ] **The goal section has no ceiling.** Progress is appended and never
   rewritten, and every entry composes into the system prompt of every request —
@@ -777,23 +757,6 @@ theirs.
   from a record whose entire purpose is that nothing is forgotten, so the missing
   input is a measurement — what does dropping the oldest progress cost a resumed
   run? — rather than a summarizer.
-
-- [ ] **Refinement's grounding is checked, not judged.** The live probe verifies
-  that a proposed record quotes something the run actually contained and invents
-  no identifier-shaped token (`REC0007`, `v4.19.2`, a region). Nothing measures
-  whether a stored memory was *worth* storing, or what happens to a ledger
-  refined after fifty runs: near-duplicates accumulate, and the prompt asks the
-  model not to add one but nothing enforces it. What that measurement needed now
-  exists: a memory can carry an `embedding` with its `embeddedBy` identity, the
-  kernels score a pair without throwing, and `benchmark/retrieval.js` is a
-  committed harness that loads a corpus through the real ledger and scores what
-  came back. What does not exist is the measurement itself — duplicate pressure
-  over repeated refinements against ONE ledger: how many near-duplicates a run
-  adds, at what similarity, and what recall they cost the questions that follow.
-  A de-duplication rule written before those numbers would still be a guess
-  about which of two similar memories is the better one, and the similarity
-  score alone cannot tell them apart: two records at 0.95 may be one redundant
-  restatement or two facts that differ in the one detail that matters.
 
 - [ ] **The site's own ledger adapter sits outside the single-writer
   contract.** A storage adapter's mutation contract is four async methods, not

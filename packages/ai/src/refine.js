@@ -176,7 +176,7 @@ export function describeTrajectory(trajectory, max = TRAJECTORY_CHARS) {
  *   applyPatch?: ((document: any, patch: any[]) => any) | null,
  *   maxOps?: number, maxRepairs?: number, validator?: any,
  *   now?: () => string, trajectoryChars?: number,
- *   instructions?: string }} options
+ *   instructions?: string, deduplicate?: 'exact-evidence' }} options
  *   - `applyPatch` is the RFC 6902 seam: `(document, patch) => document`,
  *     normally `(doc, patch) => applyJSONPatch(doc, patch)` from
  *     `@jarenjs/json`. Absent, `refine`/`commit` decline with a stated
@@ -189,6 +189,10 @@ export function describeTrajectory(trajectory, max = TRAJECTORY_CHARS) {
  *     (the state, the rules and the trajectory are always appended).
  *   - `now` returns an RFC 3339 timestamp, injected for deterministic
  *     tests exactly as the ledger injects its clock.
+ *   - `deduplicate: 'exact-evidence'` skips new memories with byte-identical
+ *     text and evidence and the same tags. Existing records are never merged
+ *     or removed by this option; case, whitespace and independent citations
+ *     remain distinct. The result reports every skipped proposal in `deduplicated`.
  * @returns {{ state: () => Promise<any>,
  *   commit: (patch: any[]) => Promise<any>,
  *   refine: (trajectory: any, hooks?: { signal?: AbortSignal }) => Promise<any>,
@@ -196,6 +200,8 @@ export function describeTrajectory(trajectory, max = TRAJECTORY_CHARS) {
  */
 export function createRefiner(options) {
   const { client, ledger } = options;
+  if (options.deduplicate !== undefined && options.deduplicate !== 'exact-evidence')
+    throw new TypeError('deduplicate must be exact-evidence or omitted');
   if (ledger === null || typeof ledger?.snapshot !== 'function') {
     throw new TypeError('createRefiner needs a ledger (createLedger())');
   }
@@ -217,6 +223,14 @@ export function createRefiner(options) {
   const noEngine = {
     error: 'refinement needs the applyPatch seam — inject '
       + '(doc, patch) => applyJSONPatch(doc, patch) from @jarenjs/json',
+  };
+  // One refiner serializes state-read, generation and commit together. Hosts
+  // sharing a ledger across refiners or other writers still own that coordination.
+  let pending = Promise.resolve();
+  const serial = (operation) => {
+    const result = pending.then(operation);
+    pending = result.then(() => undefined, () => undefined);
+    return result;
   };
 
   /**
@@ -255,6 +269,11 @@ export function createRefiner(options) {
     const add = [];
     const known = new Map(previous.map((record) => [record.id, record]));
     const kept = new Set();
+    const deduplicated = [];
+    // Only records surviving unchanged are witnesses; matching one scheduled
+    // for removal would discard both copies of the evidence.
+    const witnesses = next.flatMap((record, index) => known.has(record?.id)
+      && sameJson(record, known.get(record.id)) ? [{ record, path: `/${field}/${index}` }] : []);
 
     next.forEach((entry, index) => {
       const at = `/${field}/${index}`;
@@ -286,11 +305,22 @@ export function createRefiner(options) {
           errors.push(problem('AI0102', `the ${kind} is not storable`, at));
         return;
       }
+      if (kind === 'memory' && options.deduplicate === 'exact-evidence' && entry.id === undefined
+        && Object.keys(entry).every((key) => key === 'text' || key === 'evidence' || key === 'tags')) {
+        const match = witnesses.find(({ record: held }) => held.text === record.text && held.evidence === record.evidence
+          && sameJson([...held.tags].sort(), [...record.tags].sort()));
+        if (match) {
+          deduplicated.push({ path: at, retainedPath: match.path,
+            ...(match.record.id === undefined ? {} : { retainedId: match.record.id }) });
+          return;
+        }
+      }
       add.push(record);
+      witnesses.push({ record, path: at });
     });
 
     const remove = previous.filter((record) => !kept.has(record.id)).map((record) => record.id);
-    return { add, remove, errors };
+    return { add, remove, errors, deduplicated };
   }
 
   /**
@@ -400,7 +430,8 @@ export function createRefiner(options) {
     }
     const plan = dry.plan;
     if (empty(plan)) {
-      return { ok: true, patch, snapshot: null, memories: [], skills: [], progress: [] };
+      return { ok: true, patch, snapshot: null, memories: [], skills: [], progress: [],
+        ...(options.deduplicate ? { deduplicated: plan.memories.deduplicated } : {}) };
     }
 
     const token = await ledger.snapshot();
@@ -424,32 +455,43 @@ export function createRefiner(options) {
     // newest record first could hand its replacement the address it just
     // vacated. Two different claims sharing one address is exactly what
     // an auditable ledger may not do.
-    for (const record of plan.memories.add) {
-      const stop = failure(await ledger.addMemory(record), 'a memory could not be stored');
-      if (stop !== null) {
-        await ledger.rollback(token);
-        return stop;
+    try {
+      for (const record of plan.memories.add) {
+        const stop = failure(await ledger.addMemory(record), 'a memory could not be stored');
+        if (stop !== null) {
+          await ledger.rollback(token);
+          return stop;
+        }
+        written.memories.push(record);
       }
-      written.memories.push(record);
+      for (const record of plan.skills.add) {
+        const stop = failure(await ledger.addSkill(record), 'a skill could not be stored');
+        if (stop !== null) {
+          await ledger.rollback(token);
+          return stop;
+        }
+        written.skills.push(record);
+      }
+      for (const id of plan.memories.remove) await ledger.deleteMemory(id);
+      for (const id of plan.skills.remove) await ledger.deleteSkill(id);
+      for (const entry of plan.progress.append) {
+        const stop = failure(await ledger.recordProgress(entry),
+          'a progress entry could not be recorded');
+        if (stop !== null) {
+          await ledger.rollback(token);
+          return stop;
+        }
+        written.progress.push(entry);
+      }
     }
-    for (const record of plan.skills.add) {
-      const stop = failure(await ledger.addSkill(record), 'a skill could not be stored');
-      if (stop !== null) {
-        await ledger.rollback(token);
-        return stop;
+    catch (error) {
+      try { await ledger.rollback(token); }
+      catch {
+        return { error: 'the refinement failed and rollback failed; storage requires recovery',
+          snapshot: token, patchSchema };
       }
-      written.skills.push(record);
-    }
-    for (const id of plan.memories.remove) await ledger.deleteMemory(id);
-    for (const id of plan.skills.remove) await ledger.deleteSkill(id);
-    for (const entry of plan.progress.append) {
-      const stop = failure(await ledger.recordProgress(entry),
-        'a progress entry could not be recorded');
-      if (stop !== null) {
-        await ledger.rollback(token);
-        return stop;
-      }
-      written.progress.push(entry);
+      return { error: `the refinement was rolled back after a storage failure: ${error instanceof Error ? error.message : String(error)}`,
+        snapshot: token, patchSchema };
     }
 
     return {
@@ -461,6 +503,7 @@ export function createRefiner(options) {
       snapshot: token,
       removed: { memories: plan.memories.remove, skills: plan.skills.remove },
       ...written,
+      ...(options.deduplicate ? { deduplicated: plan.memories.deduplicated } : {}),
     };
   }
 
@@ -472,7 +515,7 @@ export function createRefiner(options) {
    */
   async function commit(patch) {
     if (applyPatch === null) return { ...noEngine, patchSchema };
-    return commitAgainst(await state(), patch);
+    return serial(async () => commitAgainst(await state(), patch));
   }
 
   /**
@@ -536,7 +579,7 @@ export function createRefiner(options) {
    * @param {any} trajectory - a `send` result, its `steps`, or messages
    * @param {{ signal?: AbortSignal }} [hooks]
    */
-  async function refine(trajectory, hooks = {}) {
+  async function refineAgainst(trajectory, hooks = {}) {
     if (applyPatch === null) return { ...noEngine, patchSchema };
     // read ONCE: the gate has to be synchronous (a compiled check is),
     // and a gate that re-read the ledger between attempts would be
@@ -567,5 +610,6 @@ export function createRefiner(options) {
     return { ...await commitAgainst(document, result.value), attempts: result.attempts };
   }
 
+  const refine = (trajectory, hooks = {}) => serial(() => refineAgainst(trajectory, hooks));
   return { state, commit, refine, patchSchema };
 }

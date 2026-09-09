@@ -739,10 +739,10 @@ const { memories, scores, skipped } = await ledger.recall({
 - **Skipped, reported.** The candidates are the records that pass `tags`/`where` AND carry a
   vector; the ones that pass and carry none are counted in `skipped`, never scored (a fabricated
   score poisons a ranking) and never hidden (a silent drop poisons trust). The result is
-  `{ memories, scores, skipped }` — `scores[i]` is `memories[i]`'s cosine, descending; equal
+  `{ memories, scores, skipped, via, ranking }` — `scores[i]` is `memories[i]`'s cosine, descending; equal
   scores fall back to recency, then id, so the order is deterministic; `minScore` filters the
   ranked list and `limit` caps what survives. `recallSkills({ near })` answers `{ skills, scores,
-  skipped }` the same way, a skill's meaning being its name, when and instructions together.
+  skipped, via, ranking }` the same way, a skill's meaning being its name, when and instructions together.
 - **`embedMissing({ limit?, batch? })` is the explicit sweep** — every un-embedded memory and
   skill, through `embed(texts[])` in batches, written inside the ledger's write chain, answering
   `{ embedded, remaining }`. A positive fractional `batch` is floored to at least one.
@@ -768,6 +768,14 @@ const { memories, scores, skipped } = await ledger.recall({
   default over the same seeded corpus, through the deterministic reference embedder
   (§Embeddings — lexical, so a mechanism score, not a model-quality claim): <!--fact:retrieval.ranked-->5.0% of questions at 10,000 memories through the hash-trigram-64 reference embedder (33.8% at 1,000), ahead of tag match and recency's 1.3%<!--/fact-->.
   A real model's number is the host's to measure through the same instrument's `--live` tier.
+
+The [labelled retrieval instrument](../../benchmark/README.md#labelled-recall-and-repeated-refinement)
+adds a checksum-pinned SciFact import, neutral host datasets, resumable vectors
+and explicit dataset/embedding classes. It measures the real ledger using
+standard fractional recall, MRR and nDCG; the historical synthetic row above
+uses hit rate. Model claims remain tied to their dataset, provider and date.
+
+Reference measurement: <!--fact:recall.reference-->baai/bge-m3 (1024 dimensions, openrouter, 2026-09-09): recall@10 0.783, MRR@10 0.608, nDCG@10 0.644 on 5183 SciFact documents and 300 test queries.<!--/fact-->
 
 #### A durable ledger over `@jarenjs/db`
 
@@ -898,8 +906,8 @@ export async function createDbStorage({ path = ':memory:', dims } = {}) {
 ```
 
 `recall({ near })` reports which path answered — `via: 'adapter'` when the store ranked,
-`via: 'sweep'` when the ledger did — and answers **the same records with the same scores
-either way**: the adapter selects candidates, the kernels re-score them, and `minScore` and
+`via: 'sweep'` when the ledger did. Exact adapters answer the same records with the same scores
+as the sweep: the adapter selects candidates, the kernels re-score them, and `minScore` and
 `limit` are applied here, so an adapter can never quietly change what a similarity means. A
 query carrying `tags` or `where` narrows on members the adapter knows nothing about and
 takes the sweep. An adapter whose `rank` answers anything other than
@@ -911,6 +919,20 @@ store reports the distinct `embeddedBy` it holds under the prefix, and the wordi
 order and the decision stay in one place. Above, that report is two pushed `COUNT(*)`
 statements on the hot path — the naming scan is paid only when the counts prove a mixture,
 which is the one case about to refuse anyway.
+
+Adapters may also return `ranking: { algorithm, exhaustive, candidateCount }`.
+Approximate selectors declare `exhaustive: false`; old adapters normalize to
+`legacy-exact` with `exhaustive: true`. The sweep reports `exact-cosine`.
+`candidateCount` counts returned candidates before filtering and capping, not
+all indexed records. Approximate adapters should return enough candidates for
+ledger re-scoring. Their candidate set can lose recall; their supplied scores
+never become the final scores. Returned keys must be unique and under the
+requested prefix, and stored ids, embedding identities and vectors are checked.
+A concurrently deleted candidate is omitted. The adapter must still report
+every identity under the prefix; completeness cannot be proved from its selected
+hits alone. Tag/where filters continue to use the exhaustive sweep.
+
+Index decision: <!--fact:recall.annDecision-->0/6 contender rows cleared all bars; retain exact. Required exact-top-10 recall ≥ 0.95, p95 speedup ≥ 2×, and a measured exact p95 ≥ 100 ms. The largest reference corpus contains 5183 documents; scale beyond it remains unmeasured.<!--/fact-->
 
 Selecting "the records whose `embeddedBy` is `{ model, dims }`" is the one piece of the
 ledger's rule an adapter has to apply itself, so it is exported rather than left to be
@@ -1076,6 +1098,28 @@ A revised memory is stored as a new record, not an edit: a different claim, with
 evidence, at a different time. The empty patch is a legal answer, and the schema does not
 demand an operation — asking a model that learned nothing to produce something is exactly
 how an invented memory gets in.
+
+`createRefiner({ ..., deduplicate: 'exact-evidence' })` optionally skips new
+memories whose text and evidence match byte for byte and whose tags match as a
+multiset. It preserves case, whitespace, independent citations, complementary
+details and conflicts; it does not merge or delete existing records. Every
+proposal still passes validation. A retained record must survive the same patch;
+one scheduled for removal cannot suppress its replacement.
+
+Results include `deduplicated`, with each skipped proposal's `path`, its
+`retainedPath` in the proposed document, and `retainedId` when the witness was
+already stored. A repeated batch that changes nothing creates no snapshot and
+preserves timestamps. Calls on one refiner serialize through generation and
+commit. Hosts coordinating multiple refiners or other ledger writers must
+provide their own single-writer coordination. Thrown storage failures also
+trigger rollback; if storage prevents rollback, the result explicitly reports
+that recovery is required and returns the snapshot token.
+
+Refinement result: <!--fact:recall.dedup-->After 12 labelled waves, opt-in exact-evidence suppression stores 21 records instead of 78; state bytes fall 73.1%. Evidence recall@10 is 1.000 versus 0.667, with all labelled conflict and complement units retained. Proposals are scripted; vectors are baai/bge-m3.<!--/fact-->
+
+The option remains off by default. The [full policy comparison](../../benchmark/README.md#labelled-recall-and-repeated-refinement)
+includes the rejected normalization, similarity and merge controls, and clearly
+separates scripted proposals from live embeddings.
 
 ### What the cheap tier does with it (measured)
 

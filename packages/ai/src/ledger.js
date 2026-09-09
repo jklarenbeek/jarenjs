@@ -88,6 +88,7 @@ import { LEDGER_SCHEMAS } from './schemas/ledger.js';
  * @property {number} skipped
  * @property {'sweep' | 'adapter'} via - which path answered: the ledger's
  *   own read-and-rank, or the adapter's `rank` capability
+ * @property {LedgerRanking} ranking - candidate selection provenance, not a quality guarantee
  */
 
 /**
@@ -97,6 +98,17 @@ import { LEDGER_SCHEMAS } from './schemas/ledger.js';
  * @property {number[]} scores
  * @property {number} skipped
  * @property {'sweep' | 'adapter'} via - see {@link LedgerRankedMemories}
+ * @property {LedgerRanking} ranking - see {@link LedgerRankedMemories}
+ */
+
+/**
+ * Optional storage rank metadata. Legacy adapters normalize to exhaustive.
+ * Exhaustive means exact candidate selection, not that every record is returned.
+ * Candidate count is the number returned before ledger filtering and capping.
+ * @typedef {object} LedgerRanking
+ * @property {string} algorithm
+ * @property {boolean} exhaustive
+ * @property {number} candidateCount
  */
 
 /**
@@ -271,7 +283,7 @@ const EMBED_BATCH = 64;
  *     keys: (prefix?: string) => Promise<string[]>,
  *     rank?: (request: { prefix: string, vector: number[], model: string, dims: number,
  *       limit?: number, minScore?: number }) => Promise<{ hits: { key: string, score: number }[],
- *       skipped: number, identities: LedgerEmbeddedBy[] }> },
+ *       skipped: number, identities: LedgerEmbeddedBy[], ranking?: LedgerRanking }> },
  *   compileQuery?: (document: any) => (data: any) => any,
  *   embedder?: Embedder,
  *   embedOnWrite?: boolean,
@@ -801,8 +813,10 @@ export function createLedger(options = {}) {
    * @param {'memories' | 'skills'} member
    * @param {number} skipped
    * @param {'sweep' | 'adapter'} via
+   * @param {LedgerRanking} [ranking]
    */
-  function rankedResult(records, probe, query, member, skipped, via) {
+  function rankedResult(records, probe, query, member, skipped, via,
+    ranking = { algorithm: 'exact-cosine', exhaustive: true, candidateCount: records.length }) {
     const ranked = records
       .map((record) => ({ record, score: cosineSimilarity(probe, record.embedding) }))
       .sort((a, b) => (b.score - a.score) || recencyOrder(a.record, b.record));
@@ -815,6 +829,7 @@ export function createLedger(options = {}) {
       scores: capped.map((entry) => entry.score),
       skipped,
       via,
+      ranking,
     };
   }
 
@@ -883,21 +898,46 @@ export function createLedger(options = {}) {
         limit: query.limit, minScore: query.minScore,
       });
       if (hits === null || typeof hits !== 'object' || !Array.isArray(hits.hits)
-        || !Array.isArray(hits.identities) || typeof hits.skipped !== 'number') {
+        || !Array.isArray(hits.identities) || !Number.isSafeInteger(hits.skipped) || hits.skipped < 0) {
         return { error: `${name}: the storage adapter's rank answered something other than`
           + ' { hits, skipped, identities } — a capability that cannot be trusted to report what it'
           + ' skipped is worse than one that is absent' };
       }
+      const ranking = hits.ranking === undefined ? { algorithm: 'legacy-exact', exhaustive: true, candidateCount: hits.hits.length } : hits.ranking;
+      if (ranking === null || typeof ranking !== 'object' || typeof ranking.algorithm !== 'string' || ranking.algorithm.trim() === ''
+        || typeof ranking.exhaustive !== 'boolean' || ranking.candidateCount !== hits.hits.length)
+        return { error: `${name}: invalid storage rank metadata` };
+      const keys = new Set();
+      for (const hit of hits.hits) {
+        if (typeof hit?.key !== 'string' || !hit.key.startsWith(prefix) || hit.key.length === prefix.length
+          || keys.has(hit.key) || typeof hit.score !== 'number' || !Number.isFinite(hit.score))
+          return { error: `${name}: invalid or duplicate storage rank candidate` };
+        keys.add(hit.key);
+      }
       /** @type {Map<string, LedgerEmbeddedBy>} */
       const found = new Map();
-      for (const stored of hits.identities) found.set(describeIdentity(stored), stored);
+      for (const stored of hits.identities) {
+        if (typeof stored?.model !== 'string' || stored.model === '' || !Number.isSafeInteger(stored.dims) || stored.dims < 1)
+          return { error: `${name}: invalid storage rank identity` };
+        found.set(describeIdentity(stored), stored);
+      }
+      const records = await Promise.all(hits.hits.map((/** @type {any} */ hit) => storage.get(hit.key)));
+      for (let i = 0; i < records.length; i++) {
+        const record = records[i];
+        if (record == null) continue; // Deleted between selection and read.
+        if (`${prefix}${record.id}` !== hits.hits[i].key || !sameIdentity(record.embeddedBy, identity))
+          return { error: `${name}: storage rank candidate identity mismatch` };
+        if (!isVector(record.embedding, identity.dims))
+          return { error: `${name}: invalid storage rank candidate vector` };
+        found.set(describeIdentity(record.embeddedBy), record.embeddedBy);
+      }
       const refused = refuseMixture(name, found, identity);
       if (refused !== null) return refused;
-      const records = await Promise.all(hits.hits.map((/** @type {any} */ hit) => storage.get(hit.key)));
       // a key the adapter ranked and a read that no longer finds it is a
       // record deleted in between, not a record without a vector
       return rankedResult(records.filter((record) => record?.embedding !== undefined),
-        probe, query, member, hits.skipped, 'adapter');
+        probe, query, member, hits.skipped, 'adapter',
+        { algorithm: ranking.algorithm, exhaustive: ranking.exhaustive, candidateCount: ranking.candidateCount });
     }
 
     // the identity check, before any math: every candidate's identity

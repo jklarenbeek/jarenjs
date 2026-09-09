@@ -29,7 +29,8 @@
  * they live instead of handing every record over:
  *
  *   rank({ prefix, vector, model, dims, limit, minScore })
- *     -> Promise<{ hits: { key, score }[], skipped, identities }>
+ *     -> Promise<{ hits: { key, score }[], skipped, identities,
+ *                  ranking?: { algorithm, exhaustive, candidateCount } }>
  *
  * `hits` are the best `limit` records under `prefix` whose
  * `embeddedBy` is `{ model, dims }`, best first; `skipped` is how many
@@ -39,8 +40,13 @@
  * inventing them. The ledger re-scores what comes back with its own
  * kernels and applies `minScore` and `limit` itself, so `score` selects
  * candidates and never decides the answer; an adapter free to rank
- * approximately is therefore free to, and says so by returning fewer
- * of the right records, not different numbers for them.
+ * approximately identifies its algorithm with `exhaustive: false`. Legacy
+ * adapters without metadata normalize to `legacy-exact`, exhaustive. The
+ * candidate count equals the returned hit count before ledger filtering.
+ * Returned keys must be unique and under the requested prefix; every fetched
+ * record is checked for identity and valid vector shape before re-scoring.
+ * The identity report must still cover omitted records: the ledger cannot
+ * independently prove an adapter's completeness without doing its own scan.
  *
  * This is the `compileQuery` seam's shape, one layer down: a capability
  * that is present or absent, never half-implemented. An adapter without

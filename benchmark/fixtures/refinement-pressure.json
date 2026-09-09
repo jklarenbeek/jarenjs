@@ -1,0 +1,407 @@
+{
+  "schemaVersion": 1,
+  "id": "jaren-refinement-pressure-v1",
+  "datasetClass": "authored",
+  "source": "Jaren contributors",
+  "license": "MIT",
+  "version": "1",
+  "facts": [
+    {
+      "id": "amber-base",
+      "class": "valuable",
+      "unit": "amber-base",
+      "text": "The amber service retries failed requests 2 times.",
+      "evidence": "amber operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-repeat",
+      "class": "duplicate",
+      "unit": "amber-base",
+      "text": "The amber service retries failed requests 2 times.",
+      "evidence": "amber operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-paraphrase",
+      "class": "duplicate",
+      "unit": "amber-base",
+      "text": "Failed requests to the amber service are retried 2 times.",
+      "evidence": "amber operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-delay",
+      "class": "complement",
+      "unit": "amber-delay",
+      "text": "The amber service waits five seconds between retries.",
+      "evidence": "amber operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-conflict",
+      "class": "conflict",
+      "unit": "amber-conflict",
+      "text": "The amber service retries failed requests 3 times.",
+      "evidence": "amber operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-confirm",
+      "class": "complement",
+      "unit": "amber-confirm",
+      "text": "The amber service retries failed requests 2 times.",
+      "evidence": "amber independent audit R3 independently confirms the retry count.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-case",
+      "class": "conflict",
+      "unit": "amber-case",
+      "text": "The AMBER service retries failed requests 2 times.",
+      "evidence": "Case-sensitive service registry: AMBER is a separate service.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "amber-noise",
+      "class": "irrelevant",
+      "unit": "amber-noise",
+      "text": "The amber office has a green kettle.",
+      "evidence": "amber office inventory.",
+      "tags": [
+        "amber"
+      ]
+    },
+    {
+      "id": "cobalt-base",
+      "class": "valuable",
+      "unit": "cobalt-base",
+      "text": "The cobalt service retries failed requests 3 times.",
+      "evidence": "cobalt operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-repeat",
+      "class": "duplicate",
+      "unit": "cobalt-base",
+      "text": "The cobalt service retries failed requests 3 times.",
+      "evidence": "cobalt operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-paraphrase",
+      "class": "duplicate",
+      "unit": "cobalt-base",
+      "text": "Failed requests to the cobalt service are retried 3 times.",
+      "evidence": "cobalt operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-delay",
+      "class": "complement",
+      "unit": "cobalt-delay",
+      "text": "The cobalt service waits five seconds between retries.",
+      "evidence": "cobalt operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-conflict",
+      "class": "conflict",
+      "unit": "cobalt-conflict",
+      "text": "The cobalt service retries failed requests 4 times.",
+      "evidence": "cobalt operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-confirm",
+      "class": "complement",
+      "unit": "cobalt-confirm",
+      "text": "The cobalt service retries failed requests 3 times.",
+      "evidence": "cobalt independent audit R3 independently confirms the retry count.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-case",
+      "class": "conflict",
+      "unit": "cobalt-case",
+      "text": "The COBALT service retries failed requests 3 times.",
+      "evidence": "Case-sensitive service registry: COBALT is a separate service.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "cobalt-noise",
+      "class": "irrelevant",
+      "unit": "cobalt-noise",
+      "text": "The cobalt office has a green kettle.",
+      "evidence": "cobalt office inventory.",
+      "tags": [
+        "cobalt"
+      ]
+    },
+    {
+      "id": "jade-base",
+      "class": "valuable",
+      "unit": "jade-base",
+      "text": "The jade service retries failed requests 4 times.",
+      "evidence": "jade operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-repeat",
+      "class": "duplicate",
+      "unit": "jade-base",
+      "text": "The jade service retries failed requests 4 times.",
+      "evidence": "jade operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-paraphrase",
+      "class": "duplicate",
+      "unit": "jade-base",
+      "text": "Failed requests to the jade service are retried 4 times.",
+      "evidence": "jade operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-delay",
+      "class": "complement",
+      "unit": "jade-delay",
+      "text": "The jade service waits five seconds between retries.",
+      "evidence": "jade operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-conflict",
+      "class": "conflict",
+      "unit": "jade-conflict",
+      "text": "The jade service retries failed requests 5 times.",
+      "evidence": "jade operations report R1: retry policy and delay; later report R2 overrides retries.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-confirm",
+      "class": "complement",
+      "unit": "jade-confirm",
+      "text": "The jade service retries failed requests 4 times.",
+      "evidence": "jade independent audit R3 independently confirms the retry count.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-case",
+      "class": "conflict",
+      "unit": "jade-case",
+      "text": "The JADE service retries failed requests 4 times.",
+      "evidence": "Case-sensitive service registry: JADE is a separate service.",
+      "tags": [
+        "jade"
+      ]
+    },
+    {
+      "id": "jade-noise",
+      "class": "irrelevant",
+      "unit": "jade-noise",
+      "text": "The jade office has a green kettle.",
+      "evidence": "jade office inventory.",
+      "tags": [
+        "jade"
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "amber-q",
+      "text": "What retry counts, independent confirmations and delays are reported for amber, and what contradictory evidence must be kept?",
+      "gold": [
+        "amber-base",
+        "amber-delay",
+        "amber-conflict",
+        "amber-confirm"
+      ]
+    },
+    {
+      "id": "amber-case-q",
+      "text": "What does the case-sensitive service registry say about AMBER retries?",
+      "gold": [
+        "amber-case"
+      ]
+    },
+    {
+      "id": "cobalt-q",
+      "text": "What retry counts, independent confirmations and delays are reported for cobalt, and what contradictory evidence must be kept?",
+      "gold": [
+        "cobalt-base",
+        "cobalt-delay",
+        "cobalt-conflict",
+        "cobalt-confirm"
+      ]
+    },
+    {
+      "id": "cobalt-case-q",
+      "text": "What does the case-sensitive service registry say about COBALT retries?",
+      "gold": [
+        "cobalt-case"
+      ]
+    },
+    {
+      "id": "jade-q",
+      "text": "What retry counts, independent confirmations and delays are reported for jade, and what contradictory evidence must be kept?",
+      "gold": [
+        "jade-base",
+        "jade-delay",
+        "jade-conflict",
+        "jade-confirm"
+      ]
+    },
+    {
+      "id": "jade-case-q",
+      "text": "What does the case-sensitive service registry say about JADE retries?",
+      "gold": [
+        "jade-case"
+      ]
+    }
+  ],
+  "waves": [
+    [
+      "amber-base",
+      "cobalt-base",
+      "jade-base"
+    ],
+    [
+      "amber-delay",
+      "amber-conflict",
+      "amber-confirm",
+      "amber-case",
+      "amber-noise",
+      "cobalt-delay",
+      "cobalt-conflict",
+      "cobalt-confirm",
+      "cobalt-case",
+      "cobalt-noise",
+      "jade-delay",
+      "jade-conflict",
+      "jade-confirm",
+      "jade-case",
+      "jade-noise"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ],
+    [
+      "amber-repeat",
+      "amber-paraphrase",
+      "cobalt-repeat",
+      "cobalt-paraphrase",
+      "jade-repeat",
+      "jade-paraphrase"
+    ]
+  ]
+}

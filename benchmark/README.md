@@ -32,6 +32,8 @@ number in a README performance table names the command that produced it.
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
 | [`long-horizon.js`](./long-horizon.js) | What survives `@jarenjs/ai`'s history compaction — needle + pairwise, ceiling and live model | Measuring agent context retention |
 | [`retrieval.js`](./retrieval.js) | Did the right memory reach the prompt — recall@k and MRR for `@jarenjs/ai`'s recall policies (tag+recency, and the seam-gated ranked path) over a seeded corpus, against an oracle | Measuring ledger retrieval, default and ranked, on one instrument |
+| [`recall-quality.js`](./recall-quality.js) | Checksum-pinned labelled datasets, identity-bound embedding caches, standard relevance metrics, exact and optional ANN candidates | Measuring real-language retrieval and the quality/cost of approximation |
+| [`refinement-pressure.js`](./refinement-pressure.js) | Labelled trajectories replayed into persisted ledgers; duplicate, conflict and complement retention with policy comparisons | Measuring refinement accumulation and the opt-in exact-evidence policy |
 | [`vector.js`](./vector.js) | k-nearest over a `derive: 'vector'` column every physical way it runs — resident sweep, the shipped plan, its own statement, `ORDER BY` over a UDF, the same query with no column — against **sqlite-vec**, equivalence-gated, with what the column costs to write and to store | Choosing between a vector column, a JSON member and an extension |
 | [`series.js`](./series.js) | The temporal ground and what was built on it: a range, a fixed bucketing, a rolling window and an as-of read over a seeded series, answered by plain references, by `@jarenjs/core/series`, by a generic query document, by stock SQLite under a declared epoch column and by the store's own plan — gated on the committed series corpus and on every route agreeing with the others before a timer starts, with the resident ceiling and the durable loss both published | Deciding what a temporal fast path has to beat, what the kernel costs against the one-pass loops it replaces, and what a declared epoch column buys over the document it came from |
 | [`db.js`](./db.js) | The store and the LINQ front door: documents in SQLite through the pushdown planner against PouchDB/RxDB/lowdb, the pushdown headline, the chain in memory, and what one DEFINITION costs to build through a pen beside the hand-written document | Deciding what pushdown buys, and what writing a document by code costs |
@@ -780,6 +782,167 @@ is always generated without it.
 ```bash
 node benchmark/retrieval.js --store=db              # both sizes, nine rows
 ```
+
+## Labelled recall and repeated refinement
+
+The labelled instrument accepts neutral JSONL: corpus rows `{id, text, title?}`,
+queries `{id, text, noAnswer?}`, and qrels `{queryId, corpusId, relevance}`.
+A manifest supplies `schemaVersion`, `id`, `datasetClass`, `source`, `license`,
+`version`, and `files.{corpus,queries,qrels}.{path,sha256}`. See the entirely
+[authored fixture](./fixtures/relevance-tiny/manifest.json). Duplicate ids,
+duplicate/conflicting judgments, dangling qrels, missing positive judgments,
+empty splits and checksum mismatches refuse before any provider call. An
+explicit `noAnswer: true` distinguishes a known unanswerable query from an
+unjudged one. No-answer abstention/false answers are reported separately;
+SciFact's selected test split has no such queries.
+
+The [SciFact recipe](./fixtures/scifact-source.json) pins the official
+[BEIR archive](https://github.com/beir-cellar/beir) with a locally verified
+SHA-256, records provenance and the [BEIR dataset card's license](https://huggingface.co/datasets/BeIR/scifact/blob/main/README.md),
+and imports only the known archive members. `unzip` is required for this
+optional import. Corpus text and cached vectors stay under ignored
+`benchmark/cache/`; normal tests never download a dataset or call a provider.
+The task is article retrieval for scientific claims, not judging claim truth.
+
+```sh
+node scripts/import-scifact.js benchmark/cache/recall-quality/scifact
+EMBEDDING_MODEL=baai/bge-m3 node --env-file-if-exists=.env benchmark/retrieval.js \
+  --dataset benchmark/cache/recall-quality/scifact/manifest.json --live --dims 1024 \
+  --sizes 500,2000,5183 --ann --filepath benchmark/recall-quality-scifact-live.json
+node benchmark/recall-quality.js --dataset benchmark/fixtures/relevance-tiny/manifest.json --ann
+```
+
+`--live` requires an explicit model and width; omitting it labels the embedder
+`hash`, including when the dataset is real language. Hash and live rows never
+share an embedding class. `EMBEDDING_MODEL` takes precedence over
+`JAREN_AI_EMBED_MODEL`. The cache refuses changes to dataset, provider, model,
+width, endpoint or text policy, verifies every stored vector hash and Float32
+representation, and resumes completed batches. It batches by text count and
+character budget, refuses silent truncation, uses one bounded attempt per
+batch, and honors `JAREN_AI_MAX_CALLS`. Failed batches and available usage are
+retained without provider error text or credentials. Missing reported cost is
+unknown. A cache-only run still publishes the original paid usage.
+
+The scorer uses macro fractional recall, MRR at the largest cutoff and graded
+nDCG. The legacy synthetic instrument retains its historical hit-rate metric
+called `recall@k`; its JSON explicitly names that definition. The labelled
+runner times real ledger recall with precomputed query vectors. Corpus subsets
+include every positive-qrel document followed by seeded distractors, so smaller
+sizes are conditional stress tests, not alternative full-benchmark scores.
+The tag baseline takes the first few longer words from each document; timestamps
+are equal and ties break by id. These full policies are recorded in JSON.
+
+Reference measurement: <!--fact:recall.reference-->baai/bge-m3 (1024 dimensions, openrouter, 2026-09-09): recall@10 0.783, MRR@10 0.608, nDCG@10 0.644 on 5183 SciFact documents and 300 test queries.<!--/fact-->
+
+Embedding cost: <!--fact:recall.cost-->87 embedding requests, 0 failures, 1,952,135 reported tokens, and $0.01952135 reported cost for the SciFact vector cache. Cache-only scoring makes no embedding requests.<!--/fact-->
+
+<!--fact:recall.quality-->
+
+| documents | policy | recall@10 | MRR@10 | nDCG@10 | p95 ms |
+|-----------|--------|-----------|--------|---------|--------|
+| 500 | recency | 0.027 | 0.008 | 0.012 | 1.156 |
+| 500 | tag+recency | 0.369 | 0.182 | 0.224 | 1.179 |
+| 500 | exact | 0.904 | 0.802 | 0.824 | 3.616 |
+| 500 | projection-0.1 | 0.632 | 0.602 | 0.604 | 5.727 |
+| 500 | projection-0.5 | 0.872 | 0.776 | 0.798 | 26.869 |
+| 2000 | recency | 0.007 | 0.001 | 0.002 | 4.519 |
+| 2000 | tag+recency | 0.206 | 0.095 | 0.119 | 4.620 |
+| 2000 | exact | 0.846 | 0.696 | 0.727 | 9.873 |
+| 2000 | projection-0.1 | 0.611 | 0.555 | 0.563 | 22.999 |
+| 2000 | projection-0.5 | 0.824 | 0.678 | 0.709 | 106.526 |
+| 5183 | recency | 0.000 | 0.000 | 0.000 | 11.464 |
+| 5183 | tag+recency | 0.138 | 0.047 | 0.067 | 11.832 |
+| 5183 | exact | 0.783 | 0.608 | 0.644 | 23.356 |
+| 5183 | projection-0.1 | 0.597 | 0.493 | 0.513 | 60.017 |
+| 5183 | projection-0.5 | 0.760 | 0.589 | 0.623 | 324.474 |
+
+<!--/fact-->
+
+The [complete scorecard](./recall-quality-scifact-live.json) records environment,
+seed, full input manifest, model identity, vector/text hashes, query ids, returned
+document ids, costs and failures. It contains no corpus or query text. Re-running
+with the same verified cache reproduces ranked ids and quality; timings vary.
+
+The dependency-free sparse-projection contender lives only in benchmark code,
+behind an injected index factory and the storage `rank` capability. Both paths
+use identical storage and real ledger re-scoring. Returned candidate arrays are
+validated; arbitrary scores cannot bypass the core cosine kernel. Each size
+reports exact-top-k recall/MRR, relevance, build and update/delete costs, and
+storage. Byte counts distinguish serialized documents, resident vector payload,
+and extra index numeric/key payload; they exclude JavaScript object overhead.
+
+<!--fact:recall.ann-->
+
+| documents | candidates | exact-top-10 recall | index bytes | build ms | update p95 ms | delete ms | clears all bars |
+|-----------|------------|---------------------|-------------|----------|---------------|-----------|-----------------|
+| 500 | projection-0.1 | 0.450 | 80915 | 129.147 | 0.410 | 0.159 | no |
+| 500 | projection-0.5 | 0.879 | 80915 | 131.003 | 0.358 | 0.112 | no |
+| 2000 | projection-0.1 | 0.536 | 308384 | 561.437 | 0.549 | 0.115 | no |
+| 2000 | projection-0.5 | 0.935 | 308384 | 527.670 | 0.352 | 0.124 | no |
+| 5183 | projection-0.1 | 0.633 | 791048 | 1325.951 | 0.312 | 0.124 | no |
+| 5183 | projection-0.5 | 0.953 | 791048 | 1416.886 | 0.365 | 0.234 | no |
+
+<!--/fact-->
+
+Index decision: <!--fact:recall.annDecision-->0/6 contender rows cleared all bars; retain exact. Required exact-top-10 recall ≥ 0.95, p95 speedup ≥ 2×, and a measured exact p95 ≥ 100 ms. The largest reference corpus contains 5183 documents; scale beyond it remains unmeasured.<!--/fact-->
+
+The rejection is scoped to this contender and these vectors. It is not evidence
+against every ANN algorithm. No production ANN dependency or default is added.
+
+Repeated refinement uses [authored trajectories and labels](./fixtures/refinement-pressure.json)
+and the real `createRefiner`, ledger validation, embedding sweep and SQLite
+adapter. Each policy gets its own persistent ledger; every wave reopens that
+same database. Choose a new run directory; a nonempty ledger refuses to prevent
+accidental double counting. Live embeddings and optional `--live-proposals`
+are separate: freely generated proposals remain explicitly unlabelled and do
+not establish a policy's quality. The guarded-model contender uses scripted
+extractive suggestions, not a claim of live-model merge reliability.
+
+```sh
+node benchmark/refinement-pressure.js --directory benchmark/cache/pressure-hash-run \
+  --filepath benchmark/recall-quality-pressure-hash.json
+EMBEDDING_MODEL=baai/bge-m3 node --env-file-if-exists=.env benchmark/refinement-pressure.js \
+  --live --dims 1024 --directory benchmark/cache/pressure-live-run \
+  --filepath benchmark/recall-quality-pressure-live.json
+```
+
+Evidence recall counts distinct labelled units within the returned records;
+duplicates still consume retrieval positions. MRR uses the first relevant
+record. Novel-evidence nDCG uses linear gain for newly reached evidence and the
+optimal ordering available in that ledger. This pressure-specific metric is
+separate from the standard graded SciFact metric. Snapshot bytes are reported
+separately from active state. Every wave reports counts, retained conflicts and
+complements, and relevance; all pair/class similarities are published.
+
+<!--fact:recall.pressure-->
+
+| vectors | policy | records | duplicates | state bytes | recall@10 | MRR@10 | novel-evidence nDCG@10 | conflict / complement retained | passes every wave |
+|---------|--------|---------|------------|-------------|-----------|--------|------------------------|--------------------------------|-------------------|
+| hash-trigram-64 | none | 78 | 60 | 85405 | 0.042 | 0.167 | 0.065 | 1.000 / 1.000 | no |
+| hash-trigram-64 | normalized-text | 15 | 3 | 15694 | 0.375 | 0.306 | 0.337 | 0.500 / 0.500 | no |
+| hash-trigram-64 | identical-evidence-merge | 12 | 0 | 13868 | 1.000 | 0.583 | 0.676 | 1.000 / 1.000 | yes |
+| hash-trigram-64 | guarded-model-merge | 12 | 0 | 13868 | 1.000 | 0.583 | 0.676 | 1.000 / 1.000 | yes |
+| hash-trigram-64 | similarity-only | 12 | 3 | 12436 | 0.250 | 0.306 | 0.332 | 0.000 / 0.500 | no |
+| hash-trigram-64 | exact-evidence | 21 | 3 | 22073 | 0.833 | 0.528 | 0.573 | 1.000 / 1.000 | yes |
+| hash-trigram-64 | runtime-exact-evidence | 21 | 3 | 22073 | 0.833 | 0.528 | 0.573 | 1.000 / 1.000 | yes |
+| baai/bge-m3 | none | 78 | 60 | 1718130 | 0.667 | 1.000 | 0.736 | 1.000 / 1.000 | no |
+| baai/bge-m3 | normalized-text | 15 | 3 | 330227 | 0.375 | 0.500 | 0.473 | 0.500 / 0.500 | no |
+| baai/bge-m3 | identical-evidence-merge | 12 | 0 | 264977 | 1.000 | 1.000 | 0.862 | 1.000 / 1.000 | no |
+| baai/bge-m3 | guarded-model-merge | 12 | 0 | 264977 | 1.000 | 1.000 | 0.862 | 1.000 / 1.000 | no |
+| baai/bge-m3 | similarity-only | 11 | 0 | 242139 | 0.583 | 0.833 | 0.833 | 0.333 / 0.500 | no |
+| baai/bge-m3 | exact-evidence | 21 | 3 | 462370 | 1.000 | 1.000 | 0.987 | 1.000 / 1.000 | yes |
+| baai/bge-m3 | runtime-exact-evidence | 21 | 3 | 462370 | 1.000 | 1.000 | 0.987 | 1.000 / 1.000 | yes |
+
+<!--/fact-->
+
+Refinement result: <!--fact:recall.dedup-->After 12 labelled waves, opt-in exact-evidence suppression stores 21 records instead of 78; state bytes fall 73.1%. Evidence recall@10 is 1.000 versus 0.667, with all labelled conflict and complement units retained. Proposals are scripted; vectors are baai/bge-m3.<!--/fact-->
+
+Only exact text/evidence/tag repeats passed every wave under both embedding
+classes. Case-folding and similarity-only controls lose conflicts and independent
+citations. Lossless merging passes the hash run but fails the live-vector
+non-inferiority bar. The runtime row exercises the selected production option
+and is checked against the independently proposed benchmark policy. The policy
+remains opt-in because authored proposals do not establish a safe general default.
 
 ## vector.js — k-nearest over a stored column, every way it runs
 

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "jaren-authored-tiny",
+  "datasetClass": "authored",
+  "source": "Jaren contributors",
+  "license": "MIT",
+  "version": "1",
+  "files": {
+    "corpus": {
+      "path": "corpus.jsonl",
+      "sha256": "a142b9e12226d2549009d09bc30a9f7c76633650ed7e4b1daa00aa94b2cab906"
+    },
+    "queries": {
+      "path": "queries.jsonl",
+      "sha256": "b42a74b59a7bae1abece85316a375eec10e9263b7182ebdfb02c3ec097a32906"
+    },
+    "qrels": {
+      "path": "qrels.jsonl",
+      "sha256": "f23b2a812e687456c901f2216e3ae7bbb7f810620f86bc75be1161511b7e72bb"
+    }
+  }
+}

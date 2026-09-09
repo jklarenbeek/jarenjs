@@ -254,7 +254,8 @@ describe('the db-backed ledger adapter — rank, and the same answer without it'
     assert.deepStrictEqual(kept.memories, sweptKept.memories);
     assert.ok(kept.scores.every((/** @type {number} */ s) => s >= 0.5));
     const none = await ledger.recall({ near: 'alpha beta gamma delta', minScore: 1.5 });
-    assert.deepStrictEqual(none, { memories: [], scores: [], skipped: 0, via: 'adapter' });
+    assert.deepStrictEqual(none, { memories: [], scores: [], skipped: 0, via: 'adapter',
+      ranking: { algorithm: 'legacy-exact', exhaustive: true, candidateCount: 5 } });
   });
 
   it('a mixture of identities refuses in the ledger\'s own words, whichever path found it', async function () {

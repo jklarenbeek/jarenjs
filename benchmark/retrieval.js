@@ -140,7 +140,8 @@ function parseArgs(argv) {
   return options;
 }
 
-const flags = parseArgs(process.argv);
+const labelled = process.argv.some((arg) => arg === '--dataset' || arg.startsWith('--dataset='));
+const flags = labelled ? null : parseArgs(process.argv);
 
 //#endregion
 
@@ -177,6 +178,8 @@ function printSize(result) {
 /** The published table for one size, in the shape the benchmarks page renders. */
 function tableFor(result) {
   const rows = result.policies.map((policy) => ({
+    datasetClass: 'synthetic',
+    embeddingClass: policy.key === 'near-live' ? 'live' : policy.key.startsWith('near') ? 'hash' : 'none',
     cells: [policy.label, ...KS.map((k) => fmt3(policy.recall[k])), fmt3(policy.mrr),
       ms(policy.latencyMs), ms(policy.latencyP95Ms)],
     // the two policies a consumer chooses between: the default, and
@@ -207,6 +210,8 @@ function tableFor(result) {
 /** One flat published row per policy (plus the floor) per size. */
 function rowsFor(result) {
   const rows = result.policies.map((policy) => ({
+    datasetClass: 'synthetic',
+    embeddingClass: policy.key === 'near-live' ? 'live' : policy.key.startsWith('near') ? 'hash' : 'none',
     size: result.n,
     policy: policy.key,
     label: policy.label,
@@ -219,6 +224,8 @@ function rowsFor(result) {
     latencyP95Ms: policy.latencyP95Ms,
   }));
   rows.push({
+    datasetClass: 'synthetic',
+    embeddingClass: 'none',
     size: result.n,
     policy: 'floor',
     label: 'random floor (analytic)',
@@ -352,6 +359,8 @@ async function main() {
     const payload = {
       meta: {
         suite: 'retrieval',
+        datasetClass: 'synthetic',
+        metricDefinition: 'legacy recall@k is hit rate, not fractional labelled recall',
         title: 'Retrieval — did the right memory reach the prompt',
         description: 'Whether the ledger\'s recall puts the right memory in the prompt: recall@k, MRR'
           + ' and latency for random, recency, tag match plus recency (the default) and the'
@@ -405,7 +414,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+(labelled ? import('./recall-quality.js').then((runner) => runner.main()) : main()).catch((error) => {
   console.error(error);
   process.exit(1);
 });
