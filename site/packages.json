@@ -1,137 +1,137 @@
 {
-  "generated": "2026-09-09T07:07:32+02:00",
-  "commit": "afff2e48ca400da78d9acbee4770733486830cad",
+  "generated": "2026-09-09T08:57:25+02:00",
+  "commit": "f3af94b56dbdfa01e298562b14510b28e5b4cb61",
   "packages": [
     {
       "name": "@jarenjs/core",
       "dir": "packages/core",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Jaren Core Functions"
     },
     {
       "name": "@jarenjs/json",
       "dir": "packages/json",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Jaren JSON Addressing Standards"
     },
     {
       "name": "@jarenjs/validate",
       "dir": "packages/validate",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Jaren is a JavaScript JSON Schema Validator"
     },
     {
       "name": "@jarenjs/formats",
       "dir": "packages/formats",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Jaren Formats for JSON Schema Validation"
     },
     {
       "name": "@jarenjs/refs",
       "dir": "packages/refs",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Jaren JSON Schema Draft Specifications"
     },
     {
       "name": "@jarenjs/emit",
       "dir": "packages/emit",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Build-time artifacts from JSON documents: JSON Schema to TypeScript declarations and beyond, via JTLT stylesheets"
     },
     {
       "name": "@jarenjs/contract",
       "dir": "packages/contract",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Operation contracts for the Jaren suite: the jaren-contract document declares JSON-in/JSON-out operations with kind, policy and an HTTP binding, compiled once into per-operation validators, transport normalizers and a static-beats-variable path matcher, served over HTTP through a total dispatch pipeline with fetch and node adapters, in-process through the local binding and over MessagePort/Worker/BroadcastChannel through the port binding with collision-free request ids, called through clients that resolve JSON outcomes, bound to @jarenjs/app documents through generated task slots and one effect, and projected to a public subset, OpenAPI 3.1, TypeScript, Markdown and AI tool definitions with a jaren-contract CLI that checks them in CI"
     },
     {
       "name": "@jarenjs/forms",
       "dir": "packages/forms",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Framework-agnostic form model generator for JSON Schema with preemptive per-field validation powered by @jarenjs/core"
     },
     {
       "name": "@jarenjs/locales",
       "dir": "packages/locales",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Locale packs (message catalogs) for @jarenjs/validate and @jarenjs/forms error messages"
     },
     {
       "name": "@jarenjs/view",
       "dir": "packages/view",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "The Jaren vnode format: user interfaces as JSON documents, with a keyed DOM patcher and an SSR string renderer"
     },
     {
       "name": "@jarenjs/app",
       "dir": "packages/app",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Applications as JSON documents: hyperapp's dispatch loop rebuilt on the Jaren suite — JSLT views, query-document actions, JSON Patch transitions"
     },
     {
       "name": "@jarenjs/md",
       "dir": "components/md",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Markdown + frontmatter as JSON documents: a compile-to-closures parser whose AST feeds the Jaren query, JSLT, view and forms engines natively"
     },
     {
       "name": "@jarenjs/mermaid",
       "dir": "components/mermaid",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "A native, headless Mermaid clone: diagrams-as-code parsed to a geometry-free JSON AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able, structurally shared, bidirectional (parseMermaid ⇄ toMermaid)"
     },
     {
       "name": "@jarenjs/calc",
       "dir": "components/calc",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "A native, headless multi-mode calculator (standard / programmer / scientific / financial / converter) with x·y and x·y·z plotting rendered as pure-vnode SVG through @jarenjs/view — a two-stage expression compiler (parseExpression ⇄ toExpression), built on @jarenjs/core (math/finance/convert) and driven as an @jarenjs/app document."
     },
     {
       "name": "@jarenjs/charts",
       "dir": "components/charts",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Headless charts for the jaren suite: chart definitions compiled to a geometry-free AST and rendered as pure-vnode SVG through @jarenjs/view — SSR-able, structurally shared, themeable via host-linked tokens"
     },
     {
       "name": "@jarenjs/studio",
       "dir": "components/studio",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "The jaren project IDE: a multi-file project (schema, view, actions, model, queries, flow) is one document; each file is validated against its own grammar, assembled into runnable artifacts, and edited/hosted by the studio widget. The engine is headless; the component layer is the IDE."
     },
     {
       "name": "@jarenjs/play",
       "dir": "components/play",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "The jaren engine playground: pick a JSON engine (JSONPath, JSON Pointer, JSON Patch, query, JSLT, markdown, mermaid, …), feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the studio. The engine is headless; the component is the playground UI."
     },
     {
       "name": "@jarenjs/josl",
       "dir": "packages/josl",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "JOSL - JavaScript Obvious Streaming Language. A TOML 1.0 backward-compatible data language with null, bigint, regexp, datetimes and root arrays as first class citizens, plus JSONX, the same extensions over JSON, and a self-healing CSV reader/writer - with incremental streaming readers for JOSL, TOML, JSONX, strict JSON and CSV."
     },
     {
       "name": "@jarenjs/ai",
       "dir": "packages/ai",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Browser-side AI that makes sense: one OpenAI-compatible chat client for OpenRouter, Ollama and LM Studio (bring your own key), an SSE stream decoder, a JSON-Schema-validated tool registry guarded by Jaren itself, a bounded agent loop, and WebMCP (navigator.modelContext) registration."
     },
     {
       "name": "@jarenjs/flow",
       "dir": "packages/flow",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Executable workflow documents for the Jaren suite: the jaren-fsm finite-state-machine format compiled to a pure step function, with query-document guards and effect descriptors as data"
     },
     {
       "name": "@jarenjs/linq",
       "dir": "packages/linq",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "A C#-familiar fluent LINQ surface for the Jaren suite: expression capture into plain query documents, deferred immutable sequences, and a provider seam that runs the same document in memory or anywhere else"
     },
     {
       "name": "@jarenjs/db",
       "dir": "packages/db",
-      "version": "0.69.0",
+      "version": "0.70.0",
       "description": "Document storage for the Jaren suite: a model document declares collections as JSON Schemas with indexes; openStore applies DDL through a dialect and gives transactional, schema-validated reads and writes over SQLite (Node, Bun, or an injected wasm handle) or PostgreSQL 16+ through an injected client"
     }
   ]
