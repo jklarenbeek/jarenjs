@@ -203,6 +203,8 @@ describe('servePort + openPortClient over a MessageChannel', () => {
 
   it('a cancel frame aborts the server-side ctx.signal; the client outcome is cancelled; the late settlement is answered to nobody', async () => {
     const { server, client, emitted } = pair();
+    const started = Promise.withResolvers();
+    const aborted = Promise.withResolvers();
     /** @type {any} */
     let handlerSignal = null;
     /** @type {(v: any) => void} */
@@ -211,18 +213,20 @@ describe('servePort + openPortClient over a MessageChannel', () => {
       ...shopHandlers(),
       'catalog.load': (/** @type {any} */ _i, /** @type {any} */ ctx) => {
         handlerSignal = ctx.signal;
+        handlerSignal.addEventListener('abort', () => aborted.resolve(), { once: true });
+        started.resolve();
         return new Promise((resolve) => { release = resolve; });
       },
     }, { channel: server }));
     const c = track(openPortClient(shop, { channel: client }));
     const controller = new AbortController();
     const pending = c.invoke('catalog.load', null, { signal: controller.signal });
-    await drain();
+    await started.promise;
     assert.strictEqual(handlerSignal.aborted, false);
     controller.abort();
     const outcome = /** @type {any} */ (assertShape(await pending));
     assert.deepStrictEqual([outcome.kind, outcome.error.code], ['cancelled', 'JC2052']);
-    await drain();
+    await aborted.promise;
     assert.strictEqual(handlerSignal.aborted, true, 'the cancel frame reached the server');
     const before = emitted.length;
     release({ revision: 9, products: [] });

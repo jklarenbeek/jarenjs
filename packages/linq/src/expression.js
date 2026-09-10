@@ -307,8 +307,7 @@ function shiftArgs(record, amount, unit) {
 function literalSpec(spec, method) {
   if (!isPlainJson(spec) || spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
     throw new LinqBuildError('JL0005',
-      `${method}() takes a plain literal spec object; it is read once when the query`
-      + ' compiles, so it cannot be an expression or carry a captured value');
+      `${method}() takes a plain literal spec object, not an expression or captured value`);
   }
   return spec;
 }
@@ -336,6 +335,10 @@ const METHODS = {
   // §8.7 strings
   startsWith: binary('$starts-with'), endsWith: binary('$ends-with'),
   contains: binary('$contains'), matches: binary('$match'),
+  lexical(record, provider, spec = {}) {
+    if (typeof provider !== 'string' || !provider) throw new LinqBuildError('JL0005', 'Lexical name');
+    return makeExpr({ $lexical: [provider, record.doc, literalSpec(spec, 'lexical')] }, record.epoch, false);
+  },
   upper: unary('$upper'), lower: unary('$lower'),
   length: unary('$string-length'),
   concat: binary('$concat'),

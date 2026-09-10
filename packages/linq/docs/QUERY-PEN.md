@@ -1324,7 +1324,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(rows).join([], …)` | `join takes another sequence as its inner side` | `from(sameSource)` |
 | `from(a).join(from(b), …)` | `join's other side must derive from the same source, or from two providers sharing one scope (one store's entity sets) — a query document reads one input; load both collections under one root, or join two entity sets of one store` | one source, or one store's two entity sets (§13.2) |
 | `from(rows).concat(42)` | `concat takes a sequence or a constant array` | a sequence over the same source, or an array |
-| `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object; it is read once when the query compiles, so it cannot be an expression or carry a captured value` | a literal spec |
+| `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object, not an expression or captured value` | a literal spec |
 
 **A provider or a document that is not shaped as the contract says.**
 
@@ -1682,14 +1682,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->174,241<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->176,461<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->40,131<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->40,211<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
 is the query ENGINE and the core it stands on: a chain's document has to
@@ -1715,8 +1715,8 @@ making:
 
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
-are the ones to read together: the chain at <!--fact:bundle.chain.kb-->174<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->674<!--/fact--> kB.
+are the ones to read together: the chain at <!--fact:bundle.chain.kb-->176<!--/fact--> kB and
+`./db` at <!--fact:bundle.db.kb-->676<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -1725,7 +1725,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->198,911<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,047<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->200,615<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,641<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT
@@ -1737,3 +1737,15 @@ subpath's figure; nothing here restates one.
 ## Native column queries and ranges
 
 Chains and JSON documents share the db planner. Adopted scalar projections, connected joins, restricted correlated counts and proved one-root grouped aggregates have [native plans](../../db/docs/NATIVE-PLANS.md); unsupported shapes retain explanations and strict-mode refusals. The structural [range provider](../../app/docs/COLLECTION-PROVIDER.md) is `handle.range(spec, options)` from the root client, composed over the existing pager and capture.
+
+
+## Lexical provider authoring
+
+A string expression's `lexical(provider, request)` method emits
+`{ $lexical: [provider, textExpression, request] }`. The provider name is a nonempty
+string; the request is a plain literal JSON object. It records a declaration,
+never builds an index or runs a second ranker. Compile the emitted document with
+`compileJsonQuery(document, {lexicalProviders})`, binding the same
+`createLexicalProvider` capability that a hand-written query uses. The ordinary
+sequence provider has no implicit search catalog. Filters/facets run before top-k,
+continuations bind the source snapshot, and `$search` remains regex-based.

@@ -345,6 +345,12 @@ export function admitSyncCursor(cursor, admit) {
 /** The page size a page takes when none is given. */
 export const PAGE_LIMIT_DEFAULT = 100;
 
+/** Classify the cursor's byte, row and work refusals at structural adapter boundaries.
+ * @param {any} error @returns {boolean} */
+export function isCursorBudgetError(error) {
+  return ['JD2073', 'JD2074', 'JD2076'].includes(error?.code);
+}
+
 /**
  * Drain a cursor into ONE page: at most `limit` items, at most `maxBytes`
  * serialised bytes (`null` for no byte bound), stopping at an item

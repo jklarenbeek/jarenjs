@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 import { build } from 'esbuild';
+import { gzipSync } from 'node:zlib';
 import { AUTHORED_PEN_PROBES } from './lib/authored-pen-probes.js';
 
 const result = await build({
@@ -748,3 +749,11 @@ const collectionEngine = await build({stdin:{contents:"export { createCollection
 if (Object.keys(collectionEngine.metafile.inputs).some((file)=>/packages\/(app|db|linq)|src\/component\//.test(file)))
   throw new Error('Collection engine imported coordination or the DOM component');
 console.log(`Collection geometry/engine tree shaking passed (${collectionGeometry.outputFiles[0].contents.length}/${collectionEngine.outputFiles[0].contents.length} bytes).`);
+
+// Lexical mechanics are an opt-in core closure, independent of host adapters and reference engines.
+const lexicalEngine = await build({stdin:{contents:"export { compileLexical } from '@jarenjs/core/search';",resolveDir:process.cwd()},
+  bundle:true,write:false,minify:true,format:'esm',platform:'browser',metafile:true});
+if (Object.keys(lexicalEngine.metafile.inputs).some(file=>/packages\/(json|linq|db|app|ai|view)|components\/|node_modules\//.test(file)))
+  throw new Error('Lexical mechanics imported a host, higher layer or external dependency');
+if (gzipSync(lexicalEngine.outputFiles[0].contents).length > 65536) throw new Error('Lexical browser bundle exceeds frozen budget');
+console.log(`Lexical tree shaking passed (${gzipSync(lexicalEngine.outputFiles[0].contents).length} gzip bytes).`);

@@ -1,7 +1,7 @@
 {
   "name": "jarenjs",
   "private": true,
-  "version": "0.79.0",
+  "version": "0.80.0",
   "packageManager": "npm@11.12.1",
   "description": "Jaren is a JSON Schema Karen Compiler written in vanilla Javascript.",
   "author": "joham",
@@ -140,7 +140,8 @@
     "benchmark:retention": "node ./benchmark/retention.js",
     "benchmark:patch-decoding": "node --env-file-if-exists=.env ./benchmark/patch-decoding.js",
     "test:collection": "node --no-warnings=ExperimentalWarning --test \"test/collection/**/*.test.js\"",
-    "benchmark:collection": "node --expose-gc ./benchmark/collection.js"
+    "benchmark:collection": "node --expose-gc ./benchmark/collection.js",
+    "benchmark:lexical": "node --expose-gc ./benchmark/lexical.js"
   },
   "keywords": [
     "JSON",
@@ -180,15 +181,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@jarenjs/app": "^0.79.0",
-    "@jarenjs/core": "^0.79.0",
-    "@jarenjs/formats": "^0.79.0",
-    "@jarenjs/forms": "^0.79.0",
-    "@jarenjs/json": "^0.79.0",
-    "@jarenjs/md": "^0.79.0",
-    "@jarenjs/refs": "^0.79.0",
-    "@jarenjs/validate": "^0.79.0",
-    "@jarenjs/view": "^0.79.0"
+    "@jarenjs/app": "^0.80.0",
+    "@jarenjs/core": "^0.80.0",
+    "@jarenjs/formats": "^0.80.0",
+    "@jarenjs/forms": "^0.80.0",
+    "@jarenjs/json": "^0.80.0",
+    "@jarenjs/md": "^0.80.0",
+    "@jarenjs/refs": "^0.80.0",
+    "@jarenjs/validate": "^0.80.0",
+    "@jarenjs/view": "^0.80.0"
   },
   "bugs": {
     "url": "https://github.com/jklarenbeek/jarenjs/issues"

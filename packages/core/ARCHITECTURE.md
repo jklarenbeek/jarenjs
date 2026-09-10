@@ -1236,3 +1236,5 @@ When contributing, remember: this package is used by `@jarenjs/validate` and `@j
 For questions about the broader architecture, see the root [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). For development workflows, see [`HOWTO.md`](../../docs/HOWTO.md).
 
 `src/virtual/` owns DOM-free fixed and sparse measured collection geometry. It imports no presentation, app or storage owner; the visible component and injected coordinator live above it.
+
+`src/search/` owns lexical definition compilation, postings, rank statistics and derived snapshots. The [search contract](docs/SEARCH.md) fixes tokenizer, scoring and tie semantics. `src/range/` owns the structural resident array provider; app re-exports it and linq injects it without importing an upper layer.

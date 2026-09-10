@@ -1064,7 +1064,7 @@ catch them:
 
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->45,575<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->45,653<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.model.kb-->46<!--/fact--> kB) beside the other nine subpath prices in
@@ -1085,7 +1085,7 @@ them:
   byte of `packages/linq/src/model/`, because the subclasses are built by
   this subpath rather than patched onto the base classes.
 
-The price above the schema pen's <!--fact:bundle.schema-->36,717<!--/fact--> is about 8 kB: the mixin, the
+The price above the schema pen's <!--fact:bundle.schema-->36,795<!--/fact--> is about 8 kB: the mixin, the
 three relation factories, `collection()`/`index()` with their capture,
 `defineModel()` — and the refusal MESSAGES, which are most of what §4
 costs. That is a deliberate trade: naming the rule and the spelling that

@@ -259,6 +259,7 @@ Every subpath a consumer can import, derived from the manifest by
 <!--fact:exports.app-->
 | Import | Kind | Declarations |
 |---|---|---|
+| `@jarenjs/app/search` | JavaScript | declared |
 | `@jarenjs/app` | JavaScript | declared |
 | `@jarenjs/app/schemas/jaren-app.authoring.schema.json` | schema | — |
 | `@jarenjs/app/schemas/jaren-app.draft-07.schema.json` | schema | — |
@@ -278,3 +279,5 @@ for the disposal and trust contract. Safe mode is a display policy and removes
 DOM event bindings and widgets.
 
 `createArrayRangeProvider` and `createCollectionCoordinator` provide injected collection coordination and complete snapshot output; see [the provider contract](docs/COLLECTION-PROVIDER.md).
+
+`@jarenjs/app/search` owns an injected worker and a private resident index; see [search ownership](docs/SEARCH.md) for cancellation, progress and drained disposal.

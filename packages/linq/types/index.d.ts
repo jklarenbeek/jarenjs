@@ -77,6 +77,8 @@ export interface StringExpr extends ExprBase<string>, EqExpr<string>, SpatialMet
   contains(value: string | StringExpr): BoolExpr;
   /** I-Regexp (RFC 9485) full match. */
   matches(pattern: string): BoolExpr;
+  /** Explicit lexical provider request; preserves ranked-result completeness. */
+  lexical(provider: string, request?: Record<string, unknown>): UnknownExpr;
   upper(): StringExpr;
   lower(): StringExpr;
   length(): NumberExpr;
@@ -363,6 +365,8 @@ export interface UnknownExpr
   endsWith(value: unknown): BoolExpr;
   contains(value: unknown): BoolExpr;
   matches(pattern: string): BoolExpr;
+  /** Explicit lexical provider request; preserves ranked-result completeness. */
+  lexical(provider: string, request?: Record<string, unknown>): UnknownExpr;
   upper(): UnknownExpr;
   lower(): UnknownExpr;
   length(): NumberExpr;

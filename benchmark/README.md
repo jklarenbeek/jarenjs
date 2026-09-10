@@ -1336,3 +1336,35 @@ The component and coordinator browser bundle is 16815 gzip bytes. Reference rang
 <!--/fact-->
 
 Browser and manual qualifications are described in the [collection evidence](../components/collection/docs/MEASUREMENTS.md).
+
+## Lexical search qualification
+
+`npm run benchmark:lexical` compares the retained MiniSearch profile with installed
+core exports over the frozen synthetic consumers. Source, runner and fixture hashes
+make the committed measurements auditable. Every labelled query compares complete
+membership, cold ordering and scores; native reload must preserve those answers.
+The reference remains a development-only oracle.
+
+<!--fact:lexical.measurements-->
+
+Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+
+| Consumer / engine | Rows | Cold / warm ms | Query p95 ms | One update ms | Snapshot gzip bytes | Sampled heap / RSS high-water MiB | V8 heap ceiling MiB |
+|---|---:|---|---:|---:|---:|---|---:|
+| catalog / reference | 10000 | 130.99 / 50.10 | 11.97 | 0.45 | 370591 | 95.97 / 190.46 | 240.00 |
+| catalog / native | 10000 | 203.59 / 201.37 | 10.89 | 63.60 | 121054 | 104.08 / 208.89 | 240.00 |
+| archive-stock / reference | 75000 | 1124.97 / 578.43 | 168.33 | 0.55 | 2820312 | 559.14 / 697.04 | 752.00 |
+| archive-stock / native | 75000 | 1500.68 / 1775.38 | 98.43 | 681.98 | 920811 | 579.94 / 726.00 | 752.00 |
+
+| Consumer | Native logical index MiB | Peak update accounted MiB | Native teardown ms / remaining handles | Membership / order / score / native reload differences | Reference reload tie changes |
+|---|---:|---:|---|---|---:|
+| catalog | 24.58 | 35.37 | 0.04 / 0 | 0 / 0 / 0 / 0 | 1002 |
+| archive-stock | 186.22 | 267.03 | 0.03 / 0 | 0 / 0 / 0 / 0 | 6002 |
+
+Browser gzip: native 5606 bytes; reference 5874 bytes.
+
+Separate Node processes, identical source rows and queries, five query samples each; startup includes source generation, cold build, snapshot and warm restore. An earlier unconstrained native run exceeded the larger corpus heap and RSS ceilings; the explicit host heap settings are required for this qualification. RSS is the OS process high-water mark; heap is sampled after operations. peakHeapBytes is the V8 hard heap ceiling (a conservative bound, not an observed peak); both engines run with the same max-old-space-size derived from the frozen heap budget, reserving 64 MiB for young space and explicitly limiting each semi-space to 16 MiB. Unconstrained GC is not a bounded host. Reference indexBytes is serialized JSON; native indexBytes is conservative logical retained allocation, so those columns are not the same metric. Both retain a cold and a restored index during query qualification.
+
+Native build, reload and update costs exceed the reference; source-bound snapshots compress better. Cold tie compatibility deliberately differs from reference reload ordering. These synthetic results qualify the named bounded host, not downstream relevance or universal latency.
+
+<!--/fact-->

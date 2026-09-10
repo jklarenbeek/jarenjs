@@ -1177,3 +1177,5 @@ clean tracked entities; pending edits and incomplete capture populations refuse.
 a bounded database subset into ordered trigger bodies. `migrate.js` reuses its
 existing rebuild/receipt transaction and verifies preservation before publication.
 The backup publisher remains shared by Node online and Bun serialized snapshots.
+
+`src/search.js` composes core lexical mechanics and the JSON predicate compiler over complete bounded entity snapshots. Committed capture and data-version checks invalidate derived state; SHA-256 source content validates persisted caches across reopen. Snapshot storage uses existing collection transactions. See [search execution](docs/SEARCH.md); native full-text dialects remain unqualified.

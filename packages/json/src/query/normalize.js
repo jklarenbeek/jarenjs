@@ -22,6 +22,7 @@ import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '.
 import { isSingularSegments } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { JsonQueryCompileError } from './errors.js';
+import { normalizeLexical } from './lexical.js';
 import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 // The operator registry: `name -> { params, result, compile }`. Only
 // referenced inside functions (never at module evaluation time), so the
@@ -654,6 +655,10 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
   const opPath = docPath + '/' + key;
   ctx.usedOps.add(key); // dependency reporting (query.explain)
   switch (key) {
+    case '$lexical': {
+      const normalized = normalizeLexical(ctx.lexicalProviders, arg, opPath, EXTENSION_HELPERS, scope, ctx);
+      return Object.freeze({ kind: 'op', card: CARD_ONE, docPath, name: key, ...normalized });
+    }
     case '$const': // quote: verbatim single item, nothing inside evaluated
       return Object.freeze({ kind: 'literal', card: CARD_ONE, docPath, value: deepFreezeCopy(arg) });
 
@@ -1480,7 +1485,7 @@ export function normalizeQuery(doc, options = {}) {
     : { pathFunctions: options.pathFunctions };
   const ctx = {
     nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
-    functions, collations, zoneProvider, limits, pathOptions, declaredExternals,
+    functions, collations, zoneProvider, limits, pathOptions, declaredExternals, lexicalProviders: options.lexicalProviders,
     // package-internal: set only by analyzeQuery (Appendix C.1); the
     // compile entry point never passes it
     analysis: options.analysis === true,

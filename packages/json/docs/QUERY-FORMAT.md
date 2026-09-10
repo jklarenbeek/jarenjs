@@ -1814,6 +1814,7 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ0009` | Schema literal rejected by the type-test compiler (invalid embedded schema, §8.11) | XQST0059 |
 | `JQ0010` | `$call`/`$collation` naming no registered function/collation (§8.12, §6.6) | XPST0017 |
 | `JQ0011` | Expression nesting deeper than `limits.depth` (§8.12) | XPDY0130 |
+| `JQ0012` | Lexical provider missing or request declaration rejected | — |
 
 ### 10.3 Runtime errors (`JQ2xxx`)
 
@@ -1830,6 +1831,7 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, `limits.resultItems` at the query boundary, or `limits.steps` expression evaluations (§8.12) | XPDY0130 |
 | `JQ2010` | A registered `$call` function threw (§8.12) | FOER0000 |
 | `JQ2011` | The input document is `undefined`, which is not a JSON value (§2.1) | XPDY0002 |
+| `JQ2012` | Lexical provider threw or returned an invalid result | — |
 
 ---
 
@@ -2259,3 +2261,40 @@ registry's declared `resultType` families (comparison, arithmetic,
 string, aggregate — everything undeclared yields `unknown`).
 **`unknown` is always a safe answer; a wrong tag is a defect.** General
 inference beyond these rules is out of scope here.
+
+
+## Explicit lexical provider requests
+
+`{ "$lexical": ["catalog", textExpression, requestLiteral] }` resolves the named
+`options.lexicalProviders.catalog` capability at compile time. Its
+`compile(requestLiteral)` returns a synchronous `(text) => result` closure.
+The literal is copied and frozen; providers are injected host capabilities, never
+JSON data. `$search` retains its existing regular-expression semantics.
+
+`createLexicalProvider(index, {row})` from `@jarenjs/json/query` composes the public
+core index with authoritative row lookup. Requests accept `where`, `facets`,
+`order: {field, direction: 'asc'|'desc'}`, `sourceRevision`, `limit`, `credits` and
+`after`. Predicates compile through this same query compiler. Facets use scalar
+field values and count every filtered match before top-k; sorting changes order,
+never membership. Source revision defaults to the revision at compilation, so a
+compiled request refuses after source changes until recompiled. Continuations
+bind filter/facet/order, text, source and core configuration identity.
+
+```js
+import { compileJsonQuery, createLexicalProvider } from '@jarenjs/json/query';
+const query = compileJsonQuery({ $lexical: ['catalog', '$.text', {
+  where: { $eq: ['$.available', true] }, facets: ['category'], limit: 20,
+}] }, { lexicalProviders: { catalog: createLexicalProvider(index, {
+  row: id => authoritativeRows.get(id),
+}) } });
+const result = query({ text: 'gren tea' });
+```
+
+The result is one JSON object containing ranked `hits`, exact `total` when
+`state: 'complete'`, continuation and source/configuration identities. Refusals
+have no hits and `total: null`; they cannot masquerade as successful empty results.
+Missing/rejected providers are JQ0012. Exceptions, asynchronous or non-JSON replies,
+duplicate IDs, non-finite scores, and false completeness are JQ2012. Non-string
+query text is JQ2001. Dependencies record `$lexical` as an operator; native database
+planning does not infer full-text parity from that spelling. Use the explicit db
+search adapter for qualified resident execution.

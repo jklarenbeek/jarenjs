@@ -126,7 +126,7 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->174<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `.` | <!--fact:bundle.chain.kb-->176<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->37<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
 | `./model` | <!--fact:bundle.model.kb-->46<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->20<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
@@ -140,7 +140,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->17<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->15<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->17<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->674<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->676<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -351,3 +351,13 @@ and [recovery contract](../packages/db/docs/MIGRATION-FORMAT.md#existing-physica
 Installed `@jarenjs/db` exports execute the [native SQL census](../packages/db/docs/NATIVE-PLANS.md). `@jarenjs/linq/db` exports `createDbRangeProvider` and entity handles expose `range`. The [provider contract](../packages/app/docs/COLLECTION-PROVIDER.md) distinguishes source epochs from client generations, resident index seeks from sequential continuations, and complete totals from loaded rows. The packed consumer runs the retained SQL comparison and no-op mutations under Node and Bun.
 
 Virtual collection consumers import geometry from `@jarenjs/core/virtual`, the headless controller from `@jarenjs/collection`, and DOM widgets from `@jarenjs/collection/component`. The host injects `createCollectionCoordinator` and a structural array or linq/db provider; [the contract](../components/collection/docs/COLLECTION.md) keeps these owners separate.
+
+Lexical consumers import `compileLexical` from `@jarenjs/core/search`; the packed
+consumer exercises both frozen corpora without installing MiniSearch. Optional
+`createLexicalProvider` from `@jarenjs/json/query` evaluates filters and facets over
+complete membership; LINQ emits the same `$lexical` request. Hosts can compose
+`@jarenjs/db/search` persistence, `@jarenjs/linq/db` credited lexical ranges and
+`@jarenjs/app/search` injected workers independently. See the [core contract](../packages/core/docs/SEARCH.md),
+[db adapter](../packages/db/docs/SEARCH.md) and [worker lifecycle](../packages/app/docs/SEARCH.md).
+The retained-reference cold profile is qualified for synthetic Node/Bun consumers;
+actual downstream cutover and native full-text dialect parity remain separate work.

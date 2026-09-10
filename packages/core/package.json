@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.79.0",
+  "version": "0.80.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -32,6 +32,10 @@
     "core"
   ],
   "exports": {
+    "./search": {
+      "types": "./dist/types/search/index.d.ts",
+      "default": "./src/search/index.js"
+    },
     ".": {
       "types": "./dist/types/index.d.ts",
       "default": "./src/index.js"
@@ -176,6 +180,10 @@
     "./virtual": {
       "types": "./dist/types/virtual/index.d.ts",
       "default": "./src/virtual/index.js"
+    },
+    "./range": {
+      "types": "./dist/types/range/index.d.ts",
+      "default": "./src/range/index.js"
     }
   },
   "scripts": {

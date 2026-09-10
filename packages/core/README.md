@@ -202,6 +202,7 @@ Every subpath a consumer can import, derived from the manifest by
 <!--fact:exports.core-->
 | Import | Kind | Declarations |
 |---|---|---|
+| `@jarenjs/core/search` | JavaScript | declared |
 | `@jarenjs/core` | JavaScript | declared |
 | `@jarenjs/core/array` | JavaScript | declared |
 | `@jarenjs/core/async` | JavaScript | declared |
@@ -297,6 +298,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/convert/registry` | JavaScript | declared |
 | `@jarenjs/core/package.json` | metadata | — |
 | `@jarenjs/core/virtual` | JavaScript | declared |
+| `@jarenjs/core/range` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
@@ -304,3 +306,5 @@ Every subpath a consumer can import, derived from the manifest by
 Unit tests live in `test/core/` at the repository root (`npm run test:core`). This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document, with per-module references under [docs/](./docs/) (`MATH`, `CONVERT`, `FINANCE`, `DATES`, `GEO`); see the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture, and the [ROADMAP](../../docs/ROADMAP.md) for planned work.
 
 See [virtual geometry](docs/VIRTUAL.md) for opt-in constant-work fixed ranges and bounded sparse measured axes.
+
+See [lexical search](docs/SEARCH.md) for the opt-in resident ranker and bounded source-derived snapshots. `@jarenjs/core/range` owns the structural resident array provider shared by app and linq.

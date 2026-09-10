@@ -1357,6 +1357,7 @@ Every subpath a consumer can import, derived from the manifest by
 <!--fact:exports.db-->
 | Import | Kind | Declarations |
 |---|---|---|
+| `@jarenjs/db/search` | JavaScript | declared |
 | `@jarenjs/db` | JavaScript | declared |
 | `@jarenjs/db/node` | JavaScript | declared |
 | `@jarenjs/db/postgres` | JavaScript | declared |
@@ -1426,3 +1427,5 @@ require explicit dispositions and assertions. `planInvariants` supplies declared
 SQLite constraint/audit triggers for installation through that migration boundary.
 
 Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.
+
+`@jarenjs/db/search` composes the resident ranker with bounded authoritative entity reads and optional atomic snapshot storage. See [persisted search](docs/SEARCH.md).

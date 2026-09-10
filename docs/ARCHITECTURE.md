@@ -706,3 +706,5 @@ backup publication retain their existing owners. See [db architecture](../packag
 ### Native storage composition
 
 The db entity planner owns adopted-column read lowering and bounded mutation documents. `linq/db` owns the headless [range adapter](../packages/app/docs/COLLECTION-PROVIDER.md), reusing db cursors, keyset pages, transactions and capture. Its structural shape is consumed through injection; there is no db/linq import of app or components and no second query or range engine.
+
+Lexical mechanics live in `core/search`; `json/query` binds explicit injected `$lexical` providers and `linq` emits their documents. `db/search` adds authoritative snapshots and persistence, and `app/search` owns injected workers. `core/range` is the single resident array provider used by app and the structural `linq/db` lexical adapter. The browser ranker imports neither db nor AI. See [the lexical contract](../packages/core/docs/SEARCH.md).

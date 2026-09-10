@@ -3,6 +3,7 @@
 import { createArrayRangeProvider, createCollectionCoordinator } from '@jarenjs/app';
 import { createDomRenderer } from '@jarenjs/view';
 import { mountProviderCollection } from '@jarenjs/collection/component';
+import { mountLexicalDemo } from './lexical.js';
 
 /** @param {string} mode */
 async function source(mode) {
@@ -30,13 +31,15 @@ async function source(mode) {
 export function createCollectionDemoWidget() {
   return {
     mount(host, props) {
+      if (props.mode === 'lexical') return mountLexicalDemo(host);
       const document = host.ownerDocument;
       let disposed = false, collection = null, close = null;
       const render = createDomRenderer(host, {document});
       render(['section', {}, ['nav', {class:'btn-row', 'aria-label':'Collection examples'},
         ['a',{class:'btn',href:'#/collection?mode=array'},'Array catalog'],
         ['a',{class:'btn',href:'#/collection?mode=measured'},'Measured grid'],
-        ['a',{class:'btn',href:'#/collection?mode=database'},'SQLite snapshot']],
+        ['a',{class:'btn',href:'#/collection?mode=database'},'SQLite snapshot'],
+        ['a',{class:'btn',href:'#/collection?mode=lexical'},'Lexical search']],
       ['p', {}, props.mode === 'database' ? 'Complete bounded SQLite snapshot. Pages and mounted rows have separate limits.' :
         'The array source is resident. Only requested pages and visible cells are mounted.'],
       ['div',{'data-collection-host':'true'}], ['p',{role:'status','data-collection-status':'true'},'Loading collection…']]);

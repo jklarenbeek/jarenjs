@@ -679,6 +679,13 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         program += "await import('./query-native.js');\n";
       }
     }
+    if (name === '@jarenjs/core') {
+      const manifest = JSON.parse(readFileSync(join(root, 'test/adoption/manifest.json'), 'utf8'));
+      writeFileSync(join(consumerDir, 'lexical.js'), readFileSync(join(root, 'test/consumer/lexical.js')));
+      writeFileSync(join(consumerDir, 'lexical-fixture.json'), readFileSync(join(root, 'test/adoption/fixtures/search.json')));
+      writeFileSync(join(consumerDir, 'lexical-consumers.json'), JSON.stringify(manifest.consumers.map((definition) => ({ definition, rows: adoptionRows(definition) }))));
+      program += "await import('./lexical.js');\n";
+    }
     if (name === '@jarenjs/collection') {
       writeFileSync(join(consumerDir, 'collection.js'), readFileSync(join(root, 'test/consumer/collection.js')));
       writeFileSync(join(consumerDir, 'collection-grid.json'), readFileSync(join(root, 'test/adoption/fixtures/grid.json')));

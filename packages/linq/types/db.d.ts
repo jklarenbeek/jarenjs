@@ -403,3 +403,9 @@ export function defineReplication(header: Omit<import('@jarenjs/db').Replication
   toDocument(): import('@jarenjs/db').ReplicationEnvelope;
   toJSON(): import('@jarenjs/db').ReplicationEnvelope;
 };
+
+/** A complete lexical membership composed with the common structural range provider. */
+export declare function createLexicalRangeProvider(source: import('@jarenjs/db/search').DbSearch,
+  text: string, request?: Record<string, unknown>, options?: {maxMatches?:number; maxSourceBytes?:number;
+    maxRows?:number; maxBytes?:number; maxPages?:number; maxInFlight?:number; query?:string;
+    source?:string; exactTotal?:boolean; seekIndex?:boolean; disposeSource?:boolean}): Promise<any>;

@@ -401,59 +401,20 @@ what each does is its own documentation's job
 
 ## Lexical search (cross-package)
 
-Catalog applications can retain MiniSearch after adopting the suite because
-query `$search` is regex substring matching; the vector kernel, indexes and AI
-recall solve a different retrieval
-problem. The open work here is an opt-in lexical engine, with dependency-free
-kernels in core where shared, query authoring in json/linq, persistence adapters
-in db and host lifecycle integration in app. Package/subpath names are design
-decisions, not existing exports; none requires a database or AI dependency in a
-browser search consumer.
+The [resident lexical contract](../packages/core/docs/SEARCH.md), explicit JSON/LINQ
+provider boundary, source-validated db snapshots and injected worker lifecycle are
+implemented. The [measurements](../benchmark/README.md#lexical-search-qualification)
+qualify the retained cold ranking profile on frozen synthetic corpora.
 
-- [ ] **A compiled lexical search contract and resident index.** Define a
-  versioned JSON declaration for document identity, indexed/stored fields,
-  normalization/tokenization, field boosts, term combination, prefix/fuzzy
-  policy, ranking and deterministic ties. Compile once; expose bounded build,
-  add/update/delete/clear, search and disposal with ranked IDs, scores and
-  optional match positions. Decide Unicode/case/accent behavior, punctuation,
-  numbers and leading-zero identifiers, repeated tokens, empty input, exact
-  identifier matching, typo-distance thresholds and expansion limits explicitly.
-  Reuse core text primitives, but do not substitute regex matching or vector
-  similarity for lexical relevance. Acceptance includes a catalog profile with
-  title, SKU, barcode, type, category/category-search, source name and tag fields,
-  application-supplied HTML-entity decoding, `prefix: true`, `fuzzy: 0.15` and
-  AND term combination. Pin result membership and ordering against the installed
-  MiniSearch baseline, including ties; explicit application sort must still
-  override relevance without changing membership. Any ranking change requires
-  a documented compatibility profile or a separately accepted migration.
-- [ ] **Bounded incremental search and durable index lifecycle.** Updates must
-  replace old postings and ranking statistics atomically by document identity,
-  reject duplicate/stale generations according to a declared policy, and remove
-  deleted content without retaining unbounded tombstones. Budget source bytes,
-  token/posting counts, vocabulary, candidate expansion, returned matches and
-  build/update work; distinguish an exhausted budget from a complete empty
-  result. Provide cooperative batches and an injected worker protocol with
-  cancellation, stale-result fencing, progress and drained teardown. Specify a
-  versioned index snapshot bound to tokenizer/ranker configuration and source
-  revision, validation of corrupt/incompatible snapshots, atomic publication
-  and full rebuild recovery. The index is derived data, never a second catalog
-  authority. Keep it outside serializable app state and prove repeated
-  rebuild/navigation does not leak workers, indexes or obsolete source rows.
-- [ ] **One search meaning across resident and database execution.** Give
-  LINQ/query documents a deliberate lexical-search provider boundary and db an
-  optional persisted-index/execution capability, without changing the existing
-  `$search` operator's meaning. Specify score identity, filtering/faceting
-  scope, exact counts versus top-k windows, tie-aware continuation and snapshot
-  consistency so filtering a truncated candidate set cannot lose valid hits.
-  Native SQLite/PostgreSQL full-text facilities are candidates only after
-  tokenizer/ranking/error equivalence is demonstrated; expose residual work
-  and unsupported capabilities instead of claiming dialect parity. Connect
-  committed changes through the existing capture/live machinery, explicitly
-  handling external SQL writers and stale index generations. Qualification
-  needs labelled multilingual and identifier-heavy queries, incremental-versus-
-  rebuild equality, cold/warm build/query latency, peak memory and bundle size
-  against MiniSearch at the application fixture and a larger bounded corpus;
-  publish relevance and performance losses alongside wins.
+- [ ] **Downstream relevance and migration acceptance.** Run the actual
+  application corpus through the declared tokenizer/ranker and host decoding
+  policy. Review ranking, tie and resource differences before removing the
+  retained engine from a real consumer. Synthetic portable qualification does
+  not establish production relevance or host-wide memory limits.
+- [ ] **Native full-text execution.** Qualify SQLite/PostgreSQL tokenization,
+  ranking, ties and errors before promoting a dialect index. The current db
+  adapter reports bounded resident residual work; PostgreSQL external-writer
+  capture needs its own platform proof. Optional match positions remain open.
 
 ## Saved formulas and reviewed rules (cross-package)
 

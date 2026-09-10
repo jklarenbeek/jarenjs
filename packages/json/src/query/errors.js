@@ -24,6 +24,7 @@ export const QUERY_CODES = Object.freeze({
   JQ0009: 'schema literal rejected by the type-test compiler',
   JQ0010: '$call/$collation naming no registered function/collation',
   JQ0011: 'expression nesting deeper than limits.depth',
+  JQ0012: 'lexical provider missing or request declaration rejected',
   JQ2001: 'runtime type error',
   JQ2002: '$idiv/$mod by zero',
   JQ2003: 'EBV of a multi-item sequence',
@@ -35,6 +36,7 @@ export const QUERY_CODES = Object.freeze({
   JQ2009: 'an execution limit exceeded',
   JQ2010: 'a registered $call function threw',
   JQ2011: 'the input document is undefined',
+  JQ2012: 'lexical provider threw or returned an invalid result',
 });
 
 /**

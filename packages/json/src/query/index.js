@@ -22,6 +22,7 @@ import { JsonQueryRuntimeError } from './errors.js';
 export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
 export { NODE_KINDS };
 export { createQueryAccumulator } from './accumulator.js';
+export { createLexicalProvider } from './lexical-provider.js';
 export { annotateTypes, TYPE_TAGS } from './types.js';
 
 const hasOwn = Object.hasOwn;
@@ -57,6 +58,9 @@ const hasOwn = Object.hasOwn;
 /**
  * Compile options for {@link compileJsonQuery}.
  * @typedef {Object} JsonQueryOptions
+ * @property {Record<string, {compile:(request:any)=>(text:string)=>any}>} [lexicalProviders]
+ *   Explicit resident lexical capabilities. Requests compile once and return bounded
+ *   ranked results with completeness, source revision and configuration identity.
  * @property {(schemaJson: any, docPath: string) => ((value: any) => boolean)} [compileTypeTest]
  *   Hook compiling a JSON Schema literal into a boolean item
  *   predicate, called once per schema literal at query compile time
