@@ -50,6 +50,13 @@ render.destroy();                // terminal teardown, idempotent
 
 `render.destroy()` unmounts every mounted widget exactly once (pending mounts are canceled), empties the container, and turns every later `render` call into an exact no-op — including a scheduled flush that fires after destruction. The render boundary is **serialized**: a `render` entered synchronously from inside a widget hook or event callback (an `emit` chain) never nests — it queues behind the running patch, multiple nested requests coalesce to the latest vnode, and the queued tree is applied against the committed baseline, so no widget sees `update` before its `mount` returned or receives stale previous props.
 
+Both renderers accept fragment roots without a wrapper. Pass `hydrate: true`
+to adopt matching server DOM on the first trusted render; local mismatches
+are repaired and widgets get fresh hosts. Safe mode rebuilds existing DOM.
+Controlled text writes defer through composition and the final input event,
+then settle with the caret preserved. The browser tests cover these paths in
+Chromium, Firefox and WebKit; native OS IME audits remain separate.
+
 ### On the server
 
 ```javascript

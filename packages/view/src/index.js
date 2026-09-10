@@ -32,3 +32,5 @@ export {
 export {
   createSafePolicy,
 } from './safe.js';
+
+/** @typedef {import('./dom.js').DomRendererOptions} DomRendererOptions */

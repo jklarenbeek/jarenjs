@@ -18,3 +18,5 @@ export { KINDS, LAYOUT_DEFAULT, parseProject, fileOf } from './project.js';
 export { validateFile } from './validate.js';
 export { assembleArtifacts, classifyChange, describe } from './assemble.js';
 export { STUDIO_CODES, StudioError } from './errors.js';
+export { resolveProjectFile, projectFileContext, renameProjectFile, writeProjectArtifact } from './resolve.js';
+export { ADDABLE_KINDS, fileSkeleton } from './skeletons.js';

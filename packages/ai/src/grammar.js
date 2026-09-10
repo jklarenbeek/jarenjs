@@ -5,12 +5,12 @@ import { createStructuredOutput } from './structured.js';
 import { checkOutcome } from './check.js';
 import { createRoutedClient } from './routing.js';
 
-/** @param {{ client: any, grammar: 'query'|'jslt'|'app'|'fsm'|'dag'|'statechart'|'workflow', profile: any,
+/** @param {{ client: any, grammar: 'query'|'jslt'|'app'|'fsm'|'dag'|'statechart'|'workflow'|'model', profile: any,
  *   schema: any, refs?: any[], compile: (document: any) => any, gate?: any,
  *   maxRepairs?: number, stream?: boolean, onAttempt?: any,
  *   selectModel?: any, limits?: any, onRoute?: any }} options */
 export function createGrammarAuthor(options) {
-  if (!['query', 'jslt', 'app', 'fsm', 'dag', 'statechart', 'workflow'].includes(options.grammar))
+  if (!['query', 'jslt', 'app', 'fsm', 'dag', 'statechart', 'workflow', 'model'].includes(options.grammar))
     throw new TypeError('unknown authored grammar');
   if (!options.profile || !options.schema || typeof options.compile !== 'function')
     throw new TypeError('grammar author needs a derived profile, full schema and compiler');

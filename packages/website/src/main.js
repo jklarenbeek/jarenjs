@@ -1,6 +1,7 @@
 //@ts-check
 /** Browser bootstrap: real environment in, one running app document out. */
 
+import { exportProject } from '@jarenjs/studio/export';
 import './styles.css';
 import '@jarenjs/md/styles/md.css';
 import '@jarenjs/mermaid/styles/mermaid.css';
@@ -134,6 +135,24 @@ const app = createSiteApp({
     anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(url);
+    return true;
+  },
+  exportProject: async (project) => {
+    const base = `${BASE}studio-offline/`;
+    const response = await fetch(base + 'manifest.json');
+    if (!response.ok) throw new Error('Offline runtime assets are unavailable.');
+    const manifest = await response.json();
+    const entries = await Promise.all(manifest.files.map(async (name) => {
+      if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('Invalid runtime asset name');
+      const asset = await fetch(base + name);
+      if (!asset.ok) throw new Error(`Cannot load offline asset ${name}`);
+      return [name, new Uint8Array(await asset.arrayBuffer())];
+    }));
+    const zip = exportProject(project, Object.fromEntries(entries));
+    const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = 'jaren-project.zip'; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     return true;
   },
   // `download`'s twin: open the file picker and hand back what was chosen.

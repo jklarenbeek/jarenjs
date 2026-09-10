@@ -22,7 +22,7 @@ const DOCUMENTS = {
   data: [1, 2],
   schema: { type: 'number' },
   fsm: { $fsm: '0.1', initial: 'a', states: ['a'], transitions: [] },
-  dag: { $dag: '0.1', nodes: { n: { kind: 'input' } }, edges: [] },
+  dag: { $dag: '0.1', nodes: { n: { kind: 'input' }, out: { kind: 'output' } }, edges: [{ from: 'n', to: 'out' }] },
   model: { $model: '0.1', collections: { rows: { schema: { type: 'object' }, key: '/id', indexes: [] } } },
   contract: { $contract: '0.1', id: 'test', operations: { load: { kind: 'read', output: true, http: { method: 'GET', path: '/data' } } } },
 };
@@ -34,7 +34,7 @@ describe('project pen', () => {
     assert.deepEqual([...p.FILE_KINDS].sort(), [...latest.$defs.file.properties.kind.enum].sort());
     assert.deepEqual(old.definitions.file.properties.kind.enum, latest.$defs.file.properties.kind.enum);
     assert.deepEqual(Object.keys(latest.properties), ['project', 'files', 'active', 'layout']);
-    assert.deepEqual(Object.keys(latest.$defs.file.properties), ['name', 'kind', 'text']);
+    assert.deepEqual(Object.keys(latest.$defs.file.properties), ['name', 'kind', 'text', 'imports', 'input', 'model', 'collection']);
     assert.deepEqual(Object.keys(latest.$defs.layout.properties), ['mode', 'ratio', 'autorun']);
   });
   for (const [kind, document] of Object.entries(DOCUMENTS)) {
@@ -101,5 +101,17 @@ describe('project pen', () => {
     assert.throws(() => p.jsonFile('x', 'data', undefined), { code: 'JL0101' });
     assert.equal(validateFile(p.file('x', 'data', '{')).valid, false);
     assert.throws(() => parseProject(p.defineProject().layout({ ratio: 2 }).schema), { code: 'JS0001' });
+  });
+  it('preserves immutable imports and explicit input/model routing through builder updates', () => {
+    const imports = { state: 'seed' };
+    const app = p.jsonFile('app', 'app', { view: [] }, { imports });
+    const query = p.file('query', 'query', '"$"', { model: 'store', collection: 'notes', input: 'seed' });
+    const built = p.defineProject([app, query, p.jsonFile('seed', 'state', {})]);
+    imports.state = 'changed';
+    assert.equal(app.imports.state, 'seed');
+    assert.ok(Object.isFrozen(app.imports));
+    assert.deepEqual(built.files(built.schema.files).schema, built.schema);
+    assert.deepEqual(parseProject(built.schema).files, built.schema.files);
+    assert.throws(() => p.file('x', 'data', '{}', { unknown: true }), { code: 'JL0101' });
   });
 });

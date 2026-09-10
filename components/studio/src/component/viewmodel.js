@@ -21,13 +21,14 @@ const MOBILE_PANES = ['files', 'editor', 'stage'];
 /** The stage the active file drives. */
 function deriveStage(project, activeMeta, results, revision, committed) {
   if (activeMeta === null) return { kind: 'empty', note: 'Add a file to begin.' };
-  if (activeMeta.kind === 'app') {
+  if (committed?.store) return { kind: 'app', widget: 'studio-data', mount: committed };
+  if (committed?.kind === 'app' || ['app', 'fsm', 'dag'].includes(activeMeta.kind)) {
     // A host that runs the app live commits the LAST-GOOD assembled
     // document (with its own reboot revision). That wins over the current
     // text: a parse error in the editor must never blank the stage — the
     // last good frame stays until the next VALID commit replaces it.
     if (committed !== null && committed.doc) {
-      return { kind: 'app', mount: { doc: committed.doc, revision: committed.revision } };
+      return { kind: 'app', widget: (committed.kind ?? activeMeta.kind) === 'app' ? 'studio-stage' : 'studio-flow', mount: committed };
     }
     const artifact = assembleArtifacts(project).artifacts.find((a) => a.name === activeMeta.name);
     if (artifact === undefined || !activeMeta.valid) {
@@ -35,7 +36,7 @@ function deriveStage(project, activeMeta, results, revision, committed) {
     }
     // the reference-stable mount is memoized by the host at wiring time;
     // here it is the data: the assembled document + the reboot revision
-    return { kind: 'app', mount: { doc: artifact.doc, revision } };
+    return { kind: 'app', widget: activeMeta.kind === 'app' ? 'studio-stage' : 'studio-flow', mount: { name: activeMeta.name, kind: activeMeta.kind, doc: artifact.doc, revision } };
   }
   if (activeMeta.kind === 'jslt' || activeMeta.kind === 'query' || activeMeta.kind === 'schema'
     || activeMeta.kind === 'contract') {
@@ -49,10 +50,7 @@ function deriveStage(project, activeMeta, results, revision, committed) {
   if (activeMeta.kind === 'state' || activeMeta.kind === 'data') {
     return { kind: 'inert', note: 'An input — edit it as text; it feeds the app, a query or a validation.' };
   }
-  // fsm / dag / model validate and assemble, but have no editor and no
-  // runner here yet — the flow canvas and the worker-backed store still
-  // live on their own website surfaces (both are tracked in ROADMAP.md)
-  return { kind: 'inert', note: `The ${activeMeta.role} editor is not built yet; edit it as text meanwhile.` };
+  return { kind: 'inert', note: `Press Run to open the ${activeMeta.role}.` };
 }
 
 /**
@@ -100,7 +98,7 @@ export function projectViewModel(state, options = {}) {
   // used only while it is the active file — a reference-stable document
   // the stage widget reboots (revision change) or hot-updates (same
   // revision, new state) against
-  const committed = (slice.mount && slice.mount.name === activeName) ? slice.mount : null;
+  const committed = (slice.mount && (slice.mount.name === activeName || slice.mount.sourceFiles?.includes(activeName))) ? slice.mount : null;
 
   // The editor's value is the typing BUFFER reconciled against the file's
   // committed text, never the committed text alone: the buffer is what the
@@ -134,6 +132,13 @@ export function projectViewModel(state, options = {}) {
       ? slice.renameDraft.text
       : activeName,
     activeKind: activeMeta?.kind ?? null,
+    routing: activeFile && ['query', 'jslt', 'schema', 'fsm', 'dag', 'model'].includes(activeFile.kind) ? {
+      input: activeFile.input ?? '', model: activeFile.model ?? '', collection: activeFile.collection ?? '',
+      canModel: activeFile.kind === 'query',
+      hasInput: !activeFile.model, hasCollection: activeFile.kind === 'model' || !!activeFile.model,
+      inputs: project.files.filter((f) => ['data', 'state'].includes(f.kind)).map((f) => f.name),
+      models: project.files.filter((f) => f.kind === 'model').map((f) => f.name),
+    } : null,
     activeValid: activeMeta?.valid ?? true,
     activeErrors: activeMeta?.errors ?? [],
     editorValue,

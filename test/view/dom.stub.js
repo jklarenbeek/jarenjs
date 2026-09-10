@@ -24,6 +24,7 @@ export class StubText extends StubNode {
   constructor(doc, text) {
     super(doc);
     this.nodeValue = text;
+    this.nodeType = 3;
   }
 }
 
@@ -44,6 +45,7 @@ export class StubElement extends StubNode {
   constructor(doc, tag, ns = null) {
     super(doc);
     this.tagName = tag;
+    this.nodeType = 1;
     this.namespaceURI = ns;
     /** @type {(StubElement | StubText)[]} */
     this.childNodes = [];
@@ -140,6 +142,8 @@ export class StubElement extends StubNode {
   getAttribute(name) {
     return this.attributes.get(name) ?? null;
   }
+
+  getAttributeNames() { return [...this.attributes.keys()]; }
 
   /** Focus tracking: the document records the active element. */
   focus() {

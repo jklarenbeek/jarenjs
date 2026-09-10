@@ -432,6 +432,11 @@ function runDeadCodeAudit(opts) {
     // same rule main.js follows
     '--exclude', 'packages/website/src/boundaries/data.js',
     '--exclude', 'packages/website/src/db-worker.js',
+    // Browser bootstrap/WASM entry points follow the same boundary. The
+    // exported ZIP is executed with network blocked in project-offline.spec
+    // (Chromium, Firefox, WebKit); their reusable hosts remain audited here.
+    '--exclude', 'packages/website/src/project-db-worker.js',
+    '--exclude', 'packages/website/src/offline-runtime.js',
     '--temp-directory', opts.tempDir,
     '--clean',
     process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',

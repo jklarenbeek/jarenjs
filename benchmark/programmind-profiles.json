@@ -2,6 +2,21 @@
   "version": 1,
   "rows": [
     {
+      "grammar": "model",
+      "sourceHash": "9005e1c53bfcdf541f5ada9b6b4a9da30e96bd7d2fd7db5fe0a4481a602b4e79",
+      "seamHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "profileHash": "5c0202768aab0c417b0883d24607b9bb90b4da154000d627c7fd72e3ba6288a8",
+      "open": [],
+      "full": {
+        "bytes": 7779,
+        "branches": 7
+      },
+      "profile": {
+        "bytes": 7710,
+        "branches": 7
+      }
+    },
+    {
       "grammar": "query",
       "sourceHash": "98ad2c2b24dcbdfcc3e4f5c9a47c578b23099e5ba0daf33b9c0bc38e2a25a6d1",
       "seamHash": "f0d41be2c687a847bb30b6271a691b76477fbce80460d4aa7388e6a1469ea80e",

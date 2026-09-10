@@ -450,7 +450,7 @@ describe('the add-file menu and its skeletons cannot drift apart', () => {
   });
 
   it('a kind with no skeleton is not offered — adding one would do nothing', function () {
-    for (const kind of ['fsm', 'dag', 'model']) {
+    for (const kind of ['unknown', '__proto__']) {
       assert.strictEqual(fileSkeleton(kind), null, `${kind} has no skeleton`);
       assert.ok(!ADDABLE_KINDS.includes(kind), `${kind} is not offered in the menu`);
     }

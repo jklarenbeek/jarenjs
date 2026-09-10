@@ -4,37 +4,105 @@
   "title": "jaren-project (draft-07)",
   "description": "The draft-07 twin of jaren-project, for tools pinned to draft-07. Mechanically equivalent to the 2020-12 canonical artifact.",
   "type": "object",
-  "required": ["project", "files"],
+  "required": [
+    "project",
+    "files"
+  ],
   "additionalProperties": false,
   "properties": {
-    "project": { "enum": ["0.1"] },
+    "project": {
+      "enum": [
+        "0.1"
+      ]
+    },
     "files": {
       "type": "array",
-      "items": { "$ref": "#/definitions/file" }
+      "items": {
+        "$ref": "#/definitions/file"
+      }
     },
-    "active": { "type": "string" },
-    "layout": { "$ref": "#/definitions/layout" }
+    "active": {
+      "type": "string"
+    },
+    "layout": {
+      "$ref": "#/definitions/layout"
+    }
   },
   "definitions": {
     "file": {
       "type": "object",
-      "required": ["name", "kind", "text"],
+      "required": [
+        "name",
+        "kind",
+        "text"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "kind": {
-          "enum": ["app", "jslt", "query", "state", "data", "schema", "fsm", "dag", "model", "contract"]
+        "name": {
+          "type": "string",
+          "minLength": 1
         },
-        "text": { "type": "string" }
+        "kind": {
+          "enum": [
+            "app",
+            "jslt",
+            "query",
+            "state",
+            "data",
+            "schema",
+            "fsm",
+            "dag",
+            "model",
+            "contract"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "imports": {
+          "type": "object",
+          "description": "Top-level artifact member to project file name; replaces an absent member with the entire source JSON value.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "input": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Explicit data/state input file."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model file whose worker store executes this query."
+        },
+        "collection": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Collection in the referenced model; required when ambiguous."
+        }
       }
     },
     "layout": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mode": { "enum": ["classic", "right", "top"] },
-        "ratio": { "type": "number", "minimum": 0, "maximum": 1 },
-        "autorun": { "type": "boolean" }
+        "mode": {
+          "enum": [
+            "classic",
+            "right",
+            "top"
+          ]
+        },
+        "ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "autorun": {
+          "type": "boolean"
+        }
       }
     }
   }

@@ -269,3 +269,10 @@ Every subpath a consumer can import, derived from the manifest by
 ## Development
 
 Unit tests live in `test/app/` at the repository root (`npm run test:app`). See [ROADMAP](../../docs/ROADMAP.md) for what's next: dirty-path-pruned re-rendering and time-travel tooling over the action log.
+
+`createApp` forwards the renderer's `safe`, `onUnsafe` and `hydrate` options.
+Optional `capabilities: { effects, subs, widgets, eventFields }` arrays grant
+specific host registry names; with safe mode or explicit grants, omitted lists
+are empty. See [APP-FORMAT §8.2.1](docs/APP-FORMAT.md#821-dom-profiles-and-host-capability-grants)
+for the disposal and trust contract. Safe mode is a display policy and removes
+DOM event bindings and widgets.

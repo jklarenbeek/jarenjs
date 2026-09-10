@@ -92,6 +92,6 @@ describe('documented counts match the code', () => {
   });
 
   it('the studio file-kind count matches KINDS', () => {
-    assert.strictEqual(statedCount(read('docs/ROADMAP.md'), '`KINDS` lists all', ''), KINDS.length);
+    assert.strictEqual(statedCount(read('components/studio/README.md'), '`KINDS` lists all', ''), KINDS.length);
   });
 });

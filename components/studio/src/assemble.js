@@ -4,17 +4,14 @@
  * needs to decide reboot-vs-hot-update.
  *
  * `assembleArtifacts` composes the project's files into the runnable set.
- * This order ships the WHOLE-DOCUMENT contract: a runnable file (`app`,
- * `fsm`, `dag`, `model`, `jslt`, `query`, `schema`) is its own artifact;
- * `state`/`data` files are inputs, not artifacts. Fragment assembly —
- * composing separate `state` + `view` + `actions` files into ONE
- * `jaren-app` document (the true HTML/CSS/JS split) — is the model's
- * headline enhancement and layers on top without changing this contract.
+ * A runnable file can import named members from other project files;
+ * `sourceFiles` records the complete dependency chain. `state`/`data`
+ * files are inputs, not standalone artifacts.
  *
  * `classifyChange` is the load-bearing UX datum: a `state`-only edit must
  * HOT-DISPATCH into a running app (no reboot, the user keeps scroll and
  * inputs), while a `view`/`actions` change must reboot. It compares a
- * STRUCTURAL key (an app's `view`, `actions` and `subs`) via the suite's own
+ * STRUCTURAL key (all app members except `state`) via the suite's own
  * `semanticKey` — the collision-free identity, not the memo-grade
  * `contentKey` fingerprint: a classification decides whether a running
  * app reboots, so a fingerprint collision would read a changed document
@@ -23,6 +20,7 @@
 
 import { semanticKey, setObjectMember } from '@jarenjs/core/object';
 import { validateFile } from './validate.js';
+import { resolveProjectFile, projectFileContext } from './resolve.js';
 
 /** Kinds that are runnable artifacts on their own (vs. `state`/`data`
  * inputs). */
@@ -35,8 +33,12 @@ const ROLE = Object.freeze({
   contract: 'contract',
 });
 
+// Keep assembled validation inputs stable across chrome/buffer renders.
+// A new immutable file list invalidates its dependencies as one snapshot.
+const assembledFiles = new WeakMap();
+
 /**
- * Compose the project's files into runnable artifacts (whole-document).
+ * Compose the project's files into runnable artifacts, resolving imports.
  * @param {any} project - a normalized project (from `parseProject`)
  * @returns {{ artifacts: Array<{ name: string, kind: string, role: string,
  *   doc: any, sourceFiles: string[] }>, errors: Array<{ file: string, message: string }> }}
@@ -46,14 +48,14 @@ export function assembleArtifacts(project) {
   const errors = [];
   for (const file of project.files) {
     if (!RUNNABLE.has(file.kind)) continue;
-    let doc;
-    try { doc = JSON.parse(file.text); }
+    let resolved;
+    try { resolved = resolveProjectFile(project, file.name); }
     catch (err) {
-      errors.push({ file: file.name, message: `not valid JSON: ${String(/** @type {any} */ (err)?.message ?? err)}` });
+      errors.push({ file: file.name, message: String(/** @type {any} */ (err)?.message ?? err) });
       continue;
     }
     artifacts.push({
-      name: file.name, kind: file.kind, role: ROLE[file.kind], doc, sourceFiles: [file.name],
+      name: file.name, kind: file.kind, role: ROLE[file.kind], ...resolved,
     });
   }
   return { artifacts, errors };
@@ -63,7 +65,7 @@ export function assembleArtifacts(project) {
  * (its `state` excluded); everything else in full. */
 function structuralKey(artifact) {
   return artifact.kind === 'app'
-    ? semanticKey({ view: artifact.doc.view, actions: artifact.doc.actions, subs: artifact.doc.subs })
+    ? semanticKey({ ...artifact.doc, state: null })
     : semanticKey(artifact.doc);
 }
 
@@ -115,7 +117,25 @@ export function describe(project, options = {}) {
     active: project.active,
     layout: project.layout,
     files: project.files.map((file) => {
-      const v = validateFile(file, options);
+      let v;
+      try {
+        projectFileContext(project, file);
+        let effective = file;
+        if (file.imports) {
+          let byFile = assembledFiles.get(project.files);
+          if (!byFile) { byFile = new Map(); assembledFiles.set(project.files, byFile); }
+          effective = byFile.get(file);
+          if (!effective) {
+            effective = { ...file, text: JSON.stringify(resolveProjectFile(project, file.name).doc) };
+            byFile.set(file, effective);
+          }
+        }
+        v = validateFile(effective, options);
+      }
+      catch (error) {
+        v = { valid: false, total: 1, errors: [{ code: error.code ?? null,
+          message: error.message, docPath: error.docPath ?? '' }] };
+      }
       return {
         name: file.name,
         kind: file.kind,

@@ -1,0 +1,32 @@
+import { it } from 'node:test';
+import assert from 'node:assert/strict';
+import { createProjectFlowWidget } from '../../packages/website/src/boundaries/project-flow.js';
+import { fileSkeleton } from '@jarenjs/studio';
+import { createStubHost, serialize } from '../view/dom.stub.js';
+
+it('the private editor writes its file, keeps undo on echo and disposes on replacement', () => {
+  const { container } = createStubHost();
+  const widget = createProjectFlowWidget({ schedule: (flush) => flush() });
+  const edits = [];
+  const props = { name: 'machine.fsm', kind: 'fsm', doc: JSON.parse(fileSkeleton('fsm')), revision: 1 };
+  const handle = widget.mount(container, props, (binding) => edits.push(binding));
+  const first = handle.app;
+  first.dispatch('flow/add-state');
+  const edit = edits.find((e) => e.action === 'project/artifact-edit');
+  assert.equal(edit.with.name, props.name);
+  assert.equal(edit.with.doc.states.length, 3);
+  widget.update(handle, { ...props, doc: edit.with.doc, revision: 2 });
+  assert.equal(handle.app, first);
+  assert.ok(first.getState().flow.history.past.length > 0);
+  first.dispatch('flow/clear');
+  assert.deepEqual(first.getState().flow.doc, props.doc);
+  assert.deepEqual(first.getState().flow.history.past, []);
+  first.dispatch('unknown-editor-action');
+  assert.equal(edits.at(-1).action, 'project/stage-error');
+  assert.match(edits.at(-1).with, /unknown-editor-action/);
+  widget.update(handle, { ...props, doc: edit.with.doc, input: { changed: true }, revision: 3 });
+  assert.notEqual(handle.app, first);
+  assert.match(serialize(container), /idle/);
+  widget.unmount(handle);
+  assert.equal(container.childNodes.length, 0);
+});

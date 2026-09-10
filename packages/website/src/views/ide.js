@@ -31,6 +31,7 @@ const ideBar = {
       type: 'button', class: 'btn small', title: 'Download only the app document as JSON',
       on: { click: 'project/download' },
     }, 'App JSON'],
+    ['button', { type: 'button', class: 'btn small', on: { click: 'project/eject' } }, 'Offline ZIP'],
     { $if: ['$.shared', ['span', { class: 'muted' }, '$.shared']] },
     ['div', { class: 'ide-list' }, [{ $apply: '$.names[*]' }]],
   ],

@@ -26,13 +26,18 @@ This package ships in two layers, the suite's convention:
   (hot-update via `app.setState`) and the drag splitter — which are
   browser-verified. Mounted live at the website's `#/project`, where `app`
   files boot, `jslt`/`query` files run against a data file, `contract`
-  files render their `describe()`/OpenAPI projections, and files are
-  added, renamed, deleted and opened from templates.
+  files render their `describe()`/OpenAPI projections, `fsm`/`dag` files
+  mount the Flow editor, and collection models run in private SQLite workers
+  with query plans and live results. All ten file kinds can be created,
+  renamed, deleted and opened from templates.
 
 ## The project document
 
 A thin envelope over typed files — the full contract is
 [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md).
+
+`KINDS` lists all ten file kinds; `ADDABLE_KINDS` and `fileSkeleton` supply
+the creation menu and starter text from one shared table.
 
 ```js
 import { parseProject, validateFile, assembleArtifacts, classifyChange, describe }
@@ -51,6 +56,24 @@ describe(project);            // per-file kind / validity / role — the file ra
 validateFile(project.files[1]); // { valid, kind, total, errors: [{ code, message, docPath }] }
 assembleArtifacts(project);   // the runnable set
 ```
+
+Files can import named members from other files: an app's `view`, `actions`
+and `state` can each live in their own editor. The assembler checks references,
+tracks dependencies and writes diagram edits back into their source files.
+Explicit `input`, `model` and `collection` metadata route queries and model
+seeds; the [format](docs/PROJECT-FORMAT.md) specifies ownership and lifetimes.
+
+`@jarenjs/studio/author` exposes `createStudioFileAuthor({ client })`: generate
+one file under its authoring profile, validate with the full engine, and repair
+bounded failures before returning a candidate. The website assistant uses this
+path and protects edits made while generation is running. No provider quality
+claim is inferred from the mocked generation tests.
+
+`@jarenjs/studio/export` exposes `exportProject(project, assets)` and
+`createProjectZip(files)`. The website's **Offline ZIP** includes a standalone
+runner and the installed runtime dependencies, including SQLite and fonts.
+It runs from a local HTTP server without an install or external network.
+Runtime rows remain transient; explicit seed files travel with the project.
 
 ## Why per-file validation
 
@@ -77,6 +100,8 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/studio/schemas/jaren-project.schema.json` | schema | — |
 | `@jarenjs/studio/styles/studio.css` | asset | — |
 | `@jarenjs/studio/package.json` | metadata | — |
+| `@jarenjs/studio/author` | JavaScript | declared |
+| `@jarenjs/studio/export` | JavaScript | declared |
 <!--/fact-->
 
 ## Install

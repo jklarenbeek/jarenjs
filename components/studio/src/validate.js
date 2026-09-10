@@ -12,7 +12,7 @@
  *               so host-registered operators ($npv, $sqrt) validate and a
  *               real error comes back as its own coded `JQ`/`JT` code with
  *               a docPath — the closed grammar would reject the operators;
- *  - `fsm` / `dag` / `model` → their published grammar (structural);
+ *  - `fsm` / `dag` / `model` → their grammar plus compiler/planner checks;
  *  - `contract` → COMPILED by `compileContract`, so a refusal comes back
  *               as its stable `JC00xx` code with the docPath of the
  *               member at fault — richer than the grammar alone;
@@ -31,6 +31,8 @@ import {
   compileJsltStylesheet, createJsltRegistry, mathPack, financePack, statsPack,
 } from '@jarenjs/json/jslt';
 import { compileContract } from '@jarenjs/contract';
+import { compileFsm, compileDag } from '@jarenjs/flow';
+import { normalizeModel, normalizeEntities, planCollection, planEntity, explainMapping, sqliteDialect } from '@jarenjs/db';
 
 import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
@@ -176,12 +178,29 @@ function validateFileUncached(file, options = {}) {
       return compileResult(kind, () => compileJsltStylesheet(doc, { compileTypeTest, ...registryOptions }));
     case 'query':
       return compileResult(kind, () => compileJsonQuery(doc, { compileTypeTest, ...registryOptions }));
-    case 'fsm':
-      return schemaResult(kind, validateFsm(doc));
-    case 'dag':
-      return schemaResult(kind, validateDag(doc));
-    case 'model':
-      return schemaResult(kind, validateModel(doc));
+    case 'fsm': {
+      const structural = schemaResult(kind, validateFsm(doc));
+      return structural.valid ? compileResult(kind, () => compileFsm(doc)) : structural;
+    }
+    case 'dag': {
+      const structural = schemaResult(kind, validateDag(doc));
+      if (!structural.valid) return structural;
+      // Validate named task nodes without acquiring or running host tasks.
+      const tasks = Object.fromEntries(Object.values(doc.nodes ?? {})
+        .filter((node) => node.kind === 'task').map((node) => [node.run, () => null]));
+      return compileResult(kind, () => compileDag(doc, { tasks }));
+    }
+    case 'model': {
+      const structural = schemaResult(kind, validateModel(doc));
+      if (!structural.valid) return structural;
+      return compileResult(kind, () => {
+        for (const [name, collection] of normalizeModel(doc)) planCollection(name, collection, sqliteDialect);
+        if (normalizeEntities(doc).size > 0) {
+          const mapping = explainMapping(doc);
+          for (const name of Object.keys(mapping.entities)) planEntity(name, mapping.entities[name], mapping, sqliteDialect);
+        }
+      });
+    }
     case 'contract':
       return compileResult(kind, () => compileContract(doc));
     case 'schema':

@@ -17,6 +17,7 @@ import { CodedError } from '@jarenjs/core/errors';
 export const STUDIO_CODES = Object.freeze({
   JS0001: 'the project document is invalid',
   JS0002: 'a file name is duplicated in the project',
+  JS0003: 'a project file reference cannot be resolved',
 });
 
 /** A studio-envelope error. */

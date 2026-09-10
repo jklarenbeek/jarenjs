@@ -39,8 +39,9 @@ strip reads.
 | `query` | a query document | **compiled** by the engine with the operator registry |
 | `state` / `data` | any JSON value (an input) | structural JSON only |
 | `schema` | a JSON Schema | must be an object/boolean and compile |
-| `fsm` / `dag` | a `jaren-fsm` / `jaren-dag` machine | its published flow grammar |
-| `model` | a `jaren-model` store definition | the `jaren-model` grammar |
+| `fsm` / `dag` | a `jaren-fsm` / `jaren-dag` machine | its grammar and compiler; named tasks are checked without execution |
+| `model` | a `jaren-model` store definition | its grammar, normalization and SQLite collection/entity planning |
+| `contract` | a `jaren-contract` document | `compileContract`, with coded diagnostics |
 
 **Why per-file, not one composed schema.** The published `jaren-query` /
 `jaren-jslt` grammars are *closed* — their operator vocabulary is
@@ -56,15 +57,74 @@ design, not a compromise. A host embeds its own vocabulary with
 
 ## Assembly — files → runnable artifacts
 
-`assembleArtifacts(project)` composes the files into the runnable set. v0.1
-ships the **whole-document** contract: a runnable file (`app`, `fsm`,
-`dag`, `model`, `jslt`, `query`, `schema`) is its own artifact
-(`{ name, kind, role, doc, sourceFiles }`); `state`/`data` files are
-inputs, not artifacts. **Fragment assembly** — composing separate `state`
-+ `view` + `actions` files into ONE `jaren-app` document (the true
-HTML/CSS/JS split) — is the model's headline enhancement and layers on
-top without changing this contract (a future `sourceFiles` will list more
-than one name).
+`assembleArtifacts(project)` returns `{ artifacts, errors }`. Each runnable
+file (`app`, `fsm`, `dag`, `model`, `jslt`, `query`, `schema`, `contract`)
+produces `{ name, kind, role, doc, sourceFiles }`; `state`/`data` are inputs.
+Assembly resolves JSON and references; `describe(project)` additionally
+validates assembled documents and reports each file's errors.
+
+A file can supply absent top-level members through `imports`, an object
+mapping member names to exact project filenames. For example:
+
+```json
+{
+  "name": "app.json", "kind": "app", "text": "{}",
+  "imports": { "view": "app.view", "actions": "app.actions", "state": "app.state" }
+}
+```
+
+Each source's entire JSON value becomes the destination member. Sources may
+themselves import members. The allowed destination members are:
+
+| Destination kind | Importable members |
+|---|---|
+| `app` | `view`, `actions`, `state`, `subs` |
+| `fsm` | `states`, `transitions`, `initial` |
+| `dag` | `nodes`, `edges`, `output` |
+| `model` | `collections`, `entities` |
+
+`resolveProjectFile(project, name)` returns `{ doc, sourceFiles }`, with
+dependencies in traversal order, deduplicated. Missing sources, cycles,
+unsupported members and a member supplied both locally and by import raise
+`JS0003`. Source files are never mutated. `renameProjectFile` updates all
+references atomically. `writeProjectArtifact` writes edits back into their
+source files, preserving untouched text and refusing conflicting writes to a
+shared source. Deletion leaves dependent files with explicit reference errors.
+
+The website keeps an app visible while editing a fragment directly imported
+by exactly one app. Imported state changes hot-update that app; structural
+changes reboot it. Ambiguous owners require selecting the intended app.
+
+## Input and model routing
+
+Optional file members `input`, `model` and `collection` select execution inputs.
+`input` names a `data` or `state` file; absent it, pure runners use the first
+`data` file, then the first `state` file, then JSON null. `model` explicitly
+names a model file for a query. It never implicitly selects the first store.
+`collection` chooses a collection; a model with exactly one collection can
+omit it. `projectFileContext` resolves these references and refuses wrong
+kinds or missing names. The IDE exposes selectors beside the editor.
+
+The website runs collection models in private in-memory SQLite workers, one
+owner per model filename. Queries referencing that model share its rows;
+other models and the separate data page do not. Switching files stops the
+view's live subscription but retains the worker. Committing a changed model
+or seed recreates its store; deleting a model, replacing a project or
+destroying the app releases its worker. Invalid drafts retain the committed
+stage. Runtime rows are transient and are not saved or shared.
+
+A model's **explicit** `input` is a seed object mapping collection names to
+arrays of documents, inserted before the first query. No implicit data file
+seeds a store. The stage supports inserts, deletes, query results, SQL plans
+and live query results. Entity-only models validate and can be authored, but
+the website's execution controls currently require a collection.
+
+FSM and DAG files mount the Flow diagram editor, including palette,
+inspector, undo/redo and run controls. Diagram edits write back through
+assembly. FSM effects are recorded, not dispatched to host services; only
+the editor's registered local DAG tasks execute. Teardown cancels pending
+runs and ignores late completions. The standalone `#/flow` route remains
+available using the same editor.
 
 ## `layout` is frozen
 
@@ -80,14 +140,25 @@ vertically in `top`; pointer cancellation restores the previous ratio.
 **Download** exports the complete `jaren-project` envelope, including every
 file and the active file/layout, and works for projects without an app.
 **App JSON** separately exports the designated app document and reports
-when none exists. A runnable offline folder/ZIP is a future export format.
+when none exists, resolving any imported members first. **Offline ZIP**
+exports a standalone runner, `project.json`, every original file's text, and
+bundled runtime, fonts and SQLite assets. Unzip and serve the directory over
+localhost (the included README gives a Python command); no package install
+or internet connection is required. Runtime versions come from the exporting
+build and are recorded in `runtime/versions.json`. Authored external asset
+URLs remain external. Live rows and host credentials are excluded.
+
+The headless `@jarenjs/studio/export` entry accepts the host's runtime asset
+bytes and produces a deterministic ZIP. It refuses unsafe archive paths;
+source filenames are represented in `project.json` and mapped to numbered
+files, so arbitrary project names cannot escape the archive directory.
 
 ## `classifyChange` — reboot vs. hot-update
 
 `classifyChange(prev, next)` reports, **per artifact**, whether a change
 is `structural`, `state-only`, or `none`. A change of artifact kind is
 structural even when the JSON text stays the same. It compares an app's
-`view`, `actions` and `subs` (other artifacts' whole documents) via the
+entire document except `state` (other artifacts' whole documents) via the
 suite's collision-free `semanticKey`; a remaining document change is
 `state-only`. Every filename, including `__proto__`, is an own member of
 the result map.
@@ -98,13 +169,14 @@ widget, is deliberate.
 
 ## Errors
 
-Only the envelope raises a coded `StudioError`; a single file's grammar
-problem is reported by `validateFile`, never thrown.
+Envelope and reference operations raise coded `StudioError`s. `validateFile`
+and `describe` report file problems as diagnostics.
 
 | code | meaning |
 |---|---|
 | `JS0001` | the project document is invalid (bad JSON, or fails the envelope schema) |
 | `JS0002` | a file name is duplicated in the project |
+| `JS0003` | an import or execution reference cannot be resolved, or an artifact write conflicts |
 
 ## Status
 
@@ -114,13 +186,16 @@ debounced editor with its typing buffer, the run stage, the three layout
 modes with a drag splitter, the phone pane switcher, save/load/share, and
 an assistant that can list, read, write and run a project's files.
 
-Still open, and tracked with their constraints in
-[ROADMAP.md](../../../docs/ROADMAP.md): the `fsm`/`dag`/`model` kinds
-validate but have no editor or runner, so they cannot be added from the
-IDE; fragment assembly (one artifact from several files) is unbuilt;
-the assistant authors files as free-form tool arguments rather than under
-constrained decoding; and a runnable offline `.zip` eject is unbuilt.
+The creation menu and assistant share the engine's ten-kind vocabulary and
+valid starter files. `@jarenjs/studio/author` uses one authoring profile per
+file, then the full file validation gate with bounded repair rounds. The
+website's `jaren_project_author` tool rejects stale publication if the project
+changed during generation, returning the candidate for recovery. Generic
+JSON/schema/contract files and imported destinations use broad JSON profiles;
+their acceptance still depends on the full local validation gate. The exact
+`jaren_project_write` tool remains available for supplied text.
+
 The stage displays the nested app's latest boot/runtime failure and clears
-it on restart. Syntax highlighting stays a
-non-goal — the editor is a plain `<textarea>` so the whole IDE remains a
-JSLT document with no imperative chrome.
+it on restart. Remaining constraints live in
+[ROADMAP.md](../../../docs/ROADMAP.md). The editor remains a plain
+`<textarea>` with no syntax highlighting or imperative editor chrome.

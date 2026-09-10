@@ -8,6 +8,7 @@ import { createGrammarAuthor, createRoutedClient, createBudgetAccount, checkOutc
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileFsm, compileDag, compileStatechart, compileWorkflow } from '@jarenjs/flow';
+import { normalizeModel, normalizeEntities } from '@jarenjs/db';
 import { JarenValidator } from '@jarenjs/validate';
 import { AUTHORING_PROFILES, generateAuthoringProfiles } from '../../scripts/generate-authoring-profiles.js';
 
@@ -16,6 +17,7 @@ const query = read('json', 'query');
 const jslt = read('json', 'jslt');
 const dag = read('flow', 'dag');
 const corpus = {
+  model: [{ $model: '0.1', collections: { notes: { schema: { type: 'object' }, key: '/id' } } }],
   query: [{$sum:'$.prices[*]'}, {$for:{r:'$.records[*]'},$return:'$r.id'}],
   jslt: [[{match:'$',body:{total:{$sum:'$.prices[*]'}}}]],
   app: [{state:{count:0},view:[{match:'$',body:{tag:'div',children:['hello']}}], actions:{inc:{state:{count:{$add:['$.count',1]}}}}}],
@@ -24,7 +26,7 @@ const corpus = {
   statechart: [{$fsm:'0.2',initial:'idle',states:['idle',{id:'done',final:true}],transitions:[{from:'idle',to:'done',after:10}]}],
   workflow: [{$workflow:'0.2',revision:'1',initial:'done',states:{done:{final:true}}}],
 };
-const compilers = { query: compileJsonQuery, jslt: compileJsltStylesheet, fsm: compileFsm, dag: compileDag,
+const compilers = { model: (doc) => { normalizeModel(doc); normalizeEntities(doc); }, query: compileJsonQuery, jslt: compileJsltStylesheet, fsm: compileFsm, dag: compileDag,
   statechart: compileStatechart, workflow: compileWorkflow,
   app: (doc) => { compileJsltStylesheet(doc.view); Object.values(doc.actions ?? {}).forEach((action) => compileJsonQuery(action)); } };
 

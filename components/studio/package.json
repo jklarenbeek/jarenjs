@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/studio",
   "private": false,
-  "version": "0.75.0",
+  "version": "0.76.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -17,7 +17,15 @@
     },
     "./schemas/*": "./schemas/*",
     "./styles/studio.css": "./styles/studio.css",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./author": {
+      "types": "./dist/types/author.d.ts",
+      "default": "./src/author.js"
+    },
+    "./export": {
+      "types": "./dist/types/export.d.ts",
+      "default": "./src/export.js"
+    }
   },
   "files": [
     "dist/types/",
@@ -59,12 +67,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.75.0",
-    "@jarenjs/validate": "^0.75.0",
-    "@jarenjs/json": "^0.75.0",
-    "@jarenjs/app": "^0.75.0",
-    "@jarenjs/flow": "^0.75.0",
-    "@jarenjs/db": "^0.75.0",
-    "@jarenjs/contract": "^0.75.0"
+    "@jarenjs/core": "^0.76.0",
+    "@jarenjs/validate": "^0.76.0",
+    "@jarenjs/json": "^0.76.0",
+    "@jarenjs/app": "^0.76.0",
+    "@jarenjs/flow": "^0.76.0",
+    "@jarenjs/db": "^0.76.0",
+    "@jarenjs/contract": "^0.76.0",
+    "@jarenjs/ai": "^0.76.0"
   }
 }

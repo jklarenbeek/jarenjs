@@ -14,6 +14,7 @@
  */
 
 import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
+import { renameProjectFile, writeProjectArtifact, resolveProjectFile } from '@jarenjs/studio';
 import { createLedger } from '@jarenjs/ai';
 
 import { ACTIONS, SUBS } from './actions.js';
@@ -38,6 +39,8 @@ import {
 import {
   projectTemplate, fileSkeleton, singleAppProject, sharedProject,
 } from '../content/projectTemplates.js';
+import { createProjectDataRuntime } from '../boundaries/project-data.js';
+import { createProjectFlowWidget } from '../boundaries/project-flow.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
 import { createGameRuntime } from '../boundaries/game.js';
 import { createDataRuntime } from '../boundaries/data.js';
@@ -48,6 +51,8 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
 /**
  * @typedef {Object} SiteEnv
+ * @property {(project: any) => Promise<boolean>} [exportProject]
+ * @property {() => any} [projectWorker] - Factory for a private model worker.
  * @property {any} [node] - Mount element (omit for headless).
  * @property {any} [document] - DOM document for the renderer.
  * @property {(flush: () => void) => void} [schedule] - Render scheduler.
@@ -210,6 +215,8 @@ export function createSiteApp(env) {
   // @jarenjs/ai tools, shared by the chat panel and the WebMCP bridge.
   // `getApp` is lazy because the app is created further down.
   const toolbox = createSiteToolbox({
+    aiFetch: env.aiFetch,
+    runModel: (project, name) => projectData.execute(project, name),
     getApp: () => app,
     navigate: env.navigate,
     share: env.share,
@@ -230,6 +237,7 @@ export function createSiteApp(env) {
   // the Flow studio's runtime: nested-machine host widget + effects
   // (template loading, fail-closed text parsing, dag runs with abort)
   const flowRuntime = createFlowRuntime({ schedule: env.schedule });
+  const projectData = createProjectDataRuntime({ createWorker: env.projectWorker });
 
   const effects = {
     ...flowRuntime.effects,
@@ -396,10 +404,18 @@ export function createSiteApp(env) {
       const file = projectAppFile(app.getState().project);
       if (file === null) { dispatch('ide/shared', 'this project has no app document'); return; }
       let doc;
-      try { doc = JSON.parse(file.text); }
+      try { doc = resolveProjectFile(app.getState().project, file.name).doc; }
       catch { dispatch('ide/shared', 'the app document is not valid JSON'); return; }
       const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
       dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
+    },
+    'project-eject': async (props, dispatch) => {
+      try {
+        dispatch('ide/shared', 'Preparing offline project…');
+        const saved = await env.exportProject?.(projectSnapshot(app.getState().project));
+        dispatch('ide/shared', saved ? 'offline project downloaded' : 'offline export unavailable here');
+      }
+      catch (error) { dispatch('ide/shared', error.message); }
     },
     'project-export': (props, dispatch) => {
       const snapshot = projectSnapshot(app.getState().project);
@@ -410,24 +426,44 @@ export function createSiteApp(env) {
     // the Project IDE: the editor commits the ACTIVE file's text (rewriting
     // it by name — an array index a patch path cannot compute); explicit
     // Run force-restarts the app stage; a template card opens a project.
+    'project-route': (props, dispatch) => {
+      const p = app.getState().project;
+      const files = p.files.map((f) => {
+        if (f.name !== p.active) return f;
+        const next = { ...f };
+        if (props.value === '') delete next[props.member];
+        else next[props.member] = props.value;
+        if (props.member === 'model') delete next.collection;
+        return next;
+      });
+      dispatch('project/files-set', { files });
+    },
+    'project-artifact-edit': (props, dispatch) => {
+      const p = app.getState().project;
+      let files;
+      try { files = writeProjectArtifact(p, props.name, props.doc); }
+      catch (error) { dispatch('project/stage-error', error.message); return; }
+      dispatch('project/files-set', { files });
+    },
     'project-edit': (props, dispatch) => {
       const p = app.getState().project;
       const files = p.files.map((f) => (f.name === p.active ? { ...f, text: props.text } : f));
       dispatch('project/files-set', { files });
     },
-    'project-run': (props, dispatch) => {
+    'project-run': Object.assign((props, dispatch) => {
       const state = app.getState().project;
       const active = state.files.find((f) => f.name === state.active);
+      const commit = commitProject(state);
+      const fragment = commit.mount?.sourceFiles?.includes(state.active) && commit.mount.name !== state.active;
       // a transform / schema / contract file re-runs; an app file force-restarts
-      if (active !== undefined && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema'
+      if (active !== undefined && !fragment && !active.model && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema'
         || active.kind === 'contract')) {
         dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
         return;
       }
-      const commit = commitProject(state);
       const mount = commit.mount === null ? null : { ...commit.mount, revision: commit.mount.revision + 1 };
       dispatch('project/committed', { mount, revision: mount === null ? commit.revision : mount.revision });
-    },
+    }, { dispose: projectData.dispose }),
     'project-template': (props, dispatch) => {
       const template = projectTemplate(props.id);
       if (template === undefined) return;
@@ -461,7 +497,7 @@ export function createSiteApp(env) {
       const p = app.getState().project;
       const next = String(props.name ?? '').trim();
       if (next === '' || next === p.active || p.files.some((f) => f.name === next)) return;
-      const files = p.files.map((f) => (f.name === p.active ? { ...f, name: next } : f));
+      const files = renameProjectFile(p.files, p.active, next);
       dispatch('project/structural', { files, active: next });
     },
     // the Play playground: picking an example loads its source + first
@@ -667,6 +703,8 @@ export function createSiteApp(env) {
       'flow-doc': flowRuntime.widget,
       // the Project IDE's live stage: boots the active app file, then
       // reboots (revision change) or hot-updates (app.setState) per commit
+      'studio-data': projectData.widget,
+      'studio-flow': createProjectFlowWidget({ schedule: env.schedule }),
       'studio-stage': createProjectStageWidget({ schedule: env.schedule }),
       // the drag splitter: drives --js-ratio live, commits on pointer-up
       'studio-splitter': createProjectSplitterWidget(),
@@ -681,6 +719,10 @@ export function createSiteApp(env) {
     },
   });
 
+  app.subscribe((state, changes) => {
+    if (changes?.some((p) => p === '/project/files' || p.startsWith('/project/files/')))
+      projectData.sync(state.project, changes.includes('/project/project'));
+  });
   wireBoundaries(app, env.debounceMs ?? 250, env.navigate);
   registerSiteWebMcp(toolbox, { modelContext: env.modelContext, onError: report });
   return app;
@@ -708,7 +750,7 @@ function wireBoundaries(app, debounceMs, navigate) {
     if (state.project === undefined) return;
     const active = state.project.active;
     const file = state.project.files.find((f) => f.name === active);
-    if (file !== undefined && (file.kind === 'query' || file.kind === 'jslt' || file.kind === 'schema'
+    if (file !== undefined && !file.model && (file.kind === 'query' || file.kind === 'jslt' || file.kind === 'schema'
       || file.kind === 'contract')) {
       app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
     }

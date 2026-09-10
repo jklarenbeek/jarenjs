@@ -65,7 +65,7 @@ export function parseProject(input) {
     : (doc.files[0]?.name ?? null);
   return Object.freeze({
     project: doc.project,
-    files: Object.freeze(doc.files.map((f) => Object.freeze({ ...f }))),
+    files: Object.freeze(doc.files.map((f) => Object.freeze({ ...f, ...(f.imports ? { imports: Object.freeze({ ...f.imports }) } : {}) }))),
     active,
     layout: Object.freeze({ ...LAYOUT_DEFAULT, ...doc.layout }),
   });

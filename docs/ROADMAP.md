@@ -138,24 +138,13 @@ delete it or fix it.
   focus traps and focus restoration under an actual screen reader, and AT
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
-- [ ] **DOM-adopting hydration & fragment roots** — VIEW-FORMAT §6/§8: adopt server-rendered markup instead of empty-and-rebuild; allow list roots.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
-- [ ] **Safe-mode composition/IME and a real-browser adversarial suite** — the
-  safe render profile (VIEW-FORMAT §8) and the controlled-input registry are
-  verified against the Node DOM stub, which cannot model an IME composition, a
-  live caret, or a browser's URL/style reflection. The open half is a
-  Playwright suite that drives create→update→remove→reinsert of the safe
-  attack corpus and the controlled/`multiple`-select/composition cases through
-  Chromium, Firefox and WebKit, plus composition-aware authoritative writes
-  (defer during a composition, settle without losing the caret). Until then
-  those behaviors are documented as browser-unproven.
-- [ ] **`safe`/`onUnsafe` forwarding through `@jarenjs/app`** — the renderer
-  takes a safe profile, but `createApp` does not thread it, and an app document
-  additionally names host actions, effects and subscriptions. Forwarding the
-  view profile is necessary but not sufficient to run an *untrusted* app
-  document; a real answer needs a capability model for what an app document may
-  name, so today the safe profile is scoped to the *view* renderer and app
-  documents are self-authored only.
+- [ ] **Native IME verification** — composition-aware controlled writes,
+  caret preservation, multiple selects and the safe create/update/remove/reinsert
+  corpus are exercised in Chromium, Firefox and WebKit. The automated tests
+  include synthetic composition events and Firefox's automation input sequence;
+  native OS input methods still need manual coverage before claiming full
+  language/input-method fidelity. VIEW-FORMAT §8 records that limit.
 
 ## @jarenjs/flow
 
@@ -189,7 +178,7 @@ delete it or fix it.
 
 ## @jarenjs/mermaid
 
-- [ ] **`foreignObject` / `htmlLabels:true`** — labels are SVG `<text>` in v1 because `@jarenjs/view` has no `foreignObject`/`setAttributeNS`; revisit alongside VIEW-FORMAT §6/§8 for HTML labels and pixel-closer parity.
+- [ ] **`htmlLabels:true`** — labels still render as SVG `<text>`. The view renderer now supports HTML descendants of `foreignObject` and namespaced attributes; Mermaid still needs HTML-label rendering, sizing and parity tests. Safe mode intentionally excludes `foreignObject`.
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction
@@ -246,62 +235,14 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/studio
 
-The multi-file project IDE behind `#/project`. A `jaren-project` is a thin
-envelope over typed files (`app`, `jslt`, `query`, `schema`, `state`, `data`,
-`contract`, `fsm`, `dag`, `model`), each validated against its own grammar
-rather than one composed mega-schema. Two of those kinds still have no editor
-beyond a textarea, which is what the first two entries are about.
+- [ ] **Entity models and durable project stores** — collection models now
+  run in private workers with explicit query routing, SQL plans, live results
+  and seed files. The stage's operation contract addresses collections; an
+  entity-only model needs entity/query controls. Durable stores and migration
+  UI also need project identity, storage ownership and a migration policy:
+  the current documented lifetime is in-memory, reset on committed model or
+  seed changes. Reusing the data page's shared database would break isolation.
 
-- [ ] **`fsm`/`dag`/`model` are validate-only kinds** — `KINDS` lists all ten
-  and `validateFile` checks all ten, but these three have no editor, no runner
-  and no way in. `deriveStage` returns an inert "edit it as text meanwhile"
-  note; `runProjectFile` whitelists `query`/`jslt`/`schema`/`contract` only;
-  and four
-  independent gates refuse to create one — the add-file `<select>`,
-  `ADDABLE_KINDS`, the `SKELETONS` table (a missing skeleton makes
-  `project-add` bail silently) and the assistant tool's `kind` enum. Today such
-  a file can only enter a project through a hand-written envelope or a share
-  token. This is the substance of the next two entries.
-- [ ] **The flow editor is not in the studio** — `#/flow` has the palette,
-  click-source-then-target connect, the generated inspector form and the live
-  run; an `fsm`/`dag` file in a project has a textarea. Moving that editor in
-  as a per-kind enhancement is what makes `#/flow` "the studio with a flow file
-  active". The constraint is the isolation boundary a hosted file boots
-  under — widgets and `compileTypeTest` but **no effects and no
-  subscriptions** — so the run pane has to work inside that sandbox rather than
-  the website's own runtime.
-- [ ] **The `model` kind has no store behind it** — a model file should open a
-  live in-browser SQLite store on the worker, with the project's `query` files
-  running against it, `explain()` showing the pushdown and a live query
-  maintaining as rows commit, exactly as `#/data` does. This is the kind that
-  earns per-file validation its keep: a data file is compiled by the WORKER so
-  registered operators (`$sqrt`, `$npv`) keep resolving, which means it can
-  never be gated by the project's closed grammar. A single whole-project gate
-  is therefore not merely unbuilt but undesirable — and the worker is the one
-  sanctioned side-effecting host inside an otherwise effect-free sandbox. **Host architecture
-  boundary:** model execution also needs per-file worker ownership, database
-  lifetime and query-to-model routing. The current project runner's closed
-  file-kind dispatch and effect-free file host do not supply that lifecycle;
-  adding a store only to validation would not make model files executable.
-- [ ] **Fragment assembly — a file is always a whole document** — `app`, `fsm`,
-  `dag` and `model` files each hold one complete document, which is what made
-  the migration a move rather than a rewrite. Splitting an app into separate
-  view / actions / state files — the real HTML/CSS/JS split, and the reason the
-  envelope is deliberately thin — is the assembly model's headline capability
-  and has not been built.
-- [ ] **The assistant authors files unconstrained** — it can already list, read,
-  write and run project files, but a written file arrives as free-form tool
-  arguments; `createStructuredOutput` ships and is not wired to this path.
-  Doing it honestly means handing the provider exactly ONE file's grammar and
-  never the whole project schema, and then using the full schema and compiler
-  as the acceptance gate.
-  Derived authoring profiles already ship for `query`, `jslt`, `app`,
-  `fsm`, `dag`, statecharts and composed workflows; the remaining work is
-  wiring the per-file authoring path and providing the `model` profile.
-- [ ] **A runnable offline project export.** Download now preserves every file
-  and the layout in a `jaren-project` JSON envelope. A `.zip` eject with a
-  host page, runtime dependencies and a README remains a separate capability;
-  it needs an explicit bundled-versus-pinned-CDN dependency policy.
 - [ ] **No syntax highlighting** — the editor is a plain `<textarea>` here and
   in `@jarenjs/play`. The two ways to add it — a `contenteditable` surface, or
   a mirrored `<pre>` behind a transparent textarea — both fight the

@@ -1366,6 +1366,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/app` | JavaScript | declared |
 | `@jarenjs/db/schemas/jaren-migration.draft-07.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-migration.schema.json` | schema | — |
+| `@jarenjs/db/schemas/jaren-model.authoring.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-model.draft-07.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-model.schema.json` | schema | — |
 | `@jarenjs/db/schemas/jaren-replication-snapshot.draft-07.schema.json` | schema | — |

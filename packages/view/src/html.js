@@ -158,6 +158,8 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
     return escapeText(String(vnode));
   }
   if (!isElementNode(vnode)) {
+    if (Array.isArray(vnode)) return childrenOf(['root', {}, vnode])
+      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection)).join('');
     return '';
   }
   const tag = vnode[0];

@@ -34,18 +34,28 @@ The IDE's hardest UX problem is that re-booting a nested `@jarenjs/app` on
 every edit destroys the running app's state. The engine keeps the *data*
 for that decision headless and tested: `classifyChange(prev, next)`
 compares a **structural key** — an `app` document minus its `state`, via
-the suite's `contentKey` — and reports `structural` / `state-only` /
+the suite's collision-free `semanticKey` — and reports `structural` / `state-only` /
 `none` per artifact. The component's policy (hot-dispatch a state-only
 edit, reboot a structural one) reads this; the split keeps the policy
 thin and the datum proven.
 
-## Assembly: whole-document first
+## Assembly and file boundaries
 
-`assembleArtifacts` ships the whole-document contract (a runnable file is
-its own artifact; `state`/`data` are inputs). **Fragment assembly** —
-composing separate `state` + `view` + `actions` files into one
-`jaren-app` document — is the enhancement that makes the true HTML/CSS/JS
-split real; it extends `sourceFiles` without changing the contract.
+`resolveProjectFile` follows explicit `imports`, substitutes absent named
+members and records the dependency chain in `sourceFiles`. Cycles, missing
+sources and conflicting definitions are coded refusals. `describe` validates
+assembled artifacts and caches their validation inputs by immutable file-list
+identity, so a typing-buffer or chrome render does not recompile a split app.
+`writeProjectArtifact` disassembles edits back into source files; unchanged
+files retain their identity and text. Renaming rewrites execution and import
+references together.
+
+Flow and model validation compiles or plans the document without acquiring
+host capabilities. The separate `/author` entry depends on `@jarenjs/ai`,
+selects one file profile and calls this same acceptance gate. It returns a
+candidate; the host compares the captured project with current state before
+publication. The `/export` entry is a headless ZIP writer accepting runtime
+assets from its host; it has no filesystem, fetch or DOM dependency.
 
 ## Files
 
@@ -61,7 +71,10 @@ split real; it extends `sourceFiles` without changing the contract.
   a sound key; pass a fresh object to force a re-check.
 - `src/assemble.js` — `assembleArtifacts`, `classifyChange`, `describe`.
 - `src/errors.js` — `StudioError` on `@jarenjs/core`'s coded base;
-  `STUDIO_CODES` (JS0001/JS0002).
+  `STUDIO_CODES` (JS0001/JS0002/JS0003).
+- `src/resolve.js` — import assembly, reference routing, rename and write-back.
+- `src/skeletons.js` — the shared creation vocabulary and valid starter files.
+- `src/author.js`, `src/export.js` — optional generation and archive entries.
 - `src/component/index.js` — `createStudioComponent`: composes the JSLT
   view + derivation + policies + engine surface into the shape a host
   mounts (`mode`, `rules`, `modes`, `viewModel`, `hostPolicy`,
@@ -108,6 +121,17 @@ DOM-touching widgets. The website mounts it live at
   commits until Run; the toolbar toggle persists in the project layout;
 - the **stage error** is the latest nested-app boot/runtime failure,
   displayed from `project.stageError` and cleared before a new boot;
+- the **flow host** embeds the existing editor as a private app. Its local
+  actions edit the assembled document; changes echo back without discarding
+  selection or undo history. FSM document effects are logged, and DAG tasks
+  come from the editor's local registry. Run generations and abort signals
+  prevent a disposed run from publishing late output;
+- the **model host** owns one private in-memory SQLite worker per model file.
+  Explicit model references share that worker across queries. File switches
+  stop subscriptions; project replacement, model deletion and app destruction
+  release stores. Committed model/seed changes recreate them. The existing
+  data operation contract supplies inserts, deletes, execution, explain and
+  live streams. This host currently exposes collection operations;
 - the **layout switcher** (pen bar) drives the three grid modes, and the
   drag **splitter** drives the grid's
   `--js-ratio` live and commits `layout.ratio` on pointer-up — also an
@@ -117,6 +141,13 @@ DOM-touching widgets. The website mounts it live at
 The host's Download action serializes a complete `jaren-project` snapshot;
 App JSON retains the separate single-app export. Neither includes transient
 results, mounted runtime state or stage errors.
+
+Offline ZIP adds a bundled standalone host. `generate-studio-offline.js`
+builds it from the installed lockfile dependencies, copies local SQLite and
+font assets and records their runtime versions. Browser tests unzip it,
+serve it on localhost with external requests blocked and run an app and store
+in Chromium, Firefox and WebKit. Authored external URLs remain the author's
+responsibility; the exporter does not crawl them.
 
 ## One pane at a time on a phone
 

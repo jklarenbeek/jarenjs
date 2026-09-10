@@ -49,7 +49,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [AI-PEN.md](AI-PEN.md) | 98 | `./ai` — the public action program over environment slots. **Read it when** you want typed fixtures or host-authored programs without a model client. |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | 75 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
 | [DB-CLIENT.md](DB-CLIENT.md) | 893 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 <!--/fact-->
@@ -217,10 +217,10 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [AI-PEN.md](AI-PEN.md) | `./ai` | 98 | 12 | 1 | 3 | 16,904 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 18,363 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,725 B |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 75 | 9 | 1 | 1 | 15,132 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,225 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,014 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 893 | 41 | 4 | 2 | 633,786 B |
-| **16 documents** | | **12,401** | **371** | **73** | | |
+| **16 documents** | | **12,407** | **371** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -274,7 +274,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/ai` | [AI-PEN.md](AI-PEN.md) | 16,904 B | 17 kB |
 | `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 18,363 B | 18 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,725 B | 17 kB |
-| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,132 B | 15 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,225 B | 15 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,014 B | 17 kB |
 | `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 633,786 B | 634 kB |
 <!--/fact-->
@@ -844,8 +844,8 @@ it says.
 
 | Method | Emits | Type | Status |
 |---|---|---|---|
-| `file(name, kind, text)` | `{ name, kind, text }`, preserving text | literal name/kind | native |
-| `jsonFile(name, kind, document)` | same file, with serialized JSON text | literal name/kind | native |
+| `file(name, kind, text, options?)` | `{ name, kind, text }` and optional routing/import members, preserving text | literal name/kind | native |
+| `jsonFile(name, kind, document, options?)` | same file, with serialized JSON text | literal name/kind | native |
 | `defineProject(files?, options?)` | version, files, optional active/layout | names from files | native |
 | `.files(files)` | replacement file list | replaces known names | native |
 | `.file(file)` | appended file | adds its name | native |

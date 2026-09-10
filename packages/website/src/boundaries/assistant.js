@@ -17,6 +17,9 @@
  * key never leaves the page — no server, no proxy.
  */
 
+import { KINDS, resolveProjectFile, writeProjectArtifact } from '@jarenjs/studio';
+import { createStudioFileAuthor, AUTHORABLE_KINDS } from '@jarenjs/studio/author';
+
 import {
   createChatClient, createAgent, createToolbox, registerModelContext, PROVIDERS,
   probeProvider, composeChecks, checkOutcome, createRefiner, createEnvironment,
@@ -148,7 +151,7 @@ function engineCatalogue() {
  * chat panel and the WebMCP bridge.
  * @param {{ getApp: () => any, navigate?: (hash: string) => void,
  *   share?: (hash: string) => string | undefined, docStore: any,
- *   playStore?: any }} env
+ *   playStore?: any, aiFetch?: typeof fetch, runModel?: (project: any, name: string) => Promise<any> }} env
  */
 export function createSiteToolbox(env) {
   const toolbox = createToolbox();
@@ -333,13 +336,42 @@ export function createSiteToolbox(env) {
   });
 
   toolbox.add({
+    name: 'jaren_project_author',
+    description: 'Generate or revise ONE project file through provider-constrained JSON and the full grammar/compiler acceptance gate. Use this to author app, flow, model, query and stylesheet documents. Existing file references are preserved. A concurrent edit refuses publication and returns the candidate for recovery.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', minLength: 1 },
+      kind: { enum: [...AUTHORABLE_KINDS] }, prompt: { type: 'string', minLength: 1 } }, required: ['name', 'prompt'] },
+    execute: async (input) => {
+      const app = env.getApp();
+      const slice = projectSlice();
+      if (!app || !slice) return { error: 'the site is not running here' };
+      const settings = app.getState().ai.settings;
+      if (!isConfigured(settings)) return { error: 'Configure a provider and model in assistant settings first.' };
+      const client = createChatClient({ ...settings, fetch: env.aiFetch });
+      const author = createStudioFileAuthor({ client, operators: operatorRegistry });
+      const result = await author.author({ ...input, project: slice });
+      if (!('file' in result)) return { ok: false, ...result };
+      // All source files are relevant when authoring an assembled fragment.
+      if (app.getState().project.files !== slice.files)
+        return { ok: false, conflict: true, file: result.file, message: 'The project changed during generation; the candidate was not written.' };
+      const files = slice.files.some((f) => f.name === input.name)
+        ? slice.files.map((f) => f.name === input.name ? result.file : f)
+        : [...slice.files, result.file];
+      go('#/project');
+      app.dispatch('project/added', { files, active: input.name });
+      app.dispatch('project/committed', commitProject(app.getState().project));
+      app.dispatch('project/run');
+      return { ok: true, file: result.file, attempts: result.attempts };
+    },
+  });
+
+  toolbox.add({
     name: 'jaren_project_write',
-    description: 'Create or replace ONE file in the Studio project and open it, so the user watches it land. `kind` is required for a new file (app / jslt / query / schema / state / data / contract) and optional when replacing. The file is validated against its OWN kind\'s grammar first — an invalid write is rejected and the current file is left alone, with the coded errors returned to repair. A runnable file (jslt / query / schema / contract) is also RUN against the project\'s data file and its result comes back (a contract file renders its describe() and OpenAPI projections). Use this for every non-app file; use jaren_studio_write for a whole app document.',
+    description: 'Write exact JSON text to ONE project file and open it. A new file requires a kind: app, jslt, query, schema, state, data, contract, fsm, dag or model. Validation resolves imports and uses the full file compiler gate before publication. Existing routing and imports are preserved. Runnable files use their input/model route and return results. For generating new content, use jaren_project_author.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', minLength: 1 },
-        kind: { enum: ['app', 'jslt', 'query', 'schema', 'state', 'data', 'contract'] },
+        kind: { enum: [...KINDS] },
         text: { type: 'string' },
       },
       required: ['name', 'text'],
@@ -351,10 +383,11 @@ export function createSiteToolbox(env) {
       const existing = (slice.files ?? []).find((f) => f.name === input.name);
       const kind = input.kind ?? existing?.kind;
       if (kind === undefined) {
-        return { error: `'${input.name}' is a new file, so it needs a kind (app / jslt / query / schema / state / data / contract)` };
+        return { error: `'${input.name}' is a new file, so it needs a kind (${KINDS.join(' / ')})` };
       }
-      const candidate = { name: input.name, kind, text: input.text };
-      const verdict = projectComponent.validateFile(candidate);
+      const candidate = { ...existing, name: input.name, kind, text: input.text };
+      const candidateProject = { ...slice, files: [...slice.files.filter((f) => f.name !== input.name), candidate] };
+      const verdict = projectComponent.describe(candidateProject).files.find((f) => f.name === input.name);
       if (!verdict.valid) {
         return {
           ok: false,
@@ -372,21 +405,24 @@ export function createSiteToolbox(env) {
       app.dispatch(existing === undefined ? 'project/added' : 'project/files-set', { files, active: input.name });
       if (existing !== undefined) app.dispatch('project/active', input.name);
       app.dispatch('project/committed', commitProject(app.getState().project));
-      const result = runProjectFile(app.getState().project, input.name);
-      if (result !== null) app.dispatch('project/result', { name: input.name, result });
-      return {
-        ok: true,
-        file: input.name,
-        kind,
-        ...(kind === 'app' ? { widgets: auditDocumentRender(JSON.parse(input.text)).widgets } : {}),
-        ...(result === null ? {} : { ran: renderedText(result.nodes) }),
+      const pending = runProjectFile(app.getState().project, input.name, { model: env.runModel });
+      const finish = (result) => {
+        if (result !== null && app.getState().project.files === files) app.dispatch('project/result', { name: input.name, result });
+        return {
+          ok: true,
+          file: input.name,
+          kind,
+          ...(kind === 'app' ? { widgets: auditDocumentRender(resolveProjectFile({ files }, input.name).doc).widgets } : {}),
+          ...(result === null ? {} : { ran: renderedText(result.nodes) }),
+        };
       };
+      return pending && 'then' in pending ? pending.then(finish) : finish(pending);
     },
   });
 
   toolbox.add({
     name: 'jaren_project_run',
-    description: 'Run one file of the Studio project against the project\'s data file and return what the stage shows (a query/jslt transform output, or a schema validation report). Without a name the OPEN file runs. Use it to check a file you did not just write, or to re-run after editing the data.',
+    description: 'Run a project file using its input/model route: query or stylesheet output, schema validation, contract projections, a pure FSM trace, DAG output, or SQLite results and query plan. Without a name the open file runs. App documents run interactively on the stage; state/data files supply inputs.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -400,14 +436,21 @@ export function createSiteToolbox(env) {
       if (file === undefined) {
         return { error: `no file named '${name}'`, names: (slice.files ?? []).map((f) => f.name) };
       }
-      const result = runProjectFile(slice, name);
-      if (result === null) {
-        return { error: `'${name}' is a ${file.kind} file — it is an input, not something that runs. Run a jslt, query or schema file instead.` };
-      }
-      go('#/project');
-      app.dispatch('project/active', name);
-      app.dispatch('project/result', { name, result });
-      return { ok: true, file: name, kind: file.kind, ran: renderedText(result.nodes) };
+      const pending = runProjectFile(slice, name, { model: env.runModel });
+      const finish = (result) => {
+        if (result === null) {
+          if (file.kind === 'state' || file.kind === 'data')
+            return { error: `'${name}' is an input, not something that runs. Select a query, stylesheet or schema using it.` };
+          return { error: `'${name}' has no result runner here; app files run on the stage and state/data files supply input.` };
+        }
+        if (app.getState().project.files !== slice.files)
+          return { ok: false, stale: true, file: name, ran: renderedText(result.nodes) };
+        go('#/project');
+        app.dispatch('project/active', name);
+        app.dispatch('project/result', { name, result });
+        return { ok: true, file: name, kind: file.kind, ran: renderedText(result.nodes) };
+      };
+      return pending && 'then' in pending ? pending.then(finish) : finish(pending);
     },
   });
 
@@ -419,7 +462,7 @@ export function createSiteToolbox(env) {
     const project = env.getApp()?.getState().project;
     const file = project === undefined ? null : projectAppFile(project);
     if (file === null) return null;
-    try { return JSON.parse(file.text); }
+    try { return resolveProjectFile(project, file.name).doc; }
     catch { return null; }
   };
 
@@ -452,7 +495,7 @@ export function createSiteToolbox(env) {
     }
     else {
       app.dispatch('project/files-set', {
-        files: project.files.map((f) => (f.name === target.name ? { ...f, text } : f)),
+        files: writeProjectArtifact(project, target.name, doc),
       });
       if (project.active !== target.name) app.dispatch('project/active', target.name);
     }
@@ -789,7 +832,7 @@ export const SYSTEM_PROMPT = [
   '   the app file. Call jaren_project_files FIRST for anything about "my project", "my',
   '   files" or "the studio"; pass a name for one file\'s text. Saying a project has no other',
   '   files because you did not look is a wrong answer, not a shortcut.',
-  '8. Write a non-app file with jaren_project_write (it validates, opens and RUNS it), and',
+  '8. Generate a file with jaren_project_author (one grammar, full compiler gate). Write an exact non-app file with jaren_project_write (it validates, opens and RUNS it), and',
   '   run one you did not write with jaren_project_run. Both report the coded errors and the',
   '   stage output — read them and repair in place, exactly as with the engines.',
   '',

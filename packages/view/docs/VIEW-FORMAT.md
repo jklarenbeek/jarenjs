@@ -190,8 +190,9 @@ reorder efficiency is only specified for fully keyed lists.
 ### 5.4 Namespaces
 
 An element with tag `svg` and its descendants are created in the SVG
-namespace. Re-entering HTML through `foreignObject` is not supported in
-0.1.
+namespace. Children of SVG `foreignObject` re-enter the HTML namespace;
+a nested `svg` enters SVG again. `xlink:*` and `xml:*` attributes use their
+namespace URIs for setting and removal. Safe mode excludes `foreignObject`.
 
 ### 5.5 The memo marker
 
@@ -238,9 +239,18 @@ and works through `optgroup`. HTML cannot encode a single select's
 option until the DOM renderer reconciles the control.
 Safe mode keeps its attribute-only policy (§8).
 
-Hydration in 0.1 is a client-side first render into the same container
-(empty and rebuild). Adopting existing server-rendered DOM is a
-roadmap item, not part of this contract.
+Both renderers accept a single vnode, a root list, or an empty/skipped root.
+Lists flatten with the ordinary child rules and need no wrapper element.
+
+`createDomRenderer(container, { hydrate: true })` adopts matching text and
+element nodes on its first trusted render, patches props and handlers,
+reconciles controlled values, repairs mismatches locally and removes surplus
+nodes and attributes. Initial matching is positional by tag and namespace;
+subsequent keyed patches preserve adopted identities. Widgets mount once on
+fresh hosts because their server-side markup has no transferable handle.
+Without `hydrate`, the first render rebuilds. Safe mode also rebuilds: existing
+DOM does not inherit trust from a sanitized vnode. Hydration does not remove
+listeners installed by another owner, so the host must own the adopted DOM.
 
 ## 7. Widgets
 
@@ -524,21 +534,25 @@ SHOULD do both.
 Safe mode reduces an untrusted view to a display; it is **not a complete
 sandbox**. The tag allow-list still admits anchors, forms, controls and media,
 so native navigation, form submission, focus and network loads remain
-possible. It is also a **renderer** policy: a host embedding it in a larger
-runtime MUST NOT assume that runtime inherits it (`@jarenjs/app`, for
-instance, does not forward `safe`, and an app document names host actions and
-effects — so a safe *view* does not make an untrusted *app document* safe).
+possible. It is also a **renderer** policy. `@jarenjs/app` forwards `safe`
+and `onUnsafe` and provides explicit effect/subscription/widget/event-field
+grants (APP-FORMAT §8.2.1). Those grants bound named host access; they do not
+isolate computation, navigation or network activity.
 
-Out of scope for this version, and NOT to be assumed: caret/IME fidelity under
-safe rewrites across browser engines, MathML, `multiple`-select and
-composition behavior proven in all three engines, and a Trusted Types
-integration. Safe mode is one layer under a Content-Security-Policy, not a
-substitute for one.
+The browser suite exercises safe create→update→remove→reinsert, URL/style
+reflection, controlled inputs, multiple selects and composition in Chromium,
+Firefox and WebKit. Trusted controlled text writes defer through composition
+and the final input event, then settle while retaining a clamped caret range.
+Composition cleanup cancels pending settlement on removal or destruction.
+Safe controls retain the attribute-only display policy rather than the trusted
+controlled-input policy.
+
+Native OS IME fidelity and assistive-technology behavior still require manual
+audits. MathML and Trusted Types integration remain outside this version.
+Safe mode is one layer under a Content-Security-Policy, not a substitute for one.
 
 ## 9. Open items (roadmap, non-normative)
 
-- **Fragment / multi-root documents** — a list at the root.
-- **DOM-adopting hydration** (§6).
 - ~~Memoized rule outputs~~ — **shipped**: the JSLT engine's `memo`
   option (on by default in `@jarenjs/app`) caches rule outputs by
   (location, value reference) with compile-time eligibility analysis,

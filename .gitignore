@@ -119,3 +119,5 @@ playwright-report/
 # manifests (scripts/generate-build-info.js, scripts/generate-site-data.js)
 packages/website/public/build.json
 packages/website/public/site/
+
+packages/website/public/studio-offline/

@@ -1616,6 +1616,7 @@ source, named seam, profile hashes and generated output for drift.
 
 | grammar | full closure bytes | profile bytes | full branches | profile branches |
 |---------|--------------------|---------------|---------------|------------------|
+| model | 7779 | 7710 | 7 | 7 |
 | query | 20709 | 3564 | 47 | 10 |
 | jslt | 23515 | 3491 | 59 | 6 |
 | app | 47275 | 2799 | 106 | 0 |

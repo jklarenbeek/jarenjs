@@ -50,6 +50,7 @@ export default [
   },
   {
     ignores: [
+      'packages/website/public/studio-offline/**',
       '**/dist', 'build', '**/_*', '**/*.no-lint.*',
       // git submodules under benchmark/ (JSON-Schema-Test-Suite, qt3tests,
       // jsonpath-compliance-test-suite, toml-test, commonmark-spec) plus the

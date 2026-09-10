@@ -21,10 +21,12 @@
  *    the previous mount, so a parse error never blanks the stage.
  */
 
-import { contentKey } from '@jarenjs/core/object';
+import { resolveProjectFile, projectFileContext } from '@jarenjs/studio';
+import { contentKey, semanticKey } from '@jarenjs/core/object';
 import { createSplitterWidget } from '@jarenjs/app';
 import { createStudioComponent } from '@jarenjs/studio/component';
 
+import { compileFsm, compileDag } from '@jarenjs/flow';
 import { compileContract } from '@jarenjs/contract';
 import { toOpenApi } from '@jarenjs/contract/project';
 
@@ -79,35 +81,53 @@ export function projectAppFile(slice) {
  * hot-updates); an invalid edit — or a non-app active file — keeps the
  * previous mount untouched (the last good frame stays on the stage).
  * @param {any} slice - the `state.project` slice
- * @returns {{ mount: { name: string, doc: any, revision: number } | null, revision: number }}
+ * @returns {{ mount: any, revision: number }}
  */
 export function commitProject(slice) {
   const mount = slice.mount ?? null;
   const revision = slice.revision ?? 0;
   const project = projectOf(slice);
-  const active = project.active;
-  const activeFile = project.files.find((f) => f.name === active);
-  if (activeFile === undefined || activeFile.kind !== 'app') {
-    return { mount, revision };
+  let active = project.active;
+  let activeFile = project.files.find((f) => f.name === active);
+  if (!activeFile) return { mount, revision };
+  // Editing an imported fragment keeps its owning app visible and live.
+  if (!['app', 'fsm', 'dag', 'model'].includes(activeFile.kind) && !activeFile.model) {
+    const owners = project.files.filter((f) => f.kind === 'app' && f.imports
+      && Object.values(f.imports).includes(active));
+    if (owners.length !== 1) return { mount, revision };
+    activeFile = owners[0]; active = activeFile.name;
   }
-  const verdict = projectComponent.validateFile(activeFile);
-  if (!verdict.valid) return { mount, revision }; // last good frame stays
-
-  let doc;
-  try { doc = JSON.parse(activeFile.text); }
+  let resolved;
+  try { resolved = resolveProjectFile(project, active); }
   catch { return { mount, revision }; }
-
-  // classify against the last-good mount (a one-file project apiece), so
-  // the policy the widget reads is the package's own tested datum
+  const assembledFile = { ...activeFile, text: JSON.stringify(resolved.doc) };
+  const verdicts = projectComponent.describe(project).files;
+  if (!verdicts.find((f) => f.name === active)?.valid) return { mount, revision };
+  let input = null;
+  let context;
+  try {
+    context = projectFileContext(project, activeFile);
+    if (context.model && !verdicts.find((f) => f.name === context.model.name)?.valid) return { mount, revision };
+    const usesInput = ['fsm', 'dag'].includes(activeFile.kind)
+      || (activeFile.kind === 'model' && activeFile.input !== undefined);
+    if (context.input && usesInput)
+      input = JSON.parse(context.input.text);
+  }
+  catch { return { mount, revision }; }
+  const isStore = activeFile.kind === 'model' || activeFile.model !== undefined;
+  const doc = resolved.doc;
   const prevProject = mount && mount.name === active
-    ? { files: [{ name: mount.name, kind: 'app', text: JSON.stringify(mount.doc) }] }
+    ? { files: [{ name: mount.name, kind: mount.kind ?? 'app', text: JSON.stringify(mount.doc) }] }
     : { files: [] };
-  const nextProject = { files: [{ name: active, kind: 'app', text: activeFile.text }] };
+  const nextProject = { files: [{ name: active, kind: activeFile.kind, text: assembledFile.text }] };
   const policy = projectComponent.hostPolicy(prevProject, nextProject)[active] ?? 'reboot';
-
-  if (policy === 'skip' && mount && mount.name === active) return { mount, revision };
+  if (policy === 'skip' && mount && mount.name === active
+    && (!isStore || mount.files === project.files) && semanticKey(mount.input ?? null) === semanticKey(input))
+    return { mount, revision };
   const nextRevision = policy === 'reboot' ? revision + 1 : revision;
-  return { mount: { name: active, doc, revision: nextRevision }, revision: nextRevision };
+  return { mount: { name: active, kind: activeFile.kind, doc, input,
+    sourceFiles: resolved.sourceFiles, ...(isStore ? { files: project.files, store: true } : {}),
+    revision: nextRevision }, revision: nextRevision };
 }
 
 /**
@@ -120,15 +140,42 @@ export function commitProject(slice) {
  * throws.
  * @param {any} slice - the `state.project` slice
  * @param {string} name - the file to run
- * @returns {{ nodes: any[] } | null}
+ * @param {{ model?: (project: any, name: string) => Promise<any> }} [options]
+ * @returns {{ nodes: any[] } | Promise<{ nodes: any[] }> | null}
  */
-export function runProjectFile(slice, name) {
+export function runProjectFile(slice, name, options = {}) {
   const project = projectOf(slice);
   const file = project.files.find((f) => f.name === name);
   if (file === undefined) return null;
-  const input = project.files.find((f) => f.kind === 'data')
-    ?? project.files.find((f) => f.kind === 'state');
+  if (file.kind === 'model' || file.model !== undefined) {
+    if (!options.model) return null;
+    return options.model(project, name).then((result) => ({ nodes: [
+      code('Result', JSON.stringify(result.result, null, 2)), code('Query plan', JSON.stringify(result.plan, null, 2)),
+    ] }), (err) => ({ nodes: [error(err, 'Model run')] }));
+  }
+  let input;
+  try { ({ input } = projectFileContext(project, file)); }
+  catch (err) { return { nodes: [error(err, 'Project reference')] }; }
   const dataText = input ? input.text : 'null';
+  if (file.kind === 'fsm' || file.kind === 'dag') {
+    try {
+      const doc = resolveProjectFile(project, name).doc;
+      const data = JSON.parse(dataText);
+      if (file.kind === 'dag') return compileDag(doc).run(data).then(
+        (output) => ({ nodes: [code('DAG output', JSON.stringify(output, null, 2) ?? '(empty sequence)')] }),
+        (err) => ({ nodes: [error(err, 'DAG run')] }));
+      const machine = compileFsm(doc);
+      let state = machine.initial;
+      const trace = [];
+      for (const event of data?.events ?? []) {
+        const result = machine.step(state, typeof event === 'string' ? event : event.event,
+          { context: data?.context ?? null, payload: typeof event === 'string' ? null : event.payload });
+        trace.push(result); state = result.state;
+      }
+      return { nodes: [code('Machine run', JSON.stringify({ state, events: state === null ? [] : machine.events(state), trace }, null, 2))] };
+    }
+    catch (err) { return { nodes: [error(err, 'Flow run')] }; }
+  }
   if (file.kind === 'query') return { nodes: runQuery({ query: file.text, data: dataText, externals: '' }) };
   if (file.kind === 'jslt') return { nodes: runJslt({ stylesheet: file.text, data: dataText }) };
   if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText) };

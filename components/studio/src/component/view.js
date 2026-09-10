@@ -14,6 +14,7 @@
  * kind badge rides `data-badge`.
  */
 
+import { ADDABLE_KINDS } from '../skeletons.js';
 import { editorTextarea } from './editor.js';
 
 /** The one mode this view uses. */
@@ -85,13 +86,7 @@ const shell = {
     ['nav', { class: 'js-rail', 'aria-label': 'files' },
       ['select', { class: 'js-addfile', 'aria-label': 'add a file', value: '', on: { change: 'project/add-file' } },
         ['option', { value: '' }, '+ add file…'],
-        ['option', { value: 'app' }, 'app'],
-        ['option', { value: 'jslt' }, 'jslt'],
-        ['option', { value: 'query' }, 'query'],
-        ['option', { value: 'state' }, 'state'],
-        ['option', { value: 'data' }, 'data'],
-        ['option', { value: 'schema' }, 'schema'],
-        ['option', { value: 'contract' }, 'contract'],
+        ...ADDABLE_KINDS.map((kind) => ['option', { value: kind }, kind]),
       ],
       [{ $apply: '$.rail[*]' }]],
     // ——— editor ———
@@ -124,6 +119,17 @@ const shell = {
           }, 'Take theirs'],
         ],
         ''] },
+      { $if: ['$.routing', ['div', { class: 'js-routing' },
+        { $if: ['$.routing.hasInput', ['label', {}, 'Input ', ['select', { 'aria-label': 'Input file', value: '$.routing.input', on: { change: { action: 'project/route-input' } } },
+          ['option', { value: '' }, 'Default data file'],
+          [{ $for: { name: '$.routing.inputs[*]' }, $return: ['option', { value: '$name' }, '$name'] }]]], ''] },
+        { $if: ['$.routing.canModel', ['label', {}, 'Model ',
+          ['select', { 'aria-label': 'Model file', value: '$.routing.model', on: { change: 'project/route-model' } },
+            ['option', { value: '' }, 'In-memory input'],
+            [{ $for: { name: '$.routing.models[*]' }, $return: ['option', { value: '$name' }, '$name'] }]]], ''] },
+        { $if: ['$.routing.hasCollection', ['label', {}, 'Collection ', ['input', { 'aria-label': 'Collection', defaultValue: '$.routing.collection',
+          key: '$.active', placeholder: 'Only collection', on: { change: 'project/route-collection' } }]], ''] },
+      ], ''] },
       editorTextarea({
         value: '$.editorValue',
         action: 'project/file-text',
@@ -147,7 +153,7 @@ const shell = {
       ['div', { class: 'js-stage-head' }, 'Stage'],
       { $if: ['$.stageError', ['div', { class: 'js-stage-error js-stage-fail', role: 'status' }, '$.stageError'], ''] },
       { $if: [{ $eq: ['$.stage.kind', 'app'] },
-        ['div', { class: 'js-stage-mount' }, ['jaren-widget', { name: 'studio-stage', props: '$.stage.mount' }]],
+        ['div', { class: 'js-stage-mount' }, ['jaren-widget', { name: { $default: ['$.stage.widget', 'studio-stage'] }, props: '$.stage.mount' }]],
         { $if: [{ $eq: ['$.stage.kind', 'result'] },
           { $if: ['$.stage.ran',
             ['div', { class: 'js-stage-result' }, [{ $apply: ['$.stage.nodes[*]', 'ui'] }]],

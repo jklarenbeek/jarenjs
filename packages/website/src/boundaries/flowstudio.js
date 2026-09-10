@@ -130,8 +130,9 @@ function decorate(vnode, targets, marks) {
         const status = marks.nodeStatus?.[id];
         if (status !== undefined) cls += ` mm-run-${status}`;
         nextProps = {
-          ...props, class: cls,
-          on: { click: { action: 'flow/pick', with: target } },
+          ...props, class: cls, role: 'button', tabindex: '0',
+          'aria-label': `${target.type} ${target.id ?? target.index}`,
+          on: { click: { action: 'flow/pick', with: target }, keydown: { action: 'flow/key-pick', with: target } },
         };
       }
       else if (typeof edge === 'number' && targets.edges[edge] !== undefined) {
@@ -146,8 +147,9 @@ function decorate(vnode, targets, marks) {
           cls += ' mm-fired';
         }
         nextProps = {
-          ...props, class: cls,
-          on: { click: { action: 'flow/pick', with: target } },
+          ...props, class: cls, role: 'button', tabindex: '0',
+          'aria-label': `${target.type} ${target.id ?? target.index}`,
+          on: { click: { action: 'flow/pick', with: target }, keydown: { action: 'flow/key-pick', with: target } },
         };
       }
     }
@@ -368,7 +370,7 @@ const message = errorMessage;
  * @param {{ schedule?: any }} [env]
  */
 export function createFlowRuntime(env = {}) {
-  const ref = { app: null, controller: null };
+  const ref = { app: null, controller: null, generation: 0, disposed: false };
 
   const boot = (handle, props) => {
     try {
@@ -451,28 +453,34 @@ export function createFlowRuntime(env = {}) {
       ref.app?.dispatch(`fsm/${props.event}`);
     },
     'flow-dag-run': (props, dispatch) => {
+      if (ref.disposed) return;
+      ref.controller?.abort();
+      const generation = ++ref.generation;
+      const send = (action, payload) => {
+        if (!ref.disposed && generation === ref.generation) dispatch(action, payload);
+      };
       let input = null;
       if (typeof props.inputText === 'string' && props.inputText.trim() !== '') {
         try { input = JSON.parse(props.inputText); }
         catch (err) {
-          dispatch('flow/dag-fail', { message: `the input is not JSON: ${message(err)}` });
+          send('flow/dag-fail', { message: `the input is not JSON: ${message(err)}` });
           return;
         }
       }
       let dag;
       try { dag = compileDag(props.doc, { tasks: DEMO_TASKS }); }
       catch (err) {
-        dispatch('flow/dag-fail', { message: message(err) });
+        send('flow/dag-fail', { message: message(err) });
         return;
       }
       const controller = new AbortController();
       ref.controller = controller;
       dag.run(input, {
         signal: controller.signal,
-        onNode: (rec) => dispatch('flow/dag-node', rec),
+        onNode: (rec) => send('flow/dag-node', rec),
       }).then(
-        (output) => dispatch('flow/dag-done', { output }),
-        (err) => dispatch('flow/dag-fail', {
+        (output) => send('flow/dag-done', { output }),
+        (err) => send('flow/dag-fail', {
           message: /** @type {any} */ (err)?.nodeId !== undefined
             ? `${message(err)} (node '${/** @type {any} */ (err).nodeId}')`
             : message(err),
@@ -484,5 +492,7 @@ export function createFlowRuntime(env = {}) {
     },
   };
 
-  return { widget, effects };
+  const dispose = () => { ref.disposed = true; ref.generation++; ref.controller?.abort(); };
+  effects['flow-dag-run'].dispose = dispose;
+  return { widget, effects, dispose };
 }

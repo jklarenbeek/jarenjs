@@ -46,6 +46,7 @@ import {
   propsOf,
   keyOf,
   childrenOf,
+  isSkippedNode,
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
@@ -113,6 +114,9 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  *   definitions by name (VIEW-FORMAT §7).
  * @property {any} [document] - The document to create nodes with
  *   (defaults to `container.ownerDocument`).
+ * @property {boolean} [hydrate=false] - Adopt matching server DOM on the
+ *   first render. Mismatches are replaced locally. Safe mode rebuilds
+ *   existing markup because the renderer cannot trust its provenance.
  * @property {boolean} [safe=false] - Render under the SAFE policy
  *   ({@link createSafePolicy}): treat the vnode as untrusted. Tags are
  *   restricted to an inert HTML/SVG allow-list, scripting-sink and inline
@@ -238,9 +242,10 @@ export function createDomRenderer(container, options = {}) {
 
   function render(vnode) {
     if (ctx.destroyed) return; // a scheduled flush after destroy is a no-op
-    if (!isTextNode(vnode) && !isElementNode(vnode)) {
-      throw new TypeError('view: the root vnode must be a text or element vnode');
+    if (!isTextNode(vnode) && !Array.isArray(vnode) && !isSkippedNode(vnode)) {
+      throw new TypeError('view: the root must be a vnode or a list of vnodes');
     }
+    if (isSkippedNode(vnode)) vnode = [];
     if (rendering) {
       // re-entrant call (a widget mount/update emitted synchronously):
       // queue behind the current patch — it applies after this frame,
@@ -254,12 +259,17 @@ export function createDomRenderer(container, options = {}) {
       do {
         pendingVnode = undefined;
         if (rootNode === null) {
-          container.textContent = '';
-          rootNode = createNode(ctx, next, null);
-          container.appendChild(rootNode);
+          if (options.hydrate && ctx.policy === null) {
+            adoptChildren(ctx, container, childrenOf(['root', {}, next]), null);
+          }
+          else {
+            container.textContent = '';
+            for (const child of childrenOf(['root', {}, next])) container.appendChild(createNode(ctx, child, null));
+          }
+          rootNode = container;
         }
         else {
-          rootNode = patchNode(ctx, container, rootNode, oldVnode, next, null);
+          patchChildren(ctx, container, childrenOf(['root', {}, oldVnode]), childrenOf(['root', {}, next]), null);
         }
         oldVnode = next;
         // mount flush: after the patch completes every queued host is
@@ -321,7 +331,7 @@ export function createDomRenderer(container, options = {}) {
     ctx.mountQueue.length = 0;
     // Release the controlled-node registry: a destroyed renderer must not
     // retain detached form controls (nor their stored values) past teardown.
-    ctx.controlled.clear();
+    for (const node of ctx.controlled) releaseControlled(ctx, node);
     if (rootNode !== null) {
       /** @type {unknown[]} */
       const failures = [];
@@ -439,10 +449,47 @@ function createNode(ctx, vnode, ns) {
   }
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
-    node.appendChild(createNode(ctx, children[i], ns));
+    node.appendChild(createNode(ctx, children[i], tag === 'foreignObject' ? null : ns));
   }
   registerControlled(ctx, node, props);
   return node;
+}
+
+/** Adopt matching nodes positionally once; subsequent keyed reconciliation
+ * has the same vnode baseline as a fresh mount. Browser parser repairs and
+ * missing/extra nodes are local mismatches, never a second tree of state. */
+function adoptChildren(ctx, parent, children, ns) {
+  for (let i = 0; i < children.length; i++) {
+    const vnode = children[i];
+    const node = parent.childNodes[i];
+    if (node && isTextNode(vnode) && node.nodeType === 3) {
+      if (node.nodeValue !== String(vnode)) node.nodeValue = String(vnode);
+      continue;
+    }
+    const tag = isElementNode(vnode) ? vnode[0] : null;
+    const namespace = tag === 'svg' ? SVG_NS : ns;
+    if (node && tag && tag !== WIDGET_TAG && node.nodeType === 1
+      && (node.localName ?? node.tagName?.toLowerCase()) === tag
+      && (namespace === null ? node.namespaceURI == null || node.namespaceURI === 'http://www.w3.org/1999/xhtml' : node.namespaceURI === namespace)) {
+      const props = propsOf(vnode);
+      const names = new Set(Object.keys(props).map((name) => name === 'className' ? 'class' : name === 'htmlFor' ? 'for' : name.toLowerCase()));
+      for (const name of node.getAttributeNames()) {
+        if (!names.has(name.toLowerCase())) node.removeAttribute(name);
+      }
+      for (const name in props) setProp(ctx, node, name, undefined, props[name], namespace);
+      // A textarea's server text is its default value, not a vnode child
+      // when `value` supplies the authoritative content.
+      if (!(tag === 'textarea' && Object.hasOwn(props, 'value')))
+        adoptChildren(ctx, node, childrenOf(vnode), tag === 'foreignObject' ? null : namespace);
+      registerControlled(ctx, node, props);
+    }
+    else {
+      const fresh = createNode(ctx, vnode, ns);
+      if (node) parent.replaceChild(fresh, node);
+      else parent.appendChild(fresh);
+    }
+  }
+  while (parent.childNodes.length > children.length) parent.removeChild(parent.childNodes[parent.childNodes.length - 1]);
 }
 
 /**
@@ -530,7 +577,7 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
       return node;
     }
     patchProps(ctx, node, propsOf(oldV), propsOf(newV), ns);
-    patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), ns);
+    patchChildren(ctx, node, childrenOf(oldV), childrenOf(newV), newV[0] === 'foreignObject' ? null : ns);
     return node;
   }
   destroyNode(ctx, node);
@@ -584,10 +631,31 @@ function registerControlled(ctx, node, props) {
   const hasChecked = kind === 'INPUT' && 'checked' in props;
   if (!hasValue && !hasChecked) {
     if (node.__jarenControlled !== undefined) {
-      node.__jarenControlled = undefined;
-      ctx.controlled.delete(node);
+      releaseControlled(ctx, node);
     }
     return;
+  }
+  if (node.__jarenComposition === undefined && kind !== 'SELECT') {
+    let settlement;
+    const start = () => {
+      clearTimeout(settlement);
+      node.__jarenComposing = true;
+      node.__jarenCompositionDirty = false;
+    };
+    const end = () => {
+      clearTimeout(settlement);
+      // Engines can checkpoint microtasks between compositionend and the
+      // final input. Keep writes deferred through that event sequence, or
+      // the stale value clears Firefox's dirty flag and loses change-on-blur.
+      settlement = setTimeout(() => {
+        node.__jarenComposing = false;
+        if (node.__jarenCompositionDirty && !ctx.destroyed && ctx.controlled.has(node) && node.parentNode !== null)
+          reconcileControlled(node);
+      }, 0);
+    };
+    node.__jarenComposition = { start, end, cancel: () => clearTimeout(settlement) };
+    node.addEventListener('compositionstart', start, true);
+    node.addEventListener('compositionend', end, true);
   }
   node.__jarenControlled = {
     hasValue,
@@ -598,14 +666,27 @@ function registerControlled(ctx, node, props) {
   ctx.controlled.add(node);
 }
 
+/** Release listeners as well as registry ownership, including detached nodes. */
+function releaseControlled(ctx, node) {
+  const listeners = node.__jarenComposition;
+  if (listeners !== undefined) {
+    listeners.cancel();
+    node.removeEventListener('compositionstart', listeners.start, true);
+    node.removeEventListener('compositionend', listeners.end, true);
+  }
+  node.__jarenComposition = undefined;
+  node.__jarenComposing = false;
+  node.__jarenControlled = undefined;
+  ctx.controlled.delete(node);
+}
+
 /** Reconcile every registered controlled node against the live DOM, once per
  * settled render pass. A node no longer connected to the container is dropped
  * from the registry here, which is why registration needs no destroy hook. */
 function reconcileControlledSet(ctx, container) {
   for (const node of ctx.controlled) {
     if (!isConnectedTo(node, container)) {
-      node.__jarenControlled = undefined;
-      ctx.controlled.delete(node);
+      releaseControlled(ctx, node);
       continue;
     }
     reconcileControlled(node);
@@ -628,6 +709,7 @@ function reconcileControlled(node) {
     if (node.checked !== want) node.checked = want;
   }
   if (!c.hasValue) return;
+  if (node.__jarenComposing) { node.__jarenCompositionDirty = true; return; }
   const isMultiple = node.multiple === true
     || (typeof node.getAttribute === 'function' && node.getAttribute('multiple') != null);
   if (node.nodeName === 'SELECT' && isMultiple && Array.isArray(c.value)) {
@@ -643,7 +725,17 @@ function reconcileControlled(node) {
     return;
   }
   const want = c.value == null ? '' : String(c.value);
-  if (node.value !== want) node.value = want;
+  if (node.value !== want) {
+    // Preserve a live edit's caret. A newly created or unfocused control
+    // keeps the browser's normal assignment behavior (caret at the end).
+    const focused = node.ownerDocument?.activeElement === node;
+    const start = focused ? node.selectionStart : null;
+    const end = focused ? node.selectionEnd : null;
+    const direction = node.selectionDirection;
+    node.value = want;
+    if (typeof start === 'number' && typeof end === 'number' && typeof node.setSelectionRange === 'function')
+      node.setSelectionRange(Math.min(start, want.length), Math.min(end, want.length), direction ?? 'none');
+  }
 }
 
 /** Whether `node` is still attached beneath `root` (the render container).
@@ -703,6 +795,16 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   }
   // Trusted path (unchanged): a property where the node has one, else an
   // attribute — the equivalent of writing the DOM by hand.
+  // Controlled values settle after children and never interrupt composition.
+  if ((name === 'value' || name === 'checked')
+    && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) return;
+  const attrNs = name.startsWith('xlink:') ? 'http://www.w3.org/1999/xlink'
+    : name.startsWith('xml:') ? 'http://www.w3.org/XML/1998/namespace' : null;
+  if (attrNs !== null && typeof node.setAttributeNS === 'function') {
+    if (newValue == null || newValue === false) node.removeAttributeNS(attrNs, name.slice(name.indexOf(':') + 1));
+    else node.setAttributeNS(attrNs, name, String(newValue));
+    return;
+  }
   if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
     newValue = styleToString(newValue);
   }

@@ -32,3 +32,9 @@ jsonFile('x', 'data', { n: 1n });
 
 import { program as aiProgram } from '@jarenjs/linq/ai';
 jsonFile('program', 'data', aiProgram(['data']).answer('data').schema);
+file('query', 'query', '"$"', { model: 'store', collection: 'notes', input: 'seed' });
+jsonFile('app', 'app', { view: [] }, { imports: { state: 'seed' } });
+// @ts-expect-error references name files with strings
+file('query', 'query', '"$"', { model: 1 });
+// @ts-expect-error closed routing options
+file('query', 'query', '"$"', { worker: 'shared' });

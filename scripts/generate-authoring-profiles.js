@@ -9,6 +9,7 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const QUERY = 'A Jaren query expression; validate against the full grammar and compile locally.';
 /** Named grammar seams; external grammars have named refs in their canonical source. */
 export const AUTHORING_PROFILES = [
+  { grammar: 'model', package: 'db', open: {} },
   { grammar: 'query', package: 'json', open: { objectExpression: QUERY } },
   { grammar: 'jslt', package: 'json', open: JSLT_AUTHORING_OPEN },
   { grammar: 'app', package: 'app', open: { queryDocument: QUERY, stylesheetDocument: 'A JSLT stylesheet; validate and compile locally.' } },

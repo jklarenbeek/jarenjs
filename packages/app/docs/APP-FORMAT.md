@@ -510,6 +510,33 @@ once), and renderer destruction — widgets unmount exactly once, the
 container is left empty, and scheduled render flushes become exact
 no-ops.
 
+### 8.2.1 DOM profiles and host capability grants
+
+`createApp` forwards `safe`, `onUnsafe` and `hydrate` to its DOM renderer
+(VIEW-FORMAT §6/§8). `capabilities` optionally grants names from the host's
+`effects`, `subs`, `widgets` and `eventFields` registries:
+
+```js
+const app = createApp(doc, {
+  node, safe: true, onUnsafe: report,
+  effects: { load },
+  capabilities: { effects: ['load'] },
+});
+```
+
+When `safe: true` or `capabilities` is supplied, omitted grant lists are empty.
+Unknown or inherited registry names are refused at construction. Only granted
+effects belong to this app's disposal lifecycle. Without either option, the
+existing registered capabilities remain available. Safe mode still removes
+DOM event bindings and widgets; a widget grant does not override that display
+policy. A trusted interactive app can use explicit grants without `safe`.
+
+The action vocabulary is local to the app document. Effect/subscription/widget
+registries and custom event fields are host boundaries. These controls bound
+named host access, not CPU, memory, native navigation or network loads; they
+are not a browser security sandbox. Hosted documents still require a deliberate
+trust policy.
+
 ### 8.3 Transaction observers and diagnostics
 
 `app.observe(fn)` delivers one bounded JSON record per settled

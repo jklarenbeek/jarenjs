@@ -81,6 +81,8 @@ test.describe('the dispatch is real', function () {
     await openHero(page, 'no-preference');
     await expect(stages(page).filter({ hasText: 'not reached' })).toHaveCount(0);
 
+    // A late font swap can move this control between pointerdown and up.
+    await page.evaluate(() => document.fonts.ready);
     await page.locator('.seg-btn', { hasText: 'Break it' }).click();
     await expect(artifact(page)).toContainText('"ok": false');
 

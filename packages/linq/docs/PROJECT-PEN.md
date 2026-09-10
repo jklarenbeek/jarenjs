@@ -17,8 +17,8 @@ layout defaults. `validateFile()` checks each file through its own engine.
 
 | Method | Emits | Type | Status |
 |---|---|---|---|
-| `file(name, kind, text)` | `{ name, kind, text }`, preserving text | literal name/kind | native |
-| `jsonFile(name, kind, document)` | same file, with serialized JSON text | literal name/kind | native |
+| `file(name, kind, text, options?)` | `{ name, kind, text }` and optional routing/import members, preserving text | literal name/kind | native |
+| `jsonFile(name, kind, document, options?)` | same file, with serialized JSON text | literal name/kind | native |
 | `defineProject(files?, options?)` | version, files, optional active/layout | names from files | native |
 | `.files(files)` | replacement file list | replaces known names | native |
 | `.file(file)` | appended file | adds its name | native |
@@ -42,6 +42,12 @@ Call `parseProject(project.schema)` from `@jarenjs/studio`. A parsed nonempty
 project round-trips through JSON and the parser unchanged. Empty projects are
 valid; the parser represents their absent active file as `null` internally.
 
+File options preserve `imports`, `input`, `model` and `collection`. For example,
+`jsonFile('app', 'app', { view: [] }, { imports: { state: 'seed' } })` supplies
+state from another file; `file('q', 'query', '"$"', { model: 'store', collection:
+'notes' })` routes a query to a store. The pen snapshots these values without
+resolving them. Studio checks missing references, cycles and execution kinds.
+
 ## 4. Refusals
 
 | Code | Condition |
@@ -57,7 +63,7 @@ pen preserves these behaviors and does not carry a second project validator.
 
 `ProjectBuilder<Names>` tracks file names only in declarations. `FILE_KINDS`
 contains the schema's file-kind vocabulary, checked against Studio's own set.
-`ProjectFile<Name, Kind>`, `FileKind`, `ProjectLayout` and `ProjectDocument` are
+`ProjectFile<Name, Kind>`, `ProjectFileOptions`, `FileKind`, `ProjectLayout` and `ProjectDocument` are
 types. `JsonInput` accepts readonly structural documents and leaves unknown
 schema extension values to the runtime JSON check. `.files()` replaces the name union and `.file()` widens it. `.active()`
 refuses an undeclared literal name in TypeScript. `from()` deliberately keeps
@@ -71,5 +77,5 @@ app rendering and contract checks remain the file engines' responsibilities.
 
 ## 7. Cost
 
-The isolated project pen costs **<!--fact:bundle.project-->15,132<!--/fact--> bytes**.
+The isolated project pen costs **<!--fact:bundle.project-->15,225<!--/fact--> bytes**.
 Its tree probe excludes Studio, other target engines and the query chain.

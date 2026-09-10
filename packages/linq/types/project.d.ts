@@ -7,7 +7,13 @@ export type JsonInput<T> = unknown extends T ? unknown
       : T extends object ? { readonly [K in keyof T]: JsonInput<T[K]> } : never;
 
 export type FileKind = 'app' | 'jslt' | 'query' | 'state' | 'data' | 'schema' | 'fsm' | 'dag' | 'model' | 'contract';
-export interface ProjectFile<Name extends string = string, Kind extends FileKind = FileKind> {
+export interface ProjectFileOptions {
+  readonly imports?: Readonly<Record<string, string>>;
+  readonly input?: string;
+  readonly model?: string;
+  readonly collection?: string;
+}
+export interface ProjectFile<Name extends string = string, Kind extends FileKind = FileKind> extends ProjectFileOptions {
   readonly name: Name;
   readonly kind: Kind;
   readonly text: string;
@@ -24,8 +30,8 @@ export interface ProjectDocument {
   readonly layout?: ProjectLayout;
 }
 export const FILE_KINDS: readonly FileKind[];
-export function file<const N extends string, K extends FileKind>(name: N, kind: K, text: string): ProjectFile<N, K>;
-export function jsonFile<const N extends string, K extends FileKind, const D>(name: N, kind: K, document: D & JsonInput<D>): ProjectFile<N, K>;
+export function file<const N extends string, K extends FileKind>(name: N, kind: K, text: string, options?: ProjectFileOptions): ProjectFile<N, K>;
+export function jsonFile<const N extends string, K extends FileKind, const D>(name: N, kind: K, document: D & JsonInput<D>, options?: ProjectFileOptions): ProjectFile<N, K>;
 /** Names are a phantom; the public document has no extra registry. */
 export class ProjectBuilder<Names extends string = never> {
   protected constructor();

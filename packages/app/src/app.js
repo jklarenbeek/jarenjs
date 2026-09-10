@@ -46,6 +46,13 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './e
  *   app (drive it via `getVnode`/`subscribe`).
  * @property {any} [document] - The DOM document (defaults to
  *   `node.ownerDocument`).
+ * @property {boolean} [hydrate] - Adopt existing DOM on the first frame.
+ * @property {boolean} [safe] - Forward the inert view render profile. In
+ *   this mode host capabilities default to empty allow-lists.
+ * @property {import('@jarenjs/view').DomRendererOptions['onUnsafe']} [onUnsafe]
+ * @property {{ effects?: string[], subs?: string[], widgets?: string[], eventFields?: string[] }} [capabilities]
+ *   Restrict the host registry names the document may access. Omitted
+ *   lists grant nothing when this option or `safe` is enabled.
  * @property {Record<string, (props: any, dispatch: Dispatch) => void>} [effects]
  *   Effect handlers by name. A handler function may carry an optional
  *   `dispose()` member, called exactly once by `app.destroy()` (a
@@ -211,9 +218,21 @@ export function createApp(appDoc, options = {}) {
   const actions = compileActions(appDoc.actions, queryOptions);
   const subs = compileSubs(appDoc.subs, queryOptions);
 
-  const effectHandlers = options.effects ?? {};
-  const subHandlers = options.subs ?? {};
-  const eventExtractors = options.eventFields ?? {};
+  const grant = (kind) => {
+    const registry = options[kind] ?? {};
+    if (!options.safe && options.capabilities === undefined) return registry;
+    const names = options.capabilities?.[kind] ?? [];
+    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string'))
+      throw new TypeError(`createApp: capabilities.${kind} must be a list of names`);
+    return Object.fromEntries(names.map((name) => {
+      if (!Object.hasOwn(registry, name)) throw new TypeError(`createApp: unknown ${kind} capability '${name}'`);
+      return [name, registry[name]];
+    }));
+  };
+  const effectHandlers = grant('effects');
+  const subHandlers = grant('subs');
+  const eventExtractors = grant('eventFields');
+  const widgets = grant('widgets');
   const onError = options.onError ?? ((err) => { throw err; });
   const schedule = options.schedule ?? ((flush) => queueMicrotask(flush));
   const afterRender = options.afterRender ?? null;
@@ -1225,7 +1244,10 @@ export function createApp(appDoc, options = {}) {
         renderer = createDomRenderer(options.node, {
           document: options.document,
           onEvent: handleBinding,
-          widgets: options.widgets,
+          widgets,
+          safe: options.safe,
+          hydrate: options.hydrate,
+          onUnsafe: options.onUnsafe,
           // terminal-cleanup provenance: a widget unmount that throws
           // during renderer teardown — deferred teardown after an
           // app.destroy() from inside a hook included — is a CLEANUP

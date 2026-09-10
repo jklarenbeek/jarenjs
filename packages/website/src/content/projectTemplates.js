@@ -11,6 +11,7 @@
  * the operator packs mounted.
  */
 
+import { fileSkeleton } from '@jarenjs/studio';
 import { STUDIO_TEMPLATES } from './appTemplates.js';
 
 /** The live starter app: the `h1` reflects `state.title` (so editing the
@@ -64,7 +65,7 @@ export function singleAppProject(doc, name = 'Studio app') {
  * The gallery. `files` is the seed tree; `active` names the file the IDE
  * opens on. Kept small and each independently valid.
  * @type {ReadonlyArray<{ id: string, title: string, lead: string,
- *   active: string, files: Array<{ name: string, kind: string, text: string }> }>}
+ *   active: string, files: Array<{ name: string, kind: string, text: string, imports?: any, model?: string, collection?: string }> }>}
  */
 export const PROJECT_TEMPLATES = Object.freeze([
   {
@@ -76,6 +77,26 @@ export const PROJECT_TEMPLATES = Object.freeze([
       { name: 'app.json', kind: 'app', text: STARTER_APP },
       { name: 'stats.query', kind: 'query', text: JSON.stringify({ mean: { $mean: '$.values[*]' } }, null, 2) },
       { name: 'stats.data', kind: 'data', text: JSON.stringify({ values: [3, 1, 4, 1, 5, 9, 2, 6] }, null, 2) },
+    ],
+  },
+  {
+    id: 'split-app', title: 'Split app', lead: 'View, actions and state as separate project files; state edits keep the app running.',
+    active: 'app.json', files: [
+      { name: 'app.json', kind: 'app', text: '{}', imports: { view: 'view.jslt', actions: 'actions.data', state: 'app.state' } },
+      { name: 'view.jslt', kind: 'jslt', text: JSON.stringify(JSON.parse(STARTER_APP).view, null, 2) },
+      { name: 'actions.data', kind: 'data', text: JSON.stringify(JSON.parse(STARTER_APP).actions, null, 2) },
+      { name: 'app.state', kind: 'state', text: JSON.stringify(JSON.parse(STARTER_APP).state, null, 2) },
+    ],
+  },
+  ...['fsm', 'dag'].map((kind) => ({ id: kind, title: kind === 'fsm' ? 'State machine' : 'Dataflow',
+    lead: 'Edit the diagram and inspector, then run the project file.', active: `main.${kind}`,
+    files: [{ name: `main.${kind}`, kind, text: fileSkeleton(kind) }] })),
+  {
+    id: 'store', title: 'Model + query', lead: 'A private SQLite worker store with query plans and live results.',
+    active: 'notes.model', files: [
+      { name: 'notes.model', kind: 'model', text: fileSkeleton('model') },
+      { name: 'notes.query', kind: 'query', model: 'notes.model', collection: 'notes',
+        text: JSON.stringify({ $for: { row: '$[*]' }, $where: { $gt: ['$row.points', 10] }, $return: '$row' }, null, 2) },
     ],
   },
   // the Studio's complete application documents, each a one-app project
@@ -121,42 +142,8 @@ export const PROJECT_TEMPLATE_CARDS = PROJECT_TEMPLATES.map((t) => ({
   id: t.id, title: t.title, lead: t.lead,
 }));
 
-/** The starter text for each addable kind — minimal but VALID, so a new
- * file never opens on an error. `fsm`/`dag`/`model` are absent because
- * they have no editor or runner in the IDE yet: offering one would create
- * a file nothing can open (tracked in ROADMAP.md). */
-const SKELETONS = {
-  app: JSON.stringify({ state: {}, view: [{ match: '$', body: ['p', {}, 'New app'] }], actions: {} }, null, 2),
-  jslt: JSON.stringify({ $jslt: '0.1', rules: [{ match: '$', body: '$' }] }, null, 2),
-  query: JSON.stringify({ value: '$' }, null, 2),
-  state: '{}',
-  data: '{}',
-  schema: JSON.stringify({ type: 'object' }, null, 2),
-  contract: JSON.stringify({
-    $contract: '0.1',
-    operations: {
-      'echo.say': {
-        kind: 'command',
-        input: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } },
-        output: true,
-      },
-    },
-  }, null, 2),
-};
-
-/** The kinds a user may add a fresh file of. DERIVED from the skeleton
- * table rather than written twice: a kind with no skeleton makes
- * `project-add` bail silently, so a hand-maintained second list drifts
- * into a menu entry that does nothing. The studio component's own
- * `<select>` is the third copy and cannot import this one (it is a
- * published package); `test/website/project.test.js` pins them equal. */
-export const ADDABLE_KINDS = Object.freeze(Object.keys(SKELETONS));
-
-/** The starter text for a freshly added file of `kind`, or null if the
- * kind is not addable. */
-export function fileSkeleton(kind) {
-  return Object.hasOwn(SKELETONS, kind) ? SKELETONS[kind] : null;
-}
+/** Shared creation vocabulary and valid starters for every file kind. */
+export { ADDABLE_KINDS, fileSkeleton } from '@jarenjs/studio';
 
 /** Materialize a template `id` into a fresh project document. */
 export function projectTemplate(id) {
@@ -193,7 +180,7 @@ export function sharedProject(snapshot) {
   if (p === null || typeof p !== 'object' || !Array.isArray(p.files)) return null;
   const files = p.files
     .filter((f) => f !== null && typeof f === 'object')
-    .map((f) => ({ name: String(f.name ?? ''), kind: String(f.kind ?? 'data'), text: String(f.text ?? '') }))
+    .map((f) => ({ ...f, name: String(f.name ?? ''), kind: String(f.kind ?? 'data'), text: String(f.text ?? '') }))
     .filter((f) => f.name !== '');
   if (files.length === 0) return null;
   return {

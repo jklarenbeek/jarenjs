@@ -5,24 +5,25 @@ import { LinqBuildError } from '../errors.js';
 
 /** The public project file vocabulary, held equal to Studio's schema by tests. */
 export const FILE_KINDS = Object.freeze(['app', 'jslt', 'query', 'state', 'data', 'schema', 'fsm', 'dag', 'model', 'contract']);
+const FILE_OPTIONS = ['imports', 'input', 'model', 'collection'];
 const LAYOUT_KEYS = ['mode', 'ratio', 'autorun'];
 
 /** One file, preserving the caller's text byte-for-byte. */
-export function file(name, kind, text) {
+export function file(name, kind, text, options = {}) {
   if (typeof name !== 'string' || name.length === 0 || !FILE_KINDS.includes(kind) || typeof text !== 'string')
     throw new LinqBuildError('JL0101', 'file() requires a nonempty name, a declared kind and text');
-  return snapshot({ name, kind, text });
+  return snapshot({ name, kind, text, ...optionsOf(options, FILE_OPTIONS, 'file()') });
 }
 
 /** One file holding a public JSON value; pass another pen's `.schema` explicitly. */
-export function jsonFile(name, kind, document) { return file(name, kind, JSON.stringify(snapshot(document))); }
+export function jsonFile(name, kind, document, options = {}) { return file(name, kind, JSON.stringify(snapshot(document)), options); }
 
 /** Validate the authoring shape, preserving duplicate names for Studio to judge. */
 function filesOf(files) {
   if (!Array.isArray(files)) throw new LinqBuildError('JL0101', 'files() takes an array of project files');
   return files.map((value) => {
-    const f = optionsOf(value, ['name', 'kind', 'text'], 'file');
-    return file(f.name, f.kind, f.text);
+    const { name, kind, text, ...options } = optionsOf(value, ['name', 'kind', 'text', ...FILE_OPTIONS], 'file');
+    return file(name, kind, text, options);
   });
 }
 
