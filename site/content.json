@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-10T23:45:52+02:00",
-  "commit": "f760ead3f61c0413722b53955fc472bfc139bcd8",
+  "generated": "2026-09-11T01:07:38+02:00",
+  "commit": "f0e601799669e3389149b97946b6f34fc211eade",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -3305,11 +3305,153 @@
                 "value": "hono and Fastify."
               }
             ]
+          },
+          {
+            "type": "heading",
+            "depth": 3,
+            "children": [
+              {
+                "type": "text",
+                "value": "Durable commands and run observation"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "Business commands can share permanent receipts across HTTP, local calls and jobs."
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "inlineCode",
+                "value": "createCommand"
+              },
+              {
+                "type": "text",
+                "value": " validates the domain result before its receipt and outbox commit,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "checks current authorization before replay, and preserves the original outcome"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "after execution leases expire. Its receipt repository maps application-owned"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "history through "
+              },
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/linq/db"
+              },
+              {
+                "type": "text",
+                "value": "; application policy supplies identity, permissions"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "and expected revisions."
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "lang": "js",
+            "meta": null,
+            "value": "import { createCommand } from '@jarenjs/contract/command';\nimport { createDbReceipts } from '@jarenjs/linq/db';\n\n// client, contract, identity, authorize and adjust are application declarations.\nconst repository = createDbReceipts(client, { receipts: 'history' });\nconst command = createCommand(contract.operations['item.adjust'], {\n  repository, identity, authorize, handler: adjust,\n});\nconst outcome = await command.execute({ key: 'adjust-1', expected: 0, delta: 3 });\n// Repeating the same command observes receipt.outcome without another mutation.\n"
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "The command uses "
+              },
+              {
+                "type": "inlineCode",
+                "value": "policy.idempotency: \"none\""
+              },
+              {
+                "type": "text",
+                "value": ": business receipts supply replay,"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "and transport response caching cannot bypass fresh authorization. External writes"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "use reviewed per-leg sending intent and explicit reconciliation. A timeout or lost"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "response remains unresolved; a lease takeover does not resend it. Run observation"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "uses bounded revision pages, while navigation detaches the observer without"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "cancelling the durable run. The full "
+              },
+              {
+                "type": "link",
+                "url": "https://github.com/jklarenbeek/jarenjs/blob/main/packages/contract/docs/DURABLE.md",
+                "title": null,
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "crash and authorization matrix"
+                  }
+                ]
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "also describes provider-specific and operator qualifications that remain separate."
+              }
+            ]
           }
         ],
         "meta": {
           "sourceUrl": "packages/contract/site.md",
-          "hash": "camjax",
+          "hash": "6kjmw1",
           "frontmatterLang": "yaml"
         }
       },
