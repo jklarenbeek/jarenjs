@@ -736,3 +736,15 @@ for (const [name, symbol, forbidden] of [
   if (leaked.length) throw new Error(`Flow ${name} retained unrelated engines: ${leaked.map(([path]) => path).join(', ')}`);
   console.log(`Flow ${name} browser isolation passed (${result.outputFiles[0].contents.length} bytes).`);
 }
+
+// Collection geometry never pulls presentation, storage or retained reference engines into a bundle.
+const collectionGeometry = await build({stdin:{contents:"export { fixedRange } from '@jarenjs/core/virtual';",resolveDir:process.cwd()},
+  bundle:true,write:false,platform:'neutral',format:'esm',minify:true,metafile:true});
+if (collectionGeometry.outputFiles[0].contents.length > 2500) throw new Error('Fixed range bundle exceeds geometry budget');
+if (Object.keys(collectionGeometry.metafile.inputs).some((file)=>/packages\/(view|app|db|linq)|components\//.test(file)))
+  throw new Error('Geometry imported a presentation or data owner');
+const collectionEngine = await build({stdin:{contents:"export { createCollection } from '@jarenjs/collection';",resolveDir:process.cwd()},
+  bundle:true,write:false,platform:'neutral',format:'esm',minify:true,metafile:true});
+if (Object.keys(collectionEngine.metafile.inputs).some((file)=>/packages\/(app|db|linq)|src\/component\//.test(file)))
+  throw new Error('Collection engine imported coordination or the DOM component');
+console.log(`Collection geometry/engine tree shaking passed (${collectionGeometry.outputFiles[0].contents.length}/${collectionEngine.outputFiles[0].contents.length} bytes).`);

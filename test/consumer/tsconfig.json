@@ -15,7 +15,8 @@
   "files": [
     "types.ts",
     "flow-composition.ts",
-    "db-replication.ts"
+    "db-replication.ts",
+    "collection.ts"
   ],
   "include": [
     "linq-*.ts"

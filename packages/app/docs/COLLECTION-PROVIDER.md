@@ -104,4 +104,63 @@ query/snapshot-scoped intent with exclusions. The authoritative mutation recheck
 membership and revision. Focus/scroll restoration carries key, offset and query
 identity, plus a declared fallback when the key disappears. Complete print/export
 requires a separate bounded stream over a declared complete snapshot; mounted
-rows cannot prove completeness. This adapter declares `completeExport: false`.
+rows cannot prove completeness. Sequential mode declares `completeExport: false`; bounded resident mode supplies the complete snapshot stream described below.
+
+## App coordinator and resident arrays
+
+`createArrayRangeProvider(rows, options)` creates an immutable resident source copy
+and key index. This full source remains resident, and `stats().rows/bytes` reports
+it honestly. `keyOf` defaults to the string form of `row.id`. Query/source identities
+default to a new host UUID; `runtime`, `source`, `query` and `snapshot` can be
+injected. Explicit query identities must distinguish source, ordering/filter and
+relevant profile/schema versions. `replace(rows,newSnapshot)` requires a new source
+identity, increments event revision and resets cursors. Return values are copied
+so consumers cannot mutate the source snapshot. `indexOf(key)` uses the resident
+index. `seekIndex:false` and `exactTotal:false` exercise restricted capabilities.
+
+`createCollectionCoordinator(provider, options)` privately owns cancellation,
+generation/request fencing and caches. Defaults: 64 rows/page, 4 cached pages,
+256 cached rows, 262144 cached bytes, 2 in-flight requests, 256 work credits/request,
+one simultaneous output (`maxOutputs`), eight subscribers (`maxSubscriptions`),
+and zero prefetch pages. `prefetchPages` is finite, below the page limit and clamped
+to row credits. `requestRange({start,end},signal)` refuses oversized ranges before
+source work. Every response must echo all four identities and fit row/byte/work
+credits before it can publish. A provider that ignores cancellation still cannot
+replace current rows. Source events need a monotone integer revision; this
+coordinator treats keyed events conservatively as reset rather than claiming
+incremental maintenance. `reset` fences old work and clears cached resources.
+
+`observation()` and `subscribe` expose JSON query/snapshot/generation, status,
+logical total and bounded loaded row/byte counts. `rowAt`, `keyAt` and `indexOf`
+access private cache rows. `logicalCount()` returns the known total, or the loaded
+frontier plus a continuation sentinel; it never manufactures a known total.
+`next(signal)` requests the next sequential page. A sequential source refuses
+arbitrary jumps as `unsupported-seek` without scanning. `pinKeys(keys)` protects
+editor pages within existing page/row/byte limits; an impossible admission returns
+`budget-exhausted / pinned-page-credits`. `stats()` separately reports cache pages,
+rows/bytes, in-flight requests and outputs. By default async `dispose` drains both
+the coordinator and provider; `disposeProvider:false` retains host ownership.
+
+## Transactional export and print sinks
+
+Complete sources expose `export({query,snapshot,pageRows,pageBytes},signal)` as an
+async iterable. Each page is `{state:'ready',query,snapshot,rows,keys}`; the terminal
+record is `{state:'complete',query,snapshot,total}`. The terminal count proves how
+many source rows were read, independently of selection. A missing terminal record,
+changed identity, byte/row overflow, cancellation or missing selected key/range
+endpoint is an incomplete output and must not be reported as success.
+
+The coordinator's `output(sink,{selection,signal,pageRows})` awaits `begin(identity)`,
+serial `write(rows)` calls and finally `commit({query,snapshot,rows})`. Any failure
+calls `abort(error)` and returns `error / incomplete-export`. The sink must stage
+work privately and make it visible only at commit. It supplies its own finite
+spool or streaming storage; building a whole output array is not implicitly
+bounded. Backpressure is the awaited `write` promise. The same sink contract
+supports printing a completed snapshot artifact. Disposal cancels and drains
+outstanding output before clearing resources.
+
+Arrays support complete output at their immutable snapshot. SQLite resident mode
+also supports complete output over its already qualified bounded source; it checks
+source data-version before and after export, and refuses a changed/unloaded epoch.
+Sequential database mode continues to refuse complete export. The website download
+sink has a finite spool, so an oversized output fails before creating a download.

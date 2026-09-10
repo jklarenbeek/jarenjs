@@ -1,0 +1,10 @@
+.jc-viewport { overflow: auto; position: relative; overscroll-behavior: contain; overflow-anchor: none; touch-action: pan-x pan-y; border: 1px solid var(--border, #999); color: var(--fg, var(--text, #222)); background: var(--surface, #fff); }
+.jc-viewport:focus-visible { outline: 2px solid var(--accent, #555); outline-offset: 2px; }
+.jc-surface { position: relative; }
+.jc-row { box-sizing: border-box; border-bottom: 1px solid var(--border, #ddd); }
+.jc-cell { box-sizing: border-box; padding: var(--space-2, 8px); overflow: hidden; }
+.jc-cell[aria-selected='true'], .jc-row[aria-selected='true'] { background: var(--accent-soft, var(--surface, #eee)); }
+.jc-cell[data-active='true'] { outline: 2px solid var(--accent, #555); outline-offset: -2px; }
+.jc-cell input { max-width: 100%; box-sizing: border-box; }
+
+.jc-pin { background: var(--surface, Canvas); }

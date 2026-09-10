@@ -127,55 +127,7 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
-- [ ] **Native list and grid virtualization.** The registered-widget lifecycle
-  already provides the host boundary; it does not provide the windowing engine
-  needed to retire `@tanstack/virtual-core`. Add a DOM-free range/measurement
-  engine under `packages/core/src/virtual/` and a reusable visible collection
-  in `components/collection/`, registered through the existing view widget
-  lifecycle. These are planned homes, not existing exports. Expose public
-  mount/update/dispose and scroll-to-key/index/offset operations. Specify stable
-  item identity, fixed
-  and measured sizes, overscan and pinned-item bounds, empty/hidden viewports,
-  resize invalidation, scroll anchoring after insert/delete/reorder and size
-  changes, and vertical/horizontal axes including RTL offsets. Qualify column
-  windowing, variable row heights and browser scroll-size ceilings separately
-  from the fixed-row first consumer. Observers, frames,
-  elements and measurement caches remain private resources; app state contains
-  JSON viewport/selection intent. Acceptance needs bounded mounted rows/cells,
-  bounded cache retention and work per scroll/update, stable anchors, no
-  per-scroll full-dataset render, deterministic headless range tests, and
-  teardown/reinsert tests that leave no observer, listener or scheduled frame.
-- [ ] **Accessible virtual collection interaction.** A window of rows is not
-  yet a usable grid: compose the virtualizer with configurable list/grid
-  semantics, logical row/column counts and indices, keyboard navigation,
-  offscreen focus realization, single/range selection by stable identity,
-  activation and return-focus behavior. Cover Arrow/Home/End/Page navigation,
-  Space/Enter, scrolling to an unmounted target, focused-row removal,
-  filter/sort/reload, horizontal header synchronization and editable cells
-  without stealing their caret or composition events. Every active-descendant
-  target must exist when exposed to accessibility APIs; pinning focus must
-  obey the DOM budget. Keep selection and field policy injectable and reusable
-  across lists and grids. Browser evidence must cover Chromium, Firefox and
-  WebKit, zoom, touch and resize; the existing real-browser accessibility and
-  native-IME audit entries remain the owners of actual assistive-technology
-  and OS input-method qualification.
-- [ ] **Virtual views over bounded data providers.** An array-backed widget
-  does not make a much larger application bounded. Define an injected range
-  presentation over the [shipped structural database provider](../packages/app/docs/COLLECTION-PROVIDER.md), with stable keys, query/snapshot generation, known or unknown total
-  size, loading/error states, finite prefetch/cache credits and cancellation;
-  stale replies cannot overwrite a newer filter, sort or scroll request.
-  Compose it with existing LINQ keyset pages and live patches through host
-  adapters, with an explicit capability/refusal for arbitrary index jumps when
-  a provider offers only sequential continuation. Distinguish logical total
-  size from loaded rows and selection intent from loaded membership. Specify
-  scroll restoration, page eviction and a complete-data print/export path
-  independent of mounted DOM. Prove search/sort/live updates preserve identity
-  and focus while loaded bytes and mounted cells stay within declared budgets;
-  keep database/worker imports out of the view engine. The component owns
-  rendering and interaction, app owns the injected provider's private resource
-  lifecycle, and `linq/db` owns the adapter to database pages/live results.
-  Coordinate through one provider contract rather than direct component-to-db
-  imports; database identity and snapshot consistency remain authoritative.
+- [ ] **Collection platform and large-source qualification.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches. Remaining work is segmented logical scrolling beyond the conservative CSS extent ceiling, physical touch-device qualification, actual assistive technology and native OS IME sessions, and complete sequential database snapshots/index seeks backed by an independently qualified source contract. Keep the retained virtualizer oracle until real downstream/manual acceptance permits retirement; installed synthetic consumers alone do not authorize an external cutover.
 
 - [ ] **Real-browser accessibility audit** — the *lifecycle* half of the matrix
   ships (the website's Playwright suite drives the built site through Chromium,
@@ -184,7 +136,7 @@ delete it or fix it.
   the `prefers-reduced-motion` half: the site's motion layer is asserted under
   both emulated preferences in all three engines, including that `reduce`
   yields final states on first paint with no animation at all (DESIGN §6/§10).
-  What stays untested and unclaimed is the assistive-technology half: dialog
+  The collection matrix also exercises pending active descendants, keyed focus/selection, anchored scroll, RTL and editable controls. What stays untested and unclaimed is the assistive-technology half: dialog
   focus traps and focus restoration under an actual screen reader, and AT
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
@@ -193,7 +145,7 @@ delete it or fix it.
   caret preservation, multiple selects and the safe create/update/remove/reinsert
   corpus are exercised in Chromium, Firefox and WebKit. The automated tests
   include synthetic composition events and Firefox's automation input sequence;
-  native OS input methods still need manual coverage before claiming full
+  the collection also covers synthetic composition during scroll and focused-row removal. Native OS input methods still need manual coverage before claiming full
   language/input-method fidelity. VIEW-FORMAT §8 records that limit.
 
 ## @jarenjs/flow

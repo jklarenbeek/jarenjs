@@ -276,3 +276,5 @@ specific host registry names; with safe mode or explicit grants, omitted lists
 are empty. See [APP-FORMAT §8.2.1](docs/APP-FORMAT.md#821-dom-profiles-and-host-capability-grants)
 for the disposal and trust contract. Safe mode is a display policy and removes
 DOM event bindings and widgets.
+
+`createArrayRangeProvider` and `createCollectionCoordinator` provide injected collection coordination and complete snapshot output; see [the provider contract](docs/COLLECTION-PROVIDER.md).

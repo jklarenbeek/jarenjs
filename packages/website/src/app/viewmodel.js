@@ -35,6 +35,7 @@ const NAV_GROUPS = [
   { key: 'engines', label: 'Engines', pages: [
     { page: 'play', label: 'Play', href: '#/play' },
     { page: 'charts', label: 'Charts', href: '#/charts' },
+    { page: 'collection', label: 'Collections', href: '#/collection' },
   ] },
   { key: 'studios', label: 'Studios', pages: [
     { page: 'project', label: 'Studio', href: '#/project' },
@@ -211,6 +212,7 @@ export function viewModel(state) {
   if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
+  if (page === 'collection') ui.collection = { mode: state.route.params.mode ?? 'array' };
   if (page === 'project') {
     ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
     // the site's save/share bar (the IDE store) renders above the IDE shell

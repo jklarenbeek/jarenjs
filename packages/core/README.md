@@ -296,8 +296,11 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/convert/index` | JavaScript | declared |
 | `@jarenjs/core/convert/registry` | JavaScript | declared |
 | `@jarenjs/core/package.json` | metadata | — |
+| `@jarenjs/core/virtual` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
 
 Unit tests live in `test/core/` at the repository root (`npm run test:core`). This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document, with per-module references under [docs/](./docs/) (`MATH`, `CONVERT`, `FINANCE`, `DATES`, `GEO`); see the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture, and the [ROADMAP](../../docs/ROADMAP.md) for planned work.
+
+See [virtual geometry](docs/VIRTUAL.md) for opt-in constant-work fixed ranges and bounded sparse measured axes.

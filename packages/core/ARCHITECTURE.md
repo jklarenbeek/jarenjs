@@ -1234,3 +1234,5 @@ export function isNumberType(data) {
 When contributing, remember: this package is used by `@jarenjs/validate` and `@jarenjs/formats`. Changes here have downstream effects. Maintain backward compatibility, optimize for performance, and keep the API predictable.
 
 For questions about the broader architecture, see the root [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). For development workflows, see [`HOWTO.md`](../../docs/HOWTO.md).
+
+`src/virtual/` owns DOM-free fixed and sparse measured collection geometry. It imports no presentation, app or storage owner; the visible component and injected coordinator live above it.

@@ -679,6 +679,11 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         program += "await import('./query-native.js');\n";
       }
     }
+    if (name === '@jarenjs/collection') {
+      writeFileSync(join(consumerDir, 'collection.js'), readFileSync(join(root, 'test/consumer/collection.js')));
+      writeFileSync(join(consumerDir, 'collection-grid.json'), readFileSync(join(root, 'test/adoption/fixtures/grid.json')));
+      program += "await import('./collection.js');\n";
+    }
     const programFile = join(consumerDir, 'consumer.mjs');
     writeFileSync(programFile, program);
 

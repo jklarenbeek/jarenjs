@@ -45,6 +45,7 @@ export async function createDbRangeProvider(store, entity, spec = {}, options = 
   let residentBytes = 0;
   const continuations = new Map();
   const pending = new Map();
+  const exports = new Set();
   const observers = new Set();
   const stats = { sourceReads: 0, sourceRows: 0, sourceBytes: 0 };
   const snapshot = () => `${source}-v${revision}`;
@@ -103,13 +104,13 @@ export async function createDbRangeProvider(store, entity, spec = {}, options = 
   catch (error) { unsubscribe(); throw error; }
 
   const capabilities = Object.freeze({ seekIndex: resident && options.seekIndex !== false, seekKey: false,
-    continuation: true, live: true, exactTotal: resident && options.exactTotal !== false, completeExport: false });
+    continuation: true, live: true, exactTotal: resident && options.exactTotal !== false, completeExport: resident });
   const provider = {
     capabilities,
     get query() { return query; },
     get snapshot() { return snapshot(); },
     stats: () => ({ ...stats, pending: pending.size, pages: continuations.size,
-      rows: rows?.length ?? 0, bytes: residentBytes, subscriptions: observers.size, disposed }),
+      rows: rows?.length ?? 0, bytes: residentBytes, subscriptions: observers.size, exports: exports.size, disposed }),
     subscribe(observer) {
       if (disposed) throw new Error('range provider is disposed');
       if (typeof observer !== 'function') throw new TypeError('range subscriber must be callable');
@@ -215,12 +216,44 @@ export async function createDbRangeProvider(store, entity, spec = {}, options = 
       pending.set(controller, promise);
       return promise;
     },
+    export(request, signal) {
+      if (disposed) throw new Error('disposed');
+      if (exports.size >= bounds.inFlight) throw new RangeError('Export credits');
+      const pageRows = request.pageRows ?? 64, pageBytes = request.pageBytes ?? bounds.bytes;
+      if (!resident) throw new Error('unsupported-export');
+      if (!Number.isSafeInteger(pageRows) || pageRows <= 0 || pageRows > bounds.rows
+        || !Number.isSafeInteger(pageBytes) || pageBytes < 2) throw new RangeError('Invalid export credits');
+      const iterator = (async function* () {
+        try {
+          // Verify external changes before certifying the bounded resident source epoch.
+          await store.transaction(checkVersion);
+          if (!rows) throw new Error('Snapshot must be reloaded before export');
+          const total = rows.length;
+          for (let start = 0; start < total; start += pageRows) {
+            if (disposed || signal?.aborted || request.query !== query || request.snapshot !== snapshot() || !rows)
+              throw new Error('Incomplete snapshot export');
+            const items = rows.slice(start, start + pageRows);
+            if (bytesOf(items) > Math.min(pageBytes, bounds.bytes)) throw new RangeError('Export byte credits');
+            yield { state: 'ready', rows: items, keys: items.map(keyOf), query, snapshot: request.snapshot };
+          }
+          await store.transaction(checkVersion);
+          if (disposed || signal?.aborted || request.query !== query || request.snapshot !== snapshot() || !rows)
+            throw new Error('Incomplete snapshot export');
+          yield { state: 'complete', total, query, snapshot: request.snapshot };
+        }
+        finally { exports.delete(iterator); }
+      })();
+      exports.add(iterator);
+      return iterator;
+    },
     async dispose() {
       if (!disposed) {
         disposed = true; unsubscribe(); observers.clear();
         for (const controller of pending.keys()) controller.abort();
       }
       await Promise.allSettled([...pending.values()]);
+      await Promise.allSettled([...exports].map((iterator) => iterator.return()));
+      exports.clear();
       continuations.clear(); rows = null; residentBytes = 0;
     },
   };

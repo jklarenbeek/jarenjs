@@ -13,6 +13,7 @@
  *    retired URLs, and apply an inbound share token.
  */
 
+import { createCollectionDemoWidget } from '../boundaries/collection.js';
 import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
 import { renameProjectFile, writeProjectArtifact, resolveProjectFile } from '@jarenjs/studio';
 import { createLedger } from '@jarenjs/ai';
@@ -697,6 +698,7 @@ export function createSiteApp(env) {
     onError: report,
     effects,
     widgets: {
+      'collection-demo': createCollectionDemoWidget(),
       // chart / mermaid / markdown / form — usable from any site-level view
       // (the adventure game embeds chart + mermaid in its own page)
       ...DOCUMENT_WIDGETS,

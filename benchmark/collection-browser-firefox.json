@@ -1,0 +1,13 @@
+{
+  "engine": "firefox",
+  "browser": "151.0",
+  "interactionMs": 11,
+  "mountedCells": 170,
+  "extent": 7920000,
+  "end": 7919560,
+  "remaining": 0,
+  "node": "v24.20.0",
+  "platform": "linux",
+  "workers": 4,
+  "samples": 40
+}

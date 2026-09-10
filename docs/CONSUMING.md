@@ -140,7 +140,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->17<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->15<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->17<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->673<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->674<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -156,7 +156,7 @@ compiler; the chain sits on the addressing package). The graph in
 [ARCHITECTURE.md](ARCHITECTURE.md#monorepo-layout) is the authority on
 which.
 
-`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `studio`,
+`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `collection`, `studio`,
 `play`, `josl`, `ai`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.
 
@@ -349,3 +349,5 @@ and [recovery contract](../packages/db/docs/MIGRATION-FORMAT.md#existing-physica
 ### Native column plans and bounded ranges
 
 Installed `@jarenjs/db` exports execute the [native SQL census](../packages/db/docs/NATIVE-PLANS.md). `@jarenjs/linq/db` exports `createDbRangeProvider` and entity handles expose `range`. The [provider contract](../packages/app/docs/COLLECTION-PROVIDER.md) distinguishes source epochs from client generations, resident index seeks from sequential continuations, and complete totals from loaded rows. The packed consumer runs the retained SQL comparison and no-op mutations under Node and Bun.
+
+Virtual collection consumers import geometry from `@jarenjs/core/virtual`, the headless controller from `@jarenjs/collection`, and DOM widgets from `@jarenjs/collection/component`. The host injects `createCollectionCoordinator` and a structural array or linq/db provider; [the contract](../components/collection/docs/COLLECTION.md) keeps these owners separate.

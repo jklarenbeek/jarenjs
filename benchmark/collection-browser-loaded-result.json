@@ -1,0 +1,13 @@
+{
+  "scope": "Earlier full website matrix, four workers; same collection controller and viewport fixture, before the site widget lifecycle fix.",
+  "node": "v24.20.0",
+  "platform": "linux",
+  "workers": 4,
+  "samples": 40,
+  "fixedBudgetMs": 16,
+  "results": {
+    "chromium": 8.600000023841858,
+    "firefox": 12,
+    "webkit": 17
+  }
+}

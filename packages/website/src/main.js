@@ -7,6 +7,7 @@ import '@jarenjs/md/styles/md.css';
 import '@jarenjs/mermaid/styles/mermaid.css';
 import '@jarenjs/calc/styles/calc.css';
 import '@jarenjs/charts/styles/charts.css';
+import '@jarenjs/collection/styles/collection.css';
 import '@jarenjs/studio/styles/studio.css';
 import '@jarenjs/play/styles/play.css';
 import { createSiteApp } from './app/createSiteApp.js';

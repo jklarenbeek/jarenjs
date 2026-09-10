@@ -37,8 +37,8 @@ test('the app boots with landmark semantics intact', async ({ page }) => {
   await expect(page.locator('nav#site-nav')).toBeVisible();
   await expect(page.locator('main.main')).toBeVisible();
   await expect(page.locator('h1').first()).toBeVisible();
-  // Home + the three dropdown groups' 9 links = 10 nav-links, behind 3 triggers
-  await expect(page.locator('#site-nav .nav-link')).toHaveCount(10);
+  // Home + the three dropdown groups' 10 links = 11 nav-links, behind 3 triggers
+  await expect(page.locator('#site-nav .nav-link')).toHaveCount(11);
   await expect(page.locator('#site-nav .nav-trigger')).toHaveCount(3);
 
   const toggle = page.locator('button[aria-controls="site-nav"]');

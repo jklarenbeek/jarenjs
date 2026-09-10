@@ -109,7 +109,7 @@ Programming is like sex.
 One mistake and you have to support it for the rest of your life.
 ```
 
-The monorepo is organized as a dependency chain of <!--fact:packages.count-->22<!--/fact--> published packages — each builds on the ones before it, and each has its own README and, where the internals warrant it, an ARCHITECTURE document:
+The monorepo is organized as a dependency chain of <!--fact:packages.count-->23<!--/fact--> published packages — each builds on the ones before it, and each has its own README and, where the internals warrant it, an ARCHITECTURE document:
 
 | Package | What it is | Docs |
 |---|---|---|
@@ -129,6 +129,7 @@ The monorepo is organized as a dependency chain of <!--fact:packages.count-->22<
 | [`@jarenjs/mermaid`](components/mermaid) | A native, headless Mermaid clone: diagrams-as-code → geometry-free JSON AST → pure-vnode SVG, bidirectional | [README](components/mermaid/README.md) · [FORMAT](components/mermaid/docs/MERMAID-FORMAT.md) |
 | [`@jarenjs/calc`](components/calc) | A multi-mode calculator (standard/scientific/programmer/financial/converter) as an @jarenjs/app document, with x·y/x·y·z plots as pure-vnode SVG; its numeric kernel lives in @jarenjs/core (math/finance/convert) | [README](components/calc/README.md) · [FORMAT](components/calc/docs/CALC-FORMAT.md) |
 | [`@jarenjs/charts`](components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG, thirteen types (pie/bar/line/scatter/candlestick/radar/gauge/boxplot/heatmap/treemap/streamgraph/sankey/map), with a stream adapter over the josl readers' events | [README](components/charts/README.md) · [ARCHITECTURE](components/charts/ARCHITECTURE.md) |
+| [`@jarenjs/collection`](components/collection) | Bounded virtual lists and grids, keyed interaction and injected providers | [README](components/collection/README.md) · [ARCHITECTURE](components/collection/ARCHITECTURE.md) |
 | [`@jarenjs/studio`](components/studio) | The jaren project IDE: a multi-file project (schema, view, actions, model, queries, flow) as one document — each file validated against its own grammar, assembled into runnable artifacts, edited and hosted by an embeddable studio widget | [README](components/studio/README.md) · [FORMAT](components/studio/docs/PROJECT-FORMAT.md) |
 | [`@jarenjs/play`](components/play) | A JSON-engine playground: pick an engine (JSONPath/Pointer/Patch/$query/JSLT/markdown/mermaid), feed it a source input and one or more datasets from a curated example library, and watch it run — understand an engine standalone before composing it in the studio | [README](components/play/README.md) · [FORMAT](components/play/docs/PLAY-FORMAT.md) |
 | [`@jarenjs/josl`](packages/josl) | JOSL, a streaming TOML superset, JSONX, and a self-healing CSV reader/writer — with incremental streaming readers for every dialect (JOSL/TOML/JSONX/strict JSON/CSV) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |

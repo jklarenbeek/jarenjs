@@ -24,6 +24,7 @@ export const packageFiles = [
   'components/mermaid/package.json',
   'components/calc/package.json',
   'components/charts/package.json',
+  'components/collection/package.json',
   'components/studio/package.json',
   'components/play/package.json',
   'packages/josl/package.json',

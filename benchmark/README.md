@@ -1315,3 +1315,24 @@ drivers and LINQ declarations with no application driver wrapper. Recovery fault
 injection runs in `test/db/relational-recovery.test.js` on both hosts. Native
 executable deployment, PostgreSQL capture and actual downstream cutover still
 need their own evidence.
+
+## Virtual collections
+
+Run `npm run benchmark:collection` for the frozen fixed/measured consumer profiles.
+The measurement loops visit every logical measurement twice. Source residency,
+page-cache credits and mounted cells are separate observations.
+
+<!--fact:collection.measurements-->
+
+Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+
+| Consumer | Rows | Reference range ms | Native range/view/interaction p95 ms | Cells | Cached rows / bytes | Measurements / accounted bytes | Heap MiB | Teardown ms |
+|---|---:|---:|---:|---:|---|---|---:|---:|
+| catalog | 10000 | 0.020 | 1.450 | 170 | 256 / 9732 | 256 / 8192 | 19.49 | 0.177 |
+| archive-stock | 75000 | 8.080 | 0.307 | 160 | 256 / 10244 | 256 / 8448 | 92.43 | 0.047 |
+
+The component and coordinator browser bundle is 16815 gzip bytes. Reference range calls do less work than native vnode and interaction calls; the comparison deliberately publishes that cost rather than claiming equal workloads.
+
+<!--/fact-->
+
+Browser and manual qualifications are described in the [collection evidence](../components/collection/docs/MEASUREMENTS.md).
