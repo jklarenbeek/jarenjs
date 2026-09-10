@@ -1,0 +1,17 @@
+{
+  "files": [
+    "LICENSE-jaren.txt",
+    "SQLite-README.md",
+    "inter-latin-400-normal.woff2",
+    "inter-latin-600-normal.woff2",
+    "inter-latin-700-normal.woff2",
+    "jetbrains-mono-latin-400-normal.woff2",
+    "jetbrains-mono-latin-700-normal.woff2",
+    "project-db-worker.js",
+    "runtime.css",
+    "runtime.js",
+    "sqlite3-opfs-async-proxy.js",
+    "sqlite3.wasm",
+    "versions.json"
+  ]
+}
