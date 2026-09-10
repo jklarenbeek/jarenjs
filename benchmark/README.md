@@ -1219,6 +1219,68 @@ qualifications without changing the frozen ceilings. See
 installed-public-API recipe and the separate native, host and operator exits.
 
 
+## Native column plan measurements
+
+`node benchmark/query-native.js` compares the retained SQL census with public
+native and forced-decoded plans, indexed and unindexed. Scale probes append the
+frozen synthetic consumers and bound the catalog prefix to sixteen candidates
+before requesting the first sixteen results; grouped sums
+still read the complete source. The additional indexed side adds an inventory
+SKU index. Output admission counts do not measure SQL visited rows. Compilation
+is included in first-call timings; decoded scans can cost more memory and time.
+Five reads and three mutations are native. One history family retains SQL because
+its source lacks a primary key. Mutation replay reports zero effective writes.
+Node and Bun installed-consumer correctness is separate from these Node timings;
+PostgreSQL physical adoption, native executable and downstream cutover remain
+unqualified. Losses are retained in the table; no budget is rewritten by this run.
+
+<!--fact:query-native.measurements-->
+
+Measured on v24.19.0, SQLite 3.53.3, linux/x64.
+
+| Consumer | Rows | Index side | Family | SQL ms | Native ms | Decoded ms | Admitted statements / rows / bytes | Latency |
+|---|---:|---|---|---:|---:|---:|---|---|
+| frozen-census | 0 | indexed | settings | 0.08 | 5.90 | 2.79 | 1 / 1 / 100 | pass |
+| frozen-census | 0 | indexed | environment-join | 0.08 | 2.09 | 1.50 | 1 / 2 / 216 | pass |
+| frozen-census | 0 | indexed | correlated-count | 0.06 | 1.10 | 1.17 | 1 / 2 / 105 | pass |
+| frozen-census | 0 | indexed | nullable-aggregate | 0.05 | 1.58 | 1.03 | 1 / 2 / 132 | pass |
+| frozen-census | 0 | indexed | compound-key | 0.04 | 0.47 | 0.51 | 1 / 1 / 51 | pass |
+| frozen-census | 0 | indexed | conditional-update | — | 3.67 | — | 1 / 1 / 85 | no-op replay proved |
+| frozen-census | 0 | indexed | upsert-noop | — | 0.69 | — | 1 / 1 / 70 | no-op replay proved |
+| frozen-census | 0 | indexed | insert-select | — | 0.52 | — | 1 / 2 / 168 | no-op replay proved |
+| frozen-census | 0 | unindexed | settings | 0.03 | 0.34 | 0.33 | 1 / 1 / 100 | pass |
+| frozen-census | 0 | unindexed | environment-join | 0.08 | 0.45 | 1.75 | 1 / 2 / 216 | pass |
+| frozen-census | 0 | unindexed | correlated-count | 0.05 | 0.39 | 0.43 | 1 / 2 / 105 | pass |
+| frozen-census | 0 | unindexed | nullable-aggregate | 0.05 | 0.43 | 0.49 | 1 / 2 / 132 | pass |
+| frozen-census | 0 | unindexed | compound-key | 0.03 | 0.31 | 0.34 | 1 / 1 / 51 | pass |
+| frozen-census | 0 | unindexed | conditional-update | — | 0.85 | — | 1 / 1 / 85 | no-op replay proved |
+| frozen-census | 0 | unindexed | upsert-noop | — | 0.34 | — | 1 / 1 / 70 | no-op replay proved |
+| frozen-census | 0 | unindexed | insert-select | — | 0.43 | — | 1 / 2 / 168 | no-op replay proved |
+| catalog | 10000 | indexed | settings | 0.04 | 0.54 | 0.43 | 1 / 1 / 100 | pass |
+| catalog | 10000 | indexed | environment-join | 0.09 | 6.39 | 74.49 | 1 / 16 / 1920 | pass |
+| catalog | 10000 | indexed | correlated-count | 0.09 | 0.70 | 67.02 | 1 / 16 / 950 | pass |
+| catalog | 10000 | indexed | nullable-aggregate | 0.95 | 8.43 | 41.33 | 1 / 2 / 142 | pass |
+| catalog | 10000 | indexed | compound-key | 0.10 | 0.50 | 29.06 | 1 / 1 / 51 | pass |
+| catalog | 10000 | unindexed | settings | 0.08 | 0.41 | 0.29 | 1 / 1 / 100 | pass |
+| catalog | 10000 | unindexed | environment-join | 0.09 | 4.14 | 56.22 | 1 / 16 / 1920 | pass |
+| catalog | 10000 | unindexed | correlated-count | 9.23 | 8.82 | 68.65 | 1 / 16 / 950 | pass |
+| catalog | 10000 | unindexed | nullable-aggregate | 1.49 | 6.95 | 28.46 | 1 / 2 / 142 | pass |
+| catalog | 10000 | unindexed | compound-key | 0.08 | 0.36 | 23.26 | 1 / 1 / 51 | pass |
+| archive-stock | 75000 | indexed | settings | 0.07 | 0.41 | 0.31 | 1 / 1 / 100 | pass |
+| archive-stock | 75000 | indexed | environment-join | 0.06 | 0.57 | 478.97 | 1 / 2 / 216 | pass |
+| archive-stock | 75000 | indexed | correlated-count | 0.07 | 0.46 | 536.40 | 1 / 16 / 1043 | pass |
+| archive-stock | 75000 | indexed | nullable-aggregate | 6.39 | 82.99 | 274.45 | 1 / 3 / 210 | pass |
+| archive-stock | 75000 | indexed | compound-key | 0.13 | 0.36 | 254.75 | 1 / 1 / 51 | pass |
+| archive-stock | 75000 | unindexed | settings | 0.09 | 0.35 | 0.29 | 1 / 1 / 100 | pass |
+| archive-stock | 75000 | unindexed | environment-join | 0.07 | 0.37 | 450.21 | 1 / 2 / 216 | pass |
+| archive-stock | 75000 | unindexed | correlated-count | 66.41 | 69.15 | 506.48 | 1 / 16 / 1043 | pass |
+| archive-stock | 75000 | unindexed | nullable-aggregate | 11.01 | 60.31 | 252.52 | 1 / 3 / 210 | pass |
+| archive-stock | 75000 | unindexed | compound-key | 0.09 | 0.54 | 224.13 | 1 / 1 / 51 | pass |
+
+0 native latency losses against frozen consumer ceilings. Peak process RSS 672.46 MiB.
+
+<!--/fact-->
+
 ## Relational adoption measurements
 
 `node --no-warnings=ExperimentalWarning benchmark/relational.js --write` compares

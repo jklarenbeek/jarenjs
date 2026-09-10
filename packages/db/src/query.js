@@ -31,7 +31,7 @@
  * the whole document runs over them.
  */
 
-import { physicalSelection } from './physical.js';
+import { physicalSelection, columnCodec } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery } from '@jarenjs/json/query';
@@ -294,7 +294,11 @@ function segmentsOf(ref) {
  * @param {string} suffix
  * @returns {any[]} the item, or nothing where the member is absent
  */
-function leafItems(row, suffix) {
+function leafItems(row, suffix, column = undefined) {
+  if (column !== undefined) {
+    const value = columnCodec(column).decode(row[`v${suffix}`]);
+    return value === undefined ? [] : [value];
+  }
   const type = row[`t${suffix}`];
   if (type === null || type === undefined) return [];
   const value = row[`v${suffix}`];
@@ -323,7 +327,8 @@ function leafItems(row, suffix) {
 function projectedTreeItems(project, row, prefix = '') {
   const build = (node) => {
     if (node.p === 'lit') return [node.value];
-    if (node.p === 'leaf') return leafItems(row, `${prefix}${node.index}`);
+    if (node.p === 'leaf') return leafItems(row, `${prefix}${node.index}`,
+      project.leaves[node.index].ref?.codecColumn);
     if (node.p === 'object') {
       /** @type {any} */
       const out = {};
@@ -339,6 +344,47 @@ function projectedTreeItems(project, row, prefix = '') {
   };
   return build(project.tree);
 }
+
+  /**
+   * The items a GENERAL grouping answers: one per group row, built from
+   * the group's keys and aggregates through the plan's own tree. A key
+   * comes back with its JSON type beside it, so an absent key leaves
+   * its member out exactly as the object constructor does; an aggregate
+   * over no values follows the mapping the plan recorded — `0` for a
+   * count or a sum, the empty sequence for the other three, which is
+   * the ENGINE's answer, not SQL's `NULL`.
+   * @param {any} entry
+   * @param {any[]} rows
+   * @returns {any[]}
+   */
+  function groupItems(group, rows) {
+    const aggregateItems = (row, index) => {
+      const value = row[`a${index}`] ?? null;
+      const empty = group.aggregates[index].empty;
+      if (value === null) return empty === 'omit' ? [] : [empty === 'zero' ? 0 : null];
+      const aggregate = group.aggregates[index];
+      return [aggregate.ref?.codecColumn && ['min', 'max'].includes(aggregate.fn)
+        ? columnCodec(aggregate.ref.codecColumn).decode(value) : value];
+    };
+    const build = (node, row) => {
+      if (node.p === 'lit') return [node.value];
+      if (node.p === 'key') return leafItems(row, `k${node.index}`, group.keys[node.index].ref.codecColumn);
+      if (node.p === 'agg') return aggregateItems(row, node.index);
+      if (node.p === 'object') {
+        /** @type {any} */
+        const out = {};
+        for (const member of node.members) {
+          const items = build(member.node, row);
+          if (items.length > 0) out[member.name] = items[0];
+        }
+        return [out];
+      }
+      const items = [];
+      for (const item of node.items) items.push(...build(item, row));
+      return [items];
+    };
+    return rows.flatMap((row) => build(group.tree, row));
+  }
 
 /**
  * The query engine for one collection.
@@ -519,7 +565,6 @@ export function createQueryEngine(context) {
           : { ...planned.series, mode: 'engine', index: null, prefix: [] },
       };
     }
-
     if (profile !== null) {
       // the member allow-list: what the caller may OBTAIN, checked
       // against every member path the document references, before a
@@ -851,46 +896,6 @@ export function createQueryEngine(context) {
     return items;
   };
 
-  /**
-   * The items a GENERAL grouping answers: one per group row, built from
-   * the group's keys and aggregates through the plan's own tree. A key
-   * comes back with its JSON type beside it, so an absent key leaves
-   * its member out exactly as the object constructor does; an aggregate
-   * over no values follows the mapping the plan recorded — `0` for a
-   * count or a sum, the empty sequence for the other three, which is
-   * the ENGINE's answer, not SQL's `NULL`.
-   * @param {any} entry
-   * @param {any[]} rows
-   * @returns {any[]}
-   */
-  const groupItems = (entry, rows) => {
-    const group = entry.plan.group;
-    const aggregateItems = (row, index) => {
-      const value = row[`a${index}`] ?? null;
-      const empty = group.aggregates[index].empty;
-      if (value === null) return empty === 'omit' ? [] : [empty === 'zero' ? 0 : null];
-      return [value];
-    };
-    const build = (node, row) => {
-      if (node.p === 'lit') return [node.value];
-      if (node.p === 'key') return leafItems(row, `k${node.index}`);
-      if (node.p === 'agg') return aggregateItems(row, node.index);
-      if (node.p === 'object') {
-        /** @type {any} */
-        const out = {};
-        for (const member of node.members) {
-          const items = build(member.node, row);
-          if (items.length > 0) out[member.name] = items[0];
-        }
-        return [out];
-      }
-      const items = [];
-      for (const item of node.items) items.push(...build(item, row));
-      return [items];
-    };
-    return rows.flatMap((row) => build(group.tree, row));
-  };
-
   /** How many ITEMS an engine result carries (its own shape rule). */
   const itemCount = (answer) => (answer === undefined ? 0
     : Array.isArray(answer) ? answer.length : 1);
@@ -1113,7 +1118,7 @@ export function createQueryEngine(context) {
         }
         if (entry.plan.group !== null) {
           return chain(runAll(entry, externals, statement), (rows) =>
-            answerOf(entry, groupItems(entry, checkRowBound(entry, rows))));
+            answerOf(entry, groupItems(entry.plan.group, checkRowBound(entry, rows))));
         }
         if (entry.plan.bucket !== null) {
           return chain(runAll(entry, externals, statement), (rows) => {
@@ -1215,7 +1220,7 @@ export function createQueryEngine(context) {
       return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           chain(runAll(entry, externals, statement), (rows) =>
-            groupItems(entry, checkRowBound(entry, rows))))) });
+            groupItems(entry.plan.group, checkRowBound(entry, rows))))) });
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
@@ -1601,7 +1606,11 @@ export function createEntityQueryEngine(context) {
   const q = dialect.quoteIdentifier;
   const physicalOf = (name) => ({ table: mapping.entities[name].table,
     // a join-table root has no document column of its own (§10.7)
-    document: mapping.entities[name].document !== false });
+    document: mapping.entities[name].document !== false,
+    ...(entities.get(name)?.physical == null ? {} : {
+      mapping: mapping.entities[name],
+      keys: mapping.entities[name].keys.map((key) => mapping.entities[name].columns.find((c) => c.name === key).physical),
+    }) });
   // the relation tables of every root this engine serves (§10.1): the
   // engine is the scope every entity set of the store shares, so a
   // producer holding one set can follow a hop into another root
@@ -1640,13 +1649,13 @@ export function createEntityQueryEngine(context) {
         'an entity query ranges over a declared entity array ($.<Entity>[*]); this '
         + 'document names none, so it has no rows to answer', '/entities');
     }
-    if (planned.referenced.some((name) => entities.get(name)?.physical != null)) {
-      planned = { ...planned, mode: 'set', plan: null,
-        reasons: [{ construct: 'physical', reason: 'declared column codecs require decoded-row evaluation' }] };
-    }
     if (!pushdown) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
+    }
+    if (planned.plan?.group && dialect.name !== 'sqlite') {
+      planned = { ...planned, mode: 'set', plan: null,
+        reasons: [{ construct: '$groupby', reason: 'entity grouping runtime guards are qualified for SQLite' }] };
     }
     const docPath = entities.get(planned.referenced[0])?.docPath;
     // the profile, applied exactly as on a collection (MODEL-FORMAT §8):
@@ -1706,6 +1715,8 @@ export function createEntityQueryEngine(context) {
       residualLimits: profile === null ? undefined : profile.limits,
       needsScanCheck: profile !== null && profile.refuseFullScan === true,
       scanChecked: false,
+      admitted: null,
+      runtimeReason: null,
     };
     if (planned.mode === 'native') {
       let plan = planned.plan;
@@ -1715,6 +1726,9 @@ export function createEntityQueryEngine(context) {
           const predicate = mandatory.get(binding.entity);
           return predicate === undefined ? entry : { ...entry, filter: conjoin(entry.filter, predicate) };
         }) };
+        if (plan.project) plan = { ...plan, project: { ...plan.project, leaves: plan.project.leaves.map((leaf) =>
+          leaf.count && mandatory.has(leaf.count.entity) ? { ...leaf, count: { ...leaf.count,
+            filter: conjoin(leaf.count.filter, mandatory.get(leaf.count.entity)) } } : leaf) } };
       }
       if (entry.rowBound !== null && plan.aggregate === null) {
         const cap = entry.rowBound + 1;
@@ -1738,6 +1752,13 @@ export function createEntityQueryEngine(context) {
         `the fetch crossed the profile's maxRows bound of ${entry.rowBound}`,
         { docPath: entities.get(name)?.docPath, collection: name });
     }
+    return rows;
+  };
+  const admittedRows = (entry, rows) => {
+    entry.admitted ??= { statements: 0, rows: 0, bytes: 0 };
+    entry.admitted.statements++;
+    entry.admitted.rows += rows.length;
+    entry.admitted.bytes += utf8Length(JSON.stringify(rows));
     return rows;
   };
   /** One merged entity document against the profile's byte bound
@@ -1799,7 +1820,11 @@ export function createEntityQueryEngine(context) {
             : `${q('t')}.*, ${mapping.entities[name].document === false ? dialect.stringLiteral('{}')
               : dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')}`} `
             + `FROM ${q(mapping.entities[name].table)} AS ${q('t')}${where} `
-            + `ORDER BY ${entities.get(name)?.physical != null ? mapping.entities[name].keys.map((k) => `${q('t')}.${q(mapping.entities[name].columns.find((c) => c.name === k).physical)}`).join(', ') : `${q('t')}.${dialect.rowIdentity()}`}${limit}`,
+            + `ORDER BY ${entities.get(name)?.physical != null ? mapping.entities[name].keys.map((k) => {
+              const column = mapping.entities[name].columns.find((c) => c.name === k);
+              const value = `${q('t')}.${q(column.physical)}`;
+              return column.codec === 'text' ? dialect.codepoint(value) : value;
+            }).join(', ') : `${q('t')}.${dialect.rowIdentity()}`}${limit}`,
           params: slots.map((slot) => slot.literal),
           statement: null,
         };
@@ -1813,6 +1838,7 @@ export function createEntityQueryEngine(context) {
       if (fetcher.statement === null) fetcher.statement = connection.prepare(fetcher.sql, { readOnly: true });
       return chain(fetcher.statement, (statement) =>
         chain(statement.all(fetcher.params), (rows) => {
+          admittedRows(entry, rows);
           root[fetcher.name] = checkRows(entry, rows, fetcher.name).map((row) =>
             checkBytes(entry, mergeEntityRow(mapping.entities[fetcher.name], row, '__doc'), fetcher.name));
           return next(i + 1);
@@ -1831,6 +1857,8 @@ export function createEntityQueryEngine(context) {
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
+    entry.admitted = { statements: 0, rows: 0, bytes: 0 };
+    entry.runtimeReason = null;
     if (entry.planned.mode !== 'native') {
       if (strict) {
         const forcing = entry.planned.reasons[0];
@@ -1850,12 +1878,30 @@ export function createEntityQueryEngine(context) {
     if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
     return chain(guardEntityScan(entry), () => chain(entry.statement, (statement) => {
       if (entry.planned.plan.aggregate === 'count')
-        return chain(statement.get(params), (row) => wrapValue(entry, row?.value ?? 0));
+        return chain(statement.get(params), (row) => { admittedRows(entry, row ? [row] : []); return wrapValue(entry, row?.value ?? 0); });
       return chain(statement.all(params), (rows) => {
+        admittedRows(entry, rows);
+        checkRows(entry, rows, entry.planned.referenced[0]);
+        if (entry.planned.plan.group) {
+          const group = entry.planned.plan.group;
+          if (rows.some((row) => row._valid === 0))
+            throw new DbRuntimeError('JD2003', 'a grouped physical column refuses a lossy or invalid value');
+          if (rows.some((row) => group.aggregates.some((aggregate, i) =>
+            ['sum', 'avg'].includes(aggregate.fn) && row[`_safe${i}`] !== 1))) {
+            entry.runtimeReason = { construct: '$groupby', reason: 'integer accumulation exceeded its runtime exactness bound' };
+            if (strict) throw new DbCompileError('JD0010', entry.runtimeReason.reason);
+            if (profile?.refuseFullScan) throw profileEntityRefusal(
+              'the profile refuses the decoded scan required by the integer accumulation bound', '/entities');
+            return runResidual(entry, document, externals);
+          }
+          return answerOf(entry, groupItems(group, rows)
+            .map((row) => checkBytes(entry, row, entry.planned.referenced[0])));
+        }
         const project = entry.planned.plan.project;
         if (project != null) {
           return answerOf(entry,
-            rows.flatMap((row) => projectedTreeItems(project, row, 'p')));
+            rows.flatMap((row) => projectedTreeItems(project, row, 'p'))
+              .map((row) => checkBytes(entry, row, entry.planned.referenced[0])));
         }
         const retEntity = entry.planned.plan.bindings
           .find((binding) => binding.name === entry.planned.plan.ret).entity;
@@ -1906,6 +1952,8 @@ export function createEntityQueryEngine(context) {
     if (entry.planned.wrapped === true) {
       return buffered({ construct: 'window', reason: BIND_REASONS.wrappedWindow });
     }
+    if (entry.planned.plan?.group)
+      return buffered({ construct: '$groupby', reason: 'group results are validated and reconstructed together' });
     if (entry.planned.mode !== 'native') {
       const forcing = entry.planned.reasons[0]
         ?? { construct: 'residual', reason: BIND_REASONS.untranslated };
@@ -1953,14 +2001,17 @@ export function createEntityQueryEngine(context) {
     refuseBuffered(options, classified, entities.get(entry.planned.retEntity ?? '')?.docPath);
     const signal = options?.signal;
     const deadline = options?.deadline;
-    if (entry.planned.wrapped === true) {
+    if (entry.planned.wrapped === true || entry.planned.plan?.group) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(execute(document, options), (value) => [value]) });
+        materialize: () => chain(execute(document, options), (value) => entry.planned.wrapped === true
+          ? [value] : value === undefined ? [] : Array.isArray(value) ? value : [value]) });
     }
     if (classified.barrier !== null) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(fetchRoot(entry), (root) =>
-          packedResidualOf(entry, document)(root, externals).map(each)) });
+        materialize: () => {
+          entry.admitted = { statements: 0, rows: 0, bytes: 0 };
+          return chain(fetchRoot(entry), (root) => packedResidualOf(entry, document)(root, externals).map(each));
+        } });
     }
     const params = entry.slots.map((slot) => slotValue(slot, externals));
     // the statement is prepared by the first PULL, not here: a root
@@ -1973,7 +2024,11 @@ export function createEntityQueryEngine(context) {
     if (entry.planned.plan.aggregate === 'count') {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
-          chain(statement.get(params), (row) => [row?.value ?? 0]))) });
+          chain(statement.get(params), (row) => {
+            entry.admitted = { statements: 0, rows: 0, bytes: 0 };
+            admittedRows(entry, row ? [row] : []);
+            return [row?.value ?? 0];
+          }))) });
     }
     const rowEntity = entry.planned.plan.ret === null ? null
       : entry.planned.plan.bindings
@@ -1982,17 +2037,23 @@ export function createEntityQueryEngine(context) {
     // a statement of its own per cursor: two live iterators over one
     // cached statement invalidate each other at the driver
     return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-      open: () => chain(guardEntityScan(entry), () => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }),
-        (statement) => statement.iterate(params))),
+      open: () => {
+        entry.admitted = { statements: 1, rows: 0, bytes: 2 };
+        return chain(guardEntityScan(entry), () => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }),
+          (statement) => statement.iterate(params)));
+      },
       items: (row) => {
         pulledRows++;
+        entry.admitted.bytes += utf8Length(JSON.stringify(row)) + (entry.admitted.rows ? 1 : 0);
+        entry.admitted.rows++;
         if (entry.rowBound !== null && pulledRows > entry.rowBound) {
           throw new DbRuntimeError('JD2007',
             `the fetch crossed the profile's maxRows bound of ${entry.rowBound}`,
             { docPath: entities.get(rowEntity)?.docPath, collection: rowEntity });
         }
         const project = entry.planned.plan.project;
-        if (project != null) return projectedTreeItems(project, row, 'p');
+        if (project != null) return projectedTreeItems(project, row, 'p')
+          .map((item) => checkBytes(entry, item, entry.planned.referenced[0]));
         return [each(checkBytes(entry, mergeEntityRow(mapping.entities[rowEntity], row, '__doc'), rowEntity))];
       } });
   };
@@ -2007,21 +2068,23 @@ export function createEntityQueryEngine(context) {
     const classified = cursorClass(entry, options?.externals ?? null);
     const diverted = entry.planned.mode === 'native' && classified.barrier !== null
       && classified.barrier.construct === 'external';
-    const mode = diverted ? 'set' : entry.planned.mode;
-    const reasons = diverted && classified.barrier !== null
+    const runtime = entry.runtimeReason;
+    const mode = diverted || runtime ? 'set' : entry.planned.mode;
+    const reasons = runtime ? [runtime, ...entry.planned.reasons] : diverted && classified.barrier !== null
       ? [classified.barrier, ...entry.planned.reasons] : entry.planned.reasons;
     const base = {
       mode,
       streaming: classified.streaming,
-      barrier: classified.barrier,
+      barrier: runtime ?? classified.barrier,
       budget: budgetOf(profile, profileSource, connection.capabilities),
       wrapped: entry.planned.wrapped === true,
       referenced: [...entry.planned.referenced],
+      admitted: entry.admitted === null ? null : { ...entry.admitted },
       reasons,
       // the same effective-order vocabulary the collection engine and
       // the graph loader report; `null` when no statement answers
-      order: diverted ? null : planOrder(entry.planned.plan),
-      sql: diverted ? null : entry.sql,
+      order: mode === 'native' ? planOrder(entry.planned.plan) : null,
+      sql: mode === 'native' ? entry.sql : null,
       residual: mode === 'native'
         ? null
         : { mode: 'set', reasons },
@@ -2713,7 +2776,7 @@ export function createLoadEngine(context, entityName) {
      * the truth either way.
      * @param {any} spec
      * @param {{ limit?: number, after?: any, maxBytes?: number | null,
-     *   consistency?: 'live' | 'snapshot', signal?: AbortSignal }} [options]
+     *   consistency?: 'live' | 'snapshot', signal?: AbortSignal, lookahead?: boolean }} [options]
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
     page(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
@@ -2732,7 +2795,9 @@ export function createLoadEngine(context, entityName) {
       if (spec?.take !== undefined || spec?.skip !== undefined)
         throw refuse('page() windows by its limit and continuation — a take or skip in the spec is refused', []);
       const after = options?.after ?? spec?.after ?? undefined;
-      const paged = { ...(spec ?? {}), take: limit + 1 };
+      if (options?.lookahead !== undefined && typeof options.lookahead !== 'boolean')
+        throw refuse('page() lookahead must be boolean', []);
+      const paged = { ...(spec ?? {}), take: limit + (options?.lookahead === false ? 0 : 1) };
       if (after === undefined) delete paged.after;
       else paged.after = after;
       const entry = buildLoad(paged, true, profileOf(options));
@@ -2750,7 +2815,7 @@ export function createLoadEngine(context, entityName) {
       // of work
       const cursor = openCursor(entry, options?.signal, undefined, options?.deadline, cursorFactory);
       return chain(drainPage(cursor, {
-        limit, maxBytes, after: after ?? null,
+        limit, maxBytes, after: after ?? null, lookahead: options?.lookahead,
         sizeOf: (doc) => utf8Length(JSON.stringify(doc)),
         continuationOf: (doc) => continuationOf(entry, doc),
       }), (page) => ({

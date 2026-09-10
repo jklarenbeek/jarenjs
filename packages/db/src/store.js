@@ -2004,6 +2004,7 @@ export function openStore(model, options) {
               return next(0);
             };
             ops = {
+              mutate: (document) => core.mutate(document),
               create: (doc) => {
                 const memberships = membershipsOf(doc);
                 if (memberships.length === 0)
@@ -2076,6 +2077,7 @@ export function openStore(model, options) {
                   create: lift((doc) => ops.create(doc)),
                   get: lift((key) => ops.get(key)),
                   update: lift((key, changes) => ops.update(key, changes)),
+                  mutate: lift((document) => ops.mutate(document)),
                   delete: lift((key) => ops.delete(key)),
                   load: lift((spec, loadOptions) => ops.load(spec, loadOptions)),
                   loadCursor: (spec, cursorOptions) => ops.loadCursor(spec, cursorOptions),
@@ -2262,7 +2264,8 @@ export function openStore(model, options) {
             for (const member of names) {
               if (typeof handle[member] !== 'function') continue;
               out[member] = (/** @type {any[]} */ ...args) =>
-                lift(() => gated(() => handle[member](...args)))();
+                lift(() => gated(() => handle[member](...args), undefined,
+                  member === 'page' ? args[1]?.signal : undefined))();
             }
             for (const member of valued) {
               if (typeof handle[member] !== 'function') continue;
@@ -2325,7 +2328,7 @@ export function openStore(model, options) {
                 // collection's `query` does: admitted one item at a time,
                 // never held across the caller's loop
                 handle = gatedMembers(inner,
-                  ['create', 'get', 'update', 'delete', 'load', 'page', 'explain'],
+                  ['create', 'get', 'update', 'mutate', 'delete', 'load', 'page', 'explain'],
                   ['execute']);
                 const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load']);
                 handle = Object.freeze({
@@ -2608,7 +2611,7 @@ export function openStore(model, options) {
               scopedMembers(identity, inner.asNoTracking(), ['get', 'load']));
             return Object.freeze({
               ...scopedMembers(identity, inner,
-                ['create', 'get', 'update', 'delete', 'load', 'page', 'explain'],
+                ['create', 'get', 'update', 'mutate', 'delete', 'load', 'page', 'explain'],
                 ['execute', 'add', 'put', 'remove', 'discard', 'link', 'unlink']),
               cursor: (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
                 scopedCursor(identity, () => inner.cursor(document, queryOptions)),

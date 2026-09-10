@@ -31,7 +31,7 @@
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
-import { DbCompileError, DbRuntimeError } from './errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt } from './driver.js';
 import { translatePatch } from './patch-sql.js';
 
@@ -783,14 +783,9 @@ export function createTracker(context) {
   };
 
   const wrapDb = (error, statement) => {
-    if (typeof (/** @type {any} */ (error))?.code === 'string'
-      && String((/** @type {any} */ (error)).code).startsWith('JD')) return error;
-    return new DbRuntimeError('JD2005',
-      `the database rejected the operation: ${/** @type {any} */ (error)?.message ?? String(error)}`,
-      {
+    return wrapDriverError(error, {
         docPath: entities.get(statement.entity)?.docPath,
         collection: statement.entity,
-        cause: error,
       });
   };
 
@@ -827,13 +822,7 @@ export function createTracker(context) {
       }
       return chain(connection.prepare(statement.sql), (prepared) => {
         if (statement.kind === 'insert' && statement.returning === true) {
-          let fetched;
-          try {
-            fetched = prepared.all(statement.params);
-          }
-          catch (error) {
-            throw wrapDb(error, statement);
-          }
+          const fetched = attempt(() => prepared.all(statement.params), (error) => wrapDb(error, statement));
           return chain(fetched, (rows) => {
             // auto keys allocate monotonically in insertion order —
             // sort ascending to pair rows with records (asserted by

@@ -1,0 +1,615 @@
+{
+  "format": "jaren-native-sql-census/1",
+  "baselineRevision": "293b84c4",
+  "source": "test/adoption/fixtures/relational.json",
+  "budgetPolicy": "Frozen before promotion. One statement per selected read or mutation; setup, EXPLAIN, transaction control and second-run verification are separate. The unchanged adoption instrument retains its nine-statement total.",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "Setting": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "value": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          }
+        },
+        "physical": {
+          "table": "app_settings",
+          "columns": {
+            "key": {
+              "name": "key",
+              "codec": "text",
+              "null": "reject"
+            },
+            "value": {
+              "name": "value",
+              "codec": "text",
+              "null": "reject"
+            },
+            "updated_at": {
+              "name": "updated_at",
+              "codec": "datetime",
+              "null": "reject",
+              "default": "database"
+            }
+          }
+        }
+      },
+      "Catalog": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "sku": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "title": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            }
+          }
+        },
+        "physical": {
+          "table": "catalog",
+          "columns": {
+            "sku": {
+              "name": "sku",
+              "codec": "text",
+              "null": "reject"
+            },
+            "title": {
+              "name": "title",
+              "codec": "text",
+              "null": "reject"
+            },
+            "category": {
+              "name": "category",
+              "codec": "text",
+              "null": "reject"
+            }
+          }
+        }
+      },
+      "Inventory": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "sku": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "environment": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "quantity": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "provenance": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "type": "integer",
+              "x-entity": {
+                "version": true
+              }
+            }
+          }
+        },
+        "physical": {
+          "table": "inventory",
+          "columns": {
+            "sku": {
+              "name": "sku",
+              "codec": "text",
+              "null": "reject"
+            },
+            "environment": {
+              "name": "environment",
+              "codec": "text",
+              "null": "reject"
+            },
+            "quantity": {
+              "name": "quantity",
+              "codec": "integer",
+              "null": "null"
+            },
+            "provenance": {
+              "name": "provenance",
+              "codec": "text",
+              "null": "null"
+            },
+            "revision": {
+              "name": "revision",
+              "codec": "integer",
+              "null": "reject",
+              "default": "database"
+            }
+          },
+          "keys": [
+            "environment",
+            "sku"
+          ]
+        }
+      },
+      "Receipt": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer",
+              "x-entity": {
+                "key": true,
+                "default": "auto"
+              }
+            },
+            "body": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer"
+            }
+          }
+        },
+        "physical": {
+          "table": "receipt",
+          "columns": {
+            "id": {
+              "name": "id",
+              "codec": "integer",
+              "null": "reject"
+            },
+            "body": {
+              "name": "body",
+              "codec": "blob-hex",
+              "null": "reject"
+            },
+            "revision": {
+              "name": "revision",
+              "codec": "integer",
+              "null": "reject",
+              "default": "database"
+            }
+          }
+        }
+      }
+    }
+  },
+  "reads": [
+    {
+      "id": "settings",
+      "sql": "SELECT key,value,updated_at FROM app_settings ORDER BY key",
+      "expected": [
+        {
+          "key": "locale",
+          "value": "nl-NL",
+          "updated_at": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "query": [
+        {
+          "$for": {
+            "s": "$.Setting[*]"
+          },
+          "$orderby": "$s.key",
+          "$return": {
+            "key": "$s.key",
+            "value": "$s.value",
+            "updated_at": "$s.updated_at"
+          }
+        }
+      ],
+      "baseline": "set",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      },
+      "semantics": "Physical NULL remains explicit JSON null; identifiers stay strings; codepoint ordering uses declared keys as tie breakers; integer quantities are exact in this bounded corpus."
+    },
+    {
+      "id": "receipt-history",
+      "sql": "SELECT r.id,hex(r.body) AS body,h.revision FROM receipt r JOIN history h ON h.receipt_id=r.id ORDER BY r.id",
+      "expected": [
+        {
+          "id": 1,
+          "body": "0001FF",
+          "revision": 1
+        }
+      ],
+      "query": null,
+      "baseline": "refused",
+      "target": "refused",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      },
+      "reason": "The audit table has no declared primary key; native entity identity cannot be inferred. Retain its reference SQL and preserve its trigger.",
+      "semantics": "Physical NULL remains explicit JSON null; identifiers stay strings; codepoint ordering uses declared keys as tie breakers; integer quantities are exact in this bounded corpus."
+    },
+    {
+      "id": "environment-join",
+      "sql": "SELECT c.sku,c.title,i.quantity,i.provenance FROM catalog c JOIN inventory i ON c.sku=i.sku WHERE i.environment='test' ORDER BY c.sku",
+      "expected": [
+        {
+          "sku": "0007",
+          "title": "Green tea",
+          "quantity": null,
+          "provenance": null
+        },
+        {
+          "sku": "0012",
+          "title": "Coffee",
+          "quantity": 3,
+          "provenance": "import"
+        }
+      ],
+      "query": [
+        {
+          "$for": {
+            "c": "$.Catalog[*]",
+            "i": "$.Inventory[*]"
+          },
+          "$where": {
+            "$and": [
+              {
+                "$eq": [
+                  "$c.sku",
+                  "$i.sku"
+                ]
+              },
+              {
+                "$eq": [
+                  "$i.environment",
+                  "test"
+                ]
+              }
+            ]
+          },
+          "$orderby": "$c.sku",
+          "$return": {
+            "sku": "$c.sku",
+            "title": "$c.title",
+            "quantity": "$i.quantity",
+            "provenance": "$i.provenance"
+          }
+        }
+      ],
+      "baseline": "set",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      },
+      "semantics": "Physical NULL remains explicit JSON null; identifiers stay strings; codepoint ordering uses declared keys as tie breakers; integer quantities are exact in this bounded corpus."
+    },
+    {
+      "id": "correlated-count",
+      "sql": "SELECT c.sku,(SELECT count(*) FROM inventory i WHERE i.sku=c.sku) AS locations FROM catalog c ORDER BY c.sku",
+      "expected": [
+        {
+          "sku": "0007",
+          "locations": 2
+        },
+        {
+          "sku": "0012",
+          "locations": 1
+        }
+      ],
+      "query": [
+        {
+          "$for": {
+            "c": "$.Catalog[*]"
+          },
+          "$orderby": "$c.sku",
+          "$return": {
+            "sku": "$c.sku",
+            "locations": {
+              "$count": {
+                "$for": {
+                  "i": "$.Inventory[*]"
+                },
+                "$where": {
+                  "$eq": [
+                    "$i.sku",
+                    "$c.sku"
+                  ]
+                },
+                "$return": "$i"
+              }
+            }
+          }
+        }
+      ],
+      "baseline": "set",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      },
+      "semantics": "Physical NULL remains explicit JSON null; identifiers stay strings; codepoint ordering uses declared keys as tie breakers; integer quantities are exact in this bounded corpus."
+    },
+    {
+      "id": "nullable-aggregate",
+      "sql": "SELECT environment,count(*) AS rows,sum(quantity) AS quantity FROM inventory GROUP BY environment ORDER BY environment",
+      "expected": [
+        {
+          "environment": "preview",
+          "rows": 1,
+          "quantity": 9
+        },
+        {
+          "environment": "test",
+          "rows": 2,
+          "quantity": 3
+        }
+      ],
+      "query": [
+        {
+          "$for": {
+            "i": "$.Inventory[*]"
+          },
+          "$groupby": {
+            "environment": "$i.environment"
+          },
+          "$orderby": "$environment",
+          "$return": {
+            "environment": "$environment",
+            "rows": {
+              "$count": "$i"
+            },
+            "quantity": {
+              "$if": [
+                {
+                  "$exists": {
+                    "$for": {
+                      "r": "$i"
+                    },
+                    "$where": {
+                      "$ne": [
+                        "$r.quantity",
+                        null
+                      ]
+                    },
+                    "$return": "$r.quantity"
+                  }
+                },
+                {
+                  "$sum": {
+                    "$for": {
+                      "r": "$i"
+                    },
+                    "$where": {
+                      "$ne": [
+                        "$r.quantity",
+                        null
+                      ]
+                    },
+                    "$return": "$r.quantity"
+                  }
+                },
+                null
+              ]
+            }
+          }
+        }
+      ],
+      "baseline": "set",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      },
+      "semantics": "Physical NULL remains explicit JSON null; identifiers stay strings; codepoint ordering uses declared keys as tie breakers; integer quantities are exact in this bounded corpus."
+    },
+    {
+      "id": "compound-key",
+      "sql": "SELECT quantity,revision FROM inventory WHERE environment='preview' AND sku='0007'",
+      "expected": [
+        {
+          "quantity": 9,
+          "revision": 1
+        }
+      ],
+      "query": [
+        {
+          "$for": {
+            "i": "$.Inventory[*]"
+          },
+          "$where": {
+            "$and": [
+              {
+                "$eq": [
+                  "$i.environment",
+                  "preview"
+                ]
+              },
+              {
+                "$eq": [
+                  "$i.sku",
+                  "0007"
+                ]
+              }
+            ]
+          },
+          "$return": {
+            "quantity": "$i.quantity",
+            "revision": "$i.revision"
+          }
+        }
+      ],
+      "baseline": "set",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      },
+      "semantics": "Physical NULL remains explicit JSON null; identifiers stay strings; codepoint ordering uses declared keys as tie breakers; integer quantities are exact in this bounded corpus."
+    }
+  ],
+  "mutations": [
+    {
+      "id": "conditional-update",
+      "sql": "UPDATE inventory SET quantity=4,revision=revision+1 WHERE environment='test' AND sku='0012' AND revision=1 RETURNING quantity,revision",
+      "first": [
+        {
+          "quantity": 4,
+          "revision": 2
+        }
+      ],
+      "second": [],
+      "entity": "Inventory",
+      "document": {
+        "op": "update",
+        "key": {
+          "environment": "test",
+          "sku": "0012"
+        },
+        "expectedRevision": 1,
+        "set": {
+          "quantity": 4
+        },
+        "returning": [
+          "quantity",
+          "revision"
+        ]
+      },
+      "baseline": "refused",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      }
+    },
+    {
+      "id": "upsert-noop",
+      "sql": "INSERT INTO app_settings(key,value) VALUES ('locale','en-GB') ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE app_settings.value IS NOT excluded.value RETURNING value",
+      "first": [
+        {
+          "value": "en-GB"
+        }
+      ],
+      "second": [],
+      "entity": "Setting",
+      "document": {
+        "op": "upsert",
+        "values": {
+          "key": "locale",
+          "value": "en-GB"
+        },
+        "conflict": [
+          "key"
+        ],
+        "update": [
+          "value"
+        ],
+        "returning": [
+          "value"
+        ]
+      },
+      "baseline": "refused",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      }
+    },
+    {
+      "id": "insert-select",
+      "sql": "INSERT INTO inventory(sku,environment,quantity,provenance) SELECT sku,'copy',quantity,provenance FROM inventory WHERE environment='test' AND 1 ON CONFLICT(environment,sku) DO NOTHING RETURNING sku",
+      "first": [
+        {
+          "sku": "0007"
+        },
+        {
+          "sku": "0012"
+        }
+      ],
+      "second": [],
+      "entity": "Inventory",
+      "document": {
+        "op": "insert-select",
+        "source": "Inventory",
+        "where": {
+          "$eq": [
+            "$it.environment",
+            "test"
+          ]
+        },
+        "select": {
+          "sku": "$it.sku",
+          "environment": {
+            "$literal": "copy"
+          },
+          "quantity": "$it.quantity",
+          "provenance": "$it.provenance"
+        },
+        "conflict": [
+          "environment",
+          "sku"
+        ],
+        "onConflict": "nothing",
+        "returning": [
+          "sku"
+        ],
+        "maxRows": 16
+      },
+      "baseline": "refused",
+      "target": "native",
+      "referenceStatements": 1,
+      "budget": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 16384
+      }
+    }
+  ],
+  "semantics": {
+    "null": "Preserved, never coerced to zero. A SQL SUM over no numeric values must return null.",
+    "collation": "Codepoint, no locale or case-insensitive promotion.",
+    "decimals": "Exact decimal strings keep their codec; arithmetic and rounding are application policy and remain residual.",
+    "identity": "Compound keys retain declared component order. The identityless history table is refused.",
+    "replay": "Identical upsert and insert-select return no rows and create no revisions or audit effects."
+  }
+}

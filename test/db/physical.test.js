@@ -79,6 +79,15 @@ it('refuses lossy codecs and undeclared data, and identical updates write nothin
   });
 });
 
+it('codec-equivalent physical updates perform no effective writes', async () => {
+  await fixture(async (store, db) => {
+    await store.entity('Receipt').create({ body: 'AB' });
+    const before = db.prepare('SELECT total_changes() AS n').get([]).n;
+    for (let i = 0; i < 2; i++) assert.deepEqual(await store.entity('Receipt').update(1, { body: 'AB' }), { id: 1, body: 'ab' });
+    assert.equal(db.prepare('SELECT total_changes() AS n').get([]).n, before);
+  });
+});
+
 it('queries decoded rows and saves tracked renamed columns with a no-op second save', async () => {
   await fixture(async (store) => {
     await store.entity('Receipt').create({ body: '0001ff' });
@@ -190,4 +199,44 @@ it('incomplete physical declarations refuse before opening a writable store', ()
     const model = structuredClone(physicalModel); edit(model);
     assert.throws(() => explainMapping(model), { code: 'JD0005' });
   }
+});
+
+it('generated readbacks enforce store invariants, and tracked inputs cannot assign generated values', async () => {
+  const db = await nodeDriver().open(':memory:');
+  db.exec('CREATE TABLE generated(id INTEGER PRIMARY KEY,n INTEGER,doubled INTEGER GENERATED ALWAYS AS(n*2) STORED)');
+  const model = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, n: { type: 'integer' }, doubled: { type: 'integer' },
+  } }, physical: { table: 'generated', columns: {
+    id: { name: 'id', codec: 'integer', null: 'reject' }, n: { name: 'n', codec: 'integer', null: 'reject' },
+    doubled: { name: 'doubled', codec: 'integer', null: 'reject', generated: true },
+  } }, invariants: [{ name: 'bounded', on: ['insert', 'update'], enforcement: 'store', assert: { $le: ['$.new.doubled', 5] } }] } } };
+  const store = await openStore(model, { driver: { ...nodeDriver(), open: async () => db }, adopt: true });
+  try {
+    await store.entity('Row').create({ id: 1, n: 2 });
+    await assert.rejects(store.entity('Row').update(1, { n: 4 }), { code: 'JD2096' });
+    assert.deepEqual(await store.entity('Row').get(1), { id: 1, n: 2, doubled: 4 });
+    assert.throws(() => store.entity('Row').add({ id: 2, n: 2, doubled: 4 }), { code: 'JD2003' });
+    await assert.rejects(store.entity('Row').mutate({ op: 'update', key: 1, set: { n: 1 } }), { code: 'JD0038' });
+  }
+  finally { await store.close(); }
+});
+
+it('same-arity physical updates bind their own column names and database defaults apply only on insert', async () => {
+  const db = await nodeDriver().open(':memory:');
+  db.exec("CREATE TABLE defaults(id TEXT PRIMARY KEY,a TEXT DEFAULT 'A',b TEXT DEFAULT 'B')");
+  const model = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
+    id: { type: 'string', 'x-entity': { key: true } }, a: { type: 'string' }, b: { type: 'string' },
+  } }, physical: { table: 'defaults', columns: {
+    id: { name: 'id', codec: 'text', null: 'reject' },
+    a: { name: 'a', codec: 'text', null: 'absent', default: 'database' },
+    b: { name: 'b', codec: 'text', null: 'absent', default: 'database' },
+  } } } } };
+  const store = await openStore(model, { driver: { ...nodeDriver(), open: async () => db }, adopt: true });
+  try {
+    await store.entity('Row').create({ id: 'x' });
+    await store.entity('Row').update('x', { a: undefined });
+    assert.deepEqual(await store.entity('Row').update('x', { a: 'new', b: undefined }), { id: 'x', a: 'new' });
+    assert.deepEqual(await store.entity('Row').get('x'), { id: 'x', a: 'new' });
+  }
+  finally { await store.close(); }
 });

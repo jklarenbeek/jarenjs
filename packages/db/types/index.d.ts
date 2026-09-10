@@ -291,6 +291,8 @@ export interface LoadContinuation {
  * write may change; `'live'` (the default) reports the truth in
  * `snapshot`. */
 export interface PageOptions<C = LoadContinuation> extends EntityCursorOptions {
+  /** False admits no lookahead row; a full page reports hasMore: null. */
+  lookahead?: boolean;
   limit?: number;
   after?: C;
   maxBytes?: number | null;
@@ -305,8 +307,11 @@ export interface PageOptions<C = LoadContinuation> extends EntityCursorOptions {
 export interface Page<T, C = LoadContinuation> {
   readonly items: T[];
   readonly continuation: C | null;
-  readonly hasMore: boolean;
+  readonly hasMore: boolean | null;
   readonly snapshot: boolean;
+  /** Present with lookahead:false; includes a row consumed at the byte boundary.
+   * Bytes count the serialized payloads consumed, excluding array punctuation. */
+  readonly work?: { readonly rows: number; readonly bytes: number };
 }
 
 export interface LoadExplanation {
@@ -594,12 +599,26 @@ export interface UntrackedReads<T = unknown> {
   load(spec?: LoadSpec): Promise<T[]>;
 }
 
+/** Closed native mutation forms over declared SQLite column layouts. */
+export type EntityMutation = {
+  returning?: readonly string[]; maxRows?: number; maxBytes?: number;
+} & ({ op: 'update'; key: EntityKeyArg; expectedRevision?: number; set: Readonly<Record<string, unknown>> }
+  | { op: 'upsert'; values: Readonly<Record<string, unknown>>; conflict: readonly string[]; update: readonly string[] }
+  | { op: 'insert-select'; source: string; where?: unknown; select: Readonly<Record<string, string | { $literal: unknown }>>;
+      conflict: readonly string[]; onConflict: 'nothing' });
+export interface MutationResult {
+  readonly mode: 'native'; readonly affected: number; readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly admitted: { readonly statements: number; readonly rows: number; readonly bytes: number };
+}
+
 export interface EntitySet<T = unknown, I = unknown> {
   /** The provider phantom: a chain over this set infers its item type. */
   readonly __item?: T;
   create(doc: I): Promise<Readonly<T>>;
   get(key: EntityKeyArg): Promise<Readonly<T> | undefined>;
   update(key: EntityKeyArg, changes: Partial<T>): Promise<Readonly<T>>;
+  /** One bounded native SQLite column mutation; unsupported shapes refuse JD0038. */
+  mutate(document: EntityMutation): Promise<MutationResult>;
   delete(key: EntityKeyArg): Promise<boolean>;
   load(spec?: LoadSpec): Promise<ReadonlyArray<Readonly<T>>>;
   /** The graph cursor: one root graph per pull, its includes attached

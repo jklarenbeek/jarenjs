@@ -51,7 +51,7 @@ export function normalizePhysical(physical, properties, keys, path) {
 }
 
 /** Compile one codec once, with a JSON-safe public value and a bound SQL value.
- * @param {any} column @returns {{ encode: Function, decode: Function }} */
+ * @param {any} column @returns {{ encode: Function, decode: Function, normalize: Function }} */
 export function columnCodec(column) {
   if (compiledCodecs.has(column)) return compiledCodecs.get(column);
   const fail = () => { throw new DbRuntimeError('JD2003', `column '${column.name}' refuses a lossy or invalid ${column.codec} value`); };
@@ -96,7 +96,10 @@ export function columnCodec(column) {
     }
     return fail();
   };
-  const codec = { encode: (v) => convert(v, false), decode: (v) => convert(v, true) };
+  const codec = { encode: (v) => convert(v, false), decode: (v) => convert(v, true), normalize: (v) => {
+    const encoded = convert(v, false);
+    return column.codec === 'blob-hex' && encoded !== null ? v.toLowerCase() : convert(encoded, true);
+  } };
   compiledCodecs.set(column, codec);
   return codec;
 }

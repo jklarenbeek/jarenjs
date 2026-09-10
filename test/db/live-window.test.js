@@ -39,6 +39,23 @@ const TOP3 = [{ $subsequence: [{
 }, 0, 3] }];
 
 describe('the maintained window', () => {
+  it('enforces retained-row credits when an insert leaves the visible window unchanged', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), capture: true, live: { maxMaintained: 2 } });
+    try {
+      const scores = store.collection('scores');
+      await scores.insert({ id: 'a', points: 0 });
+      const live = await scores.live([{ $subsequence: [TOP3[0].$subsequence[0], 0, 1] }]);
+      const events = [];
+      live.subscribe((event) => events.push(event));
+      await scores.insert({ id: 'z1', points: 1 });
+      await scores.insert({ id: 'z2', points: 2 });
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(events[0].error.code, 'JD2060');
+      assert.strictEqual(store.stats().liveQueries, 0);
+      assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['a']);
+    }
+    finally { await store.close(); }
+  });
   it('inserts inside, outside and at the boundary of a full window', async () => {
     const store = await open();
     const scores = store.collection('scores');

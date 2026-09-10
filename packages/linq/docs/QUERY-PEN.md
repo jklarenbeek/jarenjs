@@ -1716,7 +1716,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->174<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->652<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->673<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -1733,3 +1733,7 @@ share with a pen is the pens' own two shared doors, `capture-root.js`
 and `json-boundary.js`: no chain callback reaches either, and neither is
 in the figure above. Every pen document's §7 carries its own
 subpath's figure; nothing here restates one.
+
+## Native column queries and ranges
+
+Chains and JSON documents share the db planner. Adopted scalar projections, connected joins, restricted correlated counts and proved one-root grouped aggregates have [native plans](../../db/docs/NATIVE-PLANS.md); unsupported shapes retain explanations and strict-mode refusals. The structural [range provider](../../app/docs/COLLECTION-PROVIDER.md) is `handle.range(spec, options)` from the root client, composed over the existing pager and capture.

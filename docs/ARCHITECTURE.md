@@ -701,3 +701,7 @@ imports no database engine. The LINQ database client forwards the same guarded
 transaction SQL, entity and outbox capabilities, so coexistence requires no
 application driver wrapper. Query evaluation, tracking, savepoint ownership and
 backup publication retain their existing owners. See [db architecture](../packages/db/ARCHITECTURE.md#explicit-relational-adoption).
+
+### Native storage composition
+
+The db entity planner owns adopted-column read lowering and bounded mutation documents. `linq/db` owns the headless [range adapter](../packages/app/docs/COLLECTION-PROVIDER.md), reusing db cursors, keyset pages, transactions and capture. Its structural shape is consumed through injection; there is no db/linq import of app or components and no second query or range engine.

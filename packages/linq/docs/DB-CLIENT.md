@@ -115,6 +115,7 @@ back, the durable ledger over what it opened, and replication document authoring
 | `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
+| `createDbRangeProvider(store, entity, spec, options)` | a bounded structural range source over keyset pages and committed capture; also `handle.range(spec, options)` — [COLLECTION-PROVIDER.md](../../app/docs/COLLECTION-PROVIDER.md) | `Promise<DbRangeProvider>` |
 
 `open` is the only door, and it is deliberately not a coded refusal: a
 missing `options`, or a `validator` that is not a `JarenValidator`, is a
@@ -128,18 +129,18 @@ reconstruct the configuration by reading this paragraph.
 
 ### 2.3 The entity handle
 
-A handle is 59 members and no Proxy: 18 from the store's entity set, 40
-from the chain, one name in both (`explain`, resolved below), and two of
-the client's own.
+A handle has no Proxy. It combines the store's entity set, the asynchronous
+chain, and the client's graph, live and range adapters. `explain` is shared
+and resolved below.
 
 | Group | Members |
 |---|---|
-| the unit of work | `create` `get` `update` `delete` `add` `put` `remove` `discard` `asNoTracking` |
+| the unit of work | `create` `get` `update` `delete` `add` `put` `remove` `discard` `asNoTracking`; `mutate` executes an untracked [native column mutation](../../db/docs/NATIVE-PLANS.md) |
 | the store's reads | `load` `explainLoad` `execute` |
 | the provider seam | `root` `scope` `relations` |
 | membership | `link` `unlink` — the store's, behind §4.2's check |
 | the chain | every `AsyncSequence` operator and terminal: `where` `select` `selectMany` `orderBy` `orderByDescending` `thenBy` `thenByDescending` `groupBy` `aggregate` `join` `groupJoin` `skip` `take` `distinct` `reverse` `concat` `defaultIfEmpty` `ofType` `cast` `zip` `mapAsync` `params` `toDocument` `toArray` `first` `firstOrDefault` `single` `singleOrDefault` `last` `lastOrDefault` `elementAt` `elementAtOrDefault` `count` `sum` `average` `min` `max` `any` `all`, and `Symbol.asyncIterator` |
-| the client's own | `include` (§2.4) and `live` |
+| the client's own | `include` (§2.4), `live`, and `range(spec, options)` |
 | in both | `explain` |
 
 **`explain` is the one name the store's set and the chain both carry, and
@@ -826,10 +827,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->651,607<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->673,157<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->652<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->673<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather

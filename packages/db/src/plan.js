@@ -188,7 +188,8 @@ const ENTITY_REASONS = {
     + 'a binding nothing connects is a cartesian product, which is engine work',
   conjunctBinding: 'a conjunct must belong to one binding (or be the single join equality)',
   external: 'externals compare only against entity columns in this version',
-  projection: 'entity queries return one bare binding natively; projections run in the engine',
+  projection: 'this entity return or grouping needs decoded-row evaluation',
+  groupOrder: 'first-seen grouping over a compound physical key requires tuple ordering',
   order: 'ordering translates only over typed entity paths (never a boolean, never a document '
     + 'path that admits null)',
 };
@@ -2094,12 +2095,12 @@ function planSeriesOperator(root, shape) {
  * @param {any} shape
  * @returns {any | null}
  */
-function planGeneralGrouping(node, itSlot, shape) {
+function planGeneralGrouping(node, itSlot, shape, resolve = pathRef) {
   const keys = [];
   /** @type {Map<number, number>} */
   const keySlot = new Map();
   for (const key of node.groupby.keys) {
-    const ref = pathRef(key.expr, itSlot, shape);
+    const ref = resolve(key.expr, itSlot, shape);
     if (ref === null || ref.type === 'unknown')
       return null;
     keySlot.set(key.slot, keys.length);
@@ -2114,7 +2115,7 @@ function planGeneralGrouping(node, itSlot, shape) {
     if (child.kind === 'var' && child.external !== true && keySlot.has(child.slot))
       return { p: 'key', index: keySlot.get(child.slot) };
     if (child.kind === 'op') {
-      const entry = groupAggregate(child, itSlot, shape);
+      const entry = groupAggregate(child, itSlot, shape, resolve);
       if (entry === null) return null;
       // one aggregate per distinct (function, path): two members that
       // ask the same question are one SQL aggregate
@@ -2168,14 +2169,36 @@ function planGeneralGrouping(node, itSlot, shape) {
  * @param {any} shape
  * @returns {{ as: string, fn: string, ref: any, empty: string } | null}
  */
-function groupAggregate(node, itSlot, shape) {
+function groupAggregate(node, itSlot, shape, resolve = pathRef) {
+  // SQL's nullable sum is authored explicitly: test for any non-null
+  // values, sum exactly that sequence, otherwise return a literal null.
+  if (node.name === '$if' && node.args[0]?.name === '$exists'
+    && node.args[1]?.name === '$sum' && node.args[2]?.kind === 'literal' && node.args[2].value === null) {
+    const filtered = (phrase) => {
+      if (phrase?.kind !== 'flwor' || phrase.forBindings.length !== 1 || phrase.letBindings.length
+        || phrase.groupby !== null || phrase.orderby !== null || phrase.fold !== null
+        || phrase.count !== null || phrase.asChecks !== null) return null;
+      const binding = phrase.forBindings[0];
+      if (!isItVar(unpacked(binding.expr), itSlot) || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty) return null;
+      const ref = resolve(phrase.ret, binding.slot, shape);
+      const where = phrase.where;
+      if (ref === null || !isNumericType(ref.type) || where?.name !== '$ne') return null;
+      const other = resolve(where.args[0], binding.slot, shape);
+      return other !== null && canonicalOf(other.segments) === canonicalOf(ref.segments)
+        && where.args[1]?.kind === 'literal' && where.args[1].value === null ? ref : null;
+    };
+    const test = filtered(node.args[0].args[0]);
+    const sum = filtered(node.args[1].args[0]);
+    return test !== null && sum !== null && canonicalOf(test.segments) === canonicalOf(sum.segments)
+      ? { fn: 'sum', ref: sum, empty: 'null' } : null;
+  }
   if (node.name === '$count') {
     return isItVar(node.args[0], itSlot)
       ? { fn: 'rows', ref: null, empty: 'zero' } : null;
   }
   const fn = AGGREGATES.get(node.name);
   if (fn === undefined || fn === 'count') return null;
-  const ref = pathRef(node.args[0], itSlot, shape);
+  const ref = resolve(node.args[0], itSlot, shape);
   const numeric = fn === 'sum' || fn === 'avg';
   const acceptable = ref !== null
     && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
@@ -2962,8 +2985,11 @@ export function entityShape(entity, entityMapping) {
       column: column.physical ?? column.name,
       flavor: epoch ? 'entity-epoch' : 'entity-column',
       storage: column.storage,
+      codec: column.codec,
+      codecColumn: column.codec === undefined ? undefined : column,
+      nullPolicy: column.null,
       format: epoch ? entity.properties.get(column.name)?.format : undefined,
-      unsafe: column.codec !== undefined && (!['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec) || column.null !== 'reject'),
+      unsafe: column.codec !== undefined && !['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec),
     });
   }
   for (const fk of entityMapping.foreignKeys) {
@@ -3001,6 +3027,9 @@ export function entityPathRef(node, slot, shape) {
       flavor: flavored.flavor,
       storage: flavored.storage,
       format: flavored.format,
+      nullPolicy: flavored.nullPolicy,
+      codec: flavored.codec,
+      codecColumn: flavored.codecColumn,
     };
   }
   // a nested path rides the JSONB document with the phase-A guards;
@@ -3019,13 +3048,48 @@ export function entityPathRef(node, slot, shape) {
  * @param {Map<number, any>} byName - binding slot → binding
  * @returns {{ tree: any, leaves: { binding: string, ref: any }[] } | null}
  */
-function entityProjectionTree(node, byName) {
+function entityProjectionTree(node, byName, entities, mapping) {
   const leaves = [];
   /** @type {Map<string, number>} */
   const byCanonical = new Map();
   const build = (child) => {
     assertDecidedKind(child);
     if (child.kind === 'literal') return { p: 'lit', value: child.value };
+    if (child.kind === 'op' && child.name === '$count') {
+      const inner = child.args[0];
+      if (inner?.kind !== 'flwor' || inner.forBindings.length !== 1 || inner.groupby !== null
+        || inner.fold !== null || inner.orderby !== null || inner.letBindings.length
+        || inner.asChecks !== null || inner.count !== null) return null;
+      const binding = inner.forBindings[0];
+      const entity = bindingEntity(binding, entities);
+      if (entity === null || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty
+        || inner.ret.kind !== 'var' || inner.ret.slot !== binding.slot) return null;
+      const shape = entityShape(entities.get(entity), mapping.entities[entity]);
+      const innerBinding = { name: binding.name, slot: binding.slot, entity, shape };
+      const scope = new Map([...byName, [binding.slot, innerBinding]]);
+      const conjuncts = inner.where?.kind === 'op' && inner.where.name === '$and' ? inner.where.args : [inner.where];
+      const edges = [];
+      let filter = null;
+      for (const conjunct of conjuncts) {
+        if (conjunct === null) continue;
+        const cross = conjunct.kind === 'op' && conjunct.name === '$eq'
+          ? crossBindingComparison(conjunct, scope) : null;
+        if (cross !== null && (cross.left.binding === innerBinding || cross.right.binding === innerBinding)) {
+          edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
+            right: { binding: cross.right.binding.name, ref: cross.right.ref } });
+          continue;
+        }
+        const slots = new Set(); collectBindingSlots(conjunct, scope, slots);
+        if (slots.size !== 1 || !slots.has(binding.slot)) return null;
+        const planned = planEntityPredicate(conjunct, binding.slot, shape);
+        if ('refusal' in planned) return null;
+        filter = conjoin(filter, planned.pred);
+      }
+      if (!edges.length) return null;
+      const index = leaves.length;
+      leaves.push({ count: { entity, binding: binding.name, edges, filter } });
+      return { p: 'leaf', index };
+    }
     if (child.kind === 'path') {
       const binding = child.external === true ? undefined : byName.get(child.rootSlot);
       if (binding === undefined) return null;
@@ -3126,7 +3190,7 @@ export function planEntityPredicate(node, slot, shape) {
     if (!('ref' in pred) || pred.ref === null) return pred;
     const canonical = canonicalOf(pred.ref.segments);
     const flavored = shape.entityFlavors.get(canonical);
-    if (shape.columnOnly && (flavored === undefined || flavored.unsafe)) {
+    if (shape.columnOnly && (flavored === undefined || flavored.unsafe || flavored.nullPolicy === 'null')) {
       blocked = refusal('physical', PREDICATE_REASONS.physicalCodec);
       return pred;
     }
@@ -3139,7 +3203,8 @@ export function planEntityPredicate(node, slot, shape) {
       return { ...pred, ref: { ...pred.ref, flavor: 'entity-doc' } };
     }
     const ref = { ...pred.ref, column: flavored.column,
-      flavor: flavored.flavor, storage: flavored.storage, format: flavored.format };
+      flavor: flavored.flavor, storage: flavored.storage, format: flavored.format,
+      codec: flavored.codec, codecColumn: flavored.codecColumn, nullPolicy: flavored.nullPolicy };
     if (flavored.flavor === 'entity-epoch' && pred.p === 'cmp') {
       if ('ext' in pred.operand) {
         blocked = refusal(pred.op, ENTITY_REASONS.external);
@@ -3212,7 +3277,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   if (root.kind !== 'flwor')
     return residual(root.kind, ENTITY_REASONS.notFlwor);
   if (root.fold !== null || root.letBindings.length > 0 || root.asChecks !== null
-    || root.groupby !== null || root.count !== null)
+    || root.count !== null)
     return residual('$let', KIND_REASONS.let);
 
   // bindings must each range over one entity's array
@@ -3230,6 +3295,19 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     });
   }
   const byName = new Map(bindings.map((binding) => [binding.slot, binding]));
+  const group = root.groupby === null ? null : bindings.length === 1 && aggregate === null && !windows.length
+    ? planGeneralGrouping(root, bindings[0].slot, bindings[0].shape, entityPathRef) : null;
+  if (root.groupby !== null && group === null) return residual('$groupby', ENTITY_REASONS.projection);
+  if (group && [...group.keys, ...group.aggregates].some((entry) => entry.ref && entry.ref.flavor !== 'entity-column'))
+    return residual('$groupby', ENTITY_REASONS.projection);
+  // Integer accumulations carry a runtime exactness proof. Floating
+  // accumulations and date-codec validation need the decoded evaluator.
+  if (group && [...group.keys, ...group.aggregates].some((entry) => entry.ref
+    && (['date', 'datetime'].includes(entry.ref.codec)
+      || (['sum', 'avg'].includes(entry.fn) && entry.ref.type !== 'integer'))))
+    return residual('$groupby', ENTITY_REASONS.projection);
+  if (group?.order === 'first-seen' && entities.get(bindings[0].entity).physical?.keys.length > 1)
+    return residual('$groupby', ENTITY_REASONS.groupOrder);
   const conjuncts = root.where === null
     ? []
     : root.where.kind === 'op' && root.where.name === '$and'
@@ -3370,12 +3448,12 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // SHAPE the projection tree rebuilds from the bindings' members
   const retBinding = root.ret.kind === 'var' && root.ret.external !== true
     ? byName.get(root.ret.slot) : undefined;
-  const projection = retBinding === undefined
-    ? entityProjectionTree(root.ret, byName) : null;
-  if (retBinding === undefined && projection === null) {
+  const projection = retBinding === undefined && group === null
+    ? entityProjectionTree(root.ret, byName, entities, mapping) : null;
+  if (retBinding === undefined && projection === null && group === null) {
     reasons.push(refusal('$return', ENTITY_REASONS.projection));
   }
-  if (projection?.tree.p === 'leaf' && (aggregate === 'count' || windows.length > 0)) {
+  if (projection?.tree.p === 'leaf' && !projection.leaves[projection.tree.index].count && (aggregate === 'count' || windows.length > 0)) {
     const leaf = projection.leaves[projection.tree.index];
     const binding = bindings.find((entry) => entry.name === leaf.binding);
     filters.set(binding.slot, conjoin(filters.get(binding.slot),
@@ -3385,7 +3463,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // ordering over flavored refs of either binding
   let order = null;
   let orderPushed = true;
-  if (root.orderby !== null) {
+  if (root.orderby !== null && group === null) {
     const terms = [];
     for (const spec of root.orderby.specs) {
       const slot = spec.key.kind === 'path' ? spec.key.rootSlot : -1;
@@ -3397,6 +3475,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       // (a COLUMN stores it absent, §9.3, so a nullable column pushes)
       if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown')
         || ref.type === 'boolean'
+        || ref.nullPolicy === 'null'
         || (ref.flavor === 'entity-doc' && admitsNull(binding.shape.schema, ref.segments))
         || spec.collation !== null || spec.collationName !== null) {
         orderPushed = false;
@@ -3409,7 +3488,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   }
 
   const fullyPushed = whereFullyPushed && orderPushed
-    && (retBinding !== undefined || projection !== null);
+    && (retBinding !== undefined || projection !== null || group !== null);
   if (!fullyPushed) {
     return { analysis, mode: 'set', plan: null, referenced, reasons };
   }
@@ -3439,7 +3518,11 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     plan: {
       planVersion: PLAN_VERSION,
       alg: bindings.length > 1 ? 'entity-join' : 'entity-select',
-      bindings: bindings.map((binding) => ({ name: binding.name, entity: binding.entity })),
+      bindings: bindings.map((binding) => ({ name: binding.name, entity: binding.entity,
+        ...(entities.get(binding.entity).physical == null ? {} : {
+          keys: mapping.entities[binding.entity].keys.map((key) =>
+            mapping.entities[binding.entity].columns.find((c) => c.name === key).physical),
+        }) })),
       // the FROM order and each binding's join conditions; `bindings`
       // stays in the DOCUMENT's order, which is the nested-loop order
       // the ORDER BY reproduces
@@ -3447,8 +3530,10 @@ function planEntityQueryCore(document, entities, mapping, operators) {
         binding: join.binding,
         on: join.on.map((edge) => ({
           op: edge.op ?? 'eq',
-          left: { binding: edge.left.binding.name, column: edge.left.ref.column },
-          right: { binding: edge.right.binding.name, column: edge.right.ref.column },
+          left: { binding: edge.left.binding.name, column: edge.left.ref.column,
+            ...(edge.left.ref.codec === undefined ? {} : { codec: edge.left.ref.codec }) },
+          right: { binding: edge.right.binding.name, column: edge.right.ref.column,
+            ...(edge.right.ref.codec === undefined ? {} : { codec: edge.right.ref.codec }) },
         })),
       })),
       filters: bindings.map((binding) => ({
@@ -3461,12 +3546,13 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       })),
       window,
       aggregate,
+      group,
       ret: retBinding === undefined ? null : retBinding.name,
       // the projected shape, when the return is one: leaves that name
       // the binding they read from, and the tree the decoder rebuilds
       project: projection === null ? null : {
         tree: projection.tree,
-        leaves: projection.leaves.map((leaf) => ({ binding: leaf.binding, ref: leaf.ref })),
+        leaves: projection.leaves,
       },
     },
   };

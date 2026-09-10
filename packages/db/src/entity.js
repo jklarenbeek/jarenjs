@@ -26,6 +26,7 @@ import { checkInvariants } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
+import { createEntityMutation } from './mutation.js';
 
 /**
  * The write/read machinery for one entity, prepared once.
@@ -100,7 +101,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
 
   /** Split a completed document into bound column values + the rest.
    * Relation members are PROJECTIONS (§10.1) — never stored. */
-  const split = (doc) => {
+  const split = (doc, { updating = false } = {}) => {
     const values = [];
     /** @type {any} */
     const rest = {};
@@ -109,7 +110,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     }
     for (const column of scalarColumns) {
       if (column.name === autoKey && doc[column.name] === undefined) continue;
-      if (physical && (column.generated || (column.databaseDefault && doc[column.name] === undefined))) continue;
+      if (physical && (column.generated || (!updating && column.databaseDefault && doc[column.name] === undefined))) continue;
       const value = doc[column.name];
       if (physical) {
         values.push({ name: column.name, value: column.codecPlan.encode(value) });
@@ -162,6 +163,17 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     }
     for (const fk of fkColumns) drop(fk);
     return out;
+  };
+  const normalizePhysicalDoc = (doc) => {
+    if (!physical) return doc;
+    const normalized = { ...doc };
+    for (const column of scalarColumns) {
+      if (column.generated || !Object.hasOwn(doc, column.name)) continue;
+      const value = column.codecPlan.normalize(doc[column.name]);
+      if (value === undefined) delete normalized[column.name];
+      else normalized[column.name] = value;
+    }
+    return normalized;
   };
 
   // defaults, compiled once
@@ -317,7 +329,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     return typeof value === 'boolean' ? (value ? 1 : 0) : value;
   };
 
-  return {
+  const core = {
     // the unit-of-work exposure (tracker.js): the column plan and the
     // completion/validation/stamping machinery, one source of truth
     plan: {
@@ -338,7 +350,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     },
     complete: (doc, { updating }) => {
       writable();
-      const completed = applyDefaults(doc, { updating });
+      if (!updating && physical && scalarColumns.some((c) => c.generated && Object.hasOwn(doc, c.name)))
+        throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
+      const completed = applyDefaults(normalizePhysicalDoc(doc), { updating });
       checkValid(completed);
       return asStored(completed);
     },
@@ -403,28 +417,31 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
               { docPath, collection: entity.name, key: parts[0] });
           }
         }
-        if (physical && createJSONPatch(current, { ...current, ...changes }).length === 0) return current;
+        const candidate = normalizePhysicalDoc({ ...current, ...changes });
+        if (physical && createJSONPatch(current, candidate).length === 0) return current;
         if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(changes, c.name)
           && changes[c.name] !== current[c.name])) throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
-        const next = applyDefaults({ ...current, ...changes }, { updating: true });
+        const next = applyDefaults(candidate, { updating: true });
         // an explicit update is last-write-wins by contract (§11.2),
         // but it still moves a declared version token so optimistic
         // savers see the row changed
         if (entity.version !== null && entity.version !== undefined)
           next[entity.version] = (Number(current[entity.version]) || 0) + 1;
         checkValid(next);
-        checkInvariants(entity.invariants, 'update', current, next);
-        const { values, rest } = split(next);
+        if (!physical) checkInvariants(entity.invariants, 'update', current, next);
+        const { values, rest } = split(next, { updating: true });
         const assignments = [
           ...values.map((value, i) => `${q(physicalName(value.name))} = ${parameterAt(i + 1)}`),
           ...(physical ? [] : [`${q('doc')} = ${dialect.jsonEncode(parameterAt(values.length + 1))}`]),
         ].join(', ');
         const sql = `UPDATE ${q(table)} SET ${assignments} `
           + `WHERE ${keyWhere(values.length + (physical ? 0 : 1))}`;
-        return chain(prepared(`update:${values.length}`, sql), (statement) =>
+        return chain(prepared(`update:${values.map((v) => v.name).join(',')}`, sql), (statement) =>
           chain(attempt(() => statement.run([...values.map((value) => value.value),
             ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0])),
-          () => physical ? chain(this.get(key), (stored) => { checkValid(stored); return stored; }) : asStored(next)));
+          () => physical ? chain(this.get(key), (stored) => {
+            checkValid(stored); checkInvariants(entity.invariants, 'update', current, stored); return stored;
+          }) : asStored(next)));
       });
       return physical ? connection.transaction(update) : update();
     },
@@ -438,6 +455,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       return remove(key);
     },
   };
+  core.mutate = createEntityMutation(connection, entity, entityMapping, core);
+  return core;
   function remove(key) {
       const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
       const sql = `DELETE FROM ${q(table)} WHERE ${keyWhere(0)}`;

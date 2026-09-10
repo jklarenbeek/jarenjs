@@ -205,11 +205,11 @@ describe('the linq-roots groups are what the chains emit', () => {
     }
   });
 
-  it('every lowered hop shape is a named residual today (nothing promoted), and strict refuses it', async () => {
+  it('promotes the correlated count projection and names the remaining hop residuals', async () => {
     const group = JSON.parse(fs.readFileSync('test/db/oracle/relations/15-linq-hops.json', 'utf8'));
     const { store } = await storeForEntityGroup(group);
     const REASONS = new Set([
-      'entity queries return one bare binding natively; projections run in the engine',
+      'this entity return or grouping needs decoded-row evaluation',
       'existence tests translate only over a singular member path on the binding',
       'comparisons translate only between a singular member path and a literal or external',
       'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)',
@@ -217,6 +217,12 @@ describe('the linq-roots groups are what the chains emit', () => {
     ]);
     for (const kase of group.cases) {
       const explained = await store.explain(kase.query);
+      if (kase.name === 'a hop from the joined it2') {
+        assert.strictEqual(explained.mode, 'native');
+        assert.deepStrictEqual(await store.execute(kase.query, { strict: true }),
+          await store.execute(kase.query, { pushdown: false }));
+        continue;
+      }
       assert.strictEqual(explained.mode, 'set', kase.name);
       assert.ok(explained.reasons.length > 0 && explained.reasons.every((r) => REASONS.has(r.reason)),
         `${kase.name}: ${JSON.stringify(explained.reasons)}`);

@@ -46,6 +46,7 @@ export const DB_CODES = Object.freeze({
   JD0035: 'the continuation does not belong to this ordering',
   JD0036: 'a snapshot page needs an immutable ordering',
   JD0037: 'strictStreaming refused a plan that buffers',
+  JD0038: 'the native mutation document is unsupported or invalid',
   JD0040: 'the save spans a relation cycle',
   JD0050: 'live queries require change capture',
   JD0051: 'the demanded live mode is unavailable',

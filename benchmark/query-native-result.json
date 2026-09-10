@@ -1,0 +1,645 @@
+{
+  "format": "jaren-native-measurements/1",
+  "at": "2026-09-10T12:30:26.422Z",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "censusHash": "c692afac925162dfea7196b2e2a42036701be54016a6c3e8563f60a74bdecdb4",
+  "runtime": {
+    "node": "v24.19.0",
+    "sqlite": "3.53.3",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "qualification": {
+    "nativeReadFamilies": 5,
+    "nativeMutationFamilies": 3,
+    "retainedSqlFamilies": 1,
+    "retainedReason": "receipt-history has no declared primary key",
+    "scaled": "catalog prefix bounded to sixteen candidates; first sixteen results; complete grouped sums",
+    "postgres": "physical adoption and mutations refused; no PostgreSQL native-column claim",
+    "nativeExecutable": "pending",
+    "downstreamCutover": "pending",
+    "visitedSqlRows": "unavailable"
+  },
+  "measurements": [
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "settings",
+      "sqlMs": 0.08206200000000763,
+      "nativeMs": 5.897589000000011,
+      "decodedMs": 2.7877420000000086,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 100
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_app_settings_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 18166848
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "environment-join",
+      "sqlMs": 0.08338899999998262,
+      "nativeMs": 2.0940200000000004,
+      "decodedMs": 1.5044289999999876,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 216
+      },
+      "scan": "SEARCH t1 USING INDEX inventory_quantity (environment=?); SEARCH t0 USING INDEX sqlite_autoindex_catalog_1 (sku=?); USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 18683752
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "correlated-count",
+      "sqlMs": 0.06341500000002043,
+      "nativeMs": 1.098795999999993,
+      "decodedMs": 1.167728000000011,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 105
+      },
+      "scan": "SCAN t0 USING COVERING INDEX sqlite_autoindex_catalog_1; CORRELATED SCALAR SUBQUERY 1; SCAN cp1 USING COVERING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 19654448
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "nullable-aggregate",
+      "sqlMs": 0.05056400000000849,
+      "nativeMs": 1.5831389999999885,
+      "decodedMs": 1.030631999999997,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 132
+      },
+      "scan": "SCAN t0 USING INDEX inventory_quantity; USE TEMP B-TREE FOR GROUP BY; USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 19549096
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "compound-key",
+      "sqlMs": 0.036736000000018976,
+      "nativeMs": 0.4721900000000119,
+      "decodedMs": 0.5143030000000124,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 51
+      },
+      "scan": "SEARCH t0 USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 20167624
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "conditional-update",
+      "nativeMs": 3.667519999999996,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 85
+      },
+      "replayWrites": 0
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "upsert-noop",
+      "nativeMs": 0.6949800000000153,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 70
+      },
+      "replayWrites": 0
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "indexed",
+      "family": "insert-select",
+      "nativeMs": 0.515560999999991,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 168
+      },
+      "replayWrites": 0
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "settings",
+      "sqlMs": 0.02842499999999859,
+      "nativeMs": 0.34291500000000497,
+      "decodedMs": 0.33411499999999705,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 100
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_app_settings_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 21328112
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "environment-join",
+      "sqlMs": 0.07891899999998486,
+      "nativeMs": 0.454102000000006,
+      "decodedMs": 1.7532690000000173,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 216
+      },
+      "scan": "SEARCH t1 USING INDEX sqlite_autoindex_inventory_1 (environment=?); SEARCH t0 USING INDEX sqlite_autoindex_catalog_1 (sku=?); USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 21766008
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "correlated-count",
+      "sqlMs": 0.053288000000009106,
+      "nativeMs": 0.3869139999999902,
+      "decodedMs": 0.4277010000000132,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 105
+      },
+      "scan": "SCAN t0 USING COVERING INDEX sqlite_autoindex_catalog_1; CORRELATED SCALAR SUBQUERY 1; SCAN cp1 USING COVERING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 22649208
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "nullable-aggregate",
+      "sqlMs": 0.04658399999999574,
+      "nativeMs": 0.426794000000001,
+      "decodedMs": 0.4934910000000059,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 132
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR GROUP BY; USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 22441744
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "compound-key",
+      "sqlMs": 0.031218999999993002,
+      "nativeMs": 0.306459000000018,
+      "decodedMs": 0.3394930000000045,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 51
+      },
+      "scan": "SEARCH t0 USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 22741432
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "conditional-update",
+      "nativeMs": 0.847929999999991,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 85
+      },
+      "replayWrites": 0
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "upsert-noop",
+      "nativeMs": 0.33935299999998847,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 70
+      },
+      "replayWrites": 0
+    },
+    {
+      "consumer": "frozen-census",
+      "rows": 0,
+      "side": "unindexed",
+      "family": "insert-select",
+      "nativeMs": 0.4277720000000045,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 168
+      },
+      "replayWrites": 0
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "indexed",
+      "family": "settings",
+      "sqlMs": 0.04197400000001039,
+      "nativeMs": 0.5353950000000225,
+      "decodedMs": 0.42965699999999174,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 100
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_app_settings_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 27682488
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "indexed",
+      "family": "environment-join",
+      "sqlMs": 0.08513499999997975,
+      "nativeMs": 6.3926870000000235,
+      "decodedMs": 74.48510000000005,
+      "admitted": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 1920
+      },
+      "scan": "SEARCH t1 USING INDEX inventory_quantity (environment=?); SEARCH t0 USING INDEX sqlite_autoindex_catalog_1 (sku=?); USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 26948048
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "indexed",
+      "family": "correlated-count",
+      "sqlMs": 0.08848800000004076,
+      "nativeMs": 0.6995900000000006,
+      "decodedMs": 67.01603600000004,
+      "admitted": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 950
+      },
+      "scan": "SEARCH t0 USING COVERING INDEX sqlite_autoindex_catalog_1 (sku<?); CORRELATED SCALAR SUBQUERY 1; SEARCH cp1 USING COVERING INDEX native_inventory_sku (sku=?); USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 44520032
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "indexed",
+      "family": "nullable-aggregate",
+      "sqlMs": 0.9505249999999705,
+      "nativeMs": 8.429507000000001,
+      "decodedMs": 41.326842,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 142
+      },
+      "scan": "SCAN t0 USING INDEX inventory_quantity; USE TEMP B-TREE FOR GROUP BY; USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 31921736
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "indexed",
+      "family": "compound-key",
+      "sqlMs": 0.09575100000000702,
+      "nativeMs": 0.5038969999999949,
+      "decodedMs": 29.059684000000004,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 51
+      },
+      "scan": "SEARCH t0 USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 46686584
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "unindexed",
+      "family": "settings",
+      "sqlMs": 0.07898999999997613,
+      "nativeMs": 0.40807600000005095,
+      "decodedMs": 0.2949349999998958,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 100
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_app_settings_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 60497272
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "unindexed",
+      "family": "environment-join",
+      "sqlMs": 0.0861130000000685,
+      "nativeMs": 4.136427000000026,
+      "decodedMs": 56.21691999999996,
+      "admitted": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 1920
+      },
+      "scan": "SEARCH t1 USING INDEX sqlite_autoindex_inventory_1 (environment=?); SEARCH t0 USING INDEX sqlite_autoindex_catalog_1 (sku=?); USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 58354832
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "unindexed",
+      "family": "correlated-count",
+      "sqlMs": 9.227152000000046,
+      "nativeMs": 8.81991400000004,
+      "decodedMs": 68.65078600000004,
+      "admitted": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 950
+      },
+      "scan": "SEARCH t0 USING COVERING INDEX sqlite_autoindex_catalog_1 (sku<?); CORRELATED SCALAR SUBQUERY 1; SCAN cp1 USING COVERING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 58168888
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "unindexed",
+      "family": "nullable-aggregate",
+      "sqlMs": 1.4856409999999869,
+      "nativeMs": 6.9491030000000364,
+      "decodedMs": 28.45717300000001,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 142
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR GROUP BY; USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 44236176
+    },
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "side": "unindexed",
+      "family": "compound-key",
+      "sqlMs": 0.07710399999996298,
+      "nativeMs": 0.3569529999999759,
+      "decodedMs": 23.255191999999965,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 51
+      },
+      "scan": "SEARCH t0 USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)",
+      "latencyLimitMs": 100,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 58923160
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "indexed",
+      "family": "settings",
+      "sqlMs": 0.065789999999879,
+      "nativeMs": 0.4125459999997929,
+      "decodedMs": 0.3115579999998772,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 100
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_app_settings_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 108607392
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "indexed",
+      "family": "environment-join",
+      "sqlMs": 0.06397399999991649,
+      "nativeMs": 0.5738780000001498,
+      "decodedMs": 478.965594,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 216
+      },
+      "scan": "SEARCH t1 USING INDEX inventory_quantity (environment=?); SEARCH t0 USING INDEX sqlite_autoindex_catalog_1 (sku=?); USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 108760224
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "indexed",
+      "family": "correlated-count",
+      "sqlMs": 0.07249400000000605,
+      "nativeMs": 0.45919899999989866,
+      "decodedMs": 536.3962670000001,
+      "admitted": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 1043
+      },
+      "scan": "SEARCH t0 USING COVERING INDEX sqlite_autoindex_catalog_1 (sku<?); CORRELATED SCALAR SUBQUERY 1; SEARCH cp1 USING COVERING INDEX native_inventory_sku (sku=?); USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 230811504
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "indexed",
+      "family": "nullable-aggregate",
+      "sqlMs": 6.388985000000048,
+      "nativeMs": 82.993876,
+      "decodedMs": 274.44649500000014,
+      "admitted": {
+        "statements": 1,
+        "rows": 3,
+        "bytes": 210
+      },
+      "scan": "SCAN t0 USING INDEX inventory_quantity; USE TEMP B-TREE FOR GROUP BY; USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 260049680
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "indexed",
+      "family": "compound-key",
+      "sqlMs": 0.13137000000006083,
+      "nativeMs": 0.36498500000016065,
+      "decodedMs": 254.7508499999999,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 51
+      },
+      "scan": "SEARCH t0 USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 283934312
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "unindexed",
+      "family": "settings",
+      "sqlMs": 0.08604300000024523,
+      "nativeMs": 0.35129700000015873,
+      "decodedMs": 0.29458599999998114,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 100
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_app_settings_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 297860784
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "unindexed",
+      "family": "environment-join",
+      "sqlMs": 0.07472899999993388,
+      "nativeMs": 0.3692449999998644,
+      "decodedMs": 450.2115309999999,
+      "admitted": {
+        "statements": 1,
+        "rows": 2,
+        "bytes": 216
+      },
+      "scan": "SEARCH t1 USING INDEX sqlite_autoindex_inventory_1 (environment=?); SEARCH t0 USING INDEX sqlite_autoindex_catalog_1 (sku=?); USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 414318104
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "unindexed",
+      "family": "correlated-count",
+      "sqlMs": 66.40905500000008,
+      "nativeMs": 69.14777000000004,
+      "decodedMs": 506.48285699999997,
+      "admitted": {
+        "statements": 1,
+        "rows": 16,
+        "bytes": 1043
+      },
+      "scan": "SEARCH t0 USING COVERING INDEX sqlite_autoindex_catalog_1 (sku<?); CORRELATED SCALAR SUBQUERY 1; SCAN cp1 USING COVERING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 459629072
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "unindexed",
+      "family": "nullable-aggregate",
+      "sqlMs": 11.008358000000044,
+      "nativeMs": 60.305926,
+      "decodedMs": 252.52022299999953,
+      "admitted": {
+        "statements": 1,
+        "rows": 3,
+        "bytes": 210
+      },
+      "scan": "SCAN t0 USING INDEX sqlite_autoindex_inventory_1; USE TEMP B-TREE FOR GROUP BY; USE TEMP B-TREE FOR ORDER BY",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 71294864
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "side": "unindexed",
+      "family": "compound-key",
+      "sqlMs": 0.08869700000013836,
+      "nativeMs": 0.5358839999998963,
+      "decodedMs": 224.12772300000051,
+      "admitted": {
+        "statements": 1,
+        "rows": 1,
+        "bytes": 51
+      },
+      "scan": "SEARCH t0 USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)",
+      "latencyLimitMs": 250,
+      "latencyStatus": "pass",
+      "sampledHeapBytes": 100747560
+    }
+  ],
+  "peakRssBytes": 705122304
+}

@@ -692,3 +692,7 @@ It reports initialization allocations and both median and tail mutation time;
 heap deltas before collection are not precise retained-state sizes. The fixture
 has 200 initial rows and 15 mutations per case, so these measurements establish
 correctness and costs for that fixture rather than a universal crossover.
+
+## Structural range adapter
+
+`@jarenjs/linq/db` exposes bounded ranges over captured hybrid entity roots, using the existing keyset pager and committed observer. Its live event is an explicit source reset with monotone revision; this does not promote offset windows or the remaining incremental shapes. See [COLLECTION-PROVIDER](../../app/docs/COLLECTION-PROVIDER.md) for credits, snapshot identity and disposal. Maintained top windows check offscreen rows against their bound and release retained state on close.

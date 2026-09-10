@@ -36,8 +36,8 @@ is the index of those guides, and it is how a reader reaches any of them.
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 950 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,735 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 951 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,739 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,116 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
@@ -51,7 +51,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
-| [DB-CLIENT.md](DB-CLIENT.md) | 938 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [DB-CLIENT.md](DB-CLIENT.md) | 939 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 <!--/fact-->
 
 Every row of that table is derived, and none of it is written here: the
@@ -204,8 +204,8 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 950 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,735 | 34 | 8 | 15 | 174,241 B |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 951 | — | — | — | — |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,739 | 34 | 8 | 15 | 174,241 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 36,717 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,116 | 30 | 6 | 3 | 45,575 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,856 B |
@@ -219,8 +219,8 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,725 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,225 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,014 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 938 | 41 | 4 | 2 | 651,607 B |
-| **16 documents** | | **12,478** | **373** | **73** | | |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 939 | 42 | 4 | 2 | 673,157 B |
+| **16 documents** | | **12,484** | **374** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -276,7 +276,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,725 B | 17 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,225 B | 15 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,014 B | 17 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 651,607 B | 652 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 673,157 B | 673 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -905,17 +905,18 @@ it says.
 | `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
+| `createDbRangeProvider(store, entity, spec, options)` | a bounded structural range source over keyset pages and committed capture; also `handle.range(spec, options)` — [COLLECTION-PROVIDER.md](../../app/docs/COLLECTION-PROVIDER.md) | `Promise<DbRangeProvider>` |
 
 **The entity handle**
 
 | Group | Members |
 |---|---|
-| the unit of work | `create` `get` `update` `delete` `add` `put` `remove` `discard` `asNoTracking` |
+| the unit of work | `create` `get` `update` `delete` `add` `put` `remove` `discard` `asNoTracking`; `mutate` executes an untracked [native column mutation](../../db/docs/NATIVE-PLANS.md) |
 | the store's reads | `load` `explainLoad` `execute` |
 | the provider seam | `root` `scope` `relations` |
 | membership | `link` `unlink` — the store's, behind §4.2's check |
 | the chain | every `AsyncSequence` operator and terminal: `where` `select` `selectMany` `orderBy` `orderByDescending` `thenBy` `thenByDescending` `groupBy` `aggregate` `join` `groupJoin` `skip` `take` `distinct` `reverse` `concat` `defaultIfEmpty` `ofType` `cast` `zip` `mapAsync` `params` `toDocument` `toArray` `first` `firstOrDefault` `single` `singleOrDefault` `last` `lastOrDefault` `elementAt` `elementAtOrDefault` `count` `sum` `average` `min` `max` `any` `all`, and `Symbol.asyncIterator` |
-| the client's own | `include` (§2.4) and `live` |
+| the client's own | `include` (§2.4), `live`, and `range(spec, options)` |
 | in both | `explain` |
 
 **The graph**

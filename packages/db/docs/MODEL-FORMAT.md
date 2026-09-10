@@ -1048,6 +1048,7 @@ error.
 | `JD0035` | the continuation does not belong to this ordering |
 | `JD0036` | a snapshot page needs an immutable ordering |
 | `JD0037` | strictStreaming refused a plan that buffers |
+| `JD0038` | the native mutation document is unsupported or invalid |
 | `JD0040` | the save spans a relation cycle |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
@@ -2402,3 +2403,7 @@ References to a property of the unavailable old/insert or new/delete record
 refuse database lowering, because absence differs from SQL NULL. Referenced
 scalar storage types are checked by the assertion trigger; numeric references
 must stay in the safe-number range.
+
+## Native column mutation documents
+
+Asynchronous entity sets expose `mutate(document)` for conditional updates, conflict-aware upserts and bounded same-entity insert-select. The closed grammar, no-op/revision behavior, output bounds and transactional qualifications are specified in [NATIVE-PLANS](NATIVE-PLANS.md).

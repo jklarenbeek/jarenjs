@@ -673,6 +673,11 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         expected: { protectedRows: Math.ceil(definition.rows / definition.policy.protectedEvery) },
       }))));
       program += "await import('./adoption.js');\n";
+      if (name === '@jarenjs/linq') {
+        writeFileSync(join(consumerDir, 'query-native.js'), readFileSync(join(root, 'test/consumer/query-native.js')));
+        writeFileSync(join(consumerDir, 'adoption-sql.json'), readFileSync(join(root, 'test/db/fixtures/adoption-sql.json')));
+        program += "await import('./query-native.js');\n";
+      }
     }
     const programFile = join(consumerDir, 'consumer.mjs');
     writeFileSync(programFile, program);

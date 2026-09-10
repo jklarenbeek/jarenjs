@@ -1424,3 +1424,5 @@ documents trust, invalidation and synchronous execution. Schema changes use
 `planPhysicalMigration` and `migrate`; [preservation and forward recovery](docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)
 require explicit dispositions and assertions. `planInvariants` supplies declared
 SQLite constraint/audit triggers for installation through that migration boundary.
+
+Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.

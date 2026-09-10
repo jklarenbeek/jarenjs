@@ -23,7 +23,42 @@ import { fileURLToPath } from 'node:url';
 
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { openStore } from '@jarenjs/db';
-import { nodeDriver } from '@jarenjs/db/node';
+import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
+import { DatabaseSync } from 'node:sqlite';
+
+/** Retained SQL census, independent of the query planner's output. */
+export function loadSqlCensus() {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, '../fixtures/adoption-sql.json'), 'utf8'));
+}
+
+/** Open the immutable adoption schema with declared public mappings. Counts
+ * executed data statements at the raw driver boundary, including transaction scopes.
+ * @param {'indexed' | 'unindexed'} [side] */
+export async function storeForSqlCensus(side = 'indexed') {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, '../../adoption/fixtures/relational.json'), 'utf8'));
+  const raw = new DatabaseSync(':memory:');
+  for (const sql of [...fixture.ddl, ...fixture.seed]) raw.exec(sql);
+  if (side === 'unindexed') raw.exec('DROP INDEX inventory_quantity');
+  const calls = [];
+  const db = await adaptNodeDatabase({
+    exec: (sql) => raw.exec(sql), close: () => raw.close(),
+    prepare: (sql) => {
+      const statement = raw.prepare(sql);
+      return { iterate: (...args) => statement.iterate(...args),
+        ...Object.fromEntries(['all', 'get', 'run'].map((method) => [method, (...args) => {
+          const value = statement[method](...args);
+          if (/^\s*(SELECT|INSERT|UPDATE|DELETE|WITH)\b/i.test(sql)) calls.push({ sql, method, value });
+          return value;
+        }])) };
+    },
+  });
+  try {
+    const store = await openStore(loadSqlCensus().model, { driver: { ...nodeDriver(), open: async () => db }, adopt: true });
+    calls.length = 0;
+    return { store, db, calls, fixture };
+  }
+  catch (error) { await db.close(); throw error; }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

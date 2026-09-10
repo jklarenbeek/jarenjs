@@ -161,7 +161,7 @@ delete it or fix it.
   and OS input-method qualification.
 - [ ] **Virtual views over bounded data providers.** An array-backed widget
   does not make a much larger application bounded. Define an injected range
-  provider with stable keys, query/snapshot generation, known or unknown total
+  presentation over the [shipped structural database provider](../packages/app/docs/COLLECTION-PROVIDER.md), with stable keys, query/snapshot generation, known or unknown total
   size, loading/error states, finite prefetch/cache credits and cancellation;
   stale replies cannot overwrite a newer filter, sort or scroll request.
   Compose it with existing LINQ keyset pages and live patches through host
@@ -329,8 +329,9 @@ what each does is its own documentation's job
 
 - [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
   group returns that read the grouped row binding, ordering by sum/avg
-  or other unproven aggregate expressions, entity grouping, and numeric aggregates over groups still run
-  in the engine. A window over a group return that can omit an item needs an
+  or other unproven aggregate expressions, multi-root entity grouping and floating
+  numeric aggregates without a rounding proof still run in the engine. One-root
+  scalar grouping and guarded integer sums/counts now have native plans. A window over a group return that can omit an item needs an
   output-cardinality proof; the proven singleton constructors already lower.
   Path comparisons outside one non-null number/string family, predicates
   whose individual leaves span bindings, and unlisted operators remain
@@ -339,7 +340,8 @@ what each does is its own documentation's job
   forced-residual oracle. A disconnected binding graph remains a deliberate
   cartesian-product refusal; removing that guard changes the join contract.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
-  containing an operator, a whole entity binding inside a constructor or a non-singular
+  containing an unproven operator (restricted correlated counts are now native),
+  a whole entity binding inside a constructor or a non-singular
   path still needs the engine. Windows over such returns are set-residual:
   source-row limits cannot stand in for projected-item limits. `$distinct`
   over an untyped or compound projection, or ordering by paths other than the
@@ -382,21 +384,14 @@ what each does is its own documentation's job
   external-writer revision automation and PostgreSQL lowering remain open.
   Store-only rules retain their explicit writer qualification. General interval
   seek/indexing remains separate from the supported cross-member predicate.
-- [ ] **Native authoring for legacy query and mutation families.** Extend the
-  LINQ/model/query surfaces only from an executable census of real SQL consumers:
-  multi-table catalog projections, environment-qualified joins, correlated
-  lookups, aggregates, compound keys, conditional updates, insert-select,
-  upsert/conflict targets and affected-row/returned-value contracts. Reuse the
-  shipped planner and unit of work; the existing pushdown, projection/distinct
-  and live-shape entries own their unproven cases. Close additional gaps with
-  declarative plans or explicitly qualified native operations, preserving
-  missing/null, ordering/ties, rounding/overflow, collation, identity allocation,
-  optimistic revisions and exact no-op behavior. SQL-reference and
-  indexed/unindexed/forced-residual oracles must agree for reads and writes,
-  including errors, emitted statements and audit effects; explain residual
-  scans, resource costs and unsupported shapes. A raw SQL escape alone does
-  not satisfy removal of domain SQL, and fluent syntax alone does not prove
-  bounded execution or an equivalent query plan.
+- [ ] **Broader native authoring for legacy SQL.** The executable census now
+  proves five adopted-column read families and three SQLite mutation families
+  ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history
+  retains SQL because its table has no declared primary key. Arbitrary correlation,
+  computed projections, cross-entity insert-select, partial/expression conflict
+  targets, store-invariant bulk preimages and PostgreSQL column mutations remain
+  open. Additional promotions need retained SQL/decoded-row parity, no-op and
+  rollback proofs, and explicit work costs; fluent syntax alone is not evidence.
 - [ ] **Relational recovery beyond the qualified SQLite hosts.** Explicit
   preservation plans, consistent committed-WAL backups, interrupted rebuild and
   publication recovery, and forward repair from the newest file are exercised
@@ -432,7 +427,9 @@ what each does is its own documentation's job
   entity caches currently evaluate subsets keyed by distinct entity roots;
   self aliases need independent root addressing, ordered tuples need maintained
   global ordering, and group-of-groups needs another dependency level. A native
-  SQL plan alone proves none of those. Offset windows remain rerun. Preserve
+  SQL plan alone proves none of those. The bounded database range adapter publishes
+  source resets through committed capture; it does not close these incremental
+  cases. Offset windows remain rerun. Preserve
   row/byte credits, transactional invalidation and equal-correctness measurements
   when extending these strategies.
 - [ ] **Typed SQL migration aggregates need an intermediate schema.**

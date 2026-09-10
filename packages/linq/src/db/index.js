@@ -22,4 +22,5 @@
 
 export { open, defaultValidator } from './open.js';
 export { createDbLedger } from './ledger.js';
+export { createDbRangeProvider } from './range.js';
 export { defineReplication } from './replication.js';

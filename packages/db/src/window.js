@@ -100,6 +100,7 @@ export function createSortedWindow(terms, limit) {
   return {
     compare,
     size: () => entries.length,
+    clear: () => { entries.length = 0; byToken.clear(); },
     /** The visible slice: the first `limit` entries (all, unbounded). */
     visible: () => (limit === null ? [...entries] : entries.slice(0, limit)),
     /**

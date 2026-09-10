@@ -17,6 +17,11 @@
  */
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
+import { physicalSelection } from './physical.js';
+
+/** Physical text expressions must not inherit an application's collation. */
+const physicalComparable = (ref, sql, dialect) => ref.codec !== undefined
+  && ['text', 'date', 'datetime'].includes(ref.codec) ? dialect.codepoint(sql) : sql;
 
 /**
  * A promoted path the dialect's JSON path grammar cannot spell (a
@@ -653,7 +658,7 @@ export function createEntityPredicateEmitters(dialect, param) {
   };
 
   const emitColumnPred = (aliasSql, pred) => {
-    const column = `${aliasSql}.${q(pred.ref.column)}`;
+    const column = physicalComparable(pred.ref, `${aliasSql}.${q(pred.ref.column)}`, dialect);
     if (pred.p === 'typeIs') {
       if (pred.types.length === 0)
         return pred.positive ? `${column} IS NOT NULL` : `${column} IS NULL`;
@@ -710,7 +715,7 @@ export function createEntityPredicateEmitters(dialect, param) {
   const emitPred = (aliasSql, docSql, pred) => {
     if (pred.p === 'refCmp') return compareRefs(pred, (ref) => {
       if (ref.flavor === 'entity-column') {
-        const value = `${aliasSql}.${q(ref.column)}`;
+        const value = physicalComparable(ref, `${aliasSql}.${q(ref.column)}`, dialect);
         return { value, present: `${value} IS NOT NULL` };
       }
       // Epoch columns retain the document's lexical comparison rule.
@@ -804,12 +809,27 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const projectedPair = (leaf, suffix) => {
     const names = `${q(`v${suffix}`)}`;
     const typeName = `${q(`t${suffix}`)}`;
+    if (leaf.count) {
+      const count = leaf.count;
+      const alias = q(`c${suffix}`);
+      const value = (side) => physicalComparable(side.ref,
+        `${side.binding === count.binding ? alias : aliasOf(side.binding)}.${q(side.ref.column)}`, dialect);
+      const predicates = count.edges.map((edge) => `${value(edge.left)} = ${value(edge.right)}`);
+      if (count.filter) predicates.push(emitters.emitPred(alias, `${alias}.${q('doc')}`, count.filter));
+      return `(SELECT COUNT(*) FROM ${q(physicalOf(count.entity).table)} AS ${alias} `
+        + `WHERE ${predicates.join(' AND ')}) AS ${names}, ${sl('integer')} AS ${typeName}`;
+    }
     if (leaf.ref.flavor === 'entity-column') {
-      const column = `${aliasOf(leaf.binding)}.${q(leaf.ref.column)}`;
+      const raw = `${aliasOf(leaf.binding)}.${q(leaf.ref.column)}`;
+      const column = physicalComparable(leaf.ref,
+        leaf.ref.codec === 'integer'
+          ? `CASE WHEN ${dialect.valueTypeOf(raw)} = ${sl('integer')} THEN CAST(${raw} AS REAL) ELSE ${raw} END`
+          : raw, dialect);
+      const emptyType = leaf.ref.nullPolicy === 'null' ? sl('null') : 'NULL';
       const type = leaf.ref.storage === 'boolean'
-        ? `CASE WHEN ${column} IS NULL THEN NULL WHEN ${column} = 0 `
+        ? `CASE WHEN ${column} IS NULL THEN ${emptyType} WHEN ${column} = 0 `
           + `THEN ${sl('false')} ELSE ${sl('true')} END`
-        : `CASE WHEN ${column} IS NULL THEN NULL ELSE ${sl(
+        : `CASE WHEN ${column} IS NULL THEN ${emptyType} ELSE ${sl(
           leaf.ref.storage === 'string' ? 'text'
             : leaf.ref.storage === 'integer'
               ? dialect.numericTypeNames[0]
@@ -829,7 +849,33 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   // every returned column plus the document rendered to text; the
   // caller merges them back into the entity shape — or, for a projected
   // shape, one value/type pair per DISTINCT leaf and no document at all
-  const selection = plan.aggregate === 'count'
+  const group = plan.group;
+  const groupValue = (ref) => physicalComparable(ref,
+    `${aliasOf(plan.bindings[0].name)}.${q(ref.column)}`, dialect);
+  // Every integer addition is exact when the largest magnitude times
+  // the number of terms fits in the safe range. Sum as REAL so even a
+  // rejected group cannot overflow SQLite's integer accumulator first.
+  const numericGroup = (entry) => ['sum', 'avg'].includes(entry.fn);
+  const groupSafe = (entry) => `(COUNT(${groupValue(entry.ref)}) = 0 OR `
+    + `MAX(ABS(CAST(${groupValue(entry.ref)} AS REAL))) <= 9007199254740991 / COUNT(${groupValue(entry.ref)}))`;
+  const groupValid = (ref) => {
+    const value = groupValue(ref);
+    const type = dialect.valueTypeOf(value);
+    const valid = ref.codec === 'text' ? `${type} = ${sl('text')}`
+      : ref.codec === 'boolean' ? `${type} = ${sl('integer')} AND ${value} IN (0, 1)`
+        : `${type} ${ref.codec === 'integer' ? `= ${sl('integer')}` : `IN (${sl('integer')}, ${sl('real')})`}`
+          + ` AND ABS(CAST(${value} AS REAL)) <= 9007199254740991`;
+    return `MIN(CASE WHEN ${ref.nullPolicy === 'reject' ? '' : `${value} IS NULL OR `}(${valid}) THEN 1 ELSE 0 END)`;
+  };
+  const groupRefs = group ? [...group.keys, ...group.aggregates].map((entry) => entry.ref).filter((ref) => ref?.codecColumn) : [];
+  const selection = group
+    ? [...group.keys.map((key, i) => projectedPair({ binding: plan.bindings[0].name, ref: key.ref }, `k${i}`)),
+      ...group.aggregates.map((entry, i) => `${entry.fn === 'rows' ? 'COUNT(*)'
+        : dialect.groupAggregate(entry.fn, numericGroup(entry) || entry.ref.codec === 'integer'
+          ? `CAST(${groupValue(entry.ref)} AS REAL)` : groupValue(entry.ref))} AS ${q(`a${i}`)}`),
+      ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
+      ...(groupRefs.length ? [`${groupRefs.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
+    : plan.aggregate === 'count'
     ? `COUNT(*) AS ${q('value')}`
     : plan.project != null
       // `p`-prefixed, because a bare `t0` would collide with this
@@ -839,15 +885,18 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // a join-table root IS its two key columns: it has no document
       // column, so the merge is handed an empty one
       : physicalOf(entityOf.get(ret)).document === false
-        ? `${aliasOf(ret)}.*, ${sl('{}')} AS ${q('__doc')}`
+        ? physicalOf(entityOf.get(ret)).mapping
+          ? physicalSelection(physicalOf(entityOf.get(ret)).mapping, dialect, `${aliasOf(ret)}.`)
+          : `${aliasOf(ret)}.*, ${sl('{}')} AS ${q('__doc')}`
         : `${aliasOf(ret)}.*, ${dialect.jsonText(docOf(ret))} AS ${q('__doc')}`;
 
   const tableOf = (name) =>
     `${q(physicalOf(entityOf.get(name)).table)} AS ${aliasOf(name)}`;
   const JOIN_OPS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
   const onSql = (edge) =>
-    `${aliasOf(edge.left.binding)}.${q(edge.left.column)}`
-    + ` ${JOIN_OPS[edge.op ?? 'eq']} ${aliasOf(edge.right.binding)}.${q(edge.right.column)}`;
+    physicalComparable(edge.left, `${aliasOf(edge.left.binding)}.${q(edge.left.column)}`, dialect)
+    + ` ${JOIN_OPS[edge.op ?? 'eq']} `
+    + physicalComparable(edge.right, `${aliasOf(edge.right.binding)}.${q(edge.right.column)}`, dialect);
 
   let sql = `SELECT ${selection} FROM `;
   // the JOIN order the planner settled: the first binding, then each
@@ -863,21 +912,39 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     .map((entry) => emitPred(entry.binding, entry.filter));
   if (filterSql.length > 0) sql += ` WHERE ${filterSql.join(' AND ')}`;
 
-  if (plan.aggregate === null) {
+  if (group) {
+    sql += ` GROUP BY ${group.keys.map((key, i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', ')}`;
+    const terms = group.order === 'first-seen' ? [] : group.order.map((term) =>
+      `${q(term.aggregate === undefined ? `vk${term.index}` : `a${term.aggregate}`)} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
+    const physical = physicalOf(plan.bindings[0].entity);
+    for (const key of physical.keys ?? [null]) {
+      const value = `${aliasOf(plan.bindings[0].name)}.${key === null ? dialect.rowIdentity() : q(key)}`;
+      const column = physical.mapping?.columns.find((c) => c.physical === key);
+      terms.push(`MIN(${column ? physicalComparable(column, value, dialect) : value})`);
+    }
+    sql += ` ORDER BY ${terms.join(', ')}`;
+    if (plan.window !== null) sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
+  }
+  else if (plan.aggregate === null) {
     const terms = (plan.order ?? []).map((term) => {
       // only a plain mapped column orders by its column; an epoch
       // path orders by the document string — codepoint order, exactly
       // the engine's — because mixed stored precisions would let the
       // integer column sort differently
       const value = term.ref.flavor === 'entity-column'
-        ? `${aliasOf(term.binding)}.${q(term.ref.column)}`
+        ? physicalComparable(term.ref, `${aliasOf(term.binding)}.${q(term.ref.column)}`, dialect)
         : dialect.jsonExtract(docOf(term.binding), pathTextOf(term.ref), 'text');
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
     // the engine's nested-loop order: binding-order row identities
-    for (const binding of plan.bindings)
-      terms.push(`${aliasOf(binding.name)}.${dialect.rowIdentity()}`);
+    for (const binding of plan.bindings) {
+      const keys = physicalOf(binding.entity).keys;
+      if (keys) terms.push(...keys.map((key) => physicalComparable(
+        physicalOf(binding.entity).mapping.columns.find((c) => c.physical === key),
+        `${aliasOf(binding.name)}.${q(key)}`, dialect)));
+      else terms.push(`${aliasOf(binding.name)}.${dialect.rowIdentity()}`);
+    }
     sql += ` ORDER BY ${terms.join(', ')}`;
     if (plan.window !== null)
       sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;

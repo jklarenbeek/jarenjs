@@ -145,6 +145,7 @@ export type Continuation<S, M extends EntityMeta> = LoadContinuation & {
 /** A page's options over this graph (the store's `PageOptions`, the
  * continuation typed by the declared ordering). */
 export interface GraphPageOptions<S, M extends EntityMeta> extends EntityCursorOptions {
+  lookahead?: boolean;
   limit?: number;
   after?: Continuation<S, M>;
   maxBytes?: number;
@@ -205,6 +206,7 @@ export interface Graph<E extends MetaMap<E>, M extends EntityMeta, S> {
  * exactly the many-to-many members. */
 export type EntityHandle<E extends MetaMap<E>, M extends EntityMeta> =
   TypedEntitySet<E, M> & ChainStart<M['doc']> & {
+    range(spec: import('@jarenjs/db').LoadSpec, options: DbRangeOptions): Promise<DbRangeProvider<M['doc']>>;
     /** Open a graph: include one relation member with an optional spec. */
     include<K extends keyof M['relations'] & string, const I extends IncludeSpec<E, TargetMeta<E, M, K>> = true>(
       pick: (u: RelationPicker<M>) => Picked<K>, spec?: I | NoInfer<IncludeSpec<E, TargetMeta<E, M, K>>>,
@@ -216,6 +218,40 @@ export type EntityHandle<E extends MetaMap<E>, M extends EntityMeta> =
      * is given), through the store's entity-root registration. */
     live<T = M['doc']>(source?: AsyncSequence<T, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<T>>;
   };
+
+export interface DbRangeOptions {
+  keys: readonly string[];
+  resident?: boolean; seekIndex?: boolean; exactTotal?: boolean;
+  source?: string; query?: string; schemaVersion?: string;
+  profile?: 'safe' | import('@jarenjs/db').ProfileSpec;
+  maxRows?: number; maxBytes?: number; maxPages?: number; maxInFlight?: number; maxSubscriptions?: number;
+  runtime?: Partial<Runtime>;
+}
+export interface DbRangeRequest {
+  generation: number; requestId: string; query: string; snapshot: string;
+  range?: { start: number; end: number }; continuation?: string;
+  credits: { pages: number; rows: number; bytes: number; work: number };
+}
+export interface DbRangeResponse<T = unknown> {
+  generation: number; requestId: string; query: string; snapshot: string;
+  state: 'ready' | 'loading' | 'error' | 'invalidated' | 'budget-exhausted'; reason?: string;
+  rows?: readonly T[]; keys?: readonly string[]; continuation?: string | null;
+  total?: { kind: 'known'; value: number } | { kind: 'unknown' };
+  used: { pages: number; rows: number; bytes: number; work: number };
+}
+export interface DbRangeProvider<T = unknown> {
+  readonly query: string; readonly snapshot: string;
+  readonly capabilities: Readonly<{ seekIndex: boolean; seekKey: false; continuation: true;
+    live: true; exactTotal: boolean; completeExport: false }>;
+  request(request: DbRangeRequest, signal?: AbortSignal): Promise<DbRangeResponse<T>>;
+  subscribe(observer: (event: { type: 'reset'; reason: string; query: string; snapshot: string; revision: number; capture: string }) => void): () => boolean;
+  stats(): { sourceReads: number; sourceRows: number; sourceBytes: number; pending: number;
+    pages: number; rows: number; bytes: number; subscriptions: number; disposed: boolean };
+  dispose(): Promise<void>;
+}
+/** Source capture is required; keyset mode is sequential unless resident is explicit. */
+export declare function createDbRangeProvider<T = unknown>(store: import('@jarenjs/db').Store | TypedStore<any>,
+  entity: string, spec: import('@jarenjs/db').LoadSpec, options: DbRangeOptions): Promise<DbRangeProvider<T>>;
 
 /** Present exactly when the model declares entities, as on the store. */
 export interface EntityClientMembers {

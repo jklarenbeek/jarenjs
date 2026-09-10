@@ -54,6 +54,15 @@ it('fresh and upgraded rules agree for every SQL writer, allocated audit keys, n
       const created = await store.entity('Entry').create({ start: 1, end: 2, phase: 'draft' });
       assert.equal(created.id, 1);
       await assert.rejects(store.entity('Entry').update(1, { start: 3 }), { code: 'JD2096', class: 'constraint' });
+      store.entity('Entry').put({ ...created, start: 3 });
+      await assert.rejects(store.saveChanges(), { code: 'JD2096', class: 'constraint' });
+      store.entity('Entry').discard(1);
+      const native = { op: 'update', key: 1, set: { start: 0 } };
+      await assert.rejects(store.entity('Entry').mutate({ ...native, set: { start: 3 } }), { code: 'JD2096', class: 'constraint' });
+      assert.equal((await store.entity('Entry').mutate(native)).affected, 1);
+      const nativeAudit = connection.prepare('SELECT count(*) AS n FROM audit').get([]).n;
+      assert.equal((await store.entity('Entry').mutate(native)).affected, 0);
+      assert.equal(connection.prepare('SELECT count(*) AS n FROM audit').get([]).n, nativeAudit);
       for (const sql of ["INSERT INTO entry(starts,ends,phase) VALUES(3,2,'draft')", "UPDATE entry SET starts=NULL WHERE id=1"])
         assert.throws(() => connection.exec(sql), (e) => classifyDriverError(e).class === 'constraint');
       await store.entity('Entry').update(1, { phase: 'frozen' });

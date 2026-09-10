@@ -477,7 +477,7 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
     assert.strictEqual(explained.mode, 'set');
     assert.deepStrictEqual(explained.referenced, ['Post', 'User']);
     assert.deepStrictEqual(explained.reasons, [{ construct: '$return',
-      reason: 'entity queries return one bare binding natively; projections run in the engine' }]);
+      reason: 'this entity return or grouping needs decoded-row evaluation' }]);
     assert.deepStrictEqual(chain.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
     assert.throws(() => store.sync.execute(doc, { strict: true }), (e) => e.code === 'JD0010');
     await store.close();
@@ -534,7 +534,7 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
       ['a to-many existence in $where', from(users).where((u) => u.posts.all().exists()),
         'existence tests translate only over a singular member path on the binding'],
       ['a hop in $return', from(posts).select((p) => p.author.email),
-        'entity queries return one bare binding natively; projections run in the engine'],
+        'this entity return or grouping needs decoded-row evaluation'],
     ];
     for (const [name, chain, reason] of pins) {
       const explained = store.sync.explain(chain.toDocument());

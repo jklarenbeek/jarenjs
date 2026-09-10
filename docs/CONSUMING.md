@@ -140,7 +140,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->17<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->15<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->17<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->652<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->673<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -345,3 +345,7 @@ remain an explicit `planPhysicalMigration`/`migrate` operation. Follow the
 [model pen](../packages/linq/docs/MODEL-PEN.md#existing-column-layouts-and-persistence-rules),
 [transaction recipe](../packages/linq/docs/DB-CLIENT.md#trusted-sql-during-adoption),
 and [recovery contract](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery).
+
+### Native column plans and bounded ranges
+
+Installed `@jarenjs/db` exports execute the [native SQL census](../packages/db/docs/NATIVE-PLANS.md). `@jarenjs/linq/db` exports `createDbRangeProvider` and entity handles expose `range`. The [provider contract](../packages/app/docs/COLLECTION-PROVIDER.md) distinguishes source epochs from client generations, resident index seeks from sequential continuations, and complete totals from loaded rows. The packed consumer runs the retained SQL comparison and no-op mutations under Node and Bun.

@@ -357,9 +357,13 @@ export const PAGE_LIMIT_DEFAULT = 100;
  * An item that does not fit beside earlier ones ends the page before
  * it: `hasMore` is true and the continuation is the last delivered
  * item's, so the next page starts at the item that did not fit.
- * `hasMore` is otherwise decided by one peek past `limit`.
+ * `hasMore` is otherwise decided by one peek past `limit`. With
+ * `lookahead: false`, a full page reports `hasMore: null` and `work`
+ * records each consumed root and its serialized payload bytes, including
+ * the root that stopped the page at its byte boundary. Failures preserve
+ * those counters on the error; pages using the default keep their shape.
  * @param {any} cursor - a `QueryCursor`
- * @param {{ limit: number, maxBytes: number | null, after?: any,
+ * @param {{ limit: number, maxBytes: number | null, after?: any, lookahead?: boolean,
  *   sizeOf: (item: any) => number, continuationOf: (item: any) => any }} options
  * @returns {any} value-or-promise, matching the cursor
  */
@@ -368,10 +372,13 @@ export function drainPage(cursor, options) {
   const after = options.after ?? null;
   const items = [];
   let bytes = 0;
+  const measured = options.lookahead === false;
+  const work = { rows: 0, bytes: 0 };
   let last = after;
   let hasMore = false;
   const finish = () => chain(cursor.return(), () => ({
     items, continuation: items.length > 0 ? last : (hasMore ? after : null), hasMore,
+    ...(measured ? { work: { ...work } } : {}),
   }));
   const consume = (pulled) => {
     if (items.length >= limit) {
@@ -380,7 +387,8 @@ export function drainPage(cursor, options) {
     }
     if (pulled.done === true) return finish();
     const item = pulled.value;
-    const size = maxBytes === null ? 0 : sizeOf(item);
+    const size = maxBytes === null && !measured ? 0 : sizeOf(item);
+    if (measured) { work.rows++; work.bytes += size; }
     if (maxBytes !== null && bytes + size > maxBytes) {
       if (items.length === 0) {
         return chain(cursor.return(), () => {
@@ -393,6 +401,10 @@ export function drainPage(cursor, options) {
     items.push(item);
     bytes += size;
     last = continuationOf(item);
+    if (options.lookahead === false && items.length === limit) {
+      hasMore = null;
+      return finish();
+    }
     return null;
   };
   const step = () => {
@@ -403,7 +415,12 @@ export function drainPage(cursor, options) {
       if (result !== null) return result;
     }
   };
-  return settling(step, () => cursor.return());
+  return settling(step, () => cursor.return(), (error) => {
+    // A refused boundary row was still consumed. Preserve that evidence
+    // through the owning error so a bounded caller cannot report zero work.
+    if (measured && error !== null && typeof error === 'object') error.work = { ...work };
+    return error;
+  });
 }
 
 /** The shared refusal for an indivisible item, including a replicated transaction.

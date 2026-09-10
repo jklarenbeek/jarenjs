@@ -210,3 +210,15 @@ export async function trustedTransactionTypes() {
     void [rows, syncRow];
   });
 }
+
+export async function nativeRangeTypes() {
+  const client = await open(fixtureModel, { driver });
+  const mutation = await client.entities.Post.mutate({ op: 'update', key: 'p', expectedRevision: 1, set: { title: 'new' } });
+  const count: number = mutation.affected;
+  const provider = await client.entities.Post.range({}, { keys: ['id'], maxRows: 16 });
+  const response = await provider.request({ generation: 1, requestId: 'p', query: provider.query, snapshot: provider.snapshot,
+    range: { start: 0, end: 2 }, credits: { pages: 1, rows: 2, bytes: 4096, work: 2 } });
+  const state: string = response.state;
+  await provider.dispose();
+  void [count, state];
+}

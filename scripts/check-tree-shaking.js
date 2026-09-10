@@ -410,11 +410,11 @@ const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
-// The client now also carries explicit column codecs, physical verification,
-// guarded SQL and invariant lowering. This adds about 18 kB over the prior
-// 633,786-byte fixture. The 665 kB structural ceiling covers that declared
-// functionality; import-edge exclusions and frozen adoption budgets stay intact.
-if (clientBytes > 665000)
+// Native column projections/aggregates, mutation compilation and bounded ranges
+// are carried by the client. Their measured increase is published in the bundle
+// baseline; the 690 kB structural ceiling admits those new capabilities. Import
+// exclusions and independently frozen consumer resource ceilings remain intact.
+if (clientBytes > 690000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

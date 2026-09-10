@@ -194,20 +194,19 @@ describe('exactly one statement per graph load', () => {
       'one statement, and no document blob in it');
   });
 
-  it('a relation hop on the chain is the residual over the fetched roots: one fetch per root, never per row', async () => {
+  it('a projected correlated count uses one statement and remaining hop filters name their residuals', async () => {
     const posts = store.sync.entity('Post');
     const users = store.sync.entity('User');
-    // the to-many hop in a projection: the engine runs it over both roots
+    // the to-many count projection is one correlated SQL statement
     const commented = from(posts).select((p) => ({ pid: p.pid, n: p.comments.all().count() }));
     const explained = store.sync.explain(commented.toDocument());
-    assert.strictEqual(explained.mode, 'set');
+    assert.strictEqual(explained.mode, 'native');
     assert.deepStrictEqual(explained.referenced, ['Post', 'Comment']);
     counters.executed = 0;
     const rows = commented.toArray();
     assert.strictEqual(rows.length, 30);
     assert.ok(rows.every((row) => row.n === 2));
-    assert.strictEqual(counters.executed, 2,
-      'two referenced roots, two fetches — the correlated phrase never issues a statement per row');
+    assert.strictEqual(counters.executed, 1, 'both roots participate in one native statement');
     // the to-many count in a filter: the same two fetches for ten parents
     counters.executed = 0;
     const prolific = from(users).where((u) => u.posts.all().count().ge(3)).select((u) => u.id).toArray();

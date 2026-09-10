@@ -549,6 +549,7 @@ function rowsStrategy(description, context) {
         return flatten();
       }),
     entries: () => flatten().length,
+    close: () => itemsByKey.clear(),
     apply(record, previousRows) {
       const touched = touchedKeys(record, context.name, description.deps);
       if (touched === null) return null;
@@ -628,6 +629,7 @@ function windowStrategy(description, context) {
         return visibleRows();
       }),
     entries: () => sortedWindow.size(),
+    close: () => sortedWindow.clear(),
     apply(record, previousRows) {
       const touched = touchedKeys(record, context.name, description.deps);
       if (touched === null) return null;
@@ -707,6 +709,7 @@ function accumulatorStrategy(description, context) {
         return rowsOf();
       }),
     entries: () => contributions.size,
+    close: () => contributions.clear(),
     stats: () => ({ ...stats }),
     apply(record, previousRows) {
       const touched = touchedKeys(record, context.name, description.deps);
@@ -867,7 +870,7 @@ export function createLiveRegistry(bounds) {
             outcome = ops.length === 0 && !late ? null
               : { ops, rows, ...(late ? { late: outcome.late } : {}) };
           }
-          if (outcome !== null) checkBound(strategy.entries(outcome.rows));
+          checkBound(strategy.entries(outcome?.rows ?? state.result.rows));
         }
         catch (error) {
           state.status = 'errored';

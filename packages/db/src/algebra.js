@@ -335,7 +335,23 @@ export function planOrder(plan) {
   if (plan === null || plan === undefined) return null;
   if (plan.alg === 'entity-select' || plan.alg === 'entity-join') {
     if (plan.aggregate !== null) return null;
-    return effectiveOrder(plan.order, { bindings: plan.bindings.map((b) => b.name) });
+    const bindings = plan.bindings;
+    const ties = bindings.flatMap((binding) => binding.keys === undefined
+      ? [identityTerm(binding.name)] : binding.keys.map((column) => ({
+        source: 'column', binding: binding.name, column, path: null,
+        desc: false, nullsFirst: true, tieBreaker: true,
+      })));
+    if (plan.group) {
+      const group = plan.group;
+      const terms = group.order === 'first-seen' ? [] : group.order.map((term) => ({
+        source: 'group', binding: bindings[0].name,
+        column: term.aggregate === undefined ? group.keys[term.index].as : `a${term.aggregate}`,
+        path: null, desc: term.desc, nullsFirst: term.nullsFirst, tieBreaker: false,
+      }));
+      return [...terms, ...ties.map((term) => ({ ...term, source: 'group',
+        column: term.column, tieBreaker: group.order !== 'first-seen' }))];
+    }
+    return [...(plan.order ?? []).map((term) => declaredTerm(term, term.binding)), ...ties];
   }
   if (plan.aggregate !== null || plan.rank !== null) return null;
   if (plan.bucket !== null) {

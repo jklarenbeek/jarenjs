@@ -18,6 +18,7 @@ import { fromAsync, AsyncSequence } from '../async.js';
 import { Graph } from './include.js';
 import { requireMembership } from './membership.js';
 import { registerLive } from './live.js';
+import { createDbRangeProvider } from './range.js';
 
 /** The chain surface, read once from the class: every public operator
  * and terminal, `explain` set aside for its overload. */
@@ -59,6 +60,7 @@ export function createEntityHandle(store, name) {
   // the graph with nothing included: the root clauses, the keyset and
   // the page over the rows alone
   members.graph = () => new Graph(set, name);
+  members.range = (spec, options) => createDbRangeProvider(store, name, spec, options);
   members.link = (own, member, target) => {
     requireMembership(set.relations, name, member, 'link');
     set.link(own, member, target);

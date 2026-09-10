@@ -101,6 +101,7 @@ export interface TypedUntrackedReads<E extends MetaMap<E>, M extends EntityMeta>
 }
 
 export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
+  mutate(document: import('./index.js').EntityMutation): Promise<import('./index.js').MutationResult>;
   /** The provider phantom: `from(typed.entity('User'))` infers `User`
    * without a cast. */
   readonly __item?: M['doc'];

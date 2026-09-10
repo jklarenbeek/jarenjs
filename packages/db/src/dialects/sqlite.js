@@ -430,6 +430,11 @@ export const sqliteDialect = createDialect({
     optimize: () => 'PRAGMA optimize',
   },
   invariantTriggers: sqliteInvariantTriggers,
+  // The invalid path is evaluated only on overflow and carries a distinct
+  // marker through SQLite's error boundary, before any source row is written.
+  codepoint: (value) => `(${value} COLLATE BINARY)`,
+  mutationRowGuard: (count, limit) => `CASE WHEN ${count} > ${limit} `
+    + "THEN json_extract('{}', 'jaren-mutation-row-bound') ELSE 1 END",
   physicalRead: (codec, sql) => codec === 'bigint' ? `CAST(${sql} AS TEXT)`
     : codec === 'blob-hex' ? `CASE WHEN ${sql} IS NULL THEN NULL ELSE hex(${sql}) END` : sql,
   physicalTypeMatches: (codec, type) => (codec === 'blob-hex' ? /BLOB/

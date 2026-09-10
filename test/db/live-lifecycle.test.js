@@ -144,6 +144,34 @@ describe('bounds (coded, never degrading)', () => {
 });
 
 describe('the leak proof', () => {
+  it('closed handles retain their visible result without retaining offscreen window rows', () => {
+    const script = `
+      import { openStore } from '@jarenjs/db';
+      import { nodeDriver } from '@jarenjs/db/node';
+      const store = await openStore(${JSON.stringify(MODEL)}, { driver: nodeDriver(), capture: true });
+      await store.transaction(async tx => {
+        for (let i=0;i<2000;i++) await tx.collection('rows').insert({id:'r'+i,n:i,blob:'x'.repeat(1000)});
+      });
+      const held=[];
+      const round=async()=>{
+        const live=await store.collection('rows').live([{$subsequence:[{$for:{r:'$[*]'},$orderby:{$key:'$r.n'},$return:'$r'},0,1]}]);
+        if(live.result.rows.length!==1) throw Error('bad window');
+        live.close(); held.push(live);
+      };
+      await round(); globalThis.gc(); globalThis.gc();
+      const before=process.memoryUsage().heapUsed;
+      for(let i=0;i<8;i++) await round();
+      globalThis.gc(); globalThis.gc();
+      console.log(JSON.stringify({delta:process.memoryUsage().heapUsed-before,held:held.length,rows:held.every(h=>h.result.rows.length===1)}));
+      await store.close();
+    `;
+    const out = spawnSync(process.execPath, ['--expose-gc', '--input-type=module', '-e', script], { encoding: 'utf8' });
+    assert.strictEqual(out.status, 0, out.stderr);
+    const measured = JSON.parse(out.stdout.trim().split('\n').pop() ?? '');
+    assert.strictEqual(measured.held, 9);
+    assert.strictEqual(measured.rows, true);
+    assert.ok(measured.delta < 1_500_000, `closed handles retained ${measured.delta} bytes`);
+  });
   it('closing releases the maintained state (measured live set after forced GC)', () => {
     const script = `
       import { openStore } from '@jarenjs/db';
