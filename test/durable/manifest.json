@@ -1,0 +1,16 @@
+{
+  "format": "jaren-durable-fixtures/1",
+  "cases": [32, 128],
+  "limits": {
+    "legs": 2,
+    "attemptsPerLeg": 1,
+    "pageSize": 16,
+    "pageBytes": 262144,
+    "heapBytes": 100663296,
+    "rssBytes": 268435456,
+    "remainingResources": 0,
+    "secondWrites": 0,
+    "secondRevisions": 0
+  },
+  "scope": "Synthetic local SQLite commands and interrupted multi-leg effects. Baseline executes the same domain/outbox work without a receipt; durable execution adds validation, authorization and immutable replay. Limits are fixed acceptance ceilings, not performance claims. Real providers, downstream acceptance, native executables, PostgreSQL and operator reconciliation are pending."
+}

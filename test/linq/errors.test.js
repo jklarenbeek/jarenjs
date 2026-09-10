@@ -236,7 +236,7 @@ describe('every JL code fires', () => {
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006', 'JL0007',
       'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106', 'JL0107',
-      'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006', 'JL2007', 'JL2008',
+      'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006', 'JL2007', 'JL2008', 'JL2009',
     ]);
   });
 

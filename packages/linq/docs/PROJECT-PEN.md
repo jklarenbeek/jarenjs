@@ -77,5 +77,5 @@ app rendering and contract checks remain the file engines' responsibilities.
 
 ## 7. Cost
 
-The isolated project pen costs **<!--fact:bundle.project-->15,303<!--/fact--> bytes**.
+The isolated project pen costs **<!--fact:bundle.project-->13,793<!--/fact--> bytes**.
 Its tree probe excludes Studio, other target engines and the query chain.

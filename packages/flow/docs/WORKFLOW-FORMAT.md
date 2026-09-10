@@ -315,3 +315,38 @@ Task handlers receive `(props, signal, resources)`; resources never participate
 in checkpoint serialization, replay identity or trace output. A resource-bearing
 run drains tasks on abort before settling so the caller can release its lease.
 Tasks must return JSON results and keep resource handles out of their output.
+
+## Domain run and external-effect adoption
+
+`createExternalEffects({ store, executor, authorize, classify })` composes the
+existing workflow engine with a mapped effect store and the public provider
+executor. `run(operationId, { lease, signal? })` reads the reviewed plan,
+reauthorizes resume and dispatch, and persists sending intent from the executor's
+`beforeDispatch` hook. This runs after scheduler admission, immediately before
+transport. A private one-attempt budget prevents executor retries from escaping
+the durable per-leg budget. Only validated successful provider responses passed
+through the host's `classify(response, plannedLeg)` become confirmed/rejected
+public evidence. Timeout, abort, disconnect, invalid response or lost settlement
+remain unresolved. Restart recovers stale sending intent without resending it.
+Read-back and operator decisions use the store's explicit `reconcile` method.
+Register `effects.handler` with the existing queue worker to pause unresolved or
+refused operations in the queue's cancelled state. Explicit requeue/claim then
+provides a fresh reconciliation fence; confirmed operations complete normally.
+
+`createDomainRun(document, { store, schemaVersion, tasks })` compiles the existing
+workflow once and binds its checkpoint CAS to application run records.
+`run(id, input, { lease, signal?, event?, release?, ...resources })` preserves the
+application run ID. `lease` may be a capability or a function returning the
+worker's current renewed lease. Checkpoint provenance includes the canonical
+workflow/schema identity and the engine's input/task-version identity.
+
+`cancel(id, observedRevision, { actor, reason })` records explicit cancellation
+intent, stops local task admission, signals and drains local workers, and waits
+for their final observation and resource release. Remote workers see the durable
+cancellation at the next checkpoint/admission boundary; a remote cancel request
+may therefore return pending intent rather than completed cancellation. The
+requesting contract must authorize the actor. A signal alone also requires
+workers to drain; failed/cancelled observations use fixed public statuses without
+raw exception messages. Attaching an observer is independent of starting/cancelling
+a run. Reset is a separate, explicitly guarded store operation and cannot erase
+business receipts or unresolved effects.

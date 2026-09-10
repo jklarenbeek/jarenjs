@@ -776,7 +776,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   mkdirSync(compositionDir, { recursive: true });
   writeFileSync(join(compositionDir, 'package.json'), JSON.stringify({ type: 'module', private: true }));
   const compositionPackages = new Set();
-  for (const name of ['@jarenjs/contract', '@jarenjs/flow', '@jarenjs/linq', '@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats'])
+  for (const name of ['@jarenjs/contract', '@jarenjs/flow', '@jarenjs/linq', '@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats', '@jarenjs/app'])
     for (const dep of declaredClosure(byName, name)) compositionPackages.add(dep);
   for (const dep of compositionPackages) {
     const dest = join(compositionDir, 'node_modules', dep);
@@ -789,10 +789,17 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   writeFileSync(compositionFile, "import { qualifyDialects, runIngestionConsumer } from './providers.js';\n"
     + `await qualifyDialects(${readFileSync(join(root, 'test/adoption/fixtures/providers.json'), 'utf8')}, ${readFileSync(join(root, 'test/contract/fixtures/provider-descriptors.json'), 'utf8')});\n`
     + manifest.consumers.map((definition) => `await runIngestionConsumer(${JSON.stringify(definition)}, ${JSON.stringify(adoptionRows(definition).slice(0, definition.budgets.providers.rows))});`).join('\n'));
+  writeFileSync(join(compositionDir, 'durable.js'), readFileSync(join(root, 'test/consumer/durable.js')));
+  const durableManifest = JSON.parse(readFileSync(join(root, 'test/durable/manifest.json'), 'utf8'));
+  const durableFile = join(compositionDir, 'durable-consumer.mjs');
+  writeFileSync(durableFile, "import { runDurableConsumer, runPhysicalReceiptConsumer } from './durable.js';\nawait runPhysicalReceiptConsumer();\n" + durableManifest.cases.map((count) => `await runDurableConsumer(${count}, ${JSON.stringify(durableManifest.limits)});`).join('\n'));
   for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
     const result = spawnSync(runtime, [compositionFile], { cwd: compositionDir, encoding: 'utf8' });
     if (result.status !== 0) { failures++; console.error(`Provider composition (${runtime}): ${result.stderr}`); }
     else console.log(`✓ provider composition — three dialects, two consumers, zero-write replay (${runtime})`);
+    const durableResult = spawnSync(runtime, [durableFile], { cwd: compositionDir, encoding: 'utf8' });
+    if (durableResult.status !== 0) { failures++; console.error(`Durable composition (${runtime}): ${durableResult.stderr}`); }
+    else console.log(`✓ durable composition — receipts, reconciliation, runs, bounded observation (${runtime})`);
   }
 }
 finally {

@@ -504,3 +504,29 @@ a cancellation policy, a retry policy are the host's.
 only by `cancel()`; `counts()` reports it. A transaction view's `jobs`
 (the outbox, §3) carries none of the four: an administration call is a
 root call.
+
+## Business receipt and external-effect composition
+
+`jobs.assertLease(lease)` checks current execution authority without a write or
+renewal. It uses the same token/expiry guard and `JD2065`/`JD2066`/`JD2067` refusals
+as settlement; malformed authority is `JD2068`. Inside `tx.jobs`, this read and
+subsequent mapped writes share the transaction lock. Workers receive
+`context.lease()` to read their current token after automatic renewal.
+
+`createWorker({ effectSafety(job, context), ... })` optionally gates each handler
+admission. Only `true` admits; any other resolved value pauses the queue attempt
+in its existing `cancelled` state without running the handler. The worker
+`context.pause()` exposes the same operation. An authorized operator can
+explicitly `requeue` and claim it for reconciliation; it never becomes an
+unreclaimable completed job merely because its external outcome is unknown.
+A thrown policy error follows the ordinary failure path and is checked again on
+a later attempt. `createDagJobRunner` forwards the same hook. The hook supplements
+the mapped effect store's mandatory pre-dispatch fence and durable intent; it is
+not a replacement for them.
+
+Business receipts and external intents belong to application-mapped tables via
+`@jarenjs/linq/db`. Job reset/sweep operate on queue/checkpoint rows only and do
+not erase those facts. An expired lease, reset or retryable job failure cannot
+provide permission to resend unresolved external writes. Local co-commit does
+not mean exactly-once remote delivery. See the contract package's
+[durable composition](../../contract/docs/DURABLE.md).

@@ -793,6 +793,8 @@ wire response:
 | `JC1009` | the stream wire's SSE encoder was handed text the frame cannot carry: a bare carriage return inside `data`, a line terminator inside `event` or `id` (§18) |
 | `JC1010` | `client.subscribe` was asked for an operation that is not a subscribe operation (§19) |
 | `JC1011` | a ledger `commit`/`fail` named a ref that settles no started record — expired, reclaimed under a newer generation, or settled already (§8); refused by the ledger, reported to `onError` by the binding |
+| `JC1013` | a durable command settlement capability is malformed |
+| `JC2110` | a durable command was refused or failed validation |
 | `JC1012` | a provider executor, descriptor host or run capability is malformed (PROVIDER-FORMAT.md) |
 
 ### §7.4 Headers
@@ -2599,3 +2601,40 @@ a body that ends without an `end` event is then `onEnd({ reason:
 as the HTTP client does and then does nothing with it: a channel has no
 network loss to reconnect from (a closed channel is `JC2074`, final),
 and one options object serves both clients.
+
+## Durable business commands
+
+`createCommand(operation, options)` from `@jarenjs/contract/command` composes
+business settlement with the existing neutral input/output/error pipeline.
+It accepts a JSON command with `policy.idempotency: "none"`, an injected
+`repository.execute(identity, work, context)`, `identity(input, context)`,
+`authorize(input, context)` and `handler(input, context)`. The identity declares
+tenant, environment, aggregate, operation, command key, hash version and payload
+hash. The host is responsible for a collision-resistant hash over every field
+that affects the command; canonical JSON itself is a lossless alternative.
+
+The handler receives the repository transaction as `ctx.host`. Expected entity
+revisions, domain writes, receipt writes and `ctx.host.jobs.enqueue` belong to
+that transaction. The neutral pipeline validates the handler's result before
+settlement. Any invalid output/error, failed receipt write or failed commit
+rolls back the transaction. Only failure codes explicitly listed in
+`commitFailures` may commit observations; ordinary declared failures roll back.
+The optional `references(outcome, context)` preserves application audit IDs.
+
+Use the same `command.handler` in HTTP/local/port handler tables and
+`command.execute(input, context)` in jobs. Direct execution reports `committed`,
+`replay`, `uncommitted` or `refused`; committed/replayed outcomes live in
+`receipt.outcome`. `historic: true` means the stored effect, never current entity
+state. A separate read operation observes current state. Every invocation checks
+current authorization before accessing a receipt. Refused execution exposes no
+historic result. Bindings render a refusal as a generic host fault unless the
+host supplies `refuse(reason, context)` returning a declared operation failure.
+
+Transport response caching is deliberately disallowed on a durable command:
+an HTTP ledger replay could bypass the command's current authorization hook.
+Existing HTTP TTL policies and local `capabilities.idempotency: false` retain
+their meanings. Business replay is supplied by the mapped receipt repository,
+not by the transport capability. Cancellation cannot undo an already committed
+receipt or establish that a remote effect did not happen.
+
+See [durable composition](DURABLE.md) for the crash matrix and public recipe.

@@ -12,7 +12,7 @@
 
 export { contractAppBinding } from './binding.js';
 export { createContractEffect } from './effect.js';
-export { createContractSubscription } from './subscription.js';
+export { createContractSubscription, createRunPageHandler } from './subscription.js';
 
 /**
  * @typedef {import('./binding.js').ContractAppBinding} ContractAppBinding

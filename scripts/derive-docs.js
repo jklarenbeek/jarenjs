@@ -29,6 +29,7 @@ import { ledgerFacts } from './generate-ledger-facts.js';
 import { formsFacts } from './generate-forms-facts.js';
 import { recallFacts } from './generate-recall-facts.js';
 import { adoptionFacts } from './generate-adoption-facts.js';
+import { durableFacts } from './generate-durable-facts.js';
 import { providerFacts } from './generate-provider-facts.js';
 import { lexicalFacts } from './generate-lexical-facts.js';
 import { collectionFacts } from './generate-collection-facts.js';
@@ -43,6 +44,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts],
   argv: process.argv.slice(2),
 }));

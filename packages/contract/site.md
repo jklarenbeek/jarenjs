@@ -108,3 +108,33 @@ Benchmarks page, losses included.
 TypeScript declarations and an in-process dispatch against echo handlers, one tab
 each. The Benchmarks page has the match and dispatch numbers beside find-my-way,
 hono and Fastify.
+
+### Durable commands and run observation
+
+Business commands can share permanent receipts across HTTP, local calls and jobs.
+`createCommand` validates the domain result before its receipt and outbox commit,
+checks current authorization before replay, and preserves the original outcome
+after execution leases expire. Its receipt repository maps application-owned
+history through `@jarenjs/linq/db`; application policy supplies identity, permissions
+and expected revisions.
+
+```js
+import { createCommand } from '@jarenjs/contract/command';
+import { createDbReceipts } from '@jarenjs/linq/db';
+
+// client, contract, identity, authorize and adjust are application declarations.
+const repository = createDbReceipts(client, { receipts: 'history' });
+const command = createCommand(contract.operations['item.adjust'], {
+  repository, identity, authorize, handler: adjust,
+});
+const outcome = await command.execute({ key: 'adjust-1', expected: 0, delta: 3 });
+// Repeating the same command observes receipt.outcome without another mutation.
+```
+
+The command uses `policy.idempotency: "none"`: business receipts supply replay,
+and transport response caching cannot bypass fresh authorization. External writes
+use reviewed per-leg sending intent and explicit reconciliation. A timeout or lost
+response remains unresolved; a lease takeover does not resend it. Run observation
+uses bounded revision pages, while navigation detaches the observer without
+cancelling the durable run. The full [crash and authorization matrix](https://github.com/jklarenbeek/jarenjs/blob/main/packages/contract/docs/DURABLE.md)
+also describes provider-specific and operator qualifications that remain separate.

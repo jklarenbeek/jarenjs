@@ -115,6 +115,9 @@ back, the durable ledger over what it opened, and replication document authoring
 | `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
+| `createDbReceipts(client, options)` | permanent receipts and independent fenced leases; see durable mapped records | structural receipt repository |
+| `createDbEffectStore(client, options)` | reviewed external intent and reconciliation under job fences | structural effect store |
+| `createDbRunStore(client, options)` | mapped workflow checkpoints and bounded revision event pages | structural run store |
 | `createDbIngestionStore(client, options)` | atomic page/checkpoint staging and complete snapshot publication; see [complete ingestion store](DB-CLIENT.md#complete-ingestion-store) | structural ingestion store |
 | `createDbRangeProvider(store, entity, spec, options)` | a bounded structural range source over keyset pages and committed capture; also `handle.range(spec, options)` — [COLLECTION-PROVIDER.md](../../app/docs/COLLECTION-PROVIDER.md) | `Promise<DbRangeProvider>` |
 
@@ -840,10 +843,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->675,895<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->675,103<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->676<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->675<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather
@@ -874,7 +877,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->45,653<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->44,143<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at
@@ -1006,3 +1009,77 @@ reconciled history of observed identities; missing identities are not implicitly
 deleted. Applications own retirement of absent facts, staging retention and
 business-history policy. Without `facts`, only raw staging and publication are
 maintained. No provider schema, receipt TTL or manual-edit rule is inferred.
+
+## Durable mapped records
+
+`createDbReceipts`, `createDbEffectStore` and `createDbRunStore` from
+`@jarenjs/linq/db` adapt application-declared collections or entities. Each record option
+accepts its name, `{ collection, read, write }` or `{ entity, read, write, key? }`:
+synchronous, lossless mappings
+between application fields and canonical records with an `id`. The optional
+`key(id)` maps canonical identity to the declared physical key, including a
+composite key object. Entity writes use the existing direct create/update/delete
+API, read back the persisted result, and refuse lost identity before commit. A failed
+round-trip or changed identity refuses `JL2009`. Physical tables and column names
+remain the model's declarations; no adapter creates a second authoritative
+business ledger. Root operations use immediate transactions; transaction-client
+adapters use the caller's savepoint and commit with that caller.
+
+`createDbReceipts(client, { receipts, leases?, runtime? })` stores permanent
+command identity, validated outcome, stable references and creation/revision
+metadata. Its trusted-host methods are `lookup`, `execute`, `claim`, `release`,
+`sweep`, `migrate` and `compact`. Authorization belongs to the command layer.
+Claim leases are independent execution capabilities: expiry/recovery replaces
+the token, while receipt lookup always wins before admitting any work. A hash
+or hash-version collision refuses; receipts never expire. Sweep accepts at most
+1000 selected identities and deletes only expired leases. It never interprets
+replication acknowledgement as retention permission.
+
+Migration takes at most 1000 explicit receipt outcomes with references. It
+preserves originals and later receipts; a conflicting identity/outcome/reference
+refuses the whole batch. Repeating it reports zero changes, writes and revisions,
+including after compaction/restart. Expired HTTP claims cannot be imported as
+business outcomes implicitly. Compaction requires `retainReplay: true`,
+`retainReferences: true`, `actor` and `reason`; it removes only auxiliary data,
+keeps collision identity/outcome/references, and becomes a zero-write no-op on
+repeat. Erasure is unsupported and refused.
+
+`createDbEffectStore(client, { operations, maxLegs?, maxBytes? })` provides
+`prepare`, `get`, `begin`, `settle`, `recover` and `reconcile`. A reviewed plan
+contains `id`, `jobId`, `kind`, `actor`, `reason`, `hashVersion` and bounded `legs`.
+Each leg names `id`, a provider `request` and `maxAttempts`; arbitrary reviewed
+selection/payload declarations stay in the frozen plan. Preparation plus its
+optional local callback and enqueue co-commit. Repeated preparation is a no-op;
+changed reviewed bytes refuse. Each sending/settlement operation compares the
+operation revision and uses `tx.jobs.assertLease` against the plan's job ID.
+Remote I/O occurs outside these transactions. Confirmed/rejected/unresolved
+states and individual leg attempts survive lease takeover.
+
+Reconciliation requires a unique decision `id`, `actor`, `reason`, `action`
+(`confirm`, `reject`, `retry`) and public `evidence`. Repeating identical evidence
+is a zero-write/revision no-op; a reused decision ID with different evidence
+refuses. Idempotent retries preserve the provider key and original attempt
+budget. Absence without an authoritative non-application guarantee is not retry
+permission. A single-send leg remains limited to one attempt; a proven negative
+may be rejected and followed by a separately reviewed operation. Compensation
+requires a separate plan with `compensationOf`, `compensationAuthorized: true`
+and its own authorized actor/reason. The trusted host must establish that
+permission; the boolean is recorded evidence, not authentication.
+
+`createDbRunStore(client, { runs, events, statuses?, summary?, canReset?,
+maxPage?, maxBytes? })` attaches existing IDs and status vocabularies to workflow
+checkpoints. `attach` verifies workflow/schema/job identity, `load` checks it
+before reading a checkpoint, and `save` combines workflow generation CAS, the
+job fence, mapped status, summary and event in one transaction. The application
+`summary(snapshot)` projects only public JSON. Default summaries contain status
+and generation, not inputs or results. `get` is trusted/private;
+`page(id, { after, limit })` exposes bounded public events and current summary.
+Missing event history returns `reset-required` with the current durable cursor.
+
+`requestCancel` compares the observed revision and records actor/reason;
+`finish` persists a final cancelled/failed observation after draining.
+`reset` changes only this run's checkpoint and requires current revision,
+inactive status, actor/reason and a transactional `canReset(tx, record)` policy.
+The default refuses; the policy must consult receipts and unresolved effects.
+Reset never deletes those tables. Incompatible workflow/schema identities refuse;
+a host must perform an explicitly reviewed migration before attachment.

@@ -15,3 +15,4 @@ export { createSplitterWidget } from './splitter.js';
 export { createDocStore, encodeShare, decodeShare } from './docstore.js';
 export { AppCompileError, AppRuntimeError, HostValueError, toError, APP_CODES } from './errors.js';
 export { createArrayRangeProvider, createCollectionCoordinator } from './collection.js';
+export { createRunObservation } from './runs.js';

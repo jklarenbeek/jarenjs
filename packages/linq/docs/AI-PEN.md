@@ -94,5 +94,5 @@ sub-call budgets, storage and result interpretation remain runner concerns.
 
 ## 7. Cost
 
-The isolated AI program pen costs **<!--fact:bundle.ai-->16,982<!--/fact--> bytes**.
+The isolated AI program pen costs **<!--fact:bundle.ai-->15,472<!--/fact--> bytes**.
 Its tree probe excludes AI, other target engines and the query chain.

@@ -126,21 +126,21 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->176<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
-| `./schema` | <!--fact:bundle.schema.kb-->37<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
-| `./model` | <!--fact:bundle.model.kb-->46<!--/fact--> kB | the schema pen it subclasses |
-| `./jslt` | <!--fact:bundle.jslt.kb-->20<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
-| `./migration` | <!--fact:bundle.migration.kb-->24<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
-| `./contract` | <!--fact:bundle.contract.kb-->49<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
-| `./flow` | <!--fact:bundle.flow.kb-->20<!--/fact--> kB | the capture; of the schema pen, only the brand |
-| `./app` | <!--fact:bundle.app.kb-->51<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
-| `./forms` | <!--fact:bundle.forms.kb-->41<!--/fact--> kB | the schema pen it subclasses |
-| `./ai` | <!--fact:bundle.ai.kb-->17<!--/fact--> kB | action programs; no AI runtime |
-| `./messages` | <!--fact:bundle.messages.kb-->18<!--/fact--> kB | message templates; no locale packs |
-| `./jtlt` | <!--fact:bundle.jtlt.kb-->17<!--/fact--> kB | text template capture; no renderer |
-| `./project` | <!--fact:bundle.project.kb-->15<!--/fact--> kB | project files; no Studio engine |
-| `./charts` | <!--fact:bundle.charts.kb-->17<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->676<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `.` | <!--fact:bundle.chain.kb-->175<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `./schema` | <!--fact:bundle.schema.kb-->35<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
+| `./model` | <!--fact:bundle.model.kb-->44<!--/fact--> kB | the schema pen it subclasses |
+| `./jslt` | <!--fact:bundle.jslt.kb-->18<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
+| `./migration` | <!--fact:bundle.migration.kb-->23<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
+| `./contract` | <!--fact:bundle.contract.kb-->47<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./flow` | <!--fact:bundle.flow.kb-->18<!--/fact--> kB | the capture; of the schema pen, only the brand |
+| `./app` | <!--fact:bundle.app.kb-->50<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
+| `./forms` | <!--fact:bundle.forms.kb-->39<!--/fact--> kB | the schema pen it subclasses |
+| `./ai` | <!--fact:bundle.ai.kb-->15<!--/fact--> kB | action programs; no AI runtime |
+| `./messages` | <!--fact:bundle.messages.kb-->17<!--/fact--> kB | message templates; no locale packs |
+| `./jtlt` | <!--fact:bundle.jtlt.kb-->15<!--/fact--> kB | text template capture; no renderer |
+| `./project` | <!--fact:bundle.project.kb-->14<!--/fact--> kB | project files; no Studio engine |
+| `./charts` | <!--fact:bundle.charts.kb-->16<!--/fact--> kB | chart definitions; no chart engine |
+| `./db` | <!--fact:bundle.db.kb-->675<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -377,5 +377,22 @@ The packed-consumer gate installs this composition independently of each
 package's own dependency-closure proof. It executes synthetic REST, GraphQL and
 archive-link transcripts and two bounded ingestion consumers on Node and Bun.
 See the [provider contract](../packages/contract/docs/PROVIDER-FORMAT.md) for
-refusals and qualification limits. Real provider writes and business receipt
-reconciliation are separate capabilities.
+refusals and qualification limits. Real provider writes still need separate
+qualification; durable commands and reconciliation are described below.
+
+## Durable commands and existing runs
+
+The installed composition consumer in `test/consumer/durable.js` uses
+`@jarenjs/contract/command`, `@jarenjs/linq/db`, `@jarenjs/flow` and `@jarenjs/app`
+with an application model. `npm run test:packed` executes it from packed Node and
+Bun installations alongside the independent per-package closure checks. It
+covers permanent replay after expiry, authorization, interrupted multi-leg
+operations, fenced reconciliation and bounded run observation. The reference
+cost comparison is `npm run benchmark:durable`. See the
+[crash and authorization matrix](../packages/contract/docs/DURABLE.md).
+
+Hosts still provide business schemas, public summary projections, current
+permissions, provider guarantees and actor/reason decisions. Single-send outcomes
+remain unresolved until evidence settles them. Synthetic installed-consumer
+qualification does not establish real provider behavior, downstream cutover,
+native executable or PostgreSQL support, or operator reconciliation acceptance.

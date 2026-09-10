@@ -720,3 +720,16 @@ and the database engine does not import its adapters. Workflow resources are a
 private argument to task handlers, separate from JSON checkpoints and traces.
 See [provider protocols and authority](../packages/contract/docs/PROVIDER-FORMAT.md)
 and [complete ingestion](../packages/flow/docs/WORKFLOW-FORMAT.md#complete-provider-ingestion).
+
+### Durable business composition
+
+`contract/command` reuses the neutral invocation pipeline and injects a receipt
+repository. `linq/db` maps business receipts, external intent and run/event records
+onto application-declared collections and the store's transaction owner. `db`
+provides the existing outbox, job fences and read-only lease assertion; it imports
+no flow engine. `flow` composes external-effect admission and domain runs with
+its existing workflow/DAG engines through injected provider/storage capabilities.
+`contract/app` authorizes bounded progress reads and `app` observes them by cursor.
+No reverse package edge, second authoritative business ledger or scheduler is
+introduced. Public contracts and limitations are in
+[durable operations](../packages/contract/docs/DURABLE.md).

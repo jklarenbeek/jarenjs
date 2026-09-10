@@ -735,6 +735,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/contract/schemas/jaren-contract.schema.json` | schema | — |
 | `@jarenjs/contract/package.json` | metadata | — |
 | `@jarenjs/contract/provider` | JavaScript | declared |
+| `@jarenjs/contract/command` | JavaScript | declared |
 <!--/fact-->
 
 Author JSON template catalogs and MessageSpec references with the

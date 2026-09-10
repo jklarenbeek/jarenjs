@@ -985,10 +985,10 @@ meaning is a `$return` that constructs an array explicitly.
 
 ## 7. Cost
 
-`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->19,988<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->18,478<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.flow.kb-->20<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.flow.kb-->18<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report. Building a machine with a guard and
@@ -1015,7 +1015,7 @@ two effects as a consumer would — `defineFsm`, `state`, `on` and
   `packages/linq/src/flow/`.
 
 Two documents, two grammars, thirteen exported names — and 57 bytes more
-than `./jslt`'s <!--fact:bundle.jslt-->19,934<!--/fact-->, which writes one. The reason is that most of
+than `./jslt`'s <!--fact:bundle.jslt-->18,424<!--/fact-->, which writes one. The reason is that most of
 both prices is the same shared machinery: the recording proxy
 (`expression.js`), the root capture (`capture-root.js`) and the JSON
 boundary (`json-boundary.js`). What this pen adds on top of them is 685

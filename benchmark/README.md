@@ -1389,3 +1389,16 @@ Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 Offline synthetic Node SQLite ingestion. The retained reader only extracts recorded transcripts; native timings include opening storage, descriptor execution, private authority checks, page/checkpoint commits, publication and zero-write replay. Their timings describe different work. No real provider latency, credentials, external write reconciliation or production cutover is qualified.
 
 <!--/fact-->
+
+<!--fact:durable.measurements-->
+
+Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+
+| Commands | Domain/outbox ms | Durable command ms | Receipt replay ms | Added cost ratio | Sends / unresolved resends | Second writes / revisions | Events | Heap / RSS MiB | Teardown ms / resources |
+|---:|---:|---:|---:|---:|---|---|---:|---|---|
+| 32 | 7.09 | 15.88 | 5.42 | 2.24x | 2 / 0 | 0 / 0 | 8 | 23.69 / 112.07 | 0.28 / 0 |
+| 128 | 14.73 | 33.22 | 13.35 | 2.26x | 2 / 0 | 0 / 0 | 8 | 41.05 / 123.25 | 0.13 / 0 |
+
+Synthetic local SQLite commands and interrupted multi-leg effects. Baseline executes the same domain/outbox work without a receipt; durable execution adds validation, authorization and immutable replay. Limits are fixed acceptance ceilings, not performance claims. Real providers, downstream acceptance, native executables, PostgreSQL and operator reconciliation are pending.
+
+<!--/fact-->

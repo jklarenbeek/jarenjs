@@ -26,3 +26,6 @@ export { createDbIngestionStore } from './ingest.js';
 export { createDbRangeProvider } from './range.js';
 export { createLexicalRangeProvider } from './search.js';
 export { defineReplication } from './replication.js';
+export { createDbReceipts } from './receipts.js';
+export { createDbEffectStore } from './effects.js';
+export { createDbRunStore } from './runs.js';

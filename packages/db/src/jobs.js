@@ -436,6 +436,21 @@ export function createJobEngine(options) {
       { docPath: '/jobs', collection: JOBS_TABLE });
   };
 
+  /** Verify current execution authority without renewing or writing a checkpoint.
+   * Inside tx.jobs this check and mapped record writes share the same lock.
+   * @param {any} lease */
+  const assertLease = (lease) => {
+    const misuse = requireLease(lease, 'assertLease()');
+    if (misuse !== null) throw misuse;
+    return chain(prepared('assertLease', `SELECT id FROM "${JOBS_TABLE}" WHERE id=? AND ${FENCE}`)
+      .get([lease.jobId, lease.token, now()]), (row) => {
+      if (row !== undefined) return true;
+      return chain(refuseSettlement(lease, 'assertLease()'), (error) => {
+        throw error ?? new DbRuntimeError('JD2065', 'the job is already settled', { docPath: '/jobs' });
+      });
+    });
+  };
+
   /** §4: the jittered exponential backoff. */
   const backoffOf = (attempts, workerDefaults) => {
     const base = workerDefaults?.backoffBase ?? defaults.backoffBase;
@@ -849,10 +864,11 @@ export function createJobEngine(options) {
    * @param {{ handlers: Record<string, Function>, concurrency?: number,
    *   pollInterval?: number, leaseMs?: number, owner?: string,
    *   backoffBase?: number, backoffCap?: number, renew?: boolean,
-   *   onOutcome?: (event: any) => void }} workerOptions
+   *   onOutcome?: (event: any) => void, effectSafety?: (job: any, context: any) => any }} workerOptions
    */
   const createWorker = (workerOptions) => {
     const handlers = workerOptions?.handlers;
+    if (workerOptions?.effectSafety !== undefined && typeof workerOptions.effectSafety !== 'function') throw new TypeError('effectSafety must be a function');
     if (handlers === null || typeof handlers !== 'object'
       || Object.keys(handlers).length === 0
       || Object.values(handlers).some((handler) => typeof handler !== 'function')) {
@@ -1143,8 +1159,11 @@ export function createJobEngine(options) {
       try {
         let result;
         try {
-          result = await handlers[job.kind](job.payload,
-            { job, checkpoints: attempt.checkpoints, signal: attempt.signal });
+          const context = { job, lease: () => attempt.lease, checkpoints: attempt.checkpoints, signal: attempt.signal,
+            pause: () => io(() => cancel(job.id, { lease: attempt.lease }), 'a durable effect pause') };
+          const admitted = workerOptions.effectSafety === undefined || await workerOptions.effectSafety(job, context) === true;
+          if (!admitted) { await context.pause(); recordCancelled(attempt); return; }
+          result = await handlers[job.kind](job.payload, context);
         }
         catch (error) {
           // past cancellation the store is closing: leave the leased
@@ -1330,6 +1349,7 @@ export function createJobEngine(options) {
     counts,
     claim,
     renew,
+    assertLease,
     complete,
     fail,
     checkpointsFor,

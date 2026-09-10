@@ -745,10 +745,10 @@ from a drop plus a create, and guessing risks silent data loss.
 
 ## 7. Cost
 
-`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->24,337<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->22,827<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.migration.kb-->24<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.migration.kb-->23<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-step migration as a
@@ -778,4 +778,4 @@ proxy behind it, and the canonicalizer — and the two model documents
 themselves arrive as data, deep-frozen JSON that the consumer's own model
 module built. So a consumer who ships migrations to a browser does not
 ship the model pen with them; a consumer who OPENS a store does, and pays
-`./model`'s <!--fact:bundle.model-->45,653<!--/fact--> bytes for it.
+`./model`'s <!--fact:bundle.model-->44,143<!--/fact--> bytes for it.

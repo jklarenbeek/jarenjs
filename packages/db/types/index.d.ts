@@ -1798,6 +1798,8 @@ export interface JobWorker {
 }
 
 export interface JobWorkerOptions {
+  /** Admit only when current durable effect policy returns true. */
+  effectSafety?: (job: ClaimedJob, context: { lease(): JobLease; signal: AbortSignal }) => boolean | Promise<boolean>;
   /**
    * `checkpoints` is bound to THIS attempt and follows its current
    * lease, so a renewal does not strand it. `signal` aborts for either
@@ -1807,6 +1809,9 @@ export interface JobWorkerOptions {
    */
   handlers: Record<string, (payload: unknown, context: {
     job: ClaimedJob;
+    lease(): JobLease;
+    /** Pause as cancelled, permitting explicit requeue for reconciliation. */
+    pause(): Promise<boolean>;
     checkpoints: { load(runId: string): unknown;
       save(runId: string, nodeId: string, value: unknown): unknown;
       complete(runId: string, result: unknown): unknown };
@@ -1847,6 +1852,8 @@ export interface JobsApi {
    * expired), never a silent `false`.
    */
   renew(lease: JobLease, options?: { leaseMs?: number }): Promise<JobLease>;
+  /** Check the existing token/expiry fence without writing. */
+  assertLease(lease: JobLease): Promise<boolean>;
   /** Settle the attempt this lease holds. `true`, or one of the three
    * coded refusals above — a caller that cannot tell "already done"
    * from "you are stale" guesses, and guesses wrong. */
@@ -1922,6 +1929,7 @@ export interface JobsOptions {
 }
 
 export declare function createDagJobRunner(store: Store, options: {
+  effectSafety?: JobWorkerOptions['effectSafety'];
   compileDag: Function;
   documents: Record<string, unknown>;
   tasks?: Record<string, Function | { run: Function; version?: string; taskVersions?: Record<string, string> }>;

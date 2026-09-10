@@ -23,3 +23,5 @@ export { FlowCompileError, FlowRuntimeError, FLOW_CODES } from './errors.js';
 /** @typedef {import('./workflow.js').WorkflowStore} WorkflowStore */
 /** @typedef {import('./workflow.js').WorkflowResult} WorkflowResult */
 /** @typedef {import('./workflow.js').CompiledWorkflow} CompiledWorkflow */
+export { createExternalEffects } from './effects.js';
+export { createDomainRun } from './runs.js';

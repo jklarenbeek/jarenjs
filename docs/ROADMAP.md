@@ -520,61 +520,38 @@ production cutover. Streaming DAG input is not required by this composition.
   before downstream cutover. Media/binary, bulk-operation and upload protocols
   require separately qualified descriptors; they currently refuse before
   dispatch. SDK transports must prove one request per admitted attempt and bind
-  provider idempotency explicitly. External writes still require the durable
-  receipts and reconciliation below; single-send classification alone cannot
+  provider idempotency explicitly. External writes use the durable
+  receipts and reconciliation composition; single-send classification alone cannot
   resolve an uncertain remote outcome. Application membership, destination and
   reconciliation rules remain injected, including preservation of manual facts.
-- [ ] **Durable domain receipts beyond an expiring HTTP claim.** The shipped
-  ledger co-settles HTTP commands on a declared collection, but requires a
-  finite positive TTL; local/port bindings leave settlement policy inert.
-  Provide a qualified persistence/command composition for existing mapped
-  receipt and immutable event tables, with shared HTTP/local/job invocation
-  semantics. Define command identity and payload-hash versions, tenant/env/
-  aggregate scope, collision refusal, expected revisions, replay outcome and
-  current-state observation separately, current authorization for replay reads,
-  and retention independent of a
-  short-lived execution lease. Expiry, sweep or retryable failure must never
-  authorize repeating an already recorded business mutation. Reuse the current
-  required-settlement hook for same-transaction output/error validation,
-  revision checks, domain writes and receipts, including deliberate validated
-  failure observations that commit. Make claim/lease recovery and historical
-  replay retention separate policies, with explicit migration and compaction
-  rules preserving audit references. Cross-process races, invalid output,
-  settlement/commit failure and restart must prove one committed domain effect
-  and no second database or parallel authoritative ledger.
-- [ ] **External effect reconciliation on the existing job/outbox engine.**
-  Model durable preparation, frozen reviewed payload/hash, selected fields or
-  legs, sending intent, attempts, confirmed success/rejection and unresolved
-  outcome separately from a job lease. Commit preparation and local facts
-  together, release the transaction before I/O, then settle evidence under the
-  expected operation revision/fence. A crash after send and before local
-  settlement, timeout, disconnect, abort or malformed response can leave an
-  externally completed effect; lease expiry must not automatically resend it.
-  Inject provider idempotency guarantees, correlation/read-back probes and
-  explicit operator reconciliation with actor/reason evidence; absence of a
-  match is proof of non-application only when the provider guarantees it.
-  Partial multi-leg success remains individually recorded, and compensation
-  is a separately authorized operation, not rollback of a remote system.
-  Extend flow/job retry admission and recovery where needed so unknown effects
-  block or reconcile while safe work resumes. Test every crash boundary and
-  stale worker; exactly-once store settlement is never advertised as exactly-
-  once delivery to a provider.
-- [ ] **Domain run adoption, observation and audit without a second engine.**
-  Compose the existing flow FSM/DAG, job fences/checkpoints and app task effect
-  with mapped domain run IDs, revisions and transitions so an existing durable
-  import, sync, enrichment or review run can attach, resume and cancel through
-  the same public contract. Decide persisted workflow/schema identity and
-  upgrade/reset compatibility before consuming old checkpoints; reset cannot
-  erase immutable business facts or authorize replay of unresolved external
-  effects. Expose bounded, paged public progress/events and resumable observation
-  by cursor or revision, with stale-update rejection and secret-free errors;
-  navigation detaches observation without implicitly cancelling durable work.
-  Explicit cancellation stops admission, drains work and records its final
-  observation before host resources close. Prove restart, lease takeover,
-  concurrent observers, lost progress delivery and shutdown against the
-  application's existing run/status semantics. This adopts orchestration;
-  source provenance, review decisions, stock movements and posted history keep
-  their authoritative schema and domain rules.
+- [ ] **Existing business-history adoption qualification.** The public
+  [durable command composition](../packages/contract/docs/DURABLE.md) now
+  co-settles validated HTTP/local/job commands over mapped application tables,
+  with permanent replay, separate leases and bounded migration/compaction.
+  Qualify each downstream application's historical outcome mapping, hash-version
+  policy, retention rules and existing transaction owner before cutover. Native
+  executable and PostgreSQL qualification remain separate from the installed
+  Node/Bun SQLite evidence; arbitrary historical schemas and destructive
+  retention policies are not inferred or supported automatically.
+- [ ] **Provider-specific external reconciliation acceptance.** The
+  [fenced effect composition](../packages/flow/docs/WORKFLOW-FORMAT.md#domain-run-and-external-effect-adoption)
+  records reviewed legs, sending intent, uncertainty and explicit reconciliation
+  on the existing job engine. Real-provider qualification must establish key
+  scope/retention, correlation/read-back guarantees, absence semantics and
+  authoritative outcome classification. Exercise real disconnect, timeout and
+  lost-settlement boundaries, then obtain application/operator acceptance for
+  manual reconciliation and separately authorized compensation. Synthetic
+  exactly-once local settlement does not establish exactly-once remote delivery.
+- [ ] **Application run lifecycle adoption.** The public
+  [mapped run and observation adapters](../packages/linq/docs/DB-CLIENT.md#durable-mapped-records)
+  preserve run identities, workflow/schema provenance and bounded progress while
+  reusing workflow checkpoints and job fences. Qualify each application's
+  historical status vocabulary, public-summary projection, upgrade/reset policy,
+  remote cancellation boundaries and host resource lifecycle before cutover.
+  Source provenance, review decisions and posted history retain their domain
+  schemas and rules. Native executable, PostgreSQL and downstream/manual
+  acceptance remain open; synthetic restart, takeover and observer evidence do
+  not substitute for those runs.
 
 ## Native application adoption — qualification and order
 

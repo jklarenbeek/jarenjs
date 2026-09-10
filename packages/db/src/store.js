@@ -2447,6 +2447,7 @@ export function openStore(model, options) {
               get: lift((...args) => gated(() => jobsEngine.get(...args), 'a root job read')),
               counts: lift(() => gated(() => jobsEngine.counts(), 'a root job read')),
               claim: lift((...args) => gated(() => jobsEngine.claim(...args), 'a root job claim')),
+              assertLease: lift((...args) => gated(() => jobsEngine.assertLease(...args), 'a root lease check')),
               renew: lift((...args) => gated(() => jobsEngine.renew(...args), 'a root lease renewal')),
               complete: lift((...args) => gated(() => jobsEngine.complete(...args), 'a root job settlement')),
               fail: lift((...args) => gated(() => jobsEngine.fail(...args), 'a root job settlement')),
@@ -2891,6 +2892,10 @@ export function openStore(model, options) {
                 claim: lift((/** @type {any[]} */ ...args) => {
                   requireScope(identity);
                   return jobsEngine.claim(...args);
+                }),
+                assertLease: lift((/** @type {any[]} */ ...args) => {
+                  requireScope(identity);
+                  return jobsEngine.assertLease(...args);
                 }),
                 renew: lift((/** @type {any[]} */ ...args) => {
                   requireScope(identity);

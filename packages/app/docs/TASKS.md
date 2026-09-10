@@ -254,3 +254,28 @@ above validates against the shipped
 A pattern that needed a schema extension would be a format change; this
 one is proof the existing vocabulary already carries request identity
 and staleness rejection.
+
+## Observe an existing durable run
+
+`createRunObservation({ readPage, wake, pageSize?, maxBytes? })` is an app
+subscription factory, used as `subs: { run: observation }`. The subscription
+props name `runId`, attempt `id`, saved `cursor` and `update`/`error` actions.
+`readPage({ id, after, limit }, { signal })` reads one bounded public event page;
+`wake(signal)` waits for the next notification or the host's bounded poll.
+Only one page is outstanding and only current status, summary, revision and
+cursor enter app state. The update action must guard the attempt ID and reject
+older revisions, as for task completion. No accumulated event log enters state.
+
+The cleanup returned by a subscription and `observation.dispose()` detach
+observers. They do not cancel the durable run. Lost notifications recover through
+the saved revision cursor; missing history emits `reset: true` and a fresh
+summary. Malformed/oversized pages and read failures emit only
+`{ code: "run-observation-failed" }`, never exception text or provider credentials.
+The host projection decides which domain summary fields are public.
+
+`createRunPageHandler({ page, authorize, maxPage? })` from `@jarenjs/contract/app`
+is an ordinary read handler that checks current authority before touching durable
+history. Inject `createDbRunStore(...).page` into it, expose it through a compiled
+read operation, and have `readPage` invoke that operation through any public
+contract client. Explicit cancellation is a separate authorized command; navigation
+only removes the subscription.

@@ -1,0 +1,43 @@
+{
+  "format": "jaren-durable-measurements/1",
+  "freezeHash": "360b86e3225fbe3cc46fd4575d33f6eabed6043b978779c9f1a38be3c152eb2d",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "scope": "Synthetic local SQLite commands and interrupted multi-leg effects. Baseline executes the same domain/outbox work without a receipt; durable execution adds validation, authorization and immutable replay. Limits are fixed acceptance ceilings, not performance claims. Real providers, downstream acceptance, native executables, PostgreSQL and operator reconciliation are pending.",
+  "consumers": [
+    {
+      "commands": 32,
+      "baselineMs": 7.0907379999999876,
+      "commandMs": 15.875031000000007,
+      "replayMs": 5.4223949999999945,
+      "sends": 2,
+      "unresolvedResends": 0,
+      "secondWrites": 0,
+      "secondRevisions": 0,
+      "events": 8,
+      "sampledHeapBytes": 24841856,
+      "rssBytes": 117518336,
+      "teardownMs": 0.2830619999999726,
+      "remainingResources": 0
+    },
+    {
+      "commands": 128,
+      "baselineMs": 14.727137999999968,
+      "commandMs": 33.22243499999996,
+      "replayMs": 13.349330000000009,
+      "sends": 2,
+      "unresolvedResends": 0,
+      "secondWrites": 0,
+      "secondRevisions": 0,
+      "events": 8,
+      "sampledHeapBytes": 43041024,
+      "rssBytes": 129236992,
+      "teardownMs": 0.13025200000004133,
+      "remainingResources": 0
+    }
+  ]
+}

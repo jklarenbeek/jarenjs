@@ -52,7 +52,7 @@ const fingerprint = (value) => hashContent(canonicalizeJson(value ?? null));
  *   concurrency?: number, pollInterval?: number, leaseMs?: number,
  *   owner?: string, renew?: boolean, onOutcome?: (event: any) => void,
  *   backoffBase?: number, backoffCap?: number,
- *   stopGraceMs?: number }} options
+ *   stopGraceMs?: number, effectSafety?: (job: any, context: any) => any }} options
  * @returns {{ start: () => any, stop: (options?: any) => Promise<any>, stats: () => any }}
  */
 export function createDagJobRunner(store, options) {
@@ -215,6 +215,7 @@ export function createDagJobRunner(store, options) {
     owner: options.owner,
     renew: options.renew,
     onOutcome: options.onOutcome,
+    effectSafety: options.effectSafety,
     backoffBase: options.backoffBase,
     backoffCap: options.backoffCap,
     // the runner's declared default for `stop()` with no override; an

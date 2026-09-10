@@ -759,6 +759,8 @@ if (gzipSync(lexicalEngine.outputFiles[0].contents).length > 65536) throw new Er
 console.log(`Lexical tree shaking passed (${gzipSync(lexicalEngine.outputFiles[0].contents).length} gzip bytes).`);
 
 for (const [entry, forbidden] of [
+  ["export { createCommand } from '@jarenjs/contract/command';", /packages\/(flow|linq|db|app|ai)/],
+  ["export { createExternalEffects } from '@jarenjs/flow';", /packages\/(contract|linq|db|ai)/],
   ["export { createProviderExecutor } from '@jarenjs/contract/provider';", /packages\/(ai|flow|linq|db)|provider\/(compile|run)\.js/],
   ["export { createIngestion } from '@jarenjs/flow';", /packages\/(contract|linq|db|ai)/],
   ["export { createScheduler } from '@jarenjs/core/schedule';", /packages\/(json|contract|flow|linq|db|ai)/],

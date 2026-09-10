@@ -422,3 +422,46 @@ export function createDbIngestionStore(client: Client<any> | TransactionClientOf
   current(source: string): Promise<any>;
   inspect(plan: any): Promise<any>;
 };
+
+/** Lossless canonical-record mapping onto an application-declared collection. */
+export type DurableRecordMapping = string | (({ collection: string; entity?: never } | { entity: string; collection?: never }) & { key?: (id: string) => any; read: (stored: any) => any; write: (record: any) => any });
+export interface CommandIdentity {
+  tenant: string; environment: string; aggregate: string; op: string; key: string; hashVersion: string; hash: string;
+}
+/** Permanent business outcomes and independently expiring execution authority. */
+export function createDbReceipts(client: Client<any> | TransactionClientOf<any>, options: {
+  receipts: DurableRecordMapping; leases?: DurableRecordMapping; runtime?: Partial<import('@jarenjs/core/runtime').Runtime>;
+}): {
+  lookup(identity: CommandIdentity): Promise<any>;
+  execute(identity: CommandIdentity, work: (tx: TransactionClientOf<any>) => Promise<{ outcome: any; references?: any[] }>, context?: { lease?: any }): Promise<any>;
+  claim(identity: CommandIdentity, options: { leaseMs: number }): Promise<any>;
+  release(identity: CommandIdentity, lease: any): Promise<any>;
+  sweep(identities: CommandIdentity[]): Promise<{ changes: number; writes: number; revisions: number }>;
+  migrate(records: any[]): Promise<{ changes: number; writes: number; revisions: number }>;
+  compact(identity: CommandIdentity, policy: { retainReplay: true; retainReferences: true; actor: string; reason: string }): Promise<any>;
+};
+/** Durable preparation, job-fenced sending and explicit reconciliation. */
+export function createDbEffectStore(client: Client<any> | TransactionClientOf<any>, options: {
+  operations: DurableRecordMapping; maxLegs?: number; maxBytes?: number;
+}): {
+  prepare(plan: any, prepare?: (tx: TransactionClientOf<any>) => any): Promise<any>;
+  get(id: string): Promise<any>;
+  begin(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease): Promise<any>;
+  settle(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease, outcome: any): Promise<any>;
+  recover(id: string, revision: number, lease: import('@jarenjs/db').JobLease): Promise<any>;
+  reconcile(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease, decision: any): Promise<any>;
+};
+/** Application run/checkpoint records and bounded public revision pages. */
+export function createDbRunStore(client: Client<any> | TransactionClientOf<any>, options: {
+  runs: DurableRecordMapping; events: DurableRecordMapping; statuses?: Record<string, string>;
+  summary?: (snapshot: any) => any; canReset?: (tx: TransactionClientOf<any>, record: any) => any; maxPage?: number; maxBytes?: number;
+}): {
+  attach(identity: { id: string; jobId: string; workflow: string; schemaVersion: string }, lease: import('@jarenjs/db').JobLease): Promise<any>;
+  load(id: string, identity: any, lease: import('@jarenjs/db').JobLease): Promise<any>;
+  save(id: string, snapshot: any, expectedGeneration: number, lease: import('@jarenjs/db').JobLease): Promise<boolean>;
+  get(id: string): Promise<any>;
+  page(id: string, options?: { after?: number; limit?: number }): Promise<any>;
+  requestCancel(id: string, revision: number, evidence: { actor: string; reason: string }): Promise<any>;
+  finish(id: string, state: 'cancelled' | 'failed', lease: import('@jarenjs/db').JobLease): Promise<any>;
+  reset(id: string, revision: number, evidence: any, lease: import('@jarenjs/db').JobLease): Promise<any>;
+};

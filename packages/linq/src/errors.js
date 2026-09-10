@@ -15,7 +15,8 @@ import { CodedError } from '@jarenjs/core/errors';
  * this package can raise, proven in sync with QUERY-PEN.md §9's
  * normative table by a test.
  */
-export const LINQ_CODES = Object.freeze({
+// Freezing an unexported literal has no observable effect when the table is unused.
+export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0001: 'from() received neither an iterable nor a provider',
   JL0002: 'an expression proxy escaped its capture callback',
   JL0003: 'ofType/cast need an injected compileTypeTest',
@@ -38,6 +39,7 @@ export const LINQ_CODES = Object.freeze({
   JL2006: 'a provider answered an element terminal with something other than one array',
   JL2007: 'a ledger settlement named a ref that settles no started record',
   JL2008: 'a federated fetch reached its row or byte budget',
+  JL2009: 'a durable mapped record violated identity, retention or fencing',
 });
 
 /**

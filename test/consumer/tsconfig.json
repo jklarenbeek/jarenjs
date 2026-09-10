@@ -18,7 +18,8 @@
     "db-replication.ts",
     "collection.ts",
     "lexical.ts",
-    "providers.ts"
+    "providers.ts",
+    "durable-types.ts"
   ],
   "include": [
     "linq-*.ts"
