@@ -1,0 +1,164 @@
+{
+  "dialects": [
+    {
+      "id": "inventory-rest",
+      "envelope": "$.items[*]",
+      "pages": [
+        {
+          "items": [
+            {
+              "id": "i1",
+              "quantity": null
+            }
+          ],
+          "next": "c1"
+        },
+        {
+          "items": [
+            {
+              "id": "i2",
+              "quantity": 3
+            }
+          ],
+          "next": null
+        }
+      ],
+      "expectedIds": [
+        "i1",
+        "i2"
+      ],
+      "partialAfter": 1,
+      "destination": {
+        "validated": "inventory/test",
+        "current": "inventory/preview"
+      },
+      "effect": {
+        "safety": "single-send",
+        "sent": 1,
+        "response": "disconnect",
+        "expected": "unresolved",
+        "allowedResends": 0
+      }
+    },
+    {
+      "id": "commerce-graphql",
+      "envelope": "$.data.products.nodes[*]",
+      "pages": [
+        {
+          "data": {
+            "products": {
+              "nodes": [
+                {
+                  "id": "p1"
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "c1"
+              }
+            }
+          }
+        },
+        {
+          "data": {
+            "products": {
+              "nodes": [
+                {
+                  "id": "p2"
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": "c2"
+              }
+            }
+          },
+          "errors": [
+            {
+              "message": "one field unavailable",
+              "path": [
+                "products",
+                0,
+                "price"
+              ]
+            }
+          ]
+        }
+      ],
+      "expectedIds": [
+        "p1",
+        "p2"
+      ],
+      "partialAfter": 1,
+      "destination": {
+        "validated": "commerce/test",
+        "current": "commerce/preview"
+      },
+      "effect": {
+        "safety": "provider-idempotent",
+        "sent": 1,
+        "response": "timeout",
+        "expected": "reconcile-by-key",
+        "allowedResends": 0
+      }
+    },
+    {
+      "id": "archive-link",
+      "envelope": "$.entries[*]",
+      "pages": [
+        {
+          "entries": [
+            {
+              "id": "a1"
+            }
+          ],
+          "link": "</records?cursor=c1>; rel=\"next\""
+        },
+        {
+          "entries": [
+            {
+              "id": "a2"
+            }
+          ],
+          "link": null
+        }
+      ],
+      "expectedIds": [
+        "a1",
+        "a2"
+      ],
+      "partialAfter": 1,
+      "destination": {
+        "validated": "archive/test",
+        "current": "archive/preview"
+      },
+      "effect": {
+        "safety": "single-send",
+        "sent": 1,
+        "response": "malformed-response",
+        "expected": "unresolved",
+        "allowedResends": 0
+      }
+    }
+  ],
+  "expected": {
+    "partialPublication": false,
+    "changedDestination": "authority-changed",
+    "repeatedCursor": "no-progress",
+    "cancelled": "cancelled",
+    "partialGraphql": "incomplete",
+    "identicalReplay": {
+      "effectiveWrites": 0,
+      "revisions": 0,
+      "changes": 0
+    }
+  },
+  "retry": {
+    "totalAttempts": 3,
+    "overallMs": 30000,
+    "maxDelayMs": 1000,
+    "serverDelayMs": 10000,
+    "strictExpected": "budget-exhausted",
+    "compatibilityExpectedMs": 1000
+  }
+}

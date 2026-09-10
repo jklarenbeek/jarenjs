@@ -1,0 +1,164 @@
+{
+  "name": "column-only-receipts-inventory",
+  "ddl": [
+    "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z')",
+    "CREATE TABLE receipt (id INTEGER PRIMARY KEY, body BLOB NOT NULL, revision INTEGER NOT NULL DEFAULT 1)",
+    "CREATE TABLE history (receipt_id INTEGER NOT NULL REFERENCES receipt(id), body BLOB NOT NULL, revision INTEGER NOT NULL)",
+    "CREATE TRIGGER receipt_history AFTER INSERT ON receipt BEGIN INSERT INTO history VALUES (NEW.id, NEW.body, NEW.revision); END",
+    "CREATE TABLE inventory (sku TEXT NOT NULL, environment TEXT NOT NULL, quantity INTEGER, provenance TEXT, revision INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(environment, sku))",
+    "CREATE TABLE catalog (sku TEXT PRIMARY KEY, title TEXT NOT NULL, category TEXT NOT NULL)",
+    "CREATE INDEX inventory_quantity ON inventory(environment, quantity)"
+  ],
+  "seed": [
+    "INSERT INTO app_settings(key,value) VALUES ('locale','nl-NL')",
+    "INSERT INTO receipt(body) VALUES (X'0001ff')",
+    "INSERT INTO catalog VALUES ('0007','Green tea','tea'),('0012','Coffee','coffee')",
+    "INSERT INTO inventory(sku,environment,quantity,provenance) VALUES ('0007','test',NULL,NULL),('0012','test',3,'import'),('0007','preview',9,'manual')"
+  ],
+  "reads": [
+    {
+      "id": "settings",
+      "sql": "SELECT key,value,updated_at FROM app_settings ORDER BY key",
+      "expected": [
+        {
+          "key": "locale",
+          "value": "nl-NL",
+          "updated_at": "2026-01-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "receipt-history",
+      "sql": "SELECT r.id,hex(r.body) AS body,h.revision FROM receipt r JOIN history h ON h.receipt_id=r.id ORDER BY r.id",
+      "expected": [
+        {
+          "id": 1,
+          "body": "0001FF",
+          "revision": 1
+        }
+      ]
+    },
+    {
+      "id": "environment-join",
+      "sql": "SELECT c.sku,c.title,i.quantity,i.provenance FROM catalog c JOIN inventory i ON c.sku=i.sku WHERE i.environment='test' ORDER BY c.sku",
+      "expected": [
+        {
+          "sku": "0007",
+          "title": "Green tea",
+          "quantity": null,
+          "provenance": null
+        },
+        {
+          "sku": "0012",
+          "title": "Coffee",
+          "quantity": 3,
+          "provenance": "import"
+        }
+      ]
+    },
+    {
+      "id": "correlated-count",
+      "sql": "SELECT c.sku,(SELECT count(*) FROM inventory i WHERE i.sku=c.sku) AS locations FROM catalog c ORDER BY c.sku",
+      "expected": [
+        {
+          "sku": "0007",
+          "locations": 2
+        },
+        {
+          "sku": "0012",
+          "locations": 1
+        }
+      ]
+    },
+    {
+      "id": "nullable-aggregate",
+      "sql": "SELECT environment,count(*) AS rows,sum(quantity) AS quantity FROM inventory GROUP BY environment ORDER BY environment",
+      "expected": [
+        {
+          "environment": "preview",
+          "rows": 1,
+          "quantity": 9
+        },
+        {
+          "environment": "test",
+          "rows": 2,
+          "quantity": 3
+        }
+      ]
+    },
+    {
+      "id": "compound-key",
+      "sql": "SELECT quantity,revision FROM inventory WHERE environment='preview' AND sku='0007'",
+      "expected": [
+        {
+          "quantity": 9,
+          "revision": 1
+        }
+      ]
+    }
+  ],
+  "mutations": [
+    {
+      "id": "conditional-update",
+      "sql": "UPDATE inventory SET quantity=4,revision=revision+1 WHERE environment='test' AND sku='0012' AND revision=1 RETURNING quantity,revision",
+      "first": [
+        {
+          "quantity": 4,
+          "revision": 2
+        }
+      ],
+      "second": []
+    },
+    {
+      "id": "upsert-noop",
+      "sql": "INSERT INTO app_settings(key,value) VALUES ('locale','en-GB') ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE app_settings.value IS NOT excluded.value RETURNING value",
+      "first": [
+        {
+          "value": "en-GB"
+        }
+      ],
+      "second": []
+    },
+    {
+      "id": "insert-select",
+      "sql": "INSERT INTO inventory(sku,environment,quantity,provenance) SELECT sku,'copy',quantity,provenance FROM inventory WHERE environment='test' AND 1 ON CONFLICT(environment,sku) DO NOTHING RETURNING sku",
+      "first": [
+        {
+          "sku": "0007"
+        },
+        {
+          "sku": "0012"
+        }
+      ],
+      "second": []
+    }
+  ],
+  "refusals": [
+    {
+      "sql": "INSERT INTO app_settings(key,value) VALUES ('bad',NULL)",
+      "message": "NOT NULL constraint failed"
+    },
+    {
+      "sql": "INSERT INTO inventory(sku,environment) VALUES ('0007','test')",
+      "message": "UNIQUE constraint failed"
+    }
+  ],
+  "inventory": {
+    "receiptPrimaryKey": [
+      "id"
+    ],
+    "compositeKey": [
+      "environment",
+      "sku"
+    ],
+    "blobHex": "0001ff",
+    "trigger": "receipt_history",
+    "defaultRevision": "1"
+  },
+  "recovery": {
+    "boundary": "committed WAL, process exits without closing connection",
+    "expectedReceipts": 2,
+    "expectedHistory": 2,
+    "secondStartupWrites": 0
+  }
+}

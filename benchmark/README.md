@@ -1209,3 +1209,11 @@ value rows; correctness is checked before timing. Compilation and expansion
 are excluded. This isolates the addressing decision and does not claim
 complete composer or renderer throughput. The measured losses and table
 are derived into `packages/forms/README.md`.
+
+## Portable adoption reference
+
+`node benchmark/adoption.js` measures the checksum-pinned synthetic consumers
+against retained development-only oracles. It reports costs, losses and pending
+qualifications without changing the frozen ceilings. See
+[portable replacement evidence](../docs/ADOPTION-EVIDENCE.md) for the workloads,
+installed-public-API recipe and the separate native, host and operator exits.

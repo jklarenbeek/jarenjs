@@ -1,0 +1,117 @@
+{
+  "policy": "trusted static module only; bodies never dynamically compiled",
+  "formulas": [
+    {
+      "id": "amount",
+      "label": "Amount",
+      "enabled": true,
+      "storageVersion": 2,
+      "body": "return row.price * row.quantity;",
+      "input": {
+        "price": 2.5,
+        "quantity": 4
+      },
+      "expected": {
+        "kind": "value",
+        "value": 10
+      },
+      "conversion": "subset-candidate"
+    },
+    {
+      "id": "optional",
+      "label": "Optional text",
+      "enabled": true,
+      "storageVersion": 2,
+      "body": "const label = row.meta?.label;\r\nreturn label ?? 'unknown';",
+      "input": {
+        "meta": null
+      },
+      "expected": {
+        "kind": "value",
+        "value": "unknown"
+      },
+      "conversion": "review-required-statements"
+    },
+    {
+      "id": "display",
+      "label": "Display",
+      "enabled": true,
+      "storageVersion": 1,
+      "body": "return new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(row.price);",
+      "input": {
+        "price": 12.5
+      },
+      "expected": {
+        "kind": "value",
+        "value": "12.50"
+      },
+      "conversion": "review-required-intl"
+    },
+    {
+      "id": "skip",
+      "label": "Protected",
+      "enabled": true,
+      "storageVersion": 2,
+      "body": "return row.provenance === 'manual' ? helpers.SKIP : row.quantity;",
+      "input": {
+        "provenance": "manual",
+        "quantity": 9
+      },
+      "expected": {
+        "kind": "skip"
+      },
+      "conversion": "review-required-helper"
+    },
+    {
+      "id": "null",
+      "label": "Explicit null",
+      "enabled": true,
+      "storageVersion": 2,
+      "body": "return null;",
+      "input": {},
+      "expected": {
+        "kind": "value",
+        "value": null
+      },
+      "conversion": "subset-candidate"
+    },
+    {
+      "id": "explain",
+      "label": "Explanation",
+      "enabled": true,
+      "storageVersion": 2,
+      "body": "return { explanation: 'protected provenance' };",
+      "input": {},
+      "expected": {
+        "kind": "explanation",
+        "text": "protected provenance"
+      },
+      "conversion": "review-required-result-policy"
+    },
+    {
+      "id": "error",
+      "label": "Error",
+      "enabled": true,
+      "storageVersion": 2,
+      "body": "throw new Error('synthetic failure');",
+      "input": {},
+      "expected": {
+        "kind": "error",
+        "message": "synthetic failure"
+      },
+      "conversion": "review-required-throw"
+    },
+    {
+      "id": "disabled",
+      "label": "Disabled original",
+      "enabled": false,
+      "storageVersion": 1,
+      "body": "return notValid( ;\r\n",
+      "input": {},
+      "expected": {
+        "kind": "disabled"
+      },
+      "conversion": "disabled-preserved"
+    }
+  ]
+}

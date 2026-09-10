@@ -4,6 +4,9 @@
 *.js text eol=lf
 *.ts text eol=lf
 
+# This executable oracle must retain the saved bodies' mixed LF/CRLF bytes.
+test/adoption/trusted-bodies.js -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
 # Declare files that will always have CRLF line endings on checkout.
 *.sln text eol=crlf
 

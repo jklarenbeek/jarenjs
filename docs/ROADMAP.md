@@ -760,13 +760,11 @@ external-write cutover requires the receipt/reconciliation proof. Native
 formula authoring can ship before legacy migration; retiring the trusted
 runner waits for explicit resolution of the saved corpus.
 
-- [ ] **Reproducible replacement evidence across applications.** Start each
-  workstream with a source/API census and preserve the retained implementation
-  as a differential test oracle. Provide portable, secret-free fixtures for
-  an integer receipt/history trigger, column-only settings, nullable
-  inventory/provenance, ranked catalog, virtual grid, saved JavaScript bodies
-  and interrupted provider legs, plus a representative larger consumer with
-  independently declared scale and semantics. Publish capability/refusal and
+- [ ] **Reproducible replacement evidence across applications.** Qualify native
+  replacements against the [frozen synthetic instrument](ADOPTION-EVIDENCE.md),
+  which supplies the source/API census, retained oracles, independent consumer
+  workloads and fixed budgets. Real labelled and saved-source corpora remain
+  pending alongside native comparisons. Publish capability/refusal and
   behavior matrices, correctness/recovery results, source removed versus host
   policy retained, query/statement counts, startup and interaction latency,
   peak resident/heap memory and compressed browser bytes. Freeze workload and

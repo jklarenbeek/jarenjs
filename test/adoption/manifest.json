@@ -1,0 +1,324 @@
+{
+  "format": "jaren-adoption-fixtures/1",
+  "frozenAt": "2026-09-10",
+  "revision": "576a573677d39ae3e73f2d41180fcb7cb7fe41b8",
+  "budgetPolicy": "Finite acceptance ceilings declared before native comparisons. Reference losses are reported. No runner rewrites limits; changes require a reviewed new freeze identity.",
+  "runtime": {
+    "node": "v24.19.0",
+    "npm": "11.12.1",
+    "sqlite": "3.53.3",
+    "v8": "13.6.233.17-node.51",
+    "platform": "linux",
+    "arch": "x64",
+    "osRelease": "7.2.3-200.nobara.fc44.x86_64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "logicalCpus": 16,
+    "availableParallelism": 16,
+    "totalMemoryBytes": 33009852416
+  },
+  "oracles": [
+    {
+      "name": "minisearch",
+      "version": "7.2.0",
+      "license": "MIT",
+      "scope": "benchmark devDependencies"
+    },
+    {
+      "name": "@tanstack/virtual-core",
+      "version": "3.17.9",
+      "license": "MIT",
+      "scope": "benchmark devDependencies"
+    },
+    {
+      "name": "node:sqlite",
+      "version": "3.53.3",
+      "license": "SQLite public domain; Node MIT runtime",
+      "scope": "Node built-in"
+    },
+    {
+      "name": "trusted synthetic modules and transcripts",
+      "version": "1",
+      "license": "MIT",
+      "scope": "test only"
+    }
+  ],
+  "artifacts": {
+    "scripts/lib/adoption.js": "1e2dd39967ffd6c779d59bbf9a862dceec327d3e149da36c12e3645668cb90c9",
+    "test/adoption/oracles.js": "0d1635c55f86e2c635aed7e2ade1ab6c3e72a2864b220c0112f72596255ded48",
+    "test/adoption/trusted-bodies.js": "4ac183009c4e986a5832475b693256d2903b22f208028081e5441c9c9d65109f",
+    "test/adoption/provider-oracle.js": "0d179a3ca881b28eedf5fef2359cc251aeb3261f55cdab75e78ee163524ce0d2",
+    "test/adoption/range-provider-contract.js": "c4aedea2194b0bf0914a7c4d3ddba3e5f5459624183855a66aae0cb1597515cb",
+    "test/adoption/source-census.json": "401e70771c8470b6503223d6792fe634440a02044594894ef1c6246c8da1b78b",
+    "test/adoption/fixtures/relational.json": "75f7d4bd4979bdaf039d0c58091cc74b83db52ab7e997b00780f363125880fdd",
+    "test/adoption/fixtures/search.json": "ac2c13bafcadc6a0cab2e3b0f12d2ba362355fe40251b906bccc4a9c6417eca9",
+    "test/adoption/fixtures/grid.json": "19ba88728a7fcfca831132831fbaffba5776b037a893e6a3214564dd09d817ab",
+    "test/adoption/fixtures/formulas.json": "dfb628eb409c9423ac9c0551495a0b4bfdd57a98557c489e1021bbc16ec01fc1",
+    "test/adoption/fixtures/providers.json": "8510528a0ab01944a6a5f83a2a871b8a49ee7e44300db4c852bf0a8b779adcc7"
+  },
+  "consumers": [
+    {
+      "id": "catalog",
+      "seed": 20260910,
+      "rows": 10000,
+      "policy": {
+        "environment": "test",
+        "protectedEvery": 5,
+        "priceStep": 0.05,
+        "sort": "relevance",
+        "nullQuantity": "unknown",
+        "writes": "reviewed-field-only"
+      },
+      "grid": "fixed",
+      "budgets": {
+        "relational": {
+          "statements": 9,
+          "queryMs": 100,
+          "recoveryMs": 5000
+        },
+        "search": {
+          "startupMs": 15000,
+          "coldIndexMs": 15000,
+          "warmIndexMs": 15000,
+          "queryMs": 100,
+          "sourceBytes": 8388608,
+          "indexBytes": 33554432,
+          "browserGzipBytes": 65536
+        },
+        "grid": {
+          "interactionMs": 16,
+          "mountedCells": 504,
+          "loadedRows": 256,
+          "loadedBytes": 262144,
+          "browserGzipBytes": 65536
+        },
+        "formulas": {
+          "evaluationMs": 1000,
+          "errors": 1,
+          "originalByteChanges": 0
+        },
+        "providers": {
+          "pages": 3,
+          "rows": 256,
+          "bytes": 262144,
+          "attempts": 3,
+          "unresolvedResends": 0
+        },
+        "resources": {
+          "sampledHeapBytes": 268435456,
+          "peakRssBytes": 536870912,
+          "peakHeapBytes": 268435456,
+          "teardownMs": 1000,
+          "remainingHandles": 0
+        }
+      },
+      "workloadHash": "2c68af5b38af12efcf4c34f1a7b09c16f5b45fbe030c1837b29ddfcf16f35f1e"
+    },
+    {
+      "id": "archive-stock",
+      "seed": 73019,
+      "rows": 75000,
+      "policy": {
+        "environment": "archive",
+        "protectedEvery": 11,
+        "priceStep": 0.01,
+        "sort": "identifier-ascending",
+        "nullQuantity": "unobserved-do-not-coerce",
+        "writes": "report-only"
+      },
+      "grid": "measured",
+      "budgets": {
+        "relational": {
+          "statements": 9,
+          "queryMs": 250,
+          "recoveryMs": 5000
+        },
+        "search": {
+          "startupMs": 45000,
+          "coldIndexMs": 45000,
+          "warmIndexMs": 45000,
+          "queryMs": 250,
+          "sourceBytes": 50331648,
+          "indexBytes": 201326592,
+          "browserGzipBytes": 65536
+        },
+        "grid": {
+          "interactionMs": 32,
+          "mountedCells": 840,
+          "loadedRows": 256,
+          "loadedBytes": 262144,
+          "browserGzipBytes": 65536
+        },
+        "formulas": {
+          "evaluationMs": 5000,
+          "errors": 1,
+          "originalByteChanges": 0
+        },
+        "providers": {
+          "pages": 6,
+          "rows": 512,
+          "bytes": 524288,
+          "attempts": 3,
+          "unresolvedResends": 0
+        },
+        "resources": {
+          "sampledHeapBytes": 805306368,
+          "peakRssBytes": 1073741824,
+          "peakHeapBytes": 805306368,
+          "teardownMs": 2000,
+          "remainingHandles": 0
+        }
+      },
+      "workloadHash": "db38b948f5210104a8aa8eaa580bd683f9adbb8e96f8a175136c9f37a93af226"
+    }
+  ],
+  "categories": [
+    {
+      "id": "relational",
+      "fixtures": [
+        "relational"
+      ],
+      "families": [
+        "settings",
+        "receipt-history",
+        "environment-join",
+        "correlated-count",
+        "nullable-aggregate",
+        "compound-key",
+        "conditional-update",
+        "upsert-noop",
+        "insert-select"
+      ],
+      "reference": "node:sqlite prepared statements + committed WAL child",
+      "assertions": "test/adoption/relational.test.js",
+      "publicRecipe": "npm run test:packed; copied test/consumer/adoption.js uses @jarenjs/db/node or /bun and @jarenjs/db, with no source imports",
+      "pending": [
+        "column-only native mapping",
+        "source SQL retirement",
+        "Bun crash recovery",
+        "PostgreSQL live capture"
+      ]
+    },
+    {
+      "id": "virtualizer",
+      "fixtures": [
+        "grid"
+      ],
+      "families": [
+        "fixed-keyed-window",
+        "measured-window",
+        "resident-array",
+        "bounded-provider",
+        "cancellation-disposal"
+      ],
+      "reference": "@tanstack/virtual-core",
+      "assertions": "test/adoption/references.test.js; test/adoption/range-provider.test.js",
+      "publicRecipe": "future core/virtual + collection + injected app coordinator; apply rangeProviderContract unchanged to linq/db adapter before retirement",
+      "pending": [
+        "native virtual range exports",
+        "real provider snapshot/capture",
+        "mounted DOM",
+        "browser interaction",
+        "AT and native IME"
+      ]
+    },
+    {
+      "id": "lexical",
+      "fixtures": [
+        "search"
+      ],
+      "families": [
+        "eight-field-prefix-fuzzy-AND",
+        "identifier-strings",
+        "multilingual",
+        "ranking-ties",
+        "JSON-reload",
+        "incremental-rebuild"
+      ],
+      "reference": "minisearch",
+      "assertions": "test/adoption/references.test.js",
+      "publicRecipe": "future public core/search and injected query provider compared to labelled cold/reload outputs; regex baseline already executable",
+      "pending": [
+        "native lexical exports",
+        "equal-score reload divergence policy",
+        "real labelled corpus"
+      ]
+    },
+    {
+      "id": "formulas",
+      "fixtures": [
+        "formulas"
+      ],
+      "families": [
+        "arithmetic",
+        "optional-statements",
+        "Intl-display",
+        "helper-skip",
+        "explicit-null",
+        "explanation",
+        "error",
+        "disabled-malformed"
+      ],
+      "reference": "statically compiled trusted-bodies.js with byte-equal stored originals",
+      "assertions": "test/adoption/references.test.js",
+      "publicRecipe": "future json/formula and migration exports must preserve originals and produce labelled outcomes without eval",
+      "pending": [
+        "native saved-formula API",
+        "conversion and rollback",
+        "real saved corpus resolution"
+      ]
+    },
+    {
+      "id": "providers",
+      "fixtures": [
+        "providers"
+      ],
+      "families": [
+        "inventory-rest",
+        "commerce-graphql",
+        "archive-link",
+        "partial-pagination",
+        "destination-change",
+        "ambiguous-effect",
+        "TTL-claim"
+      ],
+      "reference": "offline transcripts, Query IR extraction and application policy predicates; SQLite receipts",
+      "assertions": "test/adoption/providers.test.js; test/adoption/relational.test.js",
+      "publicRecipe": "future contract/provider + flow/ingest + linq/db receipt adapters must replay transcripts offline and pass second-run co-commit proof",
+      "pending": [
+        "native descriptors and scheduling",
+        "business receipt retention",
+        "real dialect authority/effects"
+      ]
+    }
+  ],
+  "evidenceClasses": {
+    "automated": {
+      "recipe": "node --no-warnings=ExperimentalWarning --test 'test/adoption/*.test.js'; node benchmark/adoption.js; npm run test:packed",
+      "scope": "synthetic subset only"
+    },
+    "liveHost": {
+      "status": "pending",
+      "requires": [
+        "native Node/Bun binaries",
+        "PostgreSQL source/capture",
+        "real provider read-back and authority"
+      ]
+    },
+    "manualOperator": {
+      "status": "pending",
+      "requires": [
+        "real saved corpus",
+        "OS input methods",
+        "assistive technology",
+        "downstream cutover approval"
+      ]
+    }
+  },
+  "replacementEvidence": {
+    "library": "pending",
+    "portableConsumer": "pending",
+    "liveHost": "pending",
+    "manualOperator": "pending"
+  },
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2"
+}

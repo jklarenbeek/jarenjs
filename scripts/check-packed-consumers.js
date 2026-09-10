@@ -61,6 +61,7 @@ import { fileURLToPath } from 'node:url';
 import { runNpm } from './lib/portable.js';
 import { importSubpaths } from './lib/exports.js';
 import { tarExtractArgs } from './lib/tar-extract-args.js';
+import { adoptionRows } from './lib/adoption.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const requireBun = process.argv.includes('--require-bun');
@@ -663,6 +664,16 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
 `;
     // the runtime consumer is a real program FILE: `-e` strings are not
     // portable (a Windows shell reparses multiline programs)
+    if (name === '@jarenjs/db') {
+      const manifest = JSON.parse(readFileSync(join(root, 'test/adoption/manifest.json'), 'utf8'));
+      writeFileSync(join(consumerDir, 'adoption.js'), readFileSync(join(root, 'test/consumer/adoption.js')));
+      writeFileSync(join(consumerDir, 'adoption-relational.json'), readFileSync(join(root, 'test/adoption/fixtures/relational.json')));
+      writeFileSync(join(consumerDir, 'adoption-consumers.json'), JSON.stringify(manifest.consumers.map((definition) => ({
+        definition, rows: adoptionRows(definition),
+        expected: { protectedRows: Math.ceil(definition.rows / definition.policy.protectedEvery) },
+      }))));
+      program += "await import('./adoption.js');\n";
+    }
     const programFile = join(consumerDir, 'consumer.mjs');
     writeFileSync(programFile, program);
 

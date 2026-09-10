@@ -1,0 +1,363 @@
+{
+  "fields": [
+    "title",
+    "sku",
+    "barcode",
+    "type",
+    "category",
+    "categorySearch",
+    "sourceName",
+    "tags"
+  ],
+  "options": {
+    "prefix": true,
+    "fuzzy": 0.15,
+    "combineWith": "AND"
+  },
+  "normalization": {
+    "htmlEntities": {
+      "&amp;": "&"
+    },
+    "case": "MiniSearch default lowercase",
+    "accents": "preserve",
+    "identifiers": "strings, leading zeros preserved",
+    "ties": "score descending; cold and JSON-reloaded tie orders recorded separately (oracle divergence)"
+  },
+  "documents": [
+    {
+      "id": "tea",
+      "title": "Green tea",
+      "sku": "0007",
+      "barcode": "0000000017",
+      "type": "drink",
+      "category": "tea",
+      "categorySearch": "groene thee",
+      "sourceName": "North",
+      "tags": "organic"
+    },
+    {
+      "id": "tea-copy",
+      "title": "Green tea",
+      "sku": "0008",
+      "barcode": "0000000018",
+      "type": "drink",
+      "category": "tea",
+      "categorySearch": "groene thee",
+      "sourceName": "North",
+      "tags": "organic"
+    },
+    {
+      "id": "coffee",
+      "title": "Café crème",
+      "sku": "0012",
+      "barcode": "0000000022",
+      "type": "drink",
+      "category": "coffee",
+      "categorySearch": "koffie",
+      "sourceName": "West",
+      "tags": "roasted"
+    },
+    {
+      "id": "jp",
+      "title": "抹茶 緑茶",
+      "sku": "JP-002",
+      "barcode": "0000000033",
+      "type": "drink",
+      "category": "tea",
+      "categorySearch": "日本 茶",
+      "sourceName": "East",
+      "tags": "matcha"
+    },
+    {
+      "id": "de",
+      "title": "Grüner Tee",
+      "sku": "DE-004",
+      "barcode": "0000000044",
+      "type": "drink",
+      "category": "tea",
+      "categorySearch": "grüner tee",
+      "sourceName": "Central",
+      "tags": "bio"
+    },
+    {
+      "id": "entity",
+      "title": "Salt &amp; Pepper",
+      "sku": "SP-005",
+      "barcode": "0000000055",
+      "type": "spice",
+      "category": "seasoning",
+      "categorySearch": "salt pepper",
+      "sourceName": "South",
+      "tags": "pantry"
+    },
+    {
+      "id": "numeric",
+      "title": "Valve 007-A",
+      "sku": "007-A",
+      "barcode": "0000000007",
+      "type": "part",
+      "category": "hardware",
+      "categorySearch": "valves",
+      "sourceName": "Workshop",
+      "tags": "steel"
+    }
+  ],
+  "queries": [
+    {
+      "id": "0",
+      "text": "green tea"
+    },
+    {
+      "id": "1",
+      "text": "gren tea"
+    },
+    {
+      "id": "2",
+      "text": "0007"
+    },
+    {
+      "id": "3",
+      "text": "0000000007"
+    },
+    {
+      "id": "4",
+      "text": "café"
+    },
+    {
+      "id": "5",
+      "text": "cafe"
+    },
+    {
+      "id": "6",
+      "text": "抹茶"
+    },
+    {
+      "id": "7",
+      "text": "grüner"
+    },
+    {
+      "id": "8",
+      "text": "salt pepper"
+    },
+    {
+      "id": "9",
+      "text": "green missing"
+    },
+    {
+      "id": "10",
+      "text": ""
+    },
+    {
+      "id": "11",
+      "text": "007-A"
+    }
+  ],
+  "expected": {
+    "0": [
+      {
+        "id": "tea",
+        "score": 8.826520512479693
+      },
+      {
+        "id": "tea-copy",
+        "score": 8.826520512479693
+      }
+    ],
+    "1": [
+      {
+        "id": "tea",
+        "score": 6.607636738176877
+      },
+      {
+        "id": "tea-copy",
+        "score": 6.607636738176877
+      }
+    ],
+    "2": [
+      {
+        "id": "tea",
+        "score": 2.7808572039467983
+      },
+      {
+        "id": "numeric",
+        "score": 1.5667646406908586
+      },
+      {
+        "id": "tea-copy",
+        "score": 1.0011085934208472
+      }
+    ],
+    "3": [
+      {
+        "id": "numeric",
+        "score": 2.5109646503575074
+      },
+      {
+        "id": "tea",
+        "score": 1.0272128115098895
+      },
+      {
+        "id": "tea-copy",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "coffee",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "jp",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "de",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "entity",
+        "score": 0.9416117438840652
+      }
+    ],
+    "4": [
+      {
+        "id": "coffee",
+        "score": 2.554687915413484
+      }
+    ],
+    "5": [
+      {
+        "id": "coffee",
+        "score": 0.9196876495488542
+      }
+    ],
+    "6": [
+      {
+        "id": "jp",
+        "score": 2.554687915413484
+      }
+    ],
+    "7": [
+      {
+        "id": "de",
+        "score": 4.965500129574396
+      }
+    ],
+    "8": [
+      {
+        "id": "entity",
+        "score": 19.862000518297585
+      }
+    ],
+    "9": [],
+    "10": [],
+    "11": [
+      {
+        "id": "numeric",
+        "score": 18.569062408187953
+      }
+    ]
+  },
+  "expectedReload": {
+    "0": [
+      {
+        "id": "tea",
+        "score": 8.826520512479693
+      },
+      {
+        "id": "tea-copy",
+        "score": 8.826520512479693
+      }
+    ],
+    "1": [
+      {
+        "id": "tea",
+        "score": 6.607636738176877
+      },
+      {
+        "id": "tea-copy",
+        "score": 6.607636738176877
+      }
+    ],
+    "2": [
+      {
+        "id": "tea",
+        "score": 2.7808572039467983
+      },
+      {
+        "id": "numeric",
+        "score": 1.5667646406908586
+      },
+      {
+        "id": "tea-copy",
+        "score": 1.0011085934208472
+      }
+    ],
+    "3": [
+      {
+        "id": "numeric",
+        "score": 2.5109646503575074
+      },
+      {
+        "id": "tea",
+        "score": 1.0272128115098895
+      },
+      {
+        "id": "entity",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "de",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "jp",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "coffee",
+        "score": 0.9416117438840652
+      },
+      {
+        "id": "tea-copy",
+        "score": 0.9416117438840652
+      }
+    ],
+    "4": [
+      {
+        "id": "coffee",
+        "score": 2.554687915413484
+      }
+    ],
+    "5": [
+      {
+        "id": "coffee",
+        "score": 0.9196876495488542
+      }
+    ],
+    "6": [
+      {
+        "id": "jp",
+        "score": 2.554687915413484
+      }
+    ],
+    "7": [
+      {
+        "id": "de",
+        "score": 4.965500129574396
+      }
+    ],
+    "8": [
+      {
+        "id": "entity",
+        "score": 19.862000518297585
+      }
+    ],
+    "9": [],
+    "10": [],
+    "11": [
+      {
+        "id": "numeric",
+        "score": 18.569062408187953
+      }
+    ]
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "revision": "576a573677d39ae3e73f2d41180fcb7cb7fe41b8",
+  "command": "rg -n <pattern> <path>",
+  "families": [
+    {
+      "category": "relational",
+      "pattern": "readSchema|introspectModel",
+      "path": "packages/db/src/introspect.js",
+      "api": "@jarenjs/db",
+      "role": "physical discovery and preserve/refuse",
+      "matches": [
+        "3: * @file Database → model: `introspectModel(connection)` reads a live",
+        "141:export function readSchema(connection, options = undefined) {",
+        "531:export function introspectModel(connection, options = undefined) {",
+        "542:  return chain(readSchema(connection, options), (schema) => {"
+      ]
+    },
+    {
+      "category": "relational",
+      "pattern": "export (async )?function",
+      "path": "packages/db/src/drivers/node.js",
+      "api": "@jarenjs/db/node",
+      "role": "prepared SQL and transaction coexistence",
+      "matches": [
+        "25:export function adaptNodeDatabase(db, options) {",
+        "81:export function fromNodeModule(mod, path, options) {",
+        "107:export function nodeDriver() {"
+      ]
+    },
+    {
+      "category": "virtualizer",
+      "pattern": "export function createDomRenderer",
+      "path": "packages/view/src/dom.js",
+      "api": "@jarenjs/view",
+      "role": "widget lifecycle",
+      "matches": [
+        "171:export function createDomRenderer(container, options = {}) {"
+      ]
+    },
+    {
+      "category": "virtualizer",
+      "pattern": "export function createTaskEffect",
+      "path": "packages/app/src/tasks.js",
+      "api": "@jarenjs/app",
+      "role": "task cancellation and disposal",
+      "matches": [
+        "198:export function createTaskEffect(run, options = {}) {"
+      ]
+    },
+    {
+      "category": "lexical",
+      "pattern": "\\$search",
+      "path": "packages/json/src/query/operators.js",
+      "api": "@jarenjs/json/query",
+      "role": "existing regex; lexical index pending",
+      "matches": [
+        "437:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
+        "1236:  '$search': regexTestEntry(false),"
+      ]
+    },
+    {
+      "category": "formulas",
+      "pattern": "compileJsonQuery",
+      "path": "packages/json/src/query/index.js",
+      "api": "@jarenjs/json/query",
+      "role": "existing compiler and limits; saved-profile conversion pending",
+      "matches": [
+        "58: * Compile options for {@link compileJsonQuery}.",
+        "95: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
+        "103: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
+        "137: * The compiled query returned by {@link compileJsonQuery}: the query",
+        "194: * const q = compileJsonQuery({",
+        "201:export function compileJsonQuery(doc, options = {}) {",
+        "313: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
+        "351: *   `compileJsonQuery`",
+        "364:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
+        "387:    query = compileJsonQuery(doc);"
+      ]
+    },
+    {
+      "category": "providers",
+      "pattern": "export async function mapConcurrent",
+      "path": "packages/core/src/async.js",
+      "api": "@jarenjs/core/async",
+      "role": "ordered drained concurrency",
+      "matches": [
+        "41:export async function mapConcurrent(items, limit, worker, options = {}) {"
+      ]
+    },
+    {
+      "category": "providers",
+      "pattern": "export function createMemoryLedger",
+      "path": "packages/contract/src/ledger.js",
+      "api": "@jarenjs/contract/ledger",
+      "role": "finite-TTL HTTP claim",
+      "matches": [
+        "136:export function createMemoryLedger(options = {}) {"
+      ]
+    },
+    {
+      "category": "providers",
+      "pattern": "export function",
+      "path": "packages/ai/src/retry.js",
+      "api": "@jarenjs/ai (client injection)",
+      "role": "existing compatibility retry",
+      "matches": [
+        "50:export function normalizeRetry(retry) {",
+        "76:export function isTransientFailure(err) {",
+        "91:export function retryDelay(policy, attempt, retryAfter) {",
+        "155:export function transportFailure(err, url) {",
+        "167:export function retryAfterMs(response) {",
+        "221:export function abortError(signal) {"
+      ]
+    }
+  ],
+  "sharedOwners": [
+    {
+      "symbol": "adoptionRows",
+      "path": "scripts/lib/adoption.js",
+      "role": "fixture generator; uses the existing core/random PRNG"
+    },
+    {
+      "symbol": "adoptionKey",
+      "path": "scripts/lib/adoption.js",
+      "role": "stable synthetic row identity"
+    },
+    {
+      "symbol": "referenceSearch",
+      "path": "test/adoption/oracles.js",
+      "role": "deliberate MiniSearch test wrapper, no native ranker"
+    },
+    {
+      "symbol": "referenceGrid",
+      "path": "test/adoption/oracles.js",
+      "role": "deliberate virtual-core headless host wrapper"
+    },
+    {
+      "symbol": "rangeProviderContract",
+      "path": "test/adoption/range-provider-contract.js",
+      "role": "shared conformance kit, fake and future real adapters"
+    },
+    {
+      "symbol": "readProviderTranscript",
+      "path": "test/adoption/provider-oracle.js",
+      "role": "offline envelope extraction through existing Query IR"
+    }
+  ]
+}

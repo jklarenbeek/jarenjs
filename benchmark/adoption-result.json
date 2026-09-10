@@ -1,0 +1,996 @@
+{
+  "format": "jaren-adoption-report/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "runtime": {
+    "node": "v24.19.0",
+    "sqlite": "3.53.3",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "logicalCpus": 16,
+    "availableParallelism": 16,
+    "totalMemoryBytes": 33009852416,
+    "osRelease": "7.2.3-200.nobara.fc44.x86_64"
+  },
+  "runnerHash": "0f2031094216505e4740eb5cd5b5f03d6b2fdf663e018b23b5f4c94259436789",
+  "evidence": {
+    "automatedReference": "pass",
+    "library": "pending",
+    "portableConsumer": "pending",
+    "liveHost": "pending",
+    "manualOperator": "pending"
+  },
+  "consumers": [
+    {
+      "consumer": "catalog",
+      "workloadHash": "2c68af5b38af12efcf4c34f1a7b09c16f5b45fbe030c1837b29ddfcf16f35f1e",
+      "rows": 10000,
+      "metrics": {
+        "relational": {
+          "statements": 9,
+          "queryMs": 0.07626500000003489,
+          "recoveryMs": 33.323758999999995
+        },
+        "search": {
+          "startupMs": 329.562679,
+          "coldIndexMs": 146.03840100000002,
+          "warmIndexMs": 63.37383599999998,
+          "queryMs": 7.903240000000039,
+          "sourceBytes": 2606620,
+          "indexBytes": 1915119,
+          "browserGzipBytes": 5873
+        },
+        "grid": {
+          "interactionMs": 0.09204899999997451,
+          "mountedCells": null,
+          "loadedRows": null,
+          "loadedBytes": null,
+          "browserGzipBytes": 7053
+        },
+        "formulas": {
+          "evaluationMs": 10.699145999999928,
+          "errors": 1,
+          "originalByteChanges": 0
+        },
+        "providers": {
+          "pages": 2,
+          "rows": 2,
+          "bytes": 269,
+          "attempts": null,
+          "unresolvedResends": null
+        },
+        "resources": {
+          "sampledHeapBytes": 154108880,
+          "peakRssBytes": 316395520,
+          "peakHeapBytes": null,
+          "teardownMs": 0.06739600000003065,
+          "remainingHandles": null
+        }
+      },
+      "budgets": {
+        "relational": [
+          {
+            "metric": "statements",
+            "limit": 9,
+            "value": 9,
+            "status": "pass"
+          },
+          {
+            "metric": "queryMs",
+            "limit": 100,
+            "value": 0.07626500000003489,
+            "status": "pass"
+          },
+          {
+            "metric": "recoveryMs",
+            "limit": 5000,
+            "value": 33.323758999999995,
+            "status": "pass"
+          }
+        ],
+        "search": [
+          {
+            "metric": "startupMs",
+            "limit": 15000,
+            "value": 329.562679,
+            "status": "pass"
+          },
+          {
+            "metric": "coldIndexMs",
+            "limit": 15000,
+            "value": 146.03840100000002,
+            "status": "pass"
+          },
+          {
+            "metric": "warmIndexMs",
+            "limit": 15000,
+            "value": 63.37383599999998,
+            "status": "pass"
+          },
+          {
+            "metric": "queryMs",
+            "limit": 100,
+            "value": 7.903240000000039,
+            "status": "pass"
+          },
+          {
+            "metric": "sourceBytes",
+            "limit": 8388608,
+            "value": 2606620,
+            "status": "pass"
+          },
+          {
+            "metric": "indexBytes",
+            "limit": 33554432,
+            "value": 1915119,
+            "status": "pass"
+          },
+          {
+            "metric": "browserGzipBytes",
+            "limit": 65536,
+            "value": 5873,
+            "status": "pass"
+          }
+        ],
+        "grid": [
+          {
+            "metric": "interactionMs",
+            "limit": 16,
+            "value": 0.09204899999997451,
+            "status": "pass"
+          },
+          {
+            "metric": "mountedCells",
+            "limit": 504,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "loadedRows",
+            "limit": 256,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "loadedBytes",
+            "limit": 262144,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "browserGzipBytes",
+            "limit": 65536,
+            "value": 7053,
+            "status": "pass"
+          }
+        ],
+        "formulas": [
+          {
+            "metric": "evaluationMs",
+            "limit": 1000,
+            "value": 10.699145999999928,
+            "status": "pass"
+          },
+          {
+            "metric": "errors",
+            "limit": 1,
+            "value": 1,
+            "status": "pass"
+          },
+          {
+            "metric": "originalByteChanges",
+            "limit": 0,
+            "value": 0,
+            "status": "pass"
+          }
+        ],
+        "providers": [
+          {
+            "metric": "pages",
+            "limit": 3,
+            "value": 2,
+            "status": "pass"
+          },
+          {
+            "metric": "rows",
+            "limit": 256,
+            "value": 2,
+            "status": "pass"
+          },
+          {
+            "metric": "bytes",
+            "limit": 262144,
+            "value": 269,
+            "status": "pass"
+          },
+          {
+            "metric": "attempts",
+            "limit": 3,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "unresolvedResends",
+            "limit": 0,
+            "value": null,
+            "status": "pending"
+          }
+        ],
+        "resources": [
+          {
+            "metric": "sampledHeapBytes",
+            "limit": 268435456,
+            "value": 154108880,
+            "status": "pass"
+          },
+          {
+            "metric": "peakRssBytes",
+            "limit": 536870912,
+            "value": 316395520,
+            "status": "pass"
+          },
+          {
+            "metric": "peakHeapBytes",
+            "limit": 268435456,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "teardownMs",
+            "limit": 1000,
+            "value": 0.06739600000003065,
+            "status": "pass"
+          },
+          {
+            "metric": "remainingHandles",
+            "limit": 0,
+            "value": null,
+            "status": "pending"
+          }
+        ]
+      },
+      "queries": [
+        {
+          "text": "green tea",
+          "medianMs": 7.903240000000039,
+          "matches": 2500,
+          "resultHash": "5937aa033a7190b698a09a20aefbef1dee7fdf95138fce34610f78e4443c7fe9"
+        },
+        {
+          "text": "gren tea",
+          "medianMs": 4.436867999999947,
+          "matches": 2500,
+          "resultHash": "14fe842517fbec9218bf9aadcb1f5b979eb8a34a450ed3957876006391ac023b"
+        },
+        {
+          "text": "0007",
+          "medianMs": 0.2893469999999638,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "0000000007",
+          "medianMs": 3.0452360000000454,
+          "matches": 1002,
+          "resultHash": "f9d5f6cef60acf71d13c8eadb51ac79024e5307a4a60ae2717495de803290b72"
+        },
+        {
+          "text": "café",
+          "medianMs": 2.8194429999999784,
+          "matches": 5000,
+          "resultHash": "75ef8cfc32b3a6874f6cf76980b2ab855e58094d0a66f5fb555314cb7458f3f0"
+        },
+        {
+          "text": "cafe",
+          "medianMs": 3.019674000000009,
+          "matches": 5000,
+          "resultHash": "cbed7c3bc287eee3bb98b8cc40079cd425ec7a995acdd9ebd95bc13af5687c7b"
+        },
+        {
+          "text": "抹茶",
+          "medianMs": 0.8426899999999478,
+          "matches": 2500,
+          "resultHash": "9d075282a010ab56c2d52f1fa7aa8feb7ffcdde26a436633ed8bb6944c55d295"
+        },
+        {
+          "text": "grüner",
+          "medianMs": 0.8382910000000265,
+          "matches": 2500,
+          "resultHash": "9e3ec912267270a075bf6344c561670faef6b5501b770aff76d5684e22bdf98a"
+        },
+        {
+          "text": "salt pepper",
+          "medianMs": 0.016621999999983927,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "green missing",
+          "medianMs": 0.6861780000000408,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "",
+          "medianMs": 0.0033530000000610016,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "007-A",
+          "medianMs": 0.015224999999986721,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      ],
+      "grids": [
+        {
+          "offset": 0,
+          "nextOffset": 44,
+          "initializationMs": 2.807431000000065,
+          "interactionMs": 0.09204899999997451,
+          "logicalRows": 10000,
+          "virtualRows": 23,
+          "potentialCells": 276
+        },
+        {
+          "offset": 440,
+          "nextOffset": 484,
+          "initializationMs": 1.1231669999999667,
+          "interactionMs": 0.057338999999956286,
+          "logicalRows": 10000,
+          "virtualRows": 33,
+          "potentialCells": 396
+        },
+        {
+          "offset": 219978,
+          "nextOffset": 220022,
+          "initializationMs": 1.0141479999999774,
+          "interactionMs": 0.027238000000011198,
+          "logicalRows": 10000,
+          "virtualRows": 35,
+          "potentialCells": 420
+        },
+        {
+          "offset": 439560,
+          "nextOffset": 439604,
+          "initializationMs": 0.4411800000000312,
+          "interactionMs": 0.025351999999998043,
+          "logicalRows": 10000,
+          "virtualRows": 21,
+          "potentialCells": 252
+        }
+      ],
+      "plans": [
+        {
+          "family": "settings",
+          "sql": "SELECT key,value,updated_at FROM app_settings ORDER BY key",
+          "plan": [
+            {
+              "id": 4,
+              "parent": 0,
+              "notused": 224,
+              "detail": "SCAN app_settings USING INDEX sqlite_autoindex_app_settings_1"
+            }
+          ]
+        },
+        {
+          "family": "receipt-history",
+          "sql": "SELECT r.id,hex(r.body) AS body,h.revision FROM receipt r JOIN history h ON h.receipt_id=r.id ORDER BY r.id",
+          "plan": [
+            {
+              "id": 4,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN h"
+            },
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 45,
+              "detail": "SEARCH r USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 16,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        },
+        {
+          "family": "environment-join",
+          "sql": "SELECT c.sku,c.title,i.quantity,i.provenance FROM catalog c JOIN inventory i ON c.sku=i.sku WHERE i.environment='test' ORDER BY c.sku",
+          "plan": [
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 62,
+              "detail": "SEARCH i USING INDEX inventory_quantity (environment=?)"
+            },
+            {
+              "id": 11,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH c USING INDEX sqlite_autoindex_catalog_1 (sku=?)"
+            },
+            {
+              "id": 23,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        },
+        {
+          "family": "correlated-count",
+          "sql": "SELECT c.sku,(SELECT count(*) FROM inventory i WHERE i.sku=c.sku) AS locations FROM catalog c ORDER BY c.sku",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 212,
+              "detail": "SCAN c USING COVERING INDEX sqlite_autoindex_catalog_1"
+            },
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 12,
+              "parent": 7,
+              "notused": 214,
+              "detail": "SCAN i USING COVERING INDEX sqlite_autoindex_inventory_1"
+            }
+          ]
+        },
+        {
+          "family": "nullable-aggregate",
+          "sql": "SELECT environment,count(*) AS rows,sum(quantity) AS quantity FROM inventory GROUP BY environment ORDER BY environment",
+          "plan": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 212,
+              "detail": "SCAN inventory USING COVERING INDEX inventory_quantity"
+            }
+          ]
+        },
+        {
+          "family": "compound-key",
+          "sql": "SELECT quantity,revision FROM inventory WHERE environment='preview' AND sku='0007'",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 39,
+              "detail": "SEARCH inventory USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)"
+            }
+          ]
+        }
+      ],
+      "providers": [
+        {
+          "dialect": "inventory-rest",
+          "ids": [
+            "i1",
+            "i2"
+          ],
+          "state": "complete",
+          "publishable": true,
+          "pages": 2
+        },
+        {
+          "dialect": "commerce-graphql",
+          "ids": [
+            "p1",
+            "p2"
+          ],
+          "state": "incomplete",
+          "publishable": false,
+          "pages": 2
+        },
+        {
+          "dialect": "archive-link",
+          "ids": [
+            "a1",
+            "a2"
+          ],
+          "state": "complete",
+          "publishable": true,
+          "pages": 2
+        }
+      ],
+      "limitations": [
+        "sampled heap is a lower bound, exact peak heap pending",
+        "grid timings are headless retained ranges; mounted cells, interactions and provider caches need browser/native evidence",
+        "formula and provider timings cover the small labelled subsets; full saved corpus and production effects are pending",
+        "relational statement budget counts the six reads and three first mutations; seed, EXPLAIN and second-run checks are separate instrumentation",
+        "reference losses do not change frozen ceilings or qualify native replacements"
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "workloadHash": "db38b948f5210104a8aa8eaa580bd683f9adbb8e96f8a175136c9f37a93af226",
+      "rows": 75000,
+      "metrics": {
+        "relational": {
+          "statements": 9,
+          "queryMs": 0.07843000000002576,
+          "recoveryMs": 30.53336999999965
+        },
+        "search": {
+          "startupMs": 2097.809369,
+          "coldIndexMs": 1023.787061,
+          "warmIndexMs": 417.8107470000002,
+          "queryMs": 66.3714399999999,
+          "sourceBytes": 20021733,
+          "indexBytes": 15820123,
+          "browserGzipBytes": 5873
+        },
+        "grid": {
+          "interactionMs": 5.078139000000192,
+          "mountedCells": null,
+          "loadedRows": null,
+          "loadedBytes": null,
+          "browserGzipBytes": 7053
+        },
+        "formulas": {
+          "evaluationMs": 10.225072000000182,
+          "errors": 1,
+          "originalByteChanges": 0
+        },
+        "providers": {
+          "pages": 2,
+          "rows": 2,
+          "bytes": 269,
+          "attempts": null,
+          "unresolvedResends": null
+        },
+        "resources": {
+          "sampledHeapBytes": 1007375520,
+          "peakRssBytes": 1203056640,
+          "peakHeapBytes": null,
+          "teardownMs": 0.08108400000037363,
+          "remainingHandles": null
+        }
+      },
+      "budgets": {
+        "relational": [
+          {
+            "metric": "statements",
+            "limit": 9,
+            "value": 9,
+            "status": "pass"
+          },
+          {
+            "metric": "queryMs",
+            "limit": 250,
+            "value": 0.07843000000002576,
+            "status": "pass"
+          },
+          {
+            "metric": "recoveryMs",
+            "limit": 5000,
+            "value": 30.53336999999965,
+            "status": "pass"
+          }
+        ],
+        "search": [
+          {
+            "metric": "startupMs",
+            "limit": 45000,
+            "value": 2097.809369,
+            "status": "pass"
+          },
+          {
+            "metric": "coldIndexMs",
+            "limit": 45000,
+            "value": 1023.787061,
+            "status": "pass"
+          },
+          {
+            "metric": "warmIndexMs",
+            "limit": 45000,
+            "value": 417.8107470000002,
+            "status": "pass"
+          },
+          {
+            "metric": "queryMs",
+            "limit": 250,
+            "value": 66.3714399999999,
+            "status": "pass"
+          },
+          {
+            "metric": "sourceBytes",
+            "limit": 50331648,
+            "value": 20021733,
+            "status": "pass"
+          },
+          {
+            "metric": "indexBytes",
+            "limit": 201326592,
+            "value": 15820123,
+            "status": "pass"
+          },
+          {
+            "metric": "browserGzipBytes",
+            "limit": 65536,
+            "value": 5873,
+            "status": "pass"
+          }
+        ],
+        "grid": [
+          {
+            "metric": "interactionMs",
+            "limit": 32,
+            "value": 5.078139000000192,
+            "status": "pass"
+          },
+          {
+            "metric": "mountedCells",
+            "limit": 840,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "loadedRows",
+            "limit": 256,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "loadedBytes",
+            "limit": 262144,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "browserGzipBytes",
+            "limit": 65536,
+            "value": 7053,
+            "status": "pass"
+          }
+        ],
+        "formulas": [
+          {
+            "metric": "evaluationMs",
+            "limit": 5000,
+            "value": 10.225072000000182,
+            "status": "pass"
+          },
+          {
+            "metric": "errors",
+            "limit": 1,
+            "value": 1,
+            "status": "pass"
+          },
+          {
+            "metric": "originalByteChanges",
+            "limit": 0,
+            "value": 0,
+            "status": "pass"
+          }
+        ],
+        "providers": [
+          {
+            "metric": "pages",
+            "limit": 6,
+            "value": 2,
+            "status": "pass"
+          },
+          {
+            "metric": "rows",
+            "limit": 512,
+            "value": 2,
+            "status": "pass"
+          },
+          {
+            "metric": "bytes",
+            "limit": 524288,
+            "value": 269,
+            "status": "pass"
+          },
+          {
+            "metric": "attempts",
+            "limit": 3,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "unresolvedResends",
+            "limit": 0,
+            "value": null,
+            "status": "pending"
+          }
+        ],
+        "resources": [
+          {
+            "metric": "sampledHeapBytes",
+            "limit": 805306368,
+            "value": 1007375520,
+            "status": "fail"
+          },
+          {
+            "metric": "peakRssBytes",
+            "limit": 1073741824,
+            "value": 1203056640,
+            "status": "fail"
+          },
+          {
+            "metric": "peakHeapBytes",
+            "limit": 805306368,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "teardownMs",
+            "limit": 2000,
+            "value": 0.08108400000037363,
+            "status": "pass"
+          },
+          {
+            "metric": "remainingHandles",
+            "limit": 0,
+            "value": null,
+            "status": "pending"
+          }
+        ]
+      },
+      "queries": [
+        {
+          "text": "green tea",
+          "medianMs": 48.51124599999957,
+          "matches": 18750,
+          "resultHash": "338b7fd23e15009d8892f6f4cb3faf6d17a1f32473b8de40168318f208f5d967"
+        },
+        {
+          "text": "gren tea",
+          "medianMs": 48.92148700000007,
+          "matches": 18750,
+          "resultHash": "3bca7cd3d1ca73a857763fcb5f09be15013c517df5785f69dbc301e6bc3bbe4e"
+        },
+        {
+          "text": "0007",
+          "medianMs": 11.584788000000117,
+          "matches": 5000,
+          "resultHash": "53d0e7ea2c7ef7407b352ecdc3173fc64e5f3c08f6d5cbb815560fb42ec0d451"
+        },
+        {
+          "text": "0000000007",
+          "medianMs": 2.9263679999999113,
+          "matches": 1002,
+          "resultHash": "6583f20453ddccd309bb224c5bf5f0b8a326991702656bcfda4eabca61905d03"
+        },
+        {
+          "text": "café",
+          "medianMs": 43.6014210000003,
+          "matches": 37500,
+          "resultHash": "b97b451f8caa2a97b52035589d2a4be8a45daa817ddd80d29916d4085edfb6c7"
+        },
+        {
+          "text": "cafe",
+          "medianMs": 59.76073099999985,
+          "matches": 37500,
+          "resultHash": "9537f1cb6bbfbb8ba66f444db83d661e8dbe30fae6f5dd96f5d7f87f203a7596"
+        },
+        {
+          "text": "抹茶",
+          "medianMs": 18.243407999999818,
+          "matches": 18750,
+          "resultHash": "acda51bde63d1136570f5008af363ef28cee3237d2e57ac947846d8a2c580e6d"
+        },
+        {
+          "text": "grüner",
+          "medianMs": 19.456529000000046,
+          "matches": 18750,
+          "resultHash": "27548e4e99e8a19cb4d718b411e96d28fe87c492e8a745e3fe8ad314ac7d0869"
+        },
+        {
+          "text": "salt pepper",
+          "medianMs": 0.015852999999879103,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "green missing",
+          "medianMs": 6.441906000000017,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "",
+          "medianMs": 0.0028640000000450527,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "text": "007-A",
+          "medianMs": 66.3714399999999,
+          "matches": 0,
+          "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      ],
+      "grids": [
+        {
+          "offset": 0,
+          "nextOffset": 36,
+          "initializationMs": 7.623949000000266,
+          "interactionMs": 3.853704000000107,
+          "logicalRows": 75000,
+          "virtualRows": 24,
+          "potentialCells": 576
+        },
+        {
+          "offset": 180,
+          "nextOffset": 216,
+          "initializationMs": 5.604734000000008,
+          "interactionMs": 5.078139000000192,
+          "logicalRows": 75000,
+          "virtualRows": 29,
+          "potentialCells": 696
+        },
+        {
+          "offset": 3600,
+          "nextOffset": 3636,
+          "initializationMs": 3.337796000000253,
+          "interactionMs": 3.8995890000001054,
+          "logicalRows": 75000,
+          "virtualRows": 31,
+          "potentialCells": 744
+        }
+      ],
+      "plans": [
+        {
+          "family": "settings",
+          "sql": "SELECT key,value,updated_at FROM app_settings ORDER BY key",
+          "plan": [
+            {
+              "id": 4,
+              "parent": 0,
+              "notused": 224,
+              "detail": "SCAN app_settings USING INDEX sqlite_autoindex_app_settings_1"
+            }
+          ]
+        },
+        {
+          "family": "receipt-history",
+          "sql": "SELECT r.id,hex(r.body) AS body,h.revision FROM receipt r JOIN history h ON h.receipt_id=r.id ORDER BY r.id",
+          "plan": [
+            {
+              "id": 4,
+              "parent": 0,
+              "notused": 216,
+              "detail": "SCAN h"
+            },
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 45,
+              "detail": "SEARCH r USING INTEGER PRIMARY KEY (rowid=?)"
+            },
+            {
+              "id": 16,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        },
+        {
+          "family": "environment-join",
+          "sql": "SELECT c.sku,c.title,i.quantity,i.provenance FROM catalog c JOIN inventory i ON c.sku=i.sku WHERE i.environment='test' ORDER BY c.sku",
+          "plan": [
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 62,
+              "detail": "SEARCH i USING INDEX inventory_quantity (environment=?)"
+            },
+            {
+              "id": 11,
+              "parent": 0,
+              "notused": 47,
+              "detail": "SEARCH c USING INDEX sqlite_autoindex_catalog_1 (sku=?)"
+            },
+            {
+              "id": 23,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR ORDER BY"
+            }
+          ]
+        },
+        {
+          "family": "correlated-count",
+          "sql": "SELECT c.sku,(SELECT count(*) FROM inventory i WHERE i.sku=c.sku) AS locations FROM catalog c ORDER BY c.sku",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 212,
+              "detail": "SCAN c USING COVERING INDEX sqlite_autoindex_catalog_1"
+            },
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 0,
+              "detail": "CORRELATED SCALAR SUBQUERY 1"
+            },
+            {
+              "id": 12,
+              "parent": 7,
+              "notused": 214,
+              "detail": "SCAN i USING COVERING INDEX sqlite_autoindex_inventory_1"
+            }
+          ]
+        },
+        {
+          "family": "nullable-aggregate",
+          "sql": "SELECT environment,count(*) AS rows,sum(quantity) AS quantity FROM inventory GROUP BY environment ORDER BY environment",
+          "plan": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 212,
+              "detail": "SCAN inventory USING COVERING INDEX inventory_quantity"
+            }
+          ]
+        },
+        {
+          "family": "compound-key",
+          "sql": "SELECT quantity,revision FROM inventory WHERE environment='preview' AND sku='0007'",
+          "plan": [
+            {
+              "id": 3,
+              "parent": 0,
+              "notused": 39,
+              "detail": "SEARCH inventory USING INDEX sqlite_autoindex_inventory_1 (environment=? AND sku=?)"
+            }
+          ]
+        }
+      ],
+      "providers": [
+        {
+          "dialect": "inventory-rest",
+          "ids": [
+            "i1",
+            "i2"
+          ],
+          "state": "complete",
+          "publishable": true,
+          "pages": 2
+        },
+        {
+          "dialect": "commerce-graphql",
+          "ids": [
+            "p1",
+            "p2"
+          ],
+          "state": "incomplete",
+          "publishable": false,
+          "pages": 2
+        },
+        {
+          "dialect": "archive-link",
+          "ids": [
+            "a1",
+            "a2"
+          ],
+          "state": "complete",
+          "publishable": true,
+          "pages": 2
+        }
+      ],
+      "limitations": [
+        "sampled heap is a lower bound, exact peak heap pending",
+        "grid timings are headless retained ranges; mounted cells, interactions and provider caches need browser/native evidence",
+        "formula and provider timings cover the small labelled subsets; full saved corpus and production effects are pending",
+        "relational statement budget counts the six reads and three first mutations; seed, EXPLAIN and second-run checks are separate instrumentation",
+        "reference losses do not change frozen ceilings or qualify native replacements"
+      ]
+    }
+  ]
+}

@@ -28,6 +28,7 @@ import { programFacts } from './generate-program-facts.js';
 import { ledgerFacts } from './generate-ledger-facts.js';
 import { formsFacts } from './generate-forms-facts.js';
 import { recallFacts } from './generate-recall-facts.js';
+import { adoptionFacts } from './generate-adoption-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const profileDrift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
@@ -38,6 +39,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts, formsFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts, formsFacts, adoptionFacts],
   argv: process.argv.slice(2),
 }));
