@@ -127,6 +127,56 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
+- [ ] **Native list and grid virtualization.** The registered-widget lifecycle
+  already provides the host boundary; it does not provide the windowing engine
+  needed to retire `@tanstack/virtual-core`. Add a DOM-free range/measurement
+  engine under `packages/core/src/virtual/` and a reusable visible collection
+  in `components/collection/`, registered through the existing view widget
+  lifecycle. These are planned homes, not existing exports. Expose public
+  mount/update/dispose and scroll-to-key/index/offset operations. Specify stable
+  item identity, fixed
+  and measured sizes, overscan and pinned-item bounds, empty/hidden viewports,
+  resize invalidation, scroll anchoring after insert/delete/reorder and size
+  changes, and vertical/horizontal axes including RTL offsets. Qualify column
+  windowing, variable row heights and browser scroll-size ceilings separately
+  from the fixed-row first consumer. Observers, frames,
+  elements and measurement caches remain private resources; app state contains
+  JSON viewport/selection intent. Acceptance needs bounded mounted rows/cells,
+  bounded cache retention and work per scroll/update, stable anchors, no
+  per-scroll full-dataset render, deterministic headless range tests, and
+  teardown/reinsert tests that leave no observer, listener or scheduled frame.
+- [ ] **Accessible virtual collection interaction.** A window of rows is not
+  yet a usable grid: compose the virtualizer with configurable list/grid
+  semantics, logical row/column counts and indices, keyboard navigation,
+  offscreen focus realization, single/range selection by stable identity,
+  activation and return-focus behavior. Cover Arrow/Home/End/Page navigation,
+  Space/Enter, scrolling to an unmounted target, focused-row removal,
+  filter/sort/reload, horizontal header synchronization and editable cells
+  without stealing their caret or composition events. Every active-descendant
+  target must exist when exposed to accessibility APIs; pinning focus must
+  obey the DOM budget. Keep selection and field policy injectable and reusable
+  across lists and grids. Browser evidence must cover Chromium, Firefox and
+  WebKit, zoom, touch and resize; the existing real-browser accessibility and
+  native-IME audit entries remain the owners of actual assistive-technology
+  and OS input-method qualification.
+- [ ] **Virtual views over bounded data providers.** An array-backed widget
+  does not make a much larger application bounded. Define an injected range
+  provider with stable keys, query/snapshot generation, known or unknown total
+  size, loading/error states, finite prefetch/cache credits and cancellation;
+  stale replies cannot overwrite a newer filter, sort or scroll request.
+  Compose it with existing LINQ keyset pages and live patches through host
+  adapters, with an explicit capability/refusal for arbitrary index jumps when
+  a provider offers only sequential continuation. Distinguish logical total
+  size from loaded rows and selection intent from loaded membership. Specify
+  scroll restoration, page eviction and a complete-data print/export path
+  independent of mounted DOM. Prove search/sort/live updates preserve identity
+  and focus while loaded bytes and mounted cells stay within declared budgets;
+  keep database/worker imports out of the view engine. The component owns
+  rendering and interaction, app owns the injected provider's private resource
+  lifecycle, and `linq/db` owns the adapter to database pages/live results.
+  Coordinate through one provider contract rather than direct component-to-db
+  imports; database identity and snapshot consistency remain authoritative.
+
 - [ ] **Real-browser accessibility audit** — the *lifecycle* half of the matrix
   ships (the website's Playwright suite drives the built site through Chromium,
   Firefox and WebKit on every push — see
@@ -313,6 +363,91 @@ what each does is its own documentation's job
   index has no equivalent model declaration; emitting an unconditional index
   would strengthen its meaning. Boolean-versus-integer origins and numeric
   precision erased by storage also cannot be inferred without metadata.
+  Extend the read-only inventory to every trigger and other unsupported schema
+  object, including objects attached to an unmapped table; the current
+  `CREATE TABLE receipt (id INTEGER PRIMARY KEY, body BLOB)` plus an
+  `AFTER INSERT` history trigger reports the table as having no key and omits
+  the trigger. Separate key discovery from whether the resulting table can
+  be represented by the model. Report defaults, nullability, collation,
+  composite-key order, foreign-key actions, generated columns, views and index
+  predicates without silently weakening them. Each object must be represented
+  or carry a specific sorted loss, with source DDL sufficient for review;
+  strict refusal and unchanged schema/data are regression requirements.
+- [ ] **Existing relational schemas without a mandatory document column.**
+  Extend the hybrid entity model with an explicit physical mapping for ordinary
+  column-only tables: logical-to-physical table/column names, integer and
+  composite keys, database-generated identities/defaults, nullable/required
+  columns, relation/join tables and read-only views. A three-column
+  `app_settings(key, value, updated_at)` and an integer-key receipt table must
+  be adoptable without adding `doc`, renaming objects or rebuilding the file
+  merely to open it. Define SQL NULL versus JSON null/absence, safe-integer and
+  decimal precision, textual JSON and date codecs, and a lossless BLOB boundary
+  that does not put binary handles into JSON state. Carry supported partial/
+  expression indexes, cross-column CHECKs, collations and trigger ownership
+  through declaration, mapping explanation, schema comparison and migration;
+  unsupported objects require an explicit preserve/refuse disposition. Do not
+  infer business invariants from SQL or silently turn an introspection loss
+  into permission to drop an object.
+- [ ] **Declarative persistence invariants for existing histories.** Physical
+  mapping alone still leaves application SQL CHECK/trigger generators in place.
+  Define a bounded model vocabulary for reusable cross-field constraints,
+  immutable rows/fields, write-once or draft-to-frozen transitions and declared
+  revision/audit effects, with application-supplied predicates and field names.
+  Reuse existing foreign keys, enums, optimistic versions and query expressions;
+  account for old/new row values, insert/update/delete, null behavior, trigger
+  ordering, recursion refusal and interaction with generated identities.
+  Declare which invariants lower to database enforcement for every writer and
+  which require a qualified store writer; runtime validation alone must not
+  claim to protect external SQL. Unsupported trigger programs remain explicitly
+  preserved or refused. Prove equivalent accepted/rejected mutations, error
+  classification, audit rows and transaction/capture behavior through fresh
+  builds and upgrades before replacing immutable-history or posted-document
+  SQL. Inventory, provenance and recipe/purchase rules remain application
+  declarations; Jaren owns their reusable enforcement mechanism.
+- [ ] **One public transaction owner for staged SQL/model adoption.** Public
+  Node/Bun drivers already own statements and savepoints, and stores already
+  provide scoped sync/async transaction views. The missing bridge is a
+  supported way for prepared legacy SQL, mapped entities, validation, receipts
+  and `tx.jobs` to share that exact connection and transaction while a domain
+  migrates incrementally. Specify statement binding/result/close contracts,
+  immediate writer admission, nested savepoints, rollback and commit-failure
+  propagation, and lifetime checks on retained statements and callbacks;
+  synchronous callbacks must reject thenables and escaped continuations.
+  Async hosts must declare the absent synchronous capability. Any trusted-host
+  SQL seam needs explicit read/write authority and tracker/cache/change-capture
+  invalidation, including trigger/cascade side effects; unknown effects must
+  invalidate conservatively or refuse live/replication claims. Prove unrelated
+  requests cannot join the transaction, rollback withdraws all model/job state,
+  and neither a second connection nor an application-written driver wrapper is
+  needed. This is a coexistence milestone; query migration has its own exit.
+- [ ] **Native authoring for legacy query and mutation families.** Extend the
+  LINQ/model/query surfaces only from an executable census of real SQL consumers:
+  multi-table catalog projections, environment-qualified joins, correlated
+  lookups, aggregates, compound keys, conditional updates, insert-select,
+  upsert/conflict targets and affected-row/returned-value contracts. Reuse the
+  shipped planner and unit of work; the existing pushdown, projection/distinct
+  and live-shape entries own their unproven cases. Close additional gaps with
+  declarative plans or explicitly qualified native operations, preserving
+  missing/null, ordering/ties, rounding/overflow, collation, identity allocation,
+  optimistic revisions and exact no-op behavior. SQL-reference and
+  indexed/unindexed/forced-residual oracles must agree for reads and writes,
+  including errors, emitted statements and audit effects; explain residual
+  scans, resource costs and unsupported shapes. A raw SQL escape alone does
+  not satisfy removal of domain SQL, and fluent syntax alone does not prove
+  bounded execution or an equivalent query plan.
+- [ ] **Physical preservation and recovery for relational adoption.** Extend
+  the existing migration planner, assertions and table-rebuild machinery to
+  the column-only mappings and preserved objects above. Separate read-only
+  inspection, adopt-without-DDL and an explicitly executed migration; capture
+  a consistent snapshot including committed WAL, retain unknown objects or
+  refuse, and check schema, logical rows, BLOB bytes, keys, foreign keys,
+  constraints and trigger behavior against both the source and a fresh target.
+  Exercise populated histories, concurrent revision races, failed output/
+  receipt/commit, process death during copy/drop/publication, repeated startup
+  and forward repair under Node and Bun. Define compatibility with the newest
+  file and post-upgrade writes before offering downgrade or restore; an older
+  snapshot is not recovery for newer facts. Only qualified writer paths may
+  claim capture/replication coverage, under the existing replication boundary.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
@@ -358,6 +493,291 @@ what each does is its own documentation's job
   a cross-member constraint carried into DDL CHECKs, migration parity and
   introspection, plus the corresponding `createIntervalIndex` resident shape.
   Silently dropping inverted spans would violate QUERY-FORMAT §8.16.
+
+## Lexical search (cross-package)
+
+Catalog applications can retain MiniSearch after adopting the suite because
+query `$search` is regex substring matching; the vector kernel, indexes and AI
+recall solve a different retrieval
+problem. The open work here is an opt-in lexical engine, with dependency-free
+kernels in core where shared, query authoring in json/linq, persistence adapters
+in db and host lifecycle integration in app. Package/subpath names are design
+decisions, not existing exports; none requires a database or AI dependency in a
+browser search consumer.
+
+- [ ] **A compiled lexical search contract and resident index.** Define a
+  versioned JSON declaration for document identity, indexed/stored fields,
+  normalization/tokenization, field boosts, term combination, prefix/fuzzy
+  policy, ranking and deterministic ties. Compile once; expose bounded build,
+  add/update/delete/clear, search and disposal with ranked IDs, scores and
+  optional match positions. Decide Unicode/case/accent behavior, punctuation,
+  numbers and leading-zero identifiers, repeated tokens, empty input, exact
+  identifier matching, typo-distance thresholds and expansion limits explicitly.
+  Reuse core text primitives, but do not substitute regex matching or vector
+  similarity for lexical relevance. Acceptance includes a catalog profile with
+  title, SKU, barcode, type, category/category-search, source name and tag fields,
+  application-supplied HTML-entity decoding, `prefix: true`, `fuzzy: 0.15` and
+  AND term combination. Pin result membership and ordering against the installed
+  MiniSearch baseline, including ties; explicit application sort must still
+  override relevance without changing membership. Any ranking change requires
+  a documented compatibility profile or a separately accepted migration.
+- [ ] **Bounded incremental search and durable index lifecycle.** Updates must
+  replace old postings and ranking statistics atomically by document identity,
+  reject duplicate/stale generations according to a declared policy, and remove
+  deleted content without retaining unbounded tombstones. Budget source bytes,
+  token/posting counts, vocabulary, candidate expansion, returned matches and
+  build/update work; distinguish an exhausted budget from a complete empty
+  result. Provide cooperative batches and an injected worker protocol with
+  cancellation, stale-result fencing, progress and drained teardown. Specify a
+  versioned index snapshot bound to tokenizer/ranker configuration and source
+  revision, validation of corrupt/incompatible snapshots, atomic publication
+  and full rebuild recovery. The index is derived data, never a second catalog
+  authority. Keep it outside serializable app state and prove repeated
+  rebuild/navigation does not leak workers, indexes or obsolete source rows.
+- [ ] **One search meaning across resident and database execution.** Give
+  LINQ/query documents a deliberate lexical-search provider boundary and db an
+  optional persisted-index/execution capability, without changing the existing
+  `$search` operator's meaning. Specify score identity, filtering/faceting
+  scope, exact counts versus top-k windows, tie-aware continuation and snapshot
+  consistency so filtering a truncated candidate set cannot lose valid hits.
+  Native SQLite/PostgreSQL full-text facilities are candidates only after
+  tokenizer/ranking/error equivalence is demonstrated; expose residual work
+  and unsupported capabilities instead of claiming dialect parity. Connect
+  committed changes through the existing capture/live machinery, explicitly
+  handling external SQL writers and stale index generations. Qualification
+  needs labelled multilingual and identifier-heavy queries, incremental-versus-
+  rebuild equality, cold/warm build/query latency, peak memory and bundle size
+  against MiniSearch at the application fixture and a larger bounded corpus;
+  publish relevance and performance losses alongside wins.
+
+## Saved formulas and reviewed rules (cross-package)
+
+The query compiler already has named pure functions/operator packs, dependency
+reports and execution limits
+([QUERY-FORMAT §8.12](../packages/json/docs/QUERY-FORMAT.md#812-registered-functions-operators-collations-and-execution-limits));
+calc already parses and closure-compiles numeric expressions. Reuse those
+engines and core math/finance/date/unit kernels. The missing application contract
+below belongs across json/linq and opt-in forms/app authoring; database writes
+remain behind validated domain commands. No lower-layer package imports calc
+or an application component to obtain a shared parser or primitive.
+
+- [ ] **Versioned saved formulas over structured records.** Define a reusable
+  formula document/profile with language version, input/result schemas, named
+  immutable bindings, declared helper names/versions and compile diagnostics
+  that identify a formula and source/document location. It must cover nested
+  optional fields, strings, booleans, arrays, branching and collection
+  derivations as well as numeric arithmetic; calc's numeric scope alone cannot
+  express a catalog formula. Prefer the existing query document as execution
+  representation and, if a text front door is justified, lower it to that same
+  representation with a specified round trip. Define missing/null/coercion,
+  non-finite/overflow, rounding and formatting semantics; locale, clock and
+  exchange/unit data are explicit inputs or named pure host capabilities.
+  Compile/cache by document plus capability/schema identity, refuse missing
+  helpers or incompatible versions, and keep all executors CSP-safe. Product
+  helpers such as a shop's price step or field vocabulary stay in its profile.
+- [ ] **Per-record results, dependencies and bounded evaluation.** Build a
+  shared batch evaluator around compiled formulas with distinct JSON outcomes
+  for value, skip, explanation and error; null, empty sequence and a skipped
+  write must not collapse into one state, and a host's Symbol-valued `SKIP`
+  sentinel must not leak into persisted documents. A failing cell/target must
+  produce a bounded diagnostic and accurate aggregate counts while independent
+  rows continue; disabled targets do not compile or run. Inputs stay immutable,
+  evaluation receives no implicit global/IO access, and caches account for
+  schema/helper/input revisions. Extend existing dependency metadata only where
+  needed for field-sensitive invalidation and explicitly declared computed-
+  field dependencies, including cycle refusal and deterministic evaluation
+  order. Reuse query step/depth limits while exposing their actual scope:
+  intermediate allocations and arbitrary host functions are not bounded by an
+  output cap. Hard deadlines need an injected worker/isolate with termination,
+  stale-result fencing and cleanup, never a same-thread timeout promise.
+- [ ] **Explicit migration from trusted local JavaScript.** Saved column and
+  rule bodies can contain statements, optional chaining, `Intl`, local
+  variables and arbitrary trusted JavaScript, not just calculator expressions.
+  Inventory each saved source and helper dependency; preserve original text,
+  IDs, labels, enabled state and storage version in an exportable migration
+  record. A converter may accept only a documented subset with differential
+  fixtures for values, display text, errors, skip/explanation and rounding;
+  every other body needs a precise refusal and explicit rewrite/review. Keep
+  the application's existing trusted runner only as an explicitly selected
+  compatibility host while migration is incomplete, without adding `eval` or
+  `new Function` to Jaren or presenting that host as a sandbox. Prove repeated
+  migration and rollback preserve originals and later edits. The native exit
+  requires every supported saved formula to be converted or explicitly
+  resolved, with no silent deletion, automatic source reinterpretation or new
+  server execution of legacy JavaScript.
+- [ ] **Reusable reviewed-rule planning and authoring.** Compose formulas,
+  query scopes and forms into a schema-driven editor/preview and a DOM-free
+  plan contract: immutable dataset/rule revisions, enabled targets, stable
+  entity/field identity, before/proposed values, explanations, per-stage counts,
+  report-only mode and visible diagnostics. Group/entity deduplication,
+  writable fields, units, provenance protection and conflicting-target policy
+  are declared by the application; siblings and group context are explicit
+  data, not hidden database reads. Store the plan and selected changes, then
+  revalidate authority, expected revisions and admissible values inside the
+  authoritative transaction; preview evaluation never grants write authority.
+  Reuse existing contract settlement and the domain receipt work below for
+  replay and audit. Acceptance includes row/target failures, stale previews,
+  no-op writes, conflicting changes, selection across virtual pages and a
+  saved-formula editor that preserves draft text/caret; this is an application
+  composition over existing engines, not another formula or rule evaluator.
+
+## Provider execution and durable domain workflows (cross-package)
+
+The suite already supplies ordered/drained `mapConcurrent`, AI clients with
+bounded requests and retry policy, contract HTTP clients and host lifecycle
+hooks, `createDbLedger(tx)` settlement, flow checkpoints, fenced jobs with
+renewal/recovery, and the transactional `tx.jobs` outbox
+([contract lifecycle](../packages/contract/docs/CONTRACT-FORMAT.md#77-the-host-lifecycle-identify-acquire-release-settle),
+[jobs](../packages/db/docs/JOBS-FORMAT.md),
+[flow](../packages/flow/README.md)). The remaining work is their composition with
+external provider protocols and existing durable business facts. Reuse those
+owners: core for shared scheduling, contract for execution boundaries, flow for
+orchestration, db/linq for persistence, app for public run observation and ai for
+its provider dialects. Provider schemas, credentials, destination policy,
+inventory arithmetic and immutable business history remain application-owned;
+native integration means expressing and enforcing them through public Jaren
+capabilities, not replacing their meanings with a generic ledger.
+
+- [ ] **One reusable provider execution policy.** Extract the missing shared
+  transport/scheduling composition from real adapters, keeping existing AI and
+  contract clients as consumers: injected transport, clock/random/sleep,
+  explicit total attempts, per-attempt and overall deadlines, response/stream
+  byte limits, cancellation and bounded queues/concurrency. Support per-origin/
+  account start spacing and provider cost/rate observations, retry classification
+  and bounded backoff with seconds/date/millisecond Retry-After dialects; define
+  whether an over-budget server delay refuses rather than retrying too soon.
+  Distinguish safe reads, provider-idempotent commands and single-send writes;
+  never infer replay safety from an HTTP verb or a timeout. One layer owns
+  retries, so SDK, client, scheduler and job retries cannot multiply attempts.
+  Prove dispatch counts, fairness between scopes, no start after cancellation,
+  stopped admission and drained in-flight cleanup before releasing credentials,
+  leases or storage. Refactor shipped behavior through the seam only with
+  differential tests preserving each client's declared defaults and wire shape.
+- [ ] **Provider protocol descriptors and complete-snapshot ingestion.** Add
+  an opt-in contract/adapter composition for the REST/GraphQL dialect details
+  a Jaren-to-Jaren HTTP client does not describe: endpoint/API version, query/
+  variable encoding, headers, response envelopes, partial GraphQL errors,
+  provider IDs, pagination/continuation and error/cost extraction. Compile
+  declarative transformations through existing schema/query/JSLT facilities;
+  keep exceptional callbacks explicit host capabilities. Pagination needs page/
+  row/byte ceilings, repeated-cursor/no-progress detection, empty-page rules,
+  backpressure, cancellation and durable source/version/partition checkpoints.
+  Preserve lossless staging and partial observations; publication of a complete
+  snapshot requires evidence for every requested partition, with explicit
+  behavior for a source changing mid-pull. Provider-specific media/binary,
+  bulk-operation or upload capabilities require their own qualified descriptor,
+  not a claim of universal GraphQL support. Recorded inventory and commerce
+  protocol fixtures plus an unrelated provider must demonstrate reuse before retiring
+  SDK/adaptor code; CSV/locale decoding stays with its existing qualified owner.
+- [ ] **Destination authority and private host resources across runs.** Extend
+  existing identify/acquire/release and injected effects with a documented
+  composition for a persisted run whose tenant/environment/company and actor
+  identity must survive navigation while credentials remain private. Resolve
+  current authority before each external write, reject configuration changes
+  between validation and dispatch, and define lease/resource ownership across
+  OAuth refresh, account switching, worker failure, cancellation and shutdown.
+  Persist opaque credential references and authority evidence only where
+  appropriate, never tokens, browser handles, controllers or secrets in JSON
+  state, checkpoints, replay responses or logs. Restoring a switched provider
+  context must happen after all workers drain. Prove revoked access, changed
+  destination, concurrent runs and late responses cannot reuse a previously
+  privileged client or publish after cancellation. Generic lifecycle hooks
+  must remain independent of any one provider's membership or config policy.
+- [ ] **Durable domain receipts beyond an expiring HTTP claim.** The shipped
+  ledger co-settles HTTP commands on a declared collection, but requires a
+  finite positive TTL; local/port bindings leave settlement policy inert.
+  Provide a qualified persistence/command composition for existing mapped
+  receipt and immutable event tables, with shared HTTP/local/job invocation
+  semantics. Define command identity and payload-hash versions, tenant/env/
+  aggregate scope, collision refusal, expected revisions, replay outcome and
+  current-state observation separately, current authorization for replay reads,
+  and retention independent of a
+  short-lived execution lease. Expiry, sweep or retryable failure must never
+  authorize repeating an already recorded business mutation. Reuse the current
+  required-settlement hook for same-transaction output/error validation,
+  revision checks, domain writes and receipts, including deliberate validated
+  failure observations that commit. Make claim/lease recovery and historical
+  replay retention separate policies, with explicit migration and compaction
+  rules preserving audit references. Cross-process races, invalid output,
+  settlement/commit failure and restart must prove one committed domain effect
+  and no second database or parallel authoritative ledger.
+- [ ] **External effect reconciliation on the existing job/outbox engine.**
+  Model durable preparation, frozen reviewed payload/hash, selected fields or
+  legs, sending intent, attempts, confirmed success/rejection and unresolved
+  outcome separately from a job lease. Commit preparation and local facts
+  together, release the transaction before I/O, then settle evidence under the
+  expected operation revision/fence. A crash after send and before local
+  settlement, timeout, disconnect, abort or malformed response can leave an
+  externally completed effect; lease expiry must not automatically resend it.
+  Inject provider idempotency guarantees, correlation/read-back probes and
+  explicit operator reconciliation with actor/reason evidence; absence of a
+  match is proof of non-application only when the provider guarantees it.
+  Partial multi-leg success remains individually recorded, and compensation
+  is a separately authorized operation, not rollback of a remote system.
+  Extend flow/job retry admission and recovery where needed so unknown effects
+  block or reconcile while safe work resumes. Test every crash boundary and
+  stale worker; exactly-once store settlement is never advertised as exactly-
+  once delivery to a provider.
+- [ ] **Domain run adoption, observation and audit without a second engine.**
+  Compose the existing flow FSM/DAG, job fences/checkpoints and app task effect
+  with mapped domain run IDs, revisions and transitions so an existing durable
+  import, sync, enrichment or review run can attach, resume and cancel through
+  the same public contract. Decide persisted workflow/schema identity and
+  upgrade/reset compatibility before consuming old checkpoints; reset cannot
+  erase immutable business facts or authorize replay of unresolved external
+  effects. Expose bounded, paged public progress/events and resumable observation
+  by cursor or revision, with stale-update rejection and secret-free errors;
+  navigation detaches observation without implicitly cancelling durable work.
+  Explicit cancellation stops admission, drains work and records its final
+  observation before host resources close. Prove restart, lease takeover,
+  concurrent observers, lost progress delivery and shutdown against the
+  application's existing run/status semantics. This adopts orchestration;
+  source provenance, review decisions, stock movements and posted history keep
+  their authoritative schema and domain rules.
+
+## Native application adoption — qualification and order
+
+These workstreams cover five mechanisms that can remain application-owned
+after adopting the suite: domain SQL/private driver bridge,
+MiniSearch, virtual-core, trusted local formulas, and provider adapters/domain
+ledgers.
+
+| Retained mechanism | Roadmap owner |
+|---|---|
+| Domain SQL and private driver bridge | [The data pair](#jarenjslinq--jarenjsdb--the-data-pair): physical mappings, invariants, shared transactions, native queries and recovery |
+| MiniSearch | [Lexical search](#lexical-search-cross-package): ranking, incremental indexes and resident/database equivalence |
+| virtual-core | [View and app](#jarenjsview--jarenjsapp): windowing, accessible interaction and bounded data providers |
+| Trusted local formulas | [Saved formulas and reviewed rules](#saved-formulas-and-reviewed-rules-cross-package): native profiles, evaluation, migration and reviewed plans |
+| Provider adapters and domain ledgers | [Provider execution and durable workflows](#provider-execution-and-durable-domain-workflows-cross-package): scheduling, protocols, authority, receipts, reconciliation and run adoption |
+
+Existing roadmap entries for SQL pushdown/introspection/live queries,
+accessibility, IME and Studio editing remain their single owners; the additions
+above define the missing adoption contracts rather than reopening shipped
+engines. Search, virtualization and formula discovery can start independently.
+Relational mapping and transaction coexistence precede durable domain-ledger
+adoption; provider scheduling/protocol work can proceed separately, but
+external-write cutover requires the receipt/reconciliation proof. Native
+formula authoring can ship before legacy migration; retiring the trusted
+runner waits for explicit resolution of the saved corpus.
+
+- [ ] **Reproducible replacement evidence across applications.** Start each
+  workstream with a source/API census and preserve the retained implementation
+  as a differential test oracle. Provide portable, secret-free fixtures for
+  an integer receipt/history trigger, column-only settings, nullable
+  inventory/provenance, ranked catalog, virtual grid, saved JavaScript bodies
+  and interrupted provider legs, plus a representative larger consumer with
+  independently declared scale and semantics. Publish capability/refusal and
+  behavior matrices, correctness/recovery results, source removed versus host
+  policy retained, query/statement counts, startup and interaction latency,
+  peak resident/heap memory and compressed browser bytes. Freeze workload and
+  budgets before comparing; do not extrapolate a small fixture or increase a
+  limit to conceal a regression. Qualify applicable public exports through
+  installed npm consumers, Node, Bun, compiled standalone binaries and real
+  browsers, including offline/restart and teardown. Each replacement exits
+  only when the application can delete the old mechanism through public APIs,
+  preserve its existing data and user-visible behavior (or an explicitly
+  accepted migration), and keep its product policy; implementation, consumer
+  acceptance and platform/manual evidence are separate completion claims.
 
 ## @jarenjs/ai
 
