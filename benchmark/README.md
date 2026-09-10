@@ -1217,3 +1217,39 @@ against retained development-only oracles. It reports costs, losses and pending
 qualifications without changing the frozen ceilings. See
 [portable replacement evidence](../docs/ADOPTION-EVIDENCE.md) for the workloads,
 installed-public-API recipe and the separate native, host and operator exits.
+
+
+## Relational adoption measurements
+
+`node --no-warnings=ExperimentalWarning benchmark/relational.js --write` compares
+retained SQL with scoped prepared SQL against the unchanged adoption freeze and
+measures mapped rows separately. Each consumer runs in a fresh process. Timings
+are a single repeatable observation, not a speedup claim. Source SQL retirement
+remains a separate qualification.
+
+<!--fact:relational.measurements-->
+
+Measured on v24.19.0, SQLite 3.53.3, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+
+| Consumer | Generated rows | SQL statements reference / scoped | Worst SQL ms reference / scoped | WAL recovery ms | Open ms | Mapped point read ms | Bounded load rows / bytes | Decoded full scan ms | Sampled heap MiB | Peak RSS MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| catalog | 10000 | 9 / 9 | 0.64 / 0.49 | 43.50 | 17.04 | 2.40 | 256 / 18627 | 37.23 | 25.30 | 105.02 |
+| archive-stock | 75000 | 9 / 9 | 0.71 / 0.60 | 76.04 | 22.81 | 2.99 | 256 / 20298 | 198.09 | 104.93 | 205.42 |
+
+catalog: 6 measured limits met, 0 losses, 2 pending. archive-stock: 6 measured limits met, 0 losses, 2 pending.
+
+<!--/fact-->
+
+The SQL statement ceiling covers the frozen reads and first mutations. Seeding,
+transaction admission, catalog verification, second-run assertions and mapped
+reads are additional work. Both SQL subsets use the same small fixture; the
+mapped Item probe separately uses every generated consumer row. Its bounded load
+has an explicit `take`; Query IR evaluation currently decodes a full scan, whose
+cost is reported without a bounded-pushdown claim. Exact peak heap and remaining
+handles are pending. The committed report carries the freeze and runner hashes.
+
+The installed consumer runs through `npm run test:packed`, using public Node/Bun
+drivers and LINQ declarations with no application driver wrapper. Recovery fault
+injection runs in `test/db/relational-recovery.test.js` on both hosts. Native
+executable deployment, PostgreSQL capture and actual downstream cutover still
+need their own evidence.

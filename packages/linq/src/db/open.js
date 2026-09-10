@@ -91,6 +91,9 @@ export async function open(model, options) {
     const inner = {
       store: tx,
       capabilities: tx.capabilities,
+      sql: tx.sql,
+      jobs: tx.jobs,
+      sync: tx.sync,
       ...handlesOf(tx),
       transaction: (fn) => tx.transaction((nested) => fn(transactionClient(nested))),
       // the named-savepoint group (MODEL-FORMAT §5.2), forwarded as it

@@ -826,10 +826,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->633,786<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->651,607<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->634<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->652<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather
@@ -839,6 +839,10 @@ six modules are under 600 source lines. Taking `./db` means taking a SQL
 planner, a unit of work, a live-maintenance engine and a JSON Schema
 validator, and the honest way to read the figure is as the price of the
 database, not of the front door.
+
+Explicit physical codecs, catalog verification, invariant lowering and guarded
+SQL also ride with the store. Their measured cost is included in this figure;
+the structural bundle ceiling is 665 kB. The frozen consumer budgets are unchanged.
 
 What the probe asserts, and fails the build on:
 
@@ -856,7 +860,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->45,143<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->45,575<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at
@@ -891,3 +895,44 @@ survives is structural, not temporal** — the graph load's statement
 counts are printed beside its timings, and the client answers a
 two-level graph in ONE statement where the schema-first ORM takes three,
 whatever the corpus and whatever the clock says.
+
+## Trusted SQL during adoption
+
+`open()` forwards `adopt: true` and physical model declarations to the store.
+A transaction client exposes `tx.sql`, `tx.jobs`, and the store's optional
+`tx.sync` surface. `tx.sql.prepare(text, { access: 'read' | 'write', affects? })`
+returns `run(params)`, `get(params)`, `all(params)` and `close()`. Parameters are
+positional arrays. These methods answer values on synchronous hosts and promises
+on asynchronous hosts. Always await asynchronous operations inside the callback;
+statement preparation rechecks scope ownership before execution, so a late
+preparation cannot write after settlement.
+
+```js
+await client.transaction(async tx => {
+  const insert = tx.sql.prepare('INSERT INTO legacy_note(body) VALUES (?)',
+    { access: 'write' });
+  await insert.run(['reviewed']);
+  await tx.entities.Setting.update('locale', { value: 'nl-NL' });
+  await tx.jobs.enqueue('publish', { key: 'locale' });
+  insert.close();
+}, { mode: 'immediate' });
+```
+
+The SQL capability accepts trusted application statements with explicit access.
+It refuses multiple statements, transaction control, schema changes and connection
+configuration. A retained statement or continuation refuses after scope settlement
+or while a nested scope owns the connection. Closing a statement invalidates its
+public handle; underlying cached/native storage belongs to the connection.
+
+SQL writes conservatively invalidate clean tracked entities, including effects of
+unknown triggers/cascades. Pending tracked changes must first be saved or discarded.
+The optional `affects` declaration does not narrow this conservative policy.
+SQL writes refuse capture/replication and store-only invariant configurations whose
+coverage they cannot honor. This capability is not an untrusted-SQL sandbox;
+application-supplied SQL and host functions remain trusted.
+
+`store.sync.transaction(fn, { mode: 'immediate' })` uses the same writer and
+savepoint owner. It rejects thenables and invalidates post-return work. Async-only
+hosts have no synchronous transaction surface. The outbox infrastructure must
+already have been provisioned through an explicit setup/migration before a
+no-DDL adoption; opening with jobs enabled is a separate infrastructure operation.

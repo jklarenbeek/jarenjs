@@ -598,3 +598,37 @@ difference between a puzzled afternoon and a five-minute fix.
 Down migrations REMAIN a non-goal (§7's reasoning is unchanged): a
 down migration is a data-loss generator wearing a seatbelt; recovery
 is a backup restored plus the forward chain.
+
+## Existing physical files and forward recovery
+
+`planPhysicalMigration(connection, fromModel, toModel, options)` records the
+source schema and explicit DDL/SQL/rebuild steps as an ordinary migration document.
+`options` supplies an `id`, `steps`, a disposition for every source `type:name`
+(`preserve`, `replace`, or `drop`), and optional `{ sql, params, expected }`
+preservation assertions. Assertions are SELECTs evaluated before and after the
+steps. They should cover committed identities, exact BLOB hex and application
+history facts. Unknown objects cannot disappear without a declared disposition.
+Automatic hybrid model diffing refuses column layouts; an explicit plan is required.
+
+Apply through `migrate(target, [plan], { baseline, model, shadow: false })`.
+A physical plan must be qualified on an explicit backup and fresh-target fixture;
+an empty model-generated shadow cannot recreate the original file's application
+programs. The runner uses its existing immediate transaction, ordered steps,
+checksummed receipt and FK checks. It checks the source schema before destructive
+steps and preserved objects and assertions before publication. Target mapped
+columns and declared invariant triggers are verified. A changed source is
+`JD0020`, a lost object/fact is `JD0023`, and an edited applied receipt is `JD0022`.
+
+Migration history is created inside the applying transaction only when needed.
+An identical second run executes no DDL or DML. Failed steps and failed commits
+roll back; after a process kill SQLite recovery leaves the source or the committed
+target. Re-running resumes from committed receipts. Forward repair plans start
+from the newest file, including later application edits; restoring an older
+backup does not qualify as forward repair.
+
+`backupTo()` publishes a sibling temporary only after a complete snapshot.
+Node uses online backup. Bun uses its native serialized SQLite snapshot under
+the store gate, then flushes and atomically renames through the same publisher.
+Bun holds a full database image in memory and cannot offer page-granular copy
+cancellation. Both snapshots include committed WAL; interruption before rename
+leaves the previous destination valid, while a leftover temporary is not published.

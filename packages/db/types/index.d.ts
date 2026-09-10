@@ -695,7 +695,7 @@ export interface SyncStore {
    * the consumer's words; the handle's writes take it and reads answer it. */
   collection<T = unknown>(name: string): SyncCollection<T>;
   entity(name: string): SyncEntitySet;
-  transaction<R>(fn: (store: TransactionStore) => R): R;
+  transaction<R>(fn: (store: TransactionStore) => R, options?: { mode?: 'deferred' | 'immediate' }): R;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain?(document: unknown, options?: ExecuteOptions): unknown;
   /** The entity roots this store-level provider serves (present with
@@ -813,7 +813,7 @@ export interface TransactionScopeOptions {
    * upgrade `SQLITE_BUSY` the busy handler cannot retry — what a claim
    * needs under concurrent writers; `'deferred'` (the default) is the
    * savepoint as always. A nested `tx.transaction()` is a savepoint
-   * whichever mode the root chose; the synchronous twin has no mode. */
+   * whichever mode the root chose; the root synchronous twin accepts the same mode. */
   mode?: 'deferred' | 'immediate';
 }
 
@@ -845,6 +845,7 @@ export interface SyncSavepointController {
 /** The synchronous surface a transaction view carries: the store's,
  * plus the transaction-only savepoint group. */
 export interface TransactionSyncStore extends SyncStore {
+  readonly sql: TrustedSyncSql;
   readonly savepoints: SyncSavepointController;
 }
 
@@ -871,6 +872,7 @@ export interface TransactionStore extends Omit<Store,
   | 'jobs' | 'replication'> {
   /** The transactional outbox (JOBS-FORMAT §3): no administration here —
    * an admin operation is a root call. */
+  readonly sql: TrustedSql;
   readonly jobs?: JobsApi;
   transaction<R>(fn: (store: TransactionStore) => R | Promise<R>): Promise<Awaited<R>>;
   /** Named partial rollback over the transaction's one savepoint stack
@@ -1051,6 +1053,8 @@ export interface LiveBounds {
 }
 
 export interface OpenStoreOptions {
+  /** Verify existing objects and create no schema or infrastructure. */
+  adopt?: boolean;
   replication?: ReplicationOptions;
   driver: Driver;
   path?: string;
@@ -1982,3 +1986,27 @@ export interface ReplicationSnapshot {
   receipts: ReplicationEnvelope[];
 }
 export declare function normalizeReplicationSnapshot(document: unknown): ReplicationSnapshot;
+
+/** Trusted prepared SQL; statements belong to one transaction scope. */
+export interface TrustedSql {
+  prepare(sql: string, options: { access: 'read' | 'write'; affects?: readonly string[] }): {
+    run(params?: readonly unknown[]): unknown;
+    get(params?: readonly unknown[]): Record<string, any> | undefined | Promise<Record<string, any> | undefined>;
+    all(params?: readonly unknown[]): Record<string, any>[] | Promise<Record<string, any>[]>;
+    close(): void;
+  };
+}
+export interface TrustedSyncSql {
+  prepare(sql: string, options: { access: 'read' | 'write'; affects?: readonly string[] }): {
+    run(params?: readonly unknown[]): unknown;
+    get(params?: readonly unknown[]): Record<string, any> | undefined;
+    all(params?: readonly unknown[]): Record<string, any>[];
+    close(): void;
+  };
+}
+export declare function planInvariants(model: unknown, options: { dialect: Dialect }): {
+  type: 'trigger'; name: string; owner: string; rule: string; sql: string;
+}[];
+export declare function planPhysicalMigration(connection: unknown, fromModel: unknown, toModel: unknown,
+  options: { id: string; steps: readonly unknown[]; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
+    assertions?: readonly { sql: string; params?: readonly unknown[]; expected: readonly unknown[] }[] }): unknown;

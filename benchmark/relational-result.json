@@ -1,0 +1,189 @@
+{
+  "format": "jaren-relational-report/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "runnerHash": "ac3d67bf30e347aaf415fd10022144dcf4a3aa594dd99d5fd40c763f500fe801",
+  "runtime": {
+    "node": "v24.19.0",
+    "sqlite": "3.53.3",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "consumers": [
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "workloadHash": "2c68af5b38af12efcf4c34f1a7b09c16f5b45fbe030c1837b29ddfcf16f35f1e",
+      "baseline": {
+        "statements": 9,
+        "queryMs": 0.6374320000000182
+      },
+      "final": {
+        "statements": 9,
+        "queryMs": 0.4879039999999861,
+        "recoveryMs": 43.50420399999999
+      },
+      "mapping": {
+        "openMs": 17.03550899999999,
+        "pointReadMs": 2.4013180000000034,
+        "boundedLoadMs": 2.7130149999999844,
+        "loadedRows": 256,
+        "loadedBytes": 18627,
+        "decodedScanMs": 37.230243,
+        "decodedScanRows": 10000
+      },
+      "resources": {
+        "sampledHeapBytes": 26526192,
+        "peakRssBytes": 110125056,
+        "peakHeapBytes": null,
+        "teardownMs": 0.537210999999985,
+        "remainingHandles": null
+      },
+      "budgets": {
+        "relational": [
+          {
+            "metric": "statements",
+            "limit": 9,
+            "value": 9,
+            "status": "pass"
+          },
+          {
+            "metric": "queryMs",
+            "limit": 100,
+            "value": 0.4879039999999861,
+            "status": "pass"
+          },
+          {
+            "metric": "recoveryMs",
+            "limit": 5000,
+            "value": 43.50420399999999,
+            "status": "pass"
+          }
+        ],
+        "resources": [
+          {
+            "metric": "sampledHeapBytes",
+            "limit": 268435456,
+            "value": 26526192,
+            "status": "pass"
+          },
+          {
+            "metric": "peakRssBytes",
+            "limit": 536870912,
+            "value": 110125056,
+            "status": "pass"
+          },
+          {
+            "metric": "peakHeapBytes",
+            "limit": 268435456,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "teardownMs",
+            "limit": 1000,
+            "value": 0.537210999999985,
+            "status": "pass"
+          },
+          {
+            "metric": "remainingHandles",
+            "limit": 0,
+            "value": null,
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "workloadHash": "db38b948f5210104a8aa8eaa580bd683f9adbb8e96f8a175136c9f37a93af226",
+      "baseline": {
+        "statements": 9,
+        "queryMs": 0.7073419999999828
+      },
+      "final": {
+        "statements": 9,
+        "queryMs": 0.6046770000000379,
+        "recoveryMs": 76.03992400000004
+      },
+      "mapping": {
+        "openMs": 22.808854999999994,
+        "pointReadMs": 2.986230999999975,
+        "boundedLoadMs": 2.9198129999999765,
+        "loadedRows": 256,
+        "loadedBytes": 20298,
+        "decodedScanMs": 198.09068900000005,
+        "decodedScanRows": 75000
+      },
+      "resources": {
+        "sampledHeapBytes": 110027408,
+        "peakRssBytes": 215396352,
+        "peakHeapBytes": null,
+        "teardownMs": 0.8961910000000444,
+        "remainingHandles": null
+      },
+      "budgets": {
+        "relational": [
+          {
+            "metric": "statements",
+            "limit": 9,
+            "value": 9,
+            "status": "pass"
+          },
+          {
+            "metric": "queryMs",
+            "limit": 250,
+            "value": 0.6046770000000379,
+            "status": "pass"
+          },
+          {
+            "metric": "recoveryMs",
+            "limit": 5000,
+            "value": 76.03992400000004,
+            "status": "pass"
+          }
+        ],
+        "resources": [
+          {
+            "metric": "sampledHeapBytes",
+            "limit": 805306368,
+            "value": 110027408,
+            "status": "pass"
+          },
+          {
+            "metric": "peakRssBytes",
+            "limit": 1073741824,
+            "value": 215396352,
+            "status": "pass"
+          },
+          {
+            "metric": "peakHeapBytes",
+            "limit": 805306368,
+            "value": null,
+            "status": "pending"
+          },
+          {
+            "metric": "teardownMs",
+            "limit": 2000,
+            "value": 0.8961910000000444,
+            "status": "pass"
+          },
+          {
+            "metric": "remainingHandles",
+            "limit": 0,
+            "value": null,
+            "status": "pending"
+          }
+        ]
+      }
+    }
+  ],
+  "limitations": [
+    "SQL budgets count six reads and three first mutations; seed, transaction admission, metadata, second-run assertions and mapped reads are additional work.",
+    "The frozen relational SQL subset is small in both profiles; Item measurements separately use every generated consumer row.",
+    "Physical Query IR evaluation decodes a full scan; its cost is reported separately and does not qualify bounded query pushdown.",
+    "The heap is sampled, not an exact peak; open-handle teardown and PostgreSQL/native-binary deployment remain pending.",
+    "Source SQL retirement and real downstream cutover remain pending; the reference oracle stays executable."
+  ]
+}

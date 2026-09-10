@@ -166,6 +166,134 @@
         "x-rename": {
           "type": "string",
           "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT §9): a rename is declared, never inferred."
+        },
+        "physical": {
+          "type": "object",
+          "required": [
+            "table",
+            "columns"
+          ],
+          "properties": {
+            "table": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "enum": [
+                "table",
+                "view"
+              ]
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "columns": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "codec",
+                  "null"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "codec": {
+                    "enum": [
+                      "text",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "json",
+                      "date",
+                      "datetime",
+                      "epoch-ms",
+                      "bigint",
+                      "decimal",
+                      "blob-hex"
+                    ]
+                  },
+                  "null": {
+                    "enum": [
+                      "null",
+                      "absent",
+                      "reject"
+                    ]
+                  },
+                  "default": {
+                    "const": "database"
+                  },
+                  "generated": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "invariants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "on",
+              "assert",
+              "enforcement"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "on": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "insert",
+                    "update",
+                    "delete"
+                  ]
+                }
+              },
+              "assert": {},
+              "enforcement": {
+                "enum": [
+                  "database",
+                  "store"
+                ]
+              },
+              "audit": {
+                "type": "object",
+                "required": [
+                  "entity",
+                  "values"
+                ],
+                "properties": {
+                  "entity": {
+                    "type": "string"
+                  },
+                  "values": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "required": [

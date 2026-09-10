@@ -563,8 +563,11 @@ export function postgresDialect(options = undefined) {
       // fact the shape check reads beside the name and the type
       columns: (table) =>
         'SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, '
-        + "CASE WHEN a.attgenerated <> '' THEN 1 ELSE 0 END AS hidden "
+        + "CASE WHEN a.attgenerated <> '' THEN 1 ELSE 0 END AS hidden, "
+        + 'CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS not_null, '
+        + 'pg_get_expr(d.adbin, d.adrelid) AS default_value '
         + 'FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid '
+        + 'LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum '
         + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE c.relname = ${stringLiteral(table)} AND ${inNamespace} `
         + 'AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum',
@@ -597,6 +600,15 @@ export function postgresDialect(options = undefined) {
         + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE c.relkind IN ('r', 'p', 'v', 'm') AND ${inNamespace} `
         + 'ORDER BY type, c.relname',
+      objects: () =>
+        "SELECT 'trigger' AS type, t.tgname AS name, c.relname AS owner, "
+        + 'pg_get_triggerdef(t.oid) AS sql FROM pg_trigger t '
+        + 'JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace '
+        + `WHERE NOT t.tgisinternal AND ${inNamespace} UNION ALL `
+        + "SELECT 'index', ci.relname, c.relname, pg_get_indexdef(i.indexrelid) "
+        + 'FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid '
+        + 'JOIN pg_class ci ON ci.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace '
+        + `WHERE ${inNamespace} ORDER BY type, name`,
       generated: (table) =>
         'SELECT a.attname AS name, pg_get_expr(d.adbin, d.adrelid) AS expression '
         + 'FROM pg_attrdef d '
@@ -620,7 +632,7 @@ export function postgresDialect(options = undefined) {
           + "WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE 'NO ACTION' END";
         return 'SELECT tt.relname AS target, sa.attname AS source_column, '
           + `ta.attname AS target_column, ${action('c.confdeltype')} AS on_delete, `
-          + `${action('c.confupdtype')} AS on_update, k.ord - 1 AS seq `
+          + `${action('c.confupdtype')} AS on_update, c.conname AS id, k.ord - 1 AS seq `
           + 'FROM pg_constraint c JOIN pg_class ct ON ct.oid = c.conrelid '
           + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
           + 'JOIN pg_class tt ON tt.oid = c.confrelid '

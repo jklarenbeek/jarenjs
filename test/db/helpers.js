@@ -346,6 +346,7 @@ export function fullDoubleDialect(createDialect) {
       checks: (t) => `GET checks ${t}`,
       dataVersion: () => 'GET data-version',
       schemaDump: () => 'GET schema-dump',
+      objects: () => 'GET objects',
     },
   });
 }

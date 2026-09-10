@@ -14,6 +14,8 @@
  * whole one.
  */
 
+import { columnCodec } from './physical.js';
+
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
 import { jsonBytes, decodeCountedJson } from './json-bytes.js';
@@ -73,9 +75,14 @@ function checkBounds(node, include, keyed, raw, sizes) {
  * @returns {any}
  */
 export function mergeEntityRow(entityMapping, row, docField = 'doc') {
-  const doc = JSON.parse(row[docField]);
+  const doc = entityMapping.document === false ? {} : JSON.parse(row[docField]);
   for (const column of entityMapping.columns) {
     if (column.source === 'epoch(document)') continue;
+    if (entityMapping.document === false && column.codec) {
+      const value = columnCodec(column).decode(row[column.physical ?? column.name]);
+      if (value !== undefined) Object.defineProperty(doc, column.name, { value, enumerable: true, writable: true, configurable: true });
+      continue;
+    }
     const value = row[column.name];
     if (value === null || value === undefined) continue;
     doc[column.name] = column.storage === 'boolean' ? value === 1 : value;

@@ -73,7 +73,7 @@ function loss(code, object, detail) {
  * @param {string} table
  * @returns {any} value-or-promise
  */
-function readTable(connection, table) {
+function readTable(connection, table, objects) {
   const dialect = connection.dialect;
   const all = (sql) => chain(connection.prepare(sql), (statement) => statement.all([]));
   return chain(all(dialect.introspect.columns(table)), (columnRows) =>
@@ -97,6 +97,7 @@ function readTable(connection, table) {
                 unique: Number(declared[i].uniq) !== 0,
                 partial: Number(declared[i].partial ?? 0) !== 0,
                 columns: rows.map((row) => row.name == null ? null : String(row.name)),
+                sql: objects.find((o) => o.type === 'index' && o.name === String(declared[i].name))?.sql ?? null,
               }]));
           };
           return chain(withColumns(0, []), (indexes) =>
@@ -106,11 +107,18 @@ function readTable(connection, table) {
               chain(dialect.introspect.checks === undefined ? []
                 : all(dialect.introspect.checks(table)), (checkRows) => ({
               name: table,
-              primaryKey: keyRows.map((row) => String(row.name)),
+              sql: objects.find((o) => o.type === 'table' && o.name === table)?.sql ?? null,
+              primaryKey: columnRows.some((row) => Number(row.pk) > 0)
+                ? columnRows.filter((row) => Number(row.pk) > 0)
+                  .sort((a, b) => Number(a.pk) - Number(b.pk)).map((row) => String(row.name))
+                : keyRows.map((row) => String(row.name)),
               columns: columnRows.map((row) => ({
                 name: String(row.name),
                 type: String(row.type),
                 generated: Number(row.hidden) !== 0,
+                primaryKeyOrdinal: Number(row.pk ?? 0),
+                nullable: Number(row.not_null ?? 0) === 0,
+                default: row.default_value ?? null,
               })),
               generated: dialect.readGenerated(generatedRows),
               indexes,
@@ -121,6 +129,10 @@ function readTable(connection, table) {
                 targetColumn: row.target_column === null || row.target_column === undefined
                   ? null : String(row.target_column),
                 onDelete: String(row.on_delete ?? 'NO ACTION').toUpperCase(),
+                onUpdate: String(row.on_update ?? 'NO ACTION').toUpperCase(),
+                group: row.id ?? null,
+                ordinal: Number(row.seq ?? 0),
+                match: String(row.match ?? 'NONE'),
               })),
             }))));
         }))));
@@ -153,10 +165,23 @@ export function readSchema(connection, options = undefined) {
         if (String(row.type) === 'view') views.push(name);
         else names.push(name);
       }
-      const step = (i, out) => (i >= names.length
-        ? { tables: out, views }
-        : chain(readTable(connection, names[i]), (table) => step(i + 1, [...out, table])));
-      return step(0, []);
+      const readObjects = dialect.introspect.objects === undefined ? []
+        : chain(connection.prepare(dialect.introspect.objects()), (s) => s.all([]));
+      return chain(readObjects, (catalog) => {
+        const complete = [...catalog];
+        for (const row of rows) {
+          if (!complete.some((o) => o.type === row.type && o.name === row.name))
+            complete.push({ ...row, owner: row.name, sql: null });
+        }
+        const objects = complete.filter((row) => !engine.has(String(row.owner))
+          && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
+          .map((row) => ({ type: String(row.type), name: String(row.name),
+            owner: String(row.owner), sql: row.sql ?? null }));
+        const step = (i, out) => (i >= names.length
+          ? { tables: out, views, objects }
+          : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
+        return step(0, []);
+      });
     }));
 }
 
@@ -547,6 +572,11 @@ export function introspectModel(connection, options = undefined) {
       add(loss('unmapped-view', view,
         'a view is not a shape a model document can declare'));
     }
+    for (const object of schema.objects) {
+      if (object.type === 'trigger') add({ ...loss('unmapped-object', object.name,
+        'an application-owned trigger program must be explicitly preserved; inspection grants no drop permission'),
+      sql: object.sql, owner: object.owner });
+    }
 
     const joinTables = new Set(schema.tables
       .filter((table) => looksLikeJoinTable(dialect, table))
@@ -610,6 +640,13 @@ export function introspectModel(connection, options = undefined) {
         + `thing(s) the model would — ${report.map((row) => `${row.code} (${row.object})`)
           .join(', ')}`);
     }
-    return { model, report: Object.freeze(report.map((row) => Object.freeze(row))) };
+    const inventory = schema.objects.map((object) => Object.freeze({ ...object,
+      disposition: object.type === 'trigger' || object.type === 'view'
+        || report.some((row) => row.object === object.name
+          || row.object === `${object.owner}.${object.name}`
+          || (row.code === 'unmapped-table' && row.object === object.owner))
+        ? 'preserve' : 'derived' }));
+    return { model, report: Object.freeze(report.map((row) => Object.freeze(row))),
+      inventory: Object.freeze(inventory) };
   });
 }

@@ -331,6 +331,9 @@ export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown
   /** The scope-bound store — the escape hatch, still inside. It carries
    * no `close`: a transaction never owns the connection's lifetime. */
   readonly store: TransactionStore;
+  readonly sql: TransactionStore['sql'];
+  readonly jobs: TransactionStore['jobs'];
+  readonly sync: TransactionStore['sync'];
   readonly capabilities: StoreCapabilities;
   readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };

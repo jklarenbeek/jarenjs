@@ -128,7 +128,7 @@ the table and stale in the paragraph that cites it:
 |---|---:|---|
 | `.` | <!--fact:bundle.chain.kb-->174<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->37<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
-| `./model` | <!--fact:bundle.model.kb-->45<!--/fact--> kB | the schema pen it subclasses |
+| `./model` | <!--fact:bundle.model.kb-->46<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->20<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
 | `./migration` | <!--fact:bundle.migration.kb-->24<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
 | `./contract` | <!--fact:bundle.contract.kb-->49<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
@@ -140,7 +140,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->17<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->15<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->17<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->634<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->652<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -328,3 +328,20 @@ Then re-run your own test suite together with the upstream gate
 gitlink. Jaren is pre-1.0: patch releases do not break public API, but minor
 releases may. Pinning to a reviewed tag and reading the gitlink diff is the
 control that makes that acceptable.
+
+
+## Adopting an existing SQLite file
+
+Author a model through `@jarenjs/linq/model` with `.physical({ table, columns })`,
+then call `open` from `@jarenjs/linq/db` with a public `nodeDriver()` or
+`bunDriver()`, the file path and `adopt: true`. The explicit codecs define the
+JSON boundary and the existing file is verified without DDL. The portable
+installed-package probe in `test/consumer/relational.js` demonstrates settings,
+integer receipts, preserved history triggers and mixed entity/outbox rollback.
+
+Prepared application SQL belongs to `client.transaction(tx => ...)` through
+`tx.sql`; it shares the store's connection, authority and lifetime. Schema changes
+remain an explicit `planPhysicalMigration`/`migrate` operation. Follow the
+[model pen](../packages/linq/docs/MODEL-PEN.md#existing-column-layouts-and-persistence-rules),
+[transaction recipe](../packages/linq/docs/DB-CLIENT.md#trusted-sql-during-adoption),
+and [recovery contract](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery).

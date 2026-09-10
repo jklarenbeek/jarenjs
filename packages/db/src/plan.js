@@ -95,6 +95,7 @@ const KIND_REASONS = {
 
 /** Why one PREDICATE stayed in the engine. */
 const PREDICATE_REASONS = {
+  physicalCodec: 'this codec or NULL policy requires decoded-row evaluation',
   notPredicate: 'not a predicate the planner translates',
   negatedPrefilter: 'a negated predicate cannot ride an implied pre-filter '
     + '(negating a superset drops rows)',
@@ -2958,10 +2959,11 @@ export function entityShape(entity, entityMapping) {
   for (const column of entityMapping.columns) {
     const epoch = column.source === 'epoch(document)';
     flavors.set(canonicalOf([{ name: column.name }]), {
-      column: column.name,
+      column: column.physical ?? column.name,
       flavor: epoch ? 'entity-epoch' : 'entity-column',
       storage: column.storage,
       format: epoch ? entity.properties.get(column.name)?.format : undefined,
+      unsafe: column.codec !== undefined && (!['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec) || column.null !== 'reject'),
     });
   }
   for (const fk of entityMapping.foreignKeys) {
@@ -2974,6 +2976,7 @@ export function entityShape(entity, entityMapping) {
     schema: entity.schema,
     columnByCanonical: new Map(),
     entityFlavors: flavors,
+    columnOnly: entityMapping.document === false,
   };
 }
 
@@ -2990,6 +2993,7 @@ export function entityPathRef(node, slot, shape) {
   if (ref === null) return null;
   const canonical = canonicalOf(ref.segments);
   const flavored = shape.entityFlavors.get(canonical);
+  if (flavored?.unsafe || (shape.columnOnly && flavored === undefined)) return null;
   if (flavored !== undefined) {
     return {
       ...ref,
@@ -3122,6 +3126,10 @@ export function planEntityPredicate(node, slot, shape) {
     if (!('ref' in pred) || pred.ref === null) return pred;
     const canonical = canonicalOf(pred.ref.segments);
     const flavored = shape.entityFlavors.get(canonical);
+    if (shape.columnOnly && (flavored === undefined || flavored.unsafe)) {
+      blocked = refusal('physical', PREDICATE_REASONS.physicalCodec);
+      return pred;
+    }
     if (flavored === undefined) {
       // externals against DOC paths are not translated here (the
       // phase-A external forms assume the collection layout)

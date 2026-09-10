@@ -29,11 +29,60 @@
       "type": "string"
     },
     "steps": {
-      "description": "Ordered steps; the order is the contract. A pure widening may carry NO steps — the migration then only moves the recorded shape.",
+      "description": "Ordered steps; the order is the contract. A pure widening may carry NO steps \u2014 the migration then only moves the recorded shape.",
       "type": "array",
       "items": {
         "$ref": "#/definitions/step"
       }
+    },
+    "physical": {
+      "type": "object",
+      "required": [
+        "source",
+        "dispositions",
+        "assertions"
+      ],
+      "properties": {
+        "source": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "dispositions": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "preserve",
+              "replace",
+              "drop"
+            ]
+          }
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "sql",
+              "expected"
+            ],
+            "properties": {
+              "sql": {
+                "type": "string"
+              },
+              "params": {
+                "type": "array"
+              },
+              "expected": {
+                "type": "array"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [
@@ -150,7 +199,7 @@
       "additionalProperties": false
     },
     "deriveStep": {
-      "description": "Recompute named STORED derived index columns from the documents already in a collection. A spatial column is stored only under the physical mapping that cannot index a registered deterministic function (the generated mapping populates itself); a vector column is stored under both. The step is idempotent — a derived value is a pure function of the document — so a replay writes what the first run wrote.",
+      "description": "Recompute named STORED derived index columns from the documents already in a collection. A spatial column is stored only under the physical mapping that cannot index a registered deterministic function (the generated mapping populates itself); a vector column is stored under both. The step is idempotent \u2014 a derived value is a pure function of the document \u2014 so a replay writes what the first run wrote.",
       "type": "object",
       "properties": {
         "kind": {
@@ -224,7 +273,7 @@
       "additionalProperties": false
     },
     "sqlStep": {
-      "description": "A DATA step spelled directly as one SQL statement (MIGRATION-FORMAT §9.4): the planner's fold of a dropped column into the document, the move of a document member into its new column, an R*Tree backfill. Executed exactly as a ddl step; distinct in kind so a reviewer reads intent and a dry run shows it as data.",
+      "description": "A DATA step spelled directly as one SQL statement (MIGRATION-FORMAT \u00a79.4): the planner's fold of a dropped column into the document, the move of a document member into its new column, an R*Tree backfill. Executed exactly as a ddl step; distinct in kind so a reviewer reads intent and a dry run shows it as data.",
       "type": "object",
       "properties": {
         "kind": {
@@ -245,7 +294,7 @@
       "additionalProperties": false
     },
     "rebuildStep": {
-      "description": "The ALTER TABLE procedure SQLite lacks (MIGRATION-FORMAT §10), self-contained: create the target shape under `<table>__rebuild`, copy the rows through the rendered column mapping, drop the old table, rename, recreate the indexes, then `PRAGMA foreign_key_check` inside the transaction.",
+      "description": "The ALTER TABLE procedure SQLite lacks (MIGRATION-FORMAT \u00a710), self-contained: create the target shape under `<table>__rebuild`, copy the rows through the rendered column mapping, drop the old table, rename, recreate the indexes, then `PRAGMA foreign_key_check` inside the transaction.",
       "type": "object",
       "properties": {
         "kind": {
@@ -265,7 +314,7 @@
           }
         },
         "copy": {
-          "description": "The INSERT … SELECT that carries every row across the column mapping.",
+          "description": "The INSERT \u2026 SELECT that carries every row across the column mapping.",
           "type": "string",
           "minLength": 1
         },

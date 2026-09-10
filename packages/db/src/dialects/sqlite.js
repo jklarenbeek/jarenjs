@@ -11,6 +11,7 @@
 import { createDialect } from '../dialect.js';
 import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
+import { sqliteInvariantTriggers } from './invariant-sql.js';
 import { sqliteChecks } from './check-read.js';
 
 /** @param {string} s */
@@ -428,6 +429,12 @@ export const sqliteDialect = createDialect({
       : `PRAGMA integrity_check(${pragmaValue(limit)})`),
     optimize: () => 'PRAGMA optimize',
   },
+  invariantTriggers: sqliteInvariantTriggers,
+  physicalRead: (codec, sql) => codec === 'bigint' ? `CAST(${sql} AS TEXT)`
+    : codec === 'blob-hex' ? `CASE WHEN ${sql} IS NULL THEN NULL ELSE hex(${sql}) END` : sql,
+  physicalTypeMatches: (codec, type) => (codec === 'blob-hex' ? /BLOB/
+    : ['integer', 'bigint', 'boolean', 'epoch-ms'].includes(codec) ? /INT/
+      : codec === 'number' ? /REAL|FLOA|DOUB/ : /TEXT|CHAR|CLOB/).test(type),
   introspect: {
     version: () => 'SELECT sqlite_version() AS version',
     // the read-back of one configuration pragma: `PRAGMA name` answers
@@ -438,7 +445,8 @@ export const sqliteDialect = createDialect({
     tableExists: () =>
       "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
     columns: (table) =>
-      `SELECT name, type, hidden FROM pragma_table_xinfo(${stringLiteral(table)})`,
+      `SELECT name, type, hidden, pk, "notnull" AS not_null, dflt_value AS default_value `
+      + `FROM pragma_table_xinfo(${stringLiteral(table)}) ORDER BY cid`,
     indexes: (table) =>
       `SELECT name, "unique" AS uniq, origin, partial FROM pragma_index_list(${stringLiteral(table)})`,
     indexColumns: (index) =>
@@ -447,7 +455,7 @@ export const sqliteDialect = createDialect({
     dataVersion: () => 'SELECT data_version AS v FROM pragma_data_version',
     foreignKeyList: (table) =>
       `SELECT "table" AS target, "from" AS source_column, "to" AS target_column, `
-      + `on_delete, on_update, seq FROM pragma_foreign_key_list(${stringLiteral(table)}) `
+      + `on_delete, on_update, id, seq, match FROM pragma_foreign_key_list(${stringLiteral(table)}) `
       + 'ORDER BY id, seq',
     // Every schema object one table owns, with the CREATE text SQLite
     // stored verbatim. That text is where the physical facts no pragma
@@ -475,6 +483,9 @@ export const sqliteDialect = createDialect({
     schemaDump: () =>
       "SELECT type, name, tbl_name AS owner, sql FROM sqlite_schema "
       + "WHERE sql IS NOT NULL ORDER BY type, name",
+    objects: () =>
+      'SELECT type, name, tbl_name AS owner, sql FROM sqlite_schema '
+      + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
   },
   readChecks: sqliteChecks,
 });

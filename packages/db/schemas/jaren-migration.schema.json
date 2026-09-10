@@ -34,6 +34,55 @@
    "items": {
     "$ref": "#/$defs/step"
    }
+  },
+  "physical": {
+   "type": "object",
+   "required": [
+    "source",
+    "dispositions",
+    "assertions"
+   ],
+   "properties": {
+    "source": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    },
+    "dispositions": {
+     "type": "object",
+     "additionalProperties": {
+      "enum": [
+       "preserve",
+       "replace",
+       "drop"
+      ]
+     }
+    },
+    "assertions": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "sql",
+       "expected"
+      ],
+      "properties": {
+       "sql": {
+        "type": "string"
+       },
+       "params": {
+        "type": "array"
+       },
+       "expected": {
+        "type": "array"
+       }
+      },
+      "additionalProperties": false
+     }
+    }
+   },
+   "additionalProperties": false
   }
  },
  "required": [

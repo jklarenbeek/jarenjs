@@ -1159,3 +1159,21 @@ query for missing/invalid values, negative radii, polar or antimeridian boxes.
 The exact distance predicate still refines the candidates. The shared oracle
 covers SQLite column/R*Tree indexes and PostgreSQL, including repeated cached
 calls with different bound values.
+
+
+## Explicit relational adoption
+
+`introspect.js` owns physical inventory independently of model derivation.
+`physical.js` compiles column codecs and verifies declarations against that
+inventory. The existing entity core, tracker and graph row merger execute both
+hybrid and column layouts; there is no separate relational store. The query
+planner reports decoded evaluation for physical codecs, and refuses physical
+keyset continuation until its identity semantics are qualified.
+
+`sql.js` binds trusted statements to `store.js` transaction views. It reuses the
+read classifier's tokenizer and the driver's scope owner. Writes invalidate all
+clean tracked entities; pending edits and incomplete capture populations refuse.
+`invariants.js` uses the shared Query compiler for store rules; the dialect lowers
+a bounded database subset into ordered trigger bodies. `migrate.js` reuses its
+existing rebuild/receipt transaction and verifies preservation before publication.
+The backup publisher remains shared by Node online and Bun serialized snapshots.

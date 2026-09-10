@@ -185,6 +185,9 @@ function normalizeCapabilities(declared) {
  *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
+ *   physicalRead?: (codec: string, sql: string) => string,
+ *   physicalTypeMatches?: (codec: string, type: string) => boolean,
+ *   invariantTriggers?: (mapping: any, all: any, dialect: any) => any[],
  *   readChecks?: (rows: any[]) => { name: string, column?: string, values?: any[] }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
@@ -642,6 +645,9 @@ export function createDialect(spec) {
      */
     readGenerated: spec.readGenerated,
     readChecks: spec.readChecks,
+    physicalRead: spec.physicalRead,
+    physicalTypeMatches: spec.physicalTypeMatches,
+    invariantTriggers: spec.invariantTriggers,
     explainQuery: spec.explainQuery,
     /** The plan narrative, one line per row the engine answered. */
     explainLines: spec.explainLines,

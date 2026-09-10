@@ -61,6 +61,20 @@ export interface EntityBlock {
   };
 }
 
+/** Explicit column-only layout for an existing SQLite object. */
+export interface PhysicalLayout {
+  readonly table: string;
+  readonly kind?: 'table' | 'view';
+  readonly keys?: readonly string[];
+  readonly columns: Readonly<Record<string, {
+    readonly name: string;
+    readonly codec: 'text' | 'integer' | 'number' | 'boolean' | 'json' | 'date' | 'datetime' | 'epoch-ms' | 'bigint' | 'decimal' | 'blob-hex';
+    readonly null: 'null' | 'absent' | 'reject';
+    readonly default?: 'database';
+    readonly generated?: boolean;
+  }>>;
+}
+
 // ————— the entity-aware builders —————
 
 /** The base every untyped kind is built from, plus the vocabulary. */
@@ -203,6 +217,10 @@ export class EntityObjectBuilder<
   P extends Props, Open extends boolean = false, PV = never, PVIn = PV,
   N extends boolean = false, F extends Flag = never,
 > extends ObjectBuilder<P, Open, PV, PVIn, N, F> {
+  physical(layout: PhysicalLayout): this;
+  invariants(rules: readonly { name: string; on: readonly ('insert' | 'update' | 'delete')[];
+    enforcement: 'database' | 'store'; assert: unknown;
+    audit?: { entity: string; values: Readonly<Record<string, unknown>> } }[]): this;
   optional(): EntityObjectBuilder<P, Open, PV, PVIn, N, F | 'optional'>;
   nullable(): EntityObjectBuilder<P, Open, PV, PVIn, true, F>;
   open(): EntityObjectBuilder<P, true, PV, PVIn, N, F>;

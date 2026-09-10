@@ -4,8 +4,8 @@
  * live store — writers proceeding meanwhile — and publishes the copy by
  * rename, so the target path never holds a partial file and a
  * cancelled or failed backup leaves neither the target nor its
- * temporary sibling behind. The capability is the Node binding's; every
- * other binding reports `false` and refuses by code.
+ * temporary sibling behind. Node online backups and Bun serialized
+ * snapshots share the publisher; bindings without either refuse by code.
  */
 
 import { describe, it } from 'node:test';
@@ -56,7 +56,7 @@ async function idsOf(file) {
 }
 
 describe('the capability', () => {
-  it('the node driver declares backup; bun, wasm and a declaring double do not, and refuse JD2077', async () => {
+  it('the node driver declares backup; bindings without a snapshot primitive refuse JD2077', async () => {
     const node = await openStore(MODEL, { driver: nodeDriver() });
     assert.strictEqual(node.capabilities.maintenance.backup, true);
     assert.strictEqual(typeof node.backupTo, 'function');
@@ -306,4 +306,33 @@ describe('the temporary path', () => {
     assert.match(path.basename(tmp), /^store\.db\.jaren-tmp-[0-9a-f]{16}$/);
     assert.strictEqual(n, 2);
   });
+});
+
+
+it('the Bun serialized-snapshot adapter publishes exact bytes and removes a cancelled temporary', async () => {
+  const { fromBunModule } = await import('@jarenjs/db/bun');
+  const source = tempDbPath(), destination = tempDbPath();
+  let store;
+  try {
+    const seed = await seeded(source.dbPath, 2); await seed.close();
+    // The substitute models serialize's byte result; actual Bun/WAL semantics
+    // are exercised by the subprocess recovery matrix on the real runtime.
+    class SerializedDatabase extends BunShapedDatabase {
+      serialize() { return fs.readFileSync(source.dbPath); }
+    }
+    const driver = { name: 'bun-serialized-double', dialect: sqliteDialect,
+      open: (file) => fromBunModule({ Database: SerializedDatabase }, file) };
+    store = await openStore(MODEL, { driver, path: source.dbPath });
+    assert.equal(store.capabilities.maintenance.backup, true);
+    await store.backupTo(destination.dbPath, { checkpoint: false });
+    assert.deepEqual(await idsOf(destination.dbPath), ['n0', 'n1']);
+    const hash = sha256(destination.dbPath);
+    const abort = new AbortController();
+    await assert.rejects(store.backupTo(destination.dbPath, { checkpoint: false, signal: abort.signal,
+      onProgress: (progress) => { if (progress.remainingPages === 0) abort.abort(); },
+    }), { code: 'JD2079' });
+    assert.equal(sha256(destination.dbPath), hash);
+    assert.deepEqual(siblings(destination.dbPath), []);
+  }
+  finally { await store?.close(); source.cleanup(); destination.cleanup(); }
 });

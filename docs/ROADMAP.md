@@ -363,63 +363,25 @@ what each does is its own documentation's job
   index has no equivalent model declaration; emitting an unconditional index
   would strengthen its meaning. Boolean-versus-integer origins and numeric
   precision erased by storage also cannot be inferred without metadata.
-  Extend the read-only inventory to every trigger and other unsupported schema
-  object, including objects attached to an unmapped table; the current
-  `CREATE TABLE receipt (id INTEGER PRIMARY KEY, body BLOB)` plus an
-  `AFTER INSERT` history trigger reports the table as having no key and omits
-  the trigger. Separate key discovery from whether the resulting table can
-  be represented by the model. Report defaults, nullability, collation,
-  composite-key order, foreign-key actions, generated columns, views and index
-  predicates without silently weakening them. Each object must be represented
-  or carry a specific sorted loss, with source DDL sufficient for review;
-  strict refusal and unchanged schema/data are regression requirements.
-- [ ] **Existing relational schemas without a mandatory document column.**
-  Extend the hybrid entity model with an explicit physical mapping for ordinary
-  column-only tables: logical-to-physical table/column names, integer and
-  composite keys, database-generated identities/defaults, nullable/required
-  columns, relation/join tables and read-only views. A three-column
-  `app_settings(key, value, updated_at)` and an integer-key receipt table must
-  be adoptable without adding `doc`, renaming objects or rebuilding the file
-  merely to open it. Define SQL NULL versus JSON null/absence, safe-integer and
-  decimal precision, textual JSON and date codecs, and a lossless BLOB boundary
-  that does not put binary handles into JSON state. Carry supported partial/
-  expression indexes, cross-column CHECKs, collations and trigger ownership
-  through declaration, mapping explanation, schema comparison and migration;
-  unsupported objects require an explicit preserve/refuse disposition. Do not
-  infer business invariants from SQL or silently turn an introspection loss
-  into permission to drop an object.
-- [ ] **Declarative persistence invariants for existing histories.** Physical
-  mapping alone still leaves application SQL CHECK/trigger generators in place.
-  Define a bounded model vocabulary for reusable cross-field constraints,
-  immutable rows/fields, write-once or draft-to-frozen transitions and declared
-  revision/audit effects, with application-supplied predicates and field names.
-  Reuse existing foreign keys, enums, optimistic versions and query expressions;
-  account for old/new row values, insert/update/delete, null behavior, trigger
-  ordering, recursion refusal and interaction with generated identities.
-  Declare which invariants lower to database enforcement for every writer and
-  which require a qualified store writer; runtime validation alone must not
-  claim to protect external SQL. Unsupported trigger programs remain explicitly
-  preserved or refused. Prove equivalent accepted/rejected mutations, error
-  classification, audit rows and transaction/capture behavior through fresh
-  builds and upgrades before replacing immutable-history or posted-document
-  SQL. Inventory, provenance and recipe/purchase rules remain application
-  declarations; Jaren owns their reusable enforcement mechanism.
-- [ ] **One public transaction owner for staged SQL/model adoption.** Public
-  Node/Bun drivers already own statements and savepoints, and stores already
-  provide scoped sync/async transaction views. The missing bridge is a
-  supported way for prepared legacy SQL, mapped entities, validation, receipts
-  and `tx.jobs` to share that exact connection and transaction while a domain
-  migrates incrementally. Specify statement binding/result/close contracts,
-  immediate writer admission, nested savepoints, rollback and commit-failure
-  propagation, and lifetime checks on retained statements and callbacks;
-  synchronous callbacks must reject thenables and escaped continuations.
-  Async hosts must declare the absent synchronous capability. Any trusted-host
-  SQL seam needs explicit read/write authority and tracker/cache/change-capture
-  invalidation, including trigger/cascade side effects; unknown effects must
-  invalidate conservatively or refuse live/replication claims. Prove unrelated
-  requests cannot join the transaction, rollback withdraws all model/job state,
-  and neither a second connection nor an application-written driver wrapper is
-  needed. This is a coexistence milestone; query migration has its own exit.
+  Physical inventory now reports rowid/composite keys, source programs, defaults,
+  nullability, FK actions, generated columns, views and predicates independently
+  of derivation. Remaining work is a lossless declaration vocabulary for these
+  SQL programs and stronger PostgreSQL catalog parity; adoption does not infer
+  application intent from their DDL.
+- [ ] **Broader relational mapping and query qualification.** Explicit SQLite
+  column layouts, codecs, read-only views and composite-key join-table entities
+  are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
+  Relation navigation across physical layouts, codec-aware keyset continuation,
+  bounded SQL pushdown and PostgreSQL codec parity remain open. Application
+  trigger/cascade capture and replication remain refused until their complete
+  writer population has an executable oracle.
+- [ ] **Broader database invariant lowering.** Declared scalar old/new/operation
+  rules and ordered application audit effects now lower to verified SQLite
+  triggers ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)).
+  Arbitrary trigger programs, expression families outside the bounded grammar,
+  external-writer revision automation and PostgreSQL lowering remain open.
+  Store-only rules retain their explicit writer qualification. General interval
+  seek/indexing remains separate from the supported cross-member predicate.
 - [ ] **Native authoring for legacy query and mutation families.** Extend the
   LINQ/model/query surfaces only from an executable census of real SQL consumers:
   multi-table catalog projections, environment-qualified joins, correlated
@@ -435,19 +397,13 @@ what each does is its own documentation's job
   scans, resource costs and unsupported shapes. A raw SQL escape alone does
   not satisfy removal of domain SQL, and fluent syntax alone does not prove
   bounded execution or an equivalent query plan.
-- [ ] **Physical preservation and recovery for relational adoption.** Extend
-  the existing migration planner, assertions and table-rebuild machinery to
-  the column-only mappings and preserved objects above. Separate read-only
-  inspection, adopt-without-DDL and an explicitly executed migration; capture
-  a consistent snapshot including committed WAL, retain unknown objects or
-  refuse, and check schema, logical rows, BLOB bytes, keys, foreign keys,
-  constraints and trigger behavior against both the source and a fresh target.
-  Exercise populated histories, concurrent revision races, failed output/
-  receipt/commit, process death during copy/drop/publication, repeated startup
-  and forward repair under Node and Bun. Define compatibility with the newest
-  file and post-upgrade writes before offering downgrade or restore; an older
-  snapshot is not recovery for newer facts. Only qualified writer paths may
-  claim capture/replication coverage, under the existing replication boundary.
+- [ ] **Relational recovery beyond the qualified SQLite hosts.** Explicit
+  preservation plans, consistent committed-WAL backups, interrupted rebuild and
+  publication recovery, and forward repair from the newest file are exercised
+  under Node and Bun ([MIGRATION-FORMAT](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)).
+  PostgreSQL snapshots, power-loss durability, native executable deployment and
+  actual downstream cutover still require named evidence. Bun's serialized
+  backup retains a full image in memory; bounded streaming snapshots remain open.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering

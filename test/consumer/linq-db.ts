@@ -199,3 +199,14 @@ export async function ledgerTyping(client: LedgerClient) {
   const bad: DbClaimResult = { state: 'new', ref: 'seq-1' };
   void asContract; void wide; void asRecord; void swept; void bad;
 }
+
+export async function trustedTransactionTypes() {
+  const client = await open(fixtureModel, { driver });
+  await client.transaction(async (tx) => {
+    const rows: any[] = await tx.sql.prepare('SELECT ?', { access: 'read' }).all([1]);
+    const syncRow: any = tx.sync?.sql.prepare('SELECT ?', { access: 'read' }).get([1]);
+    // @ts-expect-error — transaction control is not an access mode
+    tx.sql.prepare('SELECT 1', { access: 'transaction' });
+    void [rows, syncRow];
+  });
+}

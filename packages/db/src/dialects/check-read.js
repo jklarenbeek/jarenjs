@@ -3,7 +3,7 @@
 
 /** Tokenize catalog SQL without treating quoted text or comments as syntax.
  * @param {string} sql @returns {{ kind: string, value: string }[]} */
-function tokensOf(sql) {
+export function sqlTokens(sql) {
   const tokens = [];
   for (let i = 0; i < sql.length;) {
     const c = sql[i];
@@ -120,7 +120,7 @@ function enumOf(tokens) {
 export function sqliteChecks(rows) {
   const checks = [];
   for (const row of rows) {
-    const tokens = tokensOf(String(row.sql ?? ''));
+    const tokens = sqlTokens(String(row.sql ?? ''));
     // A column's inherited collation changes IN equality even when the
     // CHECK itself names no collation. Refuse conservatively per table.
     const collated = tokens.some((token, i) => token.kind === 'word'
@@ -147,5 +147,5 @@ export function sqliteChecks(rows) {
  * @param {any[]} rows @returns {any[]} neutral constraints */
 export function postgresChecks(rows) {
   return rows.map((row) => ({ name: String(row.name),
-    ...(row.unsafe_collation ? null : enumOf(tokensOf(String(row.expression ?? '')))) }));
+    ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')))) }));
 }

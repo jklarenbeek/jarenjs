@@ -2,10 +2,10 @@
   "bundles": {
     "schema": 36717,
     "chain": 174241,
-    "model": 45143,
+    "model": 45575,
     "jslt": 19856,
     "migration": 24259,
-    "db": 633786,
+    "db": 651607,
     "contract": 48859,
     "flow": 19910,
     "app": 51006,

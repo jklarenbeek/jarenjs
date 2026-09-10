@@ -664,6 +664,7 @@ describe('the planner\'s reason vocabulary', () => {
    * by the suite whose model they need.
    */
   const NOT_REACHED = {
+    'predicate.physicalCodec': 'the explicit codec model and load refusal live in physical.test.js',
     'kind.raw': 'a raw node is only a registry operator\'s inert argument — never a root or a predicate',
     'flwor.collation': 'a $collation cannot be ANALYZED without a collation registry, '
       + 'so the engine refuses the document first',

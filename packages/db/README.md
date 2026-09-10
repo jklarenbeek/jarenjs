@@ -1407,3 +1407,20 @@ Only affected groups are reevaluated in source order; a final aggregate folds
 the retained group outputs in first-appearance order. Input documents and
 group outputs consume both state-entry and byte credits. See
 [LIVE-FORMAT](docs/LIVE-FORMAT.md) for the supported shapes and measured costs.
+
+
+## Existing relational SQLite files
+
+Use `readSchema(connection)` for physical inventory, then declare an entity's
+`physical` table, ordered keys and column codecs and open with `{ adopt: true }`.
+Opening verifies the existing shape and emits no DDL. Ordinary column tables need
+no document column; integer identities, exact hexadecimal BLOBs, database defaults
+and read-only views have explicit contracts in [MODEL-FORMAT](docs/MODEL-FORMAT.md#12-existing-column-layouts).
+
+Inside `store.transaction`, `tx.sql.prepare(text, { access: 'read' | 'write' })`
+shares the entity/outbox connection and savepoint owner. Statements expire with
+the scope. [The client recipe](../linq/docs/DB-CLIENT.md#trusted-sql-during-adoption)
+documents trust, invalidation and synchronous execution. Schema changes use
+`planPhysicalMigration` and `migrate`; [preservation and forward recovery](docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)
+require explicit dispositions and assertions. `planInvariants` supplies declared
+SQLite constraint/audit triggers for installation through that migration boundary.

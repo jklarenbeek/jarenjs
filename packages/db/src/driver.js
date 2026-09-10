@@ -822,6 +822,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // closed exactly as a statement is
     backup: capabilities.backup === true
       ? Object.freeze({
+        snapshot: raw.backup.snapshot === true,
         copy: (path, options) => { requireOpen(); return raw.backup.copy(path, options); },
         rename: (from, to) => { requireOpen(); return raw.backup.rename(from, to); },
         remove: (path) => { requireOpen(); return raw.backup.remove(path); },

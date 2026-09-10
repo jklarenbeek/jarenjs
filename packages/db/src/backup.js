@@ -20,13 +20,13 @@
  * platform reports progress (`rate` pages per step): the platform
  * itself takes no signal, so the signal is checked in the progress
  * callback and a throw there is what stops the pump. There is no
- * progress event with a zero remainder — the platform's completion
- * signal is the resolved copy, which answers the page total — so
- * progress events are handed on verbatim and completion is the promise.
+ * guaranteed terminal progress event — the platform's completion signal
+ * is the resolved copy, which answers the page total. Cancellation is
+ * checked again before publication, including after a terminal event.
  *
  * This module imports no runtime builtin: the copy, the rename and the
- * removal are the driver's primitives (`connection.backup`), present on
- * the Node binding and declared absent elsewhere.
+ * removal are the driver's primitives (`connection.backup`), supplied by
+ * Node online backup and Bun serialized snapshots.
  */
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
@@ -139,7 +139,8 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
         };
         let copying;
         try {
-          copying = files.copy(tmpPath, rate === undefined ? { progress } : { rate, progress });
+          const copy = () => files.copy(tmpPath, rate === undefined ? { progress } : { rate, progress });
+          copying = files.snapshot === true ? gated(copy, 'a snapshot backup') : copy();
         }
         catch (error) {
           return discard(aborted ?? failed(error));
@@ -153,7 +154,11 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
           attempt(() => files.rename(tmpPath, targetPath), failed),
           () => Object.freeze({ path: targetPath, pages: Number(pages), checkpoint: checkpointed ?? null }));
         return toPromise(copying)
-          .then((pages) => toPromise(publish(pages)))
+          .then((pages) => {
+            if (signal?.aborted === true) { aborted = cancelled(signal); throw aborted; }
+            callable(options, 'the temporary file was removed and the target path was not written');
+            return toPromise(publish(pages));
+          })
           .catch((error) => discard(aborted ?? failed(error)));
       });
     },

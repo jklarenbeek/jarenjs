@@ -58,7 +58,7 @@ describe('portable relational reference', () => {
     }
     finally { db.close(); }
   });
-  it('reproduces the current public inventory gap without changing schema or data', async () => {
+  it('preserves the public key and trigger inventory without changing schema or data', async () => {
     const db = await nodeDriver().open(':memory:');
     try {
       for (const sql of fixture.ddl.slice(1, 4)) db.exec(sql);
@@ -69,9 +69,9 @@ describe('portable relational reference', () => {
       const before = snapshot();
       const schema = await readSchema(db);
       const receipt = schema.tables.find((table) => table.name === 'receipt');
-      assert.deepEqual(receipt.primaryKey, []);
+      assert.deepEqual(receipt.primaryKey, ['id']);
       const report = await introspectModel(db);
-      assert.equal(JSON.stringify(report).includes('receipt_history'), false);
+      assert.equal(report.report.find((row) => row.object === 'receipt_history').code, 'unmapped-object');
       assert.ok(Object.hasOwn(DB_CODES, 'JD0002'));
       assert.throws(() => introspectModel(db, { strict: true }), { code: 'JD0002' });
       assert.equal(snapshot(), before);

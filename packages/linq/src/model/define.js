@@ -116,6 +116,8 @@ export function defineModel(spec) {
         }
       }
       const entity = { schema: builder.schema };
+      if (builder.state.invariants !== undefined) entity.invariants = builder.state.invariants;
+      if (builder.state.physical !== undefined) entity.physical = builder.state.physical;
       if (builder.state.renamedFrom !== undefined) entity['x-rename'] = builder.state.renamedFrom;
       setObjectMember(emitted, name, entity);
     }

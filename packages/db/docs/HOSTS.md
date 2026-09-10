@@ -272,3 +272,20 @@ Checked and dropped:
 - Read-only WAL workers do not accept writes, nested scopes do not migrate,
   transient cursors do not exhaust the statement cap, and failed writes are not
   automatically replayed. The lifecycle and fault corpus exercises each boundary.
+
+
+## Existing-file adoption and backup
+
+Node and Bun qualify explicit SQLite column mappings and scoped prepared SQL.
+The synchronous transaction API exists only when the driver's observed
+`synchronous` capability is true; worker and other async-only hosts expose no
+sync twin. Physical adoption on PostgreSQL refuses pending a separate mapping
+and codec qualification. Unknown application-trigger effects do not qualify
+capture or replication; those combinations refuse before an adoption claim.
+
+Node backups use the built-in online snapshot. Bun uses `Database.serialize()`
+under the store gate, writes and flushes a sibling temporary, then uses the shared
+atomic publisher. Both include committed WAL. Bun's snapshot holds the whole
+image in memory and cancellation takes effect between phases. Process-kill tests
+cover rebuild copy, table drop, commit and backup publication on both hosts;
+these tests do not establish power-loss durability or native executable packaging.

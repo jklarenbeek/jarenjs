@@ -109,6 +109,8 @@ export const DB_CODES = Object.freeze({
   JD2092: 'a worker transport bound was exceeded',
   JD2093: 'the worker protocol frame is invalid',
   JD2094: 'the durable snapshot failed and the connection is invalid',
+  JD2095: 'the trusted SQL or synchronous transaction authority was refused',
+  JD2096: 'a persistence invariant rejected the mutation',
 });
 
 /**
@@ -553,6 +555,11 @@ export function wrapDriverError(error, details = {}) {
     generic.class = 'error';
     generic.retryable = false;
     return generic;
+  }
+  if (typeof error?.message === 'string' && error.message.includes('jaren invariant:')) {
+    const wrapped = new DbRuntimeError('JD2096', error.message, { ...details, cause: error });
+    wrapped.class = 'constraint'; wrapped.retryable = false;
+    return wrapped;
   }
   const classified = classifyDriverError(error, details.unique);
   const message = error?.message ?? String(error);

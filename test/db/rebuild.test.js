@@ -170,11 +170,11 @@ describe('the rebuild procedure (§10)', () => {
           assert.match(/** @type {any} */ (error).message, /foreign_key_check/);
           return true;
         });
-      // the whole migration rolled back: data intact, history empty
+      // The whole migration rolled back, including its history table creation.
       const raw = new DatabaseSync(dbPath);
       assert.strictEqual(raw.prepare('SELECT authorId FROM "Post"').get().authorId, 'u1');
       assert.strictEqual(
-        raw.prepare(`SELECT COUNT(*) AS n FROM "${HISTORY_TABLE}"`).get().n, 0);
+        raw.prepare('SELECT COUNT(*) AS n FROM sqlite_schema WHERE name=?').get(HISTORY_TABLE).n, 0);
       raw.close();
     }
     finally {
@@ -210,7 +210,7 @@ describe('the rebuild procedure (§10)', () => {
       const raw = new DatabaseSync(dbPath);
       assert.strictEqual(raw.prepare('SELECT COUNT(*) AS n FROM "User"').get().n, 1);
       assert.strictEqual(
-        raw.prepare(`SELECT COUNT(*) AS n FROM "${HISTORY_TABLE}"`).get().n, 0,
+        raw.prepare('SELECT COUNT(*) AS n FROM sqlite_schema WHERE name=?').get(HISTORY_TABLE).n, 0,
         'nothing recorded');
       raw.close();
     }

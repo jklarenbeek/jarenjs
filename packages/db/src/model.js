@@ -27,6 +27,8 @@ import {
 import { compileJsonQuery } from '@jarenjs/json/query';
 
 import { DbCompileError } from './errors.js';
+import { normalizePhysical } from './physical.js';
+import { normalizeInvariants } from './invariants.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
 const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
@@ -343,9 +345,13 @@ export function normalizeEntities(model) {
       keys,
       relations,
       version: versions.length === 1 ? versions[0].name : null,
+      physical: normalizePhysical(spec.physical, properties, keys, docPath),
+      invariants: normalizeInvariants(spec.invariants, `${docPath}/invariants`),
     });
   }
 
+  for (const entity of entities.values())
+    if (entity.physical !== null && entity.relations.length) throw modelError('physical join tables are declared as entities; relation navigation is not qualified for column layouts', entity.docPath);
   resolveRelations(entities);
   return entities;
 }
@@ -556,6 +562,11 @@ export function explainMapping(model) {
   const mapping = { entities: {}, joinTables: {} };
 
   for (const entity of entities.values()) {
+    if (entity.physical !== null) {
+      mapping.entities[entity.name] = { ...entity.physical, document: false,
+        foreignKeys: [], indexes: [], version: entity.version, invariants: model.entities[entity.name].invariants ?? [] };
+      continue;
+    }
     const columns = [];
     const document = [];
     const indexes = [];
@@ -626,6 +637,7 @@ export function explainMapping(model) {
       indexes,
       document,
       version: entity.version ?? null,
+      ...(entity.invariants.length ? { invariants: model.entities[entity.name].invariants } : {}),
     };
   }
 

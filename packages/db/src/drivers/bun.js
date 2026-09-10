@@ -27,7 +27,7 @@ import { PRAGMA_NAMES } from '../pragmas.js';
  * with its shape) into a probed connection. Exported so the adapter is
  * exercisable without the builtin.
  * @param {any} db - A Bun `Database`-shaped database
- * @param {{ queueTimeout?: number }} [options]
+ * @param {{ queueTimeout?: number, backup?: any }} [options]
  * @returns {any} a Connection, or a promise of one
  */
 export function adaptBunDatabase(db, options) {
@@ -38,6 +38,7 @@ export function adaptBunDatabase(db, options) {
   const statements = new Set();
   const collected = new FinalizationRegistry((ref) => statements.delete(ref));
   const raw = {
+    ...(options?.backup ? { backup: options.backup } : {}),
     /** @param {string} sql */
     exec: (sql) => db.run(sql),
     /** @param {string} sql */
@@ -91,6 +92,7 @@ export function adaptBunDatabase(db, options) {
     synchronous: true,
     queueTimeout: options?.queueTimeout,
     declared: {
+      backup: options?.backup !== undefined,
       sessions: false,
       userFunctions: false,
       deterministicIndexableFunctions: false,
@@ -112,9 +114,25 @@ export function adaptBunDatabase(db, options) {
  * @returns {any}
  */
 export function fromBunModule(mod, path, options) {
-  return adaptBunDatabase(options?.readOnly === true
-    ? new mod.Database(path, { readonly: true })
-    : new mod.Database(path), options);
+  const db = options?.readOnly === true ? new mod.Database(path, { readonly: true }) : new mod.Database(path);
+  const backup = typeof db.serialize !== 'function' ? undefined : {
+    snapshot: true,
+    copy: async (target, copyOptions) => {
+      const bytes = db.serialize();
+      const pageSize = ((bytes[16] << 8) | bytes[17]) || 65536;
+      const pages = bytes.length / (pageSize === 1 ? 65536 : pageSize);
+      copyOptions?.progress?.({ totalPages: pages, remainingPages: pages });
+      const fs = await import('node:fs/promises');
+      const file = await fs.open(target, 'wx');
+      try { await file.writeFile(bytes); await file.sync(); }
+      finally { await file.close(); }
+      copyOptions?.progress?.({ totalPages: pages, remainingPages: 0 });
+      return pages;
+    },
+    rename: (from, to) => import('node:fs/promises').then((fs) => fs.rename(from, to)),
+    remove: (target) => import('node:fs/promises').then((fs) => fs.rm(target, { force: true })),
+  };
+  return adaptBunDatabase(db, { ...options, ...(backup ? { backup } : {}) });
 }
 
 /**

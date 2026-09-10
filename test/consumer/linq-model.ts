@@ -122,3 +122,12 @@ void [authored, many, isNever];
 
 // @ts-expect-error RelationBuilder is exported as a type only
 void m.RelationBuilder;
+
+const physicalSetting = m.object({ id: m.string().key(), value: m.string() }).physical({
+  table: 'settings', columns: { id: { name: 'key', codec: 'text', null: 'reject' },
+    value: { name: 'value', codec: 'text', null: 'reject' } },
+}).invariants([{ name: 'nonempty', on: ['insert'], enforcement: 'store', assert: { $ne: ['$.new.value', ''] } }]);
+const physicalDoc: EntityDoc<{ Setting: typeof physicalSetting }, 'Setting'> = { id: 'locale', value: 'nl-NL' };
+void physicalDoc;
+// @ts-expect-error — codecs are a closed vocabulary
+m.object({ id: m.string().key() }).physical({ table: 'settings', columns: { id: { name: 'key', codec: 'coerce', null: 'reject' } } });

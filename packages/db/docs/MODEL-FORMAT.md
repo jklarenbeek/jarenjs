@@ -12,6 +12,17 @@ entities, §10 relational translation, §11 the unit of work.
 
 ## 1. Scope
 
+`readSchema(connection)` inventories physical facts independently of model
+representability. SQLite keys include rowid aliases and ordered composite keys;
+columns retain defaults, nullability and key ordinals, foreign keys retain groups
+and update/delete actions. `tables[].sql` and `objects[].sql` retain source DDL,
+including collations, generated expressions, predicates and trigger programs.
+PostgreSQL catalogs retain available object definitions; unavailable source table
+DDL is explicitly `null`. `introspectModel()` also returns an `inventory` with
+`derived` or `preserve` dispositions. A disposition never authorizes a drop.
+Application triggers appear as `unmapped-object` losses with their owner and SQL.
+Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
+
 A **model document** declares the collections of a store: each
 collection is a JSON Schema for its documents, a key declaration, and
 a set of declared indexes. `openStore(model, { driver, ... })` opens
@@ -808,7 +819,7 @@ cannot retry; with the lock taken first that wait is an ordinary busy
 wait the `busyTimeout` covers, and two processes claiming one key see
 one `new`. The default `'deferred'` is unchanged, `tx.transaction()`
 inside either mode is a savepoint, `signal` and `unitOfWork` behave the
-same, and the synchronous twin has no mode. The open path already
+same; the synchronous twin also accepts writer admission mode and refuses thenable callbacks. The open path already
 brackets every first-open object — collection, entity and join tables,
 indexes, the change log and its state row, the job tables — the same
 way (§2.4).
@@ -1087,6 +1098,8 @@ error.
 | `JD2092` | a worker row, compatibility result or remote identity count exceeds its declared bound |
 | `JD2093` | malformed worker protocol request |
 | `JD2094` | invalid or uncommitted durable snapshot; reopen the last committed version |
+| `JD2095` | trusted SQL or synchronous callback authority refused |
+| `JD2096` | persistence invariant rejected the mutation; constraint class |
 | `JD0060` | a replication envelope or snapshot is invalid |
 | `JD2100` | a replica sequence or causal dependency has a gap |
 | `JD2101` | an envelope identity names different content or an unknown local origin |
@@ -2283,3 +2296,109 @@ const report = await store.saveChanges();      // { joinInserted: 1, joinDeleted
 
 Worker/pool options, synchronous cursors, wasm session probing and the browser
 persistence ladder are specified in [execution hosts](HOSTS.md).
+
+## 12. Existing column layouts
+
+An entity's optional `physical` member declares a column-only SQLite layout.
+Omitting it retains the hybrid mapping. Opening a physical entity MUST verify
+its existing table or view and MUST NOT create it. `adopt: true` also prevents
+creation of hybrid tables and infrastructure. Inspection, adoption and explicit
+migration are separate operations.
+
+```json
+{
+  "$model": "0.1",
+  "entities": {
+    "Setting": {
+      "schema": { "type": "object", "properties": {
+        "id": { "type": "string", "x-entity": { "key": true } },
+        "value": {}, "updated": { "type": "string" }
+      } },
+      "physical": { "table": "app_settings", "columns": {
+        "id": { "name": "key", "codec": "text", "null": "reject" },
+        "value": { "name": "value", "codec": "json", "null": "absent" },
+        "updated": { "name": "updated_at", "codec": "datetime", "null": "reject", "default": "database" }
+      } }
+    }
+  }
+}
+```
+
+Every stored property MUST have a distinct physical column name, an explicit
+codec and SQL NULL policy. `physical.keys` orders the declared key properties;
+without it, property declaration order applies. The physical primary key must
+agree in order. `kind: "view"` requires declared logical keys and refuses writes.
+Join tables can be declared as ordinary entities with ordered composite keys;
+relation navigation across physical layouts is not qualified.
+
+| Codec | Public representation | Required SQLite affinity |
+|---|---|---|
+| `text` | string | TEXT |
+| `integer` | safe integer | INTEGER |
+| `number` | finite number, safe when integral | REAL |
+| `boolean` | boolean | INTEGER |
+| `json` | JSON value | TEXT |
+| `date`, `datetime` | validated RFC 3339 text | TEXT |
+| `epoch-ms` | canonical UTC date-time text | INTEGER |
+| `bigint` | signed integer decimal string within SQLite's integer range | INTEGER |
+| `decimal` | exact decimal string, including trailing zeros | TEXT |
+| `blob-hex` | lowercase hexadecimal string | BLOB |
+
+Unsafe narrowing refuses `JD2003`. A byte handle never enters the public entity.
+`null: "null"` maps SQL NULL to present JSON null; `"absent"` omits the property;
+`"reject"` refuses it. With the JSON codec, JSON null is stored as the text `null`,
+so SQL NULL can independently mean absence. `default: "database"` omits an absent
+insert column and reads back the database result. `generated: true` gives column
+writes to the database. A generated integer identity uses the existing
+`x-entity.default: "auto"` declaration. Direct updates with identical values and
+identical tracked saves produce no effective writes.
+
+Mapped query documents execute through the existing decoded-row evaluator;
+explanations report this residual and strict pushdown refuses it. Scalar graph
+loads use mapped names; complex codec predicates require query documents.
+Physical `page` and `after` continuation refuse until codec-aware keysets are
+qualified; an explicit `take`/`skip` load remains available.
+Capture/live/replication for adopted application triggers is not qualified and
+is refused, rather than advertised as a complete change stream. PostgreSQL
+column adoption is not qualified; physical inventory remains available.
+
+## 13. Persistence invariants
+
+An entity may declare `invariants`: each has `name`, `on` (insert/update/delete),
+`assert` (a Query expression), and explicit `enforcement` (`database` or `store`).
+The evaluator receives `{ old, new, op }`; the missing record is null. A rule
+passes only on boolean true. Update rules and audit effects skip identical rows.
+Store enforcement covers direct and tracked model writes; arbitrary external
+SQL is outside that population. Trusted SQL writes refuse while store rules are
+present. Failed rules use `JD2096`, with constraint classification.
+
+Database enforcement requires a writable physical layout and a bounded scalar
+query expression: `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$and`, `$or`, `$not`,
+scalar literals, `$.op`, and `$.old.member` / `$.new.member` references. Unsupported
+expressions refuse at planning. `planInvariants(model, { dialect })` returns
+reviewable trigger DDL; an explicit migration installs it. Opening verifies those
+programs. A rule such as `{ "$le": ["$.new.start", "$.new.end"] }` declares an
+interval constraint without claiming interval indexing.
+
+An optional database `audit: { entity, values }` inserts into an application-owned
+mapped table after the accepted mutation, after identity allocation. Values use
+old/new scalar references. Self-referential or chained audit effects refuse;
+all effects share the writer transaction. Existing unrecognized triggers remain
+application-owned physical objects requiring preservation dispositions.
+
+
+One AFTER trigger per operation evaluates assertions in declaration order, then
+runs audit inserts in declaration order. Assertions see the allocated identity
+and generated columns. A failed assertion aborts the entire statement, including
+its trigger effects. Existing application triggers keep SQLite's ordering relative to these
+programs. Equality uses JSON-style scalar types and null equality; an ordered
+comparison involving SQL NULL is false; `$not` negates that boolean. An absent-column
+policy cannot be lowered to a database rule and refuses. Existing optimistic
+version properties remain owned by the model writer; an external SQL writer must
+supply its own declared revision discipline. Store validation and codec checks
+are not a substitute for database constraints on external inputs.
+
+References to a property of the unavailable old/insert or new/delete record
+refuse database lowering, because absence differs from SQL NULL. Referenced
+scalar storage types are checked by the assertion trigger; numeric references
+must stay in the safe-number range.

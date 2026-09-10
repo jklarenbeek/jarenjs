@@ -218,6 +218,21 @@ export function withEntity(Base) {
      */
     renamedFrom(name) { return this.with({ renamedFrom: requireName(name, 'renamedFrom()') }); }
 
+    /** Explicit existing columns, lifted onto the entity declaration.
+     * @param {any} layout */
+    physical(layout) {
+      if (this.state.kind !== 'object') throw new LinqBuildError('JL0102', 'physical() belongs on an entity object');
+      return this.with({ physical: requireJson(layout, 'physical()') });
+    }
+
+
+    /** Declare persistence predicates, with explicit writer enforcement.
+     * @param {any[]} rules */
+    invariants(rules) {
+      if (this.state.kind !== 'object') throw new LinqBuildError('JL0102', 'invariants() belongs on an entity object');
+      return this.with({ invariants: requireJson(rules, 'invariants()') });
+    }
+
     /** As in the schema pen, but `x-entity` is owned here. @param {Record<string, any>} annotations */
     meta(annotations) {
       if (annotations !== null && typeof annotations === 'object' && KEYWORD in annotations) {

@@ -14,6 +14,7 @@
  * silently indexing the wrong thing.
  */
 
+import { explainMapping } from './model.js';
 import { analyzeQuery } from '@jarenjs/json/query';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
@@ -902,6 +903,9 @@ export function verifyShape(connection, plan, collection, docPath) {
  *   columnNames: Set<string> }}
  */
 export function planEntity(name, entityMapping, entities, dialect) {
+  if (entityMapping.document === false) return { table: entityMapping.table,
+    physical: { ...entityMapping, triggers: dialect.invariantTriggers?.(entityMapping, entities, dialect) ?? [] }, createSql: [], expected: { columns: [], indexes: [] },
+    columnNames: new Set(entityMapping.columns.map((c) => c.physical)) };
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
   const keyType = (entityName) => {
     const target = entities.entities[entityName];
@@ -1036,4 +1040,13 @@ export function planJoinTable(tableName, join, entities, dialect) {
       indexes: [],
     },
   };
+}
+
+/** Plan explicit database-enforced persistence rules; never applies them.
+ * @param {any} model @param {{ dialect: any }} options @returns {any[]} */
+export function planInvariants(model, options) {
+  const mapping = explainMapping(model);
+  const dialect = options.dialect;
+  if (typeof dialect.invariantTriggers !== 'function') throw new DbCompileError('JD0005', 'this dialect cannot lower database invariants');
+  return Object.values(mapping.entities).flatMap((entity) => dialect.invariantTriggers(entity, mapping, dialect));
 }

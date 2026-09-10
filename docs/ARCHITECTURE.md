@@ -691,3 +691,13 @@ The architecture cleanly separates concerns:
 - **Schema loading** handles URI resolution and ref flattening
 - **Compilation** creates optimized validation functions, selects draft and vocabulary behavior
 - **Validation** executes compiled functions with minimal overhead, tracking annotations and dynamic scope only when the schema requires it
+
+
+## Existing relational composition
+
+The LINQ model pen emits physical layouts and persistence rules as JSON; db owns
+normalization, column codecs, schema inventory and dialect lowering. The pen
+imports no database engine. The LINQ database client forwards the same guarded
+transaction SQL, entity and outbox capabilities, so coexistence requires no
+application driver wrapper. Query evaluation, tracking, savepoint ownership and
+backup publication retain their existing owners. See [db architecture](../packages/db/ARCHITECTURE.md#explicit-relational-adoption).

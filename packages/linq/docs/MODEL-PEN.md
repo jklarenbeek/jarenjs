@@ -135,6 +135,8 @@ leaves `key` where it was and replaces `default`.
 | `.updated()` | `default: 'updated'` — a stamp on insert AND on every update | marks it `generated` | native |
 | `.fill(value)` | `default: { value }` — a literal, filled when absent; the value crosses the JSON boundary (`requireJson`) | marks it `generated` | native; a value that is not JSON is `JL0101` |
 | `.compute(fn)`, `.compute(query)` | `default: { query }` — captured over the document being written (`$`), or a query document verbatim | marks it `generated` | native; a captured rule that binds ANY external is `JL0104` |
+| `.physical(layout)` | `physical` on the entity declaration | preserves entity types; explicit column codecs | native on an object builder |
+| `.invariants(rules)` | `invariants` on the entity declaration | explicit writer qualification | native on an object builder |
 | `.renamedFrom(name)` | `x-rename: name` on the ENTITY (or collection) declaration — a planning hint the migration planner reads, never part of the shape (MIGRATION-FORMAT §3) | — | native on the declaration's own builder; on a member, `JL0102` (the document has no place for one) |
 | `.meta(annotations)` | as the schema pen ([SCHEMA-PEN.md](SCHEMA-PEN.md#28-annotations-and-messages)), minus one key | — | refused (`JL0104`) for `x-entity`: the pen owns that keyword |
 | `.entity(patch)` | the patch, merged into `x-entity` — the primitive every row above is written in terms of, and the way to spell a member of the vocabulary that has no method of its own | — (it sets no flag; the named methods do — §5.2) | native; a member outside the closed vocabulary, `JL0102` |
@@ -1062,10 +1064,10 @@ catch them:
 
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->45,143<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->45,575<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.model.kb-->45<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.model.kb-->46<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-member model as a
@@ -1090,3 +1092,25 @@ costs. That is a deliberate trade: naming the rule and the spelling that
 works is why a mapping mistake is a `JL0102` at build rather than a
 `JD0005` at `openStore`, so the ceiling is raised with the reason and the
 text is not shaved.
+
+## Existing column layouts and persistence rules
+
+An entity object builder's `.physical({ table, kind?, keys?, columns })` writes
+an explicit column-only layout onto the entity declaration. Each column names
+its physical identifier, codec, SQL NULL policy, and optional database default
+or generated ownership. `.invariants(rules)` writes application-declared predicates
+with explicit database/store enforcement. The pen emits declarations; the database
+package owns validation, codecs, SQL lowering and preservation planning. See
+[MODEL-FORMAT](../../db/docs/MODEL-FORMAT.md#12-existing-column-layouts).
+
+```js
+import * as m from '@jarenjs/linq/model';
+const model = m.defineModel({ entities: {
+  Setting: m.object({ id: m.string().key(), value: m.string() }).physical({
+    table: 'app_settings', columns: {
+      id: { name: 'key', codec: 'text', null: 'reject' },
+      value: { name: 'value', codec: 'text', null: 'reject' }
+    }
+  })
+} });
+```

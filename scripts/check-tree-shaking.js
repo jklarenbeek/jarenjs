@@ -410,11 +410,11 @@ const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
-// The client carries the store's replication ledger and bounded live
-// dependency strategies. The measured fixture is 623,994 bytes; this
-// ceiling leaves room for local changes while the import-edge assertions
-// above continue to prohibit unrelated packages and transport clients.
-if (clientBytes > 635000)
+// The client now also carries explicit column codecs, physical verification,
+// guarded SQL and invariant lowering. This adds about 18 kB over the prior
+// 633,786-byte fixture. The 665 kB structural ceiling covers that declared
+// functionality; import-edge exclusions and frozen adoption budgets stay intact.
+if (clientBytes > 665000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

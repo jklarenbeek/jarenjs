@@ -36,10 +36,10 @@ is the index of those guides, and it is how a reader reaches any of them.
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 948 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 950 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 1,735 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
-| [MODEL-PEN.md](MODEL-PEN.md) | 1,092 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
+| [MODEL-PEN.md](MODEL-PEN.md) | 1,116 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 781 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,221 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
@@ -51,7 +51,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
-| [DB-CLIENT.md](DB-CLIENT.md) | 893 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [DB-CLIENT.md](DB-CLIENT.md) | 938 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 <!--/fact-->
 
 Every row of that table is derived, and none of it is written here: the
@@ -204,10 +204,10 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 948 | — | — | — | — |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 950 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,735 | 34 | 8 | 15 | 174,241 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 36,717 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,092 | 28 | 6 | 3 | 45,143 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,116 | 30 | 6 | 3 | 45,575 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 19,856 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 24,259 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 48,859 B |
@@ -219,8 +219,8 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,725 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,225 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,014 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 893 | 41 | 4 | 2 | 633,786 B |
-| **16 documents** | | **12,407** | **371** | **73** | | |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 938 | 41 | 4 | 2 | 651,607 B |
+| **16 documents** | | **12,478** | **373** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -264,7 +264,7 @@ it and each document publishes it. The rounded column is what
 |---|---|---:|---:|
 | `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 174,241 B | 174 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 36,717 B | 37 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 45,143 B | 45 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 45,575 B | 46 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,856 B | 20 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,259 B | 24 kB |
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 48,859 B | 49 kB |
@@ -276,7 +276,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,725 B | 17 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,225 B | 15 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,014 B | 17 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 633,786 B | 634 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 651,607 B | 652 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -524,6 +524,8 @@ it says.
 | `.updated()` | `default: 'updated'` — a stamp on insert AND on every update | marks it `generated` | native |
 | `.fill(value)` | `default: { value }` — a literal, filled when absent; the value crosses the JSON boundary (`requireJson`) | marks it `generated` | native; a value that is not JSON is `JL0101` |
 | `.compute(fn)`, `.compute(query)` | `default: { query }` — captured over the document being written (`$`), or a query document verbatim | marks it `generated` | native; a captured rule that binds ANY external is `JL0104` |
+| `.physical(layout)` | `physical` on the entity declaration | preserves entity types; explicit column codecs | native on an object builder |
+| `.invariants(rules)` | `invariants` on the entity declaration | explicit writer qualification | native on an object builder |
 | `.renamedFrom(name)` | `x-rename: name` on the ENTITY (or collection) declaration — a planning hint the migration planner reads, never part of the shape (MIGRATION-FORMAT §3) | — | native on the declaration's own builder; on a member, `JL0102` (the document has no place for one) |
 | `.meta(annotations)` | as the schema pen ([SCHEMA-PEN.md](SCHEMA-PEN.md#28-annotations-and-messages)), minus one key | — | refused (`JL0104`) for `x-entity`: the pen owns that keyword |
 | `.entity(patch)` | the patch, merged into `x-entity` — the primitive every row above is written in terms of, and the way to spell a member of the vocabulary that has no method of its own | — (it sets no flag; the named methods do — §5.2) | native; a member outside the closed vocabulary, `JL0102` |

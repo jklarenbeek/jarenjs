@@ -36,6 +36,8 @@ import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots } from './profile.js';
 import { normalizeEntities, explainMapping, joinTableRoots } from './model.js';
 import { entityCore } from './entity.js';
+import { verifyPhysical } from './physical.js';
+import { trustedSql, synchronousBody } from './sql.js';
 import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createReplicationEngine } from './replication.js';
@@ -46,7 +48,7 @@ import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js'
 import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine } from './jobs.js';
-import { introspectModel } from './introspect.js';
+import { introspectModel, readSchema } from './introspect.js';
 import { collectEntityRoots, entityRoot } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
@@ -486,6 +488,7 @@ function immediately(connection, fn, retry = true) {
 function ensureShape(connection, collections, plans, readOnly) {
   const dialect = connection.dialect;
   const names = [...collections.keys()];
+  if (names.length === 0) return null;
   // a read-only store creates nothing, and cannot take a write lock
   const bracket = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
   return bracket(() => {
@@ -537,6 +540,8 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
       const name = names[i];
       const plan = entityPlans.get(name);
       const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
+      if (plan.physical) return chain(readSchema(connection), (schema) =>
+        chain(verifyPhysical(connection, plan.physical, schema), () => step(i + 1)));
       return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
         chain(statement.get([name]), (row) => {
           if (row === undefined) {
@@ -824,10 +829,11 @@ function asyncCollection(core, live) {
  */
 function writeSchemaOf(entity) {
   const schema = entity.schema;
-  const auto = entity.keys.find((key) => entity.properties.get(key).default === 'auto');
-  if (auto === undefined || !Array.isArray(schema?.required) || !schema.required.includes(auto))
-    return schema;
-  const out = { ...schema, required: schema.required.filter((name) => name !== auto) };
+  const generated = new Set(entity.keys.filter((key) => entity.properties.get(key).default === 'auto'));
+  for (const column of entity.physical?.columns ?? [])
+    if (column.databaseDefault || column.generated) generated.add(column.name);
+  if (!Array.isArray(schema?.required) || !schema.required.some((name) => generated.has(name))) return schema;
+  const out = { ...schema, required: schema.required.filter((name) => !generated.has(name)) };
   if (out.required.length === 0) delete out.required;
   return out;
 }
@@ -971,6 +977,10 @@ export function openStore(model, options) {
     collections = normalizeModel(model, options.expressions);
     entities = normalizeEntities(model);
     mapping = entities.size > 0 ? explainMapping(model) : null;
+    if ([...entities.values()].some((e) => e.physical !== null) && (options.capture || options.replication))
+      throw new DbCompileError('JD0051', 'column adoption preserves application triggers; complete capture is not qualified');
+    if (options.adopt === true && (options.jobs || options.capture || options.replication))
+      throw new DbCompileError('JD0005', 'adoption creates no infrastructure; configure it through an explicit migration');
     if (options.replication !== undefined && [...collections.keys(), ...entities.keys()]
       .some((name) => name.toLowerCase().startsWith('_jaren_replica')))
       throw new DbCompileError('JD0060', 'replication reserves table names beginning with _jaren_replica');
@@ -1425,8 +1435,8 @@ export function openStore(model, options) {
         chain(registerExpressionFunctions(connection, expressionNames,
           options.expressions ?? {}), () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
-        chain(ensureShape(connection, collections, plans, readOnly), () =>
-        chain(ensureEntityShape(connection, entityPlans, entities, readOnly), () => {
+        chain(ensureShape(connection, collections, plans, readOnly || options.adopt === true), () =>
+        chain(ensureEntityShape(connection, entityPlans, entities, readOnly || options.adopt === true), () => {
           /** @type {Map<string, any>} */
           const cores = new Map();
           const coreFor = (name) => {
@@ -2771,7 +2781,21 @@ export function openStore(model, options) {
               });
             };
 
+            const sql = trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
+              beforeWrite: () => {
+                if ([...entities.values()].some((e) => e.invariants.some((r) => r.enforcement === 'store')))
+                  throw new DbRuntimeError('JD2095', 'trusted SQL cannot bypass store-only invariants');
+                if (capture !== null) throw new DbRuntimeError('JD0051', 'trusted SQL writes cannot guarantee complete live/capture/replication coverage');
+                myWork.tracker?.assertSqlWritable();
+                if (rootWork !== myWork) rootWork.tracker?.assertSqlWritable();
+              },
+              afterWrite: () => {
+                myWork.tracker?.invalidate();
+                if (rootWork !== myWork) rootWork.tracker?.invalidate();
+              },
+            });
             const members = {
+              sql: override(sql),
               transaction: override((/** @type {any} */ fn) => lift(() => nested(fn))()),
               collection: override(collectionFor),
               entity: override(entityFor),
@@ -2931,7 +2955,8 @@ export function openStore(model, options) {
                   }
                   return handle;
                 },
-                transaction: nested,
+                sql,
+                transaction: (fn) => nested((tx) => synchronousBody(fn, tx)),
                 savepoints: Object.freeze({
                   create: savepointCreate,
                   rollbackTo: savepointRollbackTo,
@@ -3011,7 +3036,7 @@ export function openStore(model, options) {
                 }
                 return handle;
               },
-              transaction: (fn) => {
+              transaction: (fn, transactionOptions) => {
                 // the synchronous surface answers values: while a
                 // transaction owns the connection it could only QUEUE,
                 // which handed a Promise back under a value's type
@@ -3021,7 +3046,9 @@ export function openStore(model, options) {
                     + 'settle — nest through the store the callback received, or use the '
                     + 'asynchronous store.transaction()');
                 }
-                return topLevelTransaction(fn);
+                const mode = transactionOptions?.mode;
+                if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate') throw new TypeError('invalid transaction mode');
+                return topLevelTransaction((tx) => synchronousBody(fn, tx), undefined, undefined, mode);
               },
               entity(name) {
                 let handle = gatedSyncEntities.get(name);

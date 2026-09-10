@@ -22,6 +22,10 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt } from './driver.js';
+import { checkInvariants } from './invariants.js';
+import { columnCodec, physicalRead } from './physical.js';
+import { mergeEntityRow } from './graph.js';
+import { createJSONPatch } from '@jarenjs/json/patch';
 
 /**
  * The write/read machinery for one entity, prepared once.
@@ -40,6 +44,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const q = dialect.quoteIdentifier;
   const table = entityMapping.table;
   const docPath = entity.docPath;
+  const physical = entityMapping.document === false;
+  const physicalName = (name) => entityMapping.columns.find((c) => c.name === name)?.physical ?? name;
+  const writable = () => {
+    if (entityMapping.kind === 'view') throw new DbRuntimeError('JD2003', `entity '${entity.name}' is a read-only view`);
+  };
 
   // the column plan: mapped scalars (epoch ones derived), then FKs;
   // everything else lives in the JSONB document
@@ -47,6 +56,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     ...column,
     epoch: column.source === 'epoch(document)',
     property: entity.properties.get(column.name),
+    codecPlan: physical ? columnCodec(column) : null,
   }));
   // a declared via property is ALREADY a scalar column — the foreign
   // key adds a column only when no property claims it
@@ -99,7 +109,12 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     }
     for (const column of scalarColumns) {
       if (column.name === autoKey && doc[column.name] === undefined) continue;
+      if (physical && (column.generated || (column.databaseDefault && doc[column.name] === undefined))) continue;
       const value = doc[column.name];
+      if (physical) {
+        values.push({ name: column.name, value: column.codecPlan.encode(value) });
+        continue;
+      }
       if (column.epoch) {
         // derived: the string stays in the document, the epoch rides
         // the column
@@ -118,24 +133,13 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       const value = doc[fk];
       values.push({ name: fk, value: value === undefined || value === null ? null : value });
     }
+    if (physical && Object.keys(rest).length > 0) throw new DbRuntimeError('JD2003',
+      `column-only entity '${entity.name}' cannot store undeclared members: ${Object.keys(rest).join(', ')}`);
     return { values, rest };
   };
 
   /** Merge a row back into a document. */
-  const merge = (row) => {
-    const doc = JSON.parse(row.doc);
-    for (const column of scalarColumns) {
-      if (column.epoch) continue; // the string is already in the doc
-      const value = row[column.name];
-      if (value === null || value === undefined) continue; // absent (§9.3)
-      doc[column.name] = column.storage === 'boolean' ? value === 1 : value;
-    }
-    for (const fk of fkColumns) {
-      const value = row[fk];
-      if (value !== null && value !== undefined) doc[fk] = value;
-    }
-    return doc;
-  };
+  const merge = (row) => mergeEntityRow(entityMapping, row);
 
   /** The document as a read will answer it. For a column-mapped scalar,
    * JSON `null` and absence both store as SQL NULL and read back ABSENT
@@ -145,6 +149,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
    * `column: "json"` and stays in the document, where it survives; an
    * epoch column keeps its string in the document for the same reason. */
   const asStored = (doc) => {
+    if (physical) return doc;
     let out = doc;
     const drop = (name) => {
       if (!(name in out) || (out[name] !== null && out[name] !== undefined)) return;
@@ -255,22 +260,24 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
   const keyWhere = (offset) => keys
-    .map((key, i) => `${q(key)} = ${parameterAt(offset + i + 1)}`).join(' AND ');
+    .map((key, i) => `${q(physicalName(key))} = ${parameterAt(offset + i + 1)}`).join(' AND ');
   const selectColumns = [
-    ...scalarColumns.filter((column) => !column.epoch).map((column) => q(column.name)),
+    ...scalarColumns.filter((column) => !column.epoch).map((column) => physical
+      ? `${physicalRead(column, dialect)} AS ${q(physicalName(column.name))}` : q(column.name)),
     ...fkColumns.map((column) => q(column)),
-    `${dialect.jsonText(q('doc'))} AS ${q('doc')}`,
+    ...(physical ? [] : [`${dialect.jsonText(q('doc'))} AS ${q('doc')}`]),
   ].join(', ');
 
   const insertSqlFor = (names) => {
-    const withDoc = [...names, 'doc'];
-    const refs = withDoc.map((name, i) => (name === 'doc'
+    const withDoc = physical ? names : [...names, 'doc'];
+    const refs = withDoc.map((name, i) => (!physical && name === 'doc'
       ? dialect.jsonEncode(parameterAt(i + 1))
       : parameterAt(i + 1)));
     const returning = autoKey !== null && !names.includes(autoKey)
-      ? ` RETURNING ${q(autoKey)} AS ${q('key')}`
+      ? ` RETURNING ${q(physicalName(autoKey))} AS ${q('key')}`
       : '';
-    return `INSERT INTO ${q(table)} (${withDoc.map(q).join(', ')}) `
+    if (withDoc.length === 0) return `INSERT INTO ${q(table)} DEFAULT VALUES${returning}`;
+    return `INSERT INTO ${q(table)} (${withDoc.map((n) => q(physicalName(n))).join(', ')}) `
       + `VALUES (${refs.join(', ')})${returning}`;
   };
 
@@ -303,6 +310,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   /** Encode ONE column assignment the way {@link split} would. */
   const encodeColumn = (name, value) => {
     const column = columnByName.get(name);
+    if (physical && column) return column.codecPlan.encode(value);
     if (column !== undefined && column.epoch)
       return value === undefined ? null : epochOf(column.property, value);
     if (value === undefined || value === null) return null;
@@ -314,6 +322,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     // completion/validation/stamping machinery, one source of truth
     plan: {
       table,
+      document: !physical,
+      physicalName,
+      writable,
+      checkMutation: (op, before, after) => checkInvariants(entity.invariants, op, before, after),
       keys,
       autoKey,
       version: entity.version ?? null,
@@ -325,6 +337,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       encodeColumn,
     },
     complete: (doc, { updating }) => {
+      writable();
       const completed = applyDefaults(doc, { updating });
       checkValid(completed);
       return asStored(completed);
@@ -338,23 +351,33 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     },
     normalizeKey: (key) => normalizeKeyArg(key),
     create(doc) {
+      writable();
       refuseProjections(doc, 'create', true);
       const completed = applyDefaults(doc, { updating: false });
       checkValid(completed);
+      if (!physical) checkInvariants(entity.invariants, 'insert', null, completed);
+      if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(doc, c.name)))
+        throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
       const { values, rest } = split(completed);
       const names = values.map((value) => value.name);
       const sql = insertSqlFor(names);
-      return chain(prepared(`insert:${names.join(',')}`, sql), (statement) => {
-        const params = [...values.map((value) => value.value), JSON.stringify(rest)];
+      const insert = () => chain(prepared(`insert:${names.join(',')}`, sql), (statement) => {
+        const params = [...values.map((value) => value.value), ...(physical ? [] : [JSON.stringify(rest)])];
         const returning = autoKey !== null && !names.includes(autoKey);
         return chain(
           attempt(() => (returning ? statement.get(params) : statement.run(params)),
             (error) => wrapWrite(error, completed[keys[0]])),
-          (out) => asStored(returning ? { ...completed, [autoKey]: out.key } : completed));
+          (out) => {
+            const made = returning ? { ...completed, [autoKey]: out.key } : completed;
+            return physical ? chain(this.get(made), (stored) => {
+              checkValid(stored); checkInvariants(entity.invariants, 'insert', null, stored); return stored;
+            }) : asStored(made);
+          });
       });
+      return physical ? connection.transaction(insert) : insert();
     },
     get(key) {
-      const parts = normalizeKeyArg(key);
+      const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
       const sql = `SELECT ${selectColumns} FROM ${q(table)} WHERE ${keyWhere(0)}`;
       // classified like every read of the query engines, never raw
       return attempt(() => chain(prepared('get', sql), (statement) =>
@@ -362,9 +385,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
     },
     update(key, changes) {
-      const parts = normalizeKeyArg(key);
+      writable();
+      const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
       refuseProjections(changes, 'update', false);
-      return chain(this.get(key), (current) => {
+      const update = () => chain(this.get(key), (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
             `no '${entity.name}' to update under that key`,
@@ -379,6 +403,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
               { docPath, collection: entity.name, key: parts[0] });
           }
         }
+        if (physical && createJSONPatch(current, { ...current, ...changes }).length === 0) return current;
+        if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(changes, c.name)
+          && changes[c.name] !== current[c.name])) throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
         const next = applyDefaults({ ...current, ...changes }, { updating: true });
         // an explicit update is last-write-wins by contract (§11.2),
         // but it still moves a declared version token so optimistic
@@ -386,25 +413,36 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         if (entity.version !== null && entity.version !== undefined)
           next[entity.version] = (Number(current[entity.version]) || 0) + 1;
         checkValid(next);
+        checkInvariants(entity.invariants, 'update', current, next);
         const { values, rest } = split(next);
         const assignments = [
-          ...values.map((value, i) => `${q(value.name)} = ${parameterAt(i + 1)}`),
-          `${q('doc')} = ${dialect.jsonEncode(parameterAt(values.length + 1))}`,
+          ...values.map((value, i) => `${q(physicalName(value.name))} = ${parameterAt(i + 1)}`),
+          ...(physical ? [] : [`${q('doc')} = ${dialect.jsonEncode(parameterAt(values.length + 1))}`]),
         ].join(', ');
         const sql = `UPDATE ${q(table)} SET ${assignments} `
-          + `WHERE ${keyWhere(values.length + 1)}`;
+          + `WHERE ${keyWhere(values.length + (physical ? 0 : 1))}`;
         return chain(prepared(`update:${values.length}`, sql), (statement) =>
           chain(attempt(() => statement.run([...values.map((value) => value.value),
-            JSON.stringify(rest), ...parts]), (error) => wrapWrite(error, parts[0])),
-          () => asStored(next)));
+            ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0])),
+          () => physical ? chain(this.get(key), (stored) => { checkValid(stored); return stored; }) : asStored(next)));
       });
+      return physical ? connection.transaction(update) : update();
     },
     delete(key) {
-      const parts = normalizeKeyArg(key);
+      writable();
+      if (entity.invariants.some((r) => r.enforcement === 'store' && r.on.includes('delete')))
+        return chain(this.get(key), (before) => {
+          checkInvariants(entity.invariants, 'delete', before, null);
+          return remove(key);
+        });
+      return remove(key);
+    },
+  };
+  function remove(key) {
+      const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
       const sql = `DELETE FROM ${q(table)} WHERE ${keyWhere(0)}`;
       return chain(prepared('delete', sql), (statement) =>
         chain(attempt(() => statement.run(parts), (error) => wrapWrite(error, parts[0])),
           (result) => Number(result?.changes ?? 0) > 0));
-    },
-  };
+  }
 }

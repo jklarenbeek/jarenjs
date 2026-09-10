@@ -31,6 +31,8 @@
  * the whole document runs over them.
  */
 
+import { physicalSelection } from './physical.js';
+
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery } from '@jarenjs/json/query';
 
@@ -1638,6 +1640,10 @@ export function createEntityQueryEngine(context) {
         'an entity query ranges over a declared entity array ($.<Entity>[*]); this '
         + 'document names none, so it has no rows to answer', '/entities');
     }
+    if (planned.referenced.some((name) => entities.get(name)?.physical != null)) {
+      planned = { ...planned, mode: 'set', plan: null,
+        reasons: [{ construct: 'physical', reason: 'declared column codecs require decoded-row evaluation' }] };
+    }
     if (!pushdown) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
@@ -1789,11 +1795,11 @@ export function createEntityQueryEngine(context) {
         const limit = entry.rowBound === null ? '' : ` ${dialect.limitClause(entry.rowBound + 1, undefined)}`;
         return {
           name,
-          sql: `SELECT ${q('t')}.*, ${mapping.entities[name].document === false
-            ? dialect.stringLiteral('{}')
-            : dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')} `
+          sql: `SELECT ${entities.get(name)?.physical != null ? physicalSelection(mapping.entities[name], dialect, `${q('t')}.`)
+            : `${q('t')}.*, ${mapping.entities[name].document === false ? dialect.stringLiteral('{}')
+              : dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')}`} `
             + `FROM ${q(mapping.entities[name].table)} AS ${q('t')}${where} `
-            + `ORDER BY ${q('t')}.${dialect.rowIdentity()}${limit}`,
+            + `ORDER BY ${entities.get(name)?.physical != null ? mapping.entities[name].keys.map((k) => `${q('t')}.${q(mapping.entities[name].columns.find((c) => c.name === k).physical)}`).join(', ') : `${q('t')}.${dialect.rowIdentity()}`}${limit}`,
           params: slots.map((slot) => slot.literal),
           statement: null,
         };
@@ -2449,6 +2455,8 @@ export function createLoadEngine(context, entityName) {
       if (spec?.[member] !== undefined && !isWindowBound(spec[member]))
         throw refuse(`${member} must be a non-negative integer`, []);
     }
+    if (entities.get(entityName)?.physical != null && (keyset || spec?.after !== undefined))
+      throw refuse('column codecs require decoded identities; physical keyset continuation is not qualified', []);
     const tree = buildTree(entityName, spec ?? {}, 0, maxDepth, [], new Set(), profile);
     const rendered = render(tree, 'r', param, emitters);
 
@@ -2538,7 +2546,8 @@ export function createLoadEngine(context, entityName) {
       pagination = 'offset';
     }
 
-    let sql = `SELECT ${rendered.aliasSql}.*, ${dialect.jsonText(rendered.docSql)} AS ${q('__doc')}`
+    let sql = `SELECT ${tree.entity.physical != null ? physicalSelection(tree.entityMapping, dialect, `${rendered.aliasSql}.`)
+      : `${rendered.aliasSql}.*, ${tree.entityMapping.document === false ? dialect.stringLiteral('{}') : dialect.jsonText(rendered.docSql)} AS ${q('__doc')}`}`
       + includeSql
       + ` FROM ${q(tree.entityMapping.table)} AS ${rendered.aliasSql}`;
     if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
@@ -2552,7 +2561,7 @@ export function createLoadEngine(context, entityName) {
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });
-    if (identity === null) orderSql.push(`${rendered.aliasSql}.${dialect.rowIdentity()}`);
+    if (identity === null) orderSql.push(...(tree.entity.physical != null ? tree.entityMapping.keys.map((k) => `${rendered.aliasSql}.${q(tree.entityMapping.columns.find((c) => c.name === k).physical)}`) : [`${rendered.aliasSql}.${dialect.rowIdentity()}`]));
     sql += ` ORDER BY ${orderSql.join(', ')}`;
     // the profile's row bound rides the root as LIMIT maxRows + 1, so
     // a load past it is detected at the bound and refused (JD2007)
