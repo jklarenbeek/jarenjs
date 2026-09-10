@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-10T14:46:40+02:00",
-  "commit": "d259aef108395b14d60c3fd4434623e278a23532",
+  "generated": "2026-09-10T20:23:43+02:00",
+  "commit": "9790a9dccc2bbffb69f1c303995ed28ba8a0965c",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -5080,6 +5080,67 @@
         "meta": {
           "sourceUrl": "components/charts/site.md",
           "hash": "lfdzbr",
+          "frontmatterLang": "yaml"
+        }
+      },
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/collection",
+      "card": {
+        "title": "Collections",
+        "blurb": "Virtual lists and grids with stable keys, bounded geometry and injected row providers.",
+        "perf": "viewport work independent of logical row count"
+      },
+      "engines": [],
+      "docs": {
+        "$md": "0.1",
+        "frontmatter": {
+          "package": "@jarenjs/collection",
+          "card": {
+            "title": "Collections",
+            "blurb": "Virtual lists and grids with stable keys, bounded geometry and injected row providers.",
+            "perf": "viewport work independent of logical row count"
+          }
+        },
+        "ast": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "inlineCode",
+                "value": "@jarenjs/collection"
+              },
+              {
+                "type": "text",
+                "value": " renders virtual lists and grids from injected row accessors."
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "Core owns range math; the component owns rendering, measurement and interaction;"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "app coordinates bounded provider requests. Resident arrays remain resident arrays."
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "lang": "js",
+            "meta": null,
+            "value": "import { createCollection } from '@jarenjs/collection';\nconst rows = createCollection({ count: 1000, keyAt: String,\n  getItem: (i) => ({ label: `Row ${i}` }), renderCell: (row) => row.label });\nrows.viewport({ width: 320, height: 440 });\nrows.view();\nrows.dispose();\n"
+          }
+        ],
+        "meta": {
+          "sourceUrl": "components/collection/site.md",
+          "hash": "1najimb",
           "frontmatterLang": "yaml"
         }
       },
