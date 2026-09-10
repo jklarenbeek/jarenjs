@@ -299,6 +299,8 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/package.json` | metadata | — |
 | `@jarenjs/core/virtual` | JavaScript | declared |
 | `@jarenjs/core/range` | JavaScript | declared |
+| `@jarenjs/core/retry` | JavaScript | declared |
+| `@jarenjs/core/schedule` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
@@ -308,3 +310,7 @@ Unit tests live in `test/core/` at the repository root (`npm run test:core`). Th
 See [virtual geometry](docs/VIRTUAL.md) for opt-in constant-work fixed ranges and bounded sparse measured axes.
 
 See [lexical search](docs/SEARCH.md) for the opt-in resident ranker and bounded source-derived snapshots. `@jarenjs/core/range` owns the structural resident array provider shared by app and linq.
+
+[Bounded scheduling and retry](docs/SCHEDULING.md) describes `core/schedule` and
+`core/retry`: fair per-scope admission, drained shutdown, shared attempt budgets
+and explicit strict/AI/contract compatibility policies.

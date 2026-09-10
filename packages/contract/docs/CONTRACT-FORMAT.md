@@ -432,6 +432,7 @@ carries the same codes and a test holds them equal.
 | JC0018 | a subscribe operation declares a `policy.task` other than `switch` — a subscription slot is replaced, never queued (§17) |
 | JC0019 | a subscribe operation is bound to a method other than `GET` — a stream is fetched, not sent (§17) |
 | JC0020 | a subscribe operation declares a `policy.idempotency` other than `none` — a subscription registers, it does not commit (§17) |
+| JC0021 | a provider descriptor is malformed or names an undeclared transform capability |
 
 `JC0021–JC0049` are reserved for further document-level rules and are
 appended to this table when they land; `JC0050–JC0069` are the binding-
@@ -792,6 +793,7 @@ wire response:
 | `JC1009` | the stream wire's SSE encoder was handed text the frame cannot carry: a bare carriage return inside `data`, a line terminator inside `event` or `id` (§18) |
 | `JC1010` | `client.subscribe` was asked for an operation that is not a subscribe operation (§19) |
 | `JC1011` | a ledger `commit`/`fail` named a ref that settles no started record — expired, reclaimed under a newer generation, or settled already (§8); refused by the ledger, reported to `onError` by the binding |
+| `JC1012` | a provider executor, descriptor host or run capability is malformed (PROVIDER-FORMAT.md) |
 
 ### §7.4 Headers
 

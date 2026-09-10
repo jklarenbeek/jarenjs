@@ -258,3 +258,60 @@ review/retry, plus general task/choice/loop/nesting/wait, failure/resume,
 checkpoint reuse, generation races, changed identities, cancellation and
 schema/compiler agreement. Streaming input, graphical editing, action-document
 awaiting and domain orchestration projections are separate contracts.
+
+## Complete provider ingestion
+
+`createIngestion({provider,store,source,maxPartitions?,maxPages?,maxRows?,maxBytes?})`
+compiles one workflow over injected capabilities. It imports no provider or
+persistence package. `provider.pages(input,context)` supplies bounded pages;
+`store.begin/stage/invalidate/publish` supplies atomic persistence. The public
+implementations are `compileProvider` from `@jarenjs/contract/provider` and
+`createDbIngestionStore` from `@jarenjs/linq/db`.
+
+```js
+import { createIngestion } from '@jarenjs/flow';
+
+const ingestion = createIngestion({ provider, store,
+  source: async (plan, phase) => readSourceEvidence(plan, phase),
+  maxPartitions: 8, maxPages: 32, maxRows: 4096, maxBytes: 1048576,
+});
+const result = await ingestion.run({
+  source: 'inventory/test', version: 'source-snapshot-1', generation: 'pull-1',
+  partitions: ['north', 'south'], input: {}, policyRevision: 'policy-1',
+  consistency: 'snapshot',
+}, { executor: providerRun, authority: providerRun, signal: providerRun.signal });
+```
+
+A plan has a source identity, source version, local generation, unique requested
+partitions, JSON input and reconciliation policy revision. `consistency` is
+`snapshot` (an upstream stable snapshot) or `revision` (an upstream monotonic
+revision which changes with every relevant source mutation). The injected source
+check returns `{version,consistency}` at start, after each page and before
+publication. It must report actual upstream evidence, not echo local generation
+numbers. Each page's version must match. A changed source invalidates staging;
+a host may start a fresh generation after obtaining fresh source evidence.
+
+The iterator resumes each unfinished partition from its committed continuation.
+It waits for a page to commit before requesting another. No network request
+holds a database transaction. Default aggregate limits are 64 partitions, 64
+pages, 65536 rows and 16777216 bytes; counts include prior committed pages on
+resume. The descriptor's page limits additionally bound an individual iterator.
+An interrupted pull retains staging; failed/partial partitions never publish a
+complete pointer. Pages reporting partial errors retain their exact raw wire
+text and cannot complete a partition. Source-invalid pages within limits remain
+inspectable but cannot certify completion.
+
+Publication checks source and optional current authority again. For private
+runs pass the same `withProviderRun` capability as executor and authority;
+its publication gate suppresses callbacks after cancellation or revocation.
+Returning `unchanged` requires matching source version, input, requested
+partitions, consistency and policy revision, and produces zero fact writes or
+revisions without requesting another page. A new source or policy revision
+stages a new generation. The store owns transactional recovery; application
+policy owns reconciliation, retention and downstream cutover.
+
+DAG and workflow run options accept `resources` separately from JSON input.
+Task handlers receive `(props, signal, resources)`; resources never participate
+in checkpoint serialization, replay identity or trace output. A resource-bearing
+run drains tasks on abort before settling so the caller can release its lease.
+Tasks must return JSON results and keep resource handles out of their output.

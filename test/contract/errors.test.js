@@ -20,7 +20,7 @@ const range = (/** @type {number} */ from, /** @type {number} */ to) => Array.fr
 describe('contract errors — the code table', () => {
   it('lists the compile, projection, host, http, client and port/local codes with one-line meanings, frozen', () => {
     const codes = Object.keys(CONTRACT_CODES);
-    assert.deepStrictEqual(codes, [...range(1, 20), ...range(60, 61), ...range(1001, 1011), ...range(2001, 2015), ...range(2050, 2058), ...range(2070, 2074), ...range(2090, 2097)]);
+    assert.deepStrictEqual(codes, [...range(1, 21), ...range(60, 61), ...range(1001, 1012), ...range(2001, 2015), ...range(2050, 2058), ...range(2070, 2074), ...range(2090, 2097)]);
     for (const code of codes) {
       const meaning = CONTRACT_CODES[/** @type {keyof typeof CONTRACT_CODES} */ (code)];
       assert.strictEqual(typeof meaning, 'string', code);

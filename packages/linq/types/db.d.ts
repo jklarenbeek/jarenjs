@@ -409,3 +409,16 @@ export declare function createLexicalRangeProvider(source: import('@jarenjs/db/s
   text: string, request?: Record<string, unknown>, options?: {maxMatches?:number; maxSourceBytes?:number;
     maxRows?:number; maxBytes?:number; maxPages?:number; maxInFlight?:number; query?:string;
     source?:string; exactTotal?:boolean; seekIndex?:boolean; disposeSource?:boolean}): Promise<any>;
+
+/** Atomic staging and publication over application-declared collections. */
+export function createDbIngestionStore(client: Client<any> | TransactionClientOf<any>, options: {
+  staging: string; checkpoints: string; publications: string; facts?: string;
+  reconcile?: (existing: any, incoming: any, evidence: any) => any;
+}): {
+  begin(plan: any): Promise<any>;
+  stage(plan: any, partition: string, page: any): Promise<any>;
+  invalidate(plan: any, reason: string): Promise<void>;
+  publish(plan: any, evidence: any, context?: { signal?: AbortSignal }): Promise<any>;
+  current(source: string): Promise<any>;
+  inspect(plan: any): Promise<any>;
+};

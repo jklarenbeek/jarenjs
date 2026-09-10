@@ -14,6 +14,8 @@
  */
 
 import { AiError } from './errors.js';
+import { backoffDelay, parseRetryAfter, sleep as defaultSleep, abortError } from '@jarenjs/core/retry';
+export { abortError };
 
 /**
  * The `retry` option of every client.
@@ -89,10 +91,7 @@ export function isTransientFailure(err) {
  * @returns {number} milliseconds
  */
 export function retryDelay(policy, attempt, retryAfter) {
-  const backoff = Math.min(policy.maxMs, policy.baseMs * 2 ** (attempt - 1));
-  return retryAfter !== undefined
-    ? Math.min(policy.maxMs, retryAfter)
-    : backoff * (0.5 + 0.5 * policy.random());
+  return backoffDelay({ ...policy, policy: 'ai-compat' }, attempt, retryAfter);
 }
 
 /**
@@ -165,13 +164,7 @@ export function transportFailure(err, url) {
  * @returns {number | undefined}
  */
 export function retryAfterMs(response) {
-  const raw = response?.headers?.get?.('retry-after');
-  if (raw == null || raw === '') return undefined;
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-  const date = Date.parse(raw);
-  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
-  return undefined;
+  return parseRetryAfter(response?.headers?.get?.('retry-after'));
 }
 
 /**
@@ -186,41 +179,4 @@ async function readErrorExcerpt(response) {
   catch {
     return '';
   }
-}
-
-/**
- * Abortable delay. Rejects with the abort reason so an abort during
- * backoff surfaces exactly like an abort during the request.
- * @param {number} ms
- * @param {AbortSignal} [signal]
- * @returns {Promise<void>}
- */
-function defaultSleep(ms, signal) {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(abortError(signal));
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener?.('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort() {
-      clearTimeout(timer);
-      reject(abortError(signal));
-    }
-    signal?.addEventListener?.('abort', onAbort, { once: true });
-  });
-}
-
-/**
- * The abort reason, or a platform-shaped AbortError.
- * @param {AbortSignal | undefined} signal
- * @returns {any}
- */
-export function abortError(signal) {
-  if (signal?.reason !== undefined) return signal.reason;
-  const err = new Error('The operation was aborted.');
-  err.name = 'AbortError';
-  return err;
 }

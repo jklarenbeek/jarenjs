@@ -361,3 +361,21 @@ complete membership; LINQ emits the same `$lexical` request. Hosts can compose
 [db adapter](../packages/db/docs/SEARCH.md) and [worker lifecycle](../packages/app/docs/SEARCH.md).
 The retained-reference cold profile is qualified for synthetic Node/Bun consumers;
 actual downstream cutover and native full-text dialect parity remain separate work.
+
+### Provider execution and complete ingestion
+
+Compose `@jarenjs/contract/provider` (`compileProvider`, `createProviderExecutor`,
+`withProviderRun`), `@jarenjs/flow` (`createIngestion`) and `@jarenjs/linq/db`
+(`createDbIngestionStore`) through their public structural capabilities. Install
+the corresponding packages and the linq database adapter's declared peers.
+Applications declare provider dialects, source snapshot/revision evidence,
+staging collections, reconciliation and current destination authority. Secrets
+remain in the host transport. A source generation publishes only after every
+requested partition completes; identical input is a zero-write replay.
+
+The packed-consumer gate installs this composition independently of each
+package's own dependency-closure proof. It executes synthetic REST, GraphQL and
+archive-link transcripts and two bounded ingestion consumers on Node and Bun.
+See the [provider contract](../packages/contract/docs/PROVIDER-FORMAT.md) for
+refusals and qualification limits. Real provider writes and business receipt
+reconciliation are separate capabilities.

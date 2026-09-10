@@ -770,6 +770,30 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       : ` + ${peers.length} optional peer(s) needed by ${[...new Set(needing.map((n) => n.subpath))].join(', ')}`;
     console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s)${peerNote}, node+types${bun ? '+bun' : ''}${name === '@jarenjs/app' ? '+vite' : ''}`);
   }
+  // Independent composition consumer; the per-package closure proofs above
+  // remain isolated. This application explicitly installs each participating owner.
+  const compositionDir = join(work, 'provider-composition');
+  mkdirSync(compositionDir, { recursive: true });
+  writeFileSync(join(compositionDir, 'package.json'), JSON.stringify({ type: 'module', private: true }));
+  const compositionPackages = new Set();
+  for (const name of ['@jarenjs/contract', '@jarenjs/flow', '@jarenjs/linq', '@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats'])
+    for (const dep of declaredClosure(byName, name)) compositionPackages.add(dep);
+  for (const dep of compositionPackages) {
+    const dest = join(compositionDir, 'node_modules', dep);
+    mkdirSync(dest, { recursive: true });
+    execFileSync('tar', tarExtractArgs(work, tarballs.get(dep), dest), { cwd: work });
+  }
+  const manifest = JSON.parse(readFileSync(join(root, 'test/adoption/manifest.json'), 'utf8'));
+  writeFileSync(join(compositionDir, 'providers.js'), readFileSync(join(root, 'test/consumer/providers.js')));
+  const compositionFile = join(compositionDir, 'consumer.mjs');
+  writeFileSync(compositionFile, "import { qualifyDialects, runIngestionConsumer } from './providers.js';\n"
+    + `await qualifyDialects(${readFileSync(join(root, 'test/adoption/fixtures/providers.json'), 'utf8')}, ${readFileSync(join(root, 'test/contract/fixtures/provider-descriptors.json'), 'utf8')});\n`
+    + manifest.consumers.map((definition) => `await runIngestionConsumer(${JSON.stringify(definition)}, ${JSON.stringify(adoptionRows(definition).slice(0, definition.budgets.providers.rows))});`).join('\n'));
+  for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
+    const result = spawnSync(runtime, [compositionFile], { cwd: compositionDir, encoding: 'utf8' });
+    if (result.status !== 0) { failures++; console.error(`Provider composition (${runtime}): ${result.stderr}`); }
+    else console.log(`✓ provider composition — three dialects, two consumers, zero-write replay (${runtime})`);
+  }
 }
 finally {
   rmSync(work, { recursive: true, force: true });

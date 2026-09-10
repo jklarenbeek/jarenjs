@@ -1,0 +1,23 @@
+[
+  {
+    "$provider": "0.1", "id": "inventory-rest", "apiVersion": "2026-01",
+    "endpoint": "https://inventory.example/items", "protocol": "rest", "method": "GET", "safety": "safe-read",
+    "headers": { "accept": "application/json", "x-api-version": "2026-01" },
+    "query": { "environment": "$.input.environment" },
+    "response": { "rows": "$.items", "id": "$.id", "cursor": "$.next", "version": "$.version" },
+    "pagination": { "cursorParam": "cursor", "empty": "complete" }
+  },
+  {
+    "$provider": "0.1", "id": "commerce-graphql", "apiVersion": "2026-04",
+    "endpoint": "https://commerce.example/graphql", "protocol": "graphql", "method": "POST", "safety": "safe-read",
+    "graphql": { "query": "query Products($after: String) { products(after: $after) { nodes { id } pageInfo { hasNextPage endCursor } } }", "variables": {} },
+    "response": { "rows": "$.data.products.nodes", "id": "$.id", "cursor": "$.data.products.pageInfo.endCursor", "hasMore": "$.data.products.pageInfo.hasNextPage", "cost": "$.extensions.cost" },
+    "pagination": { "cursorVariable": "after", "empty": "complete" }
+  },
+  {
+    "$provider": "0.1", "id": "archive-link", "apiVersion": "v2",
+    "endpoint": "https://archive.example/records", "protocol": "rest", "method": "GET", "safety": "safe-read",
+    "response": { "rows": "$.entries", "id": "$.id", "cursor": { "callback": "archiveCursor" } },
+    "pagination": { "cursorParam": "cursor", "empty": "complete" }
+  }
+]

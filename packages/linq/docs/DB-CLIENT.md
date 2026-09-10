@@ -115,6 +115,7 @@ back, the durable ledger over what it opened, and replication document authoring
 | `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
 | `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
+| `createDbIngestionStore(client, options)` | atomic page/checkpoint staging and complete snapshot publication; see [complete ingestion store](DB-CLIENT.md#complete-ingestion-store) | structural ingestion store |
 | `createDbRangeProvider(store, entity, spec, options)` | a bounded structural range source over keyset pages and committed capture; also `handle.range(spec, options)` — [COLLECTION-PROVIDER.md](../../app/docs/COLLECTION-PROVIDER.md) | `Promise<DbRangeProvider>` |
 
 `open` is the only door, and it is deliberately not a coded refusal: a
@@ -949,3 +950,59 @@ savepoint owner. It rejects thenables and invalidates post-return work. Async-on
 hosts have no synchronous transaction surface. The outbox infrastructure must
 already have been provisioned through an explicit setup/migration before a
 no-DDL adoption; opening with jobs enabled is a separate infrastructure operation.
+
+## Complete ingestion store
+
+`createDbIngestionStore(client,{staging,checkpoints,publications,facts?,reconcile?})`
+uses application-declared document collections through the root or transaction
+client. Collection names must be distinct. The root adapter opens an immediate
+transaction; a transaction adapter nests under that owner. It introduces no
+second ledger, transaction engine or fixed provider schema.
+
+```js
+import { open, createDbIngestionStore } from '@jarenjs/linq/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const model = { $model: '0.1', collections: Object.fromEntries(
+  ['observations', 'pulls', 'snapshots', 'facts'].map((name) => [name, {
+    key: '/id', schema: { type: 'object' }, indexes: [],
+  }]),
+) };
+const client = await open(model, { driver: nodeDriver(), path: 'ingestion.db' });
+const store = createDbIngestionStore(client, {
+  staging: 'observations', checkpoints: 'pulls', publications: 'snapshots', facts: 'facts',
+  reconcile: (existing, incoming) => existing?.provenance === 'manual' ? existing : incoming,
+});
+// Pass store to createIngestion; close client after ingestion and workers drain.
+```
+
+`begin(plan)` creates or resumes a generation, or returns `unchanged` when the
+current published fingerprint matches. A fingerprint includes source version,
+partitions, input, policy revision and consistency. Generations cannot be reused
+with a changed plan. `stage(plan,partition,page)` commits exact raw page text,
+parsed/transformed observations and continuation/completion evidence together.
+An identical repeated page does no work; a conflicting page or stale cursor is
+refused. `inspect(plan)` returns the checkpoint and retained observations.
+`invalidate` preserves them while fencing the generation from publication.
+
+`publish(plan,evidence)` requires completed coverage of every requested
+partition, matching source evidence and the publication generation observed at
+begin. Concurrent stale publication is refused. The pointer, completion record
+and any reconciled facts commit together. If reconciliation or persistence
+fails, all those changes roll back while staging remains available for recovery.
+`current(source)` reads the published pointer and its completion evidence.
+
+Facts use the collision-free JSON tuple `[source,partition,providerId]`; strings
+retain leading zeros. `reconcile(existingValue,incomingRow,evidence)` is a pure
+synchronous policy and defaults to the incoming row. It must explicitly preserve
+manual provenance when required. Equal values do not write or increment the
+fact's revision. Reported `changes`, `writes` and `revisions` count effective
+fact changes; staging/checkpoint/manifest metadata is separate. An identical
+published pull performs no metadata writes either. A new policy or source
+version can publish a new manifest with zero fact changes.
+
+The complete pointer defines source membership. The facts collection is a
+reconciled history of observed identities; missing identities are not implicitly
+deleted. Applications own retirement of absent facts, staging retention and
+business-history policy. Without `facts`, only raw staging and publication are
+maintained. No provider schema, receipt TTL or manual-edit rule is inferred.

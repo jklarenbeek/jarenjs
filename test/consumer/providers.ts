@@ -1,0 +1,21 @@
+import { createScheduler } from '@jarenjs/core/schedule';
+import { createAttemptBudget, backoffDelay } from '@jarenjs/core/retry';
+import { compileProvider, createProviderExecutor, withProviderRun } from '@jarenjs/contract/provider';
+import { createIngestion, compileWorkflow } from '@jarenjs/flow';
+import { createDbIngestionStore, type Client } from '@jarenjs/linq/db';
+
+const scheduler = createScheduler({ concurrency: 2, maxScopes: 3 });
+const scheduled: Promise<number> = scheduler.run(() => 1, { scope: 'a' });
+const budget = createAttemptBudget(3, 'safe-read');
+const delay: number = backoffDelay({ policy: 'strict' }, 1);
+const executor = createProviderExecutor({ attempts: 3, maxBytes: 1024 });
+void executor.execute({ url: 'https://test.example', safety: 'safe-read' }, { budget });
+const provider = compileProvider({});
+declare const client: Client<any>;
+const store = createDbIngestionStore(client, { staging: 's', checkpoints: 'c', publications: 'p' });
+const ingest = createIngestion({ provider, store, source: () => ({ version: '1', consistency: 'snapshot' }) });
+void ingest.run({ source: 's', version: '1', generation: 'g', policyRevision: '1', input: {}, partitions: ['p'], consistency: 'snapshot' }, { executor });
+void withProviderRun;
+const workflow = compileWorkflow({}, { tasks: { read: { version: '1', run: (_props, _signal, resources) => resources } } });
+void workflow.run({}, { runId: 'r', resources: executor });
+void [scheduled, delay];

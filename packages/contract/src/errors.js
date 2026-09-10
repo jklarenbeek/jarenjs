@@ -52,6 +52,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC0018: 'a subscribe operation declares a policy.task other than switch — a subscription slot is replaced, never queued',
   JC0019: 'a subscribe operation is bound to a method other than GET — a stream is fetched, not sent',
   JC0020: 'a subscribe operation declares a policy.idempotency other than none — a subscription registers, it does not commit',
+  JC0021: 'a provider protocol descriptor is malformed or names an undeclared transform capability',
   // ——— projection compile (ContractCompileError, docPath into the contract document) ———
   JC0060: 'the OpenAPI projection met a schema keyword it cannot map honestly: a boolean required (draft-04 style) or a same-document $ref that lands outside $defs (both dropped and reported under lenient), or a components member inside a schema',
   JC0061: 'the public projection is not canonicalizable, so no revision exists — a string with an unpaired surrogate, say; docPath points at the offending value inside the projection',
@@ -67,6 +68,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1009: 'encodeSseEvent (the stream wire): an event, id or data string the SSE frame cannot carry — a bare carriage return inside data, a line terminator inside event or id',
   JC1010: 'client.subscribe was asked for an operation that is not a subscribe operation (invoke carries reads and commands; subscribe carries streams)',
   JC1011: 'a ledger commit or fail named a ref that settles no started record: the key expired, was reclaimed under a newer generation, or was settled already — the settlement is refused; the binding reports it to onError and the response still goes out',
+  JC1012: 'a provider executor, descriptor host or run capability is malformed',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',

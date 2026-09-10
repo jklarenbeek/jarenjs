@@ -757,3 +757,15 @@ if (Object.keys(lexicalEngine.metafile.inputs).some(file=>/packages\/(json|linq|
   throw new Error('Lexical mechanics imported a host, higher layer or external dependency');
 if (gzipSync(lexicalEngine.outputFiles[0].contents).length > 65536) throw new Error('Lexical browser bundle exceeds frozen budget');
 console.log(`Lexical tree shaking passed (${gzipSync(lexicalEngine.outputFiles[0].contents).length} gzip bytes).`);
+
+for (const [entry, forbidden] of [
+  ["export { createProviderExecutor } from '@jarenjs/contract/provider';", /packages\/(ai|flow|linq|db)|provider\/(compile|run)\.js/],
+  ["export { createIngestion } from '@jarenjs/flow';", /packages\/(contract|linq|db|ai)/],
+  ["export { createScheduler } from '@jarenjs/core/schedule';", /packages\/(json|contract|flow|linq|db|ai)/],
+]) {
+  const bundle = await build({ stdin: { contents: entry, resolveDir: process.cwd() },
+    bundle: true, minify: true, format: 'esm', platform: 'browser', write: false, metafile: true });
+  const retained = Object.values(bundle.metafile.outputs).flatMap((output) => Object.entries(output.inputs));
+  if (retained.some(([file, info]) => info.bytesInOutput > 0 && forbidden.test(file))) throw new Error('Provider composition violates owner isolation');
+  console.log(`Provider owner isolation passed (${bundle.outputFiles[0].contents.length} bytes).`);
+}

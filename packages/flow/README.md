@@ -345,3 +345,10 @@ Every subpath a consumer can import, derived from the manifest by
 Unit tests live in `test/flow/` at the repository root
 (`npm run test:flow`). See the repository [README](../../README.md) for
 the full suite documentation.
+
+Bounded provider ingestion composes the workflow engine with injected page and
+transaction capabilities. `createIngestion` resumes source/version/partition
+checkpoints and publishes only complete coverage; see the
+[ingestion contract](docs/WORKFLOW-FORMAT.md#complete-provider-ingestion).
+Run-scoped `resources` reach tasks separately from JSON checkpoints and drain
+before release.

@@ -17,7 +17,8 @@
     "flow-composition.ts",
     "db-replication.ts",
     "collection.ts",
-    "lexical.ts"
+    "lexical.ts",
+    "providers.ts"
   ],
   "include": [
     "linq-*.ts"

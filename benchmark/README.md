@@ -1368,3 +1368,24 @@ Separate Node processes, identical source rows and queries, five query samples e
 Native build, reload and update costs exceed the reference; source-bound snapshots compress better. Cold tie compatibility deliberately differs from reference reload ordering. These synthetic results qualify the named bounded host, not downstream relevance or universal latency.
 
 <!--/fact-->
+
+## Provider execution and complete ingestion
+
+Run `npm run benchmark:providers` for offline transcript and ingestion costs.
+The frozen retained transcript reader remains executable. Its extraction-only
+cost is shown beside native scheduling, authority, transactional staging,
+publication and no-op replay; these perform different work. Refresh the public
+table with `npm run docs:derive` after measuring.
+
+<!--fact:providers.measurements-->
+
+Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+
+| Consumer | Rows | Requests / budget | Response bytes / budget | Retained reader ms | Native ingestion ms | Second writes / revisions | Teardown ms / remaining resources | Sampled heap / RSS MiB |
+|---|---:|---|---|---:|---:|---|---|---|
+| catalog | 256 | 3 / 3 | 66426 / 262144 | 0.96 | 64.45 | 0 / 0 | 0.27 / 0 | 35.69 / 116.45 |
+| archive-stock | 512 | 6 / 6 | 135886 / 524288 | 1.31 | 79.46 | 0 / 0 | 0.11 / 0 | 42.55 / 173.56 |
+
+Offline synthetic Node SQLite ingestion. The retained reader only extracts recorded transcripts; native timings include opening storage, descriptor execution, private authority checks, page/checkpoint commits, publication and zero-write replay. Their timings describe different work. No real provider latency, credentials, external write reconciliation or production cutover is qualified.
+
+<!--/fact-->

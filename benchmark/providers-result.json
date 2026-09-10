@@ -1,0 +1,56 @@
+{
+  "format": "jaren-provider-measurements/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "scope": "Offline synthetic Node SQLite ingestion. The retained reader only extracts recorded transcripts; native timings include opening storage, descriptor execution, private authority checks, page/checkpoint commits, publication and zero-write replay. Their timings describe different work. No real provider latency, credentials, external write reconciliation or production cutover is qualified.",
+  "dialects": 3,
+  "consumers": [
+    {
+      "consumer": "catalog",
+      "reference": {
+        "elapsedMs": 0.958627000000007,
+        "rows": 256,
+        "pages": 3
+      },
+      "native": {
+        "rows": 256,
+        "requests": 3,
+        "bytes": 66426,
+        "changes": 256,
+        "secondWrites": 0,
+        "secondRevisions": 0,
+        "elapsedMs": 64.450715,
+        "teardownMs": 0.2701419999999928,
+        "remainingHandles": 0,
+        "sampledHeapBytes": 37423272,
+        "rssBytes": 122105856
+      }
+    },
+    {
+      "consumer": "archive-stock",
+      "reference": {
+        "elapsedMs": 1.3061519999999973,
+        "rows": 512,
+        "pages": 6
+      },
+      "native": {
+        "rows": 512,
+        "requests": 6,
+        "bytes": 135886,
+        "changes": 512,
+        "secondWrites": 0,
+        "secondRevisions": 0,
+        "elapsedMs": 79.464965,
+        "teardownMs": 0.11251299999997855,
+        "remainingHandles": 0,
+        "sampledHeapBytes": 44620448,
+        "rssBytes": 181993472
+      }
+    }
+  ]
+}

@@ -26,6 +26,7 @@
  * Everything per operation is decided once at `open`.
  */
 
+import { backoffDelay as sharedBackoff, sleep as defaultSleep } from '@jarenjs/core/retry';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 import { canonicalSha256 } from '@jarenjs/json/canonical';
@@ -199,9 +200,6 @@ const storageUpdates = new WeakMap();
 /** The backoff ceiling of a retry, in ms. */
 const BACKOFF_MAX = 8000;
 
-/** The jitter added to a backoff, in ms (upper bound, exclusive). */
-const BACKOFF_JITTER = 250;
-
 /**
  * @param {string} code
  * @param {string} reason
@@ -209,42 +207,6 @@ const BACKOFF_JITTER = 250;
  */
 function host(code, reason) {
   return new ContractHostError(code, `openHttpClient: ${reason}`);
-}
-
-/**
- * An `AbortError`-named error, the platform's when a signal carries one.
- * @param {AbortSignal | null} signal
- * @returns {unknown}
- */
-function abortReason(signal) {
-  if (signal !== null && signal.reason !== undefined) return signal.reason;
-  const err = new Error('The operation was aborted.');
-  err.name = 'AbortError';
-  return err;
-}
-
-/**
- * Abortable delay; rejects with the abort reason.
- * @param {number} ms
- * @param {AbortSignal} [signal]
- * @returns {Promise<void>}
- */
-function defaultSleep(ms, signal) {
-  return new Promise((resolve, reject) => {
-    if (signal !== undefined && signal.aborted) {
-      reject(abortReason(signal));
-      return;
-    }
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortReason(signal ?? null));
-    };
-    const timer = setTimeout(() => {
-      if (signal !== undefined) signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    if (signal !== undefined) signal.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 /**
@@ -444,7 +406,8 @@ export function openHttpClient(contract, options = {}) {
    * @returns {number}
    */
   function backoffDelay(n) {
-    return Math.min(1000 * 2 ** n, BACKOFF_MAX) + Math.floor(hostFact('random', runtime.random) * BACKOFF_JITTER);
+    return sharedBackoff({ policy: 'contract-compat', baseMs: 1000, maxMs: BACKOFF_MAX,
+      random: () => hostFact('random', runtime.random) }, n + 1);
   }
   const now = options.now === undefined ? runtime.now : options.now;
   /** @type {Catalog | null} */

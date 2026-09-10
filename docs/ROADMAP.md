@@ -495,7 +495,7 @@ hooks, `createDbLedger(tx)` settlement, flow checkpoints, fenced jobs with
 renewal/recovery, and the transactional `tx.jobs` outbox
 ([contract lifecycle](../packages/contract/docs/CONTRACT-FORMAT.md#77-the-host-lifecycle-identify-acquire-release-settle),
 [jobs](../packages/db/docs/JOBS-FORMAT.md),
-[flow](../packages/flow/README.md)). The remaining work is their composition with
+[flow](../packages/flow/README.md)). The remaining work extends their composition with
 external provider protocols and existing durable business facts. Reuse those
 owners: core for shared scheduling, contract for execution boundaries, flow for
 orchestration, db/linq for persistence, app for public run observation and ai for
@@ -504,51 +504,26 @@ inventory arithmetic and immutable business history remain application-owned;
 native integration means expressing and enforcing them through public Jaren
 capabilities, not replacing their meanings with a generic ledger.
 
-- [ ] **One reusable provider execution policy.** Extract the missing shared
-  transport/scheduling composition from real adapters, keeping existing AI and
-  contract clients as consumers: injected transport, clock/random/sleep,
-  explicit total attempts, per-attempt and overall deadlines, response/stream
-  byte limits, cancellation and bounded queues/concurrency. Support per-origin/
-  account start spacing and provider cost/rate observations, retry classification
-  and bounded backoff with seconds/date/millisecond Retry-After dialects; define
-  whether an over-budget server delay refuses rather than retrying too soon.
-  Distinguish safe reads, provider-idempotent commands and single-send writes;
-  never infer replay safety from an HTTP verb or a timeout. One layer owns
-  retries, so SDK, client, scheduler and job retries cannot multiply attempts.
-  Prove dispatch counts, fairness between scopes, no start after cancellation,
-  stopped admission and drained in-flight cleanup before releasing credentials,
-  leases or storage. Refactor shipped behavior through the seam only with
-  differential tests preserving each client's declared defaults and wire shape.
-- [ ] **Provider protocol descriptors and complete-snapshot ingestion.** Add
-  an opt-in contract/adapter composition for the REST/GraphQL dialect details
-  a Jaren-to-Jaren HTTP client does not describe: endpoint/API version, query/
-  variable encoding, headers, response envelopes, partial GraphQL errors,
-  provider IDs, pagination/continuation and error/cost extraction. Compile
-  declarative transformations through existing schema/query/JSLT facilities;
-  keep exceptional callbacks explicit host capabilities. Pagination needs page/
-  row/byte ceilings, repeated-cursor/no-progress detection, empty-page rules,
-  backpressure, cancellation and durable source/version/partition checkpoints.
-  Preserve lossless staging and partial observations; publication of a complete
-  snapshot requires evidence for every requested partition, with explicit
-  behavior for a source changing mid-pull. Provider-specific media/binary,
-  bulk-operation or upload capabilities require their own qualified descriptor,
-  not a claim of universal GraphQL support. Recorded inventory and commerce
-  protocol fixtures plus an unrelated provider must demonstrate reuse before retiring
-  SDK/adaptor code; CSV/locale decoding stays with its existing qualified owner.
-- [ ] **Destination authority and private host resources across runs.** Extend
-  existing identify/acquire/release and injected effects with a documented
-  composition for a persisted run whose tenant/environment/company and actor
-  identity must survive navigation while credentials remain private. Resolve
-  current authority before each external write, reject configuration changes
-  between validation and dispatch, and define lease/resource ownership across
-  OAuth refresh, account switching, worker failure, cancellation and shutdown.
-  Persist opaque credential references and authority evidence only where
-  appropriate, never tokens, browser handles, controllers or secrets in JSON
-  state, checkpoints, replay responses or logs. Restoring a switched provider
-  context must happen after all workers drain. Prove revoked access, changed
-  destination, concurrent runs and late responses cannot reuse a previously
-  privileged client or publish after cancellation. Generic lifecycle hooks
-  must remain independent of any one provider's membership or config policy.
+The bounded provider read and ingestion composition now has public owners:
+[core retry and scheduling](../packages/core/docs/SCHEDULING.md),
+[contract descriptors and private run authority](../packages/contract/docs/PROVIDER-FORMAT.md),
+[flow ingestion](../packages/flow/docs/WORKFLOW-FORMAT.md#complete-provider-ingestion)
+and [transactional staging/publication](../packages/linq/docs/DB-CLIENT.md#complete-ingestion-store).
+Three recorded dialects and two installed Node/Bun consumers qualify bounded
+reads, authority revalidation, lossless accepted pages, crash recovery, complete
+partition publication and identical-input no-op behavior. The original reference
+fixtures remain executable; these results do not retire external SDKs or qualify
+production cutover. Streaming DAG input is not required by this composition.
+
+- [ ] **Provider extensions and live adoption.** Qualify real provider authority,
+  credential refresh/account restoration and read-back on their actual hosts
+  before downstream cutover. Media/binary, bulk-operation and upload protocols
+  require separately qualified descriptors; they currently refuse before
+  dispatch. SDK transports must prove one request per admitted attempt and bind
+  provider idempotency explicitly. External writes still require the durable
+  receipts and reconciliation below; single-send classification alone cannot
+  resolve an uncertain remote outcome. Application membership, destination and
+  reconciliation rules remain injected, including preservation of manual facts.
 - [ ] **Durable domain receipts beyond an expiring HTTP claim.** The shipped
   ledger co-settles HTTP commands on a declared collection, but requires a
   finite positive TTL; local/port bindings leave settlement policy inert.

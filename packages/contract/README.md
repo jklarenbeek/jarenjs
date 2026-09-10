@@ -734,6 +734,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/contract/schemas/jaren-contract.draft-07.schema.json` | schema | — |
 | `@jarenjs/contract/schemas/jaren-contract.schema.json` | schema | — |
 | `@jarenjs/contract/package.json` | metadata | — |
+| `@jarenjs/contract/provider` | JavaScript | declared |
 <!--/fact-->
 
 Author JSON template catalogs and MessageSpec references with the
@@ -771,3 +772,8 @@ and the producer's unwritten chunk separately from bytes already accepted
 by TCP. The in-process Fetch leg can measure produced-minus-consumed
 bytes directly. Complete-byte hashes, cursor pulls and cancellation
 finalizers remain part of the same end-to-end test.
+
+`@jarenjs/contract/provider` supplies bounded provider execution, compiled JSON
+REST/GraphQL dialects and private run authority. Partial observations retain
+wire text and never become complete snapshots. See
+[provider descriptors and ingestion](docs/PROVIDER-FORMAT.md).

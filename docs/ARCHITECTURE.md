@@ -708,3 +708,15 @@ backup publication retain their existing owners. See [db architecture](../packag
 The db entity planner owns adopted-column read lowering and bounded mutation documents. `linq/db` owns the headless [range adapter](../packages/app/docs/COLLECTION-PROVIDER.md), reusing db cursors, keyset pages, transactions and capture. Its structural shape is consumed through injection; there is no db/linq import of app or components and no second query or range engine.
 
 Lexical mechanics live in `core/search`; `json/query` binds explicit injected `$lexical` providers and `linq` emits their documents. `db/search` adds authoritative snapshots and persistence, and `app/search` owns injected workers. `core/range` is the single resident array provider used by app and the structural `linq/db` lexical adapter. The browser ranker imports neither db nor AI. See [the lexical contract](../packages/core/docs/SEARCH.md).
+
+### Bounded provider composition
+
+Core owns shared admission, attempt credits and retry arithmetic. Contract's
+provider subpath owns single-attempt transport, compiled dialects and private
+identify/acquire/release lifetimes. Flow composes provider pages with atomic
+staging through injected capabilities; linq/db supplies that adapter through the
+existing database transaction owner. Flow imports neither contract nor linq/db,
+and the database engine does not import its adapters. Workflow resources are a
+private argument to task handlers, separate from JSON checkpoints and traces.
+See [provider protocols and authority](../packages/contract/docs/PROVIDER-FORMAT.md)
+and [complete ingestion](../packages/flow/docs/WORKFLOW-FORMAT.md#complete-provider-ingestion).

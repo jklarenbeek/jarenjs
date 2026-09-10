@@ -173,7 +173,7 @@ export function lowerWorkflow(document) {
 /** @typedef {{ load: (runId: string) => WorkflowSnapshot | null | Promise<WorkflowSnapshot | null>,
  * save: (runId: string, snapshot: WorkflowSnapshot, expectedGeneration: number) => boolean | Promise<boolean> }} WorkflowStore */
 /** @typedef {{ runId: string, snapshot?: any, expectedGeneration?: number,
- * signal?: AbortSignal, now?: number, event?: {type: string, payload?: any},
+ * signal?: AbortSignal, resources?: unknown, now?: number, event?: {type: string, payload?: any},
  * onTrace?: (record: any) => void }} WorkflowRunOptions */
 /** Compile once; each run owns its control and checkpoint records.
  * Store save MUST atomically compare expectedGeneration (0 means absent).
@@ -407,9 +407,14 @@ export function compileWorkflow(document, options = {}) {
           let result;
           let error = null;
           try {
-            result = Object.hasOwn(pending, 'result') ? pending.result
-              : await wait(dags.get(id).run(clone(pending.input), { runId: key, signal: controller.signal,
-                onNode: (record) => observe({ type: 'node', state: id, activation: pending.visit, ...record }) }));
+            if (Object.hasOwn(pending, 'result')) result = pending.result;
+            else {
+              const task = dags.get(id).run(clone(pending.input), { runId: key, signal: controller.signal,
+                resources: opts.resources,
+                onNode: (record) => observe({ type: 'node', state: id, activation: pending.visit, ...record }) });
+              // A private resource lease outlives every worker that received it.
+              result = opts.resources === undefined ? await wait(task) : await task;
+            }
           }
           catch (err) {
             if (spec.catch === undefined || err?.code !== 'JF2006') throw err;

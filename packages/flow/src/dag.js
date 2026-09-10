@@ -71,7 +71,7 @@ function compileEmbedded(compile, embedded, docPath) {
  *   declared task identity this workflow depends on, keyed by node id and
  *   SORTED (§7.8); a nested workflow's map composes under its node's
  *   path. Empty when no node declares a version.
- * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void, runId?: string, drainOnAbort?: boolean }) => Promise<any>} run -
+ * @property {(input?: any, opts?: { signal?: AbortSignal, onNode?: (record: DagNodeRecord) => void, runId?: string, drainOnAbort?: boolean, resources?: unknown }) => Promise<any>} run -
  *   Execute the graph for one input (`undefined` reads as `null`).
  */
 
@@ -121,8 +121,8 @@ function normalizeTaskEntry(entry, name) {
  * registry resolution — `run` only executes closures.
  *
  * @param {any} doc - the jaren-dag document
- * @param {{ tasks?: Record<string, ((props: { with: any, input: any }, signal: AbortSignal) => any)
- *     | { run: (props: { with: any, input: any }, signal: AbortSignal) => any, version?: string,
+ * @param {{ tasks?: Record<string, ((props: { with: any, input: any }, signal: AbortSignal, resources?: any) => any)
+ *     | { run: (props: { with: any, input: any }, signal: AbortSignal, resources?: any) => any, version?: string,
  *         taskVersions?: Record<string, string> }>,
  *   checkpoint?: DagCheckpointStore, revision?: string }} [options]
  * @returns {CompiledDag}
@@ -413,7 +413,7 @@ export function compileDag(doc, options) {
       throw new TypeError(
         'run: a checkpointed dag needs a non-empty string "runId" to persist under');
     }
-    return execute(input === undefined ? null : input, signal, onNode, runId, opts?.drainOnAbort === true);
+    return execute(input === undefined ? null : input, signal, onNode, runId, opts?.drainOnAbort === true || opts?.resources !== undefined, opts?.resources);
   }
 
   /**
@@ -422,8 +422,9 @@ export function compileDag(doc, options) {
    * @param {((record: DagNodeRecord) => void)|undefined} onNode
    * @param {string|undefined} runId
    * @param {boolean} drainOnAbort
+   * @param {unknown} resources - host-private, never part of input/checkpoint identity
    */
-  async function execute(runInput, signal, onNode, runId, drainOnAbort) {
+  async function execute(runInput, signal, onNode, runId, drainOnAbort, resources) {
     const controller = new AbortController();
     /** @type {FlowRuntimeError|null} */
     let failure = null;
@@ -566,7 +567,7 @@ export function compileDag(doc, options) {
               with: node.with === null ? null : node.with(scope) ?? null,
               input: scope,
             };
-            value = (await node.handler(props, controller.signal)) ?? null;
+            value = (await node.handler(props, controller.signal, resources)) ?? null;
             break;
           }
           default: value = null; break;
