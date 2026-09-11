@@ -36,3 +36,28 @@ it('disposal drains an admitted snapshot and fences late index publication', asy
   }
   finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+it('failed application setup releases the adopted connection and permits an unchanged second open', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'jaren-journey-setup-'));
+  const definition = { ...readAdoption('manifest.json').consumers[0], rows: 256 };
+  const driver = nodeDriver(), path = join(directory, 'app.sqlite');
+  const handles = new Set(); let opens = 0, closes = 0;
+  const tracked = { ...driver, async open(...args) {
+    const handle = await driver.open(...args); handles.add(handle); opens++;
+    return { ...handle, async close() { closes++; handles.delete(handle); await handle.close(); } };
+  } };
+  try {
+    await seedAdoptionFile({ driver, path, definition, rows: adoptionRows(definition), originals: readAdoption('fixtures/formulas.json').formulas });
+    const invalid = structuredClone(definition); invalid.budgets.providers.pages = 0;
+    for (const [profile, transport, code] of [[definition, false, 'JC1012'], [invalid, async () => new Response('{}'), 'JC0021']]) {
+      await assert.rejects(openAdoption({ driver: tracked, path, definition: profile, transport }), { code });
+      assert.equal(handles.size, 0, 'setup refusal must release the opened database');
+      assert.equal(closes, opens);
+    }
+    const app = await openAdoption({ driver: tracked, path, definition, transport: async () => new Response('{}') });
+    assert.equal((await app.rows()).length, 128);
+    await app.close(); await app.close();
+    assert.equal(handles.size, 0); assert.equal(closes, opens);
+  }
+  finally { for (const handle of handles) await handle.close(); rmSync(directory, { recursive: true, force: true }); }
+});

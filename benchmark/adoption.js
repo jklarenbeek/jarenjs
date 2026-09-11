@@ -16,6 +16,11 @@ import { referenceSearch, referenceGrid, searchOptions } from '../test/adoption/
 import { readProviderTranscript } from '../test/adoption/provider-oracle.js';
 import { trustedBodies, SKIP } from '../test/adoption/trusted-bodies.js';
 
+if (process.argv.includes('--final')) {
+  await import('./adoption-program.js');
+  process.exit(0);
+}
+
 if (process.argv.includes('--combined')) {
   await import('./adoption-journey.js');
   process.exit(0);

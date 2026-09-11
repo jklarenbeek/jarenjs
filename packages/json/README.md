@@ -1,5 +1,7 @@
 # @jarenjs/json
 
+Saved formulas and reviewed plans compose with injected query providers and authoritative command settlement. The [adoption ledger](../../docs/ADOPTION-EVIDENCE.md) records qualified scopes; unresolved trusted originals remain preserved for application review.
+
 The JSON addressing, query, and stylesheet standards of [Jaren](https://github.com/jklarenbeek/jarenjs), compiled: JSON Pointer ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)), a JSONPath engine ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) that passes the complete official compliance suite, the **Jaren JSON Query format** — a declarative query-and-transformation language with XQuery 3.1 semantics whose queries are themselves JSON documents — and **JSLT**, a recursive template-dispatch layer over that same stack. Everything follows the same architecture: parse and decide once, then run a specialized closure. No `eval`, no `new Function`, CSP-safe, zero runtime dependencies beyond the [`@jarenjs/core`](../core) foundation.
 
 None of it depends on JSON Schema: every module can be used standalone in any JavaScript project.

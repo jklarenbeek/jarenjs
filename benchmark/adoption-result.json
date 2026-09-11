@@ -2,8 +2,8 @@
   "format": "jaren-adoption-report/1",
   "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
   "runtime": {
-    "node": "v24.19.0",
-    "sqlite": "3.53.3",
+    "node": "v24.20.0",
+    "sqlite": "3.53.4",
     "platform": "linux",
     "arch": "x64",
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
@@ -12,7 +12,7 @@
     "totalMemoryBytes": 33009852416,
     "osRelease": "7.2.3-200.nobara.fc44.x86_64"
   },
-  "runnerHash": "0944e4dde71e23024d9e6505863e1c4aa562b0d8f050ca064c6ed8371b9c08d9",
+  "runnerHash": "916f9b7f1f99bdee278ec1d5ff4f788e514f0804b46fc45c0aec4531a823c6f5",
   "evidence": {
     "automatedReference": "pass",
     "library": "pending",
@@ -28,27 +28,27 @@
       "metrics": {
         "relational": {
           "statements": 9,
-          "queryMs": 0.08241099999997914,
-          "recoveryMs": 33.05626600000005
+          "queryMs": 0.09058300000003783,
+          "recoveryMs": 34.72672
         },
         "search": {
-          "startupMs": 286.631957,
-          "coldIndexMs": 125.32214700000002,
-          "warmIndexMs": 54.96312999999998,
-          "queryMs": 5.372025000000008,
+          "startupMs": 372.603553,
+          "coldIndexMs": 169.505833,
+          "warmIndexMs": 65.049804,
+          "queryMs": 14.11128500000001,
           "sourceBytes": 2606620,
           "indexBytes": 1915119,
           "browserGzipBytes": 5873
         },
         "grid": {
-          "interactionMs": 0.07877900000005411,
+          "interactionMs": 0.0798970000000736,
           "mountedCells": null,
           "loadedRows": null,
           "loadedBytes": null,
           "browserGzipBytes": 7053
         },
         "formulas": {
-          "evaluationMs": 12.111590000000092,
+          "evaluationMs": 24.441210999999953,
           "errors": 1,
           "originalByteChanges": 0
         },
@@ -60,10 +60,10 @@
           "unresolvedResends": null
         },
         "resources": {
-          "sampledHeapBytes": 154005696,
-          "peakRssBytes": 318033920,
+          "sampledHeapBytes": 154179328,
+          "peakRssBytes": 315109376,
           "peakHeapBytes": null,
-          "teardownMs": 0.07773200000008273,
+          "teardownMs": 0.0697699999999486,
           "remainingHandles": null
         }
       },
@@ -78,13 +78,13 @@
           {
             "metric": "queryMs",
             "limit": 100,
-            "value": 0.08241099999997914,
+            "value": 0.09058300000003783,
             "status": "pass"
           },
           {
             "metric": "recoveryMs",
             "limit": 5000,
-            "value": 33.05626600000005,
+            "value": 34.72672,
             "status": "pass"
           }
         ],
@@ -92,25 +92,25 @@
           {
             "metric": "startupMs",
             "limit": 15000,
-            "value": 286.631957,
+            "value": 372.603553,
             "status": "pass"
           },
           {
             "metric": "coldIndexMs",
             "limit": 15000,
-            "value": 125.32214700000002,
+            "value": 169.505833,
             "status": "pass"
           },
           {
             "metric": "warmIndexMs",
             "limit": 15000,
-            "value": 54.96312999999998,
+            "value": 65.049804,
             "status": "pass"
           },
           {
             "metric": "queryMs",
             "limit": 100,
-            "value": 5.372025000000008,
+            "value": 14.11128500000001,
             "status": "pass"
           },
           {
@@ -136,7 +136,7 @@
           {
             "metric": "interactionMs",
             "limit": 16,
-            "value": 0.07877900000005411,
+            "value": 0.0798970000000736,
             "status": "pass"
           },
           {
@@ -168,7 +168,7 @@
           {
             "metric": "evaluationMs",
             "limit": 1000,
-            "value": 12.111590000000092,
+            "value": 24.441210999999953,
             "status": "pass"
           },
           {
@@ -220,13 +220,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 268435456,
-            "value": 154005696,
+            "value": 154179328,
             "status": "pass"
           },
           {
             "metric": "peakRssBytes",
             "limit": 536870912,
-            "value": 318033920,
+            "value": 315109376,
             "status": "pass"
           },
           {
@@ -238,7 +238,7 @@
           {
             "metric": "teardownMs",
             "limit": 1000,
-            "value": 0.07773200000008273,
+            "value": 0.0697699999999486,
             "status": "pass"
           },
           {
@@ -252,73 +252,73 @@
       "queries": [
         {
           "text": "green tea",
-          "medianMs": 5.372025000000008,
+          "medianMs": 14.11128500000001,
           "matches": 2500,
           "resultHash": "5937aa033a7190b698a09a20aefbef1dee7fdf95138fce34610f78e4443c7fe9"
         },
         {
           "text": "gren tea",
-          "medianMs": 3.5052709999999934,
+          "medianMs": 6.69662900000003,
           "matches": 2500,
           "resultHash": "14fe842517fbec9218bf9aadcb1f5b979eb8a34a450ed3957876006391ac023b"
         },
         {
           "text": "0007",
-          "medianMs": 0.1968090000000302,
+          "medianMs": 0.1648930000000064,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "0000000007",
-          "medianMs": 2.409271999999987,
+          "medianMs": 3.156778000000031,
           "matches": 1002,
           "resultHash": "f9d5f6cef60acf71d13c8eadb51ac79024e5307a4a60ae2717495de803290b72"
         },
         {
           "text": "café",
-          "medianMs": 2.718733000000043,
+          "medianMs": 4.111843000000022,
           "matches": 5000,
           "resultHash": "75ef8cfc32b3a6874f6cf76980b2ab855e58094d0a66f5fb555314cb7458f3f0"
         },
         {
           "text": "cafe",
-          "medianMs": 2.473314999999957,
+          "medianMs": 4.60665999999992,
           "matches": 5000,
           "resultHash": "cbed7c3bc287eee3bb98b8cc40079cd425ec7a995acdd9ebd95bc13af5687c7b"
         },
         {
           "text": "抹茶",
-          "medianMs": 0.8244609999999852,
+          "medianMs": 1.2734669999999824,
           "matches": 2500,
           "resultHash": "9d075282a010ab56c2d52f1fa7aa8feb7ffcdde26a436633ed8bb6944c55d295"
         },
         {
           "text": "grüner",
-          "medianMs": 0.750710999999967,
+          "medianMs": 0.948011000000065,
           "matches": 2500,
           "resultHash": "9e3ec912267270a075bf6344c561670faef6b5501b770aff76d5684e22bdf98a"
         },
         {
           "text": "salt pepper",
-          "medianMs": 0.014806000000021413,
+          "medianMs": 0.0186469999999872,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "green missing",
-          "medianMs": 0.5696159999999963,
+          "medianMs": 1.4060230000000047,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "",
-          "medianMs": 0.002793999999994412,
+          "medianMs": 0.00377200000002631,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "007-A",
-          "medianMs": 0.01236200000005283,
+          "medianMs": 0.014387000000056105,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         }
@@ -327,8 +327,8 @@
         {
           "offset": 0,
           "nextOffset": 44,
-          "initializationMs": 2.949414000000047,
-          "interactionMs": 0.07877900000005411,
+          "initializationMs": 3.262654999999995,
+          "interactionMs": 0.0798970000000736,
           "logicalRows": 10000,
           "virtualRows": 23,
           "potentialCells": 276
@@ -336,8 +336,8 @@
         {
           "offset": 440,
           "nextOffset": 484,
-          "initializationMs": 1.195871000000011,
-          "interactionMs": 0.025702000000023872,
+          "initializationMs": 1.1182119999999713,
+          "interactionMs": 0.02584100000001399,
           "logicalRows": 10000,
           "virtualRows": 33,
           "potentialCells": 396
@@ -345,8 +345,8 @@
         {
           "offset": 219978,
           "nextOffset": 220022,
-          "initializationMs": 0.5764589999999998,
-          "interactionMs": 0.03757399999994959,
+          "initializationMs": 0.5145129999999654,
+          "interactionMs": 0.025282999999944877,
           "logicalRows": 10000,
           "virtualRows": 35,
           "potentialCells": 420
@@ -354,8 +354,8 @@
         {
           "offset": 439560,
           "nextOffset": 439604,
-          "initializationMs": 0.5404920000000857,
-          "interactionMs": 0.02612099999998918,
+          "initializationMs": 0.4629010000001017,
+          "interactionMs": 0.02528200000006109,
           "logicalRows": 10000,
           "virtualRows": 21,
           "potentialCells": 252
@@ -518,27 +518,27 @@
       "metrics": {
         "relational": {
           "statements": 9,
-          "queryMs": 0.07347200000003795,
-          "recoveryMs": 31.00932499999999
+          "queryMs": 0.16028300000016316,
+          "recoveryMs": 49.204805000000306
         },
         "search": {
-          "startupMs": 2404.365653,
-          "coldIndexMs": 1131.986223,
-          "warmIndexMs": 530.3268869999999,
-          "queryMs": 73.39580100000012,
+          "startupMs": 2096.08727,
+          "coldIndexMs": 970.363576,
+          "warmIndexMs": 479.4585920000002,
+          "queryMs": 88.96456099999978,
           "sourceBytes": 20021733,
           "indexBytes": 15820123,
           "browserGzipBytes": 5873
         },
         "grid": {
-          "interactionMs": 4.937690000000657,
+          "interactionMs": 7.882446000000527,
           "mountedCells": null,
           "loadedRows": null,
           "loadedBytes": null,
           "browserGzipBytes": 7053
         },
         "formulas": {
-          "evaluationMs": 10.330807999999706,
+          "evaluationMs": 12.517950999999812,
           "errors": 1,
           "originalByteChanges": 0
         },
@@ -550,10 +550,10 @@
           "unresolvedResends": null
         },
         "resources": {
-          "sampledHeapBytes": 1020156040,
-          "peakRssBytes": 1212923904,
+          "sampledHeapBytes": 1020055816,
+          "peakRssBytes": 1209151488,
           "peakHeapBytes": null,
-          "teardownMs": 0.06816400000025169,
+          "teardownMs": 0.10071000000061758,
           "remainingHandles": null
         }
       },
@@ -568,13 +568,13 @@
           {
             "metric": "queryMs",
             "limit": 250,
-            "value": 0.07347200000003795,
+            "value": 0.16028300000016316,
             "status": "pass"
           },
           {
             "metric": "recoveryMs",
             "limit": 5000,
-            "value": 31.00932499999999,
+            "value": 49.204805000000306,
             "status": "pass"
           }
         ],
@@ -582,25 +582,25 @@
           {
             "metric": "startupMs",
             "limit": 45000,
-            "value": 2404.365653,
+            "value": 2096.08727,
             "status": "pass"
           },
           {
             "metric": "coldIndexMs",
             "limit": 45000,
-            "value": 1131.986223,
+            "value": 970.363576,
             "status": "pass"
           },
           {
             "metric": "warmIndexMs",
             "limit": 45000,
-            "value": 530.3268869999999,
+            "value": 479.4585920000002,
             "status": "pass"
           },
           {
             "metric": "queryMs",
             "limit": 250,
-            "value": 73.39580100000012,
+            "value": 88.96456099999978,
             "status": "pass"
           },
           {
@@ -626,7 +626,7 @@
           {
             "metric": "interactionMs",
             "limit": 32,
-            "value": 4.937690000000657,
+            "value": 7.882446000000527,
             "status": "pass"
           },
           {
@@ -658,7 +658,7 @@
           {
             "metric": "evaluationMs",
             "limit": 5000,
-            "value": 10.330807999999706,
+            "value": 12.517950999999812,
             "status": "pass"
           },
           {
@@ -710,13 +710,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 805306368,
-            "value": 1020156040,
+            "value": 1020055816,
             "status": "fail"
           },
           {
             "metric": "peakRssBytes",
             "limit": 1073741824,
-            "value": 1212923904,
+            "value": 1209151488,
             "status": "fail"
           },
           {
@@ -728,7 +728,7 @@
           {
             "metric": "teardownMs",
             "limit": 2000,
-            "value": 0.06816400000025169,
+            "value": 0.10071000000061758,
             "status": "pass"
           },
           {
@@ -742,73 +742,73 @@
       "queries": [
         {
           "text": "green tea",
-          "medianMs": 73.39580100000012,
+          "medianMs": 68.91972100000021,
           "matches": 18750,
           "resultHash": "338b7fd23e15009d8892f6f4cb3faf6d17a1f32473b8de40168318f208f5d967"
         },
         {
           "text": "gren tea",
-          "medianMs": 56.433472000000165,
+          "medianMs": 65.00992600000018,
           "matches": 18750,
           "resultHash": "3bca7cd3d1ca73a857763fcb5f09be15013c517df5785f69dbc301e6bc3bbe4e"
         },
         {
           "text": "0007",
-          "medianMs": 11.59630900000002,
+          "medianMs": 15.063906000000316,
           "matches": 5000,
           "resultHash": "53d0e7ea2c7ef7407b352ecdc3173fc64e5f3c08f6d5cbb815560fb42ec0d451"
         },
         {
           "text": "0000000007",
-          "medianMs": 3.1578870000003008,
+          "medianMs": 3.1460219999999026,
           "matches": 1002,
           "resultHash": "6583f20453ddccd309bb224c5bf5f0b8a326991702656bcfda4eabca61905d03"
         },
         {
           "text": "café",
-          "medianMs": 58.966499999999996,
+          "medianMs": 58.27376800000002,
           "matches": 37500,
           "resultHash": "b97b451f8caa2a97b52035589d2a4be8a45daa817ddd80d29916d4085edfb6c7"
         },
         {
           "text": "cafe",
-          "medianMs": 41.360735000000204,
+          "medianMs": 46.14168400000017,
           "matches": 37500,
           "resultHash": "9537f1cb6bbfbb8ba66f444db83d661e8dbe30fae6f5dd96f5d7f87f203a7596"
         },
         {
           "text": "抹茶",
-          "medianMs": 18.594281000000137,
+          "medianMs": 24.13691800000015,
           "matches": 18750,
           "resultHash": "acda51bde63d1136570f5008af363ef28cee3237d2e57ac947846d8a2c580e6d"
         },
         {
           "text": "grüner",
-          "medianMs": 18.502720999999838,
+          "medianMs": 17.97023599999966,
           "matches": 18750,
           "resultHash": "27548e4e99e8a19cb4d718b411e96d28fe87c492e8a745e3fe8ad314ac7d0869"
         },
         {
           "text": "salt pepper",
-          "medianMs": 0.015295000000151049,
+          "medianMs": 0.014596999999866966,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "green missing",
-          "medianMs": 7.94926200000009,
+          "medianMs": 7.577314000000115,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "",
-          "medianMs": 0.0032829999991008663,
+          "medianMs": 0.0028630000001612643,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "007-A",
-          "medianMs": 65.40742800000044,
+          "medianMs": 88.96456099999978,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         }
@@ -817,8 +817,8 @@
         {
           "offset": 0,
           "nextOffset": 36,
-          "initializationMs": 6.230988000000252,
-          "interactionMs": 3.57860299999993,
+          "initializationMs": 9.845025999999962,
+          "interactionMs": 4.519709999999577,
           "logicalRows": 75000,
           "virtualRows": 24,
           "potentialCells": 576
@@ -826,8 +826,8 @@
         {
           "offset": 180,
           "nextOffset": 216,
-          "initializationMs": 4.88433299999997,
-          "interactionMs": 4.937690000000657,
+          "initializationMs": 6.346730000000207,
+          "interactionMs": 7.882446000000527,
           "logicalRows": 75000,
           "virtualRows": 29,
           "potentialCells": 696
@@ -835,8 +835,8 @@
         {
           "offset": 3600,
           "nextOffset": 3636,
-          "initializationMs": 3.7089249999999083,
-          "interactionMs": 3.6310539999994944,
+          "initializationMs": 7.634234000000106,
+          "interactionMs": 7.11043299999983,
           "logicalRows": 75000,
           "virtualRows": 31,
           "potentialCells": 744

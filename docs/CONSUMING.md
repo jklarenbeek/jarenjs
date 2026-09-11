@@ -4,6 +4,12 @@ How to depend on the Jaren packages from another project — either as
 published npm packages or as a pinned source checkout. If you are *releasing*
 Jaren rather than consuming it, see [PUBLISHING.md](workflow/PUBLISHING.md).
 
+For an existing application, start with the [public composition and evidence
+ledger](ADOPTION-EVIDENCE.md). It maps each retained mechanism to its public owner,
+executable installed-consumer recipe, measured limits and remaining qualification.
+The documented library composition is ready; real provider, downstream and manual
+retirement decisions remain application/operator work.
+
 Two properties shape everything below:
 
 - **There is no build step for source.** Every package's `main` points

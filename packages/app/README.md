@@ -1,5 +1,7 @@
 # @jarenjs/app
 
+Collection, search, formula and run resources are injected and disposed by their host. Follow the [combined public composition](../../docs/ADOPTION-EVIDENCE.md) for bounded observations, page ownership and explicit platform/manual qualifications.
+
 Applications as JSON documents. This package rebuilds [hyperapp](https://github.com/jorgebucaran/hyperapp)'s dispatch loop on the Jaren suite and pushes its philosophy — *everything is data* — the rest of the way: hyperapp made effects and subscriptions data but kept actions and views as JavaScript functions; here **the whole application is one JSON value**:
 
 | Slot | Written as | Compiled by |

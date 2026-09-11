@@ -1,5 +1,7 @@
 # @jarenjs/flow
 
+Complete ingestion and durable domain runs reuse the existing workflow engine and injected persistence/job fences. See the [combined adoption recipe](../../docs/ADOPTION-EVIDENCE.md) for restart and no-op proofs; real provider read-back and operator reconciliation remain host responsibilities.
+
 Executable JSON workflows: flat FSMs, statecharts, DAGs, and a composition
 compiler that combines long-lived control with concurrent work regions.
 The **jaren-fsm 0.1 format**

@@ -1,5 +1,7 @@
 # @jarenjs/linq
 
+The pens emit documents; `linq/db` supplies the declared optional database adapter edge. The [combined adoption recipe](../../docs/ADOPTION-EVIDENCE.md) composes mappings, receipts, ingestion and run adapters over one transaction owner, with host and retirement limits visible.
+
 **Write it once, in typed JavaScript. Keep it as data.**
 
 Every engine in this repository runs a JSON document. The validator runs

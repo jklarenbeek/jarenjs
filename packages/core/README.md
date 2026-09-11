@@ -1,5 +1,7 @@
 # @jarenjs/core
 
+Compose `core/virtual`, `core/range`, `core/search` and the shared retry/scheduling capabilities through the [public adoption recipes](../../docs/ADOPTION-EVIDENCE.md). The host supplies storage, workers and product policy; pure kernels own none of those resources.
+
 The zero-dependency foundation of [Jaren](https://github.com/jklarenbeek/jarenjs). Everything the rest of the suite is built on lives here — type guards, Unicode-aware string handling, a large text-validation toolbox, number range helpers, fixed-point and vector math, the calendar kernel, the spatial kernel, the vector kernel, the interval kernel, the message-catalog compiler, unit/currency conversion and a finance library.
 
 None of it depends on JSON Schema: every module can be used standalone in any JavaScript project.

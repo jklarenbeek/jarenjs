@@ -20,6 +20,8 @@ export function mountAdoptionDemo(host, options = {}) {
   let app, editor, collection, disposed = false, teardown, now = Date.now();
   render(['section', {}, ['h2', {}, 'Catalog replacement journey'],
     ['p', {}, 'Search, edit a saved formula, review selected changes and ingest an offline provider snapshot. This synthetic catalog keeps its database in this tab’s session storage.'],
+    ['p', { 'data-journey-qualification': '' }, 'Library and synthetic consumer checks pass. Real providers, downstream cutover, assistive technology and native OS input methods remain pending. ',
+      ['a', { href: 'https://github.com/jklarenbeek/jarenjs/blob/main/docs/ADOPTION-EVIDENCE.md' }, 'Read the capability and retirement evidence.']],
     ['label', {}, 'Search catalog ', ['input', { type: 'search', value: 'gren tea', 'aria-label': 'Journey search', 'data-journey-search': '' }]],
     ['button', { class: 'btn', 'data-journey-action': 'search' }, 'Search'],
     ['div', { 'data-journey-collection': '' }],

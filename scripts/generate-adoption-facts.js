@@ -1,11 +1,37 @@
 //@ts-check
 import { readFileSync } from 'node:fs';
+import { adoptionHash } from '../test/adoption/evidence.js';
+
+/** Refuse stale summaries rather than deriving authoritative prose from old inputs. */
+function finalReport() {
+  const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-program-result.json', import.meta.url), 'utf8'));
+  const manifest = JSON.parse(readFileSync(new URL('../test/adoption/manifest.json', import.meta.url), 'utf8'));
+  if (report.freezeHash !== manifest.freezeHash) throw new Error('final adoption fixture drift');
+  for (const [file, hash] of Object.entries(report.sourceHashes)) {
+    if (adoptionHash(readFileSync(new URL(`../${file}`, import.meta.url))) !== hash)
+      throw new Error(`final adoption evidence drift: ${file}; run node benchmark/adoption.js --final --write`);
+  }
+  return report;
+}
 
 /** Synthetic adoption results use the existing fact namespace and derivation runner. */
 export const adoptionFacts = {
   name: 'portable adoption evidence',
   docs: () => ['docs/ADOPTION-EVIDENCE.md'],
   facts: () => ({
+    'adoption.final': () => {
+      const report = finalReport();
+      return `\n\nProgram disposition: **${report.program}**.\n\n`
+        + '| Retained mechanism | Library | Portable consumer | Required host/operator evidence | Retirement |\n|---|---|---|---|---|\n'
+        + report.replacements.map((row) => `| ${row.mechanism} | ${row.library} | ${row.portableConsumer} | ${row.liveHost} / ${row.manualOperator} | ${row.retirement} |`).join('\n') + '\n\n';
+    },
+    'adoption.budgets': () => {
+      const report = finalReport();
+      const show = ({ value, status }) => value === null ? 'pending' : `${Number.isInteger(value) ? value : value.toFixed(2)} (${status})`;
+      return '\n\n| Consumer | Frozen metric | Ceiling | Reference | Focused owner report | Combined Node | Combined Bun |\n'
+        + '|---|---|---:|---|---|---|---|\n'
+        + report.budgets.map((row) => `| ${row.consumer} | ${row.stage}.${row.metric} | ${row.limit} | ${show(row.reference)} | ${row.focused.source ?? '—'}: ${show(row.focused)} | ${show(row.combined[0])} | ${show(row.combined[1])} |`).join('\n') + '\n\n';
+    },
     'adoption.combined': () => {
       const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-journey-result.json', import.meta.url), 'utf8'));
       return '\n\n| Host | Consumer | Rows | Journey ms | Search startup ms | Heap MiB | Peak RSS MiB | Second writes |\n'

@@ -1,5 +1,7 @@
 # @jarenjs/contract
 
+Providers and permanent commands compose with injected transport, authority and receipt repositories. The [adoption evidence ledger](../../docs/ADOPTION-EVIDENCE.md) separates synthetic qualification from actual provider guarantees; unknown single-send outcomes require explicit reconciliation.
+
 Operation contracts for the Jaren suite. A **`$contract` document** — the
 sibling of `$model`, `$fsm` and `jaren-app` — declares the operations two
 Jaren ends may exchange: JSON in, JSON out, each with a *kind* (`read` or

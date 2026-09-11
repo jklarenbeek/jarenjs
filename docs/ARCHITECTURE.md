@@ -745,3 +745,25 @@ engine and resident range provider. It does not claim an incremental database
 search source. See [combined evidence](ADOPTION-EVIDENCE.md).
 
 `json/formula` owns versioned Query compilation, dependency batches and source migration; `json/rules` owns immutable reviewed plans. `linq/formula` only authors those documents. `app/formula` owns injected terminating-worker lifecycle. `components/rules` imports core/view in its engine and forms in its component; it receives evaluation and command services through injection. The host composes the existing contract command and database receipt transaction, rechecking current authority and data before effects. The website demonstrates this composition over local SQLite and a virtual collection.
+
+
+## Adoption capability boundaries
+
+The [request disposition ledger](ADOPTION-EVIDENCE.md#request-disposition-ledger)
+assigns each adopted mechanism to one public owner and records the exact bounded
+contract. Product fields, arithmetic, credentials, current permissions and source
+resolution belong to the host. Collection and formula components receive public
+services; they do not import the database or acquire write authority themselves.
+
+The application opener owns database and provider release, including failed setup
+and repeated close. Source refresh drains before the index and database are
+released. The existing receipt transaction validates current rows and permissions
+before settlement; external intent uses the existing fenced job engine, and an
+unknown remote result stays unresolved until explicit evidence settles it.
+
+Library readiness, installed synthetic consumer qualification, and actual
+platform/operator acceptance are distinct. Linux executables and automated
+browser sessions do not establish PostgreSQL, other OS deployments, AT/native IME,
+real providers or downstream cutover. Exact combined peak heap remains unmeasured.
+These limits and the remaining roadmap clauses survive independently of campaign
+notes; no retained oracle or unresolved original is retired by a library gate.

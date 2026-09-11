@@ -326,8 +326,8 @@ what each does is its own documentation's job
   column layouts, codecs, read-only views and composite-key join-table entities
   are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
   Relation navigation across physical layouts, codec-aware keyset continuation,
-  bounded SQL pushdown and PostgreSQL codec parity remain open. Application
-  trigger/cascade capture and replication remain refused until their complete
+  pushdown beyond the qualified native census and PostgreSQL codec parity remain
+  open. Application trigger/cascade capture and replication remain refused until their complete
   writer population has an executable oracle.
 - [ ] **Broader database invariant lowering.** Declared scalar old/new/operation
   rules and ordered application audit effects now lower to verified SQLite
@@ -348,9 +348,9 @@ what each does is its own documentation's job
   preservation plans, consistent committed-WAL backups, interrupted rebuild and
   publication recovery, and forward repair from the newest file are exercised
   under Node and Bun ([MIGRATION-FORMAT](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)).
-  PostgreSQL snapshots, power-loss durability, native executable deployment and
-  actual downstream cutover still require named evidence. Bun's serialized
-  backup retains a full image in memory; bounded streaming snapshots remain open.
+  PostgreSQL snapshots, power-loss durability, deployment beyond the qualified
+  Linux executables and actual downstream cutover still require named evidence.
+  Bun's serialized backup retains a full image in memory; bounded streaming snapshots remain open.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
@@ -476,9 +476,9 @@ production cutover. Streaming DAG input is not required by this composition.
   co-settles validated HTTP/local/job commands over mapped application tables,
   with permanent replay, separate leases and bounded migration/compaction.
   Qualify each downstream application's historical outcome mapping, hash-version
-  policy, retention rules and existing transaction owner before cutover. Native
-  executable and PostgreSQL qualification remain separate from the installed
-  Node/Bun SQLite evidence; arbitrary historical schemas and destructive
+  policy, retention rules and existing transaction owner before cutover. Other
+  operating systems and PostgreSQL remain unqualified beyond the combined Linux executable and
+  installed Node/Bun SQLite evidence; arbitrary historical schemas and destructive
   retention policies are not inferred or supported automatically.
 - [ ] **Provider-specific external reconciliation acceptance.** The
   [fenced effect composition](../packages/flow/docs/WORKFLOW-FORMAT.md#domain-run-and-external-effect-adoption)
@@ -496,11 +496,11 @@ production cutover. Streaming DAG input is not required by this composition.
   historical status vocabulary, public-summary projection, upgrade/reset policy,
   remote cancellation boundaries and host resource lifecycle before cutover.
   Source provenance, review decisions and posted history retain their domain
-  schemas and rules. Native executable, PostgreSQL and downstream/manual
-  acceptance remain open; synthetic restart, takeover and observer evidence do
-  not substitute for those runs.
+  schemas and rules. Other operating systems, PostgreSQL and downstream/manual
+  acceptance remain open beyond the combined Linux executable proof; synthetic
+  restart, takeover and observer evidence do not substitute for those runs.
 
-## Native application adoption — qualification and order
+## Native application adoption — external qualification
 
 These workstreams cover five mechanisms that can remain application-owned
 after adopting the suite: domain SQL/private driver bridge,
@@ -515,26 +515,27 @@ ledgers.
 | Trusted local formulas | [Saved formulas and reviewed rules](#saved-formulas-and-reviewed-rules-cross-package): native profiles, evaluation, migration and reviewed plans |
 | Provider adapters and domain ledgers | [Provider execution and durable workflows](#provider-execution-and-durable-domain-workflows-cross-package): scheduling, protocols, authority, receipts, reconciliation and run adoption |
 
-Existing roadmap entries for SQL pushdown/introspection/live queries,
-accessibility, IME and Studio editing remain their single owners; the additions
-above define the missing adoption contracts rather than reopening shipped
-engines. Search, virtualization and formula discovery can start independently.
-Relational mapping and transaction coexistence precede durable domain-ledger
-adoption; provider scheduling/protocol work can proceed separately, but
-external-write cutover requires the receipt/reconciliation proof. Native
-formula authoring can ship before legacy migration; retiring the trusted
-runner waits for explicit resolution of the saved corpus.
+The [public disposition ledger](ADOPTION-EVIDENCE.md#request-disposition-ledger)
+reconciles the library requests and selected older clauses against their owned
+contracts and executable evidence. Library completion and synthetic portable
+qualification are established within those scopes. Each external retirement
+entry remains pending until its actual host and operator evidence exists.
 
-- [ ] **External acceptance and final adoption-program reconciliation.** The
-  [combined synthetic journeys](ADOPTION-EVIDENCE.md) now exercise existing-file
-  adoption, query/search, reviewed writes, provider snapshots and interrupted
-  effects through installed Node/Bun consumers, Linux standalone executables
-  and the browser matrix. Reconcile all capability claims with their specific
-  evidence before program close. Real labelled/saved-source corpora, actual
-  provider-platform guarantees, downstream cutover, manual accessibility,
-  other operating systems and exact peak heap still require their own evidence.
-  Keep original sources and retained oracles until their qualified retirement;
-  synthetic passes never authorize a downstream deletion or increase a budget.
+- [ ] **External adoption acceptance.** Qualify real labelled/saved-source
+  corpora, actual provider-platform guarantees, downstream cutover, manual
+  accessibility and native OS IME, other operating systems and PostgreSQL.
+  Existing combined journeys qualify Node/Bun installations, Linux standalone
+  executables and automated browser composition only. Keep original sources
+  and retained oracles until their qualified retirement; synthetic passes never
+  authorize a downstream deletion or increase a budget.
+- [ ] **WebKit offline page navigation.** Offline database reopen, ingestion
+  and reconciliation pass on the qualified WebKit host, but offline page reload
+  reports an internal navigation error. Qualify navigation itself before claiming
+  complete offline browser recovery. Chromium and Firefox already exercise it.
+- [ ] **Combined resource qualification.** Exact peak heap and host-wide remaining
+  handles need a matching measurement for each combined host/workload. Sampled
+  heap, process high-water RSS and focused component teardown do not fill those
+  cells in the [complete budget comparison](ADOPTION-EVIDENCE.md#complete-frozen-budget-comparison).
 
 ## @jarenjs/ai
 

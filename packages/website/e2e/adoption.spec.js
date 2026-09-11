@@ -5,6 +5,7 @@ test('offline catalog preserves original data, reviews pages and recovers remote
   const offlineNavigation = testInfo.project.name !== 'webkit';
   if (!offlineNavigation) testInfo.annotations.push({ type: 'qualification', description: 'WebKit offline page navigation is pending: this host reports an internal navigation error. Offline database reopen, ingestion and reconciliation are exercised.' });
   await page.goto('/jarenjs/#/collection?mode=adoption');
+  await expect(page.locator('[data-journey-qualification]')).toContainText('native OS input methods remain pending');
   const status = page.locator('[data-journey-status]');
   await expect(status).toContainText('64 matches', { timeout: 30000 });
   const draft = page.getByRole('textbox', { name: 'Rule document' });

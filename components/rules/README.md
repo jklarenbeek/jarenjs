@@ -1,5 +1,7 @@
 # @jarenjs/rules
 
+The [combined adoption recipe](../../docs/ADOPTION-EVIDENCE.md) connects the editor to current-data validation and a durable receipt transaction. Preview grants no write authority, and unresolved original formulas remain preserved until application review.
+
 Reusable schema-guided JSON rule authoring and reviewed change selection. The
 engine imports core only; evaluator and authoritative command services are
 injected. The component layer uses view/forms and the existing app widget lifecycle.

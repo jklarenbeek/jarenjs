@@ -1,5 +1,7 @@
 # @jarenjs/db
 
+For existing-file adoption with native queries, receipts and jobs, start with the [combined public recipe and evidence ledger](../../docs/ADOPTION-EVIDENCE.md). Adopted-trigger capture, physical keysets and PostgreSQL subsystem gaps retain their documented refusals; synthetic SQLite proof does not retire downstream SQL.
+
 Documents AND entities in SQLite. A **model document** declares
 collections (a JSON Schema, a key, indexes) and — since phase B —
 **entities**: keys, typed columns, relations, defaults and an

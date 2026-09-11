@@ -22,8 +22,21 @@ const contract = compileContract({ $contract: '0.1', operations: { review: { kin
 export async function openAdoption({ driver, path, definition, now = Date.now, authorize = () => true, transport }) {
   const model = adoptionModel(definition);
   const client = await open(model, { driver, path, adopt: true, jobs: { now } });
+  let executor, released;
+  const release = () => released ??= (async () => {
+    try { await executor?.close(); }
+    finally { await client.close(); }
+  })();
+  try {
+    executor = createProviderExecutor({ attempts: definition.budgets.providers.attempts, transport });
+    return createAdoption(client, model, definition, authorize, executor, release);
+  }
+  catch (error) { await release(); throw error; }
+}
+
+/** Assemble application policy under the opener's resource lifetime. */
+function createAdoption(client, model, definition, authorize, executor, release) {
   const validRow = createTypeTestCompiler()(model.entities.Item.schema, '');
-  const executor = createProviderExecutor({ attempts: definition.budgets.providers.attempts, transport });
   const receipts = createDbReceipts(client, { receipts: 'receipts', leases: 'leases' });
   const effects = createDbEffectStore(client, { operations: 'operations', maxLegs: 2 });
   const runs = createDbRunStore(client, { runs: 'runs', events: 'events', maxPage: 8, maxBytes: 16384 });
@@ -146,6 +159,6 @@ export async function openAdoption({ driver, path, definition, now = Date.now, a
           throw new TypeError('Selection is not committed in the current catalog');
       });
     },
-    async close() { disposed = true; await Promise.allSettled([...pending]); await range?.dispose(); index?.dispose(); source = []; await executor.close(); await client.close(); },
+    async close() { disposed = true; await Promise.allSettled([...pending]); await range?.dispose(); index?.dispose(); source = []; await release(); },
   };
 }

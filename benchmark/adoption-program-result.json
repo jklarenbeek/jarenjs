@@ -1,0 +1,2029 @@
+{
+  "format": "jaren-adoption-program/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "program": "library-ready; adoption-pending",
+  "replacements": [
+    {
+      "mechanism": "Domain SQL/private driver bridge",
+      "library": "pass",
+      "portableConsumer": "pass",
+      "liveHost": "pending",
+      "manualOperator": "pending",
+      "retirement": "pending"
+    },
+    {
+      "mechanism": "Virtualizer",
+      "library": "pass",
+      "portableConsumer": "pass",
+      "liveHost": "pending",
+      "manualOperator": "pending",
+      "retirement": "pending"
+    },
+    {
+      "mechanism": "Lexical search",
+      "library": "pass",
+      "portableConsumer": "pass",
+      "liveHost": "pending",
+      "manualOperator": "pending",
+      "retirement": "pending"
+    },
+    {
+      "mechanism": "Trusted formulas/rules",
+      "library": "pass",
+      "portableConsumer": "pass",
+      "liveHost": "pending",
+      "manualOperator": "pending",
+      "retirement": "pending"
+    },
+    {
+      "mechanism": "Provider adapters/domain ledgers",
+      "library": "pass",
+      "portableConsumer": "pass",
+      "liveHost": "pending",
+      "manualOperator": "pending",
+      "retirement": "pending"
+    }
+  ],
+  "budgets": [
+    {
+      "consumer": "catalog",
+      "stage": "relational",
+      "metric": "statements",
+      "limit": 9,
+      "reference": {
+        "metric": "statements",
+        "limit": 9,
+        "value": 9,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "relational",
+        "metric": "statements",
+        "limit": 9,
+        "value": 9,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "statements",
+          "limit": 9,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "statements",
+          "limit": 9,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "relational",
+      "metric": "queryMs",
+      "limit": 100,
+      "reference": {
+        "metric": "queryMs",
+        "limit": 100,
+        "value": 0.09058300000003783,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "relational",
+        "metric": "queryMs",
+        "limit": 100,
+        "value": 0.4879039999999861,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "queryMs",
+          "limit": 100,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "queryMs",
+          "limit": 100,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "relational",
+      "metric": "recoveryMs",
+      "limit": 5000,
+      "reference": {
+        "metric": "recoveryMs",
+        "limit": 5000,
+        "value": 34.72672,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "relational",
+        "metric": "recoveryMs",
+        "limit": 5000,
+        "value": 43.50420399999999,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "recoveryMs",
+          "limit": 5000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "recoveryMs",
+          "limit": 5000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "startupMs",
+      "limit": 15000,
+      "reference": {
+        "metric": "startupMs",
+        "limit": 15000,
+        "value": 372.603553,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "startupMs",
+        "limit": 15000,
+        "value": 444.67205,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "startupMs",
+          "limit": 15000,
+          "value": 513.0277100000001,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "startupMs",
+          "limit": 15000,
+          "value": 539.08719,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "coldIndexMs",
+      "limit": 15000,
+      "reference": {
+        "metric": "coldIndexMs",
+        "limit": 15000,
+        "value": 169.505833,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "coldIndexMs",
+        "limit": 15000,
+        "value": 203.59411400000005,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "coldIndexMs",
+          "limit": 15000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "coldIndexMs",
+          "limit": 15000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "warmIndexMs",
+      "limit": 15000,
+      "reference": {
+        "metric": "warmIndexMs",
+        "limit": 15000,
+        "value": 65.049804,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "warmIndexMs",
+        "limit": 15000,
+        "value": 201.36683900000003,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "warmIndexMs",
+          "limit": 15000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "warmIndexMs",
+          "limit": 15000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "queryMs",
+      "limit": 100,
+      "reference": {
+        "metric": "queryMs",
+        "limit": 100,
+        "value": 14.11128500000001,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "queryMs",
+        "limit": 100,
+        "value": 10.893334000000095,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "queryMs",
+          "limit": 100,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "queryMs",
+          "limit": 100,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "sourceBytes",
+      "limit": 8388608,
+      "reference": {
+        "metric": "sourceBytes",
+        "limit": 8388608,
+        "value": 2606620,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "sourceBytes",
+        "limit": 8388608,
+        "value": 2606620,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "sourceBytes",
+          "limit": 8388608,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "sourceBytes",
+          "limit": 8388608,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "indexBytes",
+      "limit": 33554432,
+      "reference": {
+        "metric": "indexBytes",
+        "limit": 33554432,
+        "value": 1915119,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "indexBytes",
+        "limit": 33554432,
+        "value": 25776764,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "indexBytes",
+          "limit": 33554432,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "indexBytes",
+          "limit": 33554432,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "search",
+      "metric": "browserGzipBytes",
+      "limit": 65536,
+      "reference": {
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 5873,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 5606,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "grid",
+      "metric": "interactionMs",
+      "limit": 16,
+      "reference": {
+        "metric": "interactionMs",
+        "limit": 16,
+        "value": 0.0798970000000736,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "interactionMs",
+        "limit": 16,
+        "value": 1.4496770000000083,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "interactionMs",
+          "limit": 16,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "interactionMs",
+          "limit": 16,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "grid",
+      "metric": "mountedCells",
+      "limit": 504,
+      "reference": {
+        "metric": "mountedCells",
+        "limit": 504,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "mountedCells",
+        "limit": 504,
+        "value": 170,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "mountedCells",
+          "limit": 504,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "mountedCells",
+          "limit": 504,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "grid",
+      "metric": "loadedRows",
+      "limit": 256,
+      "reference": {
+        "metric": "loadedRows",
+        "limit": 256,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "loadedRows",
+        "limit": 256,
+        "value": 256,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "loadedRows",
+          "limit": 256,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "loadedRows",
+          "limit": 256,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "grid",
+      "metric": "loadedBytes",
+      "limit": 262144,
+      "reference": {
+        "metric": "loadedBytes",
+        "limit": 262144,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "loadedBytes",
+        "limit": 262144,
+        "value": 9732,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "loadedBytes",
+          "limit": 262144,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "loadedBytes",
+          "limit": 262144,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "grid",
+      "metric": "browserGzipBytes",
+      "limit": 65536,
+      "reference": {
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 7053,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 16815,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "formulas",
+      "metric": "evaluationMs",
+      "limit": 1000,
+      "reference": {
+        "metric": "evaluationMs",
+        "limit": 1000,
+        "value": 24.441210999999953,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "formula",
+        "metric": "evaluationMs",
+        "limit": 1000,
+        "value": 224.64091499999998,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "evaluationMs",
+          "limit": 1000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "evaluationMs",
+          "limit": 1000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "formulas",
+      "metric": "errors",
+      "limit": 1,
+      "reference": {
+        "metric": "errors",
+        "limit": 1,
+        "value": 1,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "formula",
+        "metric": "errors",
+        "limit": 1,
+        "value": 0,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "errors",
+          "limit": 1,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "errors",
+          "limit": 1,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "formulas",
+      "metric": "originalByteChanges",
+      "limit": 0,
+      "reference": {
+        "metric": "originalByteChanges",
+        "limit": 0,
+        "value": 0,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "formula",
+        "metric": "originalByteChanges",
+        "limit": 0,
+        "value": 0,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "originalByteChanges",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "originalByteChanges",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "providers",
+      "metric": "pages",
+      "limit": 3,
+      "reference": {
+        "metric": "pages",
+        "limit": 3,
+        "value": 2,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "pages",
+        "limit": 3,
+        "value": 3,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "pages",
+          "limit": 3,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "pages",
+          "limit": 3,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "providers",
+      "metric": "rows",
+      "limit": 256,
+      "reference": {
+        "metric": "rows",
+        "limit": 256,
+        "value": 2,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "rows",
+        "limit": 256,
+        "value": 256,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "rows",
+          "limit": 256,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "rows",
+          "limit": 256,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "providers",
+      "metric": "bytes",
+      "limit": 262144,
+      "reference": {
+        "metric": "bytes",
+        "limit": 262144,
+        "value": 269,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "bytes",
+        "limit": 262144,
+        "value": 66426,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "bytes",
+          "limit": 262144,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "bytes",
+          "limit": 262144,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "providers",
+      "metric": "attempts",
+      "limit": 3,
+      "reference": {
+        "metric": "attempts",
+        "limit": 3,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "attempts",
+        "limit": 3,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "attempts",
+          "limit": 3,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "attempts",
+          "limit": 3,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "providers",
+      "metric": "unresolvedResends",
+      "limit": 0,
+      "reference": {
+        "metric": "unresolvedResends",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "unresolvedResends",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "resources",
+      "metric": "sampledHeapBytes",
+      "limit": 268435456,
+      "reference": {
+        "metric": "sampledHeapBytes",
+        "limit": 268435456,
+        "value": 154179328,
+        "status": "pass"
+      },
+      "focused": {
+        "source": null,
+        "metric": "sampledHeapBytes",
+        "limit": 268435456,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "sampledHeapBytes",
+          "limit": 268435456,
+          "value": 66740736,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "sampledHeapBytes",
+          "limit": 268435456,
+          "value": 87189930,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "resources",
+      "metric": "peakRssBytes",
+      "limit": 536870912,
+      "reference": {
+        "metric": "peakRssBytes",
+        "limit": 536870912,
+        "value": 315109376,
+        "status": "pass"
+      },
+      "focused": {
+        "source": null,
+        "metric": "peakRssBytes",
+        "limit": 536870912,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "peakRssBytes",
+          "limit": 536870912,
+          "value": 276480000,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "peakRssBytes",
+          "limit": 536870912,
+          "value": 303939584,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "resources",
+      "metric": "peakHeapBytes",
+      "limit": 268435456,
+      "reference": {
+        "metric": "peakHeapBytes",
+        "limit": 268435456,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": null,
+        "metric": "peakHeapBytes",
+        "limit": 268435456,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "peakHeapBytes",
+          "limit": 268435456,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "peakHeapBytes",
+          "limit": 268435456,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "resources",
+      "metric": "teardownMs",
+      "limit": 1000,
+      "reference": {
+        "metric": "teardownMs",
+        "limit": 1000,
+        "value": 0.0697699999999486,
+        "status": "pass"
+      },
+      "focused": {
+        "source": null,
+        "metric": "teardownMs",
+        "limit": 1000,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "teardownMs",
+          "limit": 1000,
+          "value": 0.31910000000016225,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "teardownMs",
+          "limit": 1000,
+          "value": 0.6405039999999644,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "catalog",
+      "stage": "resources",
+      "metric": "remainingHandles",
+      "limit": 0,
+      "reference": {
+        "metric": "remainingHandles",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": null,
+        "metric": "remainingHandles",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "relational",
+      "metric": "statements",
+      "limit": 9,
+      "reference": {
+        "metric": "statements",
+        "limit": 9,
+        "value": 9,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "relational",
+        "metric": "statements",
+        "limit": 9,
+        "value": 9,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "statements",
+          "limit": 9,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "statements",
+          "limit": 9,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "relational",
+      "metric": "queryMs",
+      "limit": 250,
+      "reference": {
+        "metric": "queryMs",
+        "limit": 250,
+        "value": 0.16028300000016316,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "relational",
+        "metric": "queryMs",
+        "limit": 250,
+        "value": 0.6046770000000379,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "queryMs",
+          "limit": 250,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "queryMs",
+          "limit": 250,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "relational",
+      "metric": "recoveryMs",
+      "limit": 5000,
+      "reference": {
+        "metric": "recoveryMs",
+        "limit": 5000,
+        "value": 49.204805000000306,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "relational",
+        "metric": "recoveryMs",
+        "limit": 5000,
+        "value": 76.03992400000004,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "recoveryMs",
+          "limit": 5000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "recoveryMs",
+          "limit": 5000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "startupMs",
+      "limit": 45000,
+      "reference": {
+        "metric": "startupMs",
+        "limit": 45000,
+        "value": 2096.08727,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "startupMs",
+        "limit": 45000,
+        "value": 3565.130837,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "startupMs",
+          "limit": 45000,
+          "value": 3168.2366730000003,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "startupMs",
+          "limit": 45000,
+          "value": 2544.299769,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "coldIndexMs",
+      "limit": 45000,
+      "reference": {
+        "metric": "coldIndexMs",
+        "limit": 45000,
+        "value": 970.363576,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "coldIndexMs",
+        "limit": 45000,
+        "value": 1500.681254,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "coldIndexMs",
+          "limit": 45000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "coldIndexMs",
+          "limit": 45000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "warmIndexMs",
+      "limit": 45000,
+      "reference": {
+        "metric": "warmIndexMs",
+        "limit": 45000,
+        "value": 479.4585920000002,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "warmIndexMs",
+        "limit": 45000,
+        "value": 1775.376098,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "warmIndexMs",
+          "limit": 45000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "warmIndexMs",
+          "limit": 45000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "queryMs",
+      "limit": 250,
+      "reference": {
+        "metric": "queryMs",
+        "limit": 250,
+        "value": 88.96456099999978,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "queryMs",
+        "limit": 250,
+        "value": 98.4298490000001,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "queryMs",
+          "limit": 250,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "queryMs",
+          "limit": 250,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "sourceBytes",
+      "limit": 50331648,
+      "reference": {
+        "metric": "sourceBytes",
+        "limit": 50331648,
+        "value": 20021733,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "sourceBytes",
+        "limit": 50331648,
+        "value": 20021733,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "sourceBytes",
+          "limit": 50331648,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "sourceBytes",
+          "limit": 50331648,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "indexBytes",
+      "limit": 201326592,
+      "reference": {
+        "metric": "indexBytes",
+        "limit": 201326592,
+        "value": 15820123,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "indexBytes",
+        "limit": 201326592,
+        "value": 195268100,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "indexBytes",
+          "limit": 201326592,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "indexBytes",
+          "limit": 201326592,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "search",
+      "metric": "browserGzipBytes",
+      "limit": 65536,
+      "reference": {
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 5873,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "lexical",
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 5606,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "grid",
+      "metric": "interactionMs",
+      "limit": 32,
+      "reference": {
+        "metric": "interactionMs",
+        "limit": 32,
+        "value": 7.882446000000527,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "interactionMs",
+        "limit": 32,
+        "value": 0.30666900000005626,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "interactionMs",
+          "limit": 32,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "interactionMs",
+          "limit": 32,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "grid",
+      "metric": "mountedCells",
+      "limit": 840,
+      "reference": {
+        "metric": "mountedCells",
+        "limit": 840,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "mountedCells",
+        "limit": 840,
+        "value": 160,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "mountedCells",
+          "limit": 840,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "mountedCells",
+          "limit": 840,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "grid",
+      "metric": "loadedRows",
+      "limit": 256,
+      "reference": {
+        "metric": "loadedRows",
+        "limit": 256,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "loadedRows",
+        "limit": 256,
+        "value": 256,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "loadedRows",
+          "limit": 256,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "loadedRows",
+          "limit": 256,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "grid",
+      "metric": "loadedBytes",
+      "limit": 262144,
+      "reference": {
+        "metric": "loadedBytes",
+        "limit": 262144,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "loadedBytes",
+        "limit": 262144,
+        "value": 10244,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "loadedBytes",
+          "limit": 262144,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "loadedBytes",
+          "limit": 262144,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "grid",
+      "metric": "browserGzipBytes",
+      "limit": 65536,
+      "reference": {
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 7053,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "collection",
+        "metric": "browserGzipBytes",
+        "limit": 65536,
+        "value": 16815,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "browserGzipBytes",
+          "limit": 65536,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "formulas",
+      "metric": "evaluationMs",
+      "limit": 5000,
+      "reference": {
+        "metric": "evaluationMs",
+        "limit": 5000,
+        "value": 12.517950999999812,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "formula",
+        "metric": "evaluationMs",
+        "limit": 5000,
+        "value": 1641.6153780000002,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "evaluationMs",
+          "limit": 5000,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "evaluationMs",
+          "limit": 5000,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "formulas",
+      "metric": "errors",
+      "limit": 1,
+      "reference": {
+        "metric": "errors",
+        "limit": 1,
+        "value": 1,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "formula",
+        "metric": "errors",
+        "limit": 1,
+        "value": 0,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "errors",
+          "limit": 1,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "errors",
+          "limit": 1,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "formulas",
+      "metric": "originalByteChanges",
+      "limit": 0,
+      "reference": {
+        "metric": "originalByteChanges",
+        "limit": 0,
+        "value": 0,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "formula",
+        "metric": "originalByteChanges",
+        "limit": 0,
+        "value": 0,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "originalByteChanges",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "originalByteChanges",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "providers",
+      "metric": "pages",
+      "limit": 6,
+      "reference": {
+        "metric": "pages",
+        "limit": 6,
+        "value": 2,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "pages",
+        "limit": 6,
+        "value": 6,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "pages",
+          "limit": 6,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "pages",
+          "limit": 6,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "providers",
+      "metric": "rows",
+      "limit": 512,
+      "reference": {
+        "metric": "rows",
+        "limit": 512,
+        "value": 2,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "rows",
+        "limit": 512,
+        "value": 512,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "rows",
+          "limit": 512,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "rows",
+          "limit": 512,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "providers",
+      "metric": "bytes",
+      "limit": 524288,
+      "reference": {
+        "metric": "bytes",
+        "limit": 524288,
+        "value": 269,
+        "status": "pass"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "bytes",
+        "limit": 524288,
+        "value": 135886,
+        "status": "pass"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "bytes",
+          "limit": 524288,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "bytes",
+          "limit": 524288,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "providers",
+      "metric": "attempts",
+      "limit": 3,
+      "reference": {
+        "metric": "attempts",
+        "limit": 3,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "attempts",
+        "limit": 3,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "attempts",
+          "limit": 3,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "attempts",
+          "limit": 3,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "providers",
+      "metric": "unresolvedResends",
+      "limit": 0,
+      "reference": {
+        "metric": "unresolvedResends",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": "providers",
+        "metric": "unresolvedResends",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "resources",
+      "metric": "sampledHeapBytes",
+      "limit": 805306368,
+      "reference": {
+        "metric": "sampledHeapBytes",
+        "limit": 805306368,
+        "value": 1020055816,
+        "status": "fail"
+      },
+      "focused": {
+        "source": null,
+        "metric": "sampledHeapBytes",
+        "limit": 805306368,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "sampledHeapBytes",
+          "limit": 805306368,
+          "value": 322960232,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "sampledHeapBytes",
+          "limit": 805306368,
+          "value": 336795399,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "resources",
+      "metric": "peakRssBytes",
+      "limit": 1073741824,
+      "reference": {
+        "metric": "peakRssBytes",
+        "limit": 1073741824,
+        "value": 1209151488,
+        "status": "fail"
+      },
+      "focused": {
+        "source": null,
+        "metric": "peakRssBytes",
+        "limit": 1073741824,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "peakRssBytes",
+          "limit": 1073741824,
+          "value": 889331712,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "peakRssBytes",
+          "limit": 1073741824,
+          "value": 979333120,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "resources",
+      "metric": "peakHeapBytes",
+      "limit": 805306368,
+      "reference": {
+        "metric": "peakHeapBytes",
+        "limit": 805306368,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": null,
+        "metric": "peakHeapBytes",
+        "limit": 805306368,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "peakHeapBytes",
+          "limit": 805306368,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "peakHeapBytes",
+          "limit": 805306368,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "resources",
+      "metric": "teardownMs",
+      "limit": 2000,
+      "reference": {
+        "metric": "teardownMs",
+        "limit": 2000,
+        "value": 0.10071000000061758,
+        "status": "pass"
+      },
+      "focused": {
+        "source": null,
+        "metric": "teardownMs",
+        "limit": 2000,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "teardownMs",
+          "limit": 2000,
+          "value": 0.21748200000001816,
+          "status": "pass"
+        },
+        {
+          "host": "bun",
+          "metric": "teardownMs",
+          "limit": 2000,
+          "value": 1.0811960000000909,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "consumer": "archive-stock",
+      "stage": "resources",
+      "metric": "remainingHandles",
+      "limit": 0,
+      "reference": {
+        "metric": "remainingHandles",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "focused": {
+        "source": null,
+        "metric": "remainingHandles",
+        "limit": 0,
+        "value": null,
+        "status": "pending"
+      },
+      "combined": [
+        {
+          "host": "node",
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        },
+        {
+          "host": "bun",
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": null,
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "sourceHashes": {
+    "benchmark/adoption-result.json": "dc51288d0e955ee9ccd029816ff984c2b1e39d3f8fda126b868252eab0d4c08b",
+    "benchmark/adoption-journey-result.json": "a3fb069d75881a7ab81fa261d1cba29c8af9e1abf840dcf9cb310924be074212",
+    "benchmark/relational-result.json": "0da4b08f0aa8cbec3c9571f003239b30335199e1bbfa9370654dff3a890aaf92",
+    "benchmark/collection-result.json": "fb8fb61487fe5a53f0c8befcc52fc6fc0e218b89f72dbfb69481f922f3119e26",
+    "benchmark/lexical-result.json": "93b2bbf068f3dc997462d9ed17e0ffb692a97f9bcc9e81746f1e561cff949fd3",
+    "benchmark/formula-result.json": "8a4980c1381e18bb5d6042e61b7a0bc08b9a6a307fb331a1c59531fda85a945c",
+    "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
+    "benchmark/adoption-hosts-result.json": "ff23185c7a12df4bba3ce54b245567d7429d0227c43d338d50dcff0c91efa638",
+    "benchmark/durable-result.json": "f158c3968f5696035353335c93c2f8a5d112c485f6ee7028232618ce93ebc45f",
+    "benchmark/adoption-program.js": "65641927fba330df879d6a0fcbc4e4298141d4e0de8dce33a2f9af75fb64f5cd",
+    "scripts/lib/adoption-program.js": "7ee3ff433e68674b098ef2a1937dc2ce084dcba6bd2fdd80c8aad046ff4bd930"
+  },
+  "limitations": [
+    "Focused metrics keep their original workload and host scope. Resources are compared on the combined journey, never chosen from a cheaper focused leg.",
+    "Provider pages/rows/bytes measure complete synthetic ingestion; attempts per request remain unmeasured here. Recovery resends cover the terminated catalog fixture.",
+    "Pending means no matching measurement in this scope, even when a focused test or another host passes. Exact combined peak heap and host-wide remaining handles are pending.",
+    "Linux executables and automated browser composition do not establish other operating systems, PostgreSQL, native OS IME, assistive technology, real providers or downstream approval.",
+    "Original saved sources and all retained oracles remain. Library readiness never authorizes their deletion."
+  ]
+}
