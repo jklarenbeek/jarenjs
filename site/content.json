@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-11T01:07:38+02:00",
-  "commit": "f0e601799669e3389149b97946b6f34fc211eade",
+  "generated": "2026-09-11T06:30:23+02:00",
+  "commit": "9b172859453d75d6f6537b7d7b9a880eedfe3988",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -5283,6 +5283,97 @@
         "meta": {
           "sourceUrl": "components/collection/site.md",
           "hash": "1najimb",
+          "frontmatterLang": "yaml"
+        }
+      },
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/rules",
+      "card": {
+        "title": "Reviewed rules",
+        "blurb": "Schema-guided saved formulas, immutable previews and stable change selection.",
+        "perf": "bounded review pages with injected evaluation"
+      },
+      "engines": [],
+      "docs": {
+        "$md": "0.1",
+        "frontmatter": {
+          "package": "@jarenjs/rules",
+          "card": {
+            "title": "Reviewed rules",
+            "blurb": "Schema-guided saved formulas, immutable previews and stable change selection.",
+            "perf": "bounded review pages with injected evaluation"
+          }
+        },
+        "ast": [
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "text",
+                "value": "Author JSON rule documents, inspect proposed values and select changes across"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "preview pages. The editor preserves draft text and caret during asynchronous"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "evaluation. Schema fields, evaluator services and commands are injected by the"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "host. Preview conveys no write authority: the command rechecks current saved"
+              },
+              {
+                "type": "softBreak"
+              },
+              {
+                "type": "text",
+                "value": "rules, rows, permissions and values in the existing receipt transaction."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "children": [
+              {
+                "type": "link",
+                "url": "#/collection?mode=rules",
+                "title": null,
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Try the reviewed-rule example"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": "."
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "lang": "js",
+            "meta": null,
+            "value": "import { createRuleEditor } from '@jarenjs/rules';\nconst editor = createRuleEditor({ text: '{}', preview: previewRule });\nawait editor.preview();\neditor.dispose();\n"
+          }
+        ],
+        "meta": {
+          "sourceUrl": "components/rules/site.md",
+          "hash": "1t0veea",
           "frontmatterLang": "yaml"
         }
       },

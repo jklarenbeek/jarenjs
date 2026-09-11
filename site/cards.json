@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-11T01:07:38+02:00",
-  "commit": "f0e601799669e3389149b97946b6f34fc211eade",
+  "generated": "2026-09-11T06:30:23+02:00",
+  "commit": "9b172859453d75d6f6537b7d7b9a880eedfe3988",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -323,6 +323,16 @@
         "title": "Collections",
         "blurb": "Virtual lists and grids with stable keys, bounded geometry and injected row providers.",
         "perf": "viewport work independent of logical row count"
+      },
+      "engines": [],
+      "derived": false
+    },
+    {
+      "name": "@jarenjs/rules",
+      "card": {
+        "title": "Reviewed rules",
+        "blurb": "Schema-guided saved formulas, immutable previews and stable change selection.",
+        "perf": "bounded review pages with injected evaluation"
       },
       "engines": [],
       "derived": false
