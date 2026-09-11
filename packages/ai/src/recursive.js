@@ -47,6 +47,7 @@
 import { excerpt } from '@jarenjs/core/chunk';
 import { recursiveItems } from './program-shape.js';
 import { createProgramSession } from './program-session.js';
+import { readProgramAnswer } from './program-result.js';
 
 /** The deepest a tree may go, whatever it asks for. */
 export const MAX_DEPTH = 3;
@@ -216,7 +217,7 @@ export const childScope = (depth, index) => `child/${depth}/${index}/`;
  *   createEnvironment: (options: any) => any,
  *   querySchema?: any, budget?: any, depth?: number,
  *   maxConcurrentSubcalls?: number, maxSubcalls?: number,
- *   subcallChars?: number, clock?: () => number }} options
+ *   subcallChars?: number, maxAnswerChars?: number, clock?: () => number }} options
  *   The three factories and `createEnvironment` are injected for the
  *   same reason everything heavy in this package is: it keeps this
  *   module free of a cycle with `program.js` and lets a probe wrap any
@@ -232,6 +233,9 @@ export function createLongHorizonAgent(options) {
   let account = createBudgetAccount(options.budget ?? {}, options.clock);
   let trajectory = createTrajectory();
   const subcallChars = options.subcallChars ?? 8000;
+  const maxAnswerChars = options.maxAnswerChars ?? 200000;
+  if (!Number.isSafeInteger(maxAnswerChars) || maxAnswerChars < 1)
+    throw new RangeError('maxAnswerChars must be a positive safe integer');
 
 
   /**
@@ -331,12 +335,13 @@ export function createLongHorizonAgent(options) {
     }
     // only the child's ANSWER crosses the boundary — never its corpus,
     // never its slots (D2, at every level and not just the root)
-    const text = result.answer?.text ?? 'null';
+    const complete = await readProgramAnswer(env, result.answer, { maxChars: maxAnswerChars });
+    if (!complete.ok) return { slot: name, depth, address: scope, error: complete.error };
     try {
-      const items = recursiveItems(JSON.parse(text));
+      const items = recursiveItems(JSON.parse(complete.answer.text));
       if (items === null) return { slot: name, depth, error: 'AI0209: child answer violates recursive shape' };
       return items.length === 1
-        ? { slot: name, depth, address: scope, value: items[0].value }
+        ? { ...items[0], slot: name, depth, address: scope }
         : { slot: name, depth, address: scope, items };
     }
     catch {

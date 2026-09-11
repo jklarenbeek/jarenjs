@@ -24,7 +24,7 @@ import {
   createEnvironment, createProgramRunner, createProgramAuthor, createStructuredOutput,
   compileProgram, programGate, PROGRAM_SCHEMA, PROGRAM_OPS, MAX_PROGRAM_CHARS, PROGRAM_EXAMPLE,
 } from '@jarenjs/ai';
-import { compileJsonQuery } from '@jarenjs/json/query';
+import { compileJsonQuery, analyzeQuery, annotateTypes } from '@jarenjs/json/query';
 import querySchema from '@jarenjs/json/schemas/jaren-query.llm-profile.schema.json' with { type: 'json' };
 
 import {
@@ -318,6 +318,7 @@ describe('ai — the runner answers with metadata and stores content in slots', 
     });
     assert.strictEqual(result.answer.text.length, 50);
     assert.strictEqual(result.answer.slot, 'program/p');
+    assert.strictEqual(result.answer.truncated, true);
   });
 
   it('runs twice with the same addresses and no duplicate storage', async function () {
@@ -443,6 +444,49 @@ describe('ai — the root pays the same for any corpus', function () {
     assert.ok(Math.abs(last.root - rows[0].root) <= 64,
       `the root grew from ${rows[0].root} to ${last.root}`);
   });
+});
+
+it('keeps completed map accounting when a later query fails', async function () {
+  const run = await runner({ maxSubcalls: 2 });
+  const result = await run.run({ steps: [
+    { op: 'chunk', from: 'corpus', as: 'pieces', strategy: 'line', size: 200 },
+    { op: 'map', from: 'pieces', as: 'found', prompt: 'Read the record.' },
+    { op: 'reduce', from: 'found', as: 'summary', query: { $max: '$[*].value' } },
+    { op: 'answer', from: 'summary' },
+  ] });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.subcalls, 2);
+  assert.strictEqual(result.failed, 0);
+  assert.ok(result.concurrency > 0);
+  assert.strictEqual(result.steps.find((step) => step.op === 'map').skipped, 10);
+});
+
+it('executes the actual recursive prompt example over mixed JSON leaf values', async function () {
+  const environment = await env(lines(24));
+  const author = createProgramAuthor({
+    environment, compileQuery: compileJsonQuery, analyzeQuery, annotateTypes, recursive: true,
+    createStructuredOutput, querySchema,
+    client: { endpoint: { provider: 'openrouter' }, complete: async ({ messages }) => {
+      const example = /right shape:\n([^\n]+)/.exec(messages[0].content)[1];
+      return { message: { content: example } };
+    } },
+  });
+  const authored = await author.author('Collect all records.');
+  assert.ok(authored.value, JSON.stringify(authored.errors));
+  const values = [];
+  const run = createProgramRunner({ environment, compileQuery: compileJsonQuery,
+    analyzeQuery, annotateTypes, recursive: true,
+    client: { complete: async () => {
+      const value = [{ id: 'a', value: 'Boston' }, null, [{ id: 'b', value: 42 }]][values.length % 3];
+      values.push(value);
+      return { message: { content: JSON.stringify(value) } };
+    } },
+  });
+  const result = await run.run(authored.value);
+  assert.strictEqual(result.ok, true, JSON.stringify(result.errors));
+  assert.ok(values.length >= 3);
+  assert.deepStrictEqual(JSON.parse(result.answer.text).map((item) => item.value), values);
+  assert.strictEqual(result.answer.truncated, false);
 });
 
 describe('ai — authoring a program', function () {

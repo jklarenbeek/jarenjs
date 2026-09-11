@@ -13,6 +13,7 @@
     "target": "ESNext"
   },
   "files": [
+    "ai-program.ts",
     "types.ts",
     "flow-composition.ts",
     "db-replication.ts",

@@ -31,8 +31,12 @@ export {
 } from './environment.js';
 export {
   compileProgram, programGate, createProgramRunner, createProgramAuthor, ProgramError,
-  PROGRAM_EXAMPLE,
+  PROGRAM_EXAMPLE, readProgramAnswer,
 } from './program.js';
+/** @typedef {import('./program-result.js').ProgramRunResult} ProgramRunResult */
+/** @typedef {import('./program-result.js').ProgramAnswer} ProgramAnswer */
+/** @typedef {import('./program-result.js').ProgramStepReport} ProgramStepReport */
+/** @typedef {import('./program-result.js').ProgramDiagnostic} ProgramDiagnostic */
 export {
   createLongHorizonAgent, createBudgetAccount, createTrajectory, resolveDepth, childScope,
   MAX_DEPTH, DEFAULT_DEPTH,

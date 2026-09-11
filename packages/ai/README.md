@@ -1551,10 +1551,7 @@ its value enters the parent's map; a sequence contributes its elements individua
 Empty query sequences normalize to an empty result.
 
 ```js
-const query = {
-  slot: 'corpus',
-  value: { value: { $max: '$[*].value.value' } },
-};
+const query = ['$[*]']; // one array containing every map envelope
 ```
 
 `compileProgram(doc, {recursive: true, compileQuery, analyzeQuery, annotateTypes})`
@@ -1563,6 +1560,34 @@ For unknown inference only, a reduce may declare `outputSchema` with required `s
 and `value` members. The runner validates that declaration before writing its result;
 a lying declaration is `AI0209`. Standalone programs may still reduce to arbitrary JSON.
 This is a structural guarantee: correctness of the value still needs a host checker.
+
+The recursive author example collects envelopes rather than choosing a maximum.
+Map results wrap the parsed leaf reply in `value`; an object, array or null reply
+is preserved as such. In recursive mode a failed map entry has `value: null`
+alongside its `error` diagnostic (and any `raw`, `depth` or `address` metadata).
+The collector keeps these entries; an error is distinguishable from a successful
+null reply, and the map's `failed` count still records it. A structurally successful
+program may contain only failures or no relevant facts; hosts must check its outcome.
+An array constructor collects a query sequence into one
+JSON array, including the empty case. An object member needs one value, so a bare
+wildcard there fails when several items match. Numeric or string extrema require
+an explicit homogeneous scalar projection and are not a general fact reducer.
+
+`createProgramRunner().run()` returns the discriminated `ProgramRunResult` type:
+`ok: true` has a `ProgramAnswer`, and `ok: false` has a null answer and an error.
+Both retain completed step details, `subcalls`, `failed`, elapsed `ms` and the
+configured `concurrency`. A compile refusal has empty steps and zero counts.
+`answer.truncated` explicitly reports when the requested
+preview is shorter than the stored result. A host that needs the full JSON result
+can use `readProgramAnswer(environment, answer, {maxChars: 64000})` from
+`@jarenjs/ai` or `@jarenjs/ai/program`. It checks slot metadata before loading
+content, verifies the actual size afterwards, and returns `{ok, answer}` or
+`{ok: false, error}`. The environment must be the one that owns the answer's scope.
+
+`createLongHorizonAgent` uses this same reader before unwrapping a child's result.
+Its `maxAnswerChars` option defaults to 200,000 characters per child. An oversized
+or missing child result becomes a map failure with a diagnostic. The root answer
+remains a bounded preview; increasing this child limit does not enlarge it.
 
 ### Verified program reuse
 

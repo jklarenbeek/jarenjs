@@ -62,6 +62,9 @@ import { unfence } from './structured.js';
 import { recursiveShape, recursiveSchema, recursiveItems } from './program-shape.js';
 import { createRoutedClient } from './routing.js';
 
+export { readProgramAnswer } from './program-result.js';
+/** @typedef {import('./program-result.js').ProgramRunResult} ProgramRunResult */
+
 /** How much of one piece a sub-call is shown. The sub-call is the only
  * place content reaches a model at all, and it sees ONE piece — a cap
  * here is the difference between a bounded fan-out and the corpus
@@ -401,7 +404,7 @@ const mapFamily = (as) => `${RESULT_PREFIX}${as}/`;
  *   - `account` is a budget shared with everything else in the run,
  *     including other depths. Checked before each sub-call and charged
  *     by it, so a tree cannot outspend the sum of its branches.
- * @returns {{ run: (doc: any, hooks?: { signal?: AbortSignal }) => Promise<any> }}
+ * @returns {{ run: (doc: any, hooks?: { signal?: AbortSignal }) => Promise<ProgramRunResult> }}
  */
 export function createProgramRunner(options) {
   const { environment } = options;
@@ -547,6 +550,7 @@ export function createProgramRunner(options) {
    * Execute a compiled program.
    * @param {any} doc
    * @param {{ signal?: AbortSignal }} [hooks]
+   * @returns {Promise<ProgramRunResult>}
    */
   async function run(doc, hooks = {}) {
     const signal = hooks.signal;
@@ -560,7 +564,9 @@ export function createProgramRunner(options) {
     catch (err) {
       // NOTHING has run: the compile reads no slot and writes none, so a
       // rejected program leaves the environment exactly as it was
-      return { ok: false, ran: 0, error: 'the program does not compile', errors: [errorRecord(err)] };
+      return { ok: false, ran: 0, steps: [], subcalls: 0, failed: 0, concurrency,
+        answer: null, ms: Date.now() - started,
+        error: 'the program does not compile', errors: [errorRecord(err)] };
     }
 
     /** binding → `{ slot }` or `{ family, count }` */
@@ -720,6 +726,10 @@ export function createProgramRunner(options) {
         subcalls += budgeted.length;
         for (let i = 0; i < results.length; i++) {
           if (results[i].error !== undefined) failed++;
+          // Recursive failures remain distinguishable from an ordinary null
+          // reply while satisfying the same envelope as successful leaves.
+          if (options.recursive && results[i].error !== undefined && !Object.hasOwn(results[i], 'value'))
+            results[i] = { ...results[i], value: null };
           await environment.put(`${mapFamily(step.as)}${i}`, JSON.stringify(results[i]),
             { kind: 'selection' });
         }
@@ -774,12 +784,17 @@ export function createProgramRunner(options) {
       }
     }
 
-    /** @param {any} step @param {any} result */
+    /** @param {any} step @param {any} result @returns {ProgramRunResult} */
     function failure(step, result) {
       return {
         ok: false,
+        answer: null,
         ran: report.length,
         steps: report,
+        subcalls,
+        failed,
+        concurrency,
+        ...(stopped === null ? {} : { stopped }),
         error: result.error,
         errors: [{ code: result.code ?? 'AI0200', docPath: `/steps/${step.index}`, message: result.error }],
         ms: Date.now() - started,
@@ -790,21 +805,24 @@ export function createProgramRunner(options) {
       ? await environment.read(addressOf(plan.answer.from), { chars: plan.answer.chars })
       : { error: `the run was ${stopped}` };
 
-    return {
-      ok: stopped === null && answered.error === undefined,
-      ...(stopped === null ? {} : { stopped }),
+    const metrics = {
       steps: report,
       ran: report.length,
       subcalls,
       failed,
       concurrency,
+      ms: Date.now() - started,
+    };
+    if (answered.error !== undefined) return {
+      ...metrics, ok: false, answer: null, error: answered.error,
+      ...(stopped === null ? {} : { stopped }),
+    };
+    return {
+      ...metrics, ok: true,
       // the one place content comes back, and it is the step the program
       // asked for by name
-      answer: answered.error === undefined
-        ? { slot: answered.name, size: answered.size, text: answered.text }
-        : null,
-      ...(answered.error === undefined ? {} : { error: answered.error }),
-      ms: Date.now() - started,
+      answer: { slot: answered.name, size: answered.size, text: answered.text,
+        truncated: answered.text.length < answered.size },
     };
   }
 
@@ -893,10 +911,17 @@ export function createProgramAuthor(options) {
           + ' Use map to ask a question of every piece — it is the only step that reads text —'
           + ' and reduce to combine what the map found. Here is a program in the right shape:\n'
           + JSON.stringify(options.recursive ? { steps: EXAMPLE.steps.map((step) => step.op === 'reduce'
-            ? { ...step, query: { slot: 'corpus', value: { value: { $max: '$[*].value.value' } } },
-              outputSchema: { type: 'object', properties: { slot: { type: 'string' }, value: {} }, required: ['slot', 'value'] } }
+            ? { ...step, query: ['$[*]'],
+              outputSchema: { type: 'array', items: { type: 'object',
+                properties: { slot: { type: 'string' }, value: {} }, required: ['slot', 'value'] } } }
             : step) } : EXAMPLE)
-          + (options.recursive ? '\nRecursive reduce MUST return {slot:string,value:any}, with value matching the leaf reply, or a sequence of these envelopes. Declare outputSchema on reduce when inference is unavailable.' : ''),
+          + (options.recursive ? '\nEach map result wraps the parsed leaf reply in {slot:string,value:any}. '
+            + 'Failed map entries have value:null and an error diagnostic; preserve both, and distinguish them from a successful null reply. '
+            + 'The worked reducer preserves every envelope, including null leaf values. An array constructor [expr] collects a sequence into one array; '
+            + 'a bare wildcard in an object member fails when it produces multiple items. '
+            + 'Recursive reduce MUST return {slot:string,value:any}, with value matching the leaf reply, or a sequence of these envelopes. '
+            + 'Use min/max only for a sequence of numbers or strings, never to combine general facts. '
+            + 'Declare outputSchema on reduce when inference is unavailable. A final answer preview may be truncated; inspect its truncated flag.' : ''),
       },
       {
         role: 'user',
