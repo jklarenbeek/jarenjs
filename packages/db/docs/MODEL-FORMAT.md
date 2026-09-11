@@ -2306,6 +2306,13 @@ its existing table or view and MUST NOT create it. `adopt: true` also prevents
 creation of hybrid tables and infrastructure. Inspection, adoption and explicit
 migration are separate operations.
 
+`adopt: true` with `jobs: true` can attach the existing current SQLite job
+tables and claim index without executing DDL. The engine checks its own schema
+declaration, preserving SQL literal values; a missing or differently shaped
+object refuses `JD0002` and requires an explicit migration. Adoption never
+provisions or upgrades the queue. Capture and replication still refuse in
+adopted mode; existing application triggers do not imply complete live capture.
+
 ```json
 {
   "$model": "0.1",

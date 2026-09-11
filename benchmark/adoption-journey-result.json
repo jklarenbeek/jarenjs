@@ -1,0 +1,470 @@
+{
+  "format": "jaren-adoption-journey/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "sourceHashes": {
+    "packages/website/src/examples/adoption.js": "41d7ea964579b686b8265f91549692de2dee4b94e7e7df629e7ea91bf8c67085",
+    "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
+    "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
+    "test/consumer/journey.js": "0870f6365a6a60829a04c9fa12dc45639bb1bdde60175ccdc3ce0d94365411e1",
+    "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
+    "benchmark/adoption-journey.js": "685477fc875289a5229fcf6ec1804ac25e5e9e66f64f17df24a4cba18d80538e",
+    "packages/db/src/jobs.js": "690c2e0645cec9a69d1c7a9b2ba9b3e8f68e8ed63562834713eea4c579bd0dff",
+    "packages/db/src/store.js": "f940e7be5bc66d9b0a379b9c9ae64515b3e9dac9ff8b44aa30a919ba4fb90d4c"
+  },
+  "hosts": [
+    {
+      "label": "node",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 382.327672,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 811.82779,
+          "teardownMs": 0.24059999999997217,
+          "runtime": "v24.19.0",
+          "heapBytes": 66606992,
+          "peakRssBytes": 280109056
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2772.520996,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 4188.549972,
+          "teardownMs": 0.23997000000053959,
+          "runtime": "v24.19.0",
+          "heapBytes": 397439232,
+          "peakRssBytes": 905072640
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 84.79061200000004,
+          "teardownMs": 0.5811400000000049,
+          "runtime": "v24.19.0",
+          "heapBytes": 22388712,
+          "peakRssBytes": 116498432
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0
+    },
+    {
+      "label": "bun",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 316.37931699999996,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 668.707061,
+          "teardownMs": 0.3704320000000507,
+          "runtime": "1.4.0",
+          "heapBytes": 50002088,
+          "peakRssBytes": 247173120
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2214.0969880000002,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 3368.5383789999996,
+          "teardownMs": 0.33083299999998417,
+          "runtime": "1.4.0",
+          "heapBytes": 336048137,
+          "peakRssBytes": 984625152
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 72.909258,
+          "teardownMs": 0.6480469999999912,
+          "runtime": "1.4.0",
+          "heapBytes": 8251385,
+          "peakRssBytes": 82440192
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0
+    }
+  ],
+  "checks": [
+    {
+      "host": "node",
+      "consumer": "catalog",
+      "checks": [
+        {
+          "metric": "startupMs",
+          "limit": 15000,
+          "value": 382.327672,
+          "status": "pass"
+        },
+        {
+          "metric": "sampledHeapBytes",
+          "limit": 268435456,
+          "value": 66606992,
+          "status": "pass"
+        },
+        {
+          "metric": "peakRssBytes",
+          "limit": 536870912,
+          "value": 280109056,
+          "status": "pass"
+        },
+        {
+          "metric": "teardownMs",
+          "limit": 1000,
+          "value": 0.24059999999997217,
+          "status": "pass"
+        },
+        {
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "host": "node",
+      "consumer": "archive-stock",
+      "checks": [
+        {
+          "metric": "startupMs",
+          "limit": 45000,
+          "value": 2772.520996,
+          "status": "pass"
+        },
+        {
+          "metric": "sampledHeapBytes",
+          "limit": 805306368,
+          "value": 397439232,
+          "status": "pass"
+        },
+        {
+          "metric": "peakRssBytes",
+          "limit": 1073741824,
+          "value": 905072640,
+          "status": "pass"
+        },
+        {
+          "metric": "teardownMs",
+          "limit": 2000,
+          "value": 0.23997000000053959,
+          "status": "pass"
+        },
+        {
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "host": "bun",
+      "consumer": "catalog",
+      "checks": [
+        {
+          "metric": "startupMs",
+          "limit": 15000,
+          "value": 316.37931699999996,
+          "status": "pass"
+        },
+        {
+          "metric": "sampledHeapBytes",
+          "limit": 268435456,
+          "value": 50002088,
+          "status": "pass"
+        },
+        {
+          "metric": "peakRssBytes",
+          "limit": 536870912,
+          "value": 247173120,
+          "status": "pass"
+        },
+        {
+          "metric": "teardownMs",
+          "limit": 1000,
+          "value": 0.3704320000000507,
+          "status": "pass"
+        },
+        {
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "host": "bun",
+      "consumer": "archive-stock",
+      "checks": [
+        {
+          "metric": "startupMs",
+          "limit": 45000,
+          "value": 2214.0969880000002,
+          "status": "pass"
+        },
+        {
+          "metric": "sampledHeapBytes",
+          "limit": 805306368,
+          "value": 336048137,
+          "status": "pass"
+        },
+        {
+          "metric": "peakRssBytes",
+          "limit": 1073741824,
+          "value": 984625152,
+          "status": "pass"
+        },
+        {
+          "metric": "teardownMs",
+          "limit": 2000,
+          "value": 0.33083299999998417,
+          "status": "pass"
+        },
+        {
+          "metric": "unresolvedResends",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    }
+  ],
+  "census": {
+    "command": [
+      "rg",
+      "-n",
+      "^import|^export (async )?function (compileLexical|createCollectionCoordinator|compileRulePlan|createCommand|createIngestion|createDbReceipts|createDbEffectStore|createDomainRun|createJobEngine)",
+      "packages/website/src/examples/adoption.js",
+      "packages/website/src/examples/adoption-model.js",
+      "packages/core/src/search/index.js",
+      "packages/app/src/collection.js",
+      "packages/json/src/rules/index.js",
+      "packages/contract/src/command.js",
+      "packages/flow/src/ingest.js",
+      "packages/linq/src/db/receipts.js",
+      "packages/linq/src/db/effects.js",
+      "packages/flow/src/runs.js",
+      "packages/db/src/jobs.js"
+    ],
+    "output": "packages/db/src/jobs.js:41:import { resolveRuntime } from '@jarenjs/core/runtime';\npackages/db/src/jobs.js:42:import { chain, attempt } from './driver.js';\npackages/db/src/jobs.js:43:import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';\npackages/db/src/jobs.js:44:import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';\npackages/db/src/jobs.js:45:import { refuseCancelled } from './cancellation.js';\npackages/db/src/jobs.js:208:export function createJobEngine(options) {\npackages/flow/src/runs.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/flow/src/runs.js:4:import { compileWorkflow } from './workflow.js';\npackages/flow/src/runs.js:12:export function createDomainRun(document, options) {\npackages/linq/src/db/effects.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/linq/src/db/effects.js:4:import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';\npackages/linq/src/db/effects.js:13:export function createDbEffectStore(client, options) {\npackages/flow/src/ingest.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/flow/src/ingest.js:4:import { compileWorkflow } from './workflow.js';\npackages/flow/src/ingest.js:21:export function createIngestion(options) {\npackages/contract/src/command.js:3:import { deepFreeze } from '@jarenjs/core/object';\npackages/contract/src/command.js:4:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/contract/src/command.js:5:import { ContractFailure, ContractHostError, ContractRuntimeError } from './errors.js';\npackages/contract/src/command.js:6:import { runOperation, validateOperationInput } from './pipeline.js';\npackages/contract/src/command.js:19:export function createCommand(operation, options) {\npackages/linq/src/db/receipts.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/linq/src/db/receipts.js:4:import { resolveRuntime } from '@jarenjs/core/runtime';\npackages/linq/src/db/receipts.js:5:import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';\npackages/linq/src/db/receipts.js:25:export function createDbReceipts(client, options) {\npackages/json/src/rules/index.js:3:import { canonicalizeJson, canonicalSha256 } from '../canonical.js';\npackages/json/src/rules/index.js:4:import { compileJSONPointer, JSONPOINTER_NOTHING } from '../pointer.js';\npackages/json/src/rules/index.js:5:import { compileFormulaBatch } from '../formula/batch.js';\npackages/json/src/rules/index.js:6:import { FormulaError, snapshot, credit } from '../formula/shared.js';\npackages/json/src/rules/index.js:15:export function compileRulePlan(definition, options) {\npackages/app/src/collection.js:3:import { deepFreeze } from '@jarenjs/core/object';\npackages/app/src/collection.js:4:import { rangeBytes as bytesOf, rangeIdentity as identityOf, validRangeCredits as validCredits, validLogicalRange as validRange } from '@jarenjs/core/range';\npackages/app/src/collection.js:12:export function createCollectionCoordinator(provider, options = {}) {\npackages/core/src/search/index.js:3:import { lexicalConfig, lexicalTokens, lexicalDistance } from './config.js';\npackages/core/src/search/index.js:4:import { utf8ByteLength as textBytes, hashContent } from '../string.js';\npackages/core/src/search/index.js:5:import { lexicalVocabulary } from './vocabulary.js';\npackages/core/src/search/index.js:14:export function compileLexical(definition) {\npackages/website/src/examples/adoption.js:3:import { open, createDbReceipts, createDbIngestionStore, createDbEffectStore, createDbRunStore } from '@jarenjs/linq/db';\npackages/website/src/examples/adoption.js:4:import { compileLexical } from '@jarenjs/core/search';\npackages/website/src/examples/adoption.js:5:import { createArrayRangeProvider } from '@jarenjs/core/range';\npackages/website/src/examples/adoption.js:6:import { canonicalizeJson, canonicalSha256 } from '@jarenjs/json/canonical';\npackages/website/src/examples/adoption.js:7:import { compileRulePlan, selectRuleChanges } from '@jarenjs/json/rules';\npackages/website/src/examples/adoption.js:8:import { migrateFormulas } from '@jarenjs/json/formula/migrate';\npackages/website/src/examples/adoption.js:9:import { compileContract } from '@jarenjs/contract';\npackages/website/src/examples/adoption.js:10:import { createCommand } from '@jarenjs/contract/command';\npackages/website/src/examples/adoption.js:11:import { compileProvider, createProviderExecutor } from '@jarenjs/contract/provider';\npackages/website/src/examples/adoption.js:12:import { createIngestion, createExternalEffects, createDomainRun } from '@jarenjs/flow';\npackages/website/src/examples/adoption.js:13:import { createTypeTestCompiler } from '@jarenjs/validate/query';\npackages/website/src/examples/adoption.js:14:import { adoptionModel, adoptionItemKey, adoptionFields } from './adoption-model.js';\n"
+  },
+  "ownership": {
+    "retainedOracleFiles": [
+      "test/adoption/oracles.js",
+      "test/adoption/trusted-bodies.js",
+      "test/adoption/provider-oracle.js"
+    ],
+    "retainedOracleLines": 105,
+    "adoptedPolicyFiles": [
+      "packages/website/src/examples/adoption.js",
+      "packages/website/src/examples/adoption-model.js"
+    ],
+    "adoptedPolicyLines": 182,
+    "retainedThirdPartyMechanisms": [
+      "minisearch",
+      "@tanstack/virtual-core"
+    ],
+    "adoptedThirdPartyMechanisms": [],
+    "domainSqlInAdoptedHost": 0,
+    "privateDriverBridges": 0,
+    "trustedSourceConversions": 2,
+    "reviewRequiredSources": 5,
+    "disabledPreservedSources": 1
+  },
+  "evidence": {
+    "library": "pass",
+    "portable": "pass",
+    "actualDownstream": "pending",
+    "actualProvider": "pending",
+    "manual": "pending"
+  },
+  "limitations": [
+    "Source lines compare executable reference adapters with remaining application policy, not a claim that oracle files were deleted.",
+    "Formula retirement covers only converted or natively authored definitions; unresolved originals and their retained oracle remain.",
+    "Capture of adopted triggers and native FTS remain refused. Search refresh reads a bounded resident snapshot; complete search membership is separate from cached pages.",
+    "Heap is a sample and RSS is a process high-water mark, including the assertion instrument. Exact peak heap remains unmeasured.",
+    "The full source sizes apply to query/search; provider snapshots and rule previews retain their separate frozen limits."
+  ]
+}

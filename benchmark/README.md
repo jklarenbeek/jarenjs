@@ -1212,6 +1212,14 @@ are derived into `packages/forms/README.md`.
 
 ## Portable adoption reference
 
+`node benchmark/adoption.js --combined --write` measures the integrated catalog
+and archive-stock applications through their installed public surfaces. The
+[combined evidence](../docs/ADOPTION-EVIDENCE.md) records current source hashes,
+retained-adapter versus application-policy ownership, work/resource budgets,
+provider wire behavior and interruption/recovery. The reference command below
+remains independently executable. Use `node scripts/check-adoption-journeys.js
+--native --write` to qualify Node/Bun hosts and relocated standalone executables.
+
 `node benchmark/adoption.js` measures the checksum-pinned synthetic consumers
 against retained development-only oracles. It reports costs, losses and pending
 qualifications without changing the frozen ceilings. See

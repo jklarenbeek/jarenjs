@@ -141,7 +141,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->15<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->14<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->16<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->675<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->676<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -399,5 +399,13 @@ qualification does not establish real provider behavior, downstream cutover,
 native executable or PostgreSQL support, or operator reconciliation acceptance.
 
 ## Saved formula and rule composition
+
+For the full application composition, see [portable replacement evidence](ADOPTION-EVIDENCE.md)
+and the website's `#/collection?mode=adoption` journey. It uses one adopted SQLite
+file and its existing jobs, public query/search and collection APIs, reviewed
+formula writes, complete provider ingestion and recoverable external intent.
+The packed and standalone gates execute the same anonymous application policies.
+Adopted queue reuse creates no infrastructure; provision or migrate that queue
+explicitly before opening with `adopt: true, jobs: true`.
 
 Install `@jarenjs/json`, `@jarenjs/linq` and `@jarenjs/rules` for formula documents and authoring UI. Inject `createTypeTestCompiler` from `@jarenjs/validate/query` when schemas are declared. Reviewed writes additionally compose `@jarenjs/contract/command` with `createDbReceipts` from `@jarenjs/linq/db`; choose an installed Node/Bun/browser driver explicitly. The preview is never write authority. See [FORMULA-FORMAT](../packages/json/docs/FORMULA-FORMAT.md) and the [rules component](../components/rules/README.md). Portable tarball qualification exercises both frozen workloads and zero-write replay.

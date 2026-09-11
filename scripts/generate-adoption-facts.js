@@ -6,6 +6,15 @@ export const adoptionFacts = {
   name: 'portable adoption evidence',
   docs: () => ['docs/ADOPTION-EVIDENCE.md'],
   facts: () => ({
+    'adoption.combined': () => {
+      const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-journey-result.json', import.meta.url), 'utf8'));
+      return '\n\n| Host | Consumer | Rows | Journey ms | Search startup ms | Heap MiB | Peak RSS MiB | Second writes |\n'
+        + '|---|---|---:|---:|---:|---:|---:|---:|\n'
+        + report.hosts.flatMap((host) => host.results.filter((row) => row.phase === 'all').map((row) =>
+          `| ${host.label} | ${row.consumer} | ${row.rows} | ${row.elapsedMs.toFixed(2)} | ${row.searchMs.toFixed(2)} | ${(row.heapBytes / 1048576).toFixed(2)} | ${(row.peakRssBytes / 1048576).toFixed(2)} | ${row.secondWrites} |`)).join('\n')
+        + `\n\nRetained reference adapters: ${report.ownership.retainedOracleLines} lines; adopted application policy: ${report.ownership.adoptedPolicyLines} lines. Third-party search/virtualization mechanisms in the application: ${report.ownership.retainedThirdPartyMechanisms.length} → ${report.ownership.adoptedThirdPartyMechanisms.length}.\n\n`
+        + report.checks.map((row) => `${row.host}/${row.consumer}: ${row.checks.filter((check) => check.status === 'fail').length} measured budget losses.`).join(' ') + '\n\n';
+    },
     'adoption.reference': () => {
       const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-result.json', import.meta.url), 'utf8'));
       const manifest = JSON.parse(readFileSync(new URL('../test/adoption/manifest.json', import.meta.url), 'utf8'));

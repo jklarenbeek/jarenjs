@@ -737,4 +737,11 @@ introduced. Public contracts and limitations are in
 
 ## Saved formulas and reviewed rules
 
+The integrated adoption example composes these same owners around an existing
+physical catalog and queue. Adoption validates existing job objects without DDL;
+the transaction owner is unchanged. Application-trigger capture remains refused,
+so this host explicitly refreshes a bounded snapshot into the shared core lexical
+engine and resident range provider. It does not claim an incremental database
+search source. See [combined evidence](ADOPTION-EVIDENCE.md).
+
 `json/formula` owns versioned Query compilation, dependency batches and source migration; `json/rules` owns immutable reviewed plans. `linq/formula` only authors those documents. `app/formula` owns injected terminating-worker lifecycle. `components/rules` imports core/view in its engine and forms in its component; it receives evaluation and command services through injection. The host composes the existing contract command and database receipt transaction, rechecking current authority and data before effects. The website demonstrates this composition over local SQLite and a virtual collection.

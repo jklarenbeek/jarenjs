@@ -194,7 +194,7 @@ function isLease(value) {
 /**
  * The queue engine over one open connection.
  * @param {{ connection: any, now?: () => number,
- *   random?: () => number,
+ *   random?: () => number, adopt?: boolean,
  *   gate?: (fn: () => any, what?: string, signal?: AbortSignal) => any,
  *   bracket?: (fn: () => any) => any,
  *   defaults?: Partial<typeof JOB_DEFAULTS>,
@@ -276,9 +276,22 @@ export function createJobEngine(options) {
 
   // the tables are created here, or refused here: a read-only store
   // leaked the driver's "attempt to write a readonly database"
-  const ready = attempt(() => bracket(() => chain(connection.exec(CREATE_JOBS), upgradeColumns)),
+  // Adoption accepts the current engine-owned schema without provisioning or
+  // upgrading it. The DDL remains the single schema declaration; differently
+  // shaped historical queues need an explicit upgrade before adoption.
+  const verifyExisting = () => chain(connection.prepare(connection.dialect.introspect.objects()), (statement) => chain(statement.all([]), (objects) => {
+    const normalize = (sql) => sql.replace(/'[^']*'|\bIF\s+NOT\s+EXISTS\b|[\s";]/g, (part) => part.startsWith("'") ? part : '');
+    for (const sql of CREATE_JOBS.split(';').filter((part) => part.trim())) {
+      const name = sql.match(/(?:TABLE|INDEX) IF NOT EXISTS "([^"]+)"/)[1];
+      const object = objects.find((value) => value.name === name);
+      if (!object?.sql || normalize(object.sql) !== normalize(sql))
+        throw new Error(`existing job object ${name} needs an explicit schema migration`);
+    }
+  }));
+  const ready = attempt(() => bracket(() => options.adopt === true
+    ? verifyExisting() : chain(connection.exec(CREATE_JOBS), upgradeColumns)),
     (error) => new DbCompileError('JD0002',
-      `the job tables could not be created (${error?.message ?? String(error)}) — `
+      `the job tables could not be opened (${error?.message ?? String(error)}) — `
       + 'a read-only store creates nothing; open it read-write once, or without jobs',
       '/jobs', error));
 

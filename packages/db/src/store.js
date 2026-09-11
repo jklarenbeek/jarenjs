@@ -979,7 +979,7 @@ export function openStore(model, options) {
     mapping = entities.size > 0 ? explainMapping(model) : null;
     if ([...entities.values()].some((e) => e.physical !== null) && (options.capture || options.replication))
       throw new DbCompileError('JD0051', 'column adoption preserves application triggers; complete capture is not qualified');
-    if (options.adopt === true && (options.jobs || options.capture || options.replication))
+    if (options.adopt === true && (options.capture || options.replication))
       throw new DbCompileError('JD0005', 'adoption creates no infrastructure; configure it through an explicit migration');
     if (options.replication !== undefined && [...collections.keys(), ...entities.keys()]
       .some((name) => name.toLowerCase().startsWith('_jaren_replica')))
@@ -1608,6 +1608,7 @@ export function openStore(model, options) {
           }
           const jobsEngine = !jobsRequested ? null : createJobEngine({
             connection,
+            adopt: options.adopt === true,
             bracket: firstOpen,
             // the WORKER's control-plane I/O (claims, renewals, its
             // checkpoint stores, its settlements) is root-owned and takes

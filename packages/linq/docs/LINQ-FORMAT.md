@@ -220,7 +220,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 15,293 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 13,793 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,582 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,085 | 46 | 4 | 2 | 675,373 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,085 | 46 | 4 | 2 | 675,752 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,850 B |
 | **17 documents** | | **12,698** | **380** | **73** | | |
 <!--/fact-->
@@ -278,7 +278,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 15,293 B | 15 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 13,793 B | 14 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 15,582 B | 16 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 675,373 B | 675 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 675,752 B | 676 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 14,850 B | 15 kB |
 <!--/fact-->
 

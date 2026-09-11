@@ -1,74 +1,128 @@
 # Portable replacement evidence
 
-The [frozen manifest](../test/adoption/manifest.json) defines synthetic reference
-inputs, source/API families, exact oracle versions, consumer policies and finite
-acceptance ceilings before native comparisons. It establishes an executable
-comparison target. Native replacement, portable consumer acceptance, live hosts
-and operator qualification remain separate evidence states.
+The [frozen instrument](../test/adoption/manifest.json) remains the source of
+synthetic inputs, original formula bytes, oracle versions and finite budgets.
+Its historical pending flags describe the foundation measurement; this matrix
+records the subsequently implemented public compositions. Actual application
+cutover, real providers and manual acceptance remain pending.
 
-Run from the repository root:
+| Capability | Combined portable evidence | Remaining qualification |
+|---|---|---|
+| Relational adoption | Existing column-only catalog, renamed archive columns and composite identity; unchanged schema, original bytes, settings and trigger histories across reopen | Arbitrary schemas, PostgreSQL, power-loss durability and actual downstream files |
+| Native queries | Public mapped reads and updates; no domain SQL or private driver bridge in the adopted application | Unkeyed history stays an independent read-only SQL oracle; broader algebra retains its refusals |
+| Collections | Reusable coordinator, virtual grid and stable review selection across pages | Physical devices, assistive technology and native OS input methods |
+| Lexical search | One core ranker over an explicitly refreshed authoritative snapshot; bounded displayed results and original identifier strings | Adopted triggers have no qualified live capture; native FTS and real relevance corpora remain unqualified |
+| Formulas and rules | Native draft/save/preview; current-row, authority and schema checks inside the receipt transaction; original-preserving migration and no-op repeat | Unresolved original sources retain review-required/disabled status and the trusted oracle |
+| Providers | Complete offline REST and GraphQL snapshots, preserved observations, atomic publication and identical-input no-op | Actual destination authority, credentials, read-back and provider-platform behavior |
+| Durable operations | Existing queue without startup DDL, permanent receipt replay, reviewed two-leg intent, abrupt termination after remote success, fenced reconciliation and original run recovery | Real remote delivery guarantees and operator approval for downstream retirement |
+
+The catalog and archive-stock applications use the unchanged full source
+workloads. Archive-stock changes physical column names, uses a composite key,
+speaks GraphQL and refuses writes under its report-only policy. Query/search
+loads a finite source snapshot separately from the collection page cache.
+Provider snapshots and rule previews have their own smaller limits: the journey
+does not claim that its preview or ingestion processes the entire search corpus.
+The range source holds the complete bounded search membership; only the
+coordinator's credited pages enter its cache. Loaded pages never stand in for
+the logical total.
+
+The application host is
+[`examples/adoption.js`](../packages/website/src/examples/adoption.js).
+[`adoption-model.js`](../packages/website/src/examples/adoption-model.js) declares
+product fields and policy. Its seed fixture creates a synthetic existing file
+before adoption; SQL used to construct and independently inspect that fixture
+does not enter the adopted host. The existing db transaction owner, core lexical
+engine, JSON formula evaluator, contract command/provider and flow/job engines
+implement the shared mechanisms. The application keeps its authorization,
+field mapping, arithmetic, saved-source resolution and read-back policy.
+
+## Executable host evidence
 
 ```sh
 node --no-warnings=ExperimentalWarning --test 'test/adoption/*.test.js'
-node --no-warnings=ExperimentalWarning benchmark/adoption.js
+node scripts/check-adoption-journeys.js
+node scripts/check-adoption-journeys.js --native-only
 npm run test:packed
+npm run site:gate
 ```
 
-The benchmark prints a report without changing the freeze. An intentional new
-measurement uses `node benchmark/adoption.js --write`, followed by
-`npm run docs:derive`. Review the report and its runner hash together. A different
-runtime or machine is a different measurement environment; compare only matching
-workload and environment identities. Missing measurements are `pending`, never
-zero or pass. Reference costs above the fixed ceilings remain published losses;
-the runner does not raise the ceilings. New fixture semantics or budgets require
-a reviewed new freeze identity and an explicit disposition of the earlier one.
+The standalone gate builds a Bun executable and a Node single-executable
+application, removes source files and module lookup paths, and runs both from
+an isolated directory. The Node build uses the pinned postject injection tool
+through npm exec; it is build tooling, not a package runtime dependency. These
+are Linux executable proofs, not claims for every operating system or native GUI.
+See the [Node executable construction contract](https://nodejs.org/docs/latest-v24.x/api/single-executable-applications.html).
 
-| Mechanism | Executable reference | Current qualification boundary |
-|---|---|---|
-| Relational SQL | SQLite settings, rowid receipt/BLOB/history, composite keys, nullable inventory, joins, aggregates, conditional writes, no-op upserts, insert-select and committed WAL recovery | Public drivers execute the reference SQL; native column mappings and removal of domain SQL remain pending |
-| Search | Exact development-only MiniSearch, labelled multilingual and identifier queries, incremental changes and serialized reload | Existing regex search is separately pinned; native lexical APIs and real labelled corpus remain pending |
-| Virtualization | Exact development-only virtual-core with fixed and measured keyed windows | Headless ranges do not prove mounted DOM, browser interaction or a bounded database provider |
-| Saved formulas | Static trusted module whose function bodies match the saved originals byte for byte, including CRLF; disabled invalid text never executes | This is a finite synthetic compatibility host; converter, native profile and complete real saved corpus remain pending |
-| Providers and durable operations | Offline REST, GraphQL and Link transcripts, partial observations, changed destinations, ambiguous effects, existing Query IR policy predicates and SQL receipts | No provider calls, credentials, new retry engine, authoritative ledger or ingestion implementation; real effects and reconciliation remain pending |
+Each runtime executes both full workloads and an additional bounded catalog
+process-termination fixture. The latter exits after the second synthetic remote
+success, before local settlement, and then reopens the same file. The remote
+journal must remain unchanged through reconciliation and subsequent verification.
+Independent inspection hashes all original item fields, checks original BLOB
+bytes and history, and compares the complete physical schema. Replayed commands,
+migration, ingestion and reconciliation assert zero reported changes and zero
+effective writes; adopted startup asserts zero DDL.
 
-The [source census](../test/adoption/source-census.json) records its revision and
-the exact `rg` patterns and matching lines. The deterministic generator lives in
-`scripts/lib/adoption.js` and reuses `@jarenjs/core/random`. Reference search and
-grid wrappers live together in `test/adoption/oracles.js`; they adapt installed
-oracles without implementing their algorithms. Runtime packages import neither
-the instrument nor its dependencies.
+The installed gate copies the same application and assertions into a directory
+containing only tarball package closures. It runs Node and Bun without repository
+source imports. The browser journey at `#/collection?mode=adoption` uses the
+same host and reusable components with SQLite session storage. Chromium,
+Firefox and WebKit exercise draft editing, review across pages, receipt replay,
+ingestion, interruption after remote success, reconciliation, reopen and
+navigation disposal. Offline page reload is qualified on Chromium and Firefox.
+The Linux Playwright WebKit host reports an internal error for that navigation;
+it separately exercises offline database reopen, ingestion and reconciliation,
+with network restored for page reload. WebKit offline page-navigation acceptance
+remains pending. Session storage preserves this tab's database through
+reload; closing the tab is outside that persistence contract.
 
-The independently declared larger consumer has its own seed, environment,
-protected-row policy, rounding step, sort policy and report-only write policy.
-Both generated datasets are checksum-pinned. The packed gate copies these inputs
-and `test/consumer/adoption.js` into the isolated database package closure, then
-executes the public-driver SQL and public-query subset under Node and Bun when
-available. That subset is useful installed-API evidence; it cannot retire the
-reference mechanisms whose native APIs have not been implemented.
+## Combined cost and source ownership
 
-## Range-provider contract kit
+```sh
+node benchmark/adoption.js --combined --write
+npm run docs:derive
+```
 
-`test/adoption/range-provider-contract.js` exports `rangeProviderContract(name,
-factory)`. A factory supplies an isolated source seeded with stable keys and
-returns a provider, a snapshot-invalidation control and a remaining-resource
-counter. The same requests and assertions apply to fake and future real adapters;
-an adapter may translate setup, never weaken assertions.
+<!--fact:adoption.combined-->
 
-Requests carry generation, request ID, query identity, source-backed snapshot,
-half-open range or opaque continuation, and finite page/row/byte/work credits.
-The signal is a separate argument. Responses echo every identity and use
-`ready`, `loading`, `error`, `invalidated` or `budget-exhausted`. Errors distinguish
-`unsupported-seek`, `invalid-range`, `invalid-credits`, `cancelled` and `disposed`;
-these are structural test-contract reasons, not newly allocated numeric package
-error codes. Known totals carry a nonnegative value; unknown totals never use
-loaded-row count. Ready responses account for UTF-8 JSON row bytes and preserve
-stable, unique keys. The kit rejects stale responses at the publication boundary,
-tests cancellation before and during requests, and checks idempotent drained
-disposal. Its fake source deliberately declares no live capture or complete
-export capability. Monotone live events, real capture consistency, coordinator
-cache/prefetch limits and complete snapshot exports need future real adapters.
+| Host | Consumer | Rows | Journey ms | Search startup ms | Heap MiB | Peak RSS MiB | Second writes |
+|---|---|---:|---:|---:|---:|---:|---:|
+| node | catalog | 10000 | 811.83 | 382.33 | 63.52 | 267.13 | 0 |
+| node | archive-stock | 75000 | 4188.55 | 2772.52 | 379.03 | 863.14 | 0 |
+| bun | catalog | 10000 | 668.71 | 316.38 | 47.69 | 235.72 | 0 |
+| bun | archive-stock | 75000 | 3368.54 | 2214.10 | 320.48 | 939.01 | 0 |
 
-## Measured reference costs and limitations
+Retained reference adapters: 105 lines; adopted application policy: 182 lines. Third-party search/virtualization mechanisms in the application: 2 → 0.
+
+node/catalog: 0 measured budget losses. node/archive-stock: 0 measured budget losses. bun/catalog: 0 measured budget losses. bun/archive-stock: 0 measured budget losses.
+
+<!--/fact-->
+
+The [combined report](../benchmark/adoption-journey-result.json) records source
+hashes, the exact rg source/import census, work and resource observations,
+wire requests and each unchanged budget comparison. Reference-adapter line
+counts describe retained test implementations; application-policy line counts
+describe the new composition. They are not a claim that those oracle files were
+physically deleted. The qualified application imports no MiniSearch,
+virtual-core, trusted formula runner or private SQL driver bridge. The oracles
+remain executable for regression comparison, and unresolved originals prevent
+general trusted-runner retirement.
+
+Source snapshot reads, compilation, validation, receipts and durable evidence
+have real costs. The focused [formula](../benchmark/formula-result.json),
+[provider](../benchmark/providers-result.json), [durable](../benchmark/durable-result.json),
+[lexical](../benchmark/lexical-result.json) and [collection](../benchmark/collection-result.json)
+reports retain their measured wins, losses and qualification boundaries.
+Combined search startup includes the database read, content hash and index;
+the historical reference index timing alone is a different workload. Heap is a
+sample and RSS is a process high-water mark including assertion instrumentation.
+Exact peak heap remains unmeasured. No benchmark raises a frozen ceiling.
+
+## Retained reference costs
+
+```sh
+node benchmark/adoption.js --write
+npm run docs:derive
+```
 
 <!--fact:adoption.reference-->
 
@@ -76,34 +130,26 @@ Reference-only measurements on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Rade
 
 | Consumer | Rows | Cold index ms | Reload ms | Worst query median ms | Sampled heap MiB | Peak RSS MiB | Search gzip bytes | Grid gzip bytes |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| catalog | 10000 | 146.04 | 63.37 | 7.90 | 146.97 | 301.74 | 5873 | 7053 |
-| archive-stock | 75000 | 1023.79 | 417.81 | 66.37 | 960.71 | 1147.32 | 5873 | 7053 |
+| catalog | 10000 | 125.32 | 54.96 | 5.37 | 146.87 | 303.30 | 5873 | 7053 |
+| archive-stock | 75000 | 1131.99 | 530.33 | 73.40 | 972.90 | 1156.73 | 5873 | 7053 |
 
 catalog: 21 measured limits met, 0 losses, 7 pending measurements. archive-stock: 19 measured limits met, 2 losses, 7 pending measurements.
 
 <!--/fact-->
 
-The full machine-readable report includes SQL plans, statement counts, per-query
-result hashes, startup and recovery times, headless range counts, serialized
-source/index bytes, teardown and each budget assessment. Browser byte figures
-are gzip-compressed, minified ESM bundles of the retained packages. They do not
-measure an application bundle delta. RSS is the process high-water mark; sampled
-heap is a lower bound, so exact peak heap stays pending. Memory covers the entire
-reference process, including source rows, serialized bytes, cold and reloaded
-indexes, query results and bundle instrumentation, rather than an isolated index.
-Each consumer runs in a fresh process. Query cost is the worst per-query median over repeated runs;
-index costs are single cold-build and JSON-reload observations. Formula and
-provider measurements use the small labelled subsets, not the generated larger
-dataset. Those omissions cannot pass a replacement exit.
+Reference search/grid costs measure the retained packages; mounted DOM and
+provider caches belong to native/browser fixtures. The larger historical
+reference exceeds its memory ceilings. MiniSearch cold and JSON-reload tie
+orders differ; the native cold profile preserves its documented deterministic
+order on reload. This is an explicit compatibility boundary, not a silently
+adjusted expected result. Formula references are static trusted modules with
+byte-identical stored originals; disabled malformed sources never execute.
 
-MiniSearch's retained configuration allows fuzzy identifier matches: exact
-identifiers can lead results while similar identifiers also match. Its JSON
-reload also changes some equal-score ordering. The fixtures retain separate cold
-and reload outputs; any native tie policy needs an explicit compatibility or
-migration decision. Neither discrepancy is silently corrected in the reference.
+## External acceptance
 
-The relational diagnosis test records the currently missing integer-rowid key
-and trigger inventory while proving read-only behavior and strict `JD0002`
-refusal from the existing DB registry. A discovery repair updates that diagnosis
-test deliberately; it must preserve the physical reference outputs and frozen
-workload. No real production data or external repository is involved.
+No actual downstream, provider-platform, assistive-technology or native-input
+acceptance is supplied by these synthetic runs. Any later attachment must name
+its anonymous fixture/profile, build revision, actual host, exercised behavior,
+result and reviewing operator separately. Missing evidence remains pending;
+passing another host cannot fill that cell. No customer identity, private path,
+credential or production data belongs in public evidence.

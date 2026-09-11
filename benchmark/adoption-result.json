@@ -12,7 +12,7 @@
     "totalMemoryBytes": 33009852416,
     "osRelease": "7.2.3-200.nobara.fc44.x86_64"
   },
-  "runnerHash": "0f2031094216505e4740eb5cd5b5f03d6b2fdf663e018b23b5f4c94259436789",
+  "runnerHash": "0944e4dde71e23024d9e6505863e1c4aa562b0d8f050ca064c6ed8371b9c08d9",
   "evidence": {
     "automatedReference": "pass",
     "library": "pending",
@@ -28,27 +28,27 @@
       "metrics": {
         "relational": {
           "statements": 9,
-          "queryMs": 0.07626500000003489,
-          "recoveryMs": 33.323758999999995
+          "queryMs": 0.08241099999997914,
+          "recoveryMs": 33.05626600000005
         },
         "search": {
-          "startupMs": 329.562679,
-          "coldIndexMs": 146.03840100000002,
-          "warmIndexMs": 63.37383599999998,
-          "queryMs": 7.903240000000039,
+          "startupMs": 286.631957,
+          "coldIndexMs": 125.32214700000002,
+          "warmIndexMs": 54.96312999999998,
+          "queryMs": 5.372025000000008,
           "sourceBytes": 2606620,
           "indexBytes": 1915119,
           "browserGzipBytes": 5873
         },
         "grid": {
-          "interactionMs": 0.09204899999997451,
+          "interactionMs": 0.07877900000005411,
           "mountedCells": null,
           "loadedRows": null,
           "loadedBytes": null,
           "browserGzipBytes": 7053
         },
         "formulas": {
-          "evaluationMs": 10.699145999999928,
+          "evaluationMs": 12.111590000000092,
           "errors": 1,
           "originalByteChanges": 0
         },
@@ -60,10 +60,10 @@
           "unresolvedResends": null
         },
         "resources": {
-          "sampledHeapBytes": 154108880,
-          "peakRssBytes": 316395520,
+          "sampledHeapBytes": 154005696,
+          "peakRssBytes": 318033920,
           "peakHeapBytes": null,
-          "teardownMs": 0.06739600000003065,
+          "teardownMs": 0.07773200000008273,
           "remainingHandles": null
         }
       },
@@ -78,13 +78,13 @@
           {
             "metric": "queryMs",
             "limit": 100,
-            "value": 0.07626500000003489,
+            "value": 0.08241099999997914,
             "status": "pass"
           },
           {
             "metric": "recoveryMs",
             "limit": 5000,
-            "value": 33.323758999999995,
+            "value": 33.05626600000005,
             "status": "pass"
           }
         ],
@@ -92,25 +92,25 @@
           {
             "metric": "startupMs",
             "limit": 15000,
-            "value": 329.562679,
+            "value": 286.631957,
             "status": "pass"
           },
           {
             "metric": "coldIndexMs",
             "limit": 15000,
-            "value": 146.03840100000002,
+            "value": 125.32214700000002,
             "status": "pass"
           },
           {
             "metric": "warmIndexMs",
             "limit": 15000,
-            "value": 63.37383599999998,
+            "value": 54.96312999999998,
             "status": "pass"
           },
           {
             "metric": "queryMs",
             "limit": 100,
-            "value": 7.903240000000039,
+            "value": 5.372025000000008,
             "status": "pass"
           },
           {
@@ -136,7 +136,7 @@
           {
             "metric": "interactionMs",
             "limit": 16,
-            "value": 0.09204899999997451,
+            "value": 0.07877900000005411,
             "status": "pass"
           },
           {
@@ -168,7 +168,7 @@
           {
             "metric": "evaluationMs",
             "limit": 1000,
-            "value": 10.699145999999928,
+            "value": 12.111590000000092,
             "status": "pass"
           },
           {
@@ -220,13 +220,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 268435456,
-            "value": 154108880,
+            "value": 154005696,
             "status": "pass"
           },
           {
             "metric": "peakRssBytes",
             "limit": 536870912,
-            "value": 316395520,
+            "value": 318033920,
             "status": "pass"
           },
           {
@@ -238,7 +238,7 @@
           {
             "metric": "teardownMs",
             "limit": 1000,
-            "value": 0.06739600000003065,
+            "value": 0.07773200000008273,
             "status": "pass"
           },
           {
@@ -252,73 +252,73 @@
       "queries": [
         {
           "text": "green tea",
-          "medianMs": 7.903240000000039,
+          "medianMs": 5.372025000000008,
           "matches": 2500,
           "resultHash": "5937aa033a7190b698a09a20aefbef1dee7fdf95138fce34610f78e4443c7fe9"
         },
         {
           "text": "gren tea",
-          "medianMs": 4.436867999999947,
+          "medianMs": 3.5052709999999934,
           "matches": 2500,
           "resultHash": "14fe842517fbec9218bf9aadcb1f5b979eb8a34a450ed3957876006391ac023b"
         },
         {
           "text": "0007",
-          "medianMs": 0.2893469999999638,
+          "medianMs": 0.1968090000000302,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "0000000007",
-          "medianMs": 3.0452360000000454,
+          "medianMs": 2.409271999999987,
           "matches": 1002,
           "resultHash": "f9d5f6cef60acf71d13c8eadb51ac79024e5307a4a60ae2717495de803290b72"
         },
         {
           "text": "café",
-          "medianMs": 2.8194429999999784,
+          "medianMs": 2.718733000000043,
           "matches": 5000,
           "resultHash": "75ef8cfc32b3a6874f6cf76980b2ab855e58094d0a66f5fb555314cb7458f3f0"
         },
         {
           "text": "cafe",
-          "medianMs": 3.019674000000009,
+          "medianMs": 2.473314999999957,
           "matches": 5000,
           "resultHash": "cbed7c3bc287eee3bb98b8cc40079cd425ec7a995acdd9ebd95bc13af5687c7b"
         },
         {
           "text": "抹茶",
-          "medianMs": 0.8426899999999478,
+          "medianMs": 0.8244609999999852,
           "matches": 2500,
           "resultHash": "9d075282a010ab56c2d52f1fa7aa8feb7ffcdde26a436633ed8bb6944c55d295"
         },
         {
           "text": "grüner",
-          "medianMs": 0.8382910000000265,
+          "medianMs": 0.750710999999967,
           "matches": 2500,
           "resultHash": "9e3ec912267270a075bf6344c561670faef6b5501b770aff76d5684e22bdf98a"
         },
         {
           "text": "salt pepper",
-          "medianMs": 0.016621999999983927,
+          "medianMs": 0.014806000000021413,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "green missing",
-          "medianMs": 0.6861780000000408,
+          "medianMs": 0.5696159999999963,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "",
-          "medianMs": 0.0033530000000610016,
+          "medianMs": 0.002793999999994412,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "007-A",
-          "medianMs": 0.015224999999986721,
+          "medianMs": 0.01236200000005283,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         }
@@ -327,8 +327,8 @@
         {
           "offset": 0,
           "nextOffset": 44,
-          "initializationMs": 2.807431000000065,
-          "interactionMs": 0.09204899999997451,
+          "initializationMs": 2.949414000000047,
+          "interactionMs": 0.07877900000005411,
           "logicalRows": 10000,
           "virtualRows": 23,
           "potentialCells": 276
@@ -336,8 +336,8 @@
         {
           "offset": 440,
           "nextOffset": 484,
-          "initializationMs": 1.1231669999999667,
-          "interactionMs": 0.057338999999956286,
+          "initializationMs": 1.195871000000011,
+          "interactionMs": 0.025702000000023872,
           "logicalRows": 10000,
           "virtualRows": 33,
           "potentialCells": 396
@@ -345,8 +345,8 @@
         {
           "offset": 219978,
           "nextOffset": 220022,
-          "initializationMs": 1.0141479999999774,
-          "interactionMs": 0.027238000000011198,
+          "initializationMs": 0.5764589999999998,
+          "interactionMs": 0.03757399999994959,
           "logicalRows": 10000,
           "virtualRows": 35,
           "potentialCells": 420
@@ -354,8 +354,8 @@
         {
           "offset": 439560,
           "nextOffset": 439604,
-          "initializationMs": 0.4411800000000312,
-          "interactionMs": 0.025351999999998043,
+          "initializationMs": 0.5404920000000857,
+          "interactionMs": 0.02612099999998918,
           "logicalRows": 10000,
           "virtualRows": 21,
           "potentialCells": 252
@@ -518,27 +518,27 @@
       "metrics": {
         "relational": {
           "statements": 9,
-          "queryMs": 0.07843000000002576,
-          "recoveryMs": 30.53336999999965
+          "queryMs": 0.07347200000003795,
+          "recoveryMs": 31.00932499999999
         },
         "search": {
-          "startupMs": 2097.809369,
-          "coldIndexMs": 1023.787061,
-          "warmIndexMs": 417.8107470000002,
-          "queryMs": 66.3714399999999,
+          "startupMs": 2404.365653,
+          "coldIndexMs": 1131.986223,
+          "warmIndexMs": 530.3268869999999,
+          "queryMs": 73.39580100000012,
           "sourceBytes": 20021733,
           "indexBytes": 15820123,
           "browserGzipBytes": 5873
         },
         "grid": {
-          "interactionMs": 5.078139000000192,
+          "interactionMs": 4.937690000000657,
           "mountedCells": null,
           "loadedRows": null,
           "loadedBytes": null,
           "browserGzipBytes": 7053
         },
         "formulas": {
-          "evaluationMs": 10.225072000000182,
+          "evaluationMs": 10.330807999999706,
           "errors": 1,
           "originalByteChanges": 0
         },
@@ -550,10 +550,10 @@
           "unresolvedResends": null
         },
         "resources": {
-          "sampledHeapBytes": 1007375520,
-          "peakRssBytes": 1203056640,
+          "sampledHeapBytes": 1020156040,
+          "peakRssBytes": 1212923904,
           "peakHeapBytes": null,
-          "teardownMs": 0.08108400000037363,
+          "teardownMs": 0.06816400000025169,
           "remainingHandles": null
         }
       },
@@ -568,13 +568,13 @@
           {
             "metric": "queryMs",
             "limit": 250,
-            "value": 0.07843000000002576,
+            "value": 0.07347200000003795,
             "status": "pass"
           },
           {
             "metric": "recoveryMs",
             "limit": 5000,
-            "value": 30.53336999999965,
+            "value": 31.00932499999999,
             "status": "pass"
           }
         ],
@@ -582,25 +582,25 @@
           {
             "metric": "startupMs",
             "limit": 45000,
-            "value": 2097.809369,
+            "value": 2404.365653,
             "status": "pass"
           },
           {
             "metric": "coldIndexMs",
             "limit": 45000,
-            "value": 1023.787061,
+            "value": 1131.986223,
             "status": "pass"
           },
           {
             "metric": "warmIndexMs",
             "limit": 45000,
-            "value": 417.8107470000002,
+            "value": 530.3268869999999,
             "status": "pass"
           },
           {
             "metric": "queryMs",
             "limit": 250,
-            "value": 66.3714399999999,
+            "value": 73.39580100000012,
             "status": "pass"
           },
           {
@@ -626,7 +626,7 @@
           {
             "metric": "interactionMs",
             "limit": 32,
-            "value": 5.078139000000192,
+            "value": 4.937690000000657,
             "status": "pass"
           },
           {
@@ -658,7 +658,7 @@
           {
             "metric": "evaluationMs",
             "limit": 5000,
-            "value": 10.225072000000182,
+            "value": 10.330807999999706,
             "status": "pass"
           },
           {
@@ -710,13 +710,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 805306368,
-            "value": 1007375520,
+            "value": 1020156040,
             "status": "fail"
           },
           {
             "metric": "peakRssBytes",
             "limit": 1073741824,
-            "value": 1203056640,
+            "value": 1212923904,
             "status": "fail"
           },
           {
@@ -728,7 +728,7 @@
           {
             "metric": "teardownMs",
             "limit": 2000,
-            "value": 0.08108400000037363,
+            "value": 0.06816400000025169,
             "status": "pass"
           },
           {
@@ -742,73 +742,73 @@
       "queries": [
         {
           "text": "green tea",
-          "medianMs": 48.51124599999957,
+          "medianMs": 73.39580100000012,
           "matches": 18750,
           "resultHash": "338b7fd23e15009d8892f6f4cb3faf6d17a1f32473b8de40168318f208f5d967"
         },
         {
           "text": "gren tea",
-          "medianMs": 48.92148700000007,
+          "medianMs": 56.433472000000165,
           "matches": 18750,
           "resultHash": "3bca7cd3d1ca73a857763fcb5f09be15013c517df5785f69dbc301e6bc3bbe4e"
         },
         {
           "text": "0007",
-          "medianMs": 11.584788000000117,
+          "medianMs": 11.59630900000002,
           "matches": 5000,
           "resultHash": "53d0e7ea2c7ef7407b352ecdc3173fc64e5f3c08f6d5cbb815560fb42ec0d451"
         },
         {
           "text": "0000000007",
-          "medianMs": 2.9263679999999113,
+          "medianMs": 3.1578870000003008,
           "matches": 1002,
           "resultHash": "6583f20453ddccd309bb224c5bf5f0b8a326991702656bcfda4eabca61905d03"
         },
         {
           "text": "café",
-          "medianMs": 43.6014210000003,
+          "medianMs": 58.966499999999996,
           "matches": 37500,
           "resultHash": "b97b451f8caa2a97b52035589d2a4be8a45daa817ddd80d29916d4085edfb6c7"
         },
         {
           "text": "cafe",
-          "medianMs": 59.76073099999985,
+          "medianMs": 41.360735000000204,
           "matches": 37500,
           "resultHash": "9537f1cb6bbfbb8ba66f444db83d661e8dbe30fae6f5dd96f5d7f87f203a7596"
         },
         {
           "text": "抹茶",
-          "medianMs": 18.243407999999818,
+          "medianMs": 18.594281000000137,
           "matches": 18750,
           "resultHash": "acda51bde63d1136570f5008af363ef28cee3237d2e57ac947846d8a2c580e6d"
         },
         {
           "text": "grüner",
-          "medianMs": 19.456529000000046,
+          "medianMs": 18.502720999999838,
           "matches": 18750,
           "resultHash": "27548e4e99e8a19cb4d718b411e96d28fe87c492e8a745e3fe8ad314ac7d0869"
         },
         {
           "text": "salt pepper",
-          "medianMs": 0.015852999999879103,
+          "medianMs": 0.015295000000151049,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "green missing",
-          "medianMs": 6.441906000000017,
+          "medianMs": 7.94926200000009,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "",
-          "medianMs": 0.0028640000000450527,
+          "medianMs": 0.0032829999991008663,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         },
         {
           "text": "007-A",
-          "medianMs": 66.3714399999999,
+          "medianMs": 65.40742800000044,
           "matches": 0,
           "resultHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
         }
@@ -817,8 +817,8 @@
         {
           "offset": 0,
           "nextOffset": 36,
-          "initializationMs": 7.623949000000266,
-          "interactionMs": 3.853704000000107,
+          "initializationMs": 6.230988000000252,
+          "interactionMs": 3.57860299999993,
           "logicalRows": 75000,
           "virtualRows": 24,
           "potentialCells": 576
@@ -826,8 +826,8 @@
         {
           "offset": 180,
           "nextOffset": 216,
-          "initializationMs": 5.604734000000008,
-          "interactionMs": 5.078139000000192,
+          "initializationMs": 4.88433299999997,
+          "interactionMs": 4.937690000000657,
           "logicalRows": 75000,
           "virtualRows": 29,
           "potentialCells": 696
@@ -835,8 +835,8 @@
         {
           "offset": 3600,
           "nextOffset": 3636,
-          "initializationMs": 3.337796000000253,
-          "interactionMs": 3.8995890000001054,
+          "initializationMs": 3.7089249999999083,
+          "interactionMs": 3.6310539999994944,
           "logicalRows": 75000,
           "virtualRows": 31,
           "potentialCells": 744

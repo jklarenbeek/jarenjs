@@ -525,22 +525,16 @@ external-write cutover requires the receipt/reconciliation proof. Native
 formula authoring can ship before legacy migration; retiring the trusted
 runner waits for explicit resolution of the saved corpus.
 
-- [ ] **Reproducible replacement evidence across applications.** Qualify native
-  replacements against the [frozen synthetic instrument](ADOPTION-EVIDENCE.md),
-  which supplies the source/API census, retained oracles, independent consumer
-  workloads and fixed budgets. Real labelled and saved-source corpora remain
-  pending alongside native comparisons. Publish capability/refusal and
-  behavior matrices, correctness/recovery results, source removed versus host
-  policy retained, query/statement counts, startup and interaction latency,
-  peak resident/heap memory and compressed browser bytes. Freeze workload and
-  budgets before comparing; do not extrapolate a small fixture or increase a
-  limit to conceal a regression. Qualify applicable public exports through
-  installed npm consumers, Node, Bun, compiled standalone binaries and real
-  browsers, including offline/restart and teardown. Each replacement exits
-  only when the application can delete the old mechanism through public APIs,
-  preserve its existing data and user-visible behavior (or an explicitly
-  accepted migration), and keep its product policy; implementation, consumer
-  acceptance and platform/manual evidence are separate completion claims.
+- [ ] **External acceptance and final adoption-program reconciliation.** The
+  [combined synthetic journeys](ADOPTION-EVIDENCE.md) now exercise existing-file
+  adoption, query/search, reviewed writes, provider snapshots and interrupted
+  effects through installed Node/Bun consumers, Linux standalone executables
+  and the browser matrix. Reconcile all capability claims with their specific
+  evidence before program close. Real labelled/saved-source corpora, actual
+  provider-platform guarantees, downstream cutover, manual accessibility,
+  other operating systems and exact peak heap still require their own evidence.
+  Keep original sources and retained oracles until their qualified retirement;
+  synthetic passes never authorize a downstream deletion or increase a budget.
 
 ## @jarenjs/ai
 

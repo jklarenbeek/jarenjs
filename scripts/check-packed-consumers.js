@@ -62,6 +62,7 @@ import { runNpm } from './lib/portable.js';
 import { importSubpaths } from './lib/exports.js';
 import { tarExtractArgs } from './lib/tar-extract-args.js';
 import { adoptionRows } from './lib/adoption.js';
+import { writeAdoptionConsumer, qualifyAdoptionRuntime } from './lib/adoption-journey.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const requireBun = process.argv.includes('--require-bun');
@@ -810,6 +811,11 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     const durableResult = spawnSync(runtime, [durableFile], { cwd: compositionDir, encoding: 'utf8' });
     if (durableResult.status !== 0) { failures++; console.error(`Durable composition (${runtime}): ${durableResult.stderr}`); }
     else console.log(`✓ durable composition — receipts, reconciliation, runs, bounded observation (${runtime})`);
+  }
+  const journey = writeAdoptionConsumer(compositionDir, root);
+  for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
+    qualifyAdoptionRuntime(runtime, [journey], compositionDir, runtime === 'bun' ? 'packed-bun' : 'packed-node');
+    console.log(`✓ combined adoption — two full workloads, abrupt remote-success termination, recovery and zero-write replay (${runtime})`);
   }
 }
 finally {

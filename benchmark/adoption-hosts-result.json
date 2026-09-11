@@ -1,0 +1,512 @@
+{
+  "format": "jaren-adoption-hosts/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "platform": "linux",
+  "arch": "x64",
+  "sourceHashes": {
+    "scripts/check-adoption-journeys.js": "92c55f01bcd68e2c4e3d70ea1d162c8e326d5c40a249c5d0fb719afcb0a85ded",
+    "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
+    "test/consumer/journey.js": "0870f6365a6a60829a04c9fa12dc45639bb1bdde60175ccdc3ce0d94365411e1",
+    "packages/website/src/examples/adoption.js": "41d7ea964579b686b8265f91549692de2dee4b94e7e7df629e7ea91bf8c67085",
+    "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
+    "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
+    "packages/db/src/jobs.js": "690c2e0645cec9a69d1c7a9b2ba9b3e8f68e8ed63562834713eea4c579bd0dff",
+    "packages/db/src/store.js": "f940e7be5bc66d9b0a379b9c9ae64515b3e9dac9ff8b44aa30a919ba4fb90d4c"
+  },
+  "report": [
+    {
+      "label": "node",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 374.083455,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 802.254304,
+          "teardownMs": 0.2590370000000348,
+          "runtime": "v24.19.0",
+          "heapBytes": 66810976,
+          "peakRssBytes": 280674304
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2721.5044769999995,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 4164.153603,
+          "teardownMs": 0.45996699999977864,
+          "runtime": "v24.19.0",
+          "heapBytes": 322781072,
+          "peakRssBytes": 890880000
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 83.42411899999996,
+          "teardownMs": 0.619762000000037,
+          "runtime": "v24.19.0",
+          "heapBytes": 22404888,
+          "peakRssBytes": 115646464
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0
+    },
+    {
+      "label": "bun",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 315.917953,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 657.569296,
+          "teardownMs": 0.3300649999999905,
+          "runtime": "1.4.0",
+          "heapBytes": 87126585,
+          "peakRssBytes": 291123200
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2132.732038,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 3301.6631039999997,
+          "teardownMs": 0.3481529999999111,
+          "runtime": "1.4.0",
+          "heapBytes": 335935619,
+          "peakRssBytes": 988241920
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 70.82012700000001,
+          "teardownMs": 0.5863779999999963,
+          "runtime": "1.4.0",
+          "heapBytes": 8258450,
+          "peakRssBytes": 81661952
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0
+    },
+    {
+      "label": "bun-executable",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 320.5466819999999,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 678.2288649999999,
+          "teardownMs": 0.11551600000007056,
+          "runtime": "1.4.0",
+          "heapBytes": 95223110,
+          "peakRssBytes": 298119168
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2387.180279,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 3551.530247,
+          "teardownMs": 0.9830709999996543,
+          "runtime": "1.4.0",
+          "heapBytes": 346943982,
+          "peakRssBytes": 1065431040
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 70.51855799999998,
+          "teardownMs": 0.5587920000000111,
+          "runtime": "1.4.0",
+          "heapBytes": 7209188,
+          "peakRssBytes": 67248128
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0,
+      "binaryBytes": 84325576
+    },
+    {
+      "label": "node-executable",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 424.81209399999995,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 848.5269989999999,
+          "teardownMs": 0.24122799999997824,
+          "runtime": "v24.19.0",
+          "heapBytes": 96757736,
+          "peakRssBytes": 289939456
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2653.444643,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 4146.361254,
+          "teardownMs": 0.2433229999996911,
+          "runtime": "v24.19.0",
+          "heapBytes": 318647032,
+          "peakRssBytes": 853069824
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 81.80040400000001,
+          "teardownMs": 0.5744360000000199,
+          "runtime": "v24.19.0",
+          "heapBytes": 18608536,
+          "peakRssBytes": 83550208
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0,
+      "binaryBytes": 127995072
+    }
+  ]
+}

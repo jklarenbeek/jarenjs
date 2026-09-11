@@ -16,6 +16,11 @@ import { referenceSearch, referenceGrid, searchOptions } from '../test/adoption/
 import { readProviderTranscript } from '../test/adoption/provider-oracle.js';
 import { trustedBodies, SKIP } from '../test/adoption/trusted-bodies.js';
 
+if (process.argv.includes('--combined')) {
+  await import('./adoption-journey.js');
+  process.exit(0);
+}
+
 const manifest = readAdoption('manifest.json');
 verifyFreeze(manifest);
 const root = fileURLToPath(new URL('../', import.meta.url));
