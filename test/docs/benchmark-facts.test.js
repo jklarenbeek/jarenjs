@@ -61,7 +61,7 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
     .map(([name, bytes]) => [String(Math.round(Number(bytes) / 1000)), name]));
 
   it('has figures distinctive enough to search for', () => {
-    assert.strictEqual(measured.size, 18, `${measured.size} measured figures`);
+    assert.strictEqual(measured.size, Object.keys(baseline.bundles).length + Object.keys(baseline.chain).length, `${measured.size} distinct measured figures`);
     for (const figure of measured.keys()) assert.match(figure, /^\d{1,3},\d{3}$/);
   });
 

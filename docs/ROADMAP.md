@@ -418,74 +418,21 @@ qualify the retained cold ranking profile on frozen synthetic corpora.
 
 ## Saved formulas and reviewed rules (cross-package)
 
-The query compiler already has named pure functions/operator packs, dependency
-reports and execution limits
-([QUERY-FORMAT §8.12](../packages/json/docs/QUERY-FORMAT.md#812-registered-functions-operators-collations-and-execution-limits));
-calc already parses and closure-compiles numeric expressions. Reuse those
-engines and core math/finance/date/unit kernels. The missing application contract
-below belongs across json/linq and opt-in forms/app authoring; database writes
-remain behind validated domain commands. No lower-layer package imports calc
-or an application component to obtain a shared parser or primitive.
+Versioned native profiles, bounded per-record outcomes/dependencies, explicit
+subset migration, terminating workers and reusable reviewed-rule authoring are
+implemented in [FORMULA-FORMAT](../packages/json/docs/FORMULA-FORMAT.md) and
+[@jarenjs/rules](../components/rules/README.md). Reviewed writes use the existing
+validated command/receipt transaction with current-authority and snapshot checks.
 
-- [ ] **Versioned saved formulas over structured records.** Define a reusable
-  formula document/profile with language version, input/result schemas, named
-  immutable bindings, declared helper names/versions and compile diagnostics
-  that identify a formula and source/document location. It must cover nested
-  optional fields, strings, booleans, arrays, branching and collection
-  derivations as well as numeric arithmetic; calc's numeric scope alone cannot
-  express a catalog formula. Prefer the existing query document as execution
-  representation and, if a text front door is justified, lower it to that same
-  representation with a specified round trip. Define missing/null/coercion,
-  non-finite/overflow, rounding and formatting semantics; locale, clock and
-  exchange/unit data are explicit inputs or named pure host capabilities.
-  Compile/cache by document plus capability/schema identity, refuse missing
-  helpers or incompatible versions, and keep all executors CSP-safe. Product
-  helpers such as a shop's price step or field vocabulary stay in its profile.
-- [ ] **Per-record results, dependencies and bounded evaluation.** Build a
-  shared batch evaluator around compiled formulas with distinct JSON outcomes
-  for value, skip, explanation and error; null, empty sequence and a skipped
-  write must not collapse into one state, and a host's Symbol-valued `SKIP`
-  sentinel must not leak into persisted documents. A failing cell/target must
-  produce a bounded diagnostic and accurate aggregate counts while independent
-  rows continue; disabled targets do not compile or run. Inputs stay immutable,
-  evaluation receives no implicit global/IO access, and caches account for
-  schema/helper/input revisions. Extend existing dependency metadata only where
-  needed for field-sensitive invalidation and explicitly declared computed-
-  field dependencies, including cycle refusal and deterministic evaluation
-  order. Reuse query step/depth limits while exposing their actual scope:
-  intermediate allocations and arbitrary host functions are not bounded by an
-  output cap. Hard deadlines need an injected worker/isolate with termination,
-  stale-result fencing and cleanup, never a same-thread timeout promise.
-- [ ] **Explicit migration from trusted local JavaScript.** Saved column and
-  rule bodies can contain statements, optional chaining, `Intl`, local
-  variables and arbitrary trusted JavaScript, not just calculator expressions.
-  Inventory each saved source and helper dependency; preserve original text,
-  IDs, labels, enabled state and storage version in an exportable migration
-  record. A converter may accept only a documented subset with differential
-  fixtures for values, display text, errors, skip/explanation and rounding;
-  every other body needs a precise refusal and explicit rewrite/review. Keep
-  the application's existing trusted runner only as an explicitly selected
-  compatibility host while migration is incomplete, without adding `eval` or
-  `new Function` to Jaren or presenting that host as a sandbox. Prove repeated
-  migration and rollback preserve originals and later edits. The native exit
-  requires every supported saved formula to be converted or explicitly
-  resolved, with no silent deletion, automatic source reinterpretation or new
-  server execution of legacy JavaScript.
-- [ ] **Reusable reviewed-rule planning and authoring.** Compose formulas,
-  query scopes and forms into a schema-driven editor/preview and a DOM-free
-  plan contract: immutable dataset/rule revisions, enabled targets, stable
-  entity/field identity, before/proposed values, explanations, per-stage counts,
-  report-only mode and visible diagnostics. Group/entity deduplication,
-  writable fields, units, provenance protection and conflicting-target policy
-  are declared by the application; siblings and group context are explicit
-  data, not hidden database reads. Store the plan and selected changes, then
-  revalidate authority, expected revisions and admissible values inside the
-  authoritative transaction; preview evaluation never grants write authority.
-  Reuse existing contract settlement and the domain receipt work below for
-  replay and audit. Acceptance includes row/target failures, stale previews,
-  no-op writes, conflicting changes, selection across virtual pages and a
-  saved-formula editor that preserves draft text/caret; this is an application
-  composition over existing engines, not another formula or rule evaluator.
+- [ ] Resolve real saved-source corpora with application owners. Statements,
+  optional chaining, Intl formatting and application helper/result policies
+  require explicit manual rewrites or further measured converters; retain the
+  application-selected trusted runner until every original is resolved.
+- [ ] Qualify real downstream adoption, physical-device behavior and manual
+  accessibility. Automated synthetic Node/Bun and browser results do not prove
+  those host/operator outcomes.
+- [ ] Consider a textual formula front door only after a measured corpus
+  justifies its grammar and a round trip into the existing Query representation.
 
 ## Provider execution and durable domain workflows (cross-package)
 

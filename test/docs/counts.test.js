@@ -37,10 +37,10 @@ const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
 
 /** The count a sentence states, read back as a number (-1 when absent). */
 function statedCount(text, before, after) {
-  const pattern = new RegExp(`${before}\\s*([a-z-]+)\\s*${after}`, 'i');
-  const match = pattern.exec(text);
+  const pattern = new RegExp(`${before}\\s*([a-z0-9-]+)\\s*${after}`, 'i');
+  const match = pattern.exec(text.replace(/<!--[^>]*-->/g, ''));
   assert.ok(match, `no sentence matching /${before} … ${after}/`);
-  return WORDS.indexOf(match[1].toLowerCase());
+  return /^\d+$/.test(match[1]) ? Number(match[1]) : WORDS.indexOf(match[1].toLowerCase());
 }
 
 const chartTypes = listDir('components/charts/src/types').filter((f) => f.endsWith('.js'));

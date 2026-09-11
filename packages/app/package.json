@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/app",
   "private": false,
-  "version": "0.82.0",
+  "version": "0.83.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -16,7 +16,11 @@
       "default": "./src/index.js"
     },
     "./schemas/*": "./schemas/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./formula": {
+      "types": "./dist/types/formula.d.ts",
+      "default": "./src/formula.js"
+    }
   },
   "files": [
     "dist/types/",
@@ -54,8 +58,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.82.0",
-    "@jarenjs/json": "^0.82.0",
-    "@jarenjs/view": "^0.82.0"
+    "@jarenjs/core": "^0.83.0",
+    "@jarenjs/json": "^0.83.0",
+    "@jarenjs/view": "^0.83.0"
   }
 }

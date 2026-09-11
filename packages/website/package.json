@@ -40,7 +40,8 @@
     "@jarenjs/studio": "file:../../components/studio",
     "@jarenjs/validate": "file:../validate",
     "@jarenjs/view": "file:../view",
-    "@jarenjs/collection": "file:../../components/collection"
+    "@jarenjs/collection": "file:../../components/collection",
+    "@jarenjs/rules": "file:../../components/rules"
   },
   "devDependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",

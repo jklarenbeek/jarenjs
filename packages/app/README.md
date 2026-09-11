@@ -265,6 +265,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/app/schemas/jaren-app.draft-07.schema.json` | schema | — |
 | `@jarenjs/app/schemas/jaren-app.schema.json` | schema | — |
 | `@jarenjs/app/package.json` | metadata | — |
+| `@jarenjs/app/formula` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
@@ -281,3 +282,7 @@ DOM event bindings and widgets.
 `createArrayRangeProvider` and `createCollectionCoordinator` provide injected collection coordination and complete snapshot output; see [the provider contract](docs/COLLECTION-PROVIDER.md).
 
 `@jarenjs/app/search` owns an injected worker and a private resident index; see [search ownership](docs/SEARCH.md) for cancellation, progress and drained disposal.
+
+## Terminating formula workers
+
+`@jarenjs/app/formula` exports `createFormulaResource`, an injected worker lifecycle with bounded admission, generation fencing, hard termination and draining disposal. Hosts supply actual terminating isolates; same-thread helpers have no hard deadline. See the [formula resource contract](../json/docs/FORMULA-FORMAT.md#batches-and-isolation).

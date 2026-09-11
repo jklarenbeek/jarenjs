@@ -47,7 +47,7 @@ SQL — and nothing is hidden: the chain's `explain()` shows the document
 it sent, and the store's `explain(document)` shows what that became,
 `SELECT … FROM "User" WHERE "age" > ? ORDER BY "name"`.
 
-Coverage: <!--fact:coverage.pens-->14 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
+Coverage: <!--fact:coverage.pens-->15 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
 
 ## What you gain
 
@@ -729,6 +729,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/linq/jtlt` | JavaScript | declared |
 | `@jarenjs/linq/messages` | JavaScript | declared |
 | `@jarenjs/linq/ai` | JavaScript | declared |
+| `@jarenjs/linq/formula` | JavaScript | declared |
 <!--/fact-->
 
 Explicit cross-provider joins use `federate({ sources, maxRows, maxBytes,
@@ -737,3 +738,7 @@ including successive fluent `.join()` calls, preserve the engine's result
 order while sharing cumulative admission credits. See
 [QUERY-PEN §12.1](docs/QUERY-PEN.md#121-the-federation-boundary-federate) for
 planning, buffering limits and cleanup guarantees.
+
+## Saved formula documents
+
+`@jarenjs/linq/formula` exports `defineFormula` for immutable JSON Query profiles with revision, bindings and schema/helper references. See [FORMULA-PEN](docs/FORMULA-PEN.md); execution remains in json/formula.

@@ -658,6 +658,13 @@ for (const [pen, probe] of Object.entries(AUTHORED_PEN_PROBES)) {
   console.log(`Tree-shaking passed (${pen}: ${bytes} bytes; no target engine or chain modules).`);
 }
 
+const formulaPen = await build({ stdin: { contents: "import { defineFormula } from '@jarenjs/linq/formula'; export const doc = defineFormula('amount', { $mul: ['$.price', '$.quantity'] });", resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', minify: true, metafile: true });
+const formulaPenBytes = formulaPen.outputFiles[0].contents.length;
+if (formulaPenBytes > 32768) throw new Error('Formula authoring exceeds its 32 KiB bundle ceiling');
+if (Object.entries(Object.values(formulaPen.metafile.outputs)[0].inputs).some(([file, info]) => info.bytesInOutput > 0 && /json\/src\/query\/|packages\/(view|app|db|validate)|components\//.test(file))) throw new Error('Formula authoring pulled an evaluator or component into its output');
+linqBundles.set('formula', formulaPenBytes);
+console.log(`Formula authoring tree shaking passed (${formulaPenBytes} bytes).`);
+
 // ---- the measured baseline (D11) ----
 // Every figure this repository publishes about a `@jarenjs/linq` subpath
 // — docs/CONSUMING.md's rounded table, each pen document's `## 7. Cost`
@@ -771,3 +778,9 @@ for (const [entry, forbidden] of [
   if (retained.some(([file, info]) => info.bytesInOutput > 0 && forbidden.test(file))) throw new Error('Provider composition violates owner isolation');
   console.log(`Provider owner isolation passed (${bundle.outputFiles[0].contents.length} bytes).`);
 }
+
+const ruleEngine = await build({ stdin: { contents: "export { createRuleEditor } from '@jarenjs/rules';", resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', minify: true, metafile: true });
+if (Object.keys(ruleEngine.metafile.inputs).some((file) => /packages\/(json|app|forms|db|linq)|src\/component\//.test(file))) throw new Error('Rule engine imports orchestration or an evaluator');
+const formulaEngine = await build({ stdin: { contents: "export { compileFormula } from '@jarenjs/json/formula';", resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', minify: true, metafile: true });
+if (Object.keys(formulaEngine.metafile.inputs).some((file) => /components\/|packages\/(app|view|db|validate)/.test(file))) throw new Error('Formula engine reverses dependency direction');
+console.log(`Rule/formula tree shaking passed (${ruleEngine.outputFiles[0].contents.length}/${formulaEngine.outputFiles[0].contents.length} bytes).`);

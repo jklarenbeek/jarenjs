@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/json",
   "private": false,
-  "version": "0.82.0",
+  "version": "0.83.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -86,7 +86,23 @@
       "default": "./src/xquery/index.js"
     },
     "./schemas/*": "./schemas/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./formula": {
+      "types": "./dist/types/formula/index.d.ts",
+      "default": "./src/formula/index.js"
+    },
+    "./formula/batch": {
+      "types": "./dist/types/formula/batch.d.ts",
+      "default": "./src/formula/batch.js"
+    },
+    "./formula/migrate": {
+      "types": "./dist/types/formula/migrate.d.ts",
+      "default": "./src/formula/migrate.js"
+    },
+    "./rules": {
+      "types": "./dist/types/rules/index.d.ts",
+      "default": "./src/rules/index.js"
+    }
   },
   "scripts": {
     "build": "npm run build:types",
@@ -94,6 +110,6 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.82.0"
+    "@jarenjs/core": "^0.83.0"
   }
 }

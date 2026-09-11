@@ -1402,3 +1402,22 @@ Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 Synthetic local SQLite commands and interrupted multi-leg effects. Baseline executes the same domain/outbox work without a receipt; durable execution adds validation, authorization and immutable replay. Limits are fixed acceptance ceilings, not performance claims. Real providers, downstream acceptance, native executables, PostgreSQL and operator reconciliation are pending.
 
 <!--/fact-->
+
+## Saved formulas
+
+`npm run benchmark:formulas` compares bounded native Query evaluation with the retained arithmetic loop and qualifies preserved source migrations and receipt replay. Frozen fixture hashes and budgets remain unchanged; unsupported sources remain review items.
+
+<!--fact:formula.measurements-->
+
+Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+
+| Consumer | Rows | Static arithmetic ms | Native formula ms | Added cost ratio | Errors | Page rows | Heap / RSS MiB |
+|---|---:|---:|---:|---:|---:|---:|---|
+| catalog | 10000 | 0.75 | 224.64 | 297.63x | 0 | 256 | 31.20 / 110.09 |
+| archive-stock | 75000 | 2.29 | 1641.62 | 715.60x | 0 | 256 | 103.36 / 239.91 |
+
+Sources: 8 preserved, 2 converted, 5 require review, 1 disabled. Original byte changes: 0; repeat migration changes: 0. Preview writes: 0; replay writes/revisions: 0/0.
+
+Synthetic public APIs only. Static arithmetic is faster; native costs include compilation, immutable snapshots, bounded outcomes and dependency memoization. Real saved-corpus, manual and physical-device acceptance remains pending.
+
+<!--/fact-->

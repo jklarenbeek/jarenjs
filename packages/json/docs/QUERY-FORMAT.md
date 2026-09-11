@@ -1815,6 +1815,9 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ0010` | `$call`/`$collation` naming no registered function/collation (§8.12, §6.6) | XPST0017 |
 | `JQ0011` | Expression nesting deeper than `limits.depth` (§8.12) | XPDY0130 |
 | `JQ0012` | Lexical provider missing or request declaration rejected | — |
+| `JQ0013` | Invalid versioned formula profile | — |
+| `JQ0014` | Missing or incompatible formula capability | — |
+| `JQ0015` | Invalid computed dependency graph | — |
 
 ### 10.3 Runtime errors (`JQ2xxx`)
 
@@ -1832,6 +1835,9 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
 | `JQ2010` | A registered `$call` function threw (§8.12) | FOER0000 |
 | `JQ2011` | The input document is `undefined`, which is not a JSON value (§2.1) | XPDY0002 |
 | `JQ2012` | Lexical provider threw or returned an invalid result | — |
+| `JQ2013` | Formula input or result is not valid JSON/schema data | — |
+| `JQ2014` | Invalid formula outcome | — |
+| `JQ2015` | Invalid reviewed rule plan | — |
 
 ---
 

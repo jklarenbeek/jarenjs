@@ -185,7 +185,7 @@ describe('the website README counts what the code holds', function () {
     // what a reader sees is the site's own sections PLUS the ones the
     // packages committed, so the claim is pinned to the merged list
     const rendered = docsSections(buildSiteContent()).length;
-    assert.match(SITE_README, new RegExp(`${spell(rendered)} documentation sections`, 'i'),
+    assert.match(SITE_README, new RegExp(`${rendered} documentation sections`, 'i'),
       `the README claims a section count other than ${rendered}`);
   });
 });

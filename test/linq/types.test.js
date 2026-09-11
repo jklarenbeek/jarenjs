@@ -158,7 +158,7 @@ describe('the declared export set and the runtime export set are one set', () =>
   // module exports and the declaration omits is a class a `strict`
   // consumer cannot reach. Both directions are asserted per pen, so a
   // failure names the pen and the names.
-  const PENS = ['schema', 'model', 'jslt', 'migration', 'db', 'contract', 'flow', 'app', 'forms', 'charts', 'project', 'jtlt', 'messages', 'ai'];
+  const PENS = ['schema', 'model', 'jslt', 'migration', 'db', 'contract', 'flow', 'app', 'forms', 'charts', 'project', 'jtlt', 'messages', 'ai', 'formula'];
 
   // The forms a `.d.ts` uses to export a VALUE. `export type`, `export
   // interface`, `export type { … }` and a type-only re-export are

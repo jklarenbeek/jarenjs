@@ -776,7 +776,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   mkdirSync(compositionDir, { recursive: true });
   writeFileSync(join(compositionDir, 'package.json'), JSON.stringify({ type: 'module', private: true }));
   const compositionPackages = new Set();
-  for (const name of ['@jarenjs/contract', '@jarenjs/flow', '@jarenjs/linq', '@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats', '@jarenjs/app'])
+  for (const name of ['@jarenjs/contract', '@jarenjs/flow', '@jarenjs/linq', '@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats', '@jarenjs/app', '@jarenjs/rules'])
     for (const dep of declaredClosure(byName, name)) compositionPackages.add(dep);
   for (const dep of compositionPackages) {
     const dest = join(compositionDir, 'node_modules', dep);
@@ -793,7 +793,17 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   const durableManifest = JSON.parse(readFileSync(join(root, 'test/durable/manifest.json'), 'utf8'));
   const durableFile = join(compositionDir, 'durable-consumer.mjs');
   writeFileSync(durableFile, "import { runDurableConsumer, runPhysicalReceiptConsumer } from './durable.js';\nawait runPhysicalReceiptConsumer();\n" + durableManifest.cases.map((count) => `await runDurableConsumer(${count}, ${JSON.stringify(durableManifest.limits)});`).join('\n'));
+  writeFileSync(join(compositionDir, 'formulas.js'), readFileSync(join(root, 'test/consumer/formulas.js')));
+  writeFileSync(join(compositionDir, 'formula-host.js'), readFileSync(join(root, 'packages/website/src/examples/reviewed-rules.js')));
+  const formulaFile = join(compositionDir, 'formula-consumer.mjs');
+  writeFileSync(formulaFile, "import { qualifyFormulaSources, runFormulaConsumer, qualifyRuleCommand } from './formulas.js';\nimport { openRuleExample, savedRule } from './formula-host.js';\n"
+    + `await qualifyFormulaSources(${readFileSync(join(root, 'test/adoption/fixtures/formulas.json'), 'utf8')}.formulas);\n`
+    + manifest.consumers.map((definition) => `runFormulaConsumer(${JSON.stringify(definition)}, ${JSON.stringify(adoptionRows(definition))});`).join('\n')
+    + "\nawait qualifyRuleCommand(openRuleExample, savedRule);\n");
   for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
+    const formulaResult = spawnSync(runtime, [formulaFile], { cwd: compositionDir, encoding: 'utf8' });
+    if (formulaResult.status !== 0) { failures++; console.error(`Formula composition (${runtime}): ${formulaResult.stderr}`); }
+    else console.log(`✓ formula composition — preserved sources, two workloads, reviewed command replay (${runtime})`);
     const result = spawnSync(runtime, [compositionFile], { cwd: compositionDir, encoding: 'utf8' });
     if (result.status !== 0) { failures++; console.error(`Provider composition (${runtime}): ${result.stderr}`); }
     else console.log(`✓ provider composition — three dialects, two consumers, zero-write replay (${runtime})`);

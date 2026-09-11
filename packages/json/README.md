@@ -843,8 +843,16 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/json/schemas/jaren-query.llm-profile.schema.json` | schema | — |
 | `@jarenjs/json/schemas/jaren-query.schema.json` | schema | — |
 | `@jarenjs/json/package.json` | metadata | — |
+| `@jarenjs/json/formula` | JavaScript | declared |
+| `@jarenjs/json/formula/batch` | JavaScript | declared |
+| `@jarenjs/json/formula/migrate` | JavaScript | declared |
+| `@jarenjs/json/rules` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
 
 Unit tests live in `test/json/` at the repository root (`npm run test:json`); the JSONPath tests are built from the RFC's own examples, the query and JSLT tests from their normative fixtures (each schema corpus validates against both artifact drafts), and every example in this README runs in `test/json/readme-examples.test.js`. This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document. Benchmarks (all documented in the [benchmark workspace README](../../benchmark/README.md)): `benchmark/jsonpath.js` (JSONPath compliance + performance), `benchmark/jsonpointer.js` (compiled pointers vs the interpretive resolver and the `jsonpointer` npm package), `benchmark/jsonquery.js` (query engine vs fontoxpath/jsonata), `benchmark/jslt.js` (stylesheet engine vs native JS/JSONata), `benchmark/qt3-runner.js` (W3C QT3 scorecard through the XQuery front-end). See the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture.
+
+## Saved formulas and reviewed plans
+
+`./formula`, `./formula/batch`, `./formula/migrate` and `./rules` compile saved JSON Query profiles, bounded per-cell outcomes, explicit source migrations and immutable reviewed plans. Schema/helper versions and current command authority are explicit. See [FORMULA-FORMAT](docs/FORMULA-FORMAT.md) for the normative contract and measured refusals.

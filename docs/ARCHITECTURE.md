@@ -98,6 +98,7 @@ flowchart BT
 | [`@jarenjs/calc`](../components/calc) | Multi-mode calculator as an app document with pure-vnode SVG plots; its numeric kernel lives in core | [calc ARCHITECTURE](../components/calc/ARCHITECTURE.md) |
 | [`@jarenjs/charts`](../components/charts) | Headless charts: definition + data → geometry-free AST → pure-vnode SVG through view, with a stream adapter over the josl readers' unified events; mermaid's pie delegates here | [charts ARCHITECTURE](../components/charts/ARCHITECTURE.md) |
 | [`@jarenjs/collection`](../components/collection) | Bounded virtual lists and grids, keyed interaction and injected providers | [README](../components/collection/README.md) · [ARCHITECTURE](../components/collection/ARCHITECTURE.md) |
+| [`@jarenjs/rules`](../components/rules) | Injected formula authoring and reviewed-plan selection; host command owns authority | [rules ARCHITECTURE](../components/rules/ARCHITECTURE.md) |
 | [`@jarenjs/studio`](../components/studio) | The jaren project IDE: a multi-file project (schema, view, actions, model, queries, flow) as one document, each file validated against its own grammar and assembled into runnable artifacts, hosted by an embeddable widget | [PROJECT-FORMAT](../components/studio/docs/PROJECT-FORMAT.md) |
 | [`@jarenjs/play`](../components/play) | The single-engine playground: an engine is a pure function of `(source, data)`, so adding one costs a descriptor plus examples and no UI code | [PLAY-FORMAT](../components/play/docs/PLAY-FORMAT.md) |
 | [`@jarenjs/josl`](../packages/josl) | JOSL (a streaming TOML superset), JSONX, and a self-healing CSV reader/writer, with incremental streaming readers for every dialect | [FORMAT](../packages/josl/FORMAT.md) |
@@ -733,3 +734,7 @@ its existing workflow/DAG engines through injected provider/storage capabilities
 No reverse package edge, second authoritative business ledger or scheduler is
 introduced. Public contracts and limitations are in
 [durable operations](../packages/contract/docs/DURABLE.md).
+
+## Saved formulas and reviewed rules
+
+`json/formula` owns versioned Query compilation, dependency batches and source migration; `json/rules` owns immutable reviewed plans. `linq/formula` only authors those documents. `app/formula` owns injected terminating-worker lifecycle. `components/rules` imports core/view in its engine and forms in its component; it receives evaluation and command services through injection. The host composes the existing contract command and database receipt transaction, rechecking current authority and data before effects. The website demonstrates this composition over local SQLite and a virtual collection.

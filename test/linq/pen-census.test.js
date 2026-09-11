@@ -12,13 +12,13 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 it('publishes the complete subpath and executable keyword census', () => {
   const census = penCensus(ROOT);
-  assert.equal(census.subpaths.length, 14);
+  assert.equal(census.subpaths.length, 15);
   assert.equal(census.owned.length, 69);
   assert.deepEqual(census.routes, census.owned);
   penCoverage.docs(ROOT);
   const facts = penCoverage.facts(new Map());
   assert.equal(facts['coverage.pens'](),
-    '14 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.');
+    '15 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.');
   for (const pen of census.subpaths)
     assert.ok(facts['coverage.subpaths']().includes(`\`${pen.replace('@jarenjs/linq', '.')}\``));
 });

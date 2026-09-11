@@ -19,7 +19,8 @@
     "collection.ts",
     "lexical.ts",
     "providers.ts",
-    "durable-types.ts"
+    "durable-types.ts",
+    "linq-formula.ts"
   ],
   "include": [
     "linq-*.ts"

@@ -1,0 +1,52 @@
+{
+  "format": "jaren-formula-measurements/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "runnerHash": "fbd9f84400e7028b176af0ad375af9ad9be202040afacdcad19a4168d0cddf6f",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "scope": "Synthetic public APIs only. Static arithmetic is faster; native costs include compilation, immutable snapshots, bounded outcomes and dependency memoization. Real saved-corpus, manual and physical-device acceptance remains pending.",
+  "sources": {
+    "originals": 8,
+    "converted": 2,
+    "unresolved": 5,
+    "disabled": 1,
+    "originalByteChanges": 0,
+    "secondChanges": 0
+  },
+  "consumers": [
+    {
+      "consumer": "catalog",
+      "rows": 10000,
+      "baselineMs": 0.7547619999999995,
+      "evaluationMs": 224.64091499999998,
+      "overhead": 297.63145865849117,
+      "errors": 0,
+      "pageRows": 256,
+      "sampledHeapBytes": 32711784,
+      "rssBytes": 115437568
+    },
+    {
+      "consumer": "archive-stock",
+      "rows": 75000,
+      "baselineMs": 2.294037000000003,
+      "evaluationMs": 1641.6153780000002,
+      "overhead": 715.6010901306291,
+      "errors": 0,
+      "pageRows": 256,
+      "sampledHeapBytes": 108376976,
+      "rssBytes": 251568128
+    }
+  ],
+  "command": {
+    "previewWrites": 0,
+    "applied": 1,
+    "secondWrites": 0,
+    "secondRevisions": 0,
+    "stale": "uncommitted",
+    "unauthorized": "refused"
+  }
+}

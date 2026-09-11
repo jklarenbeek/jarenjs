@@ -1,0 +1,10 @@
+.jr-editor { color: var(--fg, #172033); background: var(--surface, #fff); min-width: 0; }
+.jr-draft-label { display: grid; gap: var(--space-2, .5rem); }
+.jr-editor textarea { box-sizing: border-box; width: 100%; color: inherit; background: var(--bg, #fff); border: 1px solid var(--border, #64748b); border-radius: var(--radius-sm, 8px); padding: var(--space-3, .75rem); font-family: var(--mono, monospace); }
+.jr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3, .75rem); margin-block: var(--space-4, 1rem); }
+.jr-editor select { max-width: 100%; min-height: 44px; color: inherit; background: var(--bg, #fff); border: 1px solid var(--border, #64748b); border-radius: var(--radius-sm, 8px); padding: var(--space-2, .5rem); }
+.jr-editor button { color: var(--accent-fg, #fff); background: var(--accent, #2563eb); border: 1px solid var(--border, #64748b); border-radius: var(--radius-sm, 8px); min-height: 44px; padding: var(--space-2, .5rem) var(--space-4, 1rem); cursor: pointer; }
+.jr-editor button:disabled { color: var(--muted, #475569); background: var(--surface, #fff); cursor: default; }
+.jr-changes { list-style: none; margin: 0; padding: 0; }
+.jr-changes label { display: flex; align-items: center; gap: var(--space-3, .75rem); min-height: 44px; overflow-wrap: anywhere; }
+.jr-editor :focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }

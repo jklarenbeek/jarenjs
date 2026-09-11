@@ -16,9 +16,9 @@ A **pen** is a by-code front-end to one of the suite's document formats:
 named functions that build a standard document — a JSON Schema, a
 `$model`, a `$jslt` stylesheet — the way the chain builds a query
 document. `@jarenjs/linq` exports each pen under its own subpath
-(<!--fact:coverage.subpaths-->`./ai`, `./app`, `./charts`, `./contract`, `./db`, `./flow`, `./forms`, `./jslt`, `./jtlt`, `./messages`, `./migration`, `./model`, `./project`, `./schema`<!--/fact-->); `.` stays the chain.
+(<!--fact:coverage.subpaths-->`./ai`, `./app`, `./charts`, `./contract`, `./db`, `./flow`, `./forms`, `./formula`, `./jslt`, `./jtlt`, `./messages`, `./migration`, `./model`, `./project`, `./schema`<!--/fact-->); `.` stays the chain.
 
-Coverage: <!--fact:coverage.pens-->14 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
+Coverage: <!--fact:coverage.pens-->15 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
 
 **This document is the family's normative reference**: §1 states the
 rules every pen keeps, §1.3 the error codes they share, and §4–§7 the
@@ -36,7 +36,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 955 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 965 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 1,752 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,116 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
@@ -52,6 +52,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
 | [DB-CLIENT.md](DB-CLIENT.md) | 1,085 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
 
 Every row of that table is derived, and none of it is written here: the
@@ -204,8 +205,8 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 955 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,752 | 34 | 8 | 15 | 174,951 B |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 965 | — | — | — | — |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,752 | 34 | 8 | 15 | 175,221 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 35,285 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,116 | 30 | 6 | 3 | 44,143 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 18,424 B |
@@ -219,8 +220,9 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 15,293 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 13,793 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,582 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,085 | 46 | 4 | 2 | 675,103 B |
-| **16 documents** | | **12,647** | **378** | **73** | | |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,085 | 46 | 4 | 2 | 675,373 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,850 B |
+| **17 documents** | | **12,698** | **380** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -262,7 +264,7 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 174,951 B | 175 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 175,221 B | 175 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 35,285 B | 35 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 44,143 B | 44 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 18,424 B | 18 kB |
@@ -276,7 +278,8 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 15,293 B | 15 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 13,793 B | 14 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 15,582 B | 16 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 675,103 B | 675 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 675,373 B | 675 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 14,850 B | 15 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -952,4 +955,11 @@ it says.
 | `maxRows`, `maxBytes` | `maxRows`, `maxBytes` | the per-root bounds (MODEL-FORMAT §10.4): rows of the relation per parent and serialised bytes per parent; crossing one is the store's `JD2073`, never a truncated graph. Defaults 1000 rows / 1 MiB (a `take` is the row bound of the include it windows); `Infinity` spells the unbounded case and emits as `null` |
 | `include: { comments: spec }` | `include: { comments: <lowered> }` | over the TARGET's relation table (the scope carries every root's) |
 | anything else | `JL0101` | the vocabulary is closed; `after` paginates the root, never an include |
+
+### Formula document authoring — [FORMULA-PEN.md §2](FORMULA-PEN.md)
+
+| Call / option | Emitted member |
+|---|---|
+| `defineFormula(id, expression)` | `$formula`, `id`, `expression`, default `revision` |
+| `revision`, `bindings`, schema/helper references, result mode | Same named profile members |
 <!--/fact-->

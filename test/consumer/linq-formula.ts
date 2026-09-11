@@ -1,0 +1,18 @@
+import { compileFormula, createFormulaCompiler } from '@jarenjs/json/formula';
+import { compileFormulaBatch } from '@jarenjs/json/formula/batch';
+import { migrateFormulas, rollbackFormula, resolveFormulaMigration } from '@jarenjs/json/formula/migrate';
+import { compileRulePlan, selectRuleChanges } from '@jarenjs/json/rules';
+import { createFormulaResource } from '@jarenjs/app/formula';
+import { defineFormula } from '@jarenjs/linq/formula';
+import { createRuleEditor } from '@jarenjs/rules';
+import { mountRuleEditor, createRuleEditorWidget } from '@jarenjs/rules/component';
+const doc = defineFormula('a', '$.value', { revision: '2', resultMode: 'value' });
+const compiler = createFormulaCompiler({ cacheSize: 2 });
+compiler.compile(doc).evaluate({ value: 1 });
+compileFormula(doc).evaluate({ value: null });
+compileFormulaBatch([{ id: 'a', formula: doc }]).evaluate([{ id: 'r', value: 1 }]);
+const editor = createRuleEditor({ text: '{}', preview: async () => ({ id: 'a', changes: [] }) });
+editor.edit('[]', 1, 1);
+editor.select('change');
+const resource = createFormulaResource({ workerFactory: () => ({ request: async message => ({ ...message, result: 1 }), terminate: async () => {} }) });
+void [migrateFormulas, rollbackFormula, resolveFormulaMigration, compileRulePlan, selectRuleChanges, mountRuleEditor, createRuleEditorWidget, resource.dispose()];

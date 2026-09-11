@@ -136,6 +136,7 @@ the table and stale in the paragraph that cites it:
 | `./app` | <!--fact:bundle.app.kb-->50<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
 | `./forms` | <!--fact:bundle.forms.kb-->39<!--/fact--> kB | the schema pen it subclasses |
 | `./ai` | <!--fact:bundle.ai.kb-->15<!--/fact--> kB | action programs; no AI runtime |
+| `./formula` | <!--fact:bundle.formula.kb-->15<!--/fact--> kB | saved Query profiles; no evaluator |
 | `./messages` | <!--fact:bundle.messages.kb-->17<!--/fact--> kB | message templates; no locale packs |
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->15<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->14<!--/fact--> kB | project files; no Studio engine |
@@ -156,7 +157,7 @@ compiler; the chain sits on the addressing package). The graph in
 [ARCHITECTURE.md](ARCHITECTURE.md#monorepo-layout) is the authority on
 which.
 
-`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `collection`, `studio`,
+`forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `collection`, `rules`, `studio`,
 `play`, `josl`, `ai`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.
 
@@ -396,3 +397,7 @@ permissions, provider guarantees and actor/reason decisions. Single-send outcome
 remain unresolved until evidence settles them. Synthetic installed-consumer
 qualification does not establish real provider behavior, downstream cutover,
 native executable or PostgreSQL support, or operator reconciliation acceptance.
+
+## Saved formula and rule composition
+
+Install `@jarenjs/json`, `@jarenjs/linq` and `@jarenjs/rules` for formula documents and authoring UI. Inject `createTypeTestCompiler` from `@jarenjs/validate/query` when schemas are declared. Reviewed writes additionally compose `@jarenjs/contract/command` with `createDbReceipts` from `@jarenjs/linq/db`; choose an installed Node/Bun/browser driver explicitly. The preview is never write authority. See [FORMULA-FORMAT](../packages/json/docs/FORMULA-FORMAT.md) and the [rules component](../components/rules/README.md). Portable tarball qualification exercises both frozen workloads and zero-write replay.
