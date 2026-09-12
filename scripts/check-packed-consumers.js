@@ -776,6 +776,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       writeFileSync(join(consumerDir, 'package.json'), JSON.stringify({ name: 'installed-editor-host', private: true, type: 'module',
         dependencies: { '@jarenjs/studio': pkg.version, '@sqlite.org/sqlite-wasm': sqlite.version } }));
       cpSync(join(root, 'test/consumer/studio-host.html'), join(consumerDir, 'index.html'));
+      cpSync(join(root, 'test/consumer/studio-host.css'), join(consumerDir, 'studio-host.css'));
       writeFileSync(join(consumerDir, 'vite.config.mjs'), "export default { base: './', logLevel: 'error', worker: { format: 'es' }, build: { target: 'esnext', assetsInlineLimit: 0 } };\n");
       const browser = spawnSync(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'build'], { cwd: consumerDir, encoding: 'utf8' });
       if (browser.status !== 0 || !existsSync(join(consumerDir, 'dist/index.html'))) {
