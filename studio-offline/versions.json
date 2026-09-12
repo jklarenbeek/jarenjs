@@ -1,5 +1,5 @@
 {
-  "jaren": "0.84.2",
+  "jaren": "0.84.3",
   "sqlite": "3.53.0-build1",
   "policy": "bundled from the exporting build; no CDN dependencies"
 }
