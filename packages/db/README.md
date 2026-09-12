@@ -1441,12 +1441,17 @@ Native column reads and bounded mutation documents are specified in [NATIVE-PLAN
 
 `@jarenjs/db/search` composes the resident ranker with bounded authoritative entity reads and optional atomic snapshot storage. See [persisted search](docs/SEARCH.md).
 
-Column-first table definitions, guarded same-connection rebuilds, exact matched writes,
+Column-first table definitions, native additive/object DDL, guarded same-connection rebuilds, exact matched writes,
 partial conflicts, raw-text JSON queries and byte-valued operations use
 [`@jarenjs/db/relational`](docs/SQLITE-RELATIONAL.md). Both host entries export
 `snapshotDatabase(connection, newPath)` for a disk-backed committed-WAL copy.
 Existing-connection consumers can import `/query`, `/model` and `/entity`;
 `compileEntityModel` shares one normalization between queries and mapping.
+`sql.call('json_type', ...)` preserves native missing/null/type distinctions.
+`planSchemaChange`/`applySchemaChange` guard a reviewed ADD COLUMN, DROP INDEX,
+RENAME TABLE or DROP TABLE against source drift. Identity-changing policies stay
+explicit; ordinary rebuilds retain key and row preservation. Mutation statements
+are reused by SQL without retaining previous payload-bearing documents.
 
 `@jarenjs/db/node-process` adds supervised native execution with finite owner
 admission, caller deadlines, generation fencing and separate process-exit and

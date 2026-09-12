@@ -1,7 +1,7 @@
 //@ts-check
 /** Bounded column mutation documents, lowered through the entity's writer plan. */
 import { analyzeQuery } from '@jarenjs/json/query';
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { createBoundedCache } from '@jarenjs/core/cache';
 import { chain, attempt } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { entityShape, planEntityPredicate } from './plan.js';
@@ -10,12 +10,13 @@ import { physicalSelection } from './physical.js';
 import { utf8Length } from './cursor.js';
 import { relationalEmitter } from './dialects/sqlite-relational.js';
 
-/** Compile once per document, execute within the existing guarded transaction.
+/** Bind each document, reuse its SQL statement within the guarded transaction.
  * @param {any} connection @param {any} entity @param {any} mapping @param {any} core */
 export function createEntityMutation(connection, entity, mapping, core) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
-  const plans = new Map();
+  // Cache executable structure, never a value-bearing document or its bindings.
+  const statements = createBoundedCache(64);
   const fail = (reason) => { throw new DbCompileError('JD0038', reason, entity.docPath); };
   const column = (name) => {
     const c = mapping.columns.find((entry) => entry.name === name);
@@ -56,15 +57,17 @@ export function createEntityMutation(connection, entity, mapping, core) {
     const param = (value) => { params.push(value); return dialect.parameterRef(params.length, 'v'); };
     const table = q(mapping.table);
     const sqlExpression = (expression, inline = false) => {
-      const mapped = (value) => {
-        if (Array.isArray(value)) return value.map(mapped);
+      const mapped = (value, depth = 0) => {
+        if (depth > 64) fail('SQL expression nesting exceeds 64');
+        const next = (child) => mapped(child, depth + 1);
+        if (Array.isArray(value)) return value.map(next);
         if (value === null || typeof value !== 'object') return value;
         if (value.$sql === 'value') return value;
         if (value.$sql === 'column') {
           if (value.table !== undefined && value.table !== 'it') fail('mutation column expressions refer to the current entity');
           return { $sql: 'column', name: column(value.name).physical };
         }
-        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapped(item)]));
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, next(item)]));
       };
       const emitter = relationalEmitter({ inline });
       const result = emitter.expr(mapped(expression));
@@ -187,19 +190,13 @@ export function createEntityMutation(connection, entity, mapping, core) {
       }
     }
     sql = prefix + sql + ` RETURNING ${physicalSelection(mapping, dialect)}`;
-    return { sql, params, returning, maxRows, maxBytes, statement: null };
+    return { sql, params, returning, maxRows, maxBytes };
   };
   return (document) => {
-    const key = canonicalizeJson(document);
-    let plan = plans.get(key);
-    if (!plan) {
-      plan = compile(document);
-      if (plans.size >= 64) plans.delete(plans.keys().next().value);
-      plans.set(key, plan);
-    }
+    const plan = compile(document);
     return connection.transaction(() => {
-      plan.statement ??= connection.prepare(plan.sql);
-      return chain(plan.statement, (statement) => chain(attempt(() => statement.all(plan.params),
+      const prepared = statements.getOrCreate(plan.sql, (text) => connection.prepare(text));
+      return chain(prepared, (statement) => chain(attempt(() => statement.all(plan.params),
         (error) => String(error?.message).includes('jaren-mutation-row-bound')
           ? new DbRuntimeError('JD2007', 'insert-select exceeded its source row bound', { cause: error })
           : wrapDriverError(error, { collection: entity.name, docPath: entity.docPath })), (rows) => {

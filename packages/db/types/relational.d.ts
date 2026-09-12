@@ -4,7 +4,7 @@ export type SqlInput = SqlValue | SqlExpression;
 export type SqlOperator = '=' | '<>' | '<' | '<=' | '>' | '>=' | 'IS' | 'IS NOT'
   | '+' | '-' | '*' | '/' | '%' | '||' | 'AND' | 'OR' | 'LIKE' | 'NOT LIKE' | 'GLOB';
 export type SqlFunction = 'coalesce' | 'nullif' | 'trim' | 'ltrim' | 'rtrim' | 'lower' | 'upper'
-  | 'length' | 'abs' | 'round' | 'typeof' | 'json_extract' | 'json_valid'
+  | 'length' | 'abs' | 'round' | 'typeof' | 'json_extract' | 'json_valid' | 'json_type'
   | 'count' | 'sum' | 'total' | 'avg' | 'min' | 'max'
   | 'date' | 'time' | 'datetime' | 'julianday' | 'unixepoch' | 'strftime';
 export type SqlType = 'INTEGER' | 'REAL' | 'TEXT' | 'BLOB' | 'NUMERIC';
@@ -78,8 +78,13 @@ export interface TableColumn {
   readonly default?: SqlInput; readonly collation?: SqlCollation;
   readonly identity?: 'rowid' | 'autoincrement'; readonly check?: SqlInput;
   readonly generated?: SqlInput; readonly stored?: boolean;
+  readonly references?: ColumnReference;
 }
 export type ForeignKeyAction = 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default';
+export interface ColumnReference {
+  readonly table: string; readonly columns: readonly [string];
+  readonly onDelete?: ForeignKeyAction; readonly onUpdate?: ForeignKeyAction; readonly deferred?: boolean;
+}
 export type TableConstraint = { readonly name?: string } & (
   { readonly kind: 'unique'; readonly columns: readonly string[] }
   | { readonly kind: 'check'; readonly expression: SqlInput }
@@ -111,4 +116,17 @@ export interface TableMigrationPlan {
 export declare function planTableMigration(connection: unknown, definition: TableDefinition, options: TableMigrationOptions): TableMigrationPlan;
 export declare function applyTableMigration(connection: unknown, plan: TableMigrationPlan): { changed: number };
 export declare function withForeignKeysSuspended<T>(connection: unknown, fn: () => T): T;
+export type SchemaChange =
+  | { readonly op: 'addColumn'; readonly table: string; readonly column: TableColumn }
+  | { readonly op: 'dropIndex'; readonly name: string; readonly ifExists?: boolean }
+  | { readonly op: 'renameTable'; readonly table: string; readonly to: string }
+  | { readonly op: 'dropTable'; readonly table: string; readonly ifExists?: boolean };
+export interface SchemaChangePlan {
+  readonly version: 1; readonly operation: SchemaChange; readonly sql: string;
+  readonly source: readonly unknown[]; readonly settings: readonly number[]; readonly checksum: string;
+}
+/** Main-schema snapshot; does not execute SQL or infer replay/disposition policy. */
+export declare function planSchemaChange(connection: unknown, operation: SchemaChange): SchemaChangePlan;
+/** Refuses stale source/settings under an immediate transaction. */
+export declare function applySchemaChange(connection: unknown, plan: SchemaChangePlan): { changed: number };
 export { sqliteDialect } from './index.js';

@@ -105,4 +105,4 @@ export { planInvariants } from './ddl.js';
 export { planPhysicalMigration } from './migrate.js';
 export { sql, planRelational, relational } from './dialects/sqlite-relational.js';
 export { defineTable, planTable } from './dialects/sqlite-schema.js';
-export { planTableMigration, applyTableMigration, withForeignKeysSuspended } from './table-migration.js';
+export { planTableMigration, applyTableMigration, withForeignKeysSuspended, planSchemaChange, applySchemaChange } from './table-migration.js';

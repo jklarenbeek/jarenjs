@@ -2045,4 +2045,4 @@ export declare function planPhysicalMigration(connection: unknown, fromModel: un
   options: { id: string; steps: readonly unknown[]; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
     assertions?: readonly { sql: string; params?: readonly unknown[]; expected: readonly unknown[] }[] }): unknown;
 
-export { sql, relational, planRelational, defineTable, planTable, planTableMigration, applyTableMigration, withForeignKeysSuspended } from './relational.js';
+export { sql, relational, planRelational, defineTable, planTable, planTableMigration, applyTableMigration, withForeignKeysSuspended, planSchemaChange, applySchemaChange } from './relational.js';

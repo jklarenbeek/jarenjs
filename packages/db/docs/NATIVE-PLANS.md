@@ -65,9 +65,11 @@ row limits bound fetched results; byte limits bound each decoded result item.
 
 ## Mutations
 
-The asynchronous entity set exposes `mutate(document)`. It compiles and caches a
-closed document into one parameterized SQLite data statement, inside the same
-guarded transaction used by the entity writer. It supports adopted writable
+The asynchronous entity set exposes `mutate(document)`. It compiles each closed
+document into one parameterized SQLite data statement and reuses statements by
+their complete SQL in a bounded cache. Bindings, projections and output limits
+remain local to each call; earlier payload-bearing documents are not retained.
+Execution uses the same guarded transaction as the entity writer. It supports adopted writable
 column layouts. Hybrid entities, PostgreSQL physical layouts, arbitrary SQL,
 store-enforced before/after invariants and unsupported expression shapes refuse
 with `JD0038`. Database constraints and invariant triggers retain enforcement.

@@ -1717,7 +1717,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->176<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->724<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->725<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 

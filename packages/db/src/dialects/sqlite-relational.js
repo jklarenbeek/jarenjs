@@ -22,7 +22,7 @@ export function relationalIdentifier(name) {
 }
 const q = relationalIdentifier;
 const binary = new Set(['=', '<>', '<', '<=', '>', '>=', 'IS', 'IS NOT', '+', '-', '*', '/', '%', '||', 'AND', 'OR', 'LIKE', 'NOT LIKE', 'GLOB']);
-const functions = new Set(['coalesce', 'nullif', 'trim', 'ltrim', 'rtrim', 'lower', 'upper', 'length', 'abs', 'round', 'typeof', 'json_extract', 'json_valid', 'count', 'sum', 'total', 'avg', 'min', 'max', 'date', 'time', 'datetime', 'julianday', 'unixepoch', 'strftime']);
+const functions = new Set(['coalesce', 'nullif', 'trim', 'ltrim', 'rtrim', 'lower', 'upper', 'length', 'abs', 'round', 'typeof', 'json_extract', 'json_valid', 'json_type', 'count', 'sum', 'total', 'avg', 'min', 'max', 'date', 'time', 'datetime', 'julianday', 'unixepoch', 'strftime']);
 const types = new Set(['INTEGER', 'REAL', 'TEXT', 'BLOB', 'NUMERIC']);
 const collations = new Set(['BINARY', 'NOCASE', 'RTRIM']);
 const node = (kind, spec) => ({ $sql: kind, ...spec });
@@ -104,6 +104,7 @@ export function relationalEmitter(options = {}) {
         if (value.distinct !== undefined && typeof value.distinct !== 'boolean') fail('DISTINCT must be boolean');
         if (value.distinct && value.args.length !== 1) fail('DISTINCT functions require one argument');
         if (!value.args.length && value.name !== 'count') fail('SQL function requires arguments');
+        if (value.name === 'json_type' && value.args.length > 2) fail('json_type requires one or two arguments');
         return `${value.name.toUpperCase()}(${value.distinct ? 'DISTINCT ' : ''}${value.args.length ? value.args.map(next).join(', ') : '*'})`;
       }
       case 'cast':

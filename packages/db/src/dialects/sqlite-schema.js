@@ -34,37 +34,13 @@ export function planTable(definition) {
   for (const key of ['constraints', 'indexes', 'triggers']) if (definition[key] !== undefined && !Array.isArray(definition[key])) fail(`${key} must be a list`);
   const emitter = relationalEmitter({ inline: true });
   const names = new Set();
-  let inlineKey = false;
   const columns = definition.columns.map((column) => {
-    check(column, ['name', 'type', 'nullable', 'default', 'collation', 'identity', 'check', 'generated', 'stored'], 'column definition');
-    const name = q(column.name);
+    const text = columnSql(column, definition, emitter);
     if (names.has(column.name.toLowerCase())) fail('physical column names must be distinct');
     names.add(column.name.toLowerCase());
-    if (!['INTEGER', 'REAL', 'TEXT', 'BLOB', 'NUMERIC', 'ANY'].includes(column.type)) fail('unsupported SQLite column type');
-    if (definition.strict && column.type === 'NUMERIC') fail('STRICT tables do not support NUMERIC');
-    if (column.nullable !== undefined && typeof column.nullable !== 'boolean') fail('nullable must be boolean');
-    if (column.stored !== undefined && (typeof column.stored !== 'boolean' || column.generated === undefined)) fail('stored requires a generated expression');
-    let out = `${name} ${column.type}`;
-    if (column.identity !== undefined) {
-      if (!['rowid', 'autoincrement'].includes(column.identity) || column.type !== 'INTEGER'
-        || definition.withoutRowid || definition.primaryKey?.length !== 1
-        || definition.primaryKey[0] !== column.name || column.generated !== undefined) fail('identity requires a single INTEGER rowid primary key');
-      inlineKey = true;
-      out += ` PRIMARY KEY${column.identity === 'autoincrement' ? ' AUTOINCREMENT' : ''}`;
-    }
-    if (column.nullable === false) out += ' NOT NULL';
-    if (column.collation !== undefined) {
-      if (!['BINARY', 'NOCASE', 'RTRIM'].includes(column.collation)) fail('unsupported column collation');
-      out += ` COLLATE ${column.collation}`;
-    }
-    if (Object.hasOwn(column, 'default')) out += ` DEFAULT (${emitter.expr(column.default)})`;
-    if (column.check !== undefined) out += ` CHECK (${emitter.expr(column.check)})`;
-    if (column.generated !== undefined) {
-      if (Object.hasOwn(column, 'default')) fail('a generated column cannot have a default');
-      out += ` GENERATED ALWAYS AS (${emitter.expr(column.generated)}) ${column.stored ? 'STORED' : 'VIRTUAL'}`;
-    }
-    return out;
+    return text;
   });
+  const inlineKey = definition.columns.some((column) => column.identity !== undefined);
   const members = (values) => {
     const text = list(values, 'constraint columns');
     if (values.some((name) => !names.has(name.toLowerCase()))) fail('constraint names an undeclared column');
@@ -79,11 +55,12 @@ export function planTable(definition) {
     else if (constraint.kind === 'check') columns.push(`${prefix}CHECK (${emitter.expr(constraint.expression)})`);
     else if (constraint.kind === 'foreignKey') {
       if (constraint.columns?.length !== constraint.references?.length) fail('foreign-key columns must have equal arity');
-      if (constraint.deferred !== undefined && typeof constraint.deferred !== 'boolean') fail('deferred must be boolean');
-      columns.push(`${prefix}FOREIGN KEY (${members(constraint.columns)}) REFERENCES ${q(constraint.table)} (${list(constraint.references, 'references')})`
-        + (constraint.onDelete === undefined ? '' : ` ON DELETE ${action(constraint.onDelete)}`)
-        + (constraint.onUpdate === undefined ? '' : ` ON UPDATE ${action(constraint.onUpdate)}`)
-        + (constraint.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : ''));
+      columns.push(`${prefix}FOREIGN KEY (${members(constraint.columns)}) ${referenceSql({
+        table: constraint.table, columns: constraint.references,
+        ...(constraint.onDelete === undefined ? {} : { onDelete: constraint.onDelete }),
+        ...(constraint.onUpdate === undefined ? {} : { onUpdate: constraint.onUpdate }),
+        ...(constraint.deferred === undefined ? {} : { deferred: constraint.deferred }),
+      })}`);
     }
     else fail('constraint kind is unique, check or foreignKey');
     const keys = constraint.kind === 'unique' ? ['kind', 'name', 'columns']
@@ -139,4 +116,77 @@ export function planTable(definition) {
     columns: definition.columns.map((c) => ({ name: c.name, type: c.type, generated: c.generated !== undefined })),
     indexes: (definition.indexes ?? []).map((i) => ({ name: i.name, unique: i.unique === true, terms: i.terms })),
   } };
+}
+
+/** One REFERENCES clause shared by table constraints and column declarations. */
+function referenceSql(reference) {
+  check(reference, ['table', 'columns', 'onDelete', 'onUpdate', 'deferred'], 'reference');
+  if (reference.deferred !== undefined && typeof reference.deferred !== 'boolean') fail('deferred must be boolean');
+  return `REFERENCES ${q(reference.table)} (${list(reference.columns, 'references')})`
+    + (reference.onDelete === undefined ? '' : ` ON DELETE ${action(reference.onDelete)}`)
+    + (reference.onUpdate === undefined ? '' : ` ON UPDATE ${action(reference.onUpdate)}`)
+    + (reference.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '');
+}
+
+/** Render one typed column without reconstructing any surrounding schema. */
+function columnSql(column, context, emitter) {
+  check(column, ['name', 'type', 'nullable', 'default', 'collation', 'identity', 'check', 'generated', 'stored', 'references'], 'column definition');
+  const name = q(column.name);
+  if (!['INTEGER', 'REAL', 'TEXT', 'BLOB', 'NUMERIC', 'ANY'].includes(column.type)) fail('unsupported SQLite column type');
+  if (context.strict && column.type === 'NUMERIC') fail('STRICT tables do not support NUMERIC');
+  if (column.nullable !== undefined && typeof column.nullable !== 'boolean') fail('nullable must be boolean');
+  if (column.stored !== undefined && (typeof column.stored !== 'boolean' || column.generated === undefined)) fail('stored requires a generated expression');
+  const hasDefault = Object.hasOwn(column, 'default');
+  if (context.additive) {
+    if (column.identity !== undefined || column.stored === true) fail('ADD COLUMN cannot add an identity or STORED column');
+    const value = column.default?.$sql === 'value' ? column.default.value : column.default;
+    if (hasDefault && !(value === null || typeof value === 'string' || typeof value === 'bigint'
+      || (typeof value === 'number' && Number.isFinite(value)))) fail('ADD COLUMN requires a literal default');
+    if (column.generated === undefined && column.nullable === false && (!hasDefault || value === null)) fail('ADD COLUMN NOT NULL requires a non-null default');
+    if (column.references !== undefined && hasDefault && value !== null) fail('ADD COLUMN REFERENCES requires a NULL default');
+  }
+  let out = `${name} ${column.type}`;
+  if (column.identity !== undefined) {
+    if (!['rowid', 'autoincrement'].includes(column.identity) || column.type !== 'INTEGER'
+      || context.withoutRowid || context.primaryKey?.length !== 1
+      || context.primaryKey[0] !== column.name || column.generated !== undefined) fail('identity requires a single INTEGER rowid primary key');
+    out += ` PRIMARY KEY${column.identity === 'autoincrement' ? ' AUTOINCREMENT' : ''}`;
+  }
+  if (column.nullable === false) out += ' NOT NULL';
+  if (column.collation !== undefined) {
+    if (!['BINARY', 'NOCASE', 'RTRIM'].includes(column.collation)) fail('unsupported column collation');
+    out += ` COLLATE ${column.collation}`;
+  }
+  if (hasDefault) out += context.additive ? ` DEFAULT ${emitter.expr(column.default)}` : ` DEFAULT (${emitter.expr(column.default)})`;
+  if (column.check !== undefined) out += ` CHECK (${emitter.expr(column.check)})`;
+  if (column.generated !== undefined) {
+    if (hasDefault) fail('a generated column cannot have a default');
+    out += ` GENERATED ALWAYS AS (${emitter.expr(column.generated)}) ${column.stored ? 'STORED' : 'VIRTUAL'}`;
+  }
+  if (column.references !== undefined) {
+    if (column.references?.columns?.length !== 1) fail('a column reference requires one referenced column');
+    out += ` ${referenceSql(column.references)}`;
+  }
+  return out;
+}
+
+/** Render one explicit main-schema operation; validation never executes SQL.
+ * @param {any} operation @returns {string} */
+export function schemaChangeSql(operation) {
+  check(operation, ['op', 'table', 'column', 'name', 'to', 'ifExists'], 'schema change');
+  switch (operation.op) {
+    case 'addColumn':
+      check(operation, ['op', 'table', 'column'], 'addColumn');
+      return `ALTER TABLE "main".${q(operation.table)} ADD COLUMN ${columnSql(operation.column, { additive: true }, relationalEmitter({ inline: true }))}`;
+    case 'renameTable':
+      check(operation, ['op', 'table', 'to'], 'renameTable');
+      return `ALTER TABLE "main".${q(operation.table)} RENAME TO ${q(operation.to)}`;
+    case 'dropIndex': case 'dropTable': {
+      const index = operation.op === 'dropIndex';
+      check(operation, ['op', index ? 'name' : 'table', 'ifExists'], operation.op);
+      if (operation.ifExists !== undefined && typeof operation.ifExists !== 'boolean') fail('ifExists must be boolean');
+      return `DROP ${index ? 'INDEX' : 'TABLE'}${operation.ifExists ? ' IF EXISTS' : ''} "main".${q(index ? operation.name : operation.table)}`;
+    }
+    default: return fail('schema change is addColumn, dropIndex, renameTable or dropTable');
+  }
 }

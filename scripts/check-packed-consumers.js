@@ -690,6 +690,13 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     if (name === '@jarenjs/db') {
       cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./node-process.test.js');\n";
+      mkdirSync(join(consumerDir, 'fixtures'), { recursive: true });
+      for (const fixture of ['schema-upgrade.mjs', 'mutation-model.mjs', 'mutation-memory.mjs'])
+        cpSync(join(root, 'test/db/fixtures', fixture), join(consumerDir, 'fixtures', fixture));
+      for (const fixture of ['json-type.test.js', 'schema-change.test.js', 'schema-upgrade.test.js', 'mutation-reuse.test.js']) {
+        cpSync(join(root, 'test/db', fixture), join(consumerDir, fixture));
+        program += `if (typeof Bun === 'undefined') await import('./${fixture}');\n`;
+      }
     }
     if (name === '@jarenjs/studio') {
       mkdirSync(join(consumerDir, 'test/consumer'), { recursive: true });
@@ -744,9 +751,9 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       bunOutput = bunRun.stdout + bunRun.stderr;
       if (name === '@jarenjs/db') {
         // Bun's node:test skip options require its test runner, not a plain import.
-        const nativeHost = spawnSync('bun', ['test', './node-process.test.js'], { cwd: consumerDir, encoding: 'utf8' });
+        const nativeHost = spawnSync('bun', ['test', './node-process.test.js', './json-type.test.js', './schema-change.test.js', './schema-upgrade.test.js', './mutation-reuse.test.js'], { cwd: consumerDir, encoding: 'utf8' });
         if (nativeHost.status !== 0) {
-          failures++; console.error(`✗ ${name} (bun host refusal): ${nativeHost.stdout}${nativeHost.stderr}`); continue;
+          failures++; console.error(`✗ ${name} (bun native qualification): ${nativeHost.stdout}${nativeHost.stderr}`); continue;
         }
         bunOutput += nativeHost.stdout + nativeHost.stderr;
       }

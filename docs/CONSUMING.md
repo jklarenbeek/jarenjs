@@ -146,7 +146,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->15<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->14<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->16<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->724<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->725<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -347,7 +347,9 @@ integer receipts, preserved history triggers and mixed entity/outbox rollback.
 
 Prepared application SQL belongs to `client.transaction(tx => ...)` through
 `tx.sql`; it shares the store's connection, authority and lifetime. Schema changes
-remain an explicit `planPhysicalMigration`/`migrate` operation. Follow the
+remain explicit: use `planPhysicalMigration`/`migrate` for preservation programs,
+or the synchronous [native SQLite planners](../packages/db/docs/SQLITE-RELATIONAL.md)
+for guarded rebuilds and narrow additive/object operations. Follow the
 [model pen](../packages/linq/docs/MODEL-PEN.md#existing-column-layouts-and-persistence-rules),
 [transaction recipe](../packages/linq/docs/DB-CLIENT.md#trusted-sql-during-adoption),
 and [recovery contract](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery).

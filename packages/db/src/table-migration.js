@@ -3,7 +3,7 @@
 import { hashContent } from '@jarenjs/core/string';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { DbCompileError } from './errors.js';
-import { defineTable, planTable } from './dialects/sqlite-schema.js';
+import { defineTable, planTable, schemaChangeSql } from './dialects/sqlite-schema.js';
 import { relationalEmitter, relationalIdentifier as q, sql } from './dialects/sqlite-relational.js';
 import { sqliteDialect as dialect, sqliteTableMigration } from './dialects/sqlite.js';
 import { sqlTokens } from './dialects/check-read.js';
@@ -16,6 +16,39 @@ const owned = (objects, table) => objects.filter((o) => o.tbl_name === table).ma
 const sync = (connection) => {
   if (connection.dialect.name !== 'sqlite' || !connection.synchronous || connection.mustQueue) refuse('table migration requires an available synchronous SQLite connection');
 };
+
+/** Connection settings that govern the meaning of an additive/drop/rename plan. */
+function schemaSettings(connection) {
+  return ['foreign_keys', 'legacy_alter_table', 'schema_version'].map((name) =>
+    connection.prepare(dialect.introspect.pragma(name)).get([])[name]);
+}
+
+/** Review one native main-schema change without changing the database.
+ * Plans describe one source snapshot; callers own durable migration receipts.
+ * @param {any} connection @param {any} operation */
+export function planSchemaChange(connection, operation) {
+  sync(connection);
+  const text = schemaChangeSql(operation);
+  const body = { version: 1, operation: structuredClone(operation), sql: text,
+    source: schema(connection), settings: schemaSettings(connection) };
+  return { ...body, checksum: fingerprint({ ...body, operation: text }) };
+}
+
+/** Apply a reviewed native change atomically, refusing schema/settings drift.
+ * Replan after any schema change; only explicit drop ifExists handles absence.
+ * @param {any} connection @param {ReturnType<typeof planSchemaChange>} plan */
+export function applySchemaChange(connection, plan) {
+  sync(connection);
+  const { checksum, ...body } = plan;
+  if (body.version !== 1 || checksum !== fingerprint({ ...body, operation: plan.sql }) || plan.sql !== schemaChangeSql(plan.operation)) refuse('schema change checksum or statement differs');
+  return connection.transaction(() => {
+    const before = schema(connection);
+    if (fingerprint(before) !== fingerprint(plan.source) || fingerprint(schemaSettings(connection)) !== fingerprint(plan.settings))
+      refuse('source schema or connection settings changed after planning');
+    connection.exec(plan.sql);
+    return { changed: fingerprint(before) === fingerprint(schema(connection)) ? 0 : 1 };
+  }, { mode: 'immediate' });
+}
 
 /** Inspect a live schema and generate a table plan without changing it.
  * Rebuilds require explicit opt-in. Unlisted indexes and triggers are preserved.

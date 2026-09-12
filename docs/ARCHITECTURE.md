@@ -705,6 +705,11 @@ backup publication retain their existing owners. See [db architecture](../packag
 
 ### Native storage composition
 
+`db/relational` owns native SQLite expressions and structural schema authoring.
+The same column renderer serves table creation and additive changes; reviewed
+object plans retain source/settings checks while the caller owns explicit key
+remapping, row dispositions and durable migration completion.
+
 The db entity planner owns adopted-column read lowering and bounded mutation documents. `linq/db` owns the headless [range adapter](../packages/app/docs/COLLECTION-PROVIDER.md), reusing db cursors, keyset pages, transactions and capture. Its structural shape is consumed through injection; there is no db/linq import of app or components and no second query or range engine.
 
 `db/node-process` owns finite supervised SQLite child processes. It shares the

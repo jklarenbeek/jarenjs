@@ -49,8 +49,15 @@ Selections support table and subquery sources, inner/left/cross joins, correlate
 `sql.scalar`/`sql.exists`, CASE, IN/NOT IN, DISTINCT, grouped and distinct
 aggregates, HAVING, UNION/UNION ALL and ordered windows. The declaration file
 lists the closed operators and functions, including trim/coalesce, LIKE, JSON
-extraction, casts and SQLite date functions. Neither arbitrary function names
+extraction/type inspection, casts and SQLite date functions. Neither arbitrary function names
 nor a raw-expression escape hatch is accepted.
+
+`sql.call('json_type', [document, path])` distinguishes a missing path (SQL NULL)
+from JSON null (text `'null'`) and reports SQLite's native scalar/container type
+names. Omitting the path inspects the whole document. SQL-null input stays null;
+malformed JSON raises SQLite's error. It composes with CASE and synchronous
+cursors without decoding or rewriting the original column. See
+[SQLite JSON type inspection](https://www.sqlite.org/json1.html#the_json_type_function).
 
 ## Exact writes and bytes
 
@@ -114,7 +121,9 @@ applyTableMigration(connection, migration);
 Columns retain declaration order and exact INTEGER/REAL/TEXT/BLOB/NUMERIC/ANY
 types. Definitions support ordered primary keys, rowid or AUTOINCREMENT identity,
 nullability, database defaults, generated columns, STRICT/WITHOUT ROWID, named
-UNIQUE/CHECK/foreign-key constraints and delete/update actions. Index terms
+UNIQUE/CHECK/foreign-key constraints and delete/update actions. A column can also
+declare `references: { table, columns: [name], onDelete, onUpdate, deferred }`.
+Index terms
 support expressions, direction and collation, with an optional partial predicate.
 Triggers support BEFORE/AFTER, INSERT/UPDATE/DELETE, UPDATE OF, OLD/NEW conditions,
 mutation steps and RAISE. Schema expressions use the same structural emitter,
@@ -132,8 +141,9 @@ physical tables use the live-schema `planTableMigration` API.
 ## Guarded upgrades
 
 Planning inspects the existing schema without modifying it. A differing existing
-table requires `allowRebuild: true`; additions currently use the same guarded
-rebuild. Every removed column needs `dropColumns`; removing an existing explicit
+table requires `allowRebuild: true` when using `planTableMigration`; use the narrow
+schema operations below to append a column without rebuilding. Every removed
+column needs `dropColumns`; removing an existing explicit
 index/trigger requires `dropObjects`. Unmentioned indexes and triggers survive.
 An optional `copy` maps writable non-key target columns to structural expressions;
 new columns otherwise use their defaults. The plan retains the source schema and
@@ -156,6 +166,90 @@ settle synchronously. A rebuild inside an already open FK-enabled transaction
 refuses before DDL. Node/Bun regressions cover populated history and references,
 failed copies, repeat reopening, nested rollback, and process death after DROP
 with WAL recovery. These tests do not establish power-loss durability.
+
+## Additive and object operations
+
+`planSchemaChange(connection, operation)` returns a reviewable
+`{ version, operation, sql, source, settings, checksum }`. It reads the main schema
+and relevant connection settings without executing DDL. `applySchemaChange`
+checks that source and settings again under an IMMEDIATE transaction before
+executing the single statement. It returns `{ changed }`, the number of schema
+operations that changed the catalog, rather than the number of affected rows.
+Both methods require the same available synchronous SQLite ownership as rebuilds.
+
+```js
+import { planSchemaChange, applySchemaChange, sql } from '@jarenjs/db/relational';
+const addition = planSchemaChange(connection, {
+  op: 'addColumn', table: 'entries', column: {
+    name: 'revision', type: 'INTEGER', nullable: false, default: 1,
+    check: sql.binary('>=', sql.column('revision'), 1),
+  },
+});
+// Review addition.sql and addition.source before execution.
+applySchemaChange(connection, addition);
+applySchemaChange(connection, planSchemaChange(connection, {
+  op: 'dropIndex', name: 'obsolete_index', ifExists: true,
+}));
+```
+
+The closed operations are `addColumn` (`table`, `column`), `dropIndex` (`name`,
+optional `ifExists`), `renameTable` (`table`, `to`) and `dropTable` (`table`,
+optional `ifExists`). Identifiers address **main** explicitly; a temporary table
+with the same spelling cannot redirect an operation. A dot inside a name is a
+literal character. Attached database operations are not part of this surface.
+The column definition and expression renderer are shared with `planTable`.
+
+ADD COLUMN appends a declaration and preserves existing rowids, values, storage
+classes, column order, indexes and triggers. It does not derive a complete table
+definition, normalize unknown constraints or copy the table. Literal defaults
+are supported; identity columns, STORED generated columns and expression defaults
+refuse. Ordinary NOT NULL additions require a non-null default. REFERENCES
+additions require a NULL default (or no default), and a single referenced column.
+SQLite checks existing rows for a new CHECK or generated NOT NULL constraint;
+those checks can scan the table even though the operation does not copy it.
+See [SQLite ADD COLUMN restrictions](https://www.sqlite.org/lang_altertable.html#alter_table_add_column).
+
+Drop operations fail on absence unless `ifExists: true` is supplied. A missing
+object then returns `changed: 0`. DROP INDEX affects the named index, not its
+table or triggers. DROP TABLE removes the table and its owned indexes/triggers;
+SQLite's active foreign-key actions still apply. RENAME follows SQLite's current
+dependency rewriting behavior and the reviewed `legacy_alter_table` setting.
+See [DROP TABLE](https://www.sqlite.org/lang_droptable.html) and
+[RENAME TABLE](https://www.sqlite.org/lang_altertable.html#alter_table_rename).
+
+These are **single-source plans**, not durable migration receipts. Replan after
+any schema change. Reapplying a successful ADD/RENAME plan refuses as stale;
+it does not infer completion from a same-named object. An ordered migration must
+check its trusted schema/version receipt before planning the next operation and
+record completion in the same transaction. Unknown members or unsupported column
+declarations refuse with `JD0005`; modified/stale plans refuse with `JD0021`.
+Native object, data-constraint and dependency errors are left to SQLite. A
+checksum detects accidental plan edits; it does not authorize untrusted plans.
+
+## Explicit identity-changing upgrades
+
+The ordinary rebuild planner continues to refuse key reassignment or row loss.
+A reviewed upgrade can use the primitive operations under
+`withForeignKeysSuspended`, with its own explicit data policy:
+
+1. Check the durable migration receipt or the exact supported legacy schema.
+2. Create a distinct replacement table with `planTable`.
+3. Use relational insert-select with a scoped correlated selection, deterministic
+   identity choice and explicit exclusion predicate. Assert selected, inserted
+   and excluded counts, and any business-specific preservation requirements.
+4. Plan/apply `dropTable` for the original and then `renameTable` for the
+   replacement. Create the required indexes/triggers and validate dependents.
+5. Record completion inside the same transaction so another opening does no work.
+
+Create the replacement before dropping the original; renaming the original first
+can redirect dependent references. Plan each primitive inside the FK scope, after
+the preceding schema operation. The helper checks references before commit and
+restores connection settings. The caller must review incoming key references,
+views, triggers, immutable neighbors and each row disposition. Conflicts fail and
+roll back; there is no inferred permission to discard rows. The installed native
+[qualification fixture](../../../test/db/fixtures/schema-upgrade.mjs) demonstrates
+scoped minimum-ID selection, explicit exclusions, rollback, repeated reopening
+and recovery after actual process death at DROP.
 
 ## Read-only inspection and disk snapshots
 
@@ -188,3 +282,15 @@ calls. No global strong model cache is introduced. Keep connection/query caches
 bounded and reuse compiled metadata. Smaller import graphs alone do not prove
 the complete application meets its RSS budget; measure application memory with
 representative workloads.
+
+Entity mutation engines retain prepared statements by their complete emitted SQL
+in the bounded core LRU cache. Bound values, output projections and row/byte limits
+belong to each execution; changing a payload does not retain another document and
+another copy of the same statement. Distinct SQL stays isolated. This reduces
+retained payload memory, at the cost of rebinding/compiling an identical mutation
+document on each call. The synthetic retention probe at
+`test/db/fixtures/mutation-memory.mjs` reports both varying-payload and identical
+mutation timings, heap and RSS on Node (`--expose-gc`) and Bun. Such samples do not
+replace a complete application's resource gate. Metadata remains caller-owned;
+keep one compiled mapping per used model, one query state per connection, and
+release facade/cache references on close. Driver cursors remain ephemeral.

@@ -2425,3 +2425,8 @@ physical entity retains adoption-only behavior. Public plans create complete
 ordered declarations; an incomplete generated/default definition or view remains
 adoption metadata. SQLite expressions preserve a separate, explicit semantic
 contract for raw text, bytes, nulls, collations and floating totals.
+`planSchemaChange`/`applySchemaChange` expose explicit native ADD COLUMN, DROP
+INDEX, RENAME TABLE and DROP TABLE with source/settings guards. They do not infer
+identity remapping or row deletion; that policy stays in an explicitly reviewed
+transaction. Entity mutation statement reuse is keyed by emitted SQL, while
+bindings, output projections and resource limits belong to each execution.

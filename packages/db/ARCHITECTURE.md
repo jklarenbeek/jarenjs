@@ -1186,7 +1186,9 @@ both hosts, including transaction failures.
 
 `dialects/sqlite-relational.js` owns the explicit SQLite expression and statement
 compiler; `dialects/sqlite-schema.js` reuses it for ordered tables, indexes and
-triggers. `table-migration.js` owns reviewed source/target guards, native copying
+triggers, sharing its column/reference renderer with native ADD COLUMN.
+`table-migration.js` owns reviewed source/settings guards for additive/object
+changes and source/target guards for native copying
 and preservation checks, with catalog/pragma spellings in the SQLite dialect.
 The supplied driver owns transactions and cursors. These programs are explicitly
 SQLite-semantic and never enter the JSON residual evaluator. See
@@ -1196,6 +1198,8 @@ SQLite-semantic and never enter the JSON residual evaluator. See
 does not import runtime owners. `/query`, `/model` and `/entity` expose those
 mechanisms without the root store import. `compileEntityModel` performs one model
 normalization for both entities and mapping; openStore reuses that result.
+`mutation.js` keeps bounded statement reuse keyed by emitted SQL; bindings,
+projections and limits are call-local, so cached plans do not retain old payloads.
 
 `drivers/worker-client.js` and `drivers/sqlite-endpoint.js` own the shared bounded
 RPC contract. Thread and process entries supply their transports. The process
