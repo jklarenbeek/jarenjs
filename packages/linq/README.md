@@ -16,7 +16,7 @@ it by hand, as JSON, with nothing checking it until it ran.
 This package removes the price. You write the query, the schema, the
 model, the migration, the contract, the stylesheet, the state machine,
 the dataflow, the application, the form, chart, project, text template,
-message catalog or AI program as ordinary typed JavaScript,
+message catalog as ordinary typed JavaScript,
 and what comes back is the document — exactly the one its engine
 already takes, byte for byte, with its types derived beside it. The
 chain is the pen; the document is the deliverable.
@@ -49,7 +49,7 @@ SQL — and nothing is hidden: the chain's `explain()` shows the document
 it sent, and the store's `explain(document)` shows what that became,
 `SELECT … FROM "User" WHERE "age" > ? ORDER BY "name"`.
 
-Coverage: <!--fact:coverage.pens-->15 public pen/client subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
+Coverage: <!--fact:coverage.pens-->15 public pen/client/authoring subpaths beside the chain; 69/69 owned schema keywords have dedicated emission routes.<!--/fact-->
 
 ## What you gain
 
@@ -100,7 +100,6 @@ Coverage: <!--fact:coverage.pens-->15 public pen/client subpaths beside the chai
 | a state machine, a dataflow | `@jarenjs/linq/flow` | `@jarenjs/flow` | [flow pen](#by-code-the-flow-pen) · [FLOW-PEN](docs/FLOW-PEN.md) |
 | an application | `@jarenjs/linq/app` | `@jarenjs/app` | [app pen](#by-code-the-app-pen) · [APP-PEN](docs/APP-PEN.md) |
 | a form | `@jarenjs/linq/forms` | `@jarenjs/forms` | [forms pen](#by-code-the-forms-pen) · [FORMS-PEN](docs/FORMS-PEN.md) |
-| an AI action program | `@jarenjs/linq/ai` | `@jarenjs/ai` | [AI-PEN](docs/AI-PEN.md) |
 | a message catalog | `@jarenjs/linq/messages` | `@jarenjs/core/message` | [MESSAGES-PEN](docs/MESSAGES-PEN.md) |
 | a text template | `@jarenjs/linq/jtlt` | `@jarenjs/json/jtlt` | [JTLT-PEN](docs/JTLT-PEN.md) |
 | a Studio project | `@jarenjs/linq/project` | `@jarenjs/studio` | [PROJECT-PEN](docs/PROJECT-PEN.md) |
@@ -730,8 +729,8 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/linq/project` | JavaScript | declared |
 | `@jarenjs/linq/jtlt` | JavaScript | declared |
 | `@jarenjs/linq/messages` | JavaScript | declared |
-| `@jarenjs/linq/ai` | JavaScript | declared |
 | `@jarenjs/linq/formula` | JavaScript | declared |
+| `@jarenjs/linq/authoring` | JavaScript | declared |
 <!--/fact-->
 
 Explicit cross-provider joins use `federate({ sources, maxRows, maxBytes,
@@ -744,3 +743,13 @@ planning, buffering limits and cleanup guarantees.
 ## Saved formula documents
 
 `@jarenjs/linq/formula` exports `defineFormula` for immutable JSON Query profiles with revision, bindings and schema/helper references. See [FORMULA-PEN](docs/FORMULA-PEN.md); execution remains in json/formula.
+
+## Authoring custom documents
+
+`@jarenjs/linq/authoring` exposes `DocumentBuilder`, `snapshot`, `optionsOf` and
+`captureQuery` for pens that produce ordinary JSON documents. Builder snapshots
+are deeply frozen; `with()` creates a new instance of the same subclass.
+`optionsOf` enforces a closed set of option keys. `captureQuery` uses the same
+expression capture as the built-in pens; external names are explicit and an
+undeclared name retains the `JL0104` refusal. Compilation remains the consumer's
+responsibility. Use expression `get()` for field names that overlap methods.

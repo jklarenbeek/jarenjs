@@ -221,3 +221,6 @@ export function getInclusiveExclusiveBounds(getType, inclusive, exclusive) {
     ? [includes, undefined]
     : [undefined, excludes];
 }
+
+export { checkOutcome, composeChecks } from './check.js';
+export { createGuardedRefiner } from './guarded.js';

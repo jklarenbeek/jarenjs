@@ -17,7 +17,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -72,7 +72,7 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
 
   it('no committed markdown types one outside a derived block', () => {
     const files = execFileSync('git', ['ls-files', '*.md'],
-      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
+      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean).filter(file => existsSync(join(ROOT, file)));
     const typed = [];
     let checked = 0;
     for (const file of files) {
@@ -97,7 +97,7 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
     // which is what made a pen document sit at "(40 kB)" while the table
     // it pointed at published 41.
     const files = execFileSync('git', ['ls-files', '*.md'],
-      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
+      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean).filter(file => existsSync(join(ROOT, file)));
     const typed = [];
     let checked = 0;
     for (const file of files) {

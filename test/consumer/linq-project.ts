@@ -30,8 +30,7 @@ jsonFile('x', 'data', { run: () => 1 });
 // @ts-expect-error bigint is not JSON
 jsonFile('x', 'data', { n: 1n });
 
-import { program as aiProgram } from '@jarenjs/linq/ai';
-jsonFile('program', 'data', aiProgram(['data']).answer('data').schema);
+jsonFile('program', 'data', { steps: [{ op: 'answer', from: 'data' }] });
 file('query', 'query', '"$"', { model: 'store', collection: 'notes', input: 'seed' });
 jsonFile('app', 'app', { view: [] }, { imports: { state: 'seed' } });
 // @ts-expect-error references name files with strings

@@ -98,7 +98,6 @@ const DOCS = [
   ['project', 'the project pen', 'PROJECT-PEN.md', 1],
   ['jtlt', 'the JTLT pen', 'JTLT-PEN.md', 1],
   ['messages', 'the messages pen', 'MESSAGES-PEN.md', 2],
-  ['ai', 'the AI program pen', 'AI-PEN.md', 1],
 ];
 
 /** `DB-CLIENT.md`'s §2 answers a different question — the client writes

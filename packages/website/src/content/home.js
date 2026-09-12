@@ -29,13 +29,13 @@ export const HOME_CONTENT = {
     lead: 'Tool definitions are JSON Schema. Structured output is JSON Schema. Jaren is the infrastructure on the receiving end:',
     points: [
       'Validate generations locally and strictly — sub-microsecond per document once compiled',
-      'Closed vocabularies published as JSON Schema: a constrained decoder cannot emit a structurally invalid query, stylesheet — or, on this site, UI (a safe-render profile handles the untrusted case)',
+      'Closed vocabularies published as JSON Schema: use a constrained decoder, then validate locally against the canonical grammar and compile before execution',
       'Machine-repairable failures: stable codes plus a docPath pointer into the offending document',
     ],
   },
   studio: {
-    title: 'The Studio: one prompt → website',
-    lead: 'A second, self-authored app document hosted next to the site\'s own: you — or the AI assistant — author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot structurally, and the real app runtime runs it live. The AI writes JSON; Jaren validates its shape (a structural gate, not a sanitizer: an app document names host actions and effects, so this is for self-authored apps, not untrusted input). No eval, no server, no scaffolding.',
+    title: 'The Studio: documents that run',
+    lead: 'A second, self-authored app document hosted next to the site\'s own: you author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot structurally, and the real app runtime runs it live. Jaren validates the document’s shape (a structural gate, not a sanitizer: an app document names host actions and effects, so this is for self-authored apps, not untrusted input). No eval, no server, no scaffolding.',
   },
   meta: {
     title: 'This site is the demo',

@@ -11,6 +11,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noCheck": true,
+    "singleThreaded": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "target": "ESNext"

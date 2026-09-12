@@ -21,7 +21,7 @@ task slot per operation and one registered effect; and the
 consumer wants beside the runtime — a browser-safe public subset that is
 itself a `$contract` document, a valid OpenAPI 3.1 document, TypeScript
 declarations with a typed operation map, Markdown reference docs and
-`@jarenjs/ai` tool definitions — with a `jaren-contract` CLI whose
+plain operation definitions — with a `jaren-contract` CLI whose
 `--check` fails CI the moment an artifact drifts. The contract knows its
 own identity: `contract.revision()` is the SHA-256 of the canonical
 public projection, served at the well-known path and carried in every
@@ -513,7 +513,7 @@ toTypeScript(contract);       // one .d.ts: CatalogLoadInput/Output per operatio
                               //   typed Client and Handlers — invoke('product.save', …) is fully typed
 toMarkdown(contract);         // reference docs: operations table, per-operation sections, the type tables
 contractTools(contract, client);
-                              // @jarenjs/ai ToolDefs (WebMCP for free) without importing that package:
+                              // plain ToolDefs for the shared WebMCP adapter:
                               //   name 'product_save', a self-contained inputSchema, execute → the outcome
 ```
 
@@ -738,6 +738,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/contract/package.json` | metadata | — |
 | `@jarenjs/contract/provider` | JavaScript | declared |
 | `@jarenjs/contract/command` | JavaScript | declared |
+| `@jarenjs/contract/webmcp` | JavaScript | declared |
 <!--/fact-->
 
 Author JSON template catalogs and MessageSpec references with the
@@ -780,3 +781,45 @@ finalizers remain part of the same end-to-end test.
 REST/GraphQL dialects and private run authority. Partial observations retain
 wire text and never become complete snapshots. See
 [provider descriptors and ingestion](docs/PROVIDER-FORMAT.md).
+
+## Browser operation registration
+
+`@jarenjs/contract/webmcp` exports `registerWebMcp` for plain invokable tool
+definitions. Its browser boundary needs no assistant, provider or model. Supply
+operations that already validate their inputs, for example projected contract
+operations. Importing the module does not inspect browser globals.
+
+```js
+import { registerWebMcp } from '@jarenjs/contract/webmcp';
+const binding = registerWebMcp(tools, { realm: window });
+const outcome = await binding.ready;
+// On host teardown:
+await binding.dispose();
+```
+
+An explicitly supplied `context` is authoritative, including null or undefined.
+Otherwise the adapter discovers a usable `document.modelContext`, then
+`navigator.modelContext`, preserving method receivers and registering through
+only one context. Missing/inaccessible objects and non-callable methods do not
+mask the other root. `registerTool` takes precedence over legacy `provideContext`
+on either root. Only the explicit `WEBMCP_UNSUPPORTED` sentinel permits fallback
+after invoking a method; an injected implementation may return it only before
+any mutation. Exceptions, permission refusals and partial registration never
+trigger a second registration attempt.
+
+The binding immediately exposes `ready`, `status` and `dispose`. `ready` resolves
+to `registered`, `unavailable`, `failed` or `disposed` with counts, the selected
+root/method and diagnostics; starting a promise does not report completion.
+Browser failures retain their original error and separate cleanup errors.
+Dispose deactivates callbacks immediately, then waits for pending registration
+and removes only owned successful registrations. Repeated disposal is harmless.
+
+Removal uses a returned cleanup handle or `unregisterTool` where available.
+Registration always receives an abort signal. Set `lifecycle: 'abort'` only for
+a host qualified to support it; otherwise native removal without a handle or
+unregister method is explicitly `unverified`, while owned callbacks are inert.
+Legacy `clearContext` is used only with `exclusiveLegacyContext: true`, a host
+guarantee that this binding owns the whole catalog, and only for its current
+owner. Shared legacy catalogs are never cleared. Later explicit mounts discover
+capabilities again. Unknown future method shapes fail visibly without breaking
+ordinary application operations.

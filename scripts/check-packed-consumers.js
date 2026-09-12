@@ -53,7 +53,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,7 +141,13 @@ if (!bun) console.log('(no bun binary on PATH — the Bun consumer leg is skippe
  * @type {Record<string, string>}
  */
 const SEMANTIC_SNIPPETS = {
+  '@jarenjs/studio': readFileSync(join(root, 'test/consumer/studio-editors.ts'), 'utf8'),
   '@jarenjs/core': `
+import { checkOutcome, composeChecks } from '@jarenjs/core/check';
+import { createGuardedRefiner } from '@jarenjs/core/guarded';
+const checked: boolean = composeChecks(() => true)(1).valid;
+void checkOutcome(checked);
+void createGuardedRefiner({ read: async () => ({}), validateProposal: () => true, apply: (value: object) => value, validateCandidate: () => true, planCommit: (value: object) => value, commit: async (value: object) => value });
 import { isJsonNumberString } from '@jarenjs/core/number';
 import { createBoundedCache } from '@jarenjs/core/cache';
 const jsonNumber: boolean = isJsonNumberString('1.25e2');
@@ -149,27 +155,6 @@ const boundedCache = createBoundedCache<string, number>(2);
 boundedCache.set('entry', 1);
 const removed: boolean = boundedCache.delete('entry');
 void [jsonNumber, removed];
-`,
-  '@jarenjs/ai': `
-import { createChatClient, createToolbox, createAgent, registerModelContext, resolveEndpoint, createLedger, createGuardedRefiner, validateClaimEvidence, ledgerFootprint } from '@jarenjs/ai';
-void validateClaimEvidence({}); void ledgerFootprint({});
-void createGuardedRefiner({ read: async () => ({}), validateProposal: () => true, apply: (d: any) => d, validateCandidate: () => true, planCommit: (d: any) => d, commit: async (d: any) => d });
-void createLedger({ goalLimits: { maxChars: 2048 }, archiveLimits: { maxItems: 8 } }).retentionReport();
-const endpoint = resolveEndpoint({ provider: 'ollama', model: 'm' });
-void endpoint.url;
-const client = createChatClient({ provider: 'ollama', model: 'm', fetch: (globalThis.fetch), maxTokens: 3000, maxTokensField: 'max_completion_tokens' });
-// @ts-expect-error only Chat Completions token fields are accepted
-createChatClient({ maxTokensField: 'max_output_tokens' });
-const toolbox = createToolbox();
-toolbox.add({
-  name: 'echo', description: 'echo', inputSchema: { type: 'object' },
-  execute: (input: any) => input,
-});
-void toolbox.toFunctionTools();
-void toolbox.execute('echo', {});
-void registerModelContext(toolbox, undefined);
-const agent = createAgent({ client, toolbox, system: 'x', maxToolRounds: 3 });
-void agent.send([{ role: 'user', content: 'hi' }]);
 `,
   '@jarenjs/view': `
 import { createDomRenderer } from '@jarenjs/view';
@@ -277,6 +262,11 @@ void toMermaid(doc).length;
 void renderMermaid(source, { dateNames: undefined })[0];
 `,
   '@jarenjs/linq': `
+import { DocumentBuilder, captureQuery, snapshot, optionsOf } from '@jarenjs/linq/authoring';
+const builder = new DocumentBuilder({ title: 'plain' }).with({ title: 'edited' });
+const title: string = builder.schema.title;
+void snapshot({ title }); void optionsOf({ title }, ['title'], 'document');
+void captureQuery<{ price: number }, never>('price', [], row => row.get('price').add(1));
 import { from, fromDocument, LinqBuildError, LinqRuntimeError, LINQ_CODES } from '@jarenjs/linq';
 import * as m from '@jarenjs/linq/model';
 import * as sc from '@jarenjs/linq/schema';
@@ -289,8 +279,6 @@ import { bar as penBar } from '@jarenjs/linq/charts';
 import { catalog as messageCatalog, message as messageRef } from '@jarenjs/linq/messages';
 messageCatalog('forms').entry('form/required', 'Required').partial();
 messageRef('minimum', { params: { limit: 3 } });
-import { program as aiProgram } from '@jarenjs/linq/ai';
-aiProgram(['data']).select('data', 'result', v => v.get('n').add(1)).answer('result');
 const chartKind: 'bar' = penBar().categories(['A']).series([{ name: 'S', values: [1] }]).schema.type;
 void chartKind;
 import { defineProject, jsonFile } from '@jarenjs/linq/project';
@@ -381,6 +369,10 @@ const workflow = compileWorkflow({ $workflow: '0.2', revision: '1', initial: 'do
 workflow.run(null, { runId: 'packed' }).then((r: WorkflowResult) => { const s: 'waiting'|'done' = r.status; void s; });
 `,
   '@jarenjs/contract': `
+import { registerWebMcp, type WebMcpResult } from '@jarenjs/contract/webmcp';
+const registration = registerWebMcp([{ name: 'read', description: 'Read', inputSchema: { type: 'object' }, execute: () => ({ value: 1 }) }], { realm: {} });
+const registered: WebMcpResult = await registration.ready;
+void registered.status; await registration.dispose();
 import {
   compileContract, ContractCompileError, ContractRuntimeError, ContractHostError, ContractFailure, isContractFailure,
   CONTRACT_CODES, contractMessagesEn, contractCatalogEn,
@@ -692,6 +684,14 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       writeFileSync(join(consumerDir, 'collection-grid.json'), readFileSync(join(root, 'test/adoption/fixtures/grid.json')));
       program += "await import('./collection.js');\n";
     }
+    if (name === '@jarenjs/studio') {
+      mkdirSync(join(consumerDir, 'test/consumer'), { recursive: true });
+      mkdirSync(join(consumerDir, 'test/view'), { recursive: true });
+      for (const file of ['studio-installed.js', 'studio-runtime.js', 'studio-browser.js', 'studio-data-worker.js', 'studio-project-worker.js'])
+        cpSync(join(root, 'test/consumer', file), join(consumerDir, 'test/consumer', file));
+      cpSync(join(root, 'test/view/dom.stub.js'), join(consumerDir, 'test/view/dom.stub.js'));
+      program += "await import('./test/consumer/studio-runtime.js');\n";
+    }
     const programFile = join(consumerDir, 'consumer.mjs');
     writeFileSync(programFile, program);
 
@@ -767,9 +767,30 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       }
     }
 
+    if (name === '@jarenjs/studio') {
+      // The public closure above has already passed on Node, Bun and strict types.
+      // This PRIVATE browser app additionally owns its concrete SQLite initializer.
+      const sqliteRoot = join(root, 'node_modules/@sqlite.org/sqlite-wasm');
+      const sqlite = JSON.parse(readFileSync(join(sqliteRoot, 'package.json'), 'utf8'));
+      cpSync(sqliteRoot, join(modulesDir, '@sqlite.org/sqlite-wasm'), { recursive: true, dereference: true });
+      writeFileSync(join(consumerDir, 'package.json'), JSON.stringify({ name: 'installed-editor-host', private: true, type: 'module',
+        dependencies: { '@jarenjs/studio': pkg.version, '@sqlite.org/sqlite-wasm': sqlite.version } }));
+      cpSync(join(root, 'test/consumer/studio-host.html'), join(consumerDir, 'index.html'));
+      writeFileSync(join(consumerDir, 'vite.config.mjs'), "export default { base: './', logLevel: 'error', worker: { format: 'es' }, build: { target: 'esnext', assetsInlineLimit: 0 } };\n");
+      const browser = spawnSync(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'build'], { cwd: consumerDir, encoding: 'utf8' });
+      if (browser.status !== 0 || !existsSync(join(consumerDir, 'dist/index.html'))) {
+        failures++; console.error(`✗ ${name} (installed browser host): ${browser.stderr}${browser.stdout}`); continue;
+      }
+      if (process.env.STUDIO_HOST_OUTPUT) {
+        mkdirSync(process.env.STUDIO_HOST_OUTPUT, { recursive: true });
+        cpSync(join(consumerDir, 'dist'), process.env.STUDIO_HOST_OUTPUT, { recursive: true });
+        writeFileSync(join(process.env.STUDIO_HOST_OUTPUT, 'receipt.json'), JSON.stringify({ studio: pkg.version, sqlite: sqlite.version, source: 'packed package closure', websiteImports: false }, null, 2));
+      }
+    }
+
     const peerNote = peers.length === 0 ? ''
       : ` + ${peers.length} optional peer(s) needed by ${[...new Set(needing.map((n) => n.subpath))].join(', ')}`;
-    console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s)${peerNote}, node+types${bun ? '+bun' : ''}${name === '@jarenjs/app' ? '+vite' : ''}`);
+    console.log(`✓ ${name} — ${subpaths.length} subpath(s), closure of ${declaredClosure(byName, name).size} package(s)${peerNote}, node+types${bun ? '+bun' : ''}${['@jarenjs/app', '@jarenjs/studio'].includes(name) ? '+vite' : ''}`);
   }
   // Independent composition consumer; the per-package closure proofs above
   // remain isolated. This application explicitly installs each participating owner.
@@ -828,4 +849,4 @@ if (failures > 0) {
 }
 console.log('\nEvery explicit JavaScript export key of every packed package imports and '
   + `type-checks from its declared closure${bun ? ', under Node and Bun' : ' (Bun leg skipped)'}; `
-  + 'the @jarenjs/app closure bundles under an isolated Vite build.');
+  + 'the app and complete Studio editor closures bundle under isolated Vite builds.');

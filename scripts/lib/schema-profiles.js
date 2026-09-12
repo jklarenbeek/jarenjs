@@ -167,7 +167,7 @@ export function deriveAuthoringProfile(schema, options) {
  * document grammar, and it is the same seam `programSchema({ queryRef })`
  * already leaves open. The description is what a decoder reads in place
  * of ~16 kB of phrase shapes; the vocabulary itself belongs in the
- * prompt (`operatorCrib` in `@jarenjs/ai/stylesheet`).
+ * host’s prompt while local validation remains authoritative.
  */
 export const JSLT_AUTHORING_OPEN = {
   queryDocument: 'A jaren-query expression: a JSONPath string starting with "$", a literal, '

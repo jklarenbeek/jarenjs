@@ -718,7 +718,7 @@ algorithm, exhaustive flag and returned candidate count, validates candidate
 identity/vector shape, and re-scores candidates itself. The DB ledger recipe
 continues to normalize as an exact adapter. No ANN runtime dependency is added.
 
-Index decision: <!--fact:recall.annDecision-->0/6 contender rows cleared all bars; retain exact. Required exact-top-10 recall ≥ 0.95, p95 speedup ≥ 2×, and a measured exact p95 ≥ 100 ms. The largest reference corpus contains 5183 documents; scale beyond it remains unmeasured.<!--/fact-->
+The benchmark decision and its measured limits are maintained by [Tangle’s recall instruments](https://github.com/jklarenbeek/tangleai/blob/main/benchmark/MIGRATED-JAREN.md#labelled-recall-and-repeated-refinement). The generic store retains exact ranking; external ANN adapters must meet the declared oracle and lifecycle contract.
 
 **One document, three executors, proven to agree.** As with the spatial
 family, the k-nearest shapes of a committed corpus

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.10.0",
   "type": "module",
-  "description": "The jarenjs website: the whole site is one JSON app document running on @jarenjs/view + @jarenjs/app \u2014 live playground engines, an experiment IDE, a bring-your-own-key AI assistant and WebMCP agent tools (both on @jarenjs/ai) and offline PWA support.",
+  "description": "The Jaren website: complete shared editors, live engines, plain WebMCP operations and offline PWA support.",
   "author": "joham",
   "license": "MIT",
   "scripts": {
@@ -20,7 +20,6 @@
     "postdeploy:remeasure": "node ../../scripts/verify-live-site.js"
   },
   "dependencies": {
-    "@jarenjs/ai": "file:../ai",
     "@jarenjs/app": "file:../app",
     "@jarenjs/calc": "file:../../components/calc",
     "@jarenjs/charts": "file:../../components/charts",

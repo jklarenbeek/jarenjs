@@ -1,3 +1,4 @@
+@import './flow.css';
 /* @jarenjs/studio — the IDE shell stylesheet.
  *
  * DESIGN.md-conformant: minmax(0,1fr) tracks with min-width:0 on every

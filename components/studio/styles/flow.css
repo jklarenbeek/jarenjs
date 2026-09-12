@@ -1,0 +1,99 @@
+@import './editor.css';
+/* Complete Flow editor: scoped layout, interaction and reduced-motion support. */
+
+:where(.jaren-flow-editor) .flow-panebar { display: none; }
+@media (max-width: 1024px) {
+  :where(.jaren-flow-editor) .flow-grid { padding-bottom: var(--kb-inset, 0px); }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-flow-editor) .flow-panebar { display: flex; }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-flow-editor) .flow-panebar .seg-btn { flex: 1; }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-flow-editor) .flow-panebar,
+:where(.jaren-flow-editor) .flow-grid > .card,
+:where(.jaren-flow-editor) .flow-side { grid-column: 1 / -1; }
+}
+@media (max-width: 1024px) {
+
+  :where(.jaren-flow-editor) .flow-grid[data-pane='diagram']   .flow-side,
+:where(.jaren-flow-editor) .flow-grid[data-pane='inspector'] .flow-canvas-card,
+:where(.jaren-flow-editor) .flow-grid[data-pane='inspector'] .flow-run,
+:where(.jaren-flow-editor) .flow-grid[data-pane='run']       .flow-canvas-card,
+:where(.jaren-flow-editor) .flow-grid[data-pane='run']       .flow-inspector { display: none; }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-flow-editor) .flow-grid .btn,
+:where(.jaren-flow-editor) .flow-grid .seg-btn { min-height: 44px; }
+}
+
+:where(.jaren-flow-editor) .flow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-4, 1rem);
+  align-items: start;
+}
+:where(.jaren-flow-editor) .flow-side { display: grid; gap: var(--space-4, 1rem); }
+:where(.jaren-flow-editor) .flow-palette { display: flex; flex-wrap: wrap; gap: var(--space-2, 0.5rem); }
+:where(.jaren-flow-editor) .flow-tabs { display: flex; gap: var(--space-2, 0.5rem); margin-block: var(--space-2, 0.5rem); }
+:where(.jaren-flow-editor) .flow-canvas { overflow: auto; }
+:where(.jaren-flow-editor) .flow-canvas svg { max-width: 100%; height: auto; }
+:where(.jaren-flow-editor) .flow-text { width: 100%; }
+:where(.jaren-flow-editor) .flow-dag-input { width: 100%; }
+:where(.jaren-flow-editor) .flow-log {
+  list-style: none;
+  margin: var(--space-2, 0.5rem) 0 0;
+  padding: 0;
+  max-height: 12rem;
+  overflow: auto;
+}
+:where(.jaren-flow-editor) .flow-log-line {
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace);
+  font-size: 0.78rem;
+  padding-block: 1px;
+  border-block-end: 1px solid var(--border, hsl(220 14% 88%));
+  overflow-wrap: anywhere;
+}
+:where(.jaren-flow-editor) .flow-run-head { display: flex; flex-wrap: wrap; gap: var(--space-2, 0.5rem); align-items: center; margin-block: var(--space-2, 0.5rem); }
+:where(.jaren-flow-editor) .flow-run-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2, 0.5rem); }
+:where(.jaren-flow-editor) .flow-run-mount { border: 1px dashed var(--border, hsl(220 14% 88%)); border-radius: 8px; padding: var(--space-2, 0.5rem); }
+:where(.jaren-flow-editor) .flow-output { max-height: 12rem; overflow: auto; }
+:where(.jaren-flow-editor) .btn.flow-armed { outline: 2px solid var(--accent, hsl(221 83% 53%)); }
+:where(.jaren-flow-editor) .mm-pick { cursor: pointer; }
+:where(.jaren-flow-editor) .mm-selected .mm-node-shape,
+:where(.jaren-flow-editor) .mm-selected .mm-edge-line { stroke-width: 2.5; }
+:where(.jaren-flow-editor) .mm-armed .mm-node-shape { stroke-dasharray: 4 3; stroke-width: 2.5; }
+:where(.jaren-flow-editor) .mm-active .mm-node-shape {
+  stroke: var(--accent, hsl(221 83% 53%));
+  stroke-width: 2.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  filter: drop-shadow(0 0 6px var(--accent, hsl(221 83% 53%)));
+}
+:where(.jaren-flow-editor) .mm-fired .mm-edge-line {
+  stroke: var(--accent, hsl(221 83% 53%));
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+}
+:where(.jaren-flow-editor) .mm-fired .mm-edge-label { fill: var(--accent, hsl(221 83% 53%)); font-weight: 600; }
+:where(.jaren-flow-editor) .mm-run-ok .mm-node-shape { stroke: var(--ok, #16a34a); stroke-width: 2.5; }
+:where(.jaren-flow-editor) .mm-run-error .mm-node-shape { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
+:where(.jaren-flow-editor) .mm-run-aborted .mm-node-shape { opacity: 0.5; }
+@media (prefers-reduced-motion: no-preference) {
+  :where(.jaren-flow-editor) .mm-active .mm-node-shape { animation: mm-pulse 1.5s var(--motion-ease-loop, ease-in-out) infinite; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :where(.jaren-flow-editor) .mm-fired .mm-edge-line { animation: mm-flow 0.7s linear infinite; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :where(.jaren-flow-editor) .mm-run-error .mm-node-shape { animation: mm-pulse 1s var(--motion-ease-loop, ease-in-out) infinite; }
+}
+@keyframes mm-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px var(--accent, hsl(221 83% 53%))); }
+  50%      { filter: drop-shadow(0 0 9px var(--accent, hsl(221 83% 53%))); }
+}
+@keyframes mm-flow {
+  to { stroke-dashoffset: -20; }
+}

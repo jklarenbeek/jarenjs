@@ -31,7 +31,7 @@ import { createApp, createTaskEffect } from '@jarenjs/app';
 import { JarenValidator } from '@jarenjs/validate';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
-import { createToolbox } from '@jarenjs/ai';
+
 
 import { compileContract } from '@jarenjs/contract';
 import { serveHttp } from '@jarenjs/contract/http';
@@ -198,13 +198,12 @@ describe('the campaign story — one contract, every end', () => {
     }
   });
 
-  it('the same client hands the operations to a model as tools, and one executes', async () => {
-    const toolbox = createToolbox();
-    for (const tool of contractTools(contract, client)) toolbox.add(tool);
-    assert.deepStrictEqual(toolbox.list().map((/** @type {any} */ t) => t.name),
+  it('the same client projects the operations as plain definitions, and one executes', async () => {
+    const tools = contractTools(contract, client);
+    assert.deepStrictEqual(tools.map((/** @type {any} */ t) => t.name),
       ['catalog_load', 'product_save', 'product_search', 'product_remove'],
       'opaque and subscribe operations are excluded by default');
-    const outcome = /** @type {any} */ (await toolbox.execute('product_search', { q: 'second' }));
+    const outcome = /** @type {any} */ (await tools.find(t => t.name === 'product_search').execute( { q: 'second' }));
     assert.strictEqual(outcome.ok, true);
     assert.deepStrictEqual(outcome.value, [{ id: 2, name: 'second', price: 9 }]);
   });

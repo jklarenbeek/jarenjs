@@ -65,7 +65,7 @@ Split the tree into 3–5 areas that a single reader can hold — in this monore
 engine packages (`packages/core`, `packages/json`, `packages/validate`, `packages/formats`,
 `packages/refs`), the runtime packages (`packages/view`, `packages/app`, `packages/forms`,
 `packages/locales`), the data pair and the model layer (`packages/linq`, `packages/db`,
-`packages/ai`, `packages/josl`, `packages/flow`), the components (`components/*`), and the
+`packages/josl`, `packages/flow`), the components (`components/*`), and the
 harness (`benchmark/`, `scripts/`, `test/` infrastructure, `docs/`). Give each area to a
 separate reader — a subagent, a colleague, or yourself in a separate session — with the **same
 brief**:

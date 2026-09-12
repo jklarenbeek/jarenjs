@@ -152,16 +152,9 @@ error model, or a cross-tenant read that defeats a mandatory predicate
 while processing an untrusted query document is a vulnerability worth
 reporting.
 
-## A model-callable geo toolbox
+## Browser operations
 
-`@jarenjs/ai`'s `createGeoToolbox` hands a language model seven tools
-over `@jarenjs/core/geo`. Each is schema-guarded by the GeoJSON
-meta-schema before it runs, computes nothing beyond one kernel call
-over the arguments it was handed, performs no I/O and reaches no store
-— a malformed geometry is refused with the validator's errors, an
-overlay request is refused by name, and the tools can therefore be
-published to a browser agent over WebMCP without widening what a model
-can touch.
+The website registers selected, input-validated public editor operations through `@jarenjs/contract/webmcp`. Mutations require the observed document revision; a stale or invalid candidate is refused before publication. Registration owns callbacks and cleanup, and never grants a model provider access by itself.
 
 ## Supply chain
 

@@ -408,7 +408,7 @@ export type ToolName<S extends string> =
   S extends `${infer A}.${infer B}` ? `${A}_${ToolName<B>}` : S;
 
 /** One tool definition, typed by the operation it invokes — the
- * `ToolDef` shape `@jarenjs/ai`'s `createToolbox().add` takes. */
+ * `ToolDef` shape browser or host operation registries takes. */
 export type TypedTool<C> = {
   [K in keyof InvokableOf<C>]: {
     name: ToolName<Extract<K, string>>;

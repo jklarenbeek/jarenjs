@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * The Studio seed library: three complete, boot-tested `@jarenjs/app`
- * documents. They are the few-shot corpus the assistant adapts from
+ * documents. They are complete, editable examples for hosts to build upon
  * (author via template + patch, never from scratch), so each one is a
  * small but honest application: state + JSLT view + actions as one
  * JSON value, rendered through the studio's widget capabilities.

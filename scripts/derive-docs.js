@@ -16,6 +16,7 @@
  */
 
 import process from 'node:process';
+import './generate-adoption-census.js';
 import { fileURLToPath } from 'node:url';
 
 import { main } from './lib/derive.js';
@@ -24,10 +25,7 @@ import { penTables } from './generate-pen-index.js';
 import { exportInventory } from './generate-export-inventory.js';
 import { penCoverage } from './generate-pen-census.js';
 import { generateAuthoringProfiles } from './generate-authoring-profiles.js';
-import { programFacts } from './generate-program-facts.js';
-import { ledgerFacts } from './generate-ledger-facts.js';
 import { formsFacts } from './generate-forms-facts.js';
-import { recallFacts } from './generate-recall-facts.js';
 import { adoptionFacts } from './generate-adoption-facts.js';
 import { formulaFacts } from './generate-formula-facts.js';
 import { siteFacts } from './generate-site-facts.js';
@@ -46,6 +44,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, programFacts, recallFacts, ledgerFacts, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts],
   argv: process.argv.slice(2),
 }));

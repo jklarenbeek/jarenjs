@@ -566,9 +566,7 @@ Where **not** to reach for `'error'`: a schema a user hands you. Refusing to
 compile a stranger's valid schema over a format you happen not to implement is
 your problem presented as theirs — this repo keeps the default for the
 validator playground's input and for project files in the studio, and uses
-`'error'` only for its own grammars. `@jarenjs/ai`'s ledger is the other
-exception: it cannot depend on `@jarenjs/formats` at all, so it stays on the
-default and puts a `pattern` beside the `format` to do the enforcing.
+`'error'` only for its own grammars. A portable schema may put a `pattern` beside an annotation-only `format` to enforce its lexical constraint without requiring a format registry.
 
 Two things `'error'` deliberately leaves alone. It does not fire where
 `format` is annotation-only anyway (draft 2020-12 without the format-assertion

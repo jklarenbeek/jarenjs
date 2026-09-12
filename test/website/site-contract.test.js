@@ -163,7 +163,7 @@ describe('the site contract document', function () {
     assert.strictEqual(suite.output.validate([1, 2, 3]).valid, false);
     // the input, by contrast, is bounded: a name that could escape the
     // benchmark directory never reaches a fetch
-    assert.strictEqual(suite.input.validate({ suite: 'long-horizon' }).valid, true);
+    assert.strictEqual(suite.input.validate({ suite: 'vector' }).valid, true);
     assert.strictEqual(suite.input.validate({ suite: '../../etc/passwd' }).valid, false);
     assert.strictEqual(suite.input.validate({ suite: 'meta', extra: 1 }).valid, false);
   });

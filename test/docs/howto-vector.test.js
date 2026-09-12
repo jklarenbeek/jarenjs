@@ -11,7 +11,7 @@
  * So this gate does not read the example, it RUNS it: every fence of the
  * section, concatenated in the order a reader would paste them, executed
  * as one module against the real packages, with a temporary store and
- * the deterministic reference embedder. Then it asserts the values the
+ * fixed vectors supplied by the example. Then it asserts the values the
  * document itself quotes in its `// →` comments — derived from the run,
  * never typed here — so a prose figure and a real answer cannot drift
  * apart in either direction.
@@ -65,9 +65,9 @@ after(() => {
 describe('the HOWTO vector example runs, and answers what it says it answers', () => {
   it('the section is present and carries every fence the program needs', () => {
     assert.ok(SECTION.length > 0, `docs/HOWTO.md no longer has a "${HEADING}" section`);
-    // the four steps the section promises: embed, store, ask, recall
-    assert.strictEqual(FENCES.length, 4,
-      'the example is no longer four javascript fences — the runner concatenates them in order');
+    // the three steps the section promises: supplied vectors, store, ask
+    assert.strictEqual(FENCES.length, 3,
+      'the example is no longer three javascript fences — the runner concatenates them in order');
   });
 
   it('every fence, concatenated in reading order, executes as one program', async () => {
@@ -76,7 +76,7 @@ describe('the HOWTO vector example runs, and answers what it says it answers', (
     // can never leave a file the repository would notice
     const dir = fs.mkdtempSync(path.join(ROOT, 'node_modules', '.cache-howto-'));
     scratch = path.join(dir, 'example.mjs');
-    const epilogue = 'export { ranked, mode, swept, recalled };\n';
+    const epilogue = 'export { ranked, mode };\n';
     fs.writeFileSync(scratch, `${FENCES.join('\n')}\n${epilogue}`);
     ran = await import(pathToFileURL(scratch).href);
     assert.ok(ran, 'the example produced no bindings');
@@ -91,16 +91,4 @@ describe('the HOWTO vector example runs, and answers what it says it answers', (
       `the document no longer prints ${util.inspect(ran.mode)} for the plan mode`);
   });
 
-  it('the ranked recall answers the memories, scores and skip count the document prints', () => {
-    const evidence = ran.recalled.memories.map((/** @type {any} */ m) => m.evidence);
-    const scores = ran.recalled.scores.map((/** @type {number} */ s) => s.toFixed(3));
-    assert.deepStrictEqual(evidence, ['n1', 'n2']);
-    assert.deepStrictEqual(scores, ['0.712', '0.441']);
-    assert.strictEqual(ran.recalled.skipped, 0);
-    assert.deepStrictEqual(ran.swept, { embedded: 3, remaining: 0 });
-    for (const printed of [evidence, scores, ran.swept, ran.recalled.skipped]) {
-      assert.ok(SECTION.includes(`// → ${util.inspect(printed)}`),
-        `the document no longer prints ${util.inspect(printed)}`);
-    }
-  });
 });

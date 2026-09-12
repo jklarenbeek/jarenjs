@@ -8,7 +8,7 @@
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -241,17 +241,17 @@ describe('the document gate', function () {
     assert.ok(report.json >= 100, `expected the repo's json fences, found ${report.json}`);
   });
 
-  it('walks every committed markdown document outside the fixtures', function () {
+  it('walks every tracked or newly authored markdown document outside the fixtures', function () {
     // a gate that reports a file count and silently skips a document is
     // worse than no gate: the count is what a reader concludes coverage
     // from. `test/**` is the one deliberate exclusion — a fixture's job
     // is sometimes to be malformed.
-    const tracked = execFileSync('git', ['ls-files', '*.md'],
+    const tracked = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '*.md'],
       { cwd: fileURLToPath(root), encoding: 'utf8' })
-      .trim().split('\n').filter(Boolean)
+      .trim().split('\n').filter(Boolean).filter(file => existsSync(join(fileURLToPath(root), file)))
       .filter((file) => !file.startsWith('test/'));
     assert.strictEqual(checkDocuments().files, tracked.length,
-      'the gate walks exactly the committed markdown outside test fixtures');
+      'the gate walks exactly the publishable markdown outside test fixtures');
   });
 
   it('reads an indented fence and its language, and reports the opener line', function () {

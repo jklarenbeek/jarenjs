@@ -130,7 +130,7 @@ Three rules, kept by every function so that no caller has to check them again:
 - **A malformed comparison scores 0 and never throws.** Mismatched lengths, an empty vector, a null or a non-finite component answer 0: one bad vector among ten thousand loses the comparison, it does not kill the sweep, and it never poisons a ranking with `NaN`.
 - **Refuse, never fix.** `packVector` and `l2Normalize` answer `null` for anything `isVector` refuses, the way a bounding box refuses a position it cannot bound; nothing truncates, pads or zero-fills a vector into the shape it was supposed to have.
 
-The packed form is `4·d` bytes of little-endian binary32 — the value a database column stores; components round to `Math.fround` and come back exactly. Unpacking aligned bytes on a little-endian host is a *view*, not a copy, which is what a sweep over ten thousand fetched rows is paid for by; misaligned bytes (a pooled `Buffer`, an odd offset into a record) and big-endian hosts take the copy path to the same values. The client that produces embeddings — and a deterministic reference embedder for tests — lives in [`@jarenjs/ai`](../ai/README.md#embeddings).
+The packed form is `4·d` bytes of little-endian binary32 — the value a database column stores; components round to `Math.fround` and come back exactly. Unpacking aligned bytes on a little-endian host is a *view*, not a copy, which is what a sweep over ten thousand fetched rows is paid for by; misaligned bytes (a pooled `Buffer`, an odd offset into a record) and big-endian hosts take the copy path to the same values. Embedding services belong to the host; this package owns finite-vector validation, packing and similarity kernels.
 
 ## Intervals and series
 
@@ -303,6 +303,8 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/range` | JavaScript | declared |
 | `@jarenjs/core/retry` | JavaScript | declared |
 | `@jarenjs/core/schedule` | JavaScript | declared |
+| `@jarenjs/core/check` | JavaScript | declared |
+| `@jarenjs/core/guarded` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
@@ -316,3 +318,13 @@ See [lexical search](docs/SEARCH.md) for the opt-in resident ranker and bounded 
 [Bounded scheduling and retry](docs/SCHEDULING.md) describes `core/schedule` and
 `core/retry`: fair per-scope admission, drained shutdown, shared attempt budgets
 and explicit strict/AI/contract compatibility policies.
+
+## Checks and guarded editing
+
+`@jarenjs/core/check` exports `checkOutcome` and `composeChecks`. Only `true`
+or `{ valid: true }` passes. Composition stops at the first failure and
+preserves its errors. `@jarenjs/core/guarded` exports `createGuardedRefiner`: it
+copies JSON before validating/applying/planning, serializes its own commits,
+and pairs optional snapshot/restore hooks. A failed commit attempts restoration
+once and retains both original and restoration failures. External writers must
+share the host's serialization policy.

@@ -1,3 +1,6 @@
+import { createDataState } from '@jarenjs/studio/data';
+import { createFlowState } from '@jarenjs/studio/flow';
+import { createProjectState } from '@jarenjs/studio/component';
 //@ts-check
 /**
  * The initial application state — one JSON document. Everything the
@@ -6,26 +9,19 @@
  */
 
 import { calcInitialState } from '@jarenjs/calc/component';
-import { START_LOCATION } from '../content/gameContent.js';
+
 import { STARTER_PROJECT } from '../content/projectTemplates.js';
 import { PLAY_START } from '../boundaries/play.js';
 import { HERO_INPUTS } from '../content/hero.js';
 
-export const DEFAULT_AI_SETTINGS = {
-  provider: 'openrouter',  // 'openrouter' | 'ollama' | 'lmstudio' | 'custom'
-  baseUrl: '',             // required for 'custom'; overrides the preset otherwise
-  model: '',               // e.g. 'qwen/qwen3-4b' or a local model name
-  apiKey: '',              // bring your own; local runtimes need none
-};
+
 
 /**
  * @param {string} [theme]
  * @param {string[]} [ideNames] - saved experiment names from storage
- * @param {any} [aiSettings] - persisted assistant settings, if any
- * @param {any} [aiChat] - persisted assistant transcript, if any
  * @returns {any} a fresh initial state
  */
-export function createInitialState(theme = 'light', ideNames = [], aiSettings = null, aiChat = null, playNames = []) {
+export function createInitialState(theme = 'light', ideNames = [], playNames = []) {
   return {
     route: { page: 'home', params: {} },
     theme,
@@ -72,28 +68,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // only on a STRUCTURAL change, so a state-only edit hot-dispatches
     // (app.setState) with no reboot, and an INVALID edit keeps `mount`
     // (the last good frame never blanks). Seeded from the starter template.
-    project: {
-      ...STARTER_PROJECT,
-      mount: null,       // last-good { name, doc, revision } for the active app
-      revision: 0,       // reboot key — bumps only on a structural change
-      dirty: false,      // the editor has uncommitted text
-      // the editor's typing buffer ({ file, text, dirty } or null): every
-      // keystroke lands here, the commit lands on blur. It is what the
-      // controlled textarea is reasserted with, so a render mid-edit cannot
-      // overwrite the user; a write arriving on the same file while it is
-      // dirty raises a conflict instead of clobbering either side.
-      buffer: null,
-      // the file-name field's own buffer ({ file, text } or null). Separate
-      // from `buffer` because its commit is a RENAME: publishing every
-      // keystroke straight through would rename the file once per letter.
-      renameDraft: null,
-      results: {},       // file name -> a run result (query/jslt: later order)
-      stageError: null,  // the nested app's own boot/runtime failure, if any
-      // the phone layout: which single pane shows (files | editor | stage).
-      // Pure chrome — the panes stay mounted, CSS picks one, and the
-      // project/* re-run feed ignores this path by construction.
-      mobilePane: 'editor',
-    },
+    project: createProjectState(STARTER_PROJECT),
 
     // the Play engine playground (boundaries/play.js): pick an engine
     // + an example, edit the source or the data, it runs live. Ephemeral —
@@ -110,79 +85,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // the COW snapshot ring (undo/redo); `run` is the live run's
     // observable state; `revision` bumps per run boot so the nested-app
     // host widget knows when to reboot.
-    flow: {
-      kind: null,        // 'fsm' | 'dag' | null → the template picker
-      doc: null,
-      selection: null,   // { type, id?/index?, path } from a diagram click
-      connect: null,     // armed source id (click-click connect)
-      tab: 'diagram',    // 'diagram' | 'text'
-      parseError: null,  // fail-closed text commits report here
-      history: { past: [], future: [] },
-      run: null,         // fsm: { current, prev, log[] } · dag: { running, nodes, output, error, log[] }
-      runContext: null,  // the machine sandbox's data state (from the template)
-      dagInput: '',      // the dag run pane's JSON input text
-      revision: 0,
-      // the phone layout: which single card shows (diagram | inspector |
-      // run). A diagram pick jumps to the inspector and a run jumps to
-      // the run pane, so the gesture and its answer are never split
-      // across two panes on a screen that shows one.
-      mobilePane: 'diagram',
-    },
-
-    // the browser-side AI assistant (@jarenjs/ai): a bring-your-own-key
-    // chat panel that drives the site through schema-guarded tools
-    ai: {
-      open: false,
-      settingsOpen: false,
-      // the settings "Test connection" probe: idle | busy | ok | fail,
-      // a human detail line, and the model ids a successful probe found
-      probe: { status: 'idle', detail: null, models: [] },
-      // reasoning characters streamed this turn (thinking models emit
-      // reasoning before - or instead of - visible content)
-      reasoningChars: 0,
-      settings: { ...DEFAULT_AI_SETTINGS, ...(aiSettings ?? {}) },
-      // visible transcript: { role, content }; restored from local
-      // storage so a page reload keeps the conversation
-      messages: Array.isArray(aiChat?.messages) ? aiChat.messages : [],
-      draft: '',             // composer text
-      pending: '',           // the assistant reply currently streaming
-      status: 'idle',        // 'idle' | 'streaming' | 'error'
-      activity: null,        // the tool the model is currently calling
-      error: null,
-      // the @jarenjs/ai LEDGER, as the panel shows it. Read from the
-      // ledger (not mirrored into it): the objective is durable state and
-      // this slice is a view of it, so a reload shows what storage holds
-      // rather than what this tab last typed.
-      goal: null,            // { objective, progress: [ { at, note, evidence } ] }
-      goalDraft: '',         // the objective composer
-      memories: 0,           // evidenced facts carried into every turn
-      persistence: null, retention: null,
-      archived: 0,           // dropped rounds sitting in slots, recallable
-      remembering: false,    // a refinement is in flight
-      remembered: null,      // what the last refinement did, in one line
-    },
-
-    // the adventure game (boundaries/game.js): a point-and-click pirate
-    // comedy. Navigation is a jaren-fsm baked into actions (scene/go-*);
-    // `room` is that machine's slice. Static-playable; with an AI key the
-    // NPCs answer live. No death, no soft-locks.
-    game: {
-      started: false,           // false → the title card (name your pirate)
-      nameForm: { name: '' },   // the @jarenjs/forms name field data
-      locale: 'en',             // validation-message locale (@jarenjs/locales)
-      room: { current: START_LOCATION },   // the scene FSM's slice
-      verb: 'look',             // the armed point-and-click verb
-      held: null,               // the armed inventory item (use/give/combine)
-      inv: [],                  // item ids held
-      forms: [],                // the "admiralty forms in triplicate" running gag (exports to CSV)
-      flags: {},                // solved_<puzzle> / clue_* / gag_* flags
-      log: [],                  // the narration feed ({ kind, text })
-      dialogue: null,           // { who, node } while talking
-      duel: null,               // { poise, landed, insult, known[] } during the insult sword-fight
-      ask: '',                  // the dynamic-tier free-text question
-      thinking: false,          // an NPC is answering live
-      won: false,
-    },
+    flow: createFlowState(),
 
     calc: calcInitialState(),    // the @jarenjs/calc sub-app slice
 
@@ -190,48 +93,7 @@ export function createInitialState(theme = 'light', ideNames = [], aiSettings = 
     // OPFS-backed wasm driver. A worker owns the connection; this slice
     // holds the derived text panes and the last observed results/live
     // set. Booted on first navigation to #/data.
-    data: {
-      status: 'boot',          // 'boot' | 'ready' | 'error'
-      boot: null,              // the terminal boot failure { code: 'DATA_BOOT', stage, message }, or null
-      topology: '—',           // 'owner' | 'client'
-      vfs: '—',                // 'opfs-sahpool' | 'memory'
-      version: '',
-      capture: '—',            // 'journal' on wasm (sessions not adapted)
-      operators: [],           // registered operator vocabulary (math/finance/stats packs)
-      pushableOperators: [],   // the subset pushed to SQLite as deterministic UDFs
-      refusal: null,           // the JD2061 second-writer message, if any
-      modelText: '',           // the editable model document (JSON)
-      queryText: '',           // the editable query document (JSON)
-      // the collection every effect works on and the key pointer its
-      // model declares — the model pane is editable, so both move with
-      // the model rather than being named anywhere
-      collection: 'notes',
-      keyPointer: '/id',
-      rows: [],                // the whole collection, last read
-      results: [],             // the last query() result
-      explain: null,           // the last explain() { sql, params, indexes, residual }
-      live: { rows: [], seq: null, regs: null },
-      // the insert field's buffer. A controlled input whose value is not
-      // published per keystroke is erased by the next render, and this
-      // page renders on every live-query event — so the title had to
-      // live in state, not only in the DOM.
-      insertDraft: '',
-      migration: null,         // the last planned/applied migration report
-      // the spatial corpus run through THIS tab's store as the third
-      // executor (data.oracle, one throwaway store per entry): null until
-      // asked, then { status: 'running' } and the report
-      oracle: null,
-      // the spatial round trip (CSV → stylesheet → meta-schema → a
-      // throwaway store with derived spatial indexes → a linq $within →
-      // explain() → a map), run from the fourth card: the editable CSV,
-      // and the last report (null until asked, then { status, … })
-      trip: { csv: '', report: null },
-      error: null,
-      // the phone layout: which single card shows (store | query | live |
-      // trip). Query is the default — it is what a reader of this page
-      // came for.
-      mobilePane: 'query',
-    },
+    data: { ...createDataState(), collection: 'notes' },
 
     // the package-README dialog: a fetched Markdown source rendered by
     // the @jarenjs/md visual component in a near-fullscreen overlay.

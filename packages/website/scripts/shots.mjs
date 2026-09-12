@@ -57,14 +57,6 @@ async function sweep(tag, contextOpts, dark) {
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${OUT}/${tag}-studio-form.png`, fullPage: true });
 
-  // assistant panel open (configured)
-  await page.evaluate(() => localStorage.setItem('jaren-ai',
-    JSON.stringify({ provider: 'openrouter', baseUrl: '', model: 'x', apiKey: 'sk-test' })));
-  await page.reload();
-  await page.locator('.ai-launch').click();
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${OUT}/${tag}-assistant.png`, fullPage: false });
-
   await context.close();
   return problems;
 }

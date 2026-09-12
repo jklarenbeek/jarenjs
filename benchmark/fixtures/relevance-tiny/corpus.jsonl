@@ -1,3 +1,0 @@
-{"id":"a","text":"The amber service retries failed requests twice."}
-{"id":"b","text":"The amber service waits five seconds before retrying."}
-{"id":"c","text":"The blue service stores audit events for seven days."}

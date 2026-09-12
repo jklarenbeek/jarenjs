@@ -23,7 +23,6 @@ release publishes these public workspaces:
 - `@jarenjs/studio`
 - `@jarenjs/play`
 - `@jarenjs/josl`
-- `@jarenjs/ai`
 - `@jarenjs/flow`
 - `@jarenjs/linq`
 - `@jarenjs/db`
@@ -200,7 +199,6 @@ npm view @jarenjs/collection version
 npm view @jarenjs/rules version
 npm view @jarenjs/studio version
 npm view @jarenjs/josl version
-npm view @jarenjs/ai version
 npm view @jarenjs/flow version
 npm view @jarenjs/play version
 npm view @jarenjs/linq version

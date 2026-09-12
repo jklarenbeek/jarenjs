@@ -89,7 +89,6 @@ export const SHELL_RULES = [
             { $apply: ['$.ui.calculator', 'calculator'] },
           ]] },
         { $apply: ['$.ui.flow', 'flow'] },
-        { $apply: ['$.ui.game', 'game'] },
         { $apply: ['$.ui.data', 'data'] },
         { $apply: ['$.ui.bench', 'benchmarks'] },
         { $apply: ['$.ui.chartsPage', 'charts'] },
@@ -103,8 +102,6 @@ export const SHELL_RULES = [
       footer,
       // the package-README overlay: absent (renders nothing) until opened
       { $apply: ['$.ui.readme', 'readme'] },
-      // the AI assistant slide-out: present on every page
-      { $apply: ['$.ui.assistant', 'assistant'] },
     ],
   },
   // the footer's build provenance

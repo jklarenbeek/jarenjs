@@ -29,7 +29,6 @@ export const packageFiles = [
   'components/studio/package.json',
   'components/play/package.json',
   'packages/josl/package.json',
-  'packages/ai/package.json',
   'packages/flow/package.json',
   'packages/linq/package.json',
   'packages/db/package.json',

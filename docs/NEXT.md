@@ -126,7 +126,7 @@ subpaths. `@jarenjs/query` takes the query engine, the XQuery text front-end as
 runtime, errors and the nodes-mode segment runner — as the one subpath a
 dependant may consume engine internals through. `@jarenjs/jslt` takes JSLT,
 JTLT as `./jtlt`, the option-variants cache and the JSLT schemas, and depends
-on json and query. The GeoJSON schema artifacts stay in json so `@jarenjs/ai`
+on json and query. The GeoJSON schema artifacts stay in json so external authoring hosts
 gains no edge. Never import a query internal from anywhere but `./engine`, and
 never grow a fourth language package: xquery and jtlt are front-ends and ride
 along.
@@ -380,7 +380,7 @@ studio.
 
 ## 10. Out of scope
 
-- Splitting `@jarenjs/core` or `@jarenjs/ai` (D9).
+- Splitting `@jarenjs/core` (D9).
 - A server, a backend or a second deploy target for the site (D2).
 - Turning the `#/data` studio, the assistant or the game into components.
 - Free-form geometry or persisted layout in the flow editor; composing a

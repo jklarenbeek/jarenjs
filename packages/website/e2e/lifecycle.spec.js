@@ -37,8 +37,8 @@ test('the app boots with landmark semantics intact', async ({ page }) => {
   await expect(page.locator('nav#site-nav')).toBeVisible();
   await expect(page.locator('main.main')).toBeVisible();
   await expect(page.locator('h1').first()).toBeVisible();
-  // Home + the three dropdown groups' 10 links = 11 nav-links, behind 3 triggers
-  await expect(page.locator('#site-nav .nav-link')).toHaveCount(11);
+  // Home + the three dropdown groups' nine links, behind three triggers.
+  await expect(page.locator('#site-nav .nav-link')).toHaveCount(10);
   await expect(page.locator('#site-nav .nav-trigger')).toHaveCount(3);
 
   const toggle = page.locator('button[aria-controls="site-nav"]');
@@ -57,7 +57,7 @@ test('client-side navigation mounts and unmounts views without a reload or a pag
   // open the group, click the link, and the group's trigger reflects the route
   const NAV = [
     ['Play', 'Engines'], ['Charts', 'Engines'],
-    ['Studio', 'Studios'], ['Flow', 'Studios'], ['Game', 'Studios'], ['Calculator', 'Studios'],
+    ['Studio', 'Studios'], ['Flow', 'Studios'], ['Data', 'Studios'], ['Calculator', 'Studios'],
     ['Docs', 'Learn'], ['Benchmarks', 'Learn'], ['Home', null],
   ];
   for (const [label, group] of NAV) {

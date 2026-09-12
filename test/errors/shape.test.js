@@ -30,7 +30,7 @@ import { JsonPatchCompileError, JsonPatchRuntimeError } from '@jarenjs/json/patc
 import { JsonWriteError } from '@jarenjs/json/write';
 import { AppCompileError, AppRuntimeError } from '@jarenjs/app';
 import { FlowCompileError, FlowRuntimeError } from '@jarenjs/flow';
-import { AiError } from '@jarenjs/ai';
+
 import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
 import { DbCompileError, DbRuntimeError } from '@jarenjs/db';
 import { ContractCompileError, ContractRuntimeError, ContractHostError } from '@jarenjs/contract';
@@ -67,7 +67,6 @@ function instances() {
     ['AppRuntimeError', new AppRuntimeError(CODE, REASON, { cause: CAUSE })],
     ['FlowCompileError', new FlowCompileError(CODE, REASON, DOC_PATH, CAUSE)],
     ['FlowRuntimeError', new FlowRuntimeError(CODE, REASON, DOC_PATH, CAUSE)],
-    ['AiError', new AiError(CODE, REASON, { cause: CAUSE })],
     ['LinqBuildError', new LinqBuildError(CODE, REASON, DOC_PATH, CAUSE)],
     ['LinqRuntimeError', new LinqRuntimeError(CODE, REASON, DOC_PATH, CAUSE)],
     ['DbCompileError', new DbCompileError(CODE, REASON, DOC_PATH, CAUSE)],
@@ -113,8 +112,8 @@ describe('coded error shapes (T1 golden)', () => {
   const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
 
   it('covers every coded class exactly once', () => {
-    assert.strictEqual(actual.length, 21);
-    assert.strictEqual(new Set(actual.map((s) => s.class)).size, 21);
+    assert.strictEqual(actual.length, 20);
+    assert.strictEqual(new Set(actual.map((s) => s.class)).size, 20);
   });
 
   for (const shape of actual) {

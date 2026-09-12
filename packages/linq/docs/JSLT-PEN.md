@@ -893,7 +893,7 @@ non-judgement is itself gated.
 ### 6.6 When not to reach for this pen
 
 - **The stylesheet is data.** A `$jslt` document loaded from a file,
-  authored by a model ([@jarenjs/ai](../../ai/README.md)'s authoring
+  authored by a model ([Tangle authoring](https://github.com/jklarenbeek/tangleai/blob/main/packages/jaren/docs/AUTHORING.md)'s authoring
   profile writes them) or edited in the studio is a value;
   `compileJsltStylesheet` takes it directly and nothing here has to be in
   the path.

@@ -269,18 +269,9 @@ timing:
 The full tables, the wedge as a conformance row, and the fairness notes
 are on the [benchmarks page](https://jklarenbeek.github.io/jarenjs/#/benchmarks?suite=flow).
 
-## Authoring with a model
+## Validating authored documents
 
-A jaren-fsm or jaren-dag document is JSON published as a schema, so a
-constrained decoder can author one — and because every compile error
-carries a `code` and a `docPath`, a schema-valid but semantically broken
-machine (a transition to an undeclared state, say) repairs in a bounded
-loop rather than flailing. `@jarenjs/ai`'s
-[*Authoring engine documents*](../ai/README.md#authoring-engine-documents-validate-and-compile)
-section shows the `composeChecks(schema, compileGate)` recipe, and
-[*A model as a dataflow node*](../ai/README.md#a-model-as-a-dataflow-node)
-runs a model as an ordinary dag `task`. Neither package imports the
-other — the composition is data.
+A jaren-fsm or jaren-dag document is JSON published as a schema. Validate its shape, then compile it: coded errors identify the offending document path. `composeChecks` from `@jarenjs/core/check` combines these gates. Model-assisted generation is owned by [Tangle’s authoring integration](https://github.com/jklarenbeek/tangleai/blob/main/packages/jaren/docs/AUTHORING.md). A model invocation is an ordinary injected DAG task; the Flow engine has no model dependency.
 
 ## Authoring by code
 

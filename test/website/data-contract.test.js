@@ -21,7 +21,7 @@ import { compileContract } from '@jarenjs/contract';
 import { createDataHandlers } from '../../packages/website/src/db-handlers.js';
 
 const doc = JSON.parse(readFileSync(
-  new URL('../../packages/website/src/contracts/data.contract.json', import.meta.url), 'utf8'));
+  new URL(import.meta.resolve('@jarenjs/studio/contracts/data.contract.json')), 'utf8'));
 
 describe('the data studio contract document', () => {
   it('pairs the document with both actual handler tables in both directions', () => {

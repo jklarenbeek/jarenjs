@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { JarenValidator } from '@jarenjs/validate';
 import * as formats from '@jarenjs/formats';
 
-import { LEDGER_SCHEMAS } from '@jarenjs/ai/schemas/ledger';
+
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -113,16 +113,7 @@ describe('our own schemas name only formats we implement', function () {
     assert.ok(checked > 0, 'no format keyword was found in any shipped schema');
   });
 
-  it('every format name in the JavaScript-defined schemas is implemented', function () {
-    // shipped schemas are not all files: the ai ledger's live in a module
-    for (const [kind, schema] of Object.entries(LEDGER_SCHEMAS)) {
-      for (const name of formatNames(schema)) {
-        assert.ok(IMPLEMENTED.has(name), `the ${kind} schema declares unimplemented '${name}'`);
-      }
-      assert.doesNotThrow(() => strict().compile(schema),
-        `the ${kind} schema does not compile with every format asserted`);
-    }
-  });
+
 
   it('the grammars really do declare json-path, and it really does bite', function () {
     // the concrete case this file was written for: an assertion that

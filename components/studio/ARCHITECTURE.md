@@ -51,10 +51,7 @@ files retain their identity and text. Renaming rewrites execution and import
 references together.
 
 Flow and model validation compiles or plans the document without acquiring
-host capabilities. The separate `/author` entry depends on `@jarenjs/ai`,
-selects one file profile and calls this same acceptance gate. It returns a
-candidate; the host compares the captured project with current state before
-publication. The `/export` entry is a headless ZIP writer accepting runtime
+host capabilities. Host-proposed candidates use this same acceptance gate and must match the captured document revision before publication. The `/export` entry is a headless ZIP writer accepting runtime
 assets from its host; it has no filesystem, fetch or DOM dependency.
 
 ## Files
@@ -74,7 +71,7 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
   `STUDIO_CODES` (JS0001/JS0002/JS0003).
 - `src/resolve.js` — import assembly, reference routing, rename and write-back.
 - `src/skeletons.js` — the shared creation vocabulary and valid starter files.
-- `src/author.js`, `src/export.js` — optional generation and archive entries.
+- `src/export.js` — headless archive entry.
 - `src/component/index.js` — `createStudioComponent`: composes the JSLT
   view + derivation + policies + engine surface into the shape a host
   mounts (`mode`, `rules`, `modes`, `viewModel`, `hostPolicy`,

@@ -1940,7 +1940,7 @@ rendered by emit's Markdown target over the **same** type model as
 
 `contractTools(contract, client, { ops?, name? })` → an array of
 `{ name, description, inputSchema, execute }` — the `ToolDef` shape
-`@jarenjs/ai`'s `createToolbox().add` takes and WebMCP's `registerTool`
+browser or host operation registries takes and WebMCP's `registerTool`
 reads, **without importing that package** (the generated-document rule:
 the shape is a plain object; the test suite registers them into a real
 toolbox). Per public, invokable operation (opaque and subscribe

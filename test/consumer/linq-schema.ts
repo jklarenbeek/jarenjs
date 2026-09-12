@@ -13,7 +13,7 @@ import { NeverBuilder, SchemaBuilder, createFactories } from '@jarenjs/linq/sche
 import type * as G from './linq-schema-generated.js';
 import { from } from '@jarenjs/linq';
 import type { DateTime, Sequence } from '@jarenjs/linq';
-import type { ToolDef } from '@jarenjs/ai/toolbox';
+import type { ToolDefinition as ToolDef } from '@jarenjs/contract/project';
 import {
   Account, Strict, Config, Id, Exact, Empty, Job, Scalars, Literals, Enums, Nullables,
   StringRules, NumberRules, Dates, ArrayRules, Tuples, Dict, Either, Shape, Both, Node,
@@ -178,7 +178,7 @@ const stillAsserted: Sequence<unknown> = from(rows).ofType({ type: 'number' });
 const explicitlyAsserted: Sequence<number> = from(rows).ofType<number>({ type: 'number' });
 void [typedByPen, kinds, castByPen, stillAsserted, explicitlyAsserted];
 
-// ——— the AI tie-in: a pen document is a tool's inputSchema, and execute
+// ——— the plain operation tie-in: a pen document is a tool's inputSchema, and execute
 // takes Infer<> of the same builder — proven without any import in linq ———
 const User = s.object({ id: s.string().uuid(), name: s.string().min(1), age: s.integer().optional() });
 const userTool: ToolDef = {

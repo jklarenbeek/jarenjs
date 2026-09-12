@@ -9,6 +9,8 @@ import '@jarenjs/calc/styles/calc.css';
 import '@jarenjs/charts/styles/charts.css';
 import '@jarenjs/collection/styles/collection.css';
 import '@jarenjs/studio/styles/studio.css';
+import '@jarenjs/studio/styles/flow.css';
+import '@jarenjs/studio/styles/data.css';
 import '@jarenjs/play/styles/play.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { md } from './boundaries/markdown.js';
@@ -23,10 +25,6 @@ const SITE_FILES = {
 };
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
-const AI_KEY = 'jaren-ai';
-const AI_CHAT_KEY = 'jaren-ai-chat';
-const AI_LEDGER_KEY = 'jaren-ai-ledger';
-const GAME_KEY = 'jaren-game';
 
 /** A localStorage-backed JSON slot; failures degrade to in-memory. */
 const jsonStore = (key) => ({
@@ -36,8 +34,7 @@ const jsonStore = (key) => ({
       const raw = localStorage.getItem(key);
       return raw === null ? null : JSON.parse(raw);
     }
-    catch (error) {
-      if (key === AI_LEDGER_KEY) throw error;
+    catch {
       return null;
     }
   },
@@ -45,8 +42,7 @@ const jsonStore = (key) => ({
     try {
       localStorage.setItem(key, JSON.stringify(data));
     }
-    catch (error) {
-      if (key === AI_LEDGER_KEY) throw error;
+    catch {
       // storage full or unavailable: the session keeps working
     }
   },
@@ -172,23 +168,19 @@ const app = createSiteApp({
     }, { once: true });
     input.click();
   }),
-  // the AI assistant: real fetch to the user-chosen provider; settings
-  // (including the bring-your-own key) and the conversation transcript
-  // persisted locally and nowhere else
-  aiFetch: (url, init) => fetch(url, init),
-  aiStorage: jsonStore(AI_KEY),
-  aiChat: jsonStore(AI_CHAT_KEY),
-  // the assistant's ledger: the objective, its progress, what it learned
-  // and the rounds compaction archived — one slot, so a closed tab is not
-  // the end of a session
-  aiLedger: jsonStore(AI_LEDGER_KEY),
-  // the adventure save slot: a raw JSONX string (the game serializes itself)
-  gameSave: {
-    read: () => { try { return localStorage.getItem(GAME_KEY); } catch { return null; } },
-    write: (s) => { try { localStorage.setItem(GAME_KEY, s); } catch { /* private mode */ } },
-  },
-  modelContext: /** @type {any} */ (navigator).modelContext,
+
 });
+
+// Re-discover late browser support after focus; ownership stays with the app.
+const refreshWebMcp = () => { if (app.webmcp.status === 'unavailable') void app.webmcp.refresh(); };
+addEventListener('focus', refreshWebMcp);
+const releasePage = event => {
+  if (event.persisted) return;
+  removeEventListener('pagehide', releasePage);
+  removeEventListener('focus', refreshWebMcp);
+  app.destroy();
+};
+addEventListener('pagehide', releasePage);
 
 // ——— the mobile keyboard seam (browser-only; headless hosts never load
 // this bootstrap, so they no-op by construction) ———

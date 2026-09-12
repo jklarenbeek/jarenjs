@@ -190,27 +190,6 @@ function gfmFigure(engine) {
 }
 
 /**
- * One row of the long-horizon suite. The suite is a grid — task ×
- * compaction variant × payload shape × history budget — so every quoted
- * number has to name all four coordinates or it is quoting whichever row
- * happened to sort first.
- * @param {{ variant: string, shape: string, budget: number, task?: string }} at
- */
-function horizonRow(at) {
-  const row = data('long-horizon').rows.find((r) => r.variant === at.variant
-    && r.shape === at.shape && r.budget === at.budget && r.task === (at.task ?? 'needle'));
-  if (row === undefined) {
-    throw new Error(`long-horizon.json has no ${at.variant}/${at.shape} row at budget ${at.budget}`
-      + ' — regenerate it before quoting one');
-  }
-  return row;
-}
-
-/** Every row that actually compacted something, for one variant/task. */
-const horizonCompacting = (variant, task = 'needle') => data('long-horizon').rows
-  .filter((r) => r.variant === variant && r.task === task && r.compacted);
-
-/**
  * The per-row ratio band of contract.json's in-process dispatch table
  * against one rival column: rival/jaren (`invert` flips it for a rival
  * that is FASTER, so the band reads as "N× faster than jaren").
@@ -637,175 +616,6 @@ const FACTS = {
     return ratio(byLabel(b, 'jaren jslt (no memo)').ns / byLabel(b, 'jaren hand-written []').ns);
   },
 
-  // ——— @jarenjs/ai: what a compacted agent session keeps, loses and can
-  // still reach. Every figure names its row; the budget quoted in the
-  // package README is 6 000 characters on the realistic payload shape,
-  // which is the row where the defect is most visible.
-  'horizon.measured': () => {
-    const meta = data('long-horizon').meta;
-    return `${String(meta.date).slice(0, 10)}, Node ${meta.node}, ${meta.n} tool rounds`;
-  },
-  'horizon.synopsisGap': () => {
-    const row = horizonRow({ variant: 'synopsis', shape: 'late', budget: 6000 });
-    return `${row.idPresent} of ${row.n} record ids and ${row.valuePresent} of their ${row.n} values`;
-  },
-  'horizon.ledgerRecovered': () => {
-    const row = horizonRow({ variant: 'ledger', shape: 'late', budget: 6000 });
-    return `${row.valueRecoverable} of ${row.n}`;
-  },
-  // the same rows without a ledger, as a band: the realistic shape only,
-  // because the flattering one is a different claim and averaging the two
-  // would be a third that nobody measured
-  'horizon.synopsisBand': () => {
-    const kept = horizonCompacting('synopsis')
-      .filter((r) => r.shape === 'late')
-      .map((r) => r.valuePresent);
-    return `${Math.min(...kept)} to ${Math.max(...kept)}`;
-  },
-  // the campaign's own headline: the number the ledger does NOT move.
-  // Printed as a claim about every compacting row, with the exceptions
-  // named — a row where the whole corpus still fits is the payload shape
-  // being generous, not a relation being recovered.
-  'horizon.pairwise': () => {
-    const rows = data('long-horizon').rows.filter((r) => r.task === 'pairwise' && r.compacted);
-    const determined = rows.filter((r) => r.ceiling > 0);
-    return determined.length === 0
-      ? '0% at every budget that compacts anything, with a ledger or without'
-      : `0% at every budget that compacts anything except ${determined
-        .map((r) => `${r.variant}/${r.shape} at ${r.budget}`).join(', ')}`;
-  },
-  // The same question asked of an environment: the number the compaction
-  // rows above cannot move, and what it costs the root to move it. The
-  // pairwise row is quoted rather than the needle because it is the one
-  // the campaign is judged on.
-  'horizon.program': () => {
-    const row = data('long-horizon').rows
-      .find((r) => r.variant === 'program' && r.task === 'pairwise' && r.shape === 'late');
-    if (row === undefined) throw new Error('long-horizon.json has no program/pairwise/late row');
-    return `${(row.ceiling * 100).toFixed(0)}%, with ${row.valuePresent} of ${row.n} records`
-      + ` reaching the reduce over ${row.subcalls} sub-calls, while the root request carried`
-      + ` ${row.charsSent} characters against a corpus of ${row.charsFull}`;
-  },
-  // what the concurrency bought, at a stated synthetic latency — the
-  // paper's own "RLMs without asynchronous LM calls are slow" limitation
-  'horizon.programFanout': () => {
-    const s = data('long-horizon').meta.scheduling;
-    if (s === undefined || s === null) throw new Error('long-horizon.json has no scheduling block');
-    return `${(s.sequential.ms / s.parallel.ms).toFixed(1)}x (${s.sequential.ms}ms sequential vs`
-      + ` ${s.parallel.ms}ms at concurrency ${s.parallel.concurrency}, ${s.parallel.subcalls}`
-      + ` sub-calls of ${s.delayMs}ms each)`;
-  },
-  // D8: whether the cheap tier can author a plan that compiles, and do
-  // the piece work. Published whichever way it falls — a tier that
-  // cannot is a real result, and prose that quoted nothing would hide it.
-  'horizon.programLive': () => {
-    const a = data('long-horizon').meta.authoring;
-    if (a === null || a === undefined) return 'no live model ran on the machine that generated this file';
-    // a timed-out attempt is NOT a rejected program, and reporting the
-    // two together would read as "the tier cannot author" when what the
-    // run measured was the transport giving up. The distinction is the
-    // whole point of publishing this number, so the count is split.
-    const timedOut = a.errors.filter((e) => /timeout/i.test(e)).length;
-    const returned = a.trials - timedOut;
-    const authored = `${a.compiled} of ${a.trials} authored programs compiled`
-      + (timedOut === 0
-        ? ` (${a.generations} generation(s) including repairs)`
-        : ` — but ${timedOut} of those attempts never came back at all (the 300 s deadline),`
-          + ` so of the ${returned} that answered, ${a.compiled} compiled`);
-    return a.valuesReached === null
-      ? `${authored}; the piece work was not run within the spend guard`
-      : `${authored}. Answering ${a.subcalls} sub-calls itself it reached ${a.valuesReached}`
-        + ` of 40 records (${a.subcallsFailed} sub-call(s) failed) and named the`
-        + ` ${a.scored ? 'CORRECT' : 'wrong'} pair`;
-  },
-  // The campaign in one table: what each half of the work moved, on the
-  // realistic payload shape at the budget where the defect is most
-  // visible. Derived from the published rows, so it cannot drift from
-  // the measurement it summarises — and it carries the pairwise column,
-  // which is the number the whole campaign is judged on.
-  'horizon.campaign': () => {
-    const rows = data('long-horizon').rows;
-    const at = (variant, task, budget) => rows.find((r) => r.variant === variant
-      && r.task === task && r.shape === 'late' && r.budget === budget);
-    const pct = (x) => (x === null || x === undefined ? '—' : `${(x * 100).toFixed(1)}%`);
-    const budget = 6000;
-
-    const lossy = at('synopsis', 'needle', budget);
-    const ledger = at('ledger', 'needle', budget);
-    const program = at('program', 'pairwise', null);
-    const programNeedle = at('program', 'needle', null);
-    if (lossy === undefined || ledger === undefined || program === undefined) {
-      throw new Error('long-horizon.json is missing a configuration the campaign table names');
-    }
-
-    return ['',
-      '| configuration | needle | pairwise | what it cost the request |',
-      '| --- | --- | --- | --- |',
-      `| compaction alone (budget ${budget}) | ${pct(lossy.ceiling)} | ${pct(lossy.ceiling === null ? null : 0)}`
-        + ` | ${lossy.charsSent} chars |`,
-      `| + a ledger (same budget) | ${pct(ledger.ceilingRecall)} via recall | ${pct(0)}`
-        + ` | ${ledger.charsSent} chars |`,
-      `| + the environment and a program | ${pct(programNeedle?.ceiling)} | ${pct(program.ceiling)}`
-        + ` | ${program.charsSent} chars, against a ${program.charsFull}-char corpus |`,
-      ''].join('\n');
-  },
-  // The recursive path on the cheap tier. This one is published because
-  // it FAILED: a measurement that says "we could not get this to run"
-  // is a result, and rounding it to silence would be the exact dishonesty
-  // the campaign's own rules forbid.
-  'horizon.depthLive': () => {
-    const depths = data('long-horizon').meta.authoring?.depths;
-    if (depths === null || depths === undefined) {
-      return 'no live model ran on the machine that generated this file';
-    }
-    const tasks = depths.reduce((n, row) => n + row.tasks, 0);
-    const correct = depths.reduce((n, row) => n + row.correct, 0);
-    const calls = depths.reduce((n, row) => n + row.calls, 0);
-    const authored = depths.reduce((n, row) => n + row.authored.total, 0);
-    const compiled = depths.reduce((n, row) => n + row.authored.compiled, 0);
-    const timeouts = depths.reduce((n, row) =>
-      n + row.errors.filter((e) => /timeout/i.test(e)).length, 0);
-    const levels = depths.map((row) => row.depth).join(' and ');
-
-    if (calls === 0 && timeouts > 0) {
-      return `${correct} of ${tasks} tasks at depths ${levels} — every one of them died on the`
-        + ' 300-second deadline during its first authoring call, so what this measured is that'
-        + ' the recursive path does not currently RUN on this tier, not that it runs badly';
-    }
-    return `${correct} of ${tasks} tasks answered at depths ${levels}, ${compiled} of ${authored}`
-      + ` authored programs compiled, over ${calls} model call(s)`
-      + (timeouts === 0 ? '' : ` (${timeouts} attempt(s) lost to the 300-second deadline)`);
-  },
-  // The live half, as a table: what a real model scored on the realistic
-  // payload shape with and without a ledger, and how many times it walked
-  // through the door. The recall column is not decoration — a ledger row
-  // that scored well with zero recalls scored on what was still in front
-  // of it, so the mechanism is only evidenced where that number is not 0.
-  'horizon.liveNeedle': () => {
-    const rows = data('long-horizon').rows
-      .filter((r) => r.task === 'needle' && r.shape === 'late' && r.compacted);
-    const budgets = [...new Set(rows.map((r) => r.budget))].sort((a, b) => b - a);
-    const cell = (row) => (row === undefined || row.actual === null
-      ? '—'
-      : `${(row.actual * 100).toFixed(1)}%`);
-    const body = budgets.map((budget) => {
-      const lossy = rows.find((r) => r.budget === budget && r.variant === 'synopsis');
-      const ledger = rows.find((r) => r.budget === budget && r.variant === 'ledger');
-      return `| ${budget} | ${cell(lossy)} | ${cell(ledger)} | ${ledger?.recalls ?? 0} |`;
-    });
-    return ['', '| history budget | without a ledger | with a ledger | recall calls |',
-      '| --- | --- | --- | --- |', ...body, ''].join('\n');
-  },
-  // whether the published file carries a live model's score at all: a
-  // keyless regeneration republishes empty actual columns, and prose that
-  // said "measured against a model" would then be quoting nothing
-  'horizon.live': () => {
-    const meta = data('long-horizon').meta;
-    return meta.model === null
-      ? 'no live model ran on the machine that generated this file'
-      : `${meta.model}, ${meta.trials} trial(s) per row, ${meta.calls} model calls`;
-  },
-
   // ——— @jarenjs/josl: the CSV reader table. Jaren's name is bold as the
   // subject; the FASTEST cell in each timing column is bold as the
   // winner, which is often not us — the table has to keep saying so.
@@ -827,52 +637,6 @@ const FACTS = {
     });
     return ['', '| engine | csv-spectrum | 10k×6 plain | 10k×3 quoted | 1k×50 wide |',
       '| --- | --- | --- | --- | --- |', ...rows, ''].join('\n');
-  },
-
-  // -- retrieval: the instrument's own shape, then the number a ranker
-  // would have to beat. Every figure names its corpus size and policy —
-  // the suite is a grid, and a number without both coordinates is
-  // whichever row sorted first.
-  'retrieval.corpus': () => {
-    const meta = data('retrieval').meta;
-    return `${meta.facts} facts over ${meta.topics} topic vocabularies, ${meta.questions} questions`;
-  },
-  'retrieval.incumbent': () => {
-    const { meta, rows } = data('retrieval');
-    const large = meta.sizes[meta.sizes.length - 1];
-    const small = meta.sizes[0];
-    const at = (size, policy) => {
-      const row = rows.find((r) => r.size === size && r.policy === policy);
-      if (row === undefined) throw new Error(`retrieval.json has no ${policy} row at ${size} memories — regenerate it before quoting one`);
-      return row;
-    };
-    const pct = (x) => `${(100 * x).toFixed(1)}%`;
-    const memories = (n) => n.toLocaleString('en-US');
-    return `${memories(large)} memories today's recall puts a gold memory in the top 10 for`
-      + ` ${pct(at(large, 'tag+recency').recallAt10)} of questions (recency alone`
-      + ` ${pct(at(large, 'recency').recallAt10)}, a random draw ${pct(at(large, 'random').recallAt10)});`
-      + ` at ${memories(small)} memories the same policy reaches ${pct(at(small, 'tag+recency').recallAt10)}`;
-  },
-  'retrieval.ranked': () => {
-    // the ranked row beside the default, whichever way it fell — the
-    // comparison word is derived, never typed
-    const { meta, rows } = data('retrieval');
-    const large = meta.sizes[meta.sizes.length - 1];
-    const small = meta.sizes[0];
-    const at = (size, policy) => {
-      const row = rows.find((r) => r.size === size && r.policy === policy);
-      if (row === undefined) throw new Error(`retrieval.json has no ${policy} row at ${size} memories — regenerate it before quoting one`);
-      return row;
-    };
-    const pct = (x) => `${(100 * x).toFixed(1)}%`;
-    const memories = (n) => n.toLocaleString('en-US');
-    const near = at(large, 'near');
-    const incumbent = at(large, 'tag+recency');
-    const word = near.recallAt10 > incumbent.recallAt10 ? 'ahead of'
-      : near.recallAt10 < incumbent.recallAt10 ? 'behind' : 'level with';
-    return `${pct(near.recallAt10)} of questions at ${memories(large)} memories through the`
-      + ` ${meta.ranked.model} reference embedder (${pct(at(small, 'near').recallAt10)} at ${memories(small)}),`
-      + ` ${word} tag match and recency's ${pct(incumbent.recallAt10)}`;
   },
 
   // -- geo: the kernel suite. Every row of the committed table, the
@@ -1273,7 +1037,7 @@ const FACTS = {
   // Ten sentences quoting another subpath's price used to be typed, and
   // one schema-pen change left every one of them 94 bytes stale.
   ...Object.fromEntries(['schema', 'chain', 'model', 'jslt', 'migration', 'db',
-    'contract', 'flow', 'app', 'forms', 'charts', 'project', 'jtlt', 'messages', 'ai', 'formula'].flatMap((name) => [
+    'contract', 'flow', 'app', 'forms', 'charts', 'project', 'jtlt', 'messages', 'formula'].flatMap((name) => [
     [`bundle.${name}`, () => thousands(bundleBytes(name))],
     // the rounded kB docs/CONSUMING.md publishes: decimal, so a reader
     // comparing it with the exact figure beside it can do the division
@@ -1376,7 +1140,6 @@ const DOCS = [
   'packages/flow/README.md',
   'packages/view/README.md',
   'packages/josl/README.md',
-  'packages/ai/README.md',
   'packages/db/README.md',
   'packages/db/docs/HOSTS.md',
   'packages/db/docs/REPLICATION-FORMAT.md',

@@ -44,7 +44,7 @@ export const penCoverage = /** @type {import('./lib/derive.js').Registry} */ ({
   facts: () => ({
     'coverage.pens': () => {
       const { subpaths, owned, routes } = penCensus(rootAsked);
-      return `${subpaths.length} public pen/client subpaths beside the chain; `
+      return `${subpaths.length} public pen/client/authoring subpaths beside the chain; `
         + `${routes.length}/${owned.length} owned schema keywords have dedicated emission routes.`;
     },
     'coverage.subpaths': () => penCensus(rootAsked).subpaths

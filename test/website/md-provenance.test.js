@@ -62,19 +62,7 @@ function mountSite(hash = '#/') {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the site names a rendering policy per markdown provenance', function () {
-  it('renders an assistant reply with ids kept out of the page namespace', function () {
-    const app = mountSite();
-    const state = app.getState();
-    const model = viewModel({
-      ...state,
-      ai: { ...state.ai, messages: [{ role: 'assistant', content: SOURCE }] },
-    });
-    const html = renderToString(model.ui.assistant.messages[0].article);
-    assert.match(html, /id="user-content-md"/,
-      'a reply is text from elsewhere: its ids carry the prefix');
-    assert.doesNotMatch(html, /id="md"/,
-      'and never the bare id the docs page owns');
-  });
+
 
   it('renders a repo README with the bare ids the document was written for', function () {
     const app = mountSite();

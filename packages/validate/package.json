@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/validate",
   "private": false,
-  "version": "0.83.3",
+  "version": "0.84.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -55,7 +55,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.83.3",
-    "@jarenjs/json": "^0.83.3"
+    "@jarenjs/core": "^0.84.0",
+    "@jarenjs/json": "^0.84.0"
   }
 }

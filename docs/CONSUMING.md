@@ -141,7 +141,6 @@ the table and stale in the paragraph that cites it:
 | `./flow` | <!--fact:bundle.flow.kb-->18<!--/fact--> kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--fact:bundle.app.kb-->50<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
 | `./forms` | <!--fact:bundle.forms.kb-->39<!--/fact--> kB | the schema pen it subclasses |
-| `./ai` | <!--fact:bundle.ai.kb-->15<!--/fact--> kB | action programs; no AI runtime |
 | `./formula` | <!--fact:bundle.formula.kb-->15<!--/fact--> kB | saved Query profiles; no evaluator |
 | `./messages` | <!--fact:bundle.messages.kb-->17<!--/fact--> kB | message templates; no locale packs |
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->15<!--/fact--> kB | text template capture; no renderer |
@@ -164,7 +163,7 @@ compiler; the chain sits on the addressing package). The graph in
 which.
 
 `forms`, `view`, `app`, `locales`, `md`, `mermaid`, `calc`, `charts`, `collection`, `rules`, `studio`,
-`play`, `josl`, `ai`, `flow`, `linq` and `db`
+`play`, `josl`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.
 
 ### Wire the packages into your workspace

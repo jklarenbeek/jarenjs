@@ -143,17 +143,6 @@
     "causeValue": "<the fixed cause>"
   },
   {
-    "class": "AiError",
-    "name": "AiError",
-    "code": "ZZ0042",
-    "docPath": "<undefined>",
-    "dataPath": "<absent>",
-    "reason": "golden reason",
-    "message": "ZZ0042: golden reason",
-    "hasOwnCause": true,
-    "causeValue": "<the fixed cause>"
-  },
-  {
     "class": "LinqBuildError",
     "name": "LinqBuildError",
     "code": "ZZ0042",

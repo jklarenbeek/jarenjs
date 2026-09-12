@@ -30,8 +30,6 @@
  *   spatial.json      spatial.js        — spatial storage: $within every way it runs, corpus-gated (no head-to-head rival)
  *   orm.json          orm.js            — entities + graph loads vs Prisma/Drizzle/Kysely (Node + Bun)
  *   live.json         live.js           — live queries/capture/jobs vs RxDB/TinyBase (incremental vs re-run)
- *   long-horizon.json long-horizon.js   — agent context retention: needle + pairwise, ceiling and live model
- *   retrieval.json    retrieval.js      — did the right memory reach the prompt: recall@k + MRR per policy, oracle-gated
  *   vector.json       vector.js         — k-nearest over a stored vector column every way it runs, vs sqlite-vec, equivalence-gated
  *   series.json       series.js         — one temporal question every route a consumer has today, corpus-gated (references, kernel, query, raw SQL and the planned store)
  *   meta.json                          — run metadata, conformance summary, QT3 scorecard
@@ -110,7 +108,7 @@ function parseArgs(argv) {
       }
       case '--help': case '-h':
         console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
-        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, long-horizon, retrieval, vector, series, qt3');
+        console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, vector, series, qt3');
         process.exit(0);
         break;
       default:
@@ -883,7 +881,7 @@ function generateQt3() {
 const SUITE_ORDER = [
   'validate', 'contracts', 'contract', 'jsonpath', 'jsonquery', 'jslt', 'formats', 'jsonpointer', 'jsonpatch',
   'toml', 'csv', 'markdown', 'mermaid', 'view', 'charts', 'geo', 'flow', 'db',
-  'spatial', 'orm', 'live', 'long-horizon', 'retrieval', 'vector', 'series',
+  'spatial', 'orm', 'live', 'vector', 'series',
 ];
 
 /** The fastest rival timing in a `{engine: ns}` record, Jaren excluded. */
@@ -1198,67 +1196,8 @@ function buildHeadlines(generated, meta) {
       note: 'incremental live-query maintenance versus re-running the query; measured against RxDB and TinyBase (which wins raw update latency — the honest cost of durability, published on the suite page)',
     });
   }
-  if (generated['long-horizon'] !== undefined) {
-    // This suite measures RETENTION, not speed: what a compacted agent
-    // history still carries. It has no ratio because there is no rival
-    // engine to time — and it belongs on the overview anyway, because a
-    // summary that counted 20 of the 21 published suites was itself a
-    // number that could not be checked.
-    const rows = generated['long-horizon'].rows ?? [];
-    const at = (variant, budget) => rows.find((r) => r.variant === variant
-      && r.task === 'needle' && r.shape === 'late' && r.budget === budget);
-    // the budget where the defect is most visible on the realistic
-    // payload shape — the same row the package docs quote
-    const budget = 6000;
-    const lossy = at('synopsis', budget);
-    const ledger = at('ledger', budget);
-    if (lossy !== undefined && ledger !== undefined && ledger.valueRecoverable !== null) {
-      add('long-horizon', 'Long horizon', {
-        ratio: null,
-        rival: 'the same run without a ledger',
-        conformance: `${ledger.valueRecoverable} / ${ledger.n} values`,
-        note: `agent context retention, not speed: at a ${budget}-character history budget on the`
-          + ` realistic payload shape, built-in compaction still carries ${lossy.valuePresent} of`
-          + ` ${lossy.n} record values, and a ledger brings ${ledger.valueRecoverable} of`
-          + ` ${ledger.n} back — verbatim or one recall away. The pairwise relation is 0% either`
-          + ' way; only an environment moves it — see the suite page',
-      });
-    }
-  }
-  if (generated.retrieval !== undefined) {
-    // This suite measures RETRIEVAL, not speed: whether the ledger's
-    // recall put the right memory in the prompt. No rival engine is
-    // timed, so no ratio — and it sits on the overview for the same
-    // reason long-horizon does: a summary that skipped a published
-    // suite would be a count that cannot be checked.
-    const rows = generated.retrieval.rows ?? [];
-    const sizes = generated.retrieval.meta?.sizes ?? [];
-    const n = sizes[sizes.length - 1];
-    const at = (policy) => rows.find((r) => r.size === n && r.policy === policy);
-    const incumbent = at('tag+recency');
-    const near = at('near');
-    const recency = at('recency');
-    const random = at('random');
-    const oracle = at('oracle');
-    if (n !== undefined && incumbent !== undefined && near !== undefined && recency !== undefined
-      && random !== undefined && oracle !== undefined) {
-      const pct = (x) => `${(x * 100).toFixed(1)}%`;
-      const word = near.recallAt10 > incumbent.recallAt10 ? 'ahead of'
-        : near.recallAt10 < incumbent.recallAt10 ? 'behind' : 'level with';
-      add('retrieval', 'Retrieval', {
-        ratio: null,
-        rival: 'random and recency',
-        conformance: `oracle ${pct(oracle.recallAt10)}`,
-        note: `retrieval mechanics, not speed: over ${n.toLocaleString('en-US')} synthetic memories,`
-          + ` the default recall (tag match, then recency) puts a gold memory in the top 10 for`
-          + ` ${pct(incumbent.recallAt10)} of questions; the seam-gated ranked path (near, through the`
-          + ` deterministic ${generated.retrieval.meta?.ranked?.model ?? 'reference'} embedder — lexical, a`
-          + ` mechanism score) ${pct(near.recallAt10)}, ${word} it; recency alone ${pct(recency.recallAt10)},`
-          + ` a random draw ${pct(random.recallAt10)}. Embedding quality belongs to a real model behind`
-          + ' the same seam; see the suite page',
-      });
-    }
-  }
+
+
   if (generated.vector !== undefined) {
     // The rival here IS an engine and IS timed, so this row does carry a
     // ratio — and it is the one row on the overview where a purpose-built
@@ -1419,58 +1358,11 @@ function generateLive(tmp, options) {
   };
 }
 
-/**
- * The long-horizon suite: what survives `@jarenjs/ai`'s history
- * compaction, as a model-free ceiling and — when the generating machine
- * has a key — as a real model's score over the same contexts.
- *
- * `--live` is passed unconditionally and that is safe: with no key the
- * benchmark prints its ceilings, says the live tier was skipped and exits
- * 0, so the file regenerates on any machine. It also means a KEYLESS
- * regeneration republishes this file with empty `actual` columns rather
- * than keeping numbers it did not measure — the honest behaviour, and the
- * reason the skip reason travels in the file's own meta.
- */
-function generateLongHorizon(tmp, options) {
-  const file = path.join(tmp, 'long-horizon.json');
-  try {
-    runTool([
-      '--env-file-if-exists=.env',
-      'benchmark/long-horizon.js', '--live',
-      ...(options.quick ? ['--quick'] : []),
-      '--output', 'json', '--filepath', file,
-    ]);
-  }
-  catch (e) {
-    console.warn(`  warning: long-horizon run failed (${e.message}); the suite will be omitted.`);
-    return null;
-  }
-  // the entry point already emits the published document — passing it
-  // through keeps one definition of the file's shape
-  return readJson(file);
-}
 
-/**
- * The retrieval suite: whether `@jarenjs/ai`'s recall puts the right
- * memory in the prompt, scored over the committed synthetic corpus.
- * Deterministic and model-free — the ranked row embeds through the
- * hashed-trigram reference embedder, and only the latency and sweep
- * columns depend on the machine — and it gates its own scorer (the
- * oracle row must be 1.000) before it writes anything. `--live` is not
- * passed: the tracked file never carries a model's row; a host runs the
- * live tier by hand and reads its own number.
- */
-function generateRetrieval(tmp) {
-  const file = path.join(tmp, 'retrieval.json');
-  try {
-    runTool(['benchmark/retrieval.js', '--output', 'json', '--filepath', file]);
-  }
-  catch (e) {
-    console.warn(`  warning: retrieval run failed (${e.message}); the suite will be omitted.`);
-    return null;
-  }
-  return readJson(file);
-}
+
+
+
+
 
 /**
  * The vector suite: one k-nearest query over a `derive: 'vector'`
@@ -1749,16 +1641,8 @@ async function main() {
     if (live !== null)
       generated.live = live;
   }
-  if (!options.skip.has('long-horizon')) {
-    const horizon = generateLongHorizon(tmp, options);
-    if (horizon !== null)
-      generated['long-horizon'] = horizon;
-  }
-  if (!options.skip.has('retrieval')) {
-    const retrieval = generateRetrieval(tmp);
-    if (retrieval !== null)
-      generated.retrieval = retrieval;
-  }
+
+
   if (!options.skip.has('vector')) {
     const vector = generateVector(tmp, options);
     if (vector !== null)

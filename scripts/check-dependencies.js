@@ -31,6 +31,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { checkIndependentClosure } from './lib/independent-closure.js';
+
 import { runNpm } from './lib/portable.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -134,12 +136,15 @@ function publishedPackages() {
 let failures = 0;
 const fail = (message) => { failures += 1; console.error(`  ✗ ${message}`); };
 
+console.log('Independent repository closure');
+for (const failure of checkIndependentClosure(ROOT)) fail(failure);
+
 console.log('Runtime dependency closure');
 const published = publishedPackages();
 if (published.length === 0) fail('no published packages found — the check is not running');
 
 for (const { pkg, manifest } of published) {
-  const deps = Object.keys(pkg.dependencies ?? {});
+  const deps = Object.keys({ ...pkg.dependencies, ...pkg.optionalDependencies });
   const foreign = deps.filter((d) => !d.startsWith('@jarenjs/'));
   if (foreign.length > 0)
     fail(`${manifest} declares third-party runtime dependencies: ${foreign.join(', ')}`);

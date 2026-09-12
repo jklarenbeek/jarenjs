@@ -415,3 +415,30 @@ test.describe('the boot is terminal: a failed stage is named and a retry starts 
     expect(errors, 'no uncaught page errors').toEqual([]);
   });
 });
+
+
+test('live store renders retain model and query text before blur', async ({ page }) => {
+  await gotoData(page);
+  await expect(page.locator('.data-rows')).toContainText('important', READY);
+  const query = page.locator('.data-query textarea.editor');
+  await query.fill('{unfinished query');
+  // An independent event updates the store while the query keeps focus. This
+  // reproduces live subscription renders without committing the query on blur.
+  await page.evaluate(() => {
+    const input = document.querySelector('.data-insert-title'); input.value = 'live while editing';
+    input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.locator('.data-rows')).toContainText('live while editing', READY);
+  await expect(query).toHaveValue('{unfinished query');
+  await expect(query).toBeFocused();
+  const model = page.locator('.data-status textarea.editor');
+  await model.fill('{unfinished model');
+  await page.evaluate(() => {
+    const input = document.querySelector('.data-insert-title'); input.value = 'second live event';
+    input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.locator('.data-rows')).toContainText('second live event', READY);
+  await expect(model).toHaveValue('{unfinished model');
+  await expect(model).toBeFocused();
+  await expect(query).toHaveValue('{unfinished query');
+});

@@ -9,7 +9,7 @@
  * is skipped.
  *
  * `reconcileBuffer` (editor buffer ↔ document): a CLEAN buffer adopts an
- * incoming write (share / undo / an AI edit lands); a DIRTY buffer whose
+ * incoming write (share / undo / an external edit lands); a DIRTY buffer whose
  * text differs from the incoming write keeps the human's text and records
  * the write as a recoverable draft — never a silent clobber, never a
  * hidden write.
@@ -38,7 +38,7 @@ export function hostPolicy(prevProject, nextProject) {
 
 /**
  * Reconcile the editor's local typing buffer against an incoming
- * committed text (a share/undo restore, or an AI write onto the same
+ * committed text (a share/undo restore, or an external write onto the same
  * file). A clean buffer adopts; a dirty buffer that already matches the
  * incoming text simply clears (the commit landed); a dirty buffer that
  * differs keeps the human's text and surfaces the incoming version as a

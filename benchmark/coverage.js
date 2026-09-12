@@ -436,6 +436,10 @@ function runDeadCodeAudit(opts) {
     // exported ZIP is executed with network blocked in project-offline.spec
     // (Chromium, Firefox, WebKit); their reusable hosts remain audited here.
     '--exclude', 'packages/website/src/project-db-worker.js',
+    // The extracted worker hosts still require real browser storage APIs;
+    // data.spec.js and project-kinds.spec.js exercise these exact public modules.
+    '--exclude', 'components/studio/src/data/browser-worker.js',
+    '--exclude', 'components/studio/src/data/project-worker.js',
     '--exclude', 'packages/website/src/offline-runtime.js',
     '--temp-directory', opts.tempDir,
     '--clean',

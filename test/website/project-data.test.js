@@ -10,7 +10,7 @@ import { createDataHandlers } from '../../packages/website/src/db-handlers.js';
 import { createProjectDataRuntime } from '../../packages/website/src/boundaries/project-data.js';
 import { commitProject } from '../../packages/website/src/boundaries/project.js';
 import { projectTemplate } from '../../packages/website/src/content/projectTemplates.js';
-import doc from '../../packages/website/src/contracts/data.contract.json' with { type: 'json' };
+import doc from '@jarenjs/studio/contracts/data.contract.json' with { type: 'json' };
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
 
 async function until(check) {

@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/studio",
   "private": false,
-  "version": "0.83.3",
+  "version": "0.84.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -18,21 +18,34 @@
     "./schemas/*": "./schemas/*",
     "./styles/studio.css": "./styles/studio.css",
     "./package.json": "./package.json",
-    "./author": {
-      "types": "./dist/types/author.d.ts",
-      "default": "./src/author.js"
-    },
     "./export": {
       "types": "./dist/types/export.d.ts",
       "default": "./src/export.js"
-    }
+    },
+    "./flow": {
+      "types": "./dist/types/component/flow/index.d.ts",
+      "default": "./src/component/flow/index.js"
+    },
+    "./styles/flow.css": "./styles/flow.css",
+    "./styles/editor.css": "./styles/editor.css",
+    "./data": {
+      "types": "./dist/types/component/data/index.d.ts",
+      "default": "./src/component/data/index.js"
+    },
+    "./data/host": {
+      "types": "./dist/types/data/host.d.ts",
+      "default": "./src/data/host.js"
+    },
+    "./contracts/data.contract.json": "./contracts/data.contract.json",
+    "./styles/data.css": "./styles/data.css"
   },
   "files": [
     "dist/types/",
     "src/",
     "docs/",
     "schemas/",
-    "styles/"
+    "styles/",
+    "contracts/"
   ],
   "description": "The jaren project IDE: a multi-file project (schema, view, actions, model, queries, flow) is one document; each file is validated against its own grammar, assembled into runnable artifacts, and edited/hosted by the studio widget. The engine is headless; the component layer is the IDE.",
   "author": "joham",
@@ -67,13 +80,17 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.83.3",
-    "@jarenjs/validate": "^0.83.3",
-    "@jarenjs/json": "^0.83.3",
-    "@jarenjs/app": "^0.83.3",
-    "@jarenjs/flow": "^0.83.3",
-    "@jarenjs/db": "^0.83.3",
-    "@jarenjs/contract": "^0.83.3",
-    "@jarenjs/ai": "^0.83.3"
+    "@jarenjs/core": "^0.84.0",
+    "@jarenjs/validate": "^0.84.0",
+    "@jarenjs/json": "^0.84.0",
+    "@jarenjs/app": "^0.84.0",
+    "@jarenjs/flow": "^0.84.0",
+    "@jarenjs/db": "^0.84.0",
+    "@jarenjs/contract": "^0.84.0",
+    "@jarenjs/view": "^0.84.0",
+    "@jarenjs/forms": "^0.84.0",
+    "@jarenjs/formats": "^0.84.0",
+    "@jarenjs/charts": "^0.84.0",
+    "@jarenjs/mermaid": "^0.84.0"
   }
 }

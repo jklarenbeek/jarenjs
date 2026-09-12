@@ -218,12 +218,9 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
 
 /* footer (the page's bottom padding provides the gap above it) */
 .footer { border-top: 1px solid var(--border); }
-/* the bottom padding reserves the assistant launcher's lane: it is fixed
-   to the bottom-right corner, so at the foot of a short page it sat on
-   top of the footer's own right-hand links */
 .footer-inner {
   display: flex; flex-wrap: wrap; gap: var(--space-4); justify-content: space-between;
-  padding-top: var(--space-5); padding-bottom: calc(var(--space-6) + 2.75rem);
+  padding-top: var(--space-5); padding-bottom: var(--space-6);
   color: var(--muted); font-size: 0.85rem;
 }
 .footer-links { display: flex; gap: var(--space-5); }
@@ -680,7 +677,6 @@ tr.strong td { font-weight: 700; color: var(--accent); }
    wins — a later `display: none` would silently beat the media query.
    (`@jarenjs/play` and `@jarenjs/studio` keep the same pairing inside
    their own stylesheets, for the same reason.) */
-.flow-panebar, .data-panebar { display: none; }
 
 /* ——— the studio frame owns the viewport above the breakpoint ———
    `@jarenjs/play` and `@jarenjs/studio` are app shells: their rails and
@@ -722,7 +718,7 @@ tr.strong td { font-weight: 700; color: var(--accent); }
      panes, so those components carry the seam wherever they are
      mounted rather than only inside this site */
   body.kb-editing .header { position: static; }
-  .flow-grid, .data-grid, .pg-grid { padding-bottom: var(--kb-inset, 0px); }
+  .pg-grid { padding-bottom: var(--kb-inset, 0px); }
 
   /* ——— the studios show ONE pane at a time behind a segmented switcher
      (the pattern @jarenjs/play established): the grid becomes a single
@@ -730,33 +726,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
      attribute-scoped rules on the pane container. The panes stay
      MOUNTED — a hidden editor keeps its caret, its scroll and its undo
      stack — so switching costs one attribute write, not a re-render. */
-  .flow-panebar, .data-panebar { display: flex; }
-  .flow-panebar .seg-btn, .data-panebar .seg-btn { flex: 1; }
-  .flow-panebar, .data-panebar,
-  .flow-grid > .card, .data-grid > .card, .flow-side { grid-column: 1 / -1; }
-
-  .flow-grid[data-pane='diagram']   .flow-side,
-  .flow-grid[data-pane='inspector'] .flow-canvas-card,
-  .flow-grid[data-pane='inspector'] .flow-run,
-  .flow-grid[data-pane='run']       .flow-canvas-card,
-  .flow-grid[data-pane='run']       .flow-inspector { display: none; }
-
-  .data-grid[data-pane='store'] .data-query,
-  .data-grid[data-pane='store'] .data-live,
-  .data-grid[data-pane='store'] .data-trip,
-  .data-grid[data-pane='query'] .data-status,
-  .data-grid[data-pane='query'] .data-live,
-  .data-grid[data-pane='query'] .data-trip,
-  .data-grid[data-pane='live']  .data-status,
-  .data-grid[data-pane='live']  .data-query,
-  .data-grid[data-pane='live']  .data-trip,
-  .data-grid[data-pane='trip']  .data-status,
-  .data-grid[data-pane='trip']  .data-query,
-  .data-grid[data-pane='trip']  .data-live { display: none; }
 
   /* touch targets: the studios' controls are finger-sized (WCAG 2.5.8) */
-  .flow-grid .btn, .flow-grid .seg-btn,
-  .data-grid .btn, .data-grid .seg-btn { min-height: 44px; }
 }
 
 /* mobile */
@@ -940,203 +911,31 @@ tr.strong td { font-weight: 700; color: var(--accent); }
   color: var(--muted);
 }
 
-/* ---- the AI assistant slide-out (@jarenjs/ai) ---- */
-.ai-launch {
-  position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 150;
-  min-height: 2.75rem; /* primary tap target (DESIGN §5) */
-  border: 1px solid var(--accent); border-radius: 999px;
-  padding: var(--space-2) var(--space-4); font-size: 0.9rem; font-weight: 600;
-  background: var(--accent); color: var(--accent-fg); cursor: pointer;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
-}
-.ai-launch:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.ai.open .ai-launch { display: none; }
-.ai-panel {
-  position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 150;
-  display: flex; flex-direction: column; width: min(28rem, calc(100vw - 2 * var(--space-5)));
-  max-height: min(40rem, calc(100dvh - 2 * var(--space-5)));
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.22); overflow: hidden;
-}
-.ai-head {
-  display: flex; align-items: center; gap: var(--space-2);
-  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
-}
-.ai-title { font-weight: 700; margin-right: auto; }
-.ai-icon {
-  border: 0; background: transparent; color: var(--muted); cursor: pointer;
-  width: 2.75rem; height: 2.75rem; /* primary tap targets (DESIGN §5) */
-  border-radius: var(--radius-sm); font-size: 1rem;
-}
-.ai-icon:hover { color: var(--accent); background: var(--accent-soft); }
-.ai-settings {
-  display: flex; flex-direction: column; gap: var(--space-3);
-  padding: var(--space-4); border-bottom: 1px solid var(--border);
-}
-.ai-hint { color: var(--muted); font-size: 0.82rem; margin: 0; }
-.ai-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: 0.85rem; }
-.ai-field > span { color: var(--muted); }
-.ai-settings .btn { align-self: flex-start; }
-.ai-settings-actions { display: flex; gap: var(--space-2); }
-/* the ledger surface: the objective that outlives the tab, its evidenced
-   progress, and what a compacted session can still recall */
-.ai-goal, .ai-goal-set {
-  display: flex; gap: var(--space-2);
-  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
-}
-.ai-goal { flex-direction: column; }
-.ai-goal-set > input { flex: 1; min-width: 0; }
-.ai-goal-head { display: flex; align-items: center; gap: var(--space-2); }
-.ai-goal-label {
-  color: var(--muted); font-size: 0.75rem; font-weight: 600;
-  letter-spacing: 0.04em; text-transform: uppercase; margin-right: auto;
-}
-.ai-goal-text { margin: 0; font-size: 0.9rem; font-weight: 600; overflow-wrap: anywhere; }
-.ai-goal-progress {
-  margin: 0; padding-left: var(--space-5);
-  color: var(--muted); font-size: 0.82rem;
-}
-.ai-goal-progress li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
-.ai-goal-progress:empty { display: none; }
-.ai-evidence { display: block; color: var(--muted); font-size: 0.75rem; font-style: italic; }
-.ai-goal-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.ai-log {
-  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4);
-}
-.ai-archived {
-  color: var(--muted); font-size: 0.78rem; margin: 0;
-  border-top: 1px dashed var(--border); padding-top: var(--space-2);
-}
-.ai-intro { color: var(--muted); font-size: 0.88rem; }
-.ai-intro ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
-.ai-intro li { margin: var(--space-1) 0; }
-.ai-msg { border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); font-size: 0.9rem; }
-.ai-msg.user { background: var(--accent-soft); color: var(--fg); align-self: flex-end; max-width: 85%; }
-.ai-msg.user p { margin: 0; overflow-wrap: anywhere; }
-.ai-msg.assistant { background: transparent; padding-inline: 0; }
-.ai-msg.assistant .md { font-size: 0.9rem; }
-.ai-activity { color: var(--muted); font-size: 0.82rem; margin: 0; }
-.ai-error {
-  color: var(--fail); background: var(--fail-soft); border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3); font-size: 0.85rem; margin: 0;
-}
-.ai-composer {
-  display: flex; gap: var(--space-2); align-items: flex-end;
-  padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border);
-}
-.ai-composer .editor { flex: 1; min-height: auto; }
-.ai-send[disabled] { opacity: 0.6; cursor: default; }
-@media (max-width: 760px) {
-  .ai-panel {
-    right: 0; bottom: 0; left: 0; width: 100vw;
-    max-height: 85dvh; border-radius: var(--radius) var(--radius) 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  .ai-launch { right: var(--space-4); bottom: var(--space-4); }
-}
-/* small phones: the labeled pill is wide enough to sit on the hero CTA
-   or the calculator plot at some fold positions — collapse it to a
-   round icon-only launcher (the aria-label carries the name; the
-   2.75rem primary tap target holds, DESIGN §5) */
-@media (max-width: 480px) {
-  .ai-launch {
-    width: 2.75rem; height: 2.75rem; padding: 0;
-    display: grid; place-items: center; font-size: 1.05rem;
-  }
-  .ai-launch-label { display: none; }
-}
-
 /* ---------------------------------------------------------------- */
 /* The Flow studio                                                   */
 /* ---------------------------------------------------------------- */
-
-.flow-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: var(--space-4);
-  align-items: start;
-}
-.flow-side { display: grid; gap: var(--space-4); }
 /* This studio used to collapse to one column at its own 900px, which was
    the only breakpoint in the suite that was neither 1024 nor 760. The
    one-pane block now owns the collapse — at the suite's 1024 — by
    spanning every child across both tracks, so the odd one is gone. */
-.flow-palette { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.flow-tabs { display: flex; gap: var(--space-2); margin-block: var(--space-2); }
-.flow-canvas { overflow: auto; }
-.flow-canvas svg { max-width: 100%; height: auto; }
-.flow-text { width: 100%; }
-.flow-dag-input { width: 100%; }
-.flow-log {
-  list-style: none;
-  margin: var(--space-2) 0 0;
-  padding: 0;
-  max-height: 12rem;
-  overflow: auto;
-}
-.flow-log-line {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  padding-block: 1px;
-  border-block-end: 1px solid var(--border);
-  overflow-wrap: anywhere;
-}
-.flow-run-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-block: var(--space-2); }
-.flow-run-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.flow-run-mount { border: 1px dashed var(--border); border-radius: 8px; padding: var(--space-2); }
-.flow-output { max-height: 12rem; overflow: auto; }
-.btn.flow-armed { outline: 2px solid var(--accent); }
 
 /* diagram interaction affordances (injected by the decorate walk) */
-.mm-pick { cursor: pointer; }
-.mm-selected .mm-node-shape,
-.mm-selected .mm-edge-line { stroke-width: 2.5; }
-.mm-armed .mm-node-shape { stroke-dasharray: 4 3; stroke-width: 2.5; }
 
 /* The running machine's CURRENT state carries an accent glow, so the eye
    follows the machine as events drive it. The glow is a resting state;
    the breathing that makes it a pulse is motion, and lives with the rest
    of the site's motion behind `no-preference` below. */
-.mm-active .mm-node-shape {
-  stroke: var(--accent);
-  stroke-width: 2.5;
-  transform-box: fill-box;
-  transform-origin: center;
-  filter: drop-shadow(0 0 6px var(--accent));
-}
-@keyframes mm-pulse {
-  0%, 100% { filter: drop-shadow(0 0 2px var(--accent)); }
-  50%      { filter: drop-shadow(0 0 9px var(--accent)); }
-}
 
 /* The transition JUST TAKEN marks the path the machine worked through;
    under motion its accent-coloured ants march along it. */
-.mm-fired .mm-edge-line {
-  stroke: var(--accent);
-  stroke-width: 2.5;
-  stroke-dasharray: 6 4;
-}
-.mm-fired .mm-edge-label { fill: var(--accent); font-weight: 600; }
-@keyframes mm-flow {
-  to { stroke-dashoffset: -20; }
-}
 
 /* The dag run's per-node status: ok settles green, the failing node
    carries the danger stroke, an aborted sibling dims. */
-.mm-run-ok .mm-node-shape { stroke: var(--ok, #16a34a); stroke-width: 2.5; }
-.mm-run-error .mm-node-shape { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
-.mm-run-aborted .mm-node-shape { opacity: 0.5; }
 
 /* The run's motion, in one place and behind the preference: a running
    state breathes, the transition it just took flows, and the failing
    node of a dag run pulses faster. Nothing here plays under `reduce` —
    each rule's resting state above is what that reader sees. */
-@media (prefers-reduced-motion: no-preference) {
-  .mm-active .mm-node-shape { animation: mm-pulse 1.5s var(--motion-ease-loop) infinite; }
-  .mm-fired .mm-edge-line { animation: mm-flow 0.7s linear infinite; }
-  .mm-run-error .mm-node-shape { animation: mm-pulse 1s var(--motion-ease-loop) infinite; }
-}
 
 /* ---------------------------------------------------------------- */
 /* The Data studio                                                   */
@@ -1145,105 +944,14 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 /* Store | Query | Live. This grid was declared in the markup and never
    written, so the three cards stacked full-width at EVERY size — the
    auto-fit track is what the sibling studios always had. */
-.data-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
-  gap: var(--space-4);
-  align-items: start;
-}
 
 /* The stored documents, each removable. A row's own text can be long
    (it is a whole document), so it scrolls inside the row rather than
    widening the card — the delete stays reachable at every width. */
-.data-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-.data-row {
-  display: flex; align-items: center; gap: var(--space-2);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg); padding: var(--space-1) var(--space-2);
-}
-.data-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.8rem; }
-.data-row-delete { flex: none; color: var(--muted); }
-.data-row-delete:hover { color: var(--fail); border-color: var(--fail); }
 
 /* The round trip's map: the charts page's card, inside the studio card,
    so the drawing shares the visual language the map card established
    rather than inventing one. */
-.data-trip-map { margin-block: var(--space-3); padding: 0; border: 0; background: transparent; }
-.data-trip-narrative { word-break: break-word; }
-
-/* ---- The adventure game (#/game) ------------------------------------ */
-.game-title { display: grid; place-items: center; padding-block: var(--space-8); }
-.game-title-card { max-width: 44rem; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-8); }
-.game-goal { font-size: 1.1rem; color: var(--fg); background: var(--accent-soft); border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); }
-.game-name { display: flex; flex-direction: column; gap: var(--space-2); max-width: 24rem; margin: var(--space-6) auto; text-align: left; }
-.game-name-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.game-locales { display: flex; gap: 2px; }
-/* dense in-flow chrome, so the 2.2rem tier (DESIGN §5) — these were 18px */
-.game-loc { display: inline-flex; align-items: center; min-height: 2.2rem; padding: 2px var(--space-2); font-size: 0.7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--muted); cursor: pointer; }
-.game-loc.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-.game-name input, .game-name select { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); }
-.game-start { font-size: 1.05rem; padding: var(--space-3) var(--space-6); }
-.game-hint { color: var(--muted); font-size: 0.9rem; margin-top: var(--space-5); }
-
-.game-goalbar { background: var(--accent-soft); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-4); margin-bottom: var(--space-4); }
-.game-won { color: var(--accent); font-weight: 700; }
-.game-stage { display: grid; grid-template-columns: 1fr 16rem; gap: var(--space-4); align-items: start; }
-@media (max-width: 720px) { .game-stage { grid-template-columns: 1fr; } }
-.game-scene { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); min-height: 14rem; }
-.game-scene h2 { margin-top: 0; }
-.game-look { color: var(--fg); line-height: 1.6; }
-.game-hotspots { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
-.hs-group h4 { margin: 0 0 var(--space-1); color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.hs { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.hs-btn { padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg); cursor: pointer; font-size: 0.9rem; }
-.hs-btn:hover { border-color: var(--accent); color: var(--accent); }
-.hs-btn.exit { border-style: dashed; }
-.hs-btn.npc { border-color: var(--accent); }
-
-.game-side { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
-.game-side h4 { margin: 0 0 var(--space-2); }
-.game-inv { display: flex; flex-wrap: wrap; gap: var(--space-2); min-height: 2rem; }
-.game-item { padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); cursor: pointer; font-size: 0.85rem; }
-.game-item.armed { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
-.game-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
-.game-controls .btn { font-size: 0.8rem; padding: var(--space-1) var(--space-2); }
-.game-look p { margin: 0; line-height: 1.6; }
-.gd-text p { margin: 0; line-height: 1.6; }
-.game-maph { margin-top: var(--space-4); }
-.game-map { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2); overflow-x: auto; }
-.game-map svg { max-width: 100%; height: auto; }
-.game-muted { color: var(--muted); font-size: 0.85rem; }
-
-.game-verbs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; }
-.game-verb { padding: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); cursor: pointer; font-weight: 600; }
-.game-verb:hover { border-color: var(--accent); }
-.game-verb.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-
-.game-log { display: flex; flex-direction: column; gap: var(--space-1); max-height: 12rem; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
-.game-line { margin: 0; line-height: 1.5; }
-.game-line.sys { color: var(--muted); font-style: italic; }
-.game-line.win { color: var(--accent); font-weight: 600; }
-.game-line.npc { color: var(--fg); }
-
-.game-dialogue { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: grid; place-items: center; z-index: 50; padding: var(--space-4); }
-.gd-inner { position: relative; max-width: 36rem; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-6); }
-.gd-close { position: absolute; top: var(--space-3); right: var(--space-3); border: none; background: transparent; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
-.gd-text { line-height: 1.6; }
-.gd-options { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-4) 0; }
-.gd-option { text-align: left; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); cursor: pointer; }
-.gd-option:hover { border-color: var(--accent); color: var(--accent); }
-.gd-ask { display: flex; gap: var(--space-2); border-top: 1px dashed var(--border); padding-top: var(--space-4); }
-.gd-ask input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); }
-
-/* the insult sword-fight */
-.game-duel .gd-inner { border-color: var(--accent); }
-.duel-meters { display: flex; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); color: var(--muted); font-size: 0.9rem; }
-.duel-poise b { color: var(--accent); letter-spacing: 2px; }
-.duel-insult { font-style: italic; font-size: 1.05rem; }
-.duel-comeback { border-color: var(--accent); }
-.duel-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); border-top: 1px dashed var(--border); padding-top: var(--space-4); align-items: center; }
-.duel-chart { margin: var(--space-2) 0; }
-.duel-chart svg { max-width: 100%; height: auto; max-height: 9rem; }
 
 /* ---------------------------------------------------------------- */
 /* The motion layer (DESIGN §6)                                      */

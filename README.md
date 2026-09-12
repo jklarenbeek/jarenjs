@@ -109,7 +109,7 @@ Programming is like sex.
 One mistake and you have to support it for the rest of your life.
 ```
 
-The monorepo is organized as a dependency chain of <!--fact:packages.count-->24<!--/fact--> published packages — each builds on the ones before it, and each has its own README and, where the internals warrant it, an ARCHITECTURE document:
+The monorepo is organized as a dependency chain of <!--fact:packages.count-->23<!--/fact--> published packages — each builds on the ones before it, and each has its own README and, where the internals warrant it, an ARCHITECTURE document:
 
 | Package | What it is | Docs |
 |---|---|---|
@@ -136,7 +136,6 @@ The monorepo is organized as a dependency chain of <!--fact:packages.count-->24<
 | [`@jarenjs/josl`](packages/josl) | JOSL, a streaming TOML superset, JSONX, and a self-healing CSV reader/writer — with incremental streaming readers for every dialect (JOSL/TOML/JSONX/strict JSON/CSV) | [README](packages/josl/README.md) · [FORMAT](packages/josl/FORMAT.md) |
 | [`@jarenjs/linq`](packages/linq) | **The suite, by code.** C#-familiar fluent chains captured into plain query documents — deferred immutable sequences, a typed surface, one bounded async boundary, and a provider seam that pushes the same document anywhere — plus eight **pens** under their own subpaths, each writing exactly the published document another engine already takes (a JSON Schema, a database model, a JSLT stylesheet, a migration, a contract, a machine and a dataflow, an application, a form) — one gated document per pen, indexed by the binder — with `Infer<>` types proven equal to emit's generated declarations; and `./db`, the store's typed front door over the package's one declared, optional-peer edge | [README](packages/linq/README.md) · [ARCHITECTURE](packages/linq/ARCHITECTURE.md) · [QUERY PEN](packages/linq/docs/QUERY-PEN.md) · [PENS](packages/linq/docs/LINQ-FORMAT.md) |
 | [`@jarenjs/db`](packages/db) | Documents in SQLite behind driver and dialect seams: model-declared collections, a pushdown planner with honest residuals and explain(), a safe profile for untrusted queries, and migrations as shadow-validated documents | [README](packages/db/README.md) · [ARCHITECTURE](packages/db/ARCHITECTURE.md) · [MODEL-FORMAT](packages/db/docs/MODEL-FORMAT.md) · [MIGRATION-FORMAT](packages/db/docs/MIGRATION-FORMAT.md) |
-| [`@jarenjs/ai`](packages/ai) | Browser-side AI: one OpenAI-compatible client (OpenRouter/Ollama/LM Studio, bring-your-own-key), an embeddings client over the same providers behind one embedder seam, an SSE decoder, a tool registry whose inputs Jaren validates before every call, a bounded agent loop, WebMCP registration — a durable ledger (a persistent objective, evidenced memories and archived conversation rounds, so a compacted session can fetch back what it dropped and a run outlives the tab), and an environment the model works on by address rather than reads: it authors a compile-gated program over named slots, fans one bounded model call out per piece — each of which may be a depth-capped child agent over its own slice, sharing one budget with the whole tree — and answers a question over a whole corpus while the request stays flat | [README](packages/ai/README.md) |
 
 ### 🤓 @jarenjs/core — the foundation
 

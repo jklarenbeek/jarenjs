@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.83.3",
+  "version": "0.84.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -192,6 +192,14 @@
     "./schedule": {
       "types": "./dist/types/schedule.d.ts",
       "default": "./src/schedule.js"
+    },
+    "./check": {
+      "types": "./dist/types/check.d.ts",
+      "default": "./src/check.js"
+    },
+    "./guarded": {
+      "types": "./dist/types/guarded.d.ts",
+      "default": "./src/guarded.js"
     }
   },
   "scripts": {

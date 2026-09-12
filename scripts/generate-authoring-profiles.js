@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { deriveAuthoringProfile, JSLT_AUTHORING_OPEN } from './lib/schema-profiles.js';
-import { contentHash } from '../benchmark/lib/authoring.js';
+import { contentHash } from './lib/content-hash.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const QUERY = 'A Jaren query expression; validate against the full grammar and compile locally.';

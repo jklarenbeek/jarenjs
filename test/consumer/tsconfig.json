@@ -13,7 +13,6 @@
     "target": "ESNext"
   },
   "files": [
-    "ai-program.ts",
     "types.ts",
     "flow-composition.ts",
     "db-replication.ts",
@@ -21,7 +20,8 @@
     "lexical.ts",
     "providers.ts",
     "durable-types.ts",
-    "linq-formula.ts"
+    "linq-formula.ts",
+    "studio-editors.ts"
   ],
   "include": [
     "linq-*.ts"

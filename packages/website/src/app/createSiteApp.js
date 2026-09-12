@@ -1,3 +1,6 @@
+import { registerSiteWebMcp } from '../boundaries/webmcp.js';
+import { createDataController } from '@jarenjs/studio/data';
+import { createFlowController } from '@jarenjs/studio/flow';
 //@ts-check
 /**
  * Assemble and start the site: one app document (state + stylesheet +
@@ -15,22 +18,20 @@
 
 import { createCollectionDemoWidget } from '../boundaries/collection.js';
 import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
-import { renameProjectFile, writeProjectArtifact, resolveProjectFile } from '@jarenjs/studio';
-import { createLedger } from '@jarenjs/ai';
+import { createProjectController } from '@jarenjs/studio/component';
+
 
 import { ACTIONS, SUBS } from './actions.js';
-import { createSlotLedgerStorage } from '../lib/ledgerStore.js';
+
 import { createInitialState } from './state.js';
 import { viewModel } from './viewmodel.js';
 import { STYLESHEET } from '../views/index.js';
 import { binanceToggle, binancePageSync } from '../boundaries/binance.js';
-import {
-  createSiteToolbox, createAssistantEffects, registerSiteWebMcp, isConfigured,
-} from '../boundaries/assistant.js';
+
 import { STUDIO_WIDGETS as DOCUMENT_WIDGETS } from '../boundaries/studio.js';
 import {
-  createProjectStageWidget, createProjectSplitterWidget, commitProject, runProjectFile,
-  projectSnapshot, projectAppFile,
+  createProjectStageWidget, createProjectSplitterWidget, commitProject,
+  projectSnapshot, projectHost,
 } from '../boundaries/project.js';
 import {
   runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession,
@@ -38,12 +39,12 @@ import {
   sessionDocument, sessionFromDocument, sessionFilename,
 } from '../boundaries/play.js';
 import {
-  projectTemplate, fileSkeleton, singleAppProject, sharedProject,
+  projectTemplate, singleAppProject, sharedProject,
 } from '../content/projectTemplates.js';
 import { createProjectDataRuntime } from '../boundaries/project-data.js';
 import { createProjectFlowWidget } from '../boundaries/project-flow.js';
 import { createFlowRuntime } from '../boundaries/flowstudio.js';
-import { createGameRuntime } from '../boundaries/game.js';
+
 import { createDataRuntime } from '../boundaries/data.js';
 import { openSiteClient, siteContract } from '../boundaries/site.js';
 import { runHeroDispatch } from '../boundaries/hero.js';
@@ -85,9 +86,6 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   count a measured headline up to the value the renderer wrote).
  *   Omit for headless hosts: nothing moves, and the renderer's final
  *   values are exactly what renders.
- * @property {{ read: () => string | null, write: (s: string) => void }} [gameSave]
- *   The adventure game's save slot — a raw JSONX string (the game
- *   serializes itself); omit and saving degrades gracefully.
  * @property {typeof fetch} [ratesFetch] - fetch for the calculator's
  *   live currency rates; omit and the static fallback rates serve.
  * @property {(cb: (route: any) => void) => (() => void) | void} [listenHash]
@@ -105,21 +103,8 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   [openFile] - `download`'s twin: open a file picker and resolve what
  *   was chosen, or null if nothing was. Omit for hosts that cannot read
  *   a local file; the surface then says so rather than failing silently.
- * @property {any} [modelContext] - A WebMCP `navigator.modelContext`
- *   implementation; when present, the site registers its tools on it.
- * @property {typeof fetch} [aiFetch] - fetch for the AI assistant's
- *   provider calls (default global fetch); injectable for tests.
- * @property {{ read: () => any, write: (data: any) => void }} [aiStorage]
- *   Persistence for the assistant settings (localStorage in the browser).
- * @property {{ read: () => any, write: (data: any) => void }} [aiChat]
- *   Persistence for the assistant transcript, so a reload resumes the
- *   conversation (localStorage in the browser).
- * @property {{ read: () => any, write: (data: any) => void }} [aiLedger]
- *   Persistence for the assistant's LEDGER — the objective, its
- *   progress, what it has learned, and the rounds compaction archived.
- *   Omit it and the ledger runs in memory for the session, which is the
- *   degrade `@jarenjs/ai` is built for; supply it and a goal survives a
- *   reload.
+ * @property {unknown} [modelContext] - Explicit context override, including null/undefined.
+ * @property {import('@jarenjs/contract/webmcp').WebMcpOptions} [webmcp] - Shared adapter options.
  * @property {number} [debounceMs] - Boundary-run debounce (default 250;
  *   0 = synchronous, for tests).
  * @property {(error: Error) => void} [onError]
@@ -200,6 +185,7 @@ export function createSiteApp(env) {
   // corpus it runs as the third executor is a site artifact, read
   // through the same contract as every other one
   const dataRuntime = createDataRuntime({ site });
+  const dataController = createDataController({ getApp: () => app, runtime: dataRuntime });
 
   // the @jarenjs/calc live-rates layer: the impure half (fetch); the pure
   // conversion stays in @jarenjs/core/convert. The static fallback keeps
@@ -212,36 +198,17 @@ export function createSiteApp(env) {
 
   const ideNames = () => docStore.names();
 
-  // the AI assistant toolbox: the play engines as schema-guarded
-  // @jarenjs/ai tools, shared by the chat panel and the WebMCP bridge.
-  // `getApp` is lazy because the app is created further down.
-  const toolbox = createSiteToolbox({
-    aiFetch: env.aiFetch,
-    runModel: (project, name) => projectData.execute(project, name),
-    getApp: () => app,
-    navigate: env.navigate,
-    share: env.share,
-    docStore,
-    playStore,
-  });
-  const aiStorage = env.aiStorage ?? { read: () => null, write: () => {} };
-  const aiChat = env.aiChat ?? { read: () => null, write: () => {} };
-  // the assistant's durable state: one @jarenjs/ai ledger over the site's
-  // own JSON-slot idiom, or in memory when the host offers no slot. The
-  // agent reads its objective from here every turn and compaction
-  // archives every dropped round into it, so this one object is what
-  // makes a session survive a closed tab.
-  const aiLedger = createLedger(env.aiLedger === undefined
-    ? {}
-    : { storage: createSlotLedgerStorage(env.aiLedger) });
-
   // the Flow studio's runtime: nested-machine host widget + effects
   // (template loading, fail-closed text parsing, dag runs with abort)
-  const flowRuntime = createFlowRuntime({ schedule: env.schedule });
+  const flowRuntime = createFlowRuntime({ schedule: env.schedule, getFlow: () => app.getState().flow });
+  const flowController = createFlowController({ getApp: () => app, runtime: flowRuntime });
   const projectData = createProjectDataRuntime({ createWorker: env.projectWorker });
+  const projectController = createProjectController({ getApp: () => app, host: projectHost, projectData, projectTemplate,
+    download: env.download, exportProject: env.exportProject, debounceMs: env.debounceMs });
 
   const effects = {
     ...flowRuntime.effects,
+    ...flowController.effects,
     'fetch-bench': (props, dispatch) => {
       if (requested.has(props.name)) return;
       requested.add(props.name);
@@ -329,25 +296,6 @@ export function createSiteApp(env) {
     'scroll-to-anchor': (props) => env.scrollToAnchor?.(String(props.id ?? '')),
     'binance-toggle': (props, dispatch) =>
       binanceToggle((action, payload) => dispatch(action, payload)),
-    // the Flow palette's id mint: uniqueness needs a scan over the
-    // EXISTING ids (a count-based mint collides after a delete), which is
-    // JS — compute here, then dispatch the plain patch (see project-add)
-    'flow-mint': (props, dispatch) => {
-      const doc = app.getState().flow.doc;
-      if (doc === null || doc === undefined) return;
-      if (props.kind === 'state') {
-        const ids = new Set((doc.states ?? [])
-          .map((s) => (typeof s === 'string' ? s : s.id)));
-        let k = ids.size + 1;
-        while (ids.has(`s${k}`)) k += 1;
-        dispatch('flow/state-minted', `s${k}`);
-        return;
-      }
-      const nodes = doc.nodes ?? {};
-      let k = Object.keys(nodes).length + 1;
-      while (`n${k}` in nodes) k += 1;
-      dispatch('flow/node-minted', `n${k}`);
-    },
     // the IDE store (the Project IDE's Save/Load/Share bar). Two legacy
     // kinds may still be in a user's storage: an engine experiment from the
     // retired playground translates into a play session, and a Studio
@@ -399,108 +347,7 @@ export function createSiteApp(env) {
       const url = env.share?.(`#/project?s=${token}`);
       dispatch('ide/shared', url === undefined ? 'link ready' : 'link copied');
     },
-    // the app-document download: the project's designated app file, under
-    // the name Studio downloads always carried
-    'project-download': (props, dispatch) => {
-      const file = projectAppFile(app.getState().project);
-      if (file === null) { dispatch('ide/shared', 'this project has no app document'); return; }
-      let doc;
-      try { doc = resolveProjectFile(app.getState().project, file.name).doc; }
-      catch { dispatch('ide/shared', 'the app document is not valid JSON'); return; }
-      const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
-      dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
-    },
-    'project-eject': async (props, dispatch) => {
-      try {
-        dispatch('ide/shared', 'Preparing offline project…');
-        const saved = await env.exportProject?.(projectSnapshot(app.getState().project));
-        dispatch('ide/shared', saved ? 'offline project downloaded' : 'offline export unavailable here');
-      }
-      catch (error) { dispatch('ide/shared', error.message); }
-    },
-    'project-export': (props, dispatch) => {
-      const snapshot = projectSnapshot(app.getState().project);
-      const saved = env.download?.('jaren-project.json', JSON.stringify(snapshot, null, 2));
-      dispatch('ide/shared', saved === true ? 'project downloaded' : 'download unavailable here');
-    },
-
-    // the Project IDE: the editor commits the ACTIVE file's text (rewriting
-    // it by name — an array index a patch path cannot compute); explicit
-    // Run force-restarts the app stage; a template card opens a project.
-    'project-route': (props, dispatch) => {
-      const p = app.getState().project;
-      const files = p.files.map((f) => {
-        if (f.name !== p.active) return f;
-        const next = { ...f };
-        if (props.value === '') delete next[props.member];
-        else next[props.member] = props.value;
-        if (props.member === 'model') delete next.collection;
-        return next;
-      });
-      dispatch('project/files-set', { files });
-    },
-    'project-artifact-edit': (props, dispatch) => {
-      const p = app.getState().project;
-      let files;
-      try { files = writeProjectArtifact(p, props.name, props.doc); }
-      catch (error) { dispatch('project/stage-error', error.message); return; }
-      dispatch('project/files-set', { files });
-    },
-    'project-edit': (props, dispatch) => {
-      const p = app.getState().project;
-      const files = p.files.map((f) => (f.name === p.active ? { ...f, text: props.text } : f));
-      dispatch('project/files-set', { files });
-    },
-    'project-run': Object.assign((props, dispatch) => {
-      const state = app.getState().project;
-      const active = state.files.find((f) => f.name === state.active);
-      const commit = commitProject(state);
-      const fragment = commit.mount?.sourceFiles?.includes(state.active) && commit.mount.name !== state.active;
-      // a transform / schema / contract file re-runs; an app file force-restarts
-      if (active !== undefined && !fragment && !active.model && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema'
-        || active.kind === 'contract')) {
-        dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
-        return;
-      }
-      const mount = commit.mount === null ? null : { ...commit.mount, revision: commit.mount.revision + 1 };
-      dispatch('project/committed', { mount, revision: mount === null ? commit.revision : mount.revision });
-    }, { dispose: projectData.dispose }),
-    'project-template': (props, dispatch) => {
-      const template = projectTemplate(props.id);
-      if (template === undefined) return;
-      dispatch('project/open', template);
-      // commit NOW, computed from the template itself: the debounced edit
-      // loop alone leaves a race where an edit inside the debounce window
-      // supersedes the opening commit — the "last good frame" then never
-      // existed and an invalid edit blanks the stage
-      dispatch('project/committed', commitProject(template));
-    },
-    // file management (the files array is an array — index-by-name lives in
-    // JS here, then a patch action lands the result)
-    'project-add': (props, dispatch) => {
-      const text = fileSkeleton(props.kind);
-      if (text === null) return;
-      const p = app.getState().project;
-      let n = 1;
-      let name = `${props.kind}-${n}.${props.kind}`;
-      while (p.files.some((f) => f.name === name)) { n += 1; name = `${props.kind}-${n}.${props.kind}`; }
-      dispatch('project/added', { files: [...p.files, { name, kind: props.kind, text }], active: name });
-    },
-    'project-delete': (props, dispatch) => {
-      const p = app.getState().project;
-      if (p.files.length <= 1) return; // never delete the last file
-      const files = p.files.filter((f) => f.name !== props.name);
-      if (files.length === p.files.length) return; // no such file
-      const active = p.active === props.name ? files[0].name : p.active;
-      dispatch('project/structural', { files, active });
-    },
-    'project-rename': (props, dispatch) => {
-      const p = app.getState().project;
-      const next = String(props.name ?? '').trim();
-      if (next === '' || next === p.active || p.files.some((f) => f.name === next)) return;
-      const files = renameProjectFile(p.files, p.active, next);
-      dispatch('project/structural', { files, active: next });
-    },
+    ...projectController.effects,
     // the Play playground: picking an example loads its source + first
     // dataset; the dataset switcher swaps the data pane against the SAME
     // source (both land as a patch, then the run loop below re-runs).
@@ -651,22 +498,11 @@ export function createSiteApp(env) {
     },
   };
 
-  // fold in the calc sub-app's effects (= evaluation, backspace), the
-  // live-rates effect (plus the `when`-gated rates-poll subscription),
-  // and the AI assistant's streaming-turn + settings effects.
-  Object.assign(effects, calcEditEffects, rates.effects,
-    createAssistantEffects({
-      toolbox, getApp: () => app, aiFetch: env.aiFetch, aiStorage, aiChat, ledger: aiLedger,
-    }),
-    // the adventure game's resolver + dynamic-tier effects; it reuses the
-    // assistant's shared BYOK key (state.ai.settings) and fetch
-    createGameRuntime({ getApp: () => app, aiFetch: env.aiFetch, isConfigured, download: env.download, saveSlot: env.gameSave }).effects,
-    // the data studio's owner-worker transport + effects
-    dataRuntime.effects);
+  Object.assign(effects, calcEditEffects, rates.effects, dataRuntime.effects, dataController.effects);
 
   app = createApp({
     $app: '0.1',
-    state: createInitialState(env.initialTheme ?? 'light', ideNames(), aiStorage.read(), aiChat.read(), playStore.names()),
+    state: createInitialState(env.initialTheme ?? 'light', ideNames(), playStore.names()),
     view: STYLESHEET,
     actions: ACTIONS,
     subs: [...SUBS, rates.subEntry],
@@ -700,7 +536,6 @@ export function createSiteApp(env) {
     widgets: {
       'collection-demo': createCollectionDemoWidget(),
       // chart / mermaid / markdown / form — usable from any site-level view
-      // (the adventure game embeds chart + mermaid in its own page)
       ...DOCUMENT_WIDGETS,
       'flow-doc': flowRuntime.widget,
       // the Project IDE's live stage: boots the active app file, then
@@ -721,12 +556,17 @@ export function createSiteApp(env) {
     },
   });
 
-  app.subscribe((state, changes) => {
-    if (changes?.some((p) => p === '/project/files' || p.startsWith('/project/files/')))
-      projectData.sync(state.project, changes.includes('/project/project'));
-  });
-  wireBoundaries(app, env.debounceMs ?? 250, env.navigate);
-  registerSiteWebMcp(toolbox, { modelContext: env.modelContext, onError: report });
+  dataController.attach();
+  app.dataEditor = dataController;
+  flowController.attach();
+  app.flowEditor = flowController;
+  projectController.attach();
+  wireBoundaries(app, env.debounceMs ?? 250, env.navigate, projectController);
+  app.projectEditor = projectController;
+  const webmcp = registerSiteWebMcp(app, { ...env.webmcp, ...(Object.hasOwn(env, 'modelContext') ? { context: env.modelContext } : {}), onError: report });
+  const destroy = app.destroy;
+  app.destroy = () => { void webmcp.dispose(); destroy(); };
+  app.webmcp = webmcp;
   return app;
 }
 
@@ -737,26 +577,9 @@ export function createSiteApp(env) {
  * @param {((hash: string) => void)} [navigate] - set the location hash (for
  *   the retired-page redirect: #/examples → #/play)
  */
-function wireBoundaries(app, debounceMs, navigate) {
-  // the Project IDE's commit: validate + assemble the active app file and
-  // fold in the last-good stage mount (an invalid edit keeps the previous)
-  const runProjectCommit = () => {
-    const state = app.getState();
-    if (state.project === undefined) return;
-    app.dispatch('project/committed', commitProject(state.project));
-  };
-  // run the active transform file (jslt/query) live, like the playground —
-  // paired with the project's data file, registered operators included
-  const runProjectActive = () => {
-    const state = app.getState();
-    if (state.project === undefined) return;
-    const active = state.project.active;
-    const file = state.project.files.find((f) => f.name === active);
-    if (file !== undefined && !file.model && (file.kind === 'query' || file.kind === 'jslt' || file.kind === 'schema'
-      || file.kind === 'contract')) {
-      app.dispatch('project/result', { name: active, result: runProjectFile(state.project, active) });
-    }
-  };
+function wireBoundaries(app, debounceMs, navigate, projectController) {
+  const runProjectCommit = projectController.commit;
+  const runProjectActive = projectController.runActive;
   // the Play playground's live run: the active engine over the current
   // source + data (registered operators threaded in the boundary). Never
   // throws — a bad edit lands as an error result, not a crash. An async
@@ -792,20 +615,11 @@ function wireBoundaries(app, debounceMs, navigate) {
   app.subscribe((state, changes) => {
     if (changes === null) return;
     let routed = false;
-    let project = false;
     let play = false;
     let playFormEdit = false; // a /play/dataValue* edit (from the generated form)
     let playToggle = false;   // the /play/dataView toggle (json ↔ form)
     for (const path of changes) {
-      if (path === '/project/files' || path.startsWith('/project/files/') || path === '/project/active'
-        || path === '/project/layout/autorun') {
-        project = true;
-      }
-      // any Play ENGINE input (source / data / example / dataset / config)
-      // re-runs; the run's own output and the pure IDE chrome (the active
-      // tab, the session name/list, the share status, the split ratio) must
-      // NOT, or it loops / re-runs on every keystroke and drag
-      else if (path.startsWith('/play/')) {
+      if (path.startsWith('/play/')) {
         // the generated form writes into /play/dataValue*; that mirrors back
         // to the data TEXT (below), which is what actually re-validates — so
         // a form edit must not itself re-run
@@ -817,10 +631,6 @@ function wireBoundaries(app, debounceMs, navigate) {
         routed = true;
       }
     }
-    if (project) debounced('project', () => {
-      if (app.getState().project.layout.autorun === false) return;
-      runProjectCommit(); runProjectActive();
-    });
     if (play) debounced('play', runPlayLive);
     // a generated-form edit (not the toggle, which sets the buffer from the
     // text) serializes the structured buffer back into the data-pane text —

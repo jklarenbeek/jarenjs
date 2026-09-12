@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/linq",
   "private": false,
-  "version": "0.83.3",
+  "version": "0.84.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -64,13 +64,13 @@
       "types": "./types/messages.d.ts",
       "default": "./src/messages/index.js"
     },
-    "./ai": {
-      "types": "./types/ai.d.ts",
-      "default": "./src/ai/index.js"
-    },
     "./formula": {
       "types": "./types/formula.d.ts",
       "default": "./src/formula/index.js"
+    },
+    "./authoring": {
+      "types": "./types/authoring.d.ts",
+      "default": "./src/authoring.js"
     }
   },
   "files": [
@@ -108,13 +108,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.83.3",
-    "@jarenjs/json": "^0.83.3"
+    "@jarenjs/core": "^0.84.0",
+    "@jarenjs/json": "^0.84.0"
   },
   "peerDependencies": {
-    "@jarenjs/db": "^0.83.3",
-    "@jarenjs/formats": "^0.83.3",
-    "@jarenjs/validate": "^0.83.3"
+    "@jarenjs/db": "^0.84.0",
+    "@jarenjs/formats": "^0.84.0",
+    "@jarenjs/validate": "^0.84.0"
   },
   "peerDependenciesMeta": {
     "@jarenjs/db": {

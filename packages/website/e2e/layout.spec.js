@@ -43,7 +43,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 /** Every route that renders a page under the site chrome, minus `#/data`. */
-const PAGES = ['/', 'play', 'project', 'flow', 'charts', 'benchmarks', 'docs', 'calculator', 'game'];
+const PAGES = ['/', 'play', 'project', 'flow', 'charts', 'benchmarks', 'docs', 'calculator'];
 
 /** Settle: the hash route renders, then the boundaries mount. */
 async function open(page, route) {

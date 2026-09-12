@@ -1,0 +1,53 @@
+@import './editor.css';
+/* Complete Data editor layout and responsive panes, scoped to each mount. */
+
+:where(.jaren-data-editor) .data-panebar { display: none; }
+@media (max-width: 1024px) {
+  :where(.jaren-data-editor) .data-grid { padding-bottom: var(--kb-inset, 0px); }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-data-editor) .data-panebar { display: flex; }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-data-editor) .data-panebar .seg-btn { flex: 1; }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-data-editor) .data-panebar,
+:where(.jaren-data-editor) .data-grid > .card { grid-column: 1 / -1; }
+}
+@media (max-width: 1024px) {
+
+  :where(.jaren-data-editor) .data-grid[data-pane='store'] .data-query,
+:where(.jaren-data-editor) .data-grid[data-pane='store'] .data-live,
+:where(.jaren-data-editor) .data-grid[data-pane='store'] .data-trip,
+:where(.jaren-data-editor) .data-grid[data-pane='query'] .data-status,
+:where(.jaren-data-editor) .data-grid[data-pane='query'] .data-live,
+:where(.jaren-data-editor) .data-grid[data-pane='query'] .data-trip,
+:where(.jaren-data-editor) .data-grid[data-pane='live']  .data-status,
+:where(.jaren-data-editor) .data-grid[data-pane='live']  .data-query,
+:where(.jaren-data-editor) .data-grid[data-pane='live']  .data-trip,
+:where(.jaren-data-editor) .data-grid[data-pane='trip']  .data-status,
+:where(.jaren-data-editor) .data-grid[data-pane='trip']  .data-query,
+:where(.jaren-data-editor) .data-grid[data-pane='trip']  .data-live { display: none; }
+}
+@media (max-width: 1024px) {
+  :where(.jaren-data-editor) .data-grid .btn,
+:where(.jaren-data-editor) .data-grid .seg-btn { min-height: 44px; }
+}
+:where(.jaren-data-editor) .data-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-4, 1rem);
+  align-items: start;
+}
+:where(.jaren-data-editor) .data-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2, 0.5rem); }
+:where(.jaren-data-editor) .data-row {
+  display: flex; align-items: center; gap: var(--space-2, 0.5rem);
+  border: 1px solid var(--border, hsl(220 14% 88%)); border-radius: var(--radius-sm, 8px);
+  background: var(--bg, hsl(0 0% 100%)); padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+}
+:where(.jaren-data-editor) .data-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.8rem; }
+:where(.jaren-data-editor) .data-row-delete { flex: none; color: var(--muted, hsl(220 12% 45%)); }
+:where(.jaren-data-editor) .data-row-delete:hover { color: var(--fail, hsl(0 68% 46%)); border-color: var(--fail, hsl(0 68% 46%)); }
+:where(.jaren-data-editor) .data-trip-map { margin-block: var(--space-3, 0.75rem); padding: 0; border: 0; background: transparent; }
+:where(.jaren-data-editor) .data-trip-narrative { word-break: break-word; }

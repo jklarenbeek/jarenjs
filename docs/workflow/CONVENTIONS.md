@@ -17,7 +17,7 @@ this file wins and the playbook is repaired.
 - **Dependency arrow (one way, no cycles):** `@jarenjs/core` (zero-dep base) →
   `@jarenjs/view` → `@jarenjs/app` → `components/*` → `website`. Sibling packages
   (`json`, `validate`, `formats`, `refs`, `emit`, `forms`, `locales`, `flow`,
-  `linq`, `db`, `josl`, `ai`) sit on `core` and each other only in the direction
+  `linq`, `db`, `josl`) sit on `core` and each other only in the direction
   `docs/ARCHITECTURE.md`'s graph draws; cooperation across layers is by an
   injected hook, an extension keyword, or a generated document — never a
   reverse import.

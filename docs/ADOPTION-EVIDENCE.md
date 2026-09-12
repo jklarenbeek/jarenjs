@@ -307,3 +307,5 @@ larger retained search exceeds memory ceilings. Focused collection interaction,
 lexical snapshots, validated formula evaluation, provider publication and durable
 receipts do more work than their retained baselines; their linked reports publish
 those costs. A passing finite ceiling is not a claim of being faster than an oracle.
+
+The [original source census](../test/adoption/source-census.json) is immutable evidence tied to the frozen adoption revision. The [current owner census](../test/adoption/current-source-census.json) tracks retained source and the model transport retry transfer; regenerate it with `node scripts/generate-adoption-census.js`. This ownership update does not change the frozen workloads, oracle versions or measured results.

@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file `contractTools`: the public, invokable operations of a contract as
- * tool definitions for `@jarenjs/ai`'s toolbox — `{ name, description,
+ * tool definitions for host operation registries — `{ name, description,
  * inputSchema, execute }`, a plain object the toolbox and a WebMCP host
  * read, so this package never imports the ai package (the generated-
  * document rule). `execute` calls the client's `invoke` and answers the
@@ -23,7 +23,7 @@ import { bundleSameDocument } from '../bundle.js';
  */
 
 /**
- * A tool definition as `@jarenjs/ai`'s `createToolbox().add` takes it —
+ * A tool definition as browser or host operation registries takes it —
  * the same shape WebMCP's `registerTool` reads.
  * @typedef {Object} ToolDefinition
  * @property {string} name
@@ -92,9 +92,10 @@ function toolInputSchema(op, contract) {
  *   without `invoke`, `ops` naming an unknown or opaque operation, a tool
  *   name outside `^[a-zA-Z0-9_-]{1,64}$`, or two operations mapping to one name
  * @example
- * const toolbox = createToolbox();                    // @jarenjs/ai
- * for (const tool of contractTools(contract, client)) toolbox.add(tool);
- * await toolbox.execute('product_save', { id: 1, revision: 2, product: { … } }); // → an outcome
+ * const tools = contractTools(contract, client);
+ * const save = tools.find(tool => tool.name === 'product_save');
+ * await save.execute({ id: 1, revision: 2, product: { title: 'Example' } }); // → an outcome
+ * // registerWebMcp(tools) exposes the same definitions to a browser host.
  */
 export function contractTools(contract, client, options = {}) {
   if (!isJsonObject(options)) throw new ContractHostError('JC1008', 'contractTools: options must be an object');

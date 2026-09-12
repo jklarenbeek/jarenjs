@@ -183,17 +183,7 @@ and `describe` report file problems as diagnostics.
 v0.1 is the headless **engine** — parse, per-file validate, assemble,
 classify — plus the IDE **component** that mounts it: the file rail, the
 debounced editor with its typing buffer, the run stage, the three layout
-modes with a drag splitter, the phone pane switcher, save/load/share, and
-an assistant that can list, read, write and run a project's files.
-
-The creation menu and assistant share the engine's ten-kind vocabulary and
-valid starter files. `@jarenjs/studio/author` uses one authoring profile per
-file, then the full file validation gate with bounded repair rounds. The
-website's `jaren_project_author` tool rejects stale publication if the project
-changed during generation, returning the candidate for recovery. Generic
-JSON/schema/contract files and imported destinations use broad JSON profiles;
-their acceptance still depends on the full local validation gate. The exact
-`jaren_project_write` tool remains available for supplied text.
+modes with a drag splitter, the phone pane switcher, save/load/share, and complete file validation and export. The creation menu shares the engine’s ten-kind vocabulary and valid starter files. External authoring integrations publish through the same revision-checked public editor controllers.
 
 The stage displays the nested app's latest boot/runtime failure and clears
 it on restart. Remaining constraints live in

@@ -49,8 +49,6 @@ export const SUITES = [
   { key: 'spatial', label: 'Spatial' },
   { key: 'orm', label: 'ORM' },
   { key: 'live', label: 'Live' },
-  { key: 'long-horizon', label: 'Long horizon' },
-  { key: 'retrieval', label: 'Retrieval' },
   { key: 'vector', label: 'Vector' },
   { key: 'series', label: 'Series' },
 ];
@@ -89,8 +87,6 @@ export function deriveSuite(state, suite) {
     case 'spatial': return spatialSuite(data);
     case 'orm': return ormSuite(data);
     case 'live': return liveSuite(data);
-    case 'long-horizon': return scoreTables(data);
-    case 'retrieval': return scoreTables(data);
     case 'vector': return scoreTables(data);
     case 'series': return scoreTables(data);
     default: return [callout('Unknown suite', `No derivation for '${suite}'.`)];

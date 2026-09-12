@@ -1,0 +1,117 @@
+{
+  "historicalSource": "test/adoption/source-census.json",
+  "historicalRevision": "576a573677d39ae3e73f2d41180fcb7cb7fe41b8",
+  "note": "The original source census remains frozen evidence. This overlay is regenerated from the current source tree.",
+  "families": [
+    {
+      "category": "relational",
+      "pattern": "readSchema|introspectModel",
+      "path": "packages/db/src/introspect.js",
+      "api": "@jarenjs/db",
+      "role": "physical discovery and preserve/refuse",
+      "matches": [
+        "3: * @file Database → model: `introspectModel(connection)` reads a live",
+        "153:export function readSchema(connection, options = undefined) {",
+        "556:export function introspectModel(connection, options = undefined) {",
+        "567:  return chain(readSchema(connection, options), (schema) => {"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "relational",
+      "pattern": "export (async )?function",
+      "path": "packages/db/src/drivers/node.js",
+      "api": "@jarenjs/db/node",
+      "role": "prepared SQL and transaction coexistence",
+      "matches": [
+        "25:export function adaptNodeDatabase(db, options) {",
+        "81:export function fromNodeModule(mod, path, options) {",
+        "107:export function nodeDriver() {"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "virtualizer",
+      "pattern": "export function createDomRenderer",
+      "path": "packages/view/src/dom.js",
+      "api": "@jarenjs/view",
+      "role": "widget lifecycle",
+      "matches": [
+        "171:export function createDomRenderer(container, options = {}) {"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "virtualizer",
+      "pattern": "export function createTaskEffect",
+      "path": "packages/app/src/tasks.js",
+      "api": "@jarenjs/app",
+      "role": "task cancellation and disposal",
+      "matches": [
+        "198:export function createTaskEffect(run, options = {}) {"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "lexical",
+      "pattern": "\\$search",
+      "path": "packages/json/src/query/operators.js",
+      "api": "@jarenjs/json/query",
+      "role": "existing regex; lexical index pending",
+      "matches": [
+        "437:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
+        "1236:  '$search': regexTestEntry(false),"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "formulas",
+      "pattern": "compileJsonQuery",
+      "path": "packages/json/src/query/index.js",
+      "api": "@jarenjs/json/query",
+      "role": "existing compiler and limits; saved-profile conversion pending",
+      "matches": [
+        "59: * Compile options for {@link compileJsonQuery}.",
+        "99: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
+        "107: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
+        "141: * The compiled query returned by {@link compileJsonQuery}: the query",
+        "198: * const q = compileJsonQuery({",
+        "205:export function compileJsonQuery(doc, options = {}) {",
+        "317: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
+        "355: *   `compileJsonQuery`",
+        "368:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
+        "391:    query = compileJsonQuery(doc);"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "providers",
+      "pattern": "export async function mapConcurrent",
+      "path": "packages/core/src/async.js",
+      "api": "@jarenjs/core/async",
+      "role": "ordered drained concurrency",
+      "matches": [
+        "41:export async function mapConcurrent(items, limit, worker, options = {}) {"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "providers",
+      "pattern": "export function createMemoryLedger",
+      "path": "packages/contract/src/ledger.js",
+      "api": "@jarenjs/contract/ledger",
+      "role": "finite-TTL HTTP claim",
+      "matches": [
+        "136:export function createMemoryLedger(options = {}) {"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "category": "providers",
+      "originalPath": "packages/ai/src/retry.js",
+      "disposition": "moved",
+      "owner": "@tangleai/models/retry",
+      "reason": "Model transport retry belongs to Tangle; generic concurrency and provider execution remain in Jaren."
+    }
+  ]
+}

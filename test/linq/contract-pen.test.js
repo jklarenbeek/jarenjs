@@ -24,7 +24,7 @@ import { jsonFormats } from '@jarenjs/formats';
 import { compileContract, ContractCompileError } from '@jarenjs/contract';
 import { openLocalClient } from '@jarenjs/contract/local';
 import { contractTools, publicProjection } from '@jarenjs/contract/project';
-import { createToolbox } from '@jarenjs/ai/toolbox';
+
 import { LinqBuildError } from '@jarenjs/linq';
 import * as s from '@jarenjs/linq/schema';
 import {
@@ -415,7 +415,7 @@ describe('a pen contract is a contract: it serves, invokes and becomes tools', (
     client.close();
   });
 
-  it('contractTools over a pen contract registers into a real toolbox', async () => {
+  it('contractTools over a pen contract invokes its typed public operation', async () => {
     const compiled = compileContract(Shop.document);
     const client = openLocalClient(compiled, {
       'catalog.load': () => ({ revision: 1, products: [] }),
@@ -427,10 +427,9 @@ describe('a pen contract is a contract: it serves, invokes and becomes tools', (
     assert.strictEqual(typedHttpClient(httpLike, Shop), httpLike);
     assert.deepStrictEqual(tools.map((t) => t.name), ['catalog_load', 'product_save'],
       'the opaque operation is not a tool');
-    const toolbox = createToolbox();
-    for (const tool of tools) toolbox.add(tool);
+
     const product = { id: 2, name: 'Rope', price: 3 };
-    const answer = await toolbox.execute('product_save', { id: 2, revision: 1, product });
+    const answer = await tools.find(t => t.name === 'product_save').execute( { id: 2, revision: 1, product });
     assert.strictEqual(answer.ok, true);
     assert.deepStrictEqual(answer.value, product);
     // the tool's input schema stands alone: the $defs it reaches are inlined

@@ -4,7 +4,7 @@
  * `publicProjection` (the browser-safe subset — itself a `$contract`
  * document, and what the revision hashes), `toOpenApi` (OpenAPI 3.1
  * through a JSLT stylesheet), `toTypeScript` and `toMarkdown` (on
- * `@jarenjs/emit`'s type model), `contractTools` (`@jarenjs/ai` tool
+ * `@jarenjs/emit`'s type model), `contractTools` (plain operation
  * definitions, no import edge) and the same-document bundler they share.
  * This is the one subpath that imports `@jarenjs/emit` — the CLI loads
  * it lazily, only for `types` and `docs`; a consumer that never imports

@@ -48,7 +48,7 @@ describe('the assets a cache name governs', function () {
   });
 
   it('reads the name the worker declares', function () {
-    assert.strictEqual(cacheNameOf(readFileSync(WORKER, 'utf8')), 'jaren-website-v27');
+    assert.strictEqual(cacheNameOf(readFileSync(WORKER, 'utf8')), 'jaren-website-v28');
     assert.strictEqual(cacheNameOf("const CACHE = 'jaren-website-v99';"), 'jaren-website-v99');
     assert.strictEqual(cacheNameOf('const CACHE = computeIt();'), null);
   });

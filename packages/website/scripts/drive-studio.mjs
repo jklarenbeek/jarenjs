@@ -4,8 +4,8 @@
 /**
  * Deterministic studio duplication probe (no AI): load the form
  * template, then swap the document repeatedly through the editor
- * textarea (the same studio/doc → revision → destroy/reboot path the
- * assistant's studio tools use), counting <form> elements in the live
+ * textarea and its ordinary revision/publication path, counting <form>
+ * elements in the live
  * mount after every step. Also exercises typing into a field between
  * swaps, and route leave/return.
  */

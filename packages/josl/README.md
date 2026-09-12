@@ -510,7 +510,7 @@ has two possible shapes, and they serve different providers:
 1. **A JSON Schema over the data model** — the model emits JSON, and
    `stringifyJosl` renders canonical JOSL text. This works with every
    `json_schema`-capable provider today and composes directly with
-   `@jarenjs/ai`'s `createStructuredOutput`. It is what this package
+   Tangle's `createStructuredOutput`. It is what this package
    ships: [`schemas/jaren-josl-data.schema.json`](./schemas/jaren-josl-data.schema.json)
    describes the JSON-safe JOSL document (a root table of strings,
    finite numbers, booleans, `null`, arrays and nested tables), and

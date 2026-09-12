@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file `contractTools`: the tool definitions register into a real
- * `createToolbox()` (the test imports `@jarenjs/ai`; the package never
+ * plain operation execution (the contract validates at dispatch; the package never
  * does — the grep in this file pins that) and `execute` round-trips
  * through a `serveHttp` dispatcher to the same outcome `client.invoke`
  * resolves; names map `.` → `_` under OpenAI's constraint and a
@@ -24,7 +24,7 @@ import { toFetchHandler } from '@jarenjs/contract/fetch';
 import { openHttpClient } from '@jarenjs/contract/client';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { contractTools } from '@jarenjs/contract/project';
-import { createToolbox } from '@jarenjs/ai';
+
 
 import { load, shopHandlers } from './helpers.js';
 
@@ -79,15 +79,13 @@ describe('contractTools — the definitions', () => {
   });
 });
 
-describe('contractTools — through a real toolbox and a real server', () => {
-  it('registers into createToolbox() and execute answers the same outcome client.invoke resolves', async () => {
+describe('contractTools — through a real server', () => {
+  it('direct execute answers the same outcome client.invoke resolves', async () => {
     const { contract, client } = openShop();
-    const toolbox = createToolbox();
-    for (const tool of contractTools(contract, client)) toolbox.add(tool);
-    assert.deepStrictEqual(toolbox.list().map((t) => t.name), ['catalog_load', 'product_save', 'product_search', 'product_remove']);
-    assert.strictEqual(toolbox.toFunctionTools()[1].function.name, 'product_save');
+    const tools = contractTools(contract, client);
+    assert.deepStrictEqual(tools.map((t) => t.name), ['catalog_load', 'product_save', 'product_search', 'product_remove']);
 
-    const viaTool = await toolbox.execute('product_save', { id: 7, revision: 1, product: { id: 7, name: 'x', price: 2 } });
+    const viaTool = await tools.find(t => t.name === 'product_save').execute( { id: 7, revision: 1, product: { id: 7, name: 'x', price: 2 } });
     const direct = await client.invoke('product.save', { id: 7, revision: 1, product: { id: 7, name: 'x', price: 2 } });
     assert.strictEqual(viaTool.ok, true);
     assert.deepStrictEqual(viaTool.value, { id: 7, name: 'x', price: 2 });
@@ -95,12 +93,11 @@ describe('contractTools — through a real toolbox and a real server', () => {
     assert.deepStrictEqual(Object.keys(viaTool.meta), ['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']);
 
     // the toolbox's own schema guard answers the validation errors, before any request
-    const invalid = await toolbox.execute('product_save', { id: 'seven' });
-    assert.match(invalid.error, /invalid input/i);
-    assert.ok(Array.isArray(invalid.errors));
+    const invalid = await tools.find(t => t.name === 'product_save').execute( { id: 'seven' });
+    assert.equal(invalid.ok, false, 'the contract refuses invalid input before invoking the handler');
 
     // a failed outcome is still a RESOLVED value — a tool never rejects
-    const outcome = await toolbox.execute('catalog_load', {});
+    const outcome = await tools.find(t => t.name === 'catalog_load').execute( {});
     assert.strictEqual(outcome.ok, true);
   });
 

@@ -9,7 +9,7 @@ import { openPortClient, servePort } from '@jarenjs/contract/port';
 import { nodeDriver } from '@jarenjs/db/node';
 import { createDataHandlers } from '../../packages/website/src/db-handlers.js';
 import { createDataRuntime, DATA_MODEL, DATA_QUERY } from '../../packages/website/src/boundaries/data.js';
-import doc from '../../packages/website/src/contracts/data.contract.json' with { type: 'json' };
+import doc from '@jarenjs/studio/contracts/data.contract.json' with { type: 'json' };
 import { tempDbPath } from '../db/helpers.js';
 
 const contract = compileContract(doc);

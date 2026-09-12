@@ -31,6 +31,19 @@ This package ships in two layers, the suite's convention:
   with query plans and live results. All ten file kinds can be created,
   renamed, deleted and opened from templates.
 
+## Complete reusable editors
+
+`mountStudioEditor`, `mountFlowEditor` and `mountDataEditor` provide the same
+project, Flow and Data interfaces used by the website. Each exposes document
+reads, validation, revision-checked replacement/patching, execution, change
+subscriptions and disposal. Hosts supply rendering, templates, task execution
+and storage through explicit services.
+
+Use `/component`, `/flow`, `/data` and `/data/host`, with their exported styles
+and operation contract. The [host guide](docs/EDITORS.md) describes the complete
+API, worker initialization, storage identity and lifecycle. A packed independent
+host exercises all three editors without importing website source.
+
 ## The project document
 
 A thin envelope over typed files — the full contract is
@@ -63,11 +76,7 @@ tracks dependencies and writes diagram edits back into their source files.
 Explicit `input`, `model` and `collection` metadata route queries and model
 seeds; the [format](docs/PROJECT-FORMAT.md) specifies ownership and lifetimes.
 
-`@jarenjs/studio/author` exposes `createStudioFileAuthor({ client })`: generate
-one file under its authoring profile, validate with the full engine, and repair
-bounded failures before returning a candidate. The website assistant uses this
-path and protects edits made while generation is running. No provider quality
-claim is inferred from the mocked generation tests.
+Hosts can propose validated candidates through the shared editor controllers. Model-assisted authoring is provided by [Tangle’s Jaren integration](https://github.com/jklarenbeek/tangleai/blob/main/packages/jaren/README.md).
 
 `@jarenjs/studio/export` exposes `exportProject(project, assets)` and
 `createProjectZip(files)`. The website's **Offline ZIP** includes a standalone
@@ -100,8 +109,14 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/studio/schemas/jaren-project.schema.json` | schema | — |
 | `@jarenjs/studio/styles/studio.css` | asset | — |
 | `@jarenjs/studio/package.json` | metadata | — |
-| `@jarenjs/studio/author` | JavaScript | declared |
 | `@jarenjs/studio/export` | JavaScript | declared |
+| `@jarenjs/studio/flow` | JavaScript | declared |
+| `@jarenjs/studio/styles/flow.css` | asset | — |
+| `@jarenjs/studio/styles/editor.css` | asset | — |
+| `@jarenjs/studio/data` | JavaScript | declared |
+| `@jarenjs/studio/data/host` | JavaScript | declared |
+| `@jarenjs/studio/contracts/data.contract.json` | asset | — |
+| `@jarenjs/studio/styles/data.css` | asset | — |
 <!--/fact-->
 
 ## Install

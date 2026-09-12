@@ -1,14 +1,8 @@
 //@ts-check
 /**
- * @file The Studio COMPONENT — the IDE. Following the suite's component
- * convention (`createXComponent`), `createStudioComponent(options)` hands
- * the host the pieces it composes into the site's `@jarenjs/app` document:
- * the JSLT view (`rules` + `mode`), the derivation (`viewModel`), the two
- * hard-problem policies (`hostPolicy`, `reconcileBuffer`), and the engine
- * surface. The reducer `project/*` actions, the DOM stage/splitter
- * widgets, and the live site mount are wired at the host; the chrome and
- * its derivation — everything renderable without a DOM — live here and
- * are tested headlessly.
+ * The complete project editor and composable host pieces. A host can mount
+ * the editor directly, or compose the same actions, projections and controller
+ * into its application. Preview runners, templates and storage are injected.
  */
 
 import { describe, validateFile, classifyChange, parseProject } from '../index.js';
@@ -45,3 +39,19 @@ export {
   projectViewModel, projectRules, projectModes, PROJECT_MODE, PROJECT_BASE,
   hostPolicy, reconcileBuffer, editorTextarea, errorLine, KIND_BADGE,
 };
+
+export { createStudioDocumentHost } from './document.js';
+export { createProjectHost } from './project.js';
+export { p, cards, table, callout, code, errorMessage, error, details, chart, article, search, more } from './shared/nodes.js';
+export { tabRule, UI_RULES } from './shared/ui.js';
+export { memo1 } from './shared/memo.js';
+export { OUR_SCHEMA_OPTIONS } from './shared/schema-options.js';
+export { createHostWidget } from './shared/host-widget.js';
+
+export { PROJECT_ACTIONS } from './project-actions.js';
+export { createProjectState } from './project-state.js';
+export { createProjectController } from './project-controller.js';
+
+export { mountStudioEditor } from './mount.js';
+
+export { editorTextarea as sharedEditorTextarea, errorLine as editorErrorLine, paneSwitcher } from './shared/studio-kit.js';
