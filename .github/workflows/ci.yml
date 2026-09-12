@@ -93,6 +93,14 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run lint
 
+      # The durability tests execute both runtimes before packed consumers run.
+      - name: Set up Bun
+        id: bun
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Tests
         id: tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -124,13 +132,6 @@ jobs:
       - name: Tree shaking
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: npm run test:tree-shaking
-
-      - name: Set up Bun
-        id: bun
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Packed consumers
         if: >-

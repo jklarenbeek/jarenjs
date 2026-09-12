@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { nodeDriver } from '@jarenjs/db/node';
 import { openStore, planPhysicalMigration, migrate, schemaShapeOf } from '@jarenjs/db';
+import { assertCrash } from './fixtures/abrupt-exit.js';
 const child = fileURLToPath(new URL('./relational-recovery-child.js', import.meta.url));
 const baseline = { $model: '0.1', entities: { Receipt: { schema: { type: 'object', properties: {
   id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, body: { type: 'string' },
@@ -46,7 +47,7 @@ for (const host of [process.execPath, 'bun']) {
         db.close();
         const backup = ['copy', 'publish-before', 'publish-after'].includes(point);
         const killed = run(host, file, { baseline, model: backup ? baseline : target, migrations: [migration] }, point);
-        assert.equal(killed.signal, 'SIGKILL', killed.stderr);
+        assertCrash(killed, point);
         if (!backup) {
           const repaired = run(host, file, { baseline, model: target, migrations: [migration] }, 'repair');
           assert.equal(repaired.status, 0, repaired.stderr);

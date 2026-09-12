@@ -9,6 +9,7 @@ import { createIngestion } from '@jarenjs/flow';
 import { open, createDbIngestionStore } from '@jarenjs/linq/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { model, storeOptions, plan, proof, page, provider } from '../flow/fixtures/ingestion.js';
+import { assertCrash } from './fixtures/abrupt-exit.js';
 
 describe('durable ingestion transaction ownership', () => {
   it('reopening a file resumes committed pages without duplicate facts', async () => {
@@ -17,7 +18,7 @@ describe('durable ingestion transaction ownership', () => {
     try {
       const filename = join(dir, 'staging.db');
       const child = spawnSync(process.execPath, [fileURLToPath(new URL('./fixtures/ingest-crash.js', import.meta.url)), filename], { encoding: 'utf8' });
-      assert.equal(child.signal, 'SIGKILL', child.stderr);
+      assertCrash(child, 'staged');
       client = await open(model, { driver: nodeDriver(), path: filename, validator: null });
       const store = createDbIngestionStore(client, storeOptions);
       const seen = [];
