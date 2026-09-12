@@ -4,6 +4,11 @@ import { DbRuntimeError } from '../errors.js';
 import { jsonStringBytes } from '../json-bytes.js';
 
 export const WORKER_PROTOCOL_VERSION = 1;
+export const WORKER_DEFAULTS = Object.freeze({ windowRows: 64, windowBytes: 1048576,
+  maxPending: 64, maxStatements: 1024, maxCursors: 64, allMaxRows: 100000,
+  allMaxBytes: 16777216, closeTimeoutMs: 5000, startupTimeoutMs: 10000 });
+export const PROCESS_DEFAULTS = Object.freeze({ ...WORKER_DEFAULTS, closeTimeoutMs: 1000,
+  maxOwners: 4, timeoutMs: 250, maxRequestBytes: 1048576 });
 const operations = new Set(['exec', 'prepare', 'run', 'get', 'iterate', 'next', 'return', 'finalize', 'close']);
 
 /** @param {number} generation @param {boolean} [transaction] @param {unknown} [cause] */
@@ -71,6 +76,16 @@ export function positiveOption(name, value, fallback) {
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${name} must be a positive safe integer`);
   return value;
+}
+
+/** One validation and spelling of shared transport credits.
+ * @param {any} configuration @param {typeof WORKER_DEFAULTS} [defaults] */
+export function workerSettings(configuration, defaults = WORKER_DEFAULTS) {
+  const values = Object.fromEntries(Object.keys(WORKER_DEFAULTS).map((name) =>
+    [name, positiveOption(name, configuration[name], defaults[name])]));
+  return { limits: { rows: values.windowRows, bytes: values.windowBytes, statements: values.maxStatements, cursors: values.maxCursors },
+    maxPending: values.maxPending, allRows: values.allMaxRows, allBytes: values.allMaxBytes,
+    closeMs: values.closeTimeoutMs, startupMs: values.startupTimeoutMs };
 }
 
 /** @param {string} reason @param {number} depth */

@@ -77,6 +77,132 @@ run on the caller. Synchronous Store methods and live queries are unavailable on
 these asynchronous connections. Bun can import both subpaths; opening a Node
 SQLite worker there reports the named unavailable-binding failure (`JD0003`).
 
+## Supervised Node processes
+
+`nodeProcessDriver` from `@jarenjs/db/node-process` implements the same asynchronous
+Driver and Connection contracts using one Node child process per connection. It
+shares the worker protocol, cursor credits, transaction scopes and error handling
+with the thread driver. SQLite and its native calls execute in the child; callbacks
+and decoded query residuals still execute in the parent. No function is serialized.
+Node.js 24 or newer is required. Bun can import the entry but `open` refuses with
+`JD0003`. The native-call and process-lifecycle fixtures qualify Node 24.20.0 on
+Linux; other supported operating systems require their own timing qualification.
+
+```js
+import { nodeProcessDriver } from '@jarenjs/db/node-process';
+
+const driver = nodeProcessDriver({ maxOwners: 2, timeoutMs: 250 });
+const owner = await driver.open('application.sqlite', { timeout: 50, queueTimeout: 100 });
+try {
+  const result = await owner.supervise(async (connection) => {
+    return connection.transaction(async (scope) => {
+      const statement = await scope.prepare('SELECT value FROM settings WHERE key = ?');
+      return statement.get(['theme']);
+    });
+  }, { signal: requestSignal, timeoutMs: 250 });
+  useResult(result);
+} catch (error) {
+  if (error.code === 'JD2097' || error.code === 'JD2090') {
+    const observation = owner.settlement();
+    // This snapshot can still say quarantined / safeToReplace:false.
+    recordOwnerObservation(observation);
+    const exited = await owner.settled();
+    // Before repeating an uncertain write, inspect its durable receipt.
+    reconcileBeforeRetry(exited);
+  } else throw error;
+} finally {
+  // Preserve the original operation outcome if closing a fenced generation fails.
+  await owner.close().catch(recordCleanupFailure);
+}
+```
+
+`supervise(body,{signal,timeoutMs})` admits one supervised callback per connection.
+An overlapping callback refuses with `JD2091`; an already-aborted call runs no
+callback and leaves the owner healthy. A deadline or abort rejects with `JD2097`,
+fences all pending calls and signals process termination. Later operations on the
+old generation fail with `JD2090`. A normal callback failure propagates unchanged
+and does not terminate a healthy owner. `cancel(reason)` explicitly fences the
+whole connection and returns its cancellation error. It affects every call sharing
+that owner, so independent request lifetimes should use separate owners.
+
+This is response cancellation and owner termination, not a SQLite statement
+interrupt. `capabilities.process` and `ownerTermination` are true, while
+`capabilities.cancellation.midStatement` remains false. The supervision timer cannot
+preempt synchronous parent JavaScript or bound operating-system scheduling. Keep
+callbacks/residuals bounded and await all admitted work. Native fixtures use a
+short deadline and independently enforce a one-second caller-response ceiling;
+that tested ceiling is not a universal scheduling guarantee.
+
+`settlement()` reports the generation, PID, health, transaction fate and
+`safeToReplace`. `settled()` resolves only after the child's OS exit event. An
+owner awaiting termination is quarantined and still consumes its credit. If the
+OS cannot settle a process promptly, the response can finish while the owner
+remains quarantined; neither capacity nor writer ownership is recycled. `restart()`
+waits for confirmed exit and returns a new generation; old Store handles remain
+invalid. No statement, transaction or callback is automatically replayed.
+
+The transaction observation is conservative:
+
+- A live, acknowledged native transaction is `active`.
+- An acknowledged single-statement completion is `committed`, or `rolled-back`
+  after rollback. A multi-statement program with no open transaction remains
+  `unknown`: an acknowledgement alone cannot distinguish its internal boundaries.
+- Confirmed process death rolls back an observed open transaction only when no
+  pending operation could have committed it.
+- A lost commit reply, multi-statement program or uncertain autocommit mutation
+  is `unknown`. Native transaction-state support is observed, never inferred from
+  a close promise. Reopen, verify integrity and reconcile a durable receipt before
+  retrying a write with an unknown outcome.
+
+Autocommit mutation cursors remain `unknown` until their final native frame is
+acknowledged. Creating an iterator or receiving an intermediate `RETURNING` row
+does not acknowledge completion; early cursor return still requires reconciliation.
+
+Driver `metrics()` reports capacity, owners, healthy owners and quarantine. A
+file path already owned by the same driver cannot be opened again until exit;
+this reservation uses its resolved path spelling, not filesystem inode identity.
+Different driver instances, aliases and external processes remain the host's
+coordination responsibility. Use one supervisor per ownership domain and retain
+finite SQLite busy and transaction-queue timeouts. The host's service manager must
+also own its process group: an uncatchable parent-process death is not a promise
+that JavaScript can reap every descendant. Child crashes and restart are covered
+by the file/receipt fixtures; power loss and service-manager policy are separate.
+
+The ordinary Store composition uses `openStore(model,{driver,path})`. To supervise
+Store calls, retain the connection in a small driver wrapper's `open` method, then
+call `owner.supervise(() => store.transaction(body), options)`. This uses the same
+Store and transaction APIs. After owner loss, close the invalid Store, await owner
+exit and explicitly reopen/reconcile. A failed-generation `close()` may reject;
+its rejection never substitutes for the separate exit observation.
+
+All options below are positive safe integers. Row/byte/statement/cursor limits
+retain the thread worker meanings. `maxOwners` includes startup and quarantine;
+`timeoutMs` is the default supervised response deadline. `maxRequestBytes` bounds
+each outgoing request before IPC; parameters must be SQLite scalars or byte arrays.
+The process close deadline
+and startup deadline can reject while termination is still pending. The reserved
+owner credit remains until exit. Direct calls without `supervise`
+retain the ordinary row, queue and step cancellation boundaries.
+
+<!--fact:db.execution-options-->
+
+| Option | Thread worker | Process owner |
+|---|---:|---:|
+| `windowRows` | 64 | 64 |
+| `windowBytes` | 1048576 | 1048576 |
+| `maxPending` | 64 | 64 |
+| `maxStatements` | 1024 | 1024 |
+| `maxCursors` | 64 | 64 |
+| `allMaxRows` | 100000 | 100000 |
+| `allMaxBytes` | 16777216 | 16777216 |
+| `closeTimeoutMs` | 5000 | 1000 |
+| `startupTimeoutMs` | 10000 | 10000 |
+| `maxOwners` | — | 4 |
+| `timeoutMs` | — | 250 |
+| `maxRequestBytes` | — | 1048576 |
+
+<!--/fact-->
+
 ## WAL pool policy
 
 A file pool opens exactly one writer and `readers` read-only workers, verifies WAL,
@@ -283,9 +409,10 @@ sync twin. Physical adoption on PostgreSQL refuses pending a separate mapping
 and codec qualification. Unknown application-trigger effects do not qualify
 capture or replication; those combinations refuse before an adoption claim.
 
-Node backups use the built-in online snapshot. Bun uses `Database.serialize()`
-under the store gate, writes and flushes a sibling temporary, then uses the shared
-atomic publisher. Both include committed WAL. Bun's snapshot holds the whole
-image in memory and cancellation takes effect between phases. Process-kill tests
+Node backups use the built-in online snapshot. Bun uses disk-backed `VACUUM INTO`
+under the store gate, flushes a sibling temporary, then uses the shared atomic
+publisher. Both include committed WAL. Bun allocates no whole-database JavaScript
+image; native SQLite caches and temporary storage govern working memory, and
+cancellation takes effect between phases. Process-kill tests
 cover rebuild copy, table drop, commit and backup publication on both hosts;
 these tests do not establish power-loss durability or native executable packaging.

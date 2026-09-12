@@ -108,3 +108,105 @@ reads mounted DOM. The source must advertise `completeExport`. See the normative
 
 Actual assistive technology, physical touch and native OS IME qualification remain
 separate from automated browser evidence; see [measurements](MEASUREMENTS.md).
+
+## Drag intent and authoritative commands
+
+`createDragInteraction` from `@jarenjs/collection` owns a single drag with a stable
+`source:{key,revision}`, `target:{container,key,column}` and `mode:'move'|'copy'`.
+Source revisions are finite numbers or strings; every target identity is a string.
+Indices and DOM objects never enter this intent. The engine requires
+`resolveSource(key)`, `validTarget(target)` and `commit(intent,{signal})`; an optional
+`validate(intent,{signal})` can check asynchronous permission before dispatch.
+
+`begin(key,{input,point,copy})` arms pointer/touch input and immediately activates
+keyboard input. Pointer movement must meet `activationDistance` before dragging.
+`move(point,target,copy)` changes only transient intent. `revalidate()` resolves
+current source revision and target availability; source changes or invalid targets
+cancel. `drop()` validates and then dispatches one command. Repeated drops do not
+dispatch again. Permission denial, a false command result or a rejected promise
+cancels without any optimistic source mutation. The authoritative host owns all
+policy, revision checks and actual movement.
+
+`state()` returns a detached serializable snapshot with phase, identity, point,
+generation and pending status. `cancel(reason)` and idempotent `dispose()` fence
+late replies and abort their signals. A cancelled asynchronous callback retains
+the single pending credit until it settles, so repeated cancellation cannot
+accumulate new authority calls on that engine. Cancellation after dispatch does
+not undo a server command: the host must honour the signal or reconcile its
+authoritative result. The engine never applies a late reply to source data.
+
+## Owned collection drag adapter
+
+`mountCollectionDrag(containers,options)` from `@jarenjs/collection/component`
+attaches to already-mounted collections. Each container supplies a unique `id`,
+its `mounted` handle, `columnKey(index)` and `indexOfColumn(key)`. Options supply
+the engine policy above and `locateSource(key) => {container,key,column}` for its
+current cell. `disabled(target)` may additionally reject a cell. Resolvers are
+synchronous and must be bounded; unloaded or unmounted targets are unavailable.
+
+```js
+import { mountCollectionDrag } from '@jarenjs/collection/component';
+
+const drag = mountCollectionDrag([{
+  id: 'catalog', mounted: grid,
+  columnKey: (index) => columns[index].id,
+  indexOfColumn: (key) => columnIndex.get(key) ?? -1
+}], {
+  resolveSource: (key) => records.get(key), // { key, revision }
+  locateSource: (key) => positions.get(key), // stable container/row/column keys
+  validTarget: (target) => permittedCells.has(target.key),
+  commit: (intent, { signal }) => commands.moveOrCopy(intent, { signal })
+});
+// A cell renderer supplies a dedicated, focusable handle:
+const handle = ['button', {
+  'data-jc-drag': record.key, style: { touchAction: 'none' }
+}, 'Move item'];
+// The owning widget or route disposes the adapter with its collections.
+drag.dispose();
+```
+
+Pointer input uses capture and client-coordinate hit testing. Touch activation
+requires a dedicated `data-jc-drag` handle whose computed `touch-action` is `none`;
+the remainder of the collection keeps ordinary browser scrolling. No global
+touch-scroll suppression or long-press heuristic is installed. Pointer coordinates
+come from actual cell rectangles, so nested scrolling, pinned headers, transforms
+and CSS zoom do not require storing logical indices as positions. A keyed DOM move
+can reacquire capture for the same connected source; actual capture loss cancels.
+
+Space or Enter on a focused handle starts keyboard dragging. Arrows resolve the
+next current row/column key; horizontal motion follows the collection direction.
+Tab switches containers, Alt selects copy, and Enter/Space drops. Escape cancels.
+Text controls and composition retain their native editing keys; Escape can cancel
+an active pointer drag when a text control still has focus, while composing input
+remains untouched. A polite status region announces target, result and cancellation.
+Focus returns to the original connected element, or a surviving collection if it
+was removed. Native OS IME and assistive-technology behaviour still need manual
+qualification; synthetic events do not establish those results.
+
+The overlay is text in an owned portal, outside the grid's clipped containers.
+It uses the browser top layer when popovers are available and otherwise a fixed
+positioned portal. A custom `portal` owns its own CSS coordinate context. Only
+one overlay and one animation frame belong to an adapter. Auto-scroll visits a
+bounded chain of scrollable ancestors, stops at limits and on cancellation, and
+re-resolves targets after movement. Existing row/column pin budgets include the
+drag source and focus together. A pin or DOM-credit refusal cancels the drag.
+
+`mounted.subscribe(listener)` observes layout, reset and disposal;
+`mounted.retain(() => ({rows,columns}))` contributes transient indices resolved
+from stable keys inside the same pin budget. Both return idempotent unsubscribe
+functions. These host resources stay outside app state. Their own finite admission
+limits refuse excess rather than silently keeping more listeners or pins.
+
+The drag handle exposes `interaction`, `cancel`, `update`, `stats` and idempotent
+`dispose`. `update` replaces authority callbacks; geometry, portal and scheduling
+ownership are fixed for a mount. Window blur, pointer cancellation, lost capture,
+source reset, removed source and collection disposal clear the gesture. Disposal
+attempts every acquired cleanup even if an observer throws. Stats count owned
+listeners, subscriptions, frames, overlays, status nodes and pending authority.
+
+`createDraggableCollectionWidget(options)` combines one collection and its drag
+adapter with the existing WidgetDef lifetime. Supply `id`, `collection`,
+`columnKey`, `indexOfColumn` and `drag`; a factory may derive them from props and
+the host emit callback. Updating props refreshes policy and collection state.
+A changed container identity requires a new widget key. Multi-container widgets
+own one `mountCollectionDrag` handle and dispose it before their mounted collections.

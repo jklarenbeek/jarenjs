@@ -440,6 +440,10 @@ function runDeadCodeAudit(opts) {
     // data.spec.js and project-kinds.spec.js exercise these exact public modules.
     '--exclude', 'components/studio/src/data/browser-worker.js',
     '--exclude', 'components/studio/src/data/project-worker.js',
+    // Pointer capture, top-layer overlays and client-coordinate hit testing
+    // require actual layout engines. The collection-drag browser matrix owns
+    // this adapter; its headless intent engine and collection pins stay audited.
+    '--exclude', 'components/collection/src/component/drag.js',
     '--exclude', 'packages/website/src/offline-runtime.js',
     '--temp-directory', opts.tempDir,
     '--clean',

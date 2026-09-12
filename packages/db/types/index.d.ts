@@ -514,6 +514,8 @@ export interface StoreCapabilities {
   readonly sessions: boolean;
   readonly sessionReason: string | null;
   readonly worker: boolean;
+  readonly process: boolean;
+  readonly ownerTermination: boolean;
   readonly pooling: boolean;
   readonly poolReaders: number;
   readonly poolWriters: number;

@@ -57,6 +57,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 import { runNpm } from './lib/portable.js';
 import { importSubpaths } from './lib/exports.js';
@@ -473,7 +474,9 @@ const tools: ToolDefinition[] = contractTools(contract, client);
 void [tools[0]?.name, tools[0]?.inputSchema];
 client.close();
 `,
-  '@jarenjs/db': readFileSync(join(root, 'test/consumer/db-relational.ts'), 'utf8') + `
+  '@jarenjs/collection': readFileSync(join(root, 'test/consumer/collection.ts'), 'utf8'),
+  '@jarenjs/db': readFileSync(join(root, 'test/consumer/db-relational.ts'), 'utf8')
+    + readFileSync(join(root, 'test/consumer/db-process.ts'), 'utf8') + `
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { bunDriver } from '@jarenjs/db/bun';
@@ -684,6 +687,10 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       writeFileSync(join(consumerDir, 'collection-grid.json'), readFileSync(join(root, 'test/adoption/fixtures/grid.json')));
       program += "await import('./collection.js');\n";
     }
+    if (name === '@jarenjs/db') {
+      cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
+      program += "if (typeof Bun === 'undefined') await import('./node-process.test.js');\n";
+    }
     if (name === '@jarenjs/studio') {
       mkdirSync(join(consumerDir, 'test/consumer'), { recursive: true });
       mkdirSync(join(consumerDir, 'test/view'), { recursive: true });
@@ -725,6 +732,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       continue;
     }
 
+    let bunOutput = '';
     if (bun) {
       const bunRun = spawnSync('bun', [programFile],
         { cwd: consumerDir, encoding: 'utf8' });
@@ -733,6 +741,29 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         console.error(`✗ ${name} (bun): ${bunRun.stderr.split('\n').find((l) => l.trim() !== '') ?? 'failed'}`);
         continue;
       }
+      bunOutput = bunRun.stdout + bunRun.stderr;
+      if (name === '@jarenjs/db') {
+        // Bun's node:test skip options require its test runner, not a plain import.
+        const nativeHost = spawnSync('bun', ['test', './node-process.test.js'], { cwd: consumerDir, encoding: 'utf8' });
+        if (nativeHost.status !== 0) {
+          failures++; console.error(`✗ ${name} (bun host refusal): ${nativeHost.stdout}${nativeHost.stderr}`); continue;
+        }
+        bunOutput += nativeHost.stdout + nativeHost.stderr;
+      }
+    }
+
+    // Optional, relocatable qualification artifacts for native and browser hosts.
+    const output = { '@jarenjs/collection': process.env.COLLECTION_CONSUMER_OUTPUT,
+      '@jarenjs/db': process.env.DB_PROCESS_CONSUMER_OUTPUT }[name];
+    if (output) {
+      cpSync(consumerDir, output, { recursive: true });
+      writeFileSync(join(output, 'node.log'), node.stdout + node.stderr);
+      writeFileSync(join(output, 'bun.log'), bunOutput);
+      writeFileSync(join(output, 'receipt.json'), JSON.stringify({ source: 'local npm pack; not registry publication',
+        node: process.versions.node, bun: bun ? bunProbe.stdout.trim() : null,
+        packages: [...declaredClosure(byName, name)].map((dependency) => ({ name: dependency,
+          version: byName.get(dependency).pkg.version,
+          integrity: `sha512-${createHash('sha512').update(readFileSync(tarballs.get(dependency))).digest('base64')}` })) }, null, 2));
     }
 
     // the isolated Vite leg (browser-bundler evidence) runs on the app

@@ -1196,3 +1196,10 @@ SQLite-semantic and never enter the JSON residual evaluator. See
 does not import runtime owners. `/query`, `/model` and `/entity` expose those
 mechanisms without the root store import. `compileEntityModel` performs one model
 normalization for both entities and mapping; openStore reuses that result.
+
+`drivers/worker-client.js` and `drivers/sqlite-endpoint.js` own the shared bounded
+RPC contract. Thread and process entries supply their transports. The process
+driver retains owner credits until OS exit, fences lost generations, and combines
+observed native transaction state with pending statement metadata to distinguish
+rollback from an unknown commit. Supervision never serializes callbacks or replays
+transactions; Store ownership remains in the existing driver/Store gates.

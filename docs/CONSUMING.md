@@ -358,6 +358,18 @@ Installed `@jarenjs/db` exports execute the [native SQL census](../packages/db/d
 
 Virtual collection consumers import geometry from `@jarenjs/core/virtual`, the headless controller from `@jarenjs/collection`, and DOM widgets from `@jarenjs/collection/component`. The host injects `createCollectionCoordinator` and a structural array or linq/db provider; [the contract](../components/collection/docs/COLLECTION.md) keeps these owners separate.
 
+For drag interactions, compose `createDragInteraction` with
+`mountCollectionDrag`, or use `createDraggableCollectionWidget` for one owned
+widget. Render dedicated handles and inject stable identity, permission and
+command callbacks. The [drag contract](../components/collection/docs/COLLECTION.md#owned-collection-drag-adapter)
+defines keyboard/touch activation, finite resources and complete disposal.
+
+Node consumers needing caller deadlines during native SQLite work can import
+`nodeProcessDriver` from `@jarenjs/db/node-process`. Use its ordinary Driver with
+`openStore`, retain the opened owner for `supervise`, and await confirmed exit
+before replacement. The [host contract](../packages/db/docs/HOSTS.md#supervised-node-processes)
+separates response cancellation from owner and receipt settlement.
+
 Lexical consumers import `compileLexical` from `@jarenjs/core/search`; the packed
 consumer exercises both frozen corpora without installing MiniSearch. Optional
 `createLexicalProvider` from `@jarenjs/json/query` evaluates filters and facets over

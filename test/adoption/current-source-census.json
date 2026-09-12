@@ -25,8 +25,8 @@
       "role": "prepared SQL and transaction coexistence",
       "matches": [
         "25:export function adaptNodeDatabase(db, options) {",
-        "81:export function fromNodeModule(mod, path, options) {",
-        "107:export function nodeDriver() {"
+        "82:export function fromNodeModule(mod, path, options) {",
+        "108:export function nodeDriver() {"
       ],
       "disposition": "retained"
     },

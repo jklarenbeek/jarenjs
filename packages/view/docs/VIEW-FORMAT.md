@@ -124,7 +124,10 @@ something other than the per-frame prop diff. The reference
 implementation keeps a registry of controlled nodes and reconciles it
 once per settled pass — which also lets a `select` resolve its value
 after its options exist and a `multiple` select apply an array of
-values. Composition/IME coordination is not yet specified (§8).
+values. Trusted text controls defer authoritative writes through composition
+and the final input event, then settle with a clamped caret range (§8).
+Removal and destruction cancel pending settlement. Physical OS IME and
+assistive-technology fidelity still require separate manual qualification.
 
 ## 4. Events are data
 

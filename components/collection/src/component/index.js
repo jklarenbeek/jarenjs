@@ -33,6 +33,7 @@ export function mountCollection(host, options) {
   const render = createDomRenderer(element, { document, onEvent: config.onEvent });
   let frame = null, disposed = false, composing = false, unobserve = null, measurePending = false, measurementCursor = 0;
   const observed = new Map();
+  const subscribers = new Set(), retainers = new Set();
   function schedule() { if (!disposed && frame === null) frame = requestFrame(refresh); }
   function focusId() {
     const focus = interaction.state().focus;
@@ -64,7 +65,10 @@ export function mountCollection(host, options) {
     if (measurePending) { measurePending = false; measureVisible(); }
     interaction.update({ ...controller.options(), pageRows: Math.max(1, Math.floor(element.clientHeight / controller.options().rowSize)) });
     const focus = interaction.state().focus;
-    const result = focus && config.keyAt(focus.index) === focus.key ? controller.pin([focus.index], [focus.column]) : controller.pin();
+    const pins = [...retainers].map((read) => read());
+    const focused = focus && config.keyAt(focus.index) === focus.key;
+    const result = controller.pin([...(focused ? [focus.index] : []), ...pins.flatMap((pin) => pin.rows)],
+      [...(focused ? [focus.column] : []), ...pins.flatMap((pin) => pin.columns)]);
     // Remove the old ID before keyed removal; expose a new descendant only after realization.
     element.removeAttribute('aria-activedescendant');
     render(controller.view(interaction, id));
@@ -78,6 +82,7 @@ export function mountCollection(host, options) {
       for (const row of rows) if (!observed.has(row)) observed.set(row, observe(row, scheduleMeasure));
     }
     config.onChange?.({ state: result.state, ...(result.reason ? {reason: result.reason} : {}), ...controller.stats(), focus: interaction.state().focus });
+    for (const fn of [...subscribers]) fn({ kind: 'layout', state: result.state, reason: result.reason });
   }
   function scheduleMeasure() { measurePending = true; schedule(); }
   function measureVisible() {
@@ -150,6 +155,8 @@ export function mountCollection(host, options) {
     frame = null;
     let failure, failed = false;
     const clean = (fn) => { try { fn(); } catch (error) { if (!failed) { failure = error; failed = true; } } };
+    for (const fn of [...subscribers]) clean(() => fn({ kind: 'dispose' }));
+    subscribers.clear(); retainers.clear();
     if (unobserve) clean(unobserve);
     for (const stop of observed.values()) clean(stop);
     observed.clear(); clean(() => render.destroy()); clean(() => controller.dispose()); clean(() => element.remove());
@@ -163,8 +170,24 @@ export function mountCollection(host, options) {
   catch (error) { dispose(); throw error; }
   return {
     controller, interaction, element, refresh, measureVisible,
+    /** Observe layout/disposal without placing resources in application state.
+     * @param {(event:any)=>void} fn */
+    subscribe(fn) {
+      if (disposed || subscribers.size >= 16) throw new RangeError('Collection lifecycle subscriber capacity exceeded');
+      subscribers.add(fn); return () => { subscribers.delete(fn); };
+    },
+    /** Add transient pins inside the existing shared row/column budgets.
+     * @param {()=>{rows:number[],columns:number[]}} read */
+    retain(read) {
+      if (disposed || retainers.size >= 8) throw new RangeError('Collection retainer capacity exceeded');
+      retainers.add(read);
+      return () => { if (retainers.delete(read)) schedule(); };
+    },
     update(next) {
+      const reset = next.query !== undefined && next.query !== config.query
+        || next.snapshot !== undefined && next.snapshot !== config.snapshot;
       config = { ...config, ...next }; controller.update(next); interaction.update(next);
+      if (reset) for (const fn of [...subscribers]) fn({ kind: 'reset' });
       element.scrollTop = controller.position().top; refresh();
     },
     scrollToOffset(offset) { return applyScroll(controller.scrollToOffset(offset)); },
@@ -177,10 +200,15 @@ export function mountCollection(host, options) {
     },
     snapshot() { return { anchor: controller.snapshot(), selection: interaction.state().selection }; },
     stats() { return { ...controller.stats(), listeners: disposed ? 0 : Object.keys(listeners).length,
-      observers: disposed ? 0 : 1 + observed.size, frames: frame === null ? 0 : 1 }; },
+      observers: disposed ? 0 : 1 + observed.size, frames: frame === null ? 0 : 1,
+      subscribers: subscribers.size, retainers: retainers.size }; },
     dispose,
   };
 }
+
+export { mountCollectionDrag, createDraggableCollectionWidget } from './drag.js';
+/** @typedef {import('./drag.js').DragContainer} DragContainer */
+/** @typedef {import('./drag.js').CollectionDragOptions} CollectionDragOptions */
 
 /** Adapt controller disposal to the existing WidgetDef unmount lifecycle.
  * @param {any | ((props:any, emit:any)=>any)} options */

@@ -41,6 +41,20 @@ const registry = (facts, docs = ['fixture.md'], name = 'fixture') =>
 
 const read = (root, name = 'fixture.md') => readFileSync(join(root, name), 'utf8');
 
+it('current runtime scope agrees with the public exports and normative control contract', () => {
+  const doc = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+  const manifest = JSON.parse(doc('packages/db/package.json'));
+  assert.ok(manifest.exports['./postgres']);
+  const db = doc('packages/db/README.md');
+  assert.doesNotMatch(db, /SQLite only|No replication(?: is shipped| or sync engine)|There is no replication/);
+  assert.match(db, /REPLICATION-FORMAT/);
+  assert.match(doc('packages/db/docs/REPLICATION-FORMAT.md'), /PostgreSQL capture/);
+  const view = doc('packages/view/docs/VIEW-FORMAT.md');
+  assert.doesNotMatch(view, /Composition\/IME coordination is not yet specified/);
+  assert.match(view, /final input event/);
+  assert.match(view, /Native OS IME fidelity and assistive-technology behavior still require manual/);
+});
+
 describe('the namespace is one, and it is the one every document uses', () => {
   it('is spelled once, here', () => {
     assert.strictEqual(NS, 'fact');

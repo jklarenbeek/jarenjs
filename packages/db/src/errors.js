@@ -112,6 +112,7 @@ export const DB_CODES = Object.freeze({
   JD2094: 'the durable snapshot failed and the connection is invalid',
   JD2095: 'the trusted SQL or synchronous transaction authority was refused',
   JD2096: 'a persistence invariant rejected the mutation',
+  JD2097: 'the supervised operation was cancelled or exceeded its response deadline',
 });
 
 /**

@@ -2014,7 +2014,7 @@
     "benchmark/lexical-result.json": "93b2bbf068f3dc997462d9ed17e0ffb692a97f9bcc9e81746f1e561cff949fd3",
     "benchmark/formula-result.json": "8a4980c1381e18bb5d6042e61b7a0bc08b9a6a307fb331a1c59531fda85a945c",
     "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
-    "benchmark/adoption-hosts-result.json": "35eb6759e32ba3d10da5c0f9dc85e2491058786d171d45227857a5d2d6461be9",
+    "benchmark/adoption-hosts-result.json": "6d6bb0f9f14cd64ba5ad761ee7574cbb77378069231ebeb7d56e3272ecd76e1b",
     "benchmark/durable-result.json": "f158c3968f5696035353335c93c2f8a5d112c485f6ee7028232618ce93ebc45f",
     "benchmark/adoption-program.js": "65641927fba330df879d6a0fcbc4e4298141d4e0de8dce33a2f9af75fb64f5cd",
     "scripts/lib/adoption-program.js": "7ee3ff433e68674b098ef2a1937dc2ce084dcba6bd2fdd80c8aad046ff4bd930"

@@ -707,7 +707,19 @@ backup publication retain their existing owners. See [db architecture](../packag
 
 The db entity planner owns adopted-column read lowering and bounded mutation documents. `linq/db` owns the headless [range adapter](../packages/app/docs/COLLECTION-PROVIDER.md), reusing db cursors, keyset pages, transactions and capture. Its structural shape is consumed through injection; there is no db/linq import of app or components and no second query or range engine.
 
+`db/node-process` owns finite supervised SQLite child processes. It shares the
+thread driver's RPC client and SQLite endpoint, retains quarantined admission
+credits until OS exit, and reports transaction fate separately from caller
+cancellation. Store transactions stay on the existing connection owner; host
+commands reconcile uncertain receipts before retry. See [execution hosts](../packages/db/docs/HOSTS.md).
+
 Lexical mechanics live in `core/search`; `json/query` binds explicit injected `$lexical` providers and `linq` emits their documents. `db/search` adds authoritative snapshots and persistence, and `app/search` owns injected workers. `core/range` is the single resident array provider used by app and the structural `linq/db` lexical adapter. The browser ranker imports neither db nor AI. See [the lexical contract](../packages/core/docs/SEARCH.md).
+
+Collection drag intent stays in the headless collection engine. Its component
+adapter owns pointer capture, overlays, focus restoration and scroll frames over
+existing mounted collections, using their shared pin budgets. Widget lifetime
+owns disposal; injected host commands own authorization and data changes. See
+[collection interaction](../components/collection/docs/COLLECTION.md#drag-intent-and-authoritative-commands).
 
 ### Bounded provider composition
 

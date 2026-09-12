@@ -1101,6 +1101,7 @@ error.
 | `JD2094` | invalid or uncommitted durable snapshot; reopen the last committed version |
 | `JD2095` | trusted SQL or synchronous callback authority refused |
 | `JD2096` | persistence invariant rejected the mutation; constraint class |
+| `JD2097` | supervised native operation cancelled or past its response deadline; owner exit and transaction fate are reported separately |
 | `JD0060` | a replication envelope or snapshot is invalid |
 | `JD2100` | a replica sequence or causal dependency has a gap |
 | `JD2101` | an envelope identity names different content or an unknown local origin |

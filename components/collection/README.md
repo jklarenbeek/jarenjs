@@ -19,6 +19,12 @@ collection.dispose();
 
 See [architecture](ARCHITECTURE.md) and [the collection contract](docs/COLLECTION.md).
 
+`createDragInteraction` supplies stable-key move/copy intent and async authority
+fencing. `mountCollectionDrag` and `createDraggableCollectionWidget` in
+`@jarenjs/collection/component` add pointer, dedicated touch handles, keyboard,
+portal overlays and bounded auto-scroll over the existing virtualizer. See
+[the drag contract](docs/COLLECTION.md#drag-intent-and-authoritative-commands).
+
 ## Public exports
 
 <!--fact:exports.collection-->

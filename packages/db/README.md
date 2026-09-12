@@ -888,7 +888,8 @@ oracle run on both. What differs is declared rather than discovered:
 | `ALTER TABLE` | additive only | full, so a rebuild is never needed |
 
 Neither backend has a **statement timeout** (`capabilities.statementTimeout`
-is `false` on both) or **row estimates**. There is no replication.
+is `false` on both) or **row estimates**. Portable replication uses SQLite
+change capture; PostgreSQL capture and replication remain unqualified.
 Cross-process concurrency on SQLite is its own story — WAL plus a busy
 timeout, both set and visible on `store.capabilities`; on PostgreSQL it
 is the server's, and a serialization failure or a deadlock arrives as
@@ -1211,16 +1212,18 @@ same report rows — with the one difference the PostgreSQL mapping
 states: `numeric` carries both JSON number types, so an `integer`
 member reads back as `number`.
 
-## Sync-readiness — what exists and what does not
+## Replication and external-write boundaries
 
-The change stream is an ordered log of RFC 6902 patches with a
-monotonic sequence, and SQLite's own changeset/conflict primitives are
-available — which is what a replication protocol would be *built
-from*. **No replication is shipped.** There is no conflict resolution,
-no site identity, no causal ordering across writers, and no capture of
-writes made by another connection (the coarse `dataVersion()` signal
-is the honest mitigation, not a pretend fine-grained one). Building
-replication on these primitives is a roadmap item, not a hint.
+The portable replication engine supplies replica identities, causal frontiers,
+bounded logical envelopes, durable replay receipts, conflict evidence and snapshot
+resets. Data and acknowledgements commit together; hosts supply transport and any
+conflict resolver. The default preserves both contenders and rejects the write.
+See [REPLICATION-FORMAT](docs/REPLICATION-FORMAT.md) for the current contract.
+
+Capture observes participating Store writes on supported SQLite hosts. Arbitrary
+writes from another connection are not fine-grained capture events; `dataVersion()`
+provides coarse invalidation. Adopted triggers, unsupported layouts and PostgreSQL
+retain the explicit capture and replication qualification limits.
 
 ## Operating a store — configuration, maintenance, backup, cancellation, the queue
 
@@ -1311,10 +1314,11 @@ its side-effect-free status read are in
 
 ## What this is not — every non-claim in one place
 
-- **SQLite only.** One backend (3.45+); the dialect seam is tested
-  against a double but no second dialect ships. No server.
-- **No replication or sync engine** (see above). No cross-connection
-  change capture — another connection's writes are invisible locally.
+- **SQLite and PostgreSQL have different capabilities.** Both backends ship;
+  PostgreSQL does not provide the SQLite capture, replication, job queue or pragma
+  maintenance capabilities. See the dialect table and normative host contracts.
+- **Replication transport is supplied by the host.** Portable logical replication
+  ships; arbitrary external writes are not captured as local row events.
 - **No statement timeout** on SQLite (the drivers expose no interrupt;
   the capability slot is honestly `false`), no row estimates.
 - **Not safe for mutually hostile tenants** without the profile's
@@ -1359,6 +1363,7 @@ Every subpath a consumer can import, derived from the manifest by
 <!--fact:exports.db-->
 | Import | Kind | Declarations |
 |---|---|---|
+| `@jarenjs/db/node-process` | JavaScript | declared |
 | `@jarenjs/db/search` | JavaScript | declared |
 | `@jarenjs/db` | JavaScript | declared |
 | `@jarenjs/db/node` | JavaScript | declared |
@@ -1442,3 +1447,8 @@ partial conflicts, raw-text JSON queries and byte-valued operations use
 `snapshotDatabase(connection, newPath)` for a disk-backed committed-WAL copy.
 Existing-connection consumers can import `/query`, `/model` and `/entity`;
 `compileEntityModel` shares one normalization between queries and mapping.
+
+`@jarenjs/db/node-process` adds supervised native execution with finite owner
+admission, caller deadlines, generation fencing and separate process-exit and
+transaction-fate observations. See [execution hosts](docs/HOSTS.md#supervised-node-processes)
+for Store composition, receipt reconciliation and operating-system limits.

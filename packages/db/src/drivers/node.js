@@ -38,6 +38,7 @@ export function adaptNodeDatabase(db, options) {
       };
     },
     close: () => db.close(),
+    transactionState: () => typeof db.isTransaction === 'boolean' ? db.isTransaction : null,
     // each optional primitive is exposed only when the HANDLE has it, so
     // a substitute that carries less than `node:sqlite` reports less —
     // a declared capability the handle cannot honour is a TypeError at

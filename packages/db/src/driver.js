@@ -292,6 +292,8 @@ export function baseCapabilities() {
     sessions: false,
     sessionReason: null,
     worker: false,
+    process: false,
+    ownerTermination: false,
     pooling: false,
     poolReaders: 0,
     poolWriters: 0,
@@ -809,6 +811,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
       if (pending.some(isThenable)) return closeResult = Promise.allSettled(pending).then(() => raw.close());
       return closeResult = raw.close();
     },
+    transactionState: () => raw.transactionState?.() ?? null,
     registerFunction: typeof raw.registerFunction === 'function'
       ? (name, functionOptions, fn) => { requireOpen(); return raw.registerFunction(name, functionOptions, fn); }
       : null,

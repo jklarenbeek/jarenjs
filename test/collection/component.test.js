@@ -77,3 +77,27 @@ it('measures every mounted row across finite frame work credits without overridi
   for(const fn of [...env.observers.values()])fn();c.element.scrollTop=1000;c.element.fire('scroll',{});env.flush();
   assert.ok(c.element.scrollTop>=1000);c.dispose();assert.equal(env.frames.size,0);
 });
+
+it('transient retention shares finite pin credits and lifecycle observers release on every exit',()=>{
+  const env=collectionHost(), events=[];
+  const c=mountCollection(env.host,{...options,rowPinBudget:1});
+  const unsubscribe=c.subscribe(event=>events.push(event.kind));
+  const release=c.retain(()=>({rows:[90],columns:[0]}));
+  c.refresh();assert.ok(c.controller.layout().rows.some(row=>row.key==='row-90'));
+  assert.equal(c.stats().retainers,1);
+  c.update({snapshot:'changed'});assert.ok(events.includes('reset'));
+  release();release();env.flush();
+  assert.ok(!c.controller.layout().rows.some(row=>row.key==='row-90'));
+  const retainers=Array.from({length:8},()=>c.retain(()=>({rows:[],columns:[]})));
+  assert.throws(()=>c.retain(()=>({rows:[],columns:[]})),RangeError);
+  for(const stop of retainers)stop();
+  const subscribers=Array.from({length:15},()=>c.subscribe(()=>{}));
+  assert.throws(()=>c.subscribe(()=>{}),RangeError);
+  for(const stop of subscribers)stop();
+  unsubscribe();unsubscribe();
+  let disposed=0;
+  c.subscribe(()=>{throw new Error('observer cleanup');});c.subscribe(()=>{disposed++;});
+  assert.throws(()=>c.dispose(),/observer cleanup/);c.dispose();
+  assert.equal(disposed,1);assert.equal(c.stats().retainers+c.stats().subscribers,0);
+  assert.equal(env.host.childNodes.length,0);assert.equal(env.frames.size,0);
+});

@@ -34,6 +34,7 @@ import { providerFacts } from './generate-provider-facts.js';
 import { lexicalFacts } from './generate-lexical-facts.js';
 import { collectionFacts } from './generate-collection-facts.js';
 import { relationalFacts } from './generate-relational-facts.js';
+import { executionFacts } from './generate-execution-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const profileDrift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
@@ -44,6 +45,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts, executionFacts],
   argv: process.argv.slice(2),
 }));
