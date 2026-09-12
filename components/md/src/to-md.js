@@ -217,6 +217,7 @@ const BLOCK_PRINTERS = {
   // `***`, not `---`: the printer's bullet is `-`, and `- ---` is a
   // thematic break in its own right rather than an item containing one.
   thematicBreak: () => '***',
+  pageBreak: () => '<!-- pagebreak -->',
 
   blockquote: (node) => {
     const inner = printBlocks(node.children, false);

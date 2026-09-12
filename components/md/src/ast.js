@@ -54,6 +54,11 @@ export function thematicBreak() {
   return { type: 'thematicBreak' };
 }
 
+/** @returns {MdNode} */
+export function pageBreak() {
+  return { type: 'pageBreak' };
+}
+
 /** @param {MdNode[]} children @returns {MdNode} */
 export function blockquote(children) {
   return { type: 'blockquote', children };

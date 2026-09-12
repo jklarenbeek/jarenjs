@@ -28,6 +28,7 @@
         { "$ref": "#/$defs/paragraph" },
         { "$ref": "#/$defs/heading" },
         { "$ref": "#/$defs/thematicBreak" },
+        { "$ref": "#/$defs/pageBreak" },
         { "$ref": "#/$defs/blockquote" },
         { "$ref": "#/$defs/list" },
         { "$ref": "#/$defs/code" },
@@ -84,6 +85,11 @@
       "type": "object",
       "required": ["type"],
       "properties": { "type": { "const": "thematicBreak" } }
+    },
+    "pageBreak": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "pageBreak" } }
     },
     "blockquote": {
       "type": "object",
@@ -282,7 +288,7 @@
           "type": "string",
           "not": {
             "enum": [
-              "paragraph", "heading", "thematicBreak", "blockquote",
+              "paragraph", "heading", "thematicBreak", "pageBreak", "blockquote",
               "list", "listItem", "code", "html", "table", "tableRow",
               "tableCell", "text", "emphasis", "strong", "strikethrough",
               "link", "image", "inlineCode", "break", "softBreak", "custom",

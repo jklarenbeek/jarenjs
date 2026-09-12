@@ -195,6 +195,7 @@ const BLOCK_HTML = {
   },
 
   thematicBreak: () => '<hr>',
+  pageBreak: () => '<div class="md-page-break" role="separator" aria-label="Page break"></div>',
 
   blockquote: (node, ctx) => '<blockquote>' + blockChildren(node.children, ctx) + '</blockquote>',
 

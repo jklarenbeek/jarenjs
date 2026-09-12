@@ -75,6 +75,21 @@
   margin: 1.4em 0;
 }
 
+/* The screen divider marks a print boundary without adding printed ink. */
+.md .md-page-break {
+  border-top: 1px dashed var(--md-rule, #d0d4dc);
+  margin: 2em 0;
+}
+
+@media print {
+  .md .md-page-break {
+    border: 0;
+    margin: 0;
+    page-break-after: always;
+    break-after: page;
+  }
+}
+
 .md a { color: var(--md-link, #2456c4); }
 
 .md code {

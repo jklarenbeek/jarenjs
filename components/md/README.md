@@ -117,6 +117,22 @@ output — asserted over the CommonMark corpus in
 [`test/md/to-html.test.js`](../../test/md/to-html.test.js), not on one
 fixture.
 
+### Page breaks
+
+A standalone `<!-- pagebreak -->` line parses as `{ type: 'pageBreak' }`
+and prints back to the same canonical marker with `toMarkdown`. It works
+without plugins, including inside blockquotes and list items. Inline
+comments, code examples and markers inside larger HTML blocks keep their
+ordinary meaning.
+
+Both emitters render a `.md-page-break` separator. Import
+`@jarenjs/md/styles/md.css` for a dashed divider on screen and a forced
+page boundary when printing or saving to PDF. The screen rule disappears
+in print; pagination follows the host's printable layout. `toHtml` users
+should wrap their output in an element with class `md` to apply these styles.
+The marker is a core node and renders under every raw-HTML policy.
+See [MD-FORMAT.md §4.9](docs/MD-FORMAT.md#49-page-breaks-normative) for its grammar.
+
 ### Heading anchors
 
 `[see below](#the-section)` needs something to land on, so the emitter can

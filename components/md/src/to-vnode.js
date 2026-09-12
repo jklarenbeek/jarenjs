@@ -73,8 +73,7 @@ import {
  *   so a reader can copy a link to the section (default `false`).
  *   Requires `headingIds`; without ids there is nothing to link to.
  * @property {string} [footnotesLabel] the accessible name of the
- *   appended footnotes section (default `'Footnotes'`) — the one string
- *   this emitter writes that a reader can hear.
+ *   appended footnotes section (default `'Footnotes'`).
  * @property {boolean} [keyed] give each top-level block a content-hash
  *   `key` (default `true`).
  *
@@ -321,6 +320,7 @@ const BLOCK_RENDERERS = {
   },
 
   thematicBreak: () => ['hr', {}],
+  pageBreak: () => ['div', { class: 'md-page-break', role: 'separator', 'aria-label': 'Page break' }],
 
   blockquote: (node, rctx) => ['blockquote', {}, ...blockChildren(node.children, rctx, false)],
 
@@ -763,4 +763,3 @@ function hydrateIndex(docOrCompiled, tables) {
   memo.set(ast, index);
   return index;
 }
-

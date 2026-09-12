@@ -46,12 +46,15 @@ import {
 import { scanEntity } from './entities.js';
 import {
   MD_VERSION,
-  thematicBreak, blockquote, list, listItem,
+  thematicBreak, pageBreak, blockquote, list, listItem,
   code, htmlBlock, tableRow, tableCell,
   text, emphasis, strong, strikethrough, link, image, inlineCode,
   hardBreak, softBreak, textOf,
   autolink, footnoteDefinition, footnoteReference,
 } from './ast.js';
+
+/** A one-line layout marker, with ordinary block indentation. */
+const RE_PAGE_BREAK = /^ {0,3}<!--[ \t]*pagebreak[ \t]*-->[ \t]*$/;
 
 /**
  * @typedef {import('./ast.js').MdNode} MdNode
@@ -711,7 +714,10 @@ class BlockParser {
         break;
       }
       case 'html':
-        this.add(htmlBlock(leaf.lines.join('\n')));
+        // Only a complete standalone comment has layout semantics;
+        // inline comments, code and larger HTML blocks remain opaque.
+        this.add(leaf.lines.length === 1 && RE_PAGE_BREAK.test(leaf.lines[0])
+          ? pageBreak() : htmlBlock(leaf.lines.join('\n')));
         break;
       case 'table':
         this.add({ type: 'table', align: leaf.align, children: [], raw: leaf.rows });

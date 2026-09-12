@@ -38,7 +38,8 @@ blockquotes, ordered/unordered lists, inline emphasis/links/images/code,
 hard and soft breaks, backslash escapes, autolinks, raw HTML blocks and
 spans) plus the GFM extensions in universal use: **tables**,
 **strikethrough**, **task lists**, **footnotes** (§4.6) and **literal
-autolinks** (§4.7). The parser passes **every example in the CommonMark
+autolinks** (§4.7). A standalone `<!-- pagebreak -->` comment is reserved
+as a page-break extension (§4.9). The parser passes **every example in the CommonMark
 specification** through the string emitter (§4.4a), and the benchmark
 workspace scores both emitters against the official corpus — and against
 the GFM specification's extension sections — on every run.
@@ -46,7 +47,8 @@ the GFM specification's extension sections — on every run.
 This specification remains normative for the package: it covers the
 frontmatter, the AST, and the extensions neither spec describes
 (footnotes are GitHub's, documented nowhere but here). Where it and
-CommonMark speak about the same construct they agree. Two places where
+CommonMark speak about the same construct they agree, except for the
+reserved page-break comment. Two places where
 this package deliberately differs from the GFM reference implementation
 are stated with their reasons in the package README's scorecard section;
 neither is a dialect gap a document can fall into.
@@ -167,6 +169,7 @@ unchanged where possible.
 | `paragraph` | `children` | inline content |
 | `heading` | `depth` (1–6), `children` | ATX and setext |
 | `thematicBreak` | — | `***`, `---`, `___` |
+| `pageBreak` | — | standalone `<!-- pagebreak -->` (§4.9) |
 | `blockquote` | `children` | block content |
 | `list` | `ordered` (boolean), `start` (number or `null`), `tight` (boolean), `children` | children are `listItem`s |
 | `listItem` | `checked` (`true`/`false`/`null`), `children` | `checked` non-null only for task-list items |
@@ -461,6 +464,32 @@ and is never re-read. A baker MUST rewrite only the spans between
 markers — a document with no directives MUST come back byte-identical —
 because canonical re-printing (§5) would reformat every hand-written
 document it touched.
+
+### 4.9 Page breaks (normative)
+
+A complete standalone `<!-- pagebreak -->` line MUST produce
+`{ "type": "pageBreak" }`, a block node without content. The keyword is
+case-sensitive. Zero or more spaces or tabs MAY surround `pagebreak`
+inside the comment and MAY follow the closing delimiter; normal block
+indentation of up to three spaces applies after container prefixes.
+The marker MAY interrupt a paragraph and MAY occur inside a blockquote,
+list item or footnote definition. It is independent of the `gfm` option
+and needs no plugin. Batch and incremental parsing share this rule.
+
+Inline comments, fenced/indented code, escaped text, multiline comments,
+comments with extra text and markers inside an already-open HTML block
+MUST NOT become page breaks. The marker has no namespace or paired closing
+marker and is not a value directive (§4.8).
+
+`toMarkdown` MUST print the canonical spelling `<!-- pagebreak -->`.
+Both renderers emit a `div` with class `md-page-break`, role `separator`
+and accessible name `Page break`, independently of raw-HTML policy.
+The component stylesheet shows a dashed divider on screen and removes
+the rule/margins while setting `break-after: page` and the legacy
+`page-break-after: always` in print. The following content starts on a
+new printed page within the host's printable block layout; this is not
+automatic screen pagination. String-rendering hosts MUST load the
+stylesheet and provide a `.md` ancestor to obtain this presentation.
 
 ## 5. Canonical Markdown and round-trips
 

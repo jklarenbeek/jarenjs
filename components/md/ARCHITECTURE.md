@@ -142,6 +142,12 @@ Each (detabbed) line runs through three steps:
    plugin rules → paragraph) that loops when a fresh container (`>`,
    list item) re-enters with the rest of the line.
 
+The HTML-comment leaf recognizes a complete standalone `<!-- pagebreak -->`
+as a core `pageBreak` node when it closes. This keeps container and streaming
+behavior shared with ordinary comments while leaving inline comments,
+code and larger HTML blocks opaque. Both render tables emit the same
+separator; only the component stylesheet assigns screen and print layout.
+
 Leaves buffer **raw text only**. A closed paragraph first sheds link
 reference definitions into the document map, then waits.
 
