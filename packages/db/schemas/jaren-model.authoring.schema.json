@@ -233,10 +233,167 @@
                   },
                   "generated": {
                     "type": "boolean"
+                  },
+                  "type": {
+                    "enum": [
+                      "INTEGER",
+                      "REAL",
+                      "TEXT",
+                      "BLOB",
+                      "NUMERIC"
+                    ]
+                  },
+                  "defaultValue": {
+                    "description": "A literal SQLite value or closed structural $sql expression; planTable validates its operator and contextual semantics.",
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "number",
+                          "null"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "$sql"
+                        ],
+                        "properties": {
+                          "$sql": {
+                            "enum": [
+                              "column",
+                              "value",
+                              "binary",
+                              "not",
+                              "in",
+                              "call",
+                              "cast",
+                              "collate",
+                              "case",
+                              "scalar",
+                              "exists"
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "collation": {
+                    "enum": [
+                      "BINARY",
+                      "NOCASE",
+                      "RTRIM"
+                    ]
+                  },
+                  "identity": {
+                    "enum": [
+                      "rowid",
+                      "autoincrement"
+                    ]
+                  },
+                  "check": {
+                    "description": "A literal SQLite value or closed structural $sql expression; planTable validates its operator and contextual semantics.",
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "number",
+                          "null"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "$sql"
+                        ],
+                        "properties": {
+                          "$sql": {
+                            "enum": [
+                              "column",
+                              "value",
+                              "binary",
+                              "not",
+                              "in",
+                              "call",
+                              "cast",
+                              "collate",
+                              "case",
+                              "scalar",
+                              "exists"
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "generatedExpression": {
+                    "description": "A literal SQLite value or closed structural $sql expression; planTable validates its operator and contextual semantics.",
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "number",
+                          "null"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "$sql"
+                        ],
+                        "properties": {
+                          "$sql": {
+                            "enum": [
+                              "column",
+                              "value",
+                              "binary",
+                              "not",
+                              "in",
+                              "call",
+                              "cast",
+                              "collate",
+                              "case",
+                              "scalar",
+                              "exists"
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "stored": {
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": false
               }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Structural SQLite declarations validated by planTable."
+            },
+            "indexes": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Structural SQLite declarations validated by planTable."
+            },
+            "triggers": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Structural SQLite declarations validated by planTable."
+            },
+            "strict": {
+              "type": "boolean"
+            },
+            "withoutRowid": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false

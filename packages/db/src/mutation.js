@@ -8,6 +8,7 @@ import { entityShape, planEntityPredicate } from './plan.js';
 import { createEntityPredicateEmitters } from './emit.js';
 import { physicalSelection } from './physical.js';
 import { utf8Length } from './cursor.js';
+import { relationalEmitter } from './dialects/sqlite-relational.js';
 
 /** Compile once per document, execute within the existing guarded transaction.
  * @param {any} connection @param {any} entity @param {any} mapping @param {any} core */
@@ -35,7 +36,9 @@ export function createEntityMutation(connection, entity, mapping, core) {
     if (entity.physical == null || dialect.name !== 'sqlite') fail('native mutations require a declared SQLite column layout');
     core.plan.writable();
     if (!document || typeof document !== 'object' || Array.isArray(document)) fail('a mutation is an object');
-    const allowed = { update: ['key', 'expectedRevision', 'set'], upsert: ['values', 'conflict', 'update'],
+    const allowed = { update: ['key', 'expectedRevision', 'set', 'where', 'reporting', 'expressions'],
+      delete: ['key', 'where', 'expectedRevision'],
+      upsert: ['values', 'conflict', 'conflictWhere', 'update', 'onConflict', 'reporting'],
       'insert-select': ['source', 'where', 'select', 'conflict', 'onConflict'] }[document.op];
     if (!allowed) fail('op must be update, upsert or insert-select');
     for (const key of Object.keys(document))
@@ -52,29 +55,75 @@ export function createEntityMutation(connection, entity, mapping, core) {
     const params = [];
     const param = (value) => { params.push(value); return dialect.parameterRef(params.length, 'v'); };
     const table = q(mapping.table);
+    const sqlExpression = (expression, inline = false) => {
+      const mapped = (value) => {
+        if (Array.isArray(value)) return value.map(mapped);
+        if (value === null || typeof value !== 'object') return value;
+        if (value.$sql === 'value') return value;
+        if (value.$sql === 'column') {
+          if (value.table !== undefined && value.table !== 'it') fail('mutation column expressions refer to the current entity');
+          return { $sql: 'column', name: column(value.name).physical };
+        }
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapped(item)]));
+      };
+      const emitter = relationalEmitter({ inline });
+      const result = emitter.expr(mapped(expression));
+      params.push(...emitter.params);
+      return result;
+    };
+    const predicate = (expression) => {
+      if (expression?.$sql !== undefined || typeof expression === 'number') return sqlExpression(expression);
+      const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: expression, $return: '$it' });
+      const planned = planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping));
+      if ('refusal' in planned) fail(planned.refusal.reason);
+      const emitter = createEntityPredicateEmitters(dialect, (slot) => {
+        if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
+        return param(slot.literal);
+      });
+      return emitter.emitPred(table, `${table}.${q('doc')}`, planned.pred);
+    };
     let sql;
     let prefix = '';
-    if (document.op === 'update') {
-      if (!document.set || typeof document.set !== 'object' || Array.isArray(document.set) || !Object.keys(document.set).length) fail('update needs a nonempty set object');
-      const assignments = Object.entries(document.set).map(([name, value]) => {
+    if (document.reporting !== undefined && !['matched', 'changed'].includes(document.reporting)) fail('reporting is matched or changed');
+    if (document.op === 'update' || document.op === 'delete') {
+      const set = document.set ?? {}, expressions = document.expressions ?? {};
+      if (document.op === 'update' && (!set || typeof set !== 'object' || Array.isArray(set)
+        || !expressions || typeof expressions !== 'object' || Array.isArray(expressions)
+        || !Object.keys(set).length && !Object.keys(expressions).length)) fail('update needs set or expressions assignments');
+      const assignments = Object.entries(set).map(([name, value]) => {
         const c = writableColumn(name);
         const encoded = core.plan.encodeColumn(name, value);
-        return { name: q(c.physical), compare: comparison(c), value: param(encoded), encoded };
+        return { name: q(c.physical), compare: comparison(c), value: param(encoded), different: () => param(encoded) };
       });
-      const parts = core.normalizeKey(document.key);
-      const where = core.plan.keys.map((key, i) => `${q(column(key).physical)} = ${param(core.plan.encodeColumn(key, parts[i]))}`);
+      for (const [name, expression] of Object.entries(expressions)) {
+        if (Object.hasOwn(set, name)) fail('an assignment has exactly one owner');
+        const c = writableColumn(name);
+        assignments.push({ name: q(c.physical), compare: comparison(c), value: sqlExpression(expression), different: () => sqlExpression(expression) });
+      }
+      const where = [];
+      if (Object.hasOwn(document, 'key')) {
+        const parts = core.normalizeKey(document.key);
+        where.push(...core.plan.keys.map((key, i) => `${q(column(key).physical)} = ${param(core.plan.encodeColumn(key, parts[i]))}`));
+      }
+      if (Object.hasOwn(document, 'where')) where.push(predicate(document.where));
+      if (!where.length) fail('update/delete require a key or an explicit predicate');
       if (entity.version !== null) {
         if (!Number.isSafeInteger(document.expectedRevision) || document.expectedRevision < 0) fail('a versioned update needs expectedRevision');
         where.push(`${q(column(entity.version).physical)} = ${param(document.expectedRevision)}`);
       }
       else if (document.expectedRevision !== undefined) fail('expectedRevision needs a declared version member');
-      where.push(`(${assignments.map((a) => `${a.compare} IS NOT ${param(a.encoded)}`).join(' OR ')})`);
+      if (document.op === 'update' && document.reporting !== 'matched')
+        where.push(`(${assignments.map((a) => `${a.compare} IS NOT ${a.different()}`).join(' OR ')})`);
       const sets = assignments.map((a) => `${a.name} = ${a.value}`);
       if (entity.version !== null) sets.push(`${q(column(entity.version).physical)} = ${q(column(entity.version).physical)} + 1`);
-      sql = `UPDATE ${table} SET ${sets.join(', ')} WHERE ${where.join(' AND ')}`;
+      sql = document.op === 'delete' ? `DELETE FROM ${table} WHERE ${where.map((part) => `(${part})`).join(' AND ')}`
+        : `UPDATE ${table} SET ${sets.join(', ')} WHERE ${where.map((part) => `(${part})`).join(' AND ')}`;
     }
     else {
-      if (JSON.stringify(document.conflict) !== JSON.stringify(core.plan.keys)) fail('conflict must name the complete ordered primary key');
+      if (!Array.isArray(document.conflict) || !document.conflict.length || new Set(document.conflict).size !== document.conflict.length)
+        fail('conflict must name distinct mapped columns');
+      document.conflict.forEach(column);
+      if (document.op === 'insert-select' && JSON.stringify(document.conflict) !== JSON.stringify(core.plan.keys)) fail('insert-select conflict must name the complete ordered primary key');
       let names;
       let source;
       if (document.op === 'upsert') {
@@ -82,7 +131,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
         const complete = core.complete(document.values, { updating: false });
         const split = core.plan.split(complete);
         names = split.values.map((v) => v.name);
-        if (core.plan.keys.some((key) => !names.includes(key))) fail('upsert requires every primary-key value');
+        if (document.conflict.some((key) => !names.includes(key))) fail('upsert requires every conflict value');
         source = `VALUES (${split.values.map((v) => param(v.value)).join(', ')})`;
       }
       else {
@@ -120,8 +169,10 @@ export function createEntityMutation(connection, entity, mapping, core) {
           + dialect.mutationRowGuard(`(SELECT COUNT(*) FROM ${q('_jaren_source')})`, maxRows);
       }
       sql = `INSERT INTO ${table} (${names.map((name) => q(column(name).physical)).join(', ')}) ${source}`
-        + ` ON CONFLICT (${core.plan.keys.map((key) => q(column(key).physical)).join(', ')})`;
-      if (document.op === 'insert-select') sql += ' DO NOTHING';
+        + ` ON CONFLICT (${document.conflict.map((key) => q(column(key).physical)).join(', ')})`;
+      if (document.conflictWhere !== undefined) sql += ` WHERE ${sqlExpression(document.conflictWhere, true)}`;
+      if (document.onConflict !== undefined && !['nothing', 'update'].includes(document.onConflict)) fail('onConflict is nothing or update');
+      if (document.op === 'insert-select' || document.onConflict === 'nothing') sql += ' DO NOTHING';
       else {
         if (!Array.isArray(document.update) || !document.update.length || new Set(document.update).size !== document.update.length) fail('upsert update names distinct stored members');
         const changes = document.update.map((name) => {
@@ -131,7 +182,8 @@ export function createEntityMutation(connection, entity, mapping, core) {
         });
         const sets = changes.map(({ name }) => `${name} = excluded.${name}`);
         if (entity.version !== null) sets.push(`${q(column(entity.version).physical)} = ${table}.${q(column(entity.version).physical)} + 1`);
-        sql += ` DO UPDATE SET ${sets.join(', ')} WHERE ${changes.map(({ name, compare }) => `${compare} IS NOT excluded.${name}`).join(' OR ')}`;
+        sql += ` DO UPDATE SET ${sets.join(', ')}`;
+        if (document.reporting !== 'matched') sql += ` WHERE ${changes.map(({ name, compare }) => `${compare} IS NOT excluded.${name}`).join(' OR ')}`;
       }
     }
     sql = prefix + sql + ` RETURNING ${physicalSelection(mapping, dialect)}`;

@@ -644,6 +644,7 @@ describe('the planner\'s reason vocabulary', () => {
     // and neither does a bare member path (the entity answers documents)
     'entity.projection': [entity,
       { $for: { p: '$.Person[*]' }, $return: { n: { $count: '$p.name' } } }],
+    'entity.scalarAggregate': [entity, { $sum: E({}) }],
     'entity.order': [entity, E({ $orderby: ['$p.ok'] })],
     'interval.operands': [collection, F({ $where: { $overlaps: ['$it.o', '$it.o'] } })],
     'interval.probe': [collection,

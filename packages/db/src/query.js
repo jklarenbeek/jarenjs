@@ -34,7 +34,7 @@
 import { physicalSelection, columnCodec } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
-import { analyzeQuery } from '@jarenjs/json/query';
+import { analyzeQuery, JsonQueryRuntimeError } from '@jarenjs/json/query';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } from './errors.js';
 import { chain, attempt, isThenable } from './driver.js';
@@ -1653,7 +1653,7 @@ export function createEntityQueryEngine(context) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
     }
-    if (planned.plan?.group && dialect.name !== 'sqlite') {
+    if ((planned.plan?.group || planned.plan?.scalarAggregate) && dialect.name !== 'sqlite') {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: '$groupby', reason: 'entity grouping runtime guards are qualified for SQLite' }] };
     }
@@ -1872,11 +1872,30 @@ export function createEntityQueryEngine(context) {
     // the database cannot take (a missing external, a boolean, a null,
     // a region with no box) sends the call to the residual, where the
     // ENGINE raises its own error or answers with its own semantics
-    const params = entry.slots.map((slot) => slotValue(slot, externals));
-    if (params.some((value) => !bindable(value)))
+    const diverted = divertReason(entry, externals);
+    if (diverted !== null) {
+      entry.runtimeReason = diverted;
+      if (strict) throw new DbCompileError('JD0010',
+        `strict mode refused a residual: '${diverted.construct}' — ${diverted.reason}`);
+      if (profile?.refuseFullScan) throw profileEntityRefusal(
+        'the profile refuses the decoded scan required by the external binding', '/entities');
       return runResidual(entry, document, externals);
+    }
+    const params = entry.slots.map((slot) => slotValue(slot, externals));
     if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
     return chain(guardEntityScan(entry), () => chain(entry.statement, (statement) => {
+      if (entry.planned.plan.scalarAggregate) return chain(statement.get(params), (row) => {
+        admittedRows(entry, row ? [row] : []);
+        if (row?._valid === 0) throw new DbRuntimeError('JD2003', 'an aggregate column refuses a lossy or invalid value');
+        if (row?._nulls > 0) throw new JsonQueryRuntimeError('JQ2001', 'an aggregate requires numbers or strings, got null');
+        if (row?._safe === 0) {
+          entry.runtimeReason = { construct: 'aggregate', reason: 'integer accumulation exceeded its runtime exactness bound' };
+          if (strict) throw new DbCompileError('JD0010', entry.runtimeReason.reason);
+          if (profile?.refuseFullScan) throw profileEntityRefusal('the profile refuses the decoded scan required by integer accumulation', '/entities');
+          return runResidual(entry, document, externals);
+        }
+        return wrapValue(entry, row?.value ?? (entry.planned.plan.aggregate === 'sum' ? 0 : undefined));
+      });
       if (entry.planned.plan.aggregate === 'count')
         return chain(statement.get(params), (row) => { admittedRows(entry, row ? [row] : []); return wrapValue(entry, row?.value ?? 0); });
       return chain(statement.all(params), (rows) => {
@@ -1928,7 +1947,8 @@ export function createEntityQueryEngine(context) {
    */
   const divertReason = (entry, externals) => {
     for (const slot of entry.slots) {
-      if (bindable(slotValue(slot, externals))) continue;
+      const value = slotValue(slot, externals);
+      if (bindable(value) || (slot.nullable === true && value === null)) continue;
       const name = 'external' in slot ? slot.external
         : 'derived' in slot ? (slot.derived.kind === 'bboxAxis' ? slot.derived.external
           : [slot.derived.centre, slot.derived.radius].find((input) => 'external' in input)?.external) : null;
@@ -1949,6 +1969,10 @@ export function createEntityQueryEngine(context) {
    */
   const cursorClass = (entry, externals) => {
     const buffered = (barrier) => ({ streaming: 'buffered', barrier });
+    if (entry.planned.mode === 'native' && externals !== null) {
+      const diverted = divertReason(entry, externals);
+      if (diverted !== null) return buffered(diverted);
+    }
     if (entry.planned.wrapped === true) {
       return buffered({ construct: 'window', reason: BIND_REASONS.wrappedWindow });
     }
@@ -1997,11 +2021,20 @@ export function createEntityQueryEngine(context) {
         + 'entity binding — read it untracked, or return the binding itself');
     }
     const each = register === undefined ? (item) => item : (item) => register(retEntity, item);
+    entry.runtimeReason = null;
     const classified = cursorClass(entry, externals);
+    if (classified.barrier?.construct === 'external') {
+      entry.admitted = { statements: 0, rows: 0, bytes: 0 };
+      entry.runtimeReason = classified.barrier;
+      if (strict) throw new DbCompileError('JD0010',
+        `strict mode refused a residual: 'external' — ${classified.barrier.reason}`);
+      if (profile?.refuseFullScan) throw profileEntityRefusal(
+        'the profile refuses the decoded scan required by the external binding', '/entities');
+    }
     refuseBuffered(options, classified, entities.get(entry.planned.retEntity ?? '')?.docPath);
     const signal = options?.signal;
     const deadline = options?.deadline;
-    if (entry.planned.wrapped === true || entry.planned.plan?.group) {
+    if (entry.planned.wrapped === true || entry.planned.plan?.group || entry.planned.plan?.scalarAggregate) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(execute(document, options), (value) => entry.planned.wrapped === true
           ? [value] : value === undefined ? [] : Array.isArray(value) ? value : [value]) });

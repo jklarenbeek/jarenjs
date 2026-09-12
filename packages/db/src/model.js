@@ -557,7 +557,19 @@ export function relationTables(entities) {
  * @returns {any}
  */
 export function explainMapping(model) {
+  return mappingOf(model, normalizeEntities(model));
+}
+
+/** Normalize and map once for lightweight engines sharing model metadata.
+ * No process-global cache retains the model or any connection.
+ * @param {any} model @returns {{entities:Map<string,any>,mapping:any}} */
+export function compileEntityModel(model) {
   const entities = normalizeEntities(model);
+  return { entities, mapping: mappingOf(model, entities) };
+}
+
+/** @param {any} model @param {Map<string,any>} entities @returns {any} */
+function mappingOf(model, entities) {
   /** @type {any} */
   const mapping = { entities: {}, joinTables: {} };
 

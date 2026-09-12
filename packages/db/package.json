@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/db",
   "private": false,
-  "version": "0.84.3",
+  "version": "0.85.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -48,6 +48,22 @@
     "./node-pool": {
       "types": "./types/node-pool.d.ts",
       "default": "./src/drivers/node-pool.js"
+    },
+    "./relational": {
+      "types": "./types/relational.d.ts",
+      "default": "./src/relational-api.js"
+    },
+    "./query": {
+      "types": "./types/query.d.ts",
+      "default": "./src/query-api.js"
+    },
+    "./model": {
+      "types": "./types/model.d.ts",
+      "default": "./src/model-api.js"
+    },
+    "./entity": {
+      "types": "./types/entity.d.ts",
+      "default": "./src/entity.js"
     }
   },
   "files": [
@@ -88,9 +104,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.84.3",
-    "@jarenjs/json": "^0.84.3",
-    "@jarenjs/validate": "^0.84.3"
+    "@jarenjs/core": "^0.85.0",
+    "@jarenjs/json": "^0.85.0",
+    "@jarenjs/validate": "^0.85.0"
   },
   "bin": {
     "jaren-db": "./src/cli.js"

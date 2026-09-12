@@ -1,4 +1,6 @@
 //@ts-check
+import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './engine-metadata.js';
+export { JOBS_TABLE, JOB_CHECKPOINTS_TABLE };
 /**
  * @file The durable job queue (JOBS-FORMAT): enqueue, the
  * single-statement guarded claim (§3 — one statement is one
@@ -44,8 +46,8 @@ import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
 
-export const JOBS_TABLE = '_jaren_jobs';
-export const JOB_CHECKPOINTS_TABLE = '_jaren_job_checkpoints';
+
+
 
 /** §4 defaults, all overridable per worker. */
 export const JOB_DEFAULTS = Object.freeze({

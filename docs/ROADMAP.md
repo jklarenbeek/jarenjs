@@ -319,8 +319,9 @@ what each does is its own documentation's job
   precision erased by storage also cannot be inferred without metadata.
   Physical inventory now reports rowid/composite keys, source programs, defaults,
   nullability, FK actions, generated columns, views and predicates independently
-  of derivation. Remaining work is a lossless declaration vocabulary for these
-  SQL programs and stronger PostgreSQL catalog parity; adoption does not infer
+  of derivation. The explicit SQLite structural vocabulary now authors these declarations
+  ([native SQLite programs](../packages/db/docs/SQLITE-RELATIONAL.md)); automatic
+  lossless derivation and stronger PostgreSQL catalog parity remain open; adoption does not infer
   application intent from their DDL.
 - [ ] **Broader relational mapping and query qualification.** Explicit SQLite
   column layouts, codecs, read-only views and composite-key join-table entities
@@ -339,10 +340,10 @@ what each does is its own documentation's job
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history
-  retains SQL because its table has no declared primary key. Arbitrary correlation,
-  computed projections, cross-entity insert-select, partial/expression conflict
-  targets, store-invariant bulk preimages and PostgreSQL column mutations remain
-  open. Additional promotions need retained SQL/decoded-row parity, no-op and
+  retains SQL because its table has no declared primary key. The explicit SQLite surface now supports correlated/computed selections,
+  cross-table insert-select and partial/expression conflicts. Promotions into the
+  JSON query semantic contract, store-invariant bulk preimages and PostgreSQL
+  column mutations remain open. Additional promotions need retained SQL/decoded-row parity, no-op and
   rollback proofs, and explicit work costs; fluent syntax alone is not evidence.
 - [ ] **Relational recovery beyond the qualified SQLite hosts.** Explicit
   preservation plans, consistent committed-WAL backups, interrupted rebuild and
@@ -350,7 +351,9 @@ what each does is its own documentation's job
   under Node and Bun ([MIGRATION-FORMAT](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)).
   PostgreSQL snapshots, power-loss durability, deployment beyond the qualified
   Linux executables and actual downstream cutover still require named evidence.
-  Bun's serialized backup retains a full image in memory; bounded streaming snapshots remain open.
+  Both host entries now provide disk-backed standalone snapshots and Bun backup
+  no longer serializes the full database into JavaScript. Incremental progress,
+  page-identical unaliased rowid preservation and interruption remain separate work.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering

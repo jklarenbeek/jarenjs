@@ -66,12 +66,24 @@ export interface PhysicalLayout {
   readonly table: string;
   readonly kind?: 'table' | 'view';
   readonly keys?: readonly string[];
+  readonly constraints?: readonly object[];
+  readonly indexes?: readonly object[];
+  readonly triggers?: readonly object[];
+  readonly strict?: boolean;
+  readonly withoutRowid?: boolean;
   readonly columns: Readonly<Record<string, {
     readonly name: string;
     readonly codec: 'text' | 'integer' | 'number' | 'boolean' | 'json' | 'date' | 'datetime' | 'epoch-ms' | 'bigint' | 'decimal' | 'blob-hex';
     readonly null: 'null' | 'absent' | 'reject';
     readonly default?: 'database';
     readonly generated?: boolean;
+    readonly type?: 'INTEGER' | 'REAL' | 'TEXT' | 'BLOB' | 'NUMERIC';
+    readonly defaultValue?: unknown;
+    readonly collation?: 'BINARY' | 'NOCASE' | 'RTRIM';
+    readonly identity?: 'rowid' | 'autoincrement';
+    readonly check?: unknown;
+    readonly generatedExpression?: unknown;
+    readonly stored?: boolean;
   }>>;
 }
 

@@ -494,3 +494,20 @@ export const sqliteDialect = createDialect({
   },
   readChecks: sqliteChecks,
 });
+
+/** SQLite schema inspection and identity preservation statements. */
+export const sqliteTableMigration = Object.freeze({
+    schema: () => "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND substr(name,1,7) <> 'sqlite_' ORDER BY type,name",
+    tableList: () => 'PRAGMA table_list',
+    sequenceExists: () => "SELECT 1 AS present FROM sqlite_schema WHERE name='sqlite_sequence'",
+    sequence: () => 'SELECT CAST(seq AS TEXT) AS seq FROM sqlite_sequence WHERE name=?',
+    raiseSequence: () => 'UPDATE sqlite_sequence SET seq=MAX(seq,CAST(? AS INTEGER)) WHERE name=?',
+    seedSequence: () => 'INSERT INTO sqlite_sequence(name,seq) SELECT ?,CAST(? AS INTEGER) WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name=?)',
+});
+
+/** Infer the storage declaration for a physical codec.
+ * @param {string} codec @returns {string} */
+export function sqlitePhysicalColumnType(codec) {
+  return ['integer', 'bigint', 'boolean', 'epoch-ms'].includes(codec)
+    ? 'INTEGER' : codec === 'number' ? 'REAL' : codec === 'blob-hex' ? 'BLOB' : 'TEXT';
+}

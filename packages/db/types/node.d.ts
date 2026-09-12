@@ -88,3 +88,6 @@ export declare function openNullTarget(): DocumentTarget;
 /** Read an explicit collection bundle, materialized under the declared bounds. */
 export declare function readCollectionBundle(source: DocumentByteSource,
   bounds: { maxBytes: number | null; maxRows: number | null }): Promise<Record<string, unknown[]>>;
+
+/** Disk-backed consistent snapshot; refuses an existing destination. */
+export declare function snapshotDatabase(connection: unknown, target: string): Promise<{ path: string; pages: number }>;

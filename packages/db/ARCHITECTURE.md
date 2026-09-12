@@ -1167,8 +1167,10 @@ calls with different bound values.
 `physical.js` compiles column codecs and verifies declarations against that
 inventory. The existing entity core, tracker and graph row merger execute both
 hybrid and column layouts; there is no separate relational store. The query
-planner reports decoded evaluation for physical codecs, and refuses physical
-keyset continuation until its identity semantics are qualified.
+planner preserves codec semantics through qualified native plans and explicit
+residuals, and refuses physical keyset continuation until its identity semantics
+are qualified. Present-null scalar predicates and safe fluent projection
+flattening join this native subset; strict binding failures stop before a scan.
 
 `sql.js` binds trusted statements to `store.js` transaction views. It reuses the
 read classifier's tokenizer and the driver's scope owner. Writes invalidate all
@@ -1176,6 +1178,21 @@ clean tracked entities; pending edits and incomplete capture populations refuse.
 `invariants.js` uses the shared Query compiler for store rules; the dialect lowers
 a bounded database subset into ordered trigger bodies. `migrate.js` reuses its
 existing rebuild/receipt transaction and verifies preservation before publication.
-The backup publisher remains shared by Node online and Bun serialized snapshots.
+The backup publisher uses Node online backup and Bun disk-backed VACUUM INTO.
+The standalone snapshot helper shares destination reservation and cleanup across
+both hosts, including transaction failures.
 
 `src/search.js` composes core lexical mechanics and the JSON predicate compiler over complete bounded entity snapshots. Committed capture and data-version checks invalidate derived state; SHA-256 source content validates persisted caches across reopen. Snapshot storage uses existing collection transactions. See [search execution](docs/SEARCH.md); native full-text dialects remain unqualified.
+
+`dialects/sqlite-relational.js` owns the explicit SQLite expression and statement
+compiler; `dialects/sqlite-schema.js` reuses it for ordered tables, indexes and
+triggers. `table-migration.js` owns reviewed source/target guards, native copying
+and preservation checks, with catalog/pragma spellings in the SQLite dialect.
+The supplied driver owns transactions and cursors. These programs are explicitly
+SQLite-semantic and never enter the JSON residual evaluator. See
+[the native SQLite contract](docs/SQLITE-RELATIONAL.md).
+
+`engine-metadata.js` holds inert version/table constants so schema inspection
+does not import runtime owners. `/query`, `/model` and `/entity` expose those
+mechanisms without the root store import. `compileEntityModel` performs one model
+normalization for both entities and mapping; openStore reuses that result.

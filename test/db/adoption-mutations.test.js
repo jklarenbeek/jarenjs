@@ -146,8 +146,7 @@ describe('native column mutation plans', () => {
         { ...select, source: 'Catalog' }, { ...select, select: {} }, { ...select, select: null },
         { ...select, select: { sku: '$it.quantity', environment: '$it.environment' } },
         { ...select, select: { sku: '$it.sku', environment: '$it.environment', revision: { $literal: 2 } } },
-        { ...select, select: { sku: 'not a path', environment: '$it.environment' } },
-        { ...select, where: { $eq: ['$it.quantity', null] } }]) {
+        { ...select, select: { sku: 'not a path', environment: '$it.environment' } }]) {
         await assert.rejects(store.entity('Inventory').mutate(document));
       }
       for (const document of [{ ...upsert, values: null }, { ...upsert, update: [] },

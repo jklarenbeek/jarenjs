@@ -1379,6 +1379,10 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/package.json` | metadata | — |
 | `@jarenjs/db/node-worker` | JavaScript | declared |
 | `@jarenjs/db/node-pool` | JavaScript | declared |
+| `@jarenjs/db/relational` | JavaScript | declared |
+| `@jarenjs/db/query` | JavaScript | declared |
+| `@jarenjs/db/model` | JavaScript | declared |
+| `@jarenjs/db/entity` | JavaScript | declared |
 <!--/fact-->
 
 
@@ -1431,3 +1435,10 @@ SQLite constraint/audit triggers for installation through that migration boundar
 Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.
 
 `@jarenjs/db/search` composes the resident ranker with bounded authoritative entity reads and optional atomic snapshot storage. See [persisted search](docs/SEARCH.md).
+
+Column-first table definitions, guarded same-connection rebuilds, exact matched writes,
+partial conflicts, raw-text JSON queries and byte-valued operations use
+[`@jarenjs/db/relational`](docs/SQLITE-RELATIONAL.md). Both host entries export
+`snapshotDatabase(connection, newPath)` for a disk-backed committed-WAL copy.
+Existing-connection consumers can import `/query`, `/model` and `/entity`;
+`compileEntityModel` shares one normalization between queries and mapping.

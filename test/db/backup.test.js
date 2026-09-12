@@ -309,16 +309,15 @@ describe('the temporary path', () => {
 });
 
 
-it('the Bun serialized-snapshot adapter publishes exact bytes and removes a cancelled temporary', async () => {
+it('the Bun disk snapshot adapter never serializes and removes a cancelled temporary', async () => {
   const { fromBunModule } = await import('@jarenjs/db/bun');
   const source = tempDbPath(), destination = tempDbPath();
   let store;
   try {
     const seed = await seeded(source.dbPath, 2); await seed.close();
-    // The substitute models serialize's byte result; actual Bun/WAL semantics
-    // are exercised by the subprocess recovery matrix on the real runtime.
+    // Any use of the unbounded serialization path must fail this test.
     class SerializedDatabase extends BunShapedDatabase {
-      serialize() { return fs.readFileSync(source.dbPath); }
+      serialize() { throw new Error('unbounded serialization'); }
     }
     const driver = { name: 'bun-serialized-double', dialect: sqliteDialect,
       open: (file) => fromBunModule({ Database: SerializedDatabase }, file) };

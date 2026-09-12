@@ -66,7 +66,7 @@ export {
   applyMandatoryPredicate, applyRowBound,
 } from './profile.js';
 export { translatePatch } from './patch-sql.js';
-export { normalizeEntities, explainMapping, relationTables } from './model.js';
+export { normalizeEntities, explainMapping, compileEntityModel, relationTables } from './model.js';
 export { planEntity, planJoinTable } from './ddl.js';
 export { entityCore } from './entity.js';
 export { entityEmitModel } from './emit-model.js';
@@ -103,3 +103,6 @@ export { REPLICATION_VERSION, REPLICATION_DEFAULTS, normalizeFrontier,
 
 export { planInvariants } from './ddl.js';
 export { planPhysicalMigration } from './migrate.js';
+export { sql, planRelational, relational } from './dialects/sqlite-relational.js';
+export { defineTable, planTable } from './dialects/sqlite-schema.js';
+export { planTableMigration, applyTableMigration, withForeignKeysSuspended } from './table-migration.js';

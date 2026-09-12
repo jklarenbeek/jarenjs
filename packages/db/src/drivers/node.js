@@ -120,6 +120,8 @@ export function nodeDriver() {
   });
 }
 
+export { snapshotDatabase } from './snapshot.js';
+
 export {
   readDocuments, readJsonDocuments, readJsonlDocuments, readCollectionBundle,
   openAtomicTarget, openStreamTarget, openNullTarget,

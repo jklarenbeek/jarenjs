@@ -11,9 +11,9 @@
       "role": "physical discovery and preserve/refuse",
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
-        "153:export function readSchema(connection, options = undefined) {",
-        "556:export function introspectModel(connection, options = undefined) {",
-        "567:  return chain(readSchema(connection, options), (schema) => {"
+        "152:export function readSchema(connection, options = undefined) {",
+        "555:export function introspectModel(connection, options = undefined) {",
+        "566:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },

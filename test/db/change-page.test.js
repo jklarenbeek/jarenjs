@@ -373,7 +373,8 @@ describe('the high watermark is file truth (LIVE-FORMAT §5)', () => {
     const body = readBounds.slice(0, readBounds.indexOf('\n  }\n') + 4);
     assert.ok(!/\bseq\b/.test(body), 'readBounds reads the table, never the process counter');
     assert.ok(!/Date\.now|clock\(\)/.test(body), 'and never a clock');
-    assert.strictEqual((capture.match(/CHANGES_STATE_TABLE = /g) ?? []).length, 1, 'one durable watermark table');
+    const metadata = fs.readFileSync(new URL('../../packages/db/src/engine-metadata.js', import.meta.url), 'utf8');
+    assert.strictEqual(((capture + metadata).match(/CHANGES_STATE_TABLE = /g) ?? []).length, 1, 'one durable watermark table');
     assert.strictEqual((capture.match(/allocate:/g) ?? []).length, 1, 'one allocation statement');
   });
 });

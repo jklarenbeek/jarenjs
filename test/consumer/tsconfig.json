@@ -21,7 +21,8 @@
     "providers.ts",
     "durable-types.ts",
     "linq-formula.ts",
-    "studio-editors.ts"
+    "studio-editors.ts",
+    "db-relational.ts"
   ],
   "include": [
     "linq-*.ts"

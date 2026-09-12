@@ -7,3 +7,6 @@ export declare function bunDriver(): Driver;
 export declare function adaptBunDatabase(db: unknown): unknown;
 /** Construct and adapt from a loaded `bun:sqlite`-shaped module. */
 export declare function fromBunModule(mod: unknown, path: string, options?: unknown): unknown;
+
+/** Disk-backed consistent snapshot; refuses an existing destination. */
+export declare function snapshotDatabase(connection: unknown, target: string): Promise<{ path: string; pages: number }>;

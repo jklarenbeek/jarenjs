@@ -2352,7 +2352,9 @@ relation navigation across physical layouts is not qualified.
 | `decimal` | exact decimal string, including trailing zeros | TEXT |
 | `blob-hex` | lowercase hexadecimal string | BLOB |
 
-Unsafe narrowing refuses `JD2003`. A byte handle never enters the public entity.
+Unsafe narrowing refuses `JD2003`. A byte handle never enters the JSON-facing entity;
+[the native SQLite channel](SQLITE-RELATIONAL.md#exact-writes-and-bytes) preserves
+Uint8Array/Buffer values on the same synchronous connection.
 `null: "null"` maps SQL NULL to present JSON null; `"absent"` omits the property;
 `"reject"` refuses it. With the JSON codec, JSON null is stored as the text `null`,
 so SQL NULL can independently mean absence. `default: "database"` omits an absent
@@ -2361,9 +2363,10 @@ writes to the database. A generated integer identity uses the existing
 `x-entity.default: "auto"` declaration. Direct updates with identical values and
 identical tracked saves produce no effective writes.
 
-Mapped query documents execute through the existing decoded-row evaluator;
-explanations report this residual and strict pushdown refuses it. Scalar graph
-loads use mapped names; complex codec predicates require query documents.
+Mapped query documents use the qualified native subset in [NATIVE-PLANS](NATIVE-PLANS.md).
+Present-null scalar equality/ranges preserve Jaren semantics. Unsupported codecs
+and shapes retain explicit residuals; strict mode also rejects unsupported bound
+externals before fetching rows. Scalar graph loads use mapped names.
 Physical `page` and `after` continuation refuse until codec-aware keysets are
 qualified; an explicit `take`/`skip` load remains available.
 Capture/live/replication for adopted application triggers is not qualified and
@@ -2414,3 +2417,10 @@ must stay in the safe-number range.
 ## Native column mutation documents
 
 Asynchronous entity sets expose `mutate(document)` for conditional updates, conflict-aware upserts and bounded same-entity insert-select. The closed grammar, no-op/revision behavior, output bounds and transactional qualifications are specified in [NATIVE-PLANS](NATIVE-PLANS.md).
+
+Explicit physical DDL metadata and live-schema migration planning are specified
+in [SQLITE-RELATIONAL](SQLITE-RELATIONAL.md#physical-schema-ownership). Opening a
+physical entity retains adoption-only behavior. Public plans create complete
+ordered declarations; an incomplete generated/default definition or view remains
+adoption metadata. SQLite expressions preserve a separate, explicit semantic
+contract for raw text, bytes, nulls, collations and floating totals.

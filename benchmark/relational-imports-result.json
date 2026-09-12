@@ -1,0 +1,139 @@
+{
+  "node": "v24.20.0",
+  "platform": "linux",
+  "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
+  "candidateVersion": "0.84.3",
+  "measurements": [
+    {
+      "name": "published-root",
+      "imports": [
+        "@jarenjs/db"
+      ],
+      "samples": [
+        {
+          "elapsedMs": 95.68222699999998,
+          "rssBytes": 84856832,
+          "rssDeltaBytes": 30175232,
+          "heapDeltaBytes": 6520792
+        },
+        {
+          "elapsedMs": 96.45823,
+          "rssBytes": 84955136,
+          "rssDeltaBytes": 30412800,
+          "heapDeltaBytes": 6520848
+        },
+        {
+          "elapsedMs": 93.17173,
+          "rssBytes": 85331968,
+          "rssDeltaBytes": 30752768,
+          "heapDeltaBytes": 6683208
+        }
+      ],
+      "median": {
+        "elapsedMs": 95.68222699999998,
+        "rssBytes": 84955136,
+        "rssDeltaBytes": 30412800,
+        "heapDeltaBytes": 6520848
+      }
+    },
+    {
+      "name": "candidate-root",
+      "imports": [
+        "@jarenjs/db"
+      ],
+      "samples": [
+        {
+          "elapsedMs": 93.369287,
+          "rssBytes": 86347776,
+          "rssDeltaBytes": 31727616,
+          "heapDeltaBytes": 7149608
+        },
+        {
+          "elapsedMs": 96.126874,
+          "rssBytes": 86343680,
+          "rssDeltaBytes": 31932416,
+          "heapDeltaBytes": 6636008
+        },
+        {
+          "elapsedMs": 95.87744,
+          "rssBytes": 85921792,
+          "rssDeltaBytes": 31244288,
+          "heapDeltaBytes": 6757392
+        }
+      ],
+      "median": {
+        "elapsedMs": 95.87744,
+        "rssBytes": 86343680,
+        "rssDeltaBytes": 31727616,
+        "heapDeltaBytes": 6757392
+      }
+    },
+    {
+      "name": "candidate-engines",
+      "imports": [
+        "@jarenjs/db/query",
+        "@jarenjs/db/model",
+        "@jarenjs/db/entity"
+      ],
+      "samples": [
+        {
+          "elapsedMs": 62.396787999999994,
+          "rssBytes": 77639680,
+          "rssDeltaBytes": 23162880,
+          "heapDeltaBytes": 4890744
+        },
+        {
+          "elapsedMs": 62.095698,
+          "rssBytes": 77709312,
+          "rssDeltaBytes": 22994944,
+          "heapDeltaBytes": 4618976
+        },
+        {
+          "elapsedMs": 69.613196,
+          "rssBytes": 78815232,
+          "rssDeltaBytes": 24158208,
+          "heapDeltaBytes": 4501112
+        }
+      ],
+      "median": {
+        "elapsedMs": 62.396787999999994,
+        "rssBytes": 77709312,
+        "rssDeltaBytes": 23162880,
+        "heapDeltaBytes": 4618976
+      }
+    },
+    {
+      "name": "candidate-relational",
+      "imports": [
+        "@jarenjs/db/relational"
+      ],
+      "samples": [
+        {
+          "elapsedMs": 17.127256000000003,
+          "rssBytes": 58605568,
+          "rssDeltaBytes": 4063232,
+          "heapDeltaBytes": 738712
+        },
+        {
+          "elapsedMs": 16.400674000000002,
+          "rssBytes": 58769408,
+          "rssDeltaBytes": 3960832,
+          "heapDeltaBytes": 860528
+        },
+        {
+          "elapsedMs": 17.657372000000002,
+          "rssBytes": 58744832,
+          "rssDeltaBytes": 4194304,
+          "heapDeltaBytes": 738712
+        }
+      ],
+      "median": {
+        "elapsedMs": 17.127256000000003,
+        "rssBytes": 58744832,
+        "rssDeltaBytes": 4063232,
+        "heapDeltaBytes": 738712
+      }
+    }
+  ],
+  "limitation": "Fresh-process import deltas only; application RSS and allocations during queries are separate measurements."
+}

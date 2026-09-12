@@ -20,6 +20,7 @@ import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
+import { planTable } from './dialects/sqlite-schema.js';
 
 /** The fixed physical column names of the 0.1 mapping. */
 export const KEY_COLUMN = 'key';
@@ -903,9 +904,13 @@ export function verifyShape(connection, plan, collection, docPath) {
  *   columnNames: Set<string> }}
  */
 export function planEntity(name, entityMapping, entities, dialect) {
-  if (entityMapping.document === false) return { table: entityMapping.table,
-    physical: { ...entityMapping, triggers: dialect.invariantTriggers?.(entityMapping, entities, dialect) ?? [] }, createSql: [], expected: { columns: [], indexes: [] },
-    columnNames: new Set(entityMapping.columns.map((c) => c.physical)) };
+  if (entityMapping.document === false) {
+    const declared = entityMapping.ddl && dialect.name === 'sqlite' ? planTable(entityMapping.ddl) : null;
+    return { table: entityMapping.table,
+      physical: { ...entityMapping, triggers: dialect.invariantTriggers?.(entityMapping, entities, dialect) ?? [] },
+      createSql: declared?.createSql ?? [], expected: declared?.expected ?? { columns: [], indexes: [] },
+      columnNames: new Set(entityMapping.columns.map((c) => c.physical)) };
+  }
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
   const keyType = (entityName) => {
     const target = entities.entities[entityName];

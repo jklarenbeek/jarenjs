@@ -507,6 +507,16 @@ export class Sequence {
   }
 
   * [Symbol.iterator]() {
+    if (this.#sourceKind === 'provider' && typeof this.#source.syncQuery === 'function') {
+      const document = this.toDocument();
+      const cursor = this.#source.syncQuery(document === this.#root
+        ? { $for: { it: this.#root }, $return: '$it' } : document,
+      { externals: Object.fromEntries(this.#params) });
+      if (cursor == null || typeof cursor[Symbol.iterator] !== 'function')
+        throw new LinqRuntimeError('JL2004', 'syncQuery() must return a synchronous iterable cursor');
+      yield* cursor;
+      return;
+    }
     yield* this.toArray();
   }
 

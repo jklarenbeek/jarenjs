@@ -4,6 +4,8 @@ import { getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339 } from '@jarenjs/c
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { planTable } from './dialects/sqlite-schema.js';
+import { sqlitePhysicalColumnType } from './dialects/sqlite.js';
 
 const compiledCodecs = new WeakMap();
 const CODECS = new Set(['text', 'integer', 'number', 'boolean', 'json', 'date', 'datetime', 'epoch-ms', 'bigint', 'decimal', 'blob-hex']);
@@ -19,7 +21,7 @@ export function normalizePhysical(physical, properties, keys, path) {
   const fail = (reason) => { throw new DbCompileError('JD0005', reason, `${path}/physical`); };
   if (!physical || typeof physical !== 'object' || Array.isArray(physical)) fail('physical must be an object');
   for (const key of Object.keys(physical))
-    if (!['table', 'kind', 'keys', 'columns'].includes(key)) fail(`unknown physical member '${key}'`);
+    if (!['table', 'kind', 'keys', 'columns', 'constraints', 'indexes', 'triggers', 'strict', 'withoutRowid'].includes(key)) fail(`unknown physical member '${key}'`);
   if (!identifier(physical.table)) fail('physical.table must be a nonempty SQL identifier');
   if (physical.kind !== undefined && !['table', 'view'].includes(physical.kind)) fail('physical.kind is table or view');
   if (!physical.columns || typeof physical.columns !== 'object' || Array.isArray(physical.columns)) fail('physical.columns is required');
@@ -28,26 +30,54 @@ export function normalizePhysical(physical, properties, keys, path) {
     || ordered.some((key) => !keys.includes(key))) fail('physical.keys must order every declared key exactly once');
   const used = new Set();
   const columns = [];
-  for (const [name, property] of properties) {
+  for (const name of Object.keys(physical.columns))
+    if (!properties.has(name) || properties.get(name).relation) fail(`column '${name}' is not a stored property`);
+  for (const [name, property] of properties)
+    if (!property.relation && !Object.hasOwn(physical.columns, name)) fail(`'${name}' needs an explicit supported column codec`);
+  const definitions = [];
+  for (const name of Object.keys(physical.columns)) {
+    const property = properties.get(name);
     if (property.relation) continue;
     const c = physical.columns[name];
     if (!c || typeof c !== 'object' || Array.isArray(c) || !CODECS.has(c.codec)) fail(`'${name}' needs an explicit supported column codec`);
     for (const key of Object.keys(c))
-      if (!['name', 'codec', 'null', 'default', 'generated'].includes(key)) fail(`unknown column member '${key}'`);
+      if (!['name', 'codec', 'null', 'default', 'generated', 'type', 'defaultValue', 'collation', 'identity', 'check', 'generatedExpression', 'stored'].includes(key)) fail(`unknown column member '${key}'`);
     if (!identifier(c.name) || used.has(c.name.toLowerCase())) fail(`'${name}' needs a distinct physical column name`);
     if (!['null', 'absent', 'reject'].includes(c.null)) fail(`'${name}' must declare SQL NULL as null, absent or reject`);
+    if (c.type !== undefined && c.type !== sqlitePhysicalColumnType(c.codec)) fail(`'${name}' declares an affinity incompatible with its codec`);
+    if (c.stored !== undefined && (typeof c.stored !== 'boolean' || c.generatedExpression === undefined))
+      fail(`'${name}' needs an explicit generated expression for stored ownership`);
     if (c.default !== undefined && c.default !== 'database') fail('column default ownership is database');
     if (c.generated !== undefined && typeof c.generated !== 'boolean') fail('generated must be boolean');
     if (property.key && (!['text', 'integer', 'bigint'].includes(c.codec) || c.null !== 'reject')) fail('keys require non-null text, integer or bigint codecs');
     if (property.column !== undefined) fail('physical codecs replace hybrid column overrides');
-    if (c.default === 'database' && property.default !== undefined && property.default !== 'auto') fail('a default has exactly one owner');
+    if ((c.default === 'database' || Object.hasOwn(c, 'defaultValue')) && property.default !== undefined && property.default !== 'auto') fail('a default has exactly one owner');
+    if (c.generatedExpression !== undefined && c.generated === false) fail('a generated expression requires generated ownership');
     used.add(c.name.toLowerCase());
-    columns.push({ name, physical: c.name, codec: c.codec, null: c.null, databaseDefault: c.default === 'database',
-      generated: c.generated === true, storage: STORAGE[c.codec], source: 'column', key: property.key });
+    columns.push({ name, physical: c.name, codec: c.codec, null: c.null, databaseDefault: c.default === 'database' || Object.hasOwn(c, 'defaultValue'),
+      generated: c.generated === true || c.generatedExpression !== undefined, storage: STORAGE[c.codec], source: 'column', key: property.key });
+    definitions.push({ name: c.name,
+      type: c.type ?? sqlitePhysicalColumnType(c.codec),
+      nullable: c.null !== 'reject',
+      ...(Object.hasOwn(c, 'defaultValue') ? { default: c.defaultValue } : {}),
+      ...(c.identity !== undefined || property.default === 'auto' ? { identity: c.identity ?? 'rowid' } : {}),
+      ...(c.collation === undefined ? {} : { collation: c.collation }),
+      ...(c.check === undefined ? {} : { check: c.check }),
+      ...(c.generatedExpression === undefined ? {} : { generated: c.generatedExpression, stored: c.stored === true }),
+    });
   }
   for (const name of Object.keys(physical.columns))
     if (!properties.has(name) || properties.get(name).relation) fail(`column '${name}' is not a stored property`);
-  return { table: physical.table, kind: physical.kind ?? 'table', keys: [...ordered], columns };
+  const definition = { name: physical.table, columns: definitions,
+    primaryKey: ordered.map((key) => physical.columns[key].name),
+    ...Object.fromEntries(['constraints', 'indexes', 'triggers', 'strict', 'withoutRowid']
+      .filter((key) => physical[key] !== undefined).map((key) => [key, physical[key]])) };
+  if (physical.kind !== 'view') planTable(definition);
+  // Database-owned expressions must be explicit before DDL can own them.
+  const ddl = physical.kind === 'view' || columns.some((c, i) => (c.generated && definitions[i].generated === undefined)
+    || (c.databaseDefault && !Object.hasOwn(definitions[i], 'default')))
+    ? null : definition;
+  return { table: physical.table, kind: physical.kind ?? 'table', keys: [...ordered], columns, ddl };
 }
 
 /** Compile one codec once, with a JSON-safe public value and a bound SQL value.

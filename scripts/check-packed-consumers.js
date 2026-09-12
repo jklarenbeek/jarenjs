@@ -473,7 +473,7 @@ const tools: ToolDefinition[] = contractTools(contract, client);
 void [tools[0]?.name, tools[0]?.inputSchema];
 client.close();
 `,
-  '@jarenjs/db': `
+  '@jarenjs/db': readFileSync(join(root, 'test/consumer/db-relational.ts'), 'utf8') + `
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { bunDriver } from '@jarenjs/db/bun';

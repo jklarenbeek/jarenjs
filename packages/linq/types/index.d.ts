@@ -457,6 +457,8 @@ export interface Provider<T = unknown> {
   /** The item phantom: never present at runtime; what `from` infers `T` from. */
   readonly __item?: T;
   execute(document: unknown, options: { externals: Record<string, unknown> }): unknown;
+  /** Optional native synchronous cursor; iteration closes it on early return. */
+  syncQuery?(document: unknown, options: { externals: Record<string, unknown> }): Iterable<T>;
   /** The root expression the items are bound through (`'$.Post[*]'`);
    * absent means the whole input, `'$[*]'`. */
   readonly root?: string;

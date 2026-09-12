@@ -3,17 +3,17 @@
   "rows": [
     {
       "grammar": "model",
-      "sourceHash": "e0457754c71c4d95e6383b305ee1ff0f64c868e0d3746779ba8ee06ff83473c5",
+      "sourceHash": "72581969be5c4a4a1d8b31005cf310cae1c83c284786a8dab0efd40aadb9fc58",
       "seamHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "profileHash": "cd036e1bcd47f40255341038fb77ae0f88b27daf4dbd328da9577c46eae2d1a6",
+      "profileHash": "b41d15a095ce8a654979ab492be21d17df76d5b61a2bc28618716e1fc8af66b4",
       "open": [],
       "full": {
-        "bytes": 8972,
-        "branches": 7
+        "bytes": 10661,
+        "branches": 13
       },
       "profile": {
-        "bytes": 8903,
-        "branches": 7
+        "bytes": 10592,
+        "branches": 13
       }
     },
     {

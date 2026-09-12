@@ -1,4 +1,6 @@
 //@ts-check
+import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './engine-metadata.js';
+export { CHANGES_TABLE, CHANGES_STATE_TABLE };
 /**
  * @file Change capture (D13): committed writes become an observable,
  * ordered stream of RFC 6902 patches — derived from SQLite's own
@@ -37,13 +39,13 @@ import { chain, attempt } from './driver.js';
 import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './cursor.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
-export const CHANGES_TABLE = '_jaren_changes';
+
 /**
  * The log's durable state: one row holding the highest sequence ever
  * allocated for this file, so the high watermark survives a log that
  * retention or maintenance has emptied (LIVE-FORMAT §5).
  */
-export const CHANGES_STATE_TABLE = '_jaren_changes_state';
+
 export const DEFAULT_RETENTION = 1000;
 
 /** A driver failure met by the change reader, classified — never raw. */

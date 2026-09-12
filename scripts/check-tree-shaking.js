@@ -411,11 +411,11 @@ const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
-// Native column projections/aggregates, mutation compilation and bounded ranges
-// are carried by the client. Their measured increase is published in the bundle
-// baseline; the 690 kB structural ceiling admits those new capabilities. Import
-// exclusions and independently frozen consumer resource ceilings remain intact.
-if (clientBytes > 690000)
+// The complete store client now carries the explicit SQLite expression/schema
+// compiler, present-null and scalar-aggregate guards, and exact mutation options.
+// Publish this feature cost in the measured baseline. Lightweight public engine
+// imports have separate closure assertions; application RSS ceilings are unchanged.
+if (clientBytes > 735000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -49,6 +49,13 @@ Floating sums/averages and date/datetime grouping remain residual. Physical text
 comparisons explicitly use codepoint collation, independent of a column's declared
 collation; an incompatible index may therefore stop helping that query.
 
+Safe identity/object projection chains, including a projected join followed by
+filtering and ordering, flatten without crossing windows, grouping or inner
+ordering. Standalone min/max over supported scalar columns and sum/avg over safe
+integer columns now lower natively, preserving empty-sequence and present-null
+errors. Missing or unbindable external values refuse strict execution and both
+cursor APIs before any decoded fetch; a nullable slot accepts explicit null.
+
 `explain` reports the emitted SQL, scan narrative, profile bounds and last
 execution's admitted statement/returned-row/serialized-wire-byte counts. These
 are application admission costs. SQLite does not expose visited-row counts or
@@ -73,12 +80,13 @@ const result = await store.entity('Inventory').mutate({
 });
 ```
 
-The three operations are:
+The operations are:
 
 | Operation | Required document members | Meaning |
 |---|---|---|
-| `update` | `key`, `set`; `expectedRevision` for a versioned entity | Complete primary key and revision predicate; writes only changed columns and increments the revision once. Missing/stale/identical rows yield zero affected rows. |
-| `upsert` | `values`, `conflict`, `update` | Insert or update the named supplied members only if their stored values differ. `conflict` is the complete ordered primary key. |
+| `update` | `key` and/or `where`, `set` and/or `expressions`; `expectedRevision` for a versioned entity | Exact assignments with an atomic predicate. Default changed reporting suppresses identical writes; `reporting: 'matched'` executes them. A declared version increments once on a write. |
+| `upsert` | `values`, `conflict`; `update` or `onConflict: 'nothing'` | Ordered logical conflict columns may name a non-primary UNIQUE identity; `conflictWhere` matches a partial index. Default changed reporting suppresses identical updates. |
+| `delete` | `key` and/or `where`; `expectedRevision` for a versioned entity | One conditional or bulk delete, with the same transactional output bounds. |
 | `insert-select` | `source`, `where`, `select`, `conflict`, `onConflict: 'nothing'` | Same-entity scalar/literal projection, bounded source rows, conflict-ignore insertion. Source and target path codecs and NULL policies must match. |
 
 `returning` is a nonempty list of logical stored members (default: all). `maxRows`
@@ -92,14 +100,23 @@ before insertion, even if all rows would conflict. Output bounds and codec/schem
 validation run inside the transaction; failure rolls back rows and trigger effects.
 The byte bound checks decoded output, not a database allocation interrupt.
 The statement's `RETURNING` view follows SQLite timing; later AFTER-trigger
-modifications are not an extra readback. Same-input replay yields no effective
-write, no revision increment and no additional trigger effects.
+modifications are not an extra readback. Changed-reporting same-input literal replay yields no effective write, revision
+increment or additional trigger effects. Matched reporting and arithmetic
+expressions intentionally may write on repeat.
 
 Mutations are untracked. Re-read affected rows before subsequent tracked editing;
 a previously tracked revision remains stale and retains normal conflict checks.
 Use `tx.entity(name).mutate(document)` to compose writes, receipts and jobs in one
-transaction. An outer failure rolls everything back. No synchronous `mutate`
-facade or generic bulk mutation expression language is declared.
+transaction. An outer failure rolls everything back. `entityCore` on a synchronous
+connection also settles these mutations synchronously. `where` accepts a native
+Jaren predicate or structural `sql` expression; `expressions` maps exact logical
+assignment names to `sql` expressions, with logical columns resolved to physical
+names. A member cannot appear in both `set` and `expressions`.
+
+For cross-table insert-select, expression conflict updates, raw JSON text, bytes
+and complete SQLite null/collation semantics use the explicit
+[native SQLite surface](SQLITE-RELATIONAL.md). It shares expression emission with
+entity mutations while retaining its own native SQL result contract.
 
 ## Bounded ranges and live qualification
 

@@ -41,7 +41,7 @@ function compareRefs(pred, read) {
 }
 
 /**
- * @typedef {{ external: string } | { literal: unknown } |
+ * @typedef {{ external: string, nullable?: boolean } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
  *   { derived: { kind: 'circleAxis', centre: { external: string } | { literal: unknown },
@@ -659,15 +659,20 @@ export function createEntityPredicateEmitters(dialect, param) {
 
   const emitColumnPred = (aliasSql, pred) => {
     const column = physicalComparable(pred.ref, `${aliasSql}.${q(pred.ref.column)}`, dialect);
+    const presentNull = pred.ref.nullPolicy === 'null';
+    const present = presentNull ? dialect.booleanLiteral(true) : `${column} IS NOT NULL`;
     if (pred.p === 'typeIs') {
       if (pred.types.length === 0)
-        return pred.positive ? `${column} IS NOT NULL` : `${column} IS NULL`;
+        return pred.positive ? present : presentNull ? dialect.booleanLiteral(false) : `${column} IS NULL`;
       if (pred.types[0] === 'null')
-        return pred.positive ? dialect.booleanLiteral(false) : `${column} IS NOT NULL`;
+        return pred.positive ? presentNull ? `${column} IS NULL` : dialect.booleanLiteral(false) : `${column} IS NOT NULL`;
+      if (pred.ref.storage !== 'boolean')
+        return pred.positive ? dialect.booleanLiteral(false) : present;
       const wanted = pred.types[0] === 'true' ? 1 : 0;
       return pred.positive
         ? `(${column} IS NOT NULL AND ${column} = ${param({ literal: wanted })})`
-        : `(${column} IS NOT NULL AND ${column} <> ${param({ literal: wanted })})`;
+        : presentNull ? `${column} IS NOT ${param({ literal: wanted })}`
+          : `(${column} IS NOT NULL AND ${column} <> ${param({ literal: wanted })})`;
     }
     if (pred.p === 'strop') {
       const form = stropForm(dialect, param, column, pred);
@@ -675,6 +680,26 @@ export function createEntityPredicateEmitters(dialect, param) {
     }
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     if ('ext' in pred.operand) {
+      if (dialect.name === 'sqlite') {
+        // SQL NULL is a present Jaren null only for an explicit null
+        // policy. Keep type guards: SQLite affinity must not turn a
+        // numeric lookup into a string lookup, or invert inequality.
+        const value = () => param({ external: pred.operand.ext, nullable: true });
+        const kind = pred.ref.storage === 'string' ? 'text' : 'number';
+        const guard = () => kind === 'text'
+          ? `${dialect.valueTypeOf(value())} = ${sl('text')}`
+          : pred.ref.storage === 'boolean' ? dialect.booleanLiteral(false)
+            : `${dialect.valueTypeOf(value())} IN ${NUMERIC()}`;
+        if (pred.op === 'eq') {
+          const nullCase = presentNull ? `(${column} IS NULL AND ${value()} IS NULL) OR ` : '';
+          return `(${nullCase}(${column} IS NOT NULL AND ${guard()} AND ${column} = ${value()}))`;
+        }
+        if (pred.op === 'ne') {
+          const nullCase = presentNull ? `(${column} IS NULL AND ${value()} IS NOT NULL) OR ` : '';
+          return `(${nullCase}(${column} IS NOT NULL AND (NOT (${guard()}) OR ${column} <> ${value()})))`;
+        }
+        return `(${column} IS NOT NULL AND ${guard()} AND ${column} ${symbol} ${value()})`;
+      }
       const kind = pred.ref.storage === 'string' ? 'text' : 'number';
       const guard = kind === 'text'
         ? `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} = ${sl('text')}`
@@ -688,7 +713,8 @@ export function createEntityPredicateEmitters(dialect, param) {
     const storageKind = pred.ref.storage === 'string' ? 'string'
       : pred.ref.storage === 'boolean' ? 'boolean' : 'number';
     if (storageKind === 'boolean' || litKind === 'other' || storageKind !== litKind)
-      return pred.op === 'ne' ? `${column} IS NOT NULL` : dialect.booleanLiteral(false);
+      return pred.op === 'ne' ? present : dialect.booleanLiteral(false);
+    if (presentNull && pred.op === 'ne') return `${column} IS NOT ${param({ literal: lit })}`;
     return `(${column} IS NOT NULL AND ${column} ${symbol} ${param({ literal: lit })})`;
   };
 
@@ -875,6 +901,12 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
           ? `CAST(${groupValue(entry.ref)} AS REAL)` : groupValue(entry.ref))} AS ${q(`a${i}`)}`),
       ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
       ...(groupRefs.length ? [`${groupRefs.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
+    : plan.scalarAggregate
+    ? `${dialect.groupAggregate(plan.scalarAggregate.fn, plan.scalarAggregate.ref.type === 'string'
+      ? groupValue(plan.scalarAggregate.ref) : `CAST(${groupValue(plan.scalarAggregate.ref)} AS REAL)`)} AS ${q('value')}, `
+      + `${groupValid(plan.scalarAggregate.ref)} AS ${q('_valid')}, `
+      + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate.ref)})` : '0'} AS ${q('_nulls')}, `
+      + `${numericGroup(plan.scalarAggregate) ? groupSafe(plan.scalarAggregate) : '1'} AS ${q('_safe')}`
     : plan.aggregate === 'count'
     ? `COUNT(*) AS ${q('value')}`
     : plan.project != null

@@ -30,8 +30,7 @@
 import { chain } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { KEY_COLUMN, DOC_COLUMN } from './ddl.js';
-import { MODEL_VERSION } from './store.js';
-import { ENGINE_TABLES } from './migrate.js';
+import { MODEL_VERSION, ENGINE_TABLES } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
 
 /**

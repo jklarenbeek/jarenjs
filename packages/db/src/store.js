@@ -34,7 +34,7 @@ import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas } 
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots } from './profile.js';
-import { normalizeEntities, explainMapping, joinTableRoots } from './model.js';
+import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore } from './entity.js';
 import { verifyPhysical } from './physical.js';
 import { trustedSql, synchronousBody } from './sql.js';
@@ -59,7 +59,8 @@ import {
 } from './expression.js';
 
 /** The model format version this store implements. */
-export const MODEL_VERSION = '0.1';
+import { MODEL_VERSION } from './engine-metadata.js';
+export { MODEL_VERSION };
 
 const COLLECTION_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const IDENTITIES = new Set(['uuid', 'integer']);
@@ -975,8 +976,9 @@ export function openStore(model, options) {
   let mapping;
   try {
     collections = normalizeModel(model, options.expressions);
-    entities = normalizeEntities(model);
-    mapping = entities.size > 0 ? explainMapping(model) : null;
+    const compiled = compileEntityModel(model);
+    entities = compiled.entities;
+    mapping = entities.size > 0 ? compiled.mapping : null;
     if ([...entities.values()].some((e) => e.physical !== null) && (options.capture || options.replication))
       throw new DbCompileError('JD0051', 'column adoption preserves application triggers; complete capture is not qualified');
     if (options.adopt === true && (options.capture || options.replication))

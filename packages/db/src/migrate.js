@@ -34,9 +34,8 @@ import { chain, toPromise } from './driver.js';
 import { normalizeModel } from './store.js';
 import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
-import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './capture.js';
-import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './jobs.js';
-import { REPLICATION_TABLES } from './replication-tables.js';
+import { HISTORY_TABLE, ENGINE_TABLES } from './engine-metadata.js';
+export { HISTORY_TABLE, ENGINE_TABLES };
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
@@ -73,17 +72,6 @@ function mappingFor(connection, expressions = undefined) {
     registered,
   };
 }
-
-/** The history table name (outside the model's identifier namespace
- * conventions on purpose — a collection cannot collide with it). */
-export const HISTORY_TABLE = '_jaren_migrations';
-/** The tables the engine owns beside a model's: never a shape-drift finding. */
-/** The tables this package owns. A model never declared one, so one
- * found in a database is the engine's own bookkeeping rather than
- * anybody's drift — the drift check skips them and the introspector
- * does not derive them. */
-export const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE,
-  JOBS_TABLE, JOB_CHECKPOINTS_TABLE, ...Object.values(REPLICATION_TABLES)]);
 
 /**
  * The signature-grade identity of a model SHAPE.
@@ -198,8 +186,16 @@ export function planMigration(fromModel, toModel, options = undefined) {
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
-  if ([fromModel, toModel].some((m) => Object.values(m.entities ?? {}).some((e) => e.physical !== undefined)))
-    throw refuse('JD0021', 'column layouts require planPhysicalMigration with explicit preservation dispositions');
+  if ([fromModel, toModel].some((m) => Object.values(m.entities ?? {}).some((e) => e.physical !== undefined))) {
+    normalizeEntities(fromModel);
+    normalizeEntities(toModel);
+    if (canonicalizeJson(fromModel) !== canonicalizeJson(toModel))
+      throw refuse('JD0021', 'changed column layouts require planTableMigration on the open connection or planPhysicalMigration with explicit preservation dispositions');
+    return { migration: { $migration: MIGRATION_VERSION,
+      id: options?.id ?? `to-${shapeHash(toModel).slice(0, 8)}`,
+      from: shapeHash(fromModel), to: shapeHash(toModel), steps: [] },
+    report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], destructive: false } };
+  }
   const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false,
     // a model that declares an index EXPRESSION resolves its functions
     // here too: a plan is DDL, and DDL over a function this planner was

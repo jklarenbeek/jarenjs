@@ -602,8 +602,11 @@ export interface UntrackedReads<T = unknown> {
 /** Closed native mutation forms over declared SQLite column layouts. */
 export type EntityMutation = {
   returning?: readonly string[]; maxRows?: number; maxBytes?: number;
-} & ({ op: 'update'; key: EntityKeyArg; expectedRevision?: number; set: Readonly<Record<string, unknown>> }
-  | { op: 'upsert'; values: Readonly<Record<string, unknown>>; conflict: readonly string[]; update: readonly string[] }
+} & ({ op: 'update'; key?: EntityKeyArg; where?: unknown; expectedRevision?: number; set?: Readonly<Record<string, unknown>>;
+    expressions?: Readonly<Record<string, import('./relational.js').SqlInput>>; reporting?: 'matched' | 'changed' }
+  | { op: 'delete'; key?: EntityKeyArg; where?: unknown; expectedRevision?: number }
+  | { op: 'upsert'; values: Readonly<Record<string, unknown>>; conflict: readonly string[]; update?: readonly string[];
+      conflictWhere?: import('./relational.js').SqlInput; onConflict?: 'nothing' | 'update'; reporting?: 'matched' | 'changed' }
   | { op: 'insert-select'; source: string; where?: unknown; select: Readonly<Record<string, string | { $literal: unknown }>>;
       conflict: readonly string[]; onConflict: 'nothing' });
 export interface MutationResult {
@@ -1207,6 +1210,8 @@ export declare const MAINTENANCE_OPERATIONS: readonly string[];
 
 export declare function normalizeEntities(model: unknown): Map<string, unknown>;
 export declare function explainMapping(model: unknown): unknown;
+/** One normalization shared by the entity engine and its physical mapping. */
+export declare function compileEntityModel(model: unknown): { entities: Map<string, unknown>; mapping: unknown };
 /** The relation tables of normalized entities, keyed by entity name
  * then by relation member (MODEL-FORMAT §10.1) — what every entity set
  * exposes as `relations` and every scope carries for all its roots. */
@@ -2037,3 +2042,5 @@ export declare function planInvariants(model: unknown, options: { dialect: Diale
 export declare function planPhysicalMigration(connection: unknown, fromModel: unknown, toModel: unknown,
   options: { id: string; steps: readonly unknown[]; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
     assertions?: readonly { sql: string; params?: readonly unknown[]; expected: readonly unknown[] }[] }): unknown;
+
+export { sql, relational, planRelational, defineTable, planTable, planTableMigration, applyTableMigration, withForeignKeysSuspended } from './relational.js';

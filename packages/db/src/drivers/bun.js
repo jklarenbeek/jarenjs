@@ -21,6 +21,8 @@
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMA_NAMES } from '../pragmas.js';
+import { writeSqliteSnapshot } from './snapshot.js';
+export { snapshotDatabase } from './snapshot.js';
 
 /**
  * Adapt an already-constructed `bun:sqlite` `Database` (or any object
@@ -37,6 +39,7 @@ export function adaptBunDatabase(db, options) {
   /** @type {Set<WeakRef<any>>} */
   const statements = new Set();
   const collected = new FinalizationRegistry((ref) => statements.delete(ref));
+  let changesStatement;
   const raw = {
     ...(options?.backup ? { backup: options.backup } : {}),
     /** @param {string} sql */
@@ -50,7 +53,13 @@ export function adaptBunDatabase(db, options) {
         collected.register(statement, ref, ref);
       }
       return {
-        run: (params = []) => statement.run(...params),
+        run: (params = []) => {
+          const result = statement.run(...params);
+          // Bun's result can include trigger side effects. The driver
+          // contract counts the data statement's own affected rows.
+          changesStatement ??= db.prepare('SELECT changes() AS changes');
+          return { ...result, changes: changesStatement.get().changes };
+        },
         // the driver contract says a missing row reads UNDEFINED;
         // bun:sqlite answers null — normalize at the seam, or every
         // create-or-verify and absence check misfires
@@ -60,12 +69,21 @@ export function adaptBunDatabase(db, options) {
         // driver-level wrapper composes one over `all` when it does not,
         // and `iterate` stays absent here so that fallback is reached
         ...(typeof statement.iterate === 'function'
-          ? { iterate: (params = []) => statement.iterate(...params) }
+          ? { *iterate(params = []) {
+            // Bun's iterator.return() does not reset the native statement.
+            // Give each cursor its own statement and finalize on every exit;
+            // cached queries and concurrent cursors remain independently usable.
+            const cursorStatement = db.prepare(sql);
+            try { yield* cursorStatement.iterate(...params); }
+            finally { cursorStatement.finalize?.(); }
+          } }
           : undefined),
       };
     },
     close: () => {
       const errors = [];
+      try { changesStatement?.finalize?.(); }
+      catch (error) { errors.push(error); }
       for (const ref of statements) {
         collected.unregister(ref);
         try {
@@ -115,20 +133,13 @@ export function adaptBunDatabase(db, options) {
  */
 export function fromBunModule(mod, path, options) {
   const db = options?.readOnly === true ? new mod.Database(path, { readonly: true }) : new mod.Database(path);
-  const backup = typeof db.serialize !== 'function' ? undefined : {
+  const backup = {
     snapshot: true,
-    copy: async (target, copyOptions) => {
-      const bytes = db.serialize();
-      const pageSize = ((bytes[16] << 8) | bytes[17]) || 65536;
-      const pages = bytes.length / (pageSize === 1 ? 65536 : pageSize);
-      copyOptions?.progress?.({ totalPages: pages, remainingPages: pages });
-      const fs = await import('node:fs/promises');
-      const file = await fs.open(target, 'wx');
-      try { await file.writeFile(bytes); await file.sync(); }
-      finally { await file.close(); }
-      copyOptions?.progress?.({ totalPages: pages, remainingPages: 0 });
-      return pages;
-    },
+    copy: (target, copyOptions) => writeSqliteSnapshot(target, () => {
+      const statement = db.prepare('VACUUM INTO ?');
+      try { return statement.run(target); }
+      finally { statement.finalize?.(); }
+    }, copyOptions),
     rename: (from, to) => import('node:fs/promises').then((fs) => fs.rename(from, to)),
     remove: (target) => import('node:fs/promises').then((fs) => fs.rm(target, { force: true })),
   };
