@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-11T14:00:45+02:00",
-  "commit": "3491513e164dc30e429c84e709bd738841f4df16",
+  "generated": "2026-09-12T05:20:23+02:00",
+  "commit": "b111a633f6d35f00109902a16cc25776ccaaf4ea",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -381,26 +381,6 @@
             "title": "CSV",
             "blurb": "RFC 4180 strict by default, and self-healing on demand: an unclosed quote, a stray quote inside a value or a ragged row is read the way that loses the least — and every fix is reported with a code, a line and a column, where other parsers heal silently or reject the file. Wholesale and chunk-streaming share one grammar path.",
             "perf": "reports what it repaired, instead of guessing quietly"
-          }
-        }
-      ],
-      "derived": false
-    },
-    {
-      "name": "@jarenjs/ai",
-      "card": {
-        "title": "AI assistant",
-        "blurb": "Browser-side AI with bring-your-own-key: one OpenAI-compatible client (OpenRouter / Ollama / LM Studio), an incremental SSE decoder, retry with Retry-After, structured output with local-validation repair, token-budget compaction, a bounded agent loop and WebMCP registration.",
-        "perf": "tool calls validated by Jaren before they run"
-      },
-      "engines": [
-        {
-          "key": "ai",
-          "suite": null,
-          "card": {
-            "title": "AI",
-            "blurb": "Browser-side AI with bring-your-own-key: one OpenAI-compatible client (OpenRouter / Ollama / LM Studio), an incremental SSE decoder, retry with Retry-After, structured output with local-validation repair, token-budget compaction, a bounded agent loop and WebMCP registration.",
-            "perf": "tool calls validated by Jaren before they run"
           }
         }
       ],
