@@ -1,7 +1,6 @@
 //@ts-check
 /** The frozen adoption baseline stays immutable; this overlay names current owners. */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -12,7 +11,11 @@ const families = original.families.map(family => {
     if (family.path !== 'packages/ai/src/retry.js') throw new Error(`Unaccounted source family: ${family.path}`);
     return { category: family.category, originalPath: family.path, disposition: 'moved', owner: '@tangleai/models/retry', reason: 'Model transport retry belongs to Tangle; generic concurrency and provider execution remain in Jaren.' };
   }
-  return { ...family, matches: execFileSync('rg', ['-n', family.pattern, family.path], { cwd: root, encoding: 'utf8' }).trim().split('\n'), disposition: 'retained' };
+  const pattern = new RegExp(family.pattern);
+  const matches = readFileSync(join(root, family.path), 'utf8').split(/\r?\n/)
+    .flatMap((line, index) => pattern.test(line) ? [`${index + 1}:${line}`] : []);
+  if (matches.length === 0) throw new Error(`Source family no longer matches: ${family.path}`);
+  return { ...family, matches, disposition: 'retained' };
 });
 const value = JSON.stringify({ historicalSource: 'test/adoption/source-census.json', historicalRevision: original.revision,
   note: 'The original source census remains frozen evidence. This overlay is regenerated from the current source tree.', families }, null, 2) + '\n';

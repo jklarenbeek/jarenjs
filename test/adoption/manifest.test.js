@@ -9,6 +9,15 @@ import { adoptionHash, readAdoption, verifyFreeze, assessBudget, replacementRead
 
 const manifest = readAdoption('manifest.json');
 describe('frozen portable evidence', () => {
+  it('checks the current source census with Node alone and preserves the recorded bytes', () => {
+    const root = fileURLToPath(new URL('../../', import.meta.url));
+    const census = new URL('./current-source-census.json', import.meta.url);
+    const before = readFileSync(census);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PATH'));
+    env.PATH = '';
+    execFileSync(process.execPath, ['scripts/generate-adoption-census.js', '--check'], { cwd: root, env });
+    assert.deepEqual(readFileSync(census), before);
+  });
   it('Git clean filters preserve exact trusted-body CRLF bytes on fresh checkouts', () => {
     const file = 'test/adoption/trusted-bodies.js';
     const root = fileURLToPath(new URL('../../', import.meta.url));
