@@ -21,10 +21,9 @@
  *    ```` ```jsonc ```` instead and is not parsed: it never claimed to be
  *    a value.
  *
- * Fences are found by scanning the SOURCE rather than the parsed AST,
- * because an `MdDocument` carries no source offsets by construction
- * (MD-FORMAT §1.1/§6) and a diagnostic without `file:line` is a diagnostic
- * nobody can act on — the same reason `bake` splices bytes.
+ * The Markdown parser owns fence/container semantics. Source lines are
+ * recovered lazily with prefix parses when a diagnostic needs an opener:
+ * the fenced node first appears at EOF immediately after its opening line.
  */
 
 import { readFileSync, globSync } from 'node:fs';
@@ -32,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
 import { parseMermaid } from '@jarenjs/mermaid';
+import { parseMarkdown, parseFrontmatter, walkAst } from '@jarenjs/md';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
@@ -55,27 +55,45 @@ const PATTERNS = [
   'benchmark/*.md',
 ];
 
-/** `path` → `{ lang, body, line }` for every fenced block in it. */
-const FENCE = /^([ \t]*)```([A-Za-z0-9_-]*)[^\n]*\n([\s\S]*?)^\1```/gm;
+/** Language-tagged fences in source order, including container children. */
+function codeFences(source) {
+  const nodes = [];
+  walkAst(parseMarkdown(source, { frontmatter: false }).ast, (node) => {
+    if (node.type === 'code' && node.lang !== null) nodes.push(node);
+  });
+  return nodes;
+}
 
 /**
- * Every fenced block of a source, with the 1-based line its opener sits on.
+ * Every language-tagged fence, with a lazy 1-based opener line.
  * @param {string} source
  * @returns {{ lang: string, body: string, line: number }[]}
  */
 export function fencesOf(source) {
-  /** @type {{ lang: string, body: string, line: number }[]} */
-  const out = [];
-  FENCE.lastIndex = 0;
-  let match;
-  while ((match = FENCE.exec(source)) !== null) {
-    out.push({
-      lang: match[2].toLowerCase(),
-      body: match[3],
-      line: source.slice(0, match.index).split('\n').length,
-    });
-  }
-  return out;
+  // Resolve frontmatter once: a later closing delimiter must not change what
+  // an earlier prefix meant while locating a fence. No second fence grammar.
+  const { body } = parseFrontmatter(source);
+  const offset = source.slice(0, source.length - body.length).split(/\r\n|\n|\r/).length - 1;
+  let lines;
+  const counts = new Map();
+  return codeFences(body).map((node, index) => {
+    let line;
+    return { lang: node.lang.toLowerCase(), body: node.value,
+      get line() {
+        if (line !== undefined) return line;
+        lines ??= body.split(/\r\n|\n|\r/);
+        let low = 1, high = lines.length;
+        while (low < high) {
+          const mid = Math.floor((low + high) / 2);
+          if (!counts.has(mid)) counts.set(mid, codeFences(lines.slice(0, mid).join('\n')).length);
+          if (counts.get(mid) > index) high = mid;
+          else low = mid + 1;
+        }
+        line = offset + low;
+        return line;
+      },
+    };
+  });
 }
 
 /**
@@ -105,14 +123,13 @@ export function checkDocuments(options = {}) {
   for (const rel of files) {
     const source = readFileSync(resolve(root, rel), 'utf8');
     for (const fence of fencesOf(source)) {
-      const where = `${rel}:${fence.line}`;
       if (fence.lang === 'mermaid') {
         mermaid += 1;
         try {
           parseMermaid(fence.body);
         }
         catch (err) {
-          failures.push(`${where} — mermaid: ${String(/** @type {any} */ (err)?.message ?? err)}`);
+          failures.push(`${rel}:${fence.line} — mermaid: ${String(/** @type {any} */ (err)?.message ?? err)}`);
         }
       }
       else if (fence.lang === 'json') {
@@ -121,7 +138,7 @@ export function checkDocuments(options = {}) {
           JSON.parse(fence.body);
         }
         catch (err) {
-          failures.push(`${where} — json: ${String(/** @type {any} */ (err)?.message ?? err)}`
+          failures.push(`${rel}:${fence.line} — json: ${String(/** @type {any} */ (err)?.message ?? err)}`
             + '\n    (JSON-shaped notation belongs in a ```jsonc fence, which this gate does not parse)');
         }
       }

@@ -155,6 +155,8 @@ unchanged values/storage classes, drops/renames atomically, restores indexes and
 triggers, and checks foreign keys and the target schema. Primary-key columns,
 unshadowed hidden rowids, raw text, bytes and AUTOINCREMENT high-water marks are
 preserved. A key change, rowid-ownership change or ambiguous rowid alias refuses.
+This includes converting an `INTEGER PRIMARY KEY DESC` with an independent
+hidden rowid into an ordinary INTEGER primary key that owns the rowid.
 No migration history table or model adoption is needed.
 
 Rebuilds require SQLite's foreign-key transition outside a transaction. For a

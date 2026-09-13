@@ -159,7 +159,7 @@ export function createCollectionCoordinator(provider, options = {}) {
                 inRange ||= range.open || endpoint;
                 if (endpoint) { range.found++; range.open = !range.open; if (range.fromKey === range.toKey) { range.open = false; range.found++; } }
               }
-              const selected = !selection || (selection.mode === 'all' && !excluded.has(key)) || wanted.has(key) || inRange;
+              const selected = !selection || wanted.has(key) || ((selection.mode === 'all' || inRange) && !excluded.has(key));
               wanted.delete(key); read++;
               if (selected) { output.push(page.rows[i]); written++; }
             }

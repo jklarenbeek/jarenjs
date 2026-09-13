@@ -100,6 +100,15 @@ describe('csv: RFC 4180 reading', () => {
 });
 
 describe('csv: typed values', () => {
+  it('keeps inferred header names lexical while coercing whole and streamed data rows', async () => {
+    const names = ['1e2', '100', 'null', '2026-07-27T08:30:00Z', '007', 'true'];
+    const text = `${names.join(',')}\n1,2,null,2026-07-27T08:30:00Z,007,true`;
+    const expected = [{ '1e2': 1, '100': 2, null: null, '2026-07-27T08:30:00Z': new Date('2026-07-27T08:30:00Z'), '007': '007', true: true }];
+    deepStrictEqual(parseCsv(text, { headers: true, typed: true }), expected);
+    deepStrictEqual(await parseCsvStream([...text], { headers: true, typed: true }), expected);
+    deepStrictEqual(parseCsv(text.slice(text.indexOf('\n') + 1), { headers: names, typed: true }), expected);
+  });
+
   it('coerces the unambiguous JOSL value types', () => {
     deepStrictEqual(parseCsv('1,2.5,-3e2,true,FALSE,null', { typed: true }),
       [[1, 2.5, -300, true, false, null]]);

@@ -42,7 +42,9 @@ export function createDomainRun(document, options) {
         return await workflow.run(input, { runId: id, signal, resources, event: resources.event });
       }
       catch (error) {
-        if (attached) {
+        // Provenance refusal happens before the workflow claims a generation;
+        // it must not overwrite the status or audit history of the prior run.
+        if (attached && error?.code !== 'JF2013') {
           const record = await store.get(id);
           await store.finish(id, record.cancelRequested || signal.aborted ? 'cancelled' : 'failed', lease());
         }

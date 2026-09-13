@@ -292,6 +292,35 @@ describe('Form Rules (x-form)', function () {
   });
 
   describe('#createRuleMemo() dependency memoization', function () {
+    it('invalidates root reads inside nested relative and root filter queries', function () {
+      for (const query of ['$.groups[?@.items[?@.id == $.selected]]', '$.groups[?$.items[?@.id == $.selected]]']) {
+        const compiled = compiledFor({ type: 'object', properties: { details: { 'x-form': { visible: query } } } });
+        assert.isTrue(compiled.rules[0].deps.includes('/selected'));
+        const groups = [{ items: [{ id: 1 }] }], items = [{ id: 1 }], memo = createRuleMemo();
+        assert.isTrue(evaluateFormRules(compiled, { groups, items, selected: 1 }, undefined, memo)['/details'].visible);
+        const changed = { groups, items, selected: 2 };
+        assert.deepEqual(evaluateFormRules(compiled, changed, undefined, memo), evaluateFormRules(compiled, changed));
+        assert.isTrue(evaluateFormRules(compiled, changed, undefined, memo)['/details'].visible === false);
+      }
+    });
+
+    it('invalidates results and template keys when compiled rules change on identical data', function () {
+      const memo = createRuleMemo(), data = { name: 'x', lines: [{ amount: 1 }, { amount: 2 }] };
+      const variants = [
+        { name: { 'x-form': { visible: true } } },
+        { name: { 'x-form': { visible: false } }, lines: { type: 'array', items: { 'x-form': { visible: true } } } },
+        { lines: { type: 'array', items: { properties: { amount: { 'x-form': { visible: false } } } } } },
+        {},
+      ];
+      for (const properties of variants) {
+        const compiled = compiledFor({ type: 'object', properties });
+        assert.deepEqual(evaluateFormRules(compiled, data, undefined, memo), evaluateFormRules(compiled, data));
+        const changed = { ...data, lines: [{ amount: 3 }] };
+        assert.deepEqual(evaluateFormRules(compiled, changed, undefined, memo), evaluateFormRules(compiled, changed));
+        evaluateFormRules(compiled, data, undefined, memo);
+      }
+    });
+
     const schema = {
       type: 'object',
       properties: {

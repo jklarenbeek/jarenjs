@@ -61,8 +61,8 @@ export function toMermaid(docOrAst) {
 //#endregion
 //#region flowchart -------------------------------------------------
 
-/** Labels containing shape-closer characters must be quoted. */
-const RE_NEEDS_QUOTE = /[[\](){}<>|"]/;
+/** Protect delimiters and literal quotes without removing label text. */
+const RE_NEEDS_QUOTE = /[[\](){}<>|"';]/;
 
 /**
  * @param {any} ast
@@ -121,7 +121,8 @@ function wrapShape(shape, label) {
   // end the statement. Emitting the tag back is what makes a transformed
   // diagram round-trip to source that still parses.
   const text = label.replace(/\n/g, '<br/>');
-  const l = RE_NEEDS_QUOTE.test(text) ? '"' + text.replace(/"/g, '') + '"' : text;
+  const quote = text.includes('"') && !text.includes("'") ? "'" : '"';
+  const l = RE_NEEDS_QUOTE.test(text) ? quote + text + quote : text;
   switch (shape) {
     case 'round': return `(${l})`;
     case 'stadium': return `([${l}])`;

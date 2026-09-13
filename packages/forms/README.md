@@ -451,6 +451,8 @@ paths in its query documents (plus its own location). That over-approximates
 every read, and soundly: the only way into the document is such a path, and a
 `$let`/`$for` variable can only hold what one of them produced.
 
+Nested filters contribute their root reads too. Replacing the compiled rule set
+invalidates the memo's results and template keys, even when the data is unchanged.
 The memo diffs the previous document against the new one — reference-equal
 subtrees are skipped whole, so an immutable edit costs O(change). A host that
 already knows what it wrote can skip even that with `memo.touch(pointer)`,

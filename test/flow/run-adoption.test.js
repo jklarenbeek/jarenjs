@@ -13,6 +13,28 @@ const doc = { $workflow: '0.2', revision: 'domain/1', initial: 'wait', states: {
 const claim = (f) => f.client.store.jobs.claim({ kinds: ['domain'], owner: 'worker', leaseMs: 1000 });
 const options = { runs: 'runs', events: 'events', maxPage: 2, statuses: { waiting: 'paused', done: 'completed' } };
 
+it('rejected input provenance preserves completed and waiting run history on every retry', async () => {
+  const f = await fixture();
+  try {
+    await f.client.store.jobs.enqueue('domain', {}, { id: 'job' });
+    const job = await claim(f);
+    const store = createDbRunStore(f.client, options);
+    for (const initial of ['wait', 'done']) {
+      const runner = createDomainRun({ ...doc, initial }, { store, schemaVersion: '1', tasks: { step: { version: '1', run: () => 7 } } });
+      await runner.run(initial, { value: 1 }, { lease: job.lease });
+      const before = await store.get(initial), page = await store.page(initial);
+      let releases = 0;
+      for (let repeat = 0; repeat < 2; repeat++) {
+        await assert.rejects(runner.run(initial, { value: 2 }, { lease: job.lease, release: () => { releases++; } }), { code: 'JF2013' });
+        assert.deepEqual(await store.get(initial), before);
+        assert.deepEqual(await store.page(initial), page);
+      }
+      assert.equal(releases, 2);
+    }
+  }
+  finally { await f.client.close(); }
+});
+
 it('existing IDs/status mappings survive restart, takeover and bounded concurrent readers', async () => {
   const { dbPath, cleanup } = tempDbPath();
   let f = await fixture({ path: dbPath });

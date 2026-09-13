@@ -35,7 +35,7 @@ import { standardMode } from '../modes/standard.js';
 import { BASES, WORD_SIZES } from '../modes/programmer.js';
 import { financialMode } from '../modes/financial.js';
 import { converterMode } from '../modes/converter.js';
-import { createRatesLayer, FALLBACK_RATES, CURRENCY_CODES } from './rates/index.js';
+import { createRatesLayer, FALLBACK_RATES } from './rates/index.js';
 import { CALCULATOR_RULES } from './rules.js';
 import { FINANCIAL_SCHEMA } from './schema.js';
 
@@ -136,6 +136,7 @@ export const calcActions = {
   'calc/equals': {
     effects: [{ run: 'calc-eval', with: {
       entry: '$.calc.entry', mode: '$.calc.mode',
+      base: '$.calc.base',
       angleMode: '$.calc.angleMode', wordBits: '$.calc.wordBits',
       signed: '$.calc.signed', ans: '$.calc.ans', memory: '$.calc.memory',
     } }],
@@ -143,7 +144,7 @@ export const calcActions = {
   'calc/commit': {
     patch: [
       { op: 'replace', path: '/calc/ans', value: '$payload.value' },
-      { op: 'replace', path: '/calc/entry', value: '$payload.display' },
+      { op: 'replace', path: '/calc/entry', value: { $if: [{ $exists: '$payload.entry' }, '$payload.entry', '$payload.display'] } },
       { op: 'add', path: '/calc/tape/-', value: { expr: '$payload.expr', result: '$payload.display' } },
     ],
   },
@@ -223,7 +224,9 @@ export const calcEditEffects = {
     const display = desc.format
       ? desc.format(res.value, { angleMode: props.angleMode, wordBits: props.wordBits, signed: props.signed, base: props.base })
       : String(res.value);
-    dispatch('calc/commit', { value: res.value, display, expr: entry });
+    // Grouping belongs on the tape/display; expression literals contain no spaces.
+    dispatch('calc/commit', { value: res.value, display, expr: entry,
+      entry: mode === 'programmer' ? display.replaceAll(' ', '') : display });
   },
 };
 
@@ -331,10 +334,11 @@ export function contributeCalcViewModel(state, options = {}) {
  */
 export function createCalcComponent(options = {}) {
   const rates = createRatesLayer(options);
+  const initialState = () => ({ ...calcInitialState(), rates: structuredClone(rates.fallbackRates) });
   const formViewRules = calcFormViewRules;
 
   return {
-    initialState: calcInitialState,
+    initialState,
     actions: calcActions,
     mode: 'calculator',
     rules: calcViewRules,
@@ -344,7 +348,7 @@ export function createCalcComponent(options = {}) {
     subEntry: rates.subEntry,
     fallbackRates: rates.fallbackRates,
     viewModel: contributeCalcViewModel,
-    codes: CURRENCY_CODES,
+    codes: rates.codes,
 
     /**
      * A standalone app document + running app (headless if `node` omitted).
@@ -353,7 +357,7 @@ export function createCalcComponent(options = {}) {
     createApp(appOptions = {}) {
       const appDoc = {
         $app: '0.1',
-        state: { calc: calcInitialState() },
+        state: { calc: initialState() },
         view: {
           $jslt: '0.1',
           modes: { calculator: { unmatched: 'error' } },

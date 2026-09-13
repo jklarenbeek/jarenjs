@@ -117,8 +117,9 @@ export function equalsDeep(target, source) {
  *
  * JSON-only equality: objects compare by own enumerable keys, arrays by
  * index, primitives by `===` (so `1 === 1.0`, and `NaN` is never equal).
- * Anything a JSON value cannot be — Map, Set, RegExp, function, class
- * instance — compares by identity only. Deliberately not the same as
+ * Other objects also compare by own enumerable keys: constructors and
+ * non-enumerable Map/Set entries are ignored. Functions compare by identity.
+ * Deliberately not the same as
  * `equalsDeep`, the generic JavaScript variant: this is the hot-path
  * comparator of the JSONPath engine — do not merge the two.
  * @param {any} a

@@ -62,6 +62,26 @@ describe('the namespace is one, and it is the one every document uses', () => {
 });
 
 describe('a marker no registry answers fails both modes', () => {
+  it('refuses inherited object keys without writes, while own derivations with those names settle once', () => {
+    for (const key of ['toString', 'constructor', '__proto__']) {
+      const source = `Value: <!--fact:${key}-->stale<!--/fact-->\n`;
+      const root = fixture(source);
+      for (const check of [false, false, true]) {
+        const report = runDerivation({ root, registries: [registry({})], check });
+        assert.strictEqual(report.code, 1);
+        assert.deepStrictEqual(report.rewritten, []);
+        assert.deepStrictEqual(report.seen, []);
+        assert.strictEqual(read(root), source);
+      }
+      const registries = [registry(Object.fromEntries([[key, () => 'resolved']]))];
+      assert.deepStrictEqual(runDerivation({ root, registries }).rewritten, ['fixture.md']);
+      const second = runDerivation({ root, registries });
+      assert.strictEqual(second.code, 0);
+      assert.deepStrictEqual(second.rewritten, []);
+      assert.strictEqual(runDerivation({ root, registries, check: true }).code, 0);
+    }
+  });
+
   const source = `The figure is <!--${NS}:not.a.real.one-->0.0<!--/${NS}-->x today.\n`;
 
   it('refuses to rewrite, names the marker, and leaves the file alone', () => {

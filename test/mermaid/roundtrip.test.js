@@ -41,6 +41,15 @@ const FIXTURES = [
 ];
 
 describe('toMermaid round-trip fixed point', function () {
+  it('preserves quotes and semicolons in node labels across repeated printing', function () {
+    for (const label of [`'He said "Hi"'`, '"a;b"', `'He said "Hi; there"'`, `"it's fine"`]) {
+      const doc = parseMermaid(`flowchart TD\nA[${label}]`);
+      const printed = toMermaid(doc);
+      assert.deepEqual(parseMermaid(printed).ast, doc.ast);
+      assert.equal(toMermaid(parseMermaid(printed)), printed);
+    }
+  });
+
   for (let i = 0; i < FIXTURES.length; i++) {
     it(`fixture ${i} re-parses deep-equal`, function () {
       const doc = parseMermaid(FIXTURES[i]);

@@ -25,6 +25,19 @@ const seed = (db) => {
   db.exec("INSERT INTO history VALUES(1,X'0001FF',' { \"key\" : 1 } '); INSERT INTO history VALUES(30,X'00','unused'); DELETE FROM history WHERE id=30; CREATE TABLE child(id INTEGER PRIMARY KEY,history INTEGER REFERENCES history(id) ON DELETE CASCADE);INSERT INTO child VALUES(1,1);CREATE VIEW history_view AS SELECT id,bytes FROM history; CREATE INDEX retained_raw ON history(raw)");
 };
 
+it('refuses INTEGER PRIMARY KEY DESC rebuilds that would replace independent hidden rowids', async () => fixture((db) => {
+  db.exec("CREATE TABLE entries(id INTEGER PRIMARY KEY DESC,value TEXT); INSERT INTO entries(rowid,id,value) VALUES(123,7,'kept')");
+  const definition = { name: 'entries', primaryKey: ['id'], columns: [
+    { name: 'id', type: 'INTEGER' }, { name: 'value', type: 'TEXT' }, { name: 'extra', type: 'TEXT' },
+  ] };
+  const schema = db.prepare('SELECT name,sql FROM sqlite_schema ORDER BY name').all([]);
+  for (let repeat = 0; repeat < 2; repeat++) {
+    assert.throws(() => planTableMigration(db, definition, { id: 'upgrade', allowRebuild: true }), /rowid ownership/);
+    assert.deepEqual(db.prepare('SELECT name,sql FROM sqlite_schema ORDER BY name').all([]), schema);
+    assert.deepEqual({ ...db.prepare('SELECT rowid,id,value FROM entries').get([]) }, { rowid: 123, id: 7, value: 'kept' });
+  }
+}));
+
 it('populated rebuilds preserve bytes, histories, references, indexes and allocated identities on repeat', async () => fixture((db) => {
   seed(db);
   const plan = planTableMigration(db, after(), { id: 'history-v2', allowRebuild: true });

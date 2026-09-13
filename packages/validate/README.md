@@ -87,6 +87,9 @@ BigInt instance values are supported too: `maximum`/`minimum`/`exclusiveMaximum`
 - contentMediaType | same assertion defaults; `application/json` content is parse-checked
 - ❌ contentSchema | annotation only (never asserted)
 
+Base64 JSON content validation decodes UTF-8 in both browser and Node runtimes;
+it does not require Node's `Buffer` global.
+
 ### 🔑 Keywords for format
 
 - format
@@ -248,6 +251,10 @@ Jaren supports the `data-ref` proposal from json-everything through the `data` k
 
 The refs compile once at schema compile time through the compiled pointer engine of [`@jarenjs/json`](../json) and resolve allocation-free per validation.
 
+Dynamic `const` and `enum` use the same structural object/array equality as
+their static forms. Dynamic string bounds honor the compiler's `useGrapheme`
+option as well.
+
 See also:
 - [$data](https://github.com/json-schema-org/json-schema-spec/issues/51)
 - [Ajv $data spec](https://github.com/ajv-validator/ajv/tree/master/spec/extras/%24data)
@@ -256,6 +263,10 @@ See also:
 ### 👉 Vocabularies and cross-draft references
 
 A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`; a 2019-09 document ignores `prefixItems`). Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations, and declaring `format-assertion` turns format assertion on.
+
+Modern reference chains preserve supported sibling assertions, including
+dependent schemas and dynamic references. Draft-07 retains its reference-only
+behavior, ignoring siblings beside `$ref`.
 
 ## `$query` — cross-field assertions
 
@@ -467,8 +478,8 @@ Zod-style path.
 ### String lengths count graphemes by default
 
 `useGrapheme` defaults to **`true`**, so `minLength`/`maxLength` count
-user-perceived characters. Most other validators — and the JSON Schema
-specification itself — count UTF-16 code units:
+user-perceived characters. Setting it to `false` makes this package count
+UTF-16 code units instead:
 
 ```javascript
 const family = '👨‍👩‍👧‍👦';   // 1 grapheme cluster, 11 UTF-16 code units

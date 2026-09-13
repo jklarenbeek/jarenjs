@@ -19,27 +19,30 @@ export function createCollectionInteraction(options) {
     return { state: 'ready', ...focus };
   }
   function scoped() { return selection.query === config.query && selection.snapshot === config.snapshot; }
-  function selected(key) {
-    if (key == null) return false;
-    if (selection.mode === 'all' && scoped()) return !selection.exclusions.includes(key);
-    if (selection.keys.includes(key)) return true;
+  function covered(key) {
     if (!scoped()) return false;
+    if (selection.mode === 'all') return true;
     return selection.ranges.some((range) => {
       if (key === range.fromKey || key === range.toKey) return true;
       const index = config.indexOf?.(key), start = config.indexOf?.(range.fromKey), end = config.indexOf?.(range.toKey);
       return index >= 0 && start >= 0 && end >= 0 && index >= Math.min(start, end) && index <= Math.max(start, end);
     });
   }
+  function selected(key) {
+    return key != null && (selection.keys.includes(key) || (covered(key) && !selection.exclusions.includes(key)));
+  }
   function toggle(key) {
     if (typeof key !== 'string') return {state:'error',reason:'invalid-selection'};
-    if (selection.mode === 'all' && scoped()) {
+    if (covered(key)) {
       const excluded = selection.exclusions.includes(key);
-      if (!excluded && selection.exclusions.length >= config.maxSelectedKeys) return { state: 'budget-exhausted', reason: 'selection-credits' };
+      const keys = selection.keys.filter((item) => item !== key);
+      if (!excluded && keys.length + selection.exclusions.length >= config.maxSelectedKeys) return { state: 'budget-exhausted', reason: 'selection-credits' };
+      selection.keys = keys;
       selection.exclusions = excluded ? selection.exclusions.filter((item) => item !== key) : [...selection.exclusions, key];
     }
     else {
       const exists = selection.keys.includes(key);
-      if (!exists && selection.keys.length >= config.maxSelectedKeys) return { state: 'budget-exhausted', reason: 'selection-credits' };
+      if (!exists && selection.keys.length + selection.exclusions.length >= config.maxSelectedKeys) return { state: 'budget-exhausted', reason: 'selection-credits' };
       selection.keys = exists ? selection.keys.filter((item) => item !== key) : [...selection.keys, key];
     }
     return { state: 'ready' };
@@ -67,7 +70,7 @@ export function createCollectionInteraction(options) {
     },
     toggle,
     selectAll() { selection = { mode: 'all', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }; },
-    clear() { selection = { mode: 'keys', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }; },
+    clear() { rangeAnchor = null; selection = { mode: 'keys', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }; },
     restore(intent) {
       // Only JSON intent returns from navigation; loaded resources never travel here.
       if (!intent || !isJsonValue(intent) || typeof intent.query !== 'string' || typeof intent.snapshot !== 'string' || !['keys', 'all'].includes(intent.mode) || !Array.isArray(intent.keys) || !Array.isArray(intent.exclusions)

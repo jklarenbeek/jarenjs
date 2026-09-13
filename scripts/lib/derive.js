@@ -75,7 +75,7 @@ const MAX_PASSES = 4;
  */
 function mergeFacts(registries, text) {
   /** @type {Record<string, () => string>} */
-  const facts = {};
+  const facts = Object.create(null);
   /** @type {Map<string, string>} */
   const owner = new Map();
   for (const registry of registries) {

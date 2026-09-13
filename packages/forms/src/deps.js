@@ -137,7 +137,12 @@ function addPath(source, out) {
   catch {
     return; // a variable-rooted path, or not a path at all
   }
-  out.add(prefixOf(ast.segments));
+  collectPathQueries(ast, out);
+}
+
+/** Visit every nested filter, including those on a relative query. */
+function collectPathQueries(ast, out) {
+  if (ast.relative !== true) out.add(prefixOf(ast.segments));
   for (const segment of ast.segments) {
     for (const selector of segment.selectors) {
       if (selector.kind === 'filter') collectFilterQueries(selector.expr, out);
@@ -168,8 +173,7 @@ function prefixOf(segments) {
 function collectFilterQueries(node, out) {
   if (node === null || typeof node !== 'object') return;
   if (node.query !== undefined && Array.isArray(node.query.segments)) {
-    if (node.query.relative !== true) out.add(prefixOf(node.query.segments));
-    else collectFilterQueries(node.query, out);
+    collectPathQueries(node.query, out);
   }
   for (const key of ['operands', 'operand', 'left', 'right', 'args', 'expr']) {
     const child = node[key];

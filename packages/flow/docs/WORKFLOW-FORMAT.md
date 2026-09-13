@@ -339,6 +339,8 @@ workflow once and binds its checkpoint CAS to application run records.
 application run ID. `lease` may be a capability or a function returning the
 worker's current renewed lease. Checkpoint provenance includes the canonical
 workflow/schema identity and the engine's input/task-version identity.
+Refused checkpoint provenance leaves the prior run status, revision and event
+history intact; resources still release after the rejected attempt drains.
 
 `cancel(id, observedRevision, { actor, reason })` records explicit cancellation
 intent, stops local task admission, signals and drains local workers, and waits

@@ -416,8 +416,8 @@ function expandItemRule(rule, data, node, partIndex, pointer, ext, results, cata
  */
 export function evaluateFormRules(compiled, data, catalog = undefined, memo = undefined) {
   const rules = compiled.rules;
-  // a catalog swap (a locale switch) invalidates every rendered message
-  const reuse = memo !== undefined && memo.results !== null && memo.catalog === catalog;
+  // A rule-set or catalog swap invalidates the entire result map and its keys.
+  const reuse = memo !== undefined && memo.results !== null && memo.catalog === catalog && memo.compiled === compiled;
   // A declared write is taken at its word; otherwise the documents are
   // diffed. Diffing is the honest default — it needs nothing from the
   // caller — but it must scan the members of every container that
@@ -473,6 +473,7 @@ export function evaluateFormRules(compiled, data, catalog = undefined, memo = un
   if (memo !== undefined) {
     memo.data = data;
     memo.catalog = catalog;
+    memo.compiled = compiled;
     memo.results = results;
     memo.keys = keys;
   }
@@ -498,6 +499,7 @@ function evaluateRule(rule, data, ext, results, catalog, written) {
  * @typedef {object} RuleMemo
  * @property {any} data
  * @property {any} catalog
+ * @property {CompiledRules|null} [compiled]
  * @property {Record<string, RuleResult>|null} results
  * @property {string[][]|null} keys
  * @property {string[]|null} touched - Pointers declared through
@@ -507,8 +509,8 @@ function evaluateRule(rule, data, ext, results, catalog, written) {
 
 /**
  * Create an empty rule memo. One per form session: it is bound to the
- * document lineage it has seen, so sharing it between two forms would
- * diff unrelated documents (correct, but pointlessly expensive).
+ * document lineage and compiled rules it has seen. Switching compiled
+ * rules rebuilds the memo, including the keys written by item templates.
  *
  * `memo.touch(pointer)` declares a write before the next evaluation.
  * It is an optimization AND a promise: the evaluation then trusts the
@@ -526,6 +528,7 @@ export function createRuleMemo() {
   const memo = {
     data: undefined,
     catalog: undefined,
+    compiled: null,
     results: null,
     keys: null,
     touched: null,

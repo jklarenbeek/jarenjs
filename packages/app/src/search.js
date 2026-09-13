@@ -81,8 +81,13 @@ export function createSearchResource(definition, options) {
         }
         catch (error) { return refuse('error', disposed ? 'disposed' : controller.signal.aborted ? 'cancelled' : String(error?.message ?? error)); }
       };
-      const promise = run().finally(() => { pending.delete(controller); signal?.removeEventListener('abort', abort); });
-      pending.set(controller, promise); return promise;
+      // Worker construction and progress callbacks may synchronously reenter
+      // build(); reserve the credit before invoking either capability.
+      const deferred = Promise.withResolvers();
+      const promise = deferred.promise.finally(() => { pending.delete(controller); signal?.removeEventListener('abort', abort); });
+      pending.set(controller, promise);
+      deferred.resolve(run());
+      return promise;
     },
     /** @param {string} text @param {any} [options] */
     search(text, options) { return index.search(text, options); },

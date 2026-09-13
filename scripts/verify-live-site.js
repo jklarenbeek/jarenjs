@@ -21,7 +21,8 @@
  * At the moment this runs, HEAD is the revision the deployed build recorded.
  *
  * A fresh publish takes a minute or two to propagate, so a mismatch is
- * retried with backoff before it is believed.
+ * retried with backoff before it is believed. The timeout bounds the whole
+ * verification, including response bodies and waits, and aborts timed-out fetches.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -53,7 +54,7 @@ export function expected(root = ROOT) {
 /**
  * Poll the live `build.json` until it matches, or the budget runs out.
  * @param {{ url?: string, want?: {version: string, commit: string},
- *   timeoutMs?: number, fetchJson?: (url: string) => Promise<any>,
+ *   timeoutMs?: number, fetchJson?: (url: string, signal: AbortSignal) => Promise<any>,
  *   wait?: (ms: number) => Promise<any>, log?: (m: string) => void }} [options]
  * @returns {Promise<LiveReport>}
  */
@@ -63,8 +64,8 @@ export async function verifyLiveSite(options = {}) {
   const budget = options.timeoutMs ?? 240_000;
   const log = options.log ?? ((m) => console.log(m));
   const wait = options.wait ?? sleep;
-  const fetchJson = options.fetchJson ?? (async (url) => {
-    const response = await fetch(url, { cache: 'no-store' });
+  const fetchJson = options.fetchJson ?? (async (url, signal) => {
+    const response = await fetch(url, { cache: 'no-store', signal });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     return response.json();
   });
@@ -81,7 +82,7 @@ export async function verifyLiveSite(options = {}) {
     attempts += 1;
     problems = [];
     try {
-      live = await fetchJson(`${base}build.json?t=${started}-${attempts}`);
+      live = await beforeDeadline((signal) => fetchJson(`${base}build.json?t=${started}-${attempts}`, signal), started + budget);
       if (live?.commit !== want.commit) {
         problems.push(`commit: live ${String(live?.commit).slice(0, 7)} `
           + `≠ local HEAD ${want.commit.slice(0, 7)}`);
@@ -96,10 +97,29 @@ export async function verifyLiveSite(options = {}) {
     }
     if (Date.now() - started + backoff > budget) break;
     log(`not live yet (${problems.join('; ')}) — retrying in ${Math.round(backoff / 1000)}s`);
-    await wait(backoff);
+    try { await beforeDeadline(() => wait(backoff), started + budget); }
+    catch (err) { problems.push(String(/** @type {any} */ (err)?.message ?? err)); break; }
     backoff = Math.min(backoff * 2, 40_000);
   }
   return { code: 1, attempts, live, problems };
+}
+
+/** Bound injected capabilities even when they ignore cancellation. */
+async function beforeDeadline(run, deadline) {
+  const remaining = deadline - Date.now();
+  const error = new Error('verification timed out');
+  if (remaining <= 0) throw error;
+  const controller = new AbortController();
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(error); reject(error); }, remaining);
+  });
+  try {
+    const value = await Promise.race([run(controller.signal), expired]);
+    if (Date.now() >= deadline) { controller.abort(error); throw error; }
+    return value;
+  }
+  finally { clearTimeout(timer); }
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

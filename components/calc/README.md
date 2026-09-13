@@ -36,6 +36,11 @@ const calc = createCalcComponent({ provider: 'coingecko' });
 const app = calc.createApp({ node: document.getElementById('calc') });
 ```
 
+`createCalcComponent({ codes, fallbackRates })` uses those currency choices and
+fallback rates for its exposed configuration and both initialization paths.
+Programmer Equals records the selected base on the tape; grouping spaces stay
+out of the committed expression so it can be used in the next calculation.
+
 ## The numeric kernel lives in `@jarenjs/core`
 
 Reusable primitives were pushed *down* into core, so any package can use

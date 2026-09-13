@@ -125,7 +125,14 @@ test.describe('with motion allowed', function () {
     const jump = async () => {
       const height = await page.evaluate(() => document.scrollingElement.scrollHeight);
       for (let top = 0; top < height; top += 1_200) {
-        await page.evaluate((y) => window.scrollTo(0, y), top);
+        const position = await page.evaluate((y) => {
+          // The page enables smooth scrolling; this scenario requires actual
+          // jumps that can skip an IntersectionObserver observation cycle.
+          window.scrollTo({ top: y, behavior: 'instant' });
+          const root = document.scrollingElement;
+          return { actual: window.scrollY, expected: Math.min(y, root.scrollHeight - root.clientHeight) };
+        }, top);
+        expect(position.actual, 'the jump reaches its target in the same turn').toBe(position.expected);
         await page.waitForTimeout(60);
       }
       await page.waitForTimeout(1_200);

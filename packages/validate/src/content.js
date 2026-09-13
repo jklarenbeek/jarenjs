@@ -47,11 +47,12 @@ export function compileContentMediaType(schemaObj, jsonSchema) {
       };
     }
     else {
+      const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
       return function validateBase64JsonContent(data, dataPath) {
         if (!isStringType(data)) return true;
         // Check valid base64 first before decoding
         if (!isValidBase64(data)) return addError(data, dataPath);
-        const decoded = Buffer.from(data, 'base64').toString('utf8');
+        const decoded = decoder.decode(Uint8Array.from(atob(data), (char) => char.charCodeAt(0)));
         return isValidJSON(decoded) || addError(data, dataPath);
       }
     }

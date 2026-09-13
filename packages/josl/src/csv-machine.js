@@ -819,7 +819,7 @@ export class CsvMachine {
       cell = trimAscii(cell);
     if (cell.length === 0)
       return this.emptyAsNull ? null : cell;
-    return this.typed ? coerceCsvValue(cell) : cell;
+    return this.typed && !(this.wantHeader && this.headerFields === null) ? coerceCsvValue(cell) : cell;
   }
 
   // A quoted cell is never trimmed — the quotes are the author saying the

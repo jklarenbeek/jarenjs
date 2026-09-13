@@ -26,35 +26,35 @@ import { Docs, Health, Shop } from '../linq/contract-corpus.js';
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 
 // ——— §2 shop: every operation's input, output and error codes ———
-type ShopOps = ContractOf<typeof Shop>;
+type ShopContract = ContractOf<typeof Shop>;
 
 // A date-formatted string is the `DateTime` brand on both sides — the
 // suite's one reading of `format: "date-time"`, which @jarenjs/db's
 // generated entity types, the schema pen and §12.3's projection all
 // share — so this input is strictly equal like every other.
-const catalogLoadInput: Equals<ShopOps['catalog.load']['input'], G.Shop.CatalogLoadInput> = true;
-const catalogLoadSince: Equals<ShopOps['catalog.load']['input']['since'], DateTime | undefined> = true;
-const catalogLoadOutput: Equals<ShopOps['catalog.load']['output'], G.Shop.CatalogLoadOutput> = true;
-const catalogLoadErrors: Equals<ShopOps['catalog.load']['errors'], 'stale'> = true;
-const catalogLoadKind: Equals<ShopOps['catalog.load']['kind'], 'read'> = true;
+const catalogLoadInput: Equals<ShopContract['catalog.load']['input'], G.Shop.CatalogLoadInput> = true;
+const catalogLoadSince: Equals<ShopContract['catalog.load']['input']['since'], DateTime | undefined> = true;
+const catalogLoadOutput: Equals<ShopContract['catalog.load']['output'], G.Shop.CatalogLoadOutput> = true;
+const catalogLoadErrors: Equals<ShopContract['catalog.load']['errors'], 'stale'> = true;
+const catalogLoadKind: Equals<ShopContract['catalog.load']['kind'], 'read'> = true;
 
-const productSaveInput: Equals<ShopOps['product.save']['input'], G.Shop.ProductSaveInput> = true;
-const productSaveOutput: Equals<ShopOps['product.save']['output'], G.Shop.ProductSaveOutput> = true;
-const productSaveErrors: Equals<ShopOps['product.save']['errors'], 'conflict' | 'not-found'> = true;
-const productSaveKind: Equals<ShopOps['product.save']['kind'], 'command'> = true;
+const productSaveInput: Equals<ShopContract['product.save']['input'], G.Shop.ProductSaveInput> = true;
+const productSaveOutput: Equals<ShopContract['product.save']['output'], G.Shop.ProductSaveOutput> = true;
+const productSaveErrors: Equals<ShopContract['product.save']['errors'], 'conflict' | 'not-found'> = true;
+const productSaveKind: Equals<ShopContract['product.save']['kind'], 'command'> = true;
 
-const imageBytesInput: Equals<ShopOps['image.bytes']['input'], G.Shop.ImageBytesInput> = true;
-const imageBytesOutput: Equals<ShopOps['image.bytes']['output'], G.Shop.ImageBytesOutput> = true;
+const imageBytesInput: Equals<ShopContract['image.bytes']['input'], G.Shop.ImageBytesInput> = true;
+const imageBytesOutput: Equals<ShopContract['image.bytes']['output'], G.Shop.ImageBytesOutput> = true;
 
 // the projection's `Operations` is the invokable set: the opaque
 // operation is out of it, and in `UrlOperations` only
 const shopInvokable: Equals<keyof InvokableOf<typeof Shop>, keyof G.Shop.Operations> = true;
-const shopUrl: Equals<keyof ShopOps, keyof G.Shop.UrlOperations> = true;
+const shopUrl: Equals<keyof ShopContract, keyof G.Shop.UrlOperations> = true;
 // the projection's `ByteOperations` is the opaque set, exactly `OpaqueOf<>`
 const shopOpaque: Equals<keyof OpaqueOf<typeof Shop>, keyof G.Shop.ByteOperations> = true;
 const shopOpaqueInput: Equals<OpaqueOf<typeof Shop>['image.bytes']['input'], G.Shop.ByteOperations['image.bytes']> = true;
-const imageIsOpaque: Equals<ShopOps['image.bytes']['opaque'], true> = true;
-const productIsNotOpaque: Equals<ShopOps['product.save']['opaque'], false> = true;
+const imageIsOpaque: Equals<ShopContract['image.bytes']['opaque'], true> = true;
+const productIsNotOpaque: Equals<ShopContract['product.save']['opaque'], false> = true;
 
 // ——— §6 health: an input-less operation reads `null` ———
 type HealthOps = ContractOf<typeof Health>;

@@ -2,8 +2,38 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCollectionInteraction } from '@jarenjs/collection';
+import { createArrayRangeProvider, createCollectionCoordinator } from '@jarenjs/app';
 const options = { count: 100, columnCount: 4, keyAt: (i) => `row-${i}`, indexOf: (key) => Number(key.slice(4)), query: 'q', snapshot: 's' };
 describe('collection keyed interaction', () => {
+  it('toggles range members with bounded exclusions and exports exactly the visible selection', async () => {
+    const keys = ['a', 'b', 'c', 'd'];
+    const c = createCollectionInteraction({ count: 4, keyAt: (i) => keys[i], indexOf: (key) => keys.indexOf(key), query: 'q', snapshot: 's', maxSelectedKeys: 1 });
+    c.focusIndex(0); c.key({ key: 'ArrowDown', shiftKey: true }); c.key({ key: 'ArrowDown', shiftKey: true });
+    c.key({ key: ' ' });
+    assert.equal(c.selected('c'), false);
+    assert.equal(c.selected('b'), true);
+    assert.deepEqual(c.state().selection.exclusions, ['c']);
+    assert.equal(c.toggle('b').state, 'budget-exhausted');
+    const provider = createArrayRangeProvider(keys.map((id) => ({ id })), { query: 'q', snapshot: 's' });
+    const coordinator = createCollectionCoordinator(provider);
+    try {
+      const output = [];
+      assert.deepEqual(await coordinator.output({ write: (rows) => output.push(...rows), commit() {} }, { selection: c.state().selection, pageRows: 1 }), { state: 'complete', rows: 2 });
+      assert.deepEqual(output, [{ id: 'a' }, { id: 'b' }]);
+      c.toggle('c'); assert.equal(c.selected('c'), true);
+      assert.deepEqual(c.state().selection.exclusions, []);
+    }
+    finally { await coordinator.dispose(); }
+  });
+
+  it('starts a fresh shift range from current focus after clearing selection', () => {
+    const c = createCollectionInteraction(options);
+    c.focusIndex(0); c.key({ key: 'ArrowDown', shiftKey: true }); c.key({ key: 'ArrowDown', shiftKey: true });
+    c.clear(); c.focusIndex(2); c.key({ key: 'ArrowDown', shiftKey: true });
+    assert.deepEqual(c.state().selection.ranges, [{ fromKey: 'row-2', toKey: 'row-3' }]);
+    assert.equal(c.selected('row-0'), false);
+  });
+
   it('navigates rows, columns, home/end/page and key-scoped selection', () => {
     const c = createCollectionInteraction(options); c.focusIndex(10, 1);
     assert.equal(c.key({ key: 'ArrowDown', shiftKey: true }).key, 'row-11');

@@ -13,6 +13,20 @@ function makeApp() {
 }
 
 describe('#calc component: state + viewModel', function () {
+  it('uses configured fallback rates and codes in both component initialization paths', () => {
+    const codes = ['USD', 'EUR'], fallbackRates = { base: 'USD', rates: { USD: 1, EUR: 2 }, at: 123, stale: true, status: 'fallback' };
+    const comp = createCalcComponent({ codes, fallbackRates });
+    const app = comp.createApp({ schedule: (f) => f() });
+    try {
+      assert.deepEqual(comp.codes, codes);
+      assert.deepEqual(comp.initialState().rates, fallbackRates);
+      assert.deepEqual(app.getState().calc.rates, fallbackRates);
+      app.dispatch('calc/mode', { mode: 'converter' });
+      assert.equal(comp.viewModel(app.getState()).converter.result, '50');
+    }
+    finally { app.destroy(); }
+  });
+
   it('initial state is plain JSON', () => {
     const s = calcInitialState();
     assert.equal(s.mode, 'standard');
@@ -31,6 +45,25 @@ describe('#calc component: state + viewModel', function () {
 });
 
 describe('#calc component: app integration (synchronous dispatch)', function () {
+  it('commits the selected programmer base and keeps grouped results usable for the next calculation', () => {
+    for (const [base, display] of [['HEX', '0xFFFF'], ['OCT', '0o177 777'], ['BIN', '0b0000 0000 0000 0000 1111 1111 1111 1111']]) {
+      const { comp, app } = makeApp();
+      try {
+        app.dispatch('calc/mode', { mode: 'programmer' }); app.dispatch('calc/base', { base });
+        app.dispatch('calc/key', { k: '65535' });
+        assert.equal(comp.viewModel(app.getState()).display.result, display);
+        app.dispatch('calc/equals');
+        assert.equal(app.getState().calc.tape[0].result, display);
+        assert.equal(app.getState().calc.entry, display.replaceAll(' ', ''));
+        assert.equal(comp.viewModel(app.getState()).display.error, null);
+        app.dispatch('calc/key', { k: '+1' }); app.dispatch('calc/equals');
+        assert.equal(app.getState().calc.ans, 65536);
+        assert.equal(app.getState().calc.tape.length, 2);
+      }
+      finally { app.destroy(); }
+    }
+  });
+
   it('renders keypad + display + plot through the view', () => {
     const { app } = makeApp();
     const html = renderToString(app.getVnode());

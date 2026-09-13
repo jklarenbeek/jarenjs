@@ -81,7 +81,9 @@ pending realization. `removedKeys` tells interaction to resolve a removal fallba
 only bounded observations and JSON intent need enter app state.
 
 Selection contains stable `keys`, or query/snapshot-scoped `mode:'all'` with
-`exclusions`, or one range with stable `fromKey`/`toKey` endpoints. Shift ranges
+`exclusions`, or one range with stable `fromKey`/`toKey` endpoints and optional
+exclusions. Toggling a range member excludes or restores it in both the UI and
+complete output. Clearing selection resets its shift anchor. Shift ranges
 survive asynchronous endpoint realization. `maxSelectedKeys` (4096) bounds explicit
 keys/exclusions. `state`, `selected`, `toggle`, `selectAll`, `clear`, `restore`,
 `cancelPending` and `update` expose the model. Range membership for rendered rows

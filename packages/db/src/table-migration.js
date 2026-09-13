@@ -104,7 +104,15 @@ export function planTableMigration(connection, definition, options) {
   // Preserve hidden rowids too, including text/composite-key rowid tables.
   const tableInfo = existing ? connection.prepare(sqliteTableMigration.tableList()).all([]).find((t) => t.schema === 'main' && t.name === target.name) : null;
   if (rebuild && !!tableInfo.wr !== !!target.withoutRowid) refuse('rebuild cannot change rowid ownership');
-  if (rebuild && !tableInfo.wr && !(oldKey.length === 1 && oldColumns.find((c) => c.name === oldKey[0]).type.toUpperCase() === 'INTEGER')) {
+  // INTEGER PRIMARY KEY DESC has a separate primary-key index and a hidden
+  // rowid. The declared type alone cannot establish rowid ownership.
+  const sourceAlias = rebuild && !tableInfo.wr && oldKey.length === 1
+    && oldColumns.find((c) => c.name === oldKey[0]).type.toUpperCase() === 'INTEGER'
+    && !connection.prepare(dialect.introspect.indexes(target.name)).all([]).some((index) => index.origin === 'pk');
+  const targetAlias = !target.withoutRowid && target.primaryKey?.length === 1
+    && target.columns.find((c) => c.name.toLowerCase() === target.primaryKey[0].toLowerCase()).type === 'INTEGER';
+  if (rebuild && sourceAlias !== !!targetAlias) refuse('rebuild cannot change rowid ownership');
+  if (rebuild && !tableInfo.wr && !sourceAlias) {
     const rowid = ['rowid', '_rowid_', 'oid'].find((name) => !oldColumns.some((c) => c.name.toLowerCase() === name)
       && !target.columns.some((c) => c.name.toLowerCase() === name));
     if (!rowid) refuse('the source shadows every rowid alias');

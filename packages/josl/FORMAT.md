@@ -224,6 +224,8 @@ information that cannot be recovered downstream:
 - A trailing terminator does not produce a final empty record.
 - A quoted cell is never trimmed and never coerced: the quotes are the
   author marking the content as text.
+- Header names remain text even with `typed: true`; coercion applies only
+  to data rows, in both whole-document and streaming reads.
 - A missing column is **absent**, not empty — `undefined` says the record
   did not carry it, `''` would claim it carried nothing.
 - `typed: true` promotes an integer beyond 2^53 to bigint rather than

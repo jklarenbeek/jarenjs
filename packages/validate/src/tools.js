@@ -17,6 +17,7 @@ import {
 import {
   isRegExpType,
   isStringWhiteSpace,
+  getStringLength,
 } from '@jarenjs/core/string';
 
 import {
@@ -25,6 +26,7 @@ import {
 
 import {
   isJsonObject,
+  equalsDeep,
 } from '@jarenjs/core/object';
 
 import {
@@ -102,7 +104,8 @@ export const REF_SIBLING_KEYWORDS = Object.freeze(['type', 'const', 'enum',
   ...NUMERIC_CONSTRAINTS, ...STRING_CONSTRAINTS,
   ...ARRAY_CONSTRAINTS, 'maxContains', 'minContains',
   ...OBJECT_CONSTRAINTS, 'required',
-  'dependentRequired', 'properties', 'patternProperties', 'additionalProperties', 'items',
+  'dependentRequired', 'dependentSchemas', 'dependencies', 'nullable', '$dynamicRef',
+  'properties', 'patternProperties', 'additionalProperties', 'items',
   'prefixItems', 'additionalItems', 'contains', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
   'then', 'else', 'propertyNames', 'contentEncoding', 'contentMediaType',
   'unevaluatedProperties', 'unevaluatedItems', '$query', 'data']);
@@ -213,12 +216,13 @@ export function createDataRefCompilers(compileRefResolver) {
    * @param {string} keyword
    * @param {(data: any) => boolean} accepts - Instance types the keyword constrains
    * @param {(constraint: any) => boolean} expects - Resolved constraint types that assert
-   * @param {(data: any, constraint: any) => boolean} isValid
+   * @param {(data: any, constraint: any, useGrapheme: boolean) => boolean} isValid
    */
   const constraint = (keyword, accepts, expects, isValid) =>
     (schemaObj, ref) => {
       const addError = schemaObj.createErrorHandler(ref, keyword);
       const resolveRef = compileRefResolver(ref);
+      const useGrapheme = schemaObj.options.useGrapheme;
 
       return function validateDataRefConstraint(data, dataPath, dataRoot) {
         if (!accepts(data)) return true;
@@ -226,7 +230,7 @@ export function createDataRefCompilers(compileRefResolver) {
         const value = resolveRef(dataRoot, dataPath);
         if (value === JSONPOINTER_NOTHING || !expects(value)) return true;
 
-        return isValid(data, value) || addError(data, dataPath, value);
+        return isValid(data, value, useGrapheme) || addError(data, dataPath, value);
       };
     };
 
@@ -287,9 +291,9 @@ export function createDataRefCompilers(compileRefResolver) {
         return Math.abs(q - Math.round(q)) < 1e-6;
       }),
     minLength: constraint('minLength', isJsonString, isNumberType,
-      (data, min) => data.length >= min),
+      (data, min, useGrapheme) => getStringLength(data, useGrapheme) >= min),
     maxLength: constraint('maxLength', isJsonString, isNumberType,
-      (data, max) => data.length <= max),
+      (data, max, useGrapheme) => getStringLength(data, useGrapheme) <= max),
     pattern: constraint('pattern', isJsonString, isStringType,
       (data, pattern) => new RegExp(pattern, 'u').test(data)),
     minItems: constraint('minItems', Array.isArray, isNumberType,
@@ -301,9 +305,10 @@ export function createDataRefCompilers(compileRefResolver) {
     maxProperties: constraint('maxProperties', isJsonObject, isNumberType,
       (data, max) => Object.keys(data).length <= max),
     enum: constraint('enum', isDefined, Array.isArray,
-      (data, values) => values.includes(data)),
+      (data, values) => values.includes(data)
+        || (data !== null && typeof data === 'object' && values.some((value) => equalsDeep(value, data)))),
     const: constraint('const', isDefined, isAnyValue,
-      (data, value) => data === value),
+      (data, value) => value !== null && typeof value === 'object' ? equalsDeep(value, data) : data === value),
     format: compileFormat,
   };
 }

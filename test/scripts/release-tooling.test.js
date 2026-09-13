@@ -204,6 +204,30 @@ describe('the live verifier compares the publish to this checkout', function () 
 
   const want = { version: '9.9.9', commit: 'a'.repeat(40) };
 
+  it('bounds a stalled injected fetch and aborts its signal', { timeout: 2000 }, async () => {
+    let signal;
+    const report = await verifyLiveSite({ want, timeoutMs: 10, log: () => {},
+      fetchJson: (_url, current) => { signal = current; return new Promise(() => {}); } });
+    assert.strictEqual(report.code, 1);
+    assert.strictEqual(report.attempts, 1);
+    assert.match(report.problems[0], /timed out/);
+    assert.strictEqual(signal.aborted, true);
+  });
+
+  it('refuses a matching response body that arrives after the overall deadline', async () => {
+    let timer;
+    const server = createServer((_req, res) => {
+      res.setHeader('content-type', 'application/json'); res.flushHeaders();
+      timer = setTimeout(() => res.end(JSON.stringify(want)), 80);
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const report = await verifyLiveSite({ url: `http://127.0.0.1:${server.address().port}/`, want, timeoutMs: 5, log: () => {} });
+      assert.strictEqual(report.code, 1);
+    }
+    finally { clearTimeout(timer); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+  });
+
   it('verifies a live site carrying exactly this build', async function () {
     const site = await serving({ ...want, built: '2026-08-22T00:00:00+02:00' });
     const report = await verifyLiveSite({ url: site.url, want, timeoutMs: 5000 });
@@ -217,7 +241,7 @@ describe('the live verifier compares the publish to this checkout', function () 
     // the branch push is not the publish: a stale commit is the failure
     // this exists to catch, and it must not be retried into a pass
     const report = await verifyLiveSite({
-      url: site.url, want, timeoutMs: 1, log: () => {}, wait: async () => {},
+      url: site.url, want, timeoutMs: 1000, log: () => {}, wait: async () => {},
     });
     site.close();
     assert.strictEqual(report.code, 1);
@@ -234,6 +258,26 @@ describe('the live verifier compares the publish to this checkout', function () 
 });
 
 describe('the document gate', function () {
+  it('checks long, tilde, nested and EOF-terminated fences using Markdown semantics', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jaren-document-fences-'));
+    try {
+      for (const source of ['````json\nnope\n````\n', '~~~json\nnope\n~~~\n', '> ```json\n> nope\n> ```\n', '- ```json\n  nope\n  ```\n', '```json\nnope\n']) {
+        writeFileSync(join(root, 'README.md'), source);
+        const report = checkDocuments({ root, patterns: ['README.md'] });
+        assert.strictEqual(report.code, 1, source);
+        assert.strictEqual(report.json, 1);
+        assert.match(report.failures[0], /^README.md:1 — json:/);
+      }
+      const source = '````text\n```json\nnope\n```\n````\n\n<div>\n```json\nnope\n```\n</div>\n\n> ~~~json\n> {"ok":true}\n> ~~~\n';
+      assert.deepStrictEqual(fencesOf(source).map(({ lang, line }) => [lang, line]), [['text', 1], ['json', 13]]);
+      const nested = '---\ntitle: fences\n---\n\n[^late]:\n    ~~~json\n    {}\n    ~~~\n\n> - ````mermaid\n>   flowchart TD\n>   A --> B\n>   ````\n';
+      const fences = fencesOf(nested.replaceAll('\n', '\r\n'));
+      assert.deepStrictEqual(fences.map(({ lang, line }) => [lang, line]), [['json', 6], ['mermaid', 10]]);
+      assert.deepStrictEqual(fences.map(({ line }) => line), [6, 10]);
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('parses every checkable fence in the committed markdown surface', function () {
     const report = checkDocuments();
     assert.deepStrictEqual(report.failures, []);

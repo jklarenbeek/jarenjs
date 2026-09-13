@@ -18,6 +18,28 @@ function finish(request, changes = {}) {
   index.dispose();
 }
 describe('injected lexical worker lifecycle', () => {
+  it('reserves request credits before synchronous worker progress can reenter admission', async () => {
+    const worker = workerHost();
+    const request = worker.request;
+    worker.request = (message, options) => {
+      const promise = request(message, options);
+      options.onProgress({ version: 1, ...identity(message.generation), work: 1 });
+      return promise;
+    };
+    let nested;
+    const resource = createSearchResource(definition, { workerFactory: () => worker, maxInFlight: 1,
+      onProgress: () => { nested = resource.build([], identity(2)); } });
+    try {
+      const first = resource.build([], identity(1));
+      assert.equal(resource.stats().pending, 1);
+      assert.equal(worker.requests.length, 1);
+      assert.deepEqual(await nested, { ...identity(2), state: 'budget-exhausted', reason: 'in-flight' });
+      finish(worker.requests[0]); assert.equal((await first).state, 'complete');
+      assert.equal(resource.stats().pending, 0);
+    }
+    finally { await resource.dispose(); }
+  });
+
   it('publishes only matching complete snapshots, progress stays JSON and teardown drains', async () => {
     for (let cycle = 0; cycle < 12; cycle++) {
       const worker = workerHost(), progress = [];
