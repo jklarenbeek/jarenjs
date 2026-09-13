@@ -102,15 +102,9 @@ describe('declaration parity', () => {
   it('every option migrationStatus reads is declared, and nothing declared goes unread', () => {
     const source = fs.readFileSync(path.resolve('packages/db/src/migrate.js'), 'utf8');
     const types = fs.readFileSync(path.resolve('packages/db/types/index.d.ts'), 'utf8');
-    const at = types.indexOf('export declare function migrationStatus(');
-    const signature = types.slice(at, types.indexOf('): Promise<MigrationStatusReport>;', at));
-    const optionsText = signature.slice(signature.search(/options\??: \{/));
-    // the members of the options object: parenthesised function types
-    // (`registerFunctions?: (connection: unknown) => unknown`) carry
-    // parameter names that are not members
-    const flat = optionsText.replace(/\([^)]*\)/g, '()');
-    const declared = [...new Set([...flat.matchAll(/\b([A-Za-z]+)\??:/g)].map((m) => m[1]))]
-      .filter((name) => name !== 'options').sort();
+    // Both ownership overloads read the same named options contract.
+    const block = types.slice(types.indexOf('export interface MigrationStatusOptions {'));
+    const declared = membersOf(block.slice(0, block.indexOf('\n}\n')));
     assert.deepStrictEqual(readsOf(source, 'migrationStatus'), declared);
   });
 
@@ -119,6 +113,8 @@ describe('declaration parity', () => {
     assert.match(types, /export interface MigrationTarget \{[\s\S]*?driver: Driver;[\s\S]*?path\?: string;[\s\S]*?busyTimeout\?: number;[\s\S]*?\}/);
     assert.match(types, /export declare function migrate\(\s*target: MigrationTarget,/);
     assert.match(types, /export declare function migrationStatus\(\s*target: MigrationTarget,/);
+    assert.match(types, /export declare function migrate\(\s*target: BorrowedMigrationTarget,/);
+    assert.match(types, /export declare function migrationStatus\(\s*target: BorrowedMigrationTarget,/);
   });
 });
 

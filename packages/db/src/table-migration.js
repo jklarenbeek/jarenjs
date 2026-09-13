@@ -7,10 +7,13 @@ import { defineTable, planTable, schemaChangeSql } from './dialects/sqlite-schem
 import { relationalEmitter, relationalIdentifier as q, sql } from './dialects/sqlite-relational.js';
 import { sqliteDialect as dialect, sqliteTableMigration } from './dialects/sqlite.js';
 import { sqlTokens } from './dialects/check-read.js';
+import { ENGINE_TABLES } from './engine-metadata.js';
+import { withForeignKeySettings } from './foreign-key-scope.js';
 
 const refuse = (message) => { throw new DbCompileError('JD0021', message); };
 const fingerprint = (v) => canonicalizeJson(v);
-const schema = (connection) => connection.prepare(sqliteTableMigration.schema()).all([]).map((v) => ({ ...v }));
+const schema = (connection) => connection.prepare(sqliteTableMigration.schema()).all([])
+  .filter((v) => !ENGINE_TABLES.has(v.name) && !ENGINE_TABLES.has(v.tbl_name)).map((v) => ({ ...v }));
 const createdSql = (text) => text.replace(/^CREATE (TABLE|(?:UNIQUE )?INDEX|TRIGGER) IF NOT EXISTS /i, 'CREATE $1 ');
 const owned = (objects, table) => objects.filter((o) => o.tbl_name === table).map((o) => [o.type, o.name, o.sql]).sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
 const sync = (connection) => {
@@ -47,7 +50,7 @@ export function applySchemaChange(connection, plan) {
       refuse('source schema or connection settings changed after planning');
     connection.exec(plan.sql);
     return { changed: fingerprint(before) === fingerprint(schema(connection)) ? 0 : 1 };
-  }, { mode: 'immediate' });
+  }, undefined, 'immediate');
 }
 
 /** Inspect a live schema and generate a table plan without changing it.
@@ -165,7 +168,7 @@ export function applyTableMigration(connection, plan) {
     if (connection.prepare(dialect.pragma.foreignKeyCheck()).get([])) refuse('migration violates foreign-key references');
     if (fingerprint(owned(schema(connection), plan.table)) !== fingerprint(owned(plan.after, plan.table))) refuse('migrated schema differs from the reviewed target');
     return { changed: plan.statements.length + plan.finish.length };
-  }, { mode: 'immediate' });
+  }, undefined, 'immediate');
   return plan.rebuild ? withForeignKeysSuspended(connection, run) : run();
 }
 
@@ -176,13 +179,7 @@ export function withForeignKeysSuspended(connection, fn) {
   sync(connection);
   if (typeof fn !== 'function' || Object.prototype.toString.call(fn) === '[object AsyncFunction]')
     refuse('a physical migration scope requires a synchronous callback');
-  const foreignKeys = connection.prepare(dialect.introspect.pragma('foreign_keys')).get([]).foreign_keys;
-  const legacy = connection.prepare(dialect.introspect.pragma('legacy_alter_table')).get([]).legacy_alter_table;
-  try {
-    connection.exec(dialect.pragma.foreignKeys(false));
-    if (connection.prepare(dialect.introspect.pragma('foreign_keys')).get([]).foreign_keys !== 0) refuse('foreign_keys cannot change inside a transaction; establish the outer migration scope first');
-    connection.exec(dialect.pragma.set('legacy_alter_table', 'ON'));
-    return connection.transaction(() => {
+  return withForeignKeySettings(connection, () => connection.transaction(() => {
       const result = fn();
       if (result != null && typeof result.then === 'function') {
         Promise.resolve(result).catch(() => {});
@@ -190,10 +187,5 @@ export function withForeignKeysSuspended(connection, fn) {
       }
       if (connection.prepare(dialect.pragma.foreignKeyCheck()).get([])) refuse('migration violates foreign-key references');
       return result;
-    }, { mode: 'immediate' });
-  }
-  finally {
-    connection.exec(dialect.pragma.set('legacy_alter_table', legacy ? 'ON' : 'OFF'));
-    connection.exec(dialect.pragma.foreignKeys(!!foreignKeys));
-  }
+  }, undefined, 'immediate'));
 }

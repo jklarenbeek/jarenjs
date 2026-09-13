@@ -951,16 +951,32 @@ back so the retry plans the same statements again.
 
 ## The migration engine, relationally (`src/migrate.js`, `src/cli.js`)
 
-The strategy-table diff renders SELF-CONTAINED steps — additive
-columns, data steps, and one rebuild implementation following
-SQLite's documented twelve-step procedure with `foreign_key_check`
-inside the transaction. Shape EQUALITY (schemaShapeOf versus a fresh
-createModelShape build) is the acceptance criterion, asserted on the
-shadow before the real database is touched and again after. Probed
-and designed around: node:sqlite enables foreign keys BY DEFAULT (the
-pragma bracket is load-bearing), `jsonb()` PARSES its argument
-(column folds pass plain SQL values), and a table rename does not
-rename columns (join tables rename their endpoint keys explicitly).
+The strategy-table diff renders managed hybrid-model steps. Physical
+declaration changes remain an explicit planning-policy refusal; reviewed
+`table` steps delegate to `table-migration.js` with their entire source,
+checksum, storage, identity and object guards. `migrate.js` owns the one
+history/receipt transaction for both structural and data steps.
+
+`physical-transform.js` reuses entity codecs and the document-step kernel
+for bounded column reads and changed-only writes. Each step can select a
+historical model. Keys remain fixed; generated/default ownership and
+unchanged raw storage survive. Text cursor bytes are checked against the
+native binding before exposing their batch; unsupported round-trips refuse.
+
+`migration-target.js` owns connection acquisition/cleanup and complete
+physical target acceptance for apply, repeated startup and status.
+Application-owned inventories include retained programs while unrelated
+tables stay outside the selected scope. `schema-sql.js` is the single
+literal-aware comparison owner: physical order is strict, and safe managed
+named-column comparison opts into a narrow relaxation. Exact source
+snapshots and checksums never use relaxed comparison.
+
+`foreign-key-scope.js` brackets FK/legacy settings around the driver's
+IMMEDIATE transaction. Nested work shares savepoints. Owned handles close
+even after initialization failure; borrowed synchronous work retains its
+value boundary. `shadowFixture` initializes a disposable historical schema
+before replay calls the same `migrate` and receipt executor, with recursive
+replay disabled. Every selected target is accepted before its receipt.
 
 ## One cross-runtime seam worth remembering
 
@@ -1176,8 +1192,9 @@ flattening join this native subset; strict binding failures stop before a scan.
 read classifier's tokenizer and the driver's scope owner. Writes invalidate all
 clean tracked entities; pending edits and incomplete capture populations refuse.
 `invariants.js` uses the shared Query compiler for store rules; the dialect lowers
-a bounded database subset into ordered trigger bodies. `migrate.js` reuses its
-existing rebuild/receipt transaction and verifies preservation before publication.
+a bounded database subset into ordered trigger bodies. `migrate.js` composes
+guarded table plans and codec-aware transforms in its existing receipt
+transaction, checking preservation and complete selected targets before publication.
 The backup publisher uses Node online backup and Bun disk-backed VACUUM INTO.
 The standalone snapshot helper shares destination reservation and cleanup across
 both hosts, including transaction failures.

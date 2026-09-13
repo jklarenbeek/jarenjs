@@ -18,6 +18,8 @@
  * assertion's row is typed by the members the two shapes SHARE (a
  * precondition sees old rows, a postcondition new ones; what both agree
  * on is what neither lies about), annotated when one shape is meant.
+ * With an explicit step `model`, transform input/output and assertion
+ * rows use that model's layout, including names absent from the final model.
  * Every claim here has a runtime twin in
  * `test/linq/migration-pen.test.js` and a compile-level pin in
  * `test/consumer/linq-migration.ts`.
@@ -39,6 +41,8 @@ export interface JsltStep {
   /** A planner placeholder; the runner refuses it (`JD0021`). The pen never sets or clears it. */
   readonly draft?: boolean;
   readonly note?: string;
+  /** The immutable model for this step's current layout. */
+  readonly model?: object;
 }
 export interface QueryStep {
   readonly kind: 'query';
@@ -46,6 +50,7 @@ export interface QueryStep {
   readonly assert: Json;
   readonly expect?: 'empty' | 'ebv';
   readonly note?: string;
+  readonly model?: object;
 }
 export interface DeriveColumn {
   readonly name: string;
@@ -69,7 +74,39 @@ export interface RebuildStep {
   readonly indexes: readonly string[];
   readonly note?: string;
 }
-export type MigrationStep = DdlStep | SqlStep | JsltStep | QueryStep | DeriveStep | RebuildStep;
+/** The complete serializable artifact returned by planTableMigration. */
+export interface ReviewedTablePlan {
+  readonly version: 1;
+  readonly id: string;
+  readonly table: string;
+  readonly checksum: string;
+  readonly source: readonly unknown[];
+  readonly after: readonly unknown[];
+  readonly rebuild: boolean;
+  readonly temporary: string;
+  readonly unchanged: readonly string[];
+  readonly statements: readonly string[];
+  readonly finish: readonly string[];
+}
+export interface TableStep {
+  readonly kind: 'table';
+  readonly plan: ReviewedTablePlan;
+  readonly note?: string;
+}
+export type MigrationStep = DdlStep | SqlStep | JsltStep | QueryStep | DeriveStep | RebuildStep | TableStep;
+
+export interface PhysicalObject {
+  readonly type: 'table' | 'view' | 'index' | 'trigger';
+  readonly name: string;
+  readonly owner: string;
+  readonly sql: string | null;
+}
+export interface PhysicalHeader {
+  readonly source: readonly PhysicalObject[];
+  readonly dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
+  readonly assertions: readonly { readonly sql: string; readonly params?: readonly unknown[]; readonly expected: readonly unknown[] }[];
+  readonly target?: { readonly objects: readonly PhysicalObject[]; readonly tables?: readonly string[] };
+}
 
 /** The `$migration` 0.1 document (MIGRATION-FORMAT §2). */
 export interface MigrationDocument {
@@ -79,6 +116,7 @@ export interface MigrationDocument {
   readonly to: string;
   readonly note?: string;
   readonly steps: readonly MigrationStep[];
+  readonly physical?: PhysicalHeader;
 }
 
 // ————— what a model document types —————
@@ -124,7 +162,11 @@ export type SheetFor<S, New> = S extends { readonly __out: infer O }
   ? (unknown extends O ? unknown : O extends New ? unknown : never)
   : unknown;
 
-export interface AssertOptions {
+export interface TransformOptions<Current = never> {
+  /** Override the final model with the layout at this step. */
+  readonly model?: Current;
+}
+export interface AssertOptions<Current = never> extends TransformOptions<Current> {
   /** `'empty'` (the default, absent from the document): no row may
    * satisfy the predicate — it names the violation; `'ebv'`: the matching
    * rows are the witness. */
@@ -141,6 +183,22 @@ export class Migration<From = unknown, To = unknown> {
   ddl(sql: string, note?: string): Migration<From, To>;
   /** One data statement spelled directly (`sql`, MIGRATION-FORMAT §9.4). */
   sql(sql: string, note?: string): Migration<From, To>;
+  /** With an explicit current model, both the row and result use that layout. */
+  transform<Current extends object, N extends DeclaredNames<Current>, V extends ExprBase<unknown> = MemberExpr<DocOf<Current, N>>>(
+    name: N,
+    rule: (row: V, x: Externals<{}, ValueOf<V>>) => Spell<DocOf<Current, N>>,
+    options: TransformOptions<Current> & { readonly model: Current },
+  ): Migration<From, To>;
+  transform<Current extends object, N extends DeclaredNames<Current>, S extends StylesheetLike>(
+    name: N,
+    stylesheet: S & SheetFor<S, DocOf<Current, N>>,
+    options: TransformOptions<Current> & { readonly model: Current },
+  ): Migration<From, To>;
+  transform<Current extends object, N extends DeclaredNames<Current>, const R extends readonly RuleDocument[]>(
+    name: N,
+    rules: R & RulesFor<R, DocOf<Current, N>>,
+    options: TransformOptions<Current> & { readonly model: Current },
+  ): Migration<From, To>;
   /** A `jslt` step: one root rule captured over the OLD row (`root`/`path`
    * as externals), whose result spells the NEW row. Over a planned
    * document it replaces the draft for `name`; otherwise it is appended
@@ -148,6 +206,7 @@ export class Migration<From = unknown, To = unknown> {
   transform<N extends DeclaredNames<To>, V extends ExprBase<unknown> = MemberExpr<DocOf<From, N>>>(
     name: N,
     rule: (row: V, x: Externals<{}, ValueOf<V>>) => Spell<DocOf<To, N>>,
+    options?: TransformOptions,
   ): Migration<From, To>;
   /** A `stylesheet(…)` document — its output must be the new row when it
    * is typed; a hand-written envelope is the honest top. A disposition or
@@ -155,12 +214,23 @@ export class Migration<From = unknown, To = unknown> {
   transform<N extends DeclaredNames<To>, S extends StylesheetLike>(
     name: N,
     stylesheet: S & SheetFor<S, DocOf<To, N>>,
+    options?: TransformOptions,
   ): Migration<From, To>;
   /** A rules array: a typed first rule must produce the new row; a
    * hand-written rule is the honest top. */
   transform<N extends DeclaredNames<To>, const R extends readonly RuleDocument[]>(
     name: N,
     rules: R & RulesFor<R, DocOf<To, N>>,
+    options?: TransformOptions,
+  ): Migration<From, To>;
+  /** An explicit current model types a historical assertion's row. */
+  assert<Current extends object, N extends DeclaredNames<Current>, V extends ExprBase<unknown> = MemberExpr<DocOf<Current, N>>>(
+    name: N,
+    predicate: (row: V) => BoolExpr | boolean,
+    options: AssertOptions<Current> & { readonly model: Current },
+  ): Migration<From, To>;
+  assert<Current extends object, N extends DeclaredNames<Current>>(
+    name: N, query: Json, options: AssertOptions<Current> & { readonly model: Current },
   ): Migration<From, To>;
   /** A `query` step over `name`'s rows: the predicate names the VIOLATION
    * (`expect: 'empty'`, the default) or the witness (`'ebv'`); the row is

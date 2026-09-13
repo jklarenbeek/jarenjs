@@ -181,7 +181,8 @@ describe('what is deliberately NOT drift', () => {
       + '"doc" BLOB NOT NULL) STRICT';
     const migrated = 'CREATE TABLE "t"("id" TEXT PRIMARY KEY,"doc" BLOB NOT NULL,'
       + '"age" INTEGER) STRICT';
-    assert.strictEqual(comparableDeclaredSql(fresh), comparableDeclaredSql(migrated));
+    assert.strictEqual(comparableDeclaredSql(fresh, { columnOrder: 'ignore' }),
+      comparableDeclaredSql(migrated, { columnOrder: 'ignore' }));
   });
 
   it('whitespace and IF NOT EXISTS', () => {

@@ -245,7 +245,8 @@ describe('fromPlanned', () => {
     const draft = planned.steps.find((step) => step.draft === true);
     assert.throws(() => fromPlanned({ ...planned, steps: [...planned.steps, draft] }).transform('User', HANDLE),
       codeIs('JL0106', /2 draft transforms/));
-    assert.throws(() => fromPlanned(planned).transform('Nope', HANDLE), codeIs('JL0106', /no target model/));
+    assert.throws(() => fromPlanned(planned).transform('Nope', HANDLE),
+      codeIs('JL0106', /no target model or explicit step model was given/));
     assert.throws(() => fromPlanned(planned, { to: V2 }).transform('Nope', HANDLE), codeIs('JL0106', /does not declare/));
     assert.throws(() => fromPlanned(planned, { from: V2 }), codeIs('JL0102', /not the one the planner planned/));
     assert.throws(() => fromPlanned(planned, { to: V1 }), codeIs('JL0102', /not the one the planner planned/));

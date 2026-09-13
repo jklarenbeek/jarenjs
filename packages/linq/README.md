@@ -387,6 +387,14 @@ model that moved without a plan (`jaren-db check`). The mapping table
 and the worked examples are
 [docs/MIGRATION-PEN.md](docs/MIGRATION-PEN.md).
 
+For existing physical tables, `.step({ kind: 'table', plan })` preserves
+the complete guarded `planTableMigration` artifact. `fromPlanned` keeps the
+physical source/dispositions/assertions/target header. An optional `{ model }`
+on `transform` or `assert` selects the layout at that point in the chain,
+including an old name absent from the final model. Execution, complete target
+acceptance, fixture replay and receipts remain in db; the pen imports no engine.
+See the [runnable physical lifecycle](../db/docs/MIGRATION-FORMAT.md#runnable-physical-lifecycle).
+
 ## By code: the contract pen
 
 `@jarenjs/linq/contract` writes `$contract` 0.1 documents — the

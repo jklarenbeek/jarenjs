@@ -10,7 +10,7 @@
  * and nothing here ever clears a `draft` flag: a draft left in place
  * still refuses to run (`JD0021`, the runner's rule). The pen refuses
  * what it cannot spell and what the runner would refuse later and the
- * pen can see now — a step over a table the target model does not
+ * pen can see now — a step over a table the selected model does not
  * declare (`JL0106`).
  */
 
@@ -25,7 +25,7 @@ import {
 } from './steps.js';
 
 const MIGRATION_VERSION = '0.1';
-const HEAD_MEMBERS = ['$migration', 'id', 'from', 'to', 'note', 'steps'];
+const HEAD_MEMBERS = ['$migration', 'id', 'from', 'to', 'note', 'steps', 'physical'];
 
 /** A JSON value, copied: the document is a value of its own. @param {any} v */
 const copy = (v) => JSON.parse(JSON.stringify(v));
@@ -132,14 +132,14 @@ export class Migration {
     return this.#with([...this.#steps, step]);
   }
 
-  /** A step's table must be one the target model declares — when the
-   * target is known; the runner would fail the statement on a table
-   * that does not exist, and the pen can say so first. */
-  #requireDeclared(name, what) {
-    if (this.#names !== null && !this.#names.includes(name)) {
+  /** A step's table must be one its explicit current model or the known
+   * target model declares; the pen catches a missing name before execution. */
+  #requireDeclared(name, what, model = undefined) {
+    const names = model === undefined ? this.#names : declaredNames(model);
+    if (names !== null && !names.includes(name)) {
       throw new LinqBuildError('JL0106',
-        `${what} names '${name}', which the target model does not declare — it declares `
-        + (this.#names.length === 0 ? 'nothing' : this.#names.map((n) => `'${n}'`).join(', ')));
+        `${what} names '${name}', which the ${model === undefined ? 'target' : 'step'} model does not declare — it declares `
+        + (names.length === 0 ? 'nothing' : names.map((n) => `'${n}'`).join(', ')));
     }
   }
 
@@ -156,15 +156,17 @@ export class Migration {
   /**
    * The transform of one table's rows (a `jslt` step). Over a planned
    * document it REPLACES the draft the planner left for that table, in
-   * place; otherwise it is appended, for a table the target model
-   * declares. Two drafts for one name, a draft-less planned document with
-   * no target model, or an undeclared name are `JL0106`.
+   * place; otherwise it is appended, for a table the explicit current or
+   * target model declares. Two drafts for one name, a draft-less planned
+   * document with neither model, or an undeclared name are `JL0106`.
    * @param {string} name
    * @param {any} spelling - a callback `(row, x) => …`, a `stylesheet(…)`
    *   document, or a rules array
+   * @param {{ model?: any }} [options] - The layout at this step, before later DDL
    */
-  transform(name, spelling) {
-    const step = transformStep(name, spelling);
+  transform(name, spelling, options = undefined) {
+    const step = transformStep(name, spelling, options);
+    if (step.model !== undefined) this.#requireDeclared(name, 'transform()', step.model);
     const drafts = [];
     this.#steps.forEach((s, i) => {
       if (s.kind === 'jslt' && s.draft === true && s.collection === name) drafts.push(i);
@@ -179,12 +181,12 @@ export class Migration {
       next[drafts[0]] = step;
       return this.#with(next);
     }
-    if (this.#names === null) {
+    if (this.#names === null && step.model === undefined) {
       throw new LinqBuildError('JL0106',
         `transform() over '${name}': the planned migration drafts no transform for it and no `
-        + 'target model was given — pass { to } to fromPlanned(), or spell the step with step()');
+        + 'target model or explicit step model was given — pass { model } to transform(), { to } to fromPlanned(), or spell the step with step()');
     }
-    this.#requireDeclared(name, 'transform()');
+    this.#requireDeclared(name, 'transform()', step.model);
     return this.#append(step);
   }
 
@@ -192,11 +194,11 @@ export class Migration {
    * An assertion over one table's rows (a `query` step).
    * @param {string} name
    * @param {any} spelling - a predicate `(row) => …`, or a query document
-   * @param {{ expect?: 'empty' | 'ebv' }} [options]
+   * @param {{ expect?: 'empty' | 'ebv', model?: any }} [options]
    */
   assert(name, spelling, options = undefined) {
     const step = assertStep(name, spelling, options);
-    this.#requireDeclared(name, 'assert()');
+    this.#requireDeclared(name, 'assert()', step.model);
     return this.#append(step);
   }
 
@@ -313,6 +315,14 @@ export function fromPlanned(document, options = undefined) {
       throw new LinqBuildError('JL0101', `fromPlanned() document note is a string, got ${describeValue(doc.note)}`, '/note');
     }
     head.note = doc.note;
+  }
+  if (doc.physical !== undefined) {
+    if (!isJsonObject(doc.physical) || !Array.isArray(doc.physical.source)
+      || !isJsonObject(doc.physical.dispositions) || !Array.isArray(doc.physical.assertions)) {
+      throw new LinqBuildError('JL0101',
+        'fromPlanned() physical header needs source, dispositions and assertions', '/physical');
+    }
+    head.physical = doc.physical;
   }
   return new Migration(head, doc.steps.map((step) => rawStep(step)), names);
 }

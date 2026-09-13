@@ -36,12 +36,12 @@ is the index of those guides, and it is how a reader reaches any of them.
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 944 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 945 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 1,761 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,116 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | 781 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | 808 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,221 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,033 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,143 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
@@ -203,12 +203,12 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 944 | — | — | — | — |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 945 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,761 | 34 | 8 | 15 | 175,560 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 35,285 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,116 | 30 | 6 | 3 | 44,143 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 18,424 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 781 | 11 | 5 | 4 | 22,827 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 808 | 12 | 5 | 4 | 23,806 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 47,427 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,033 | 16 | 7 | 3 | 18,478 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 49,574 B |
@@ -217,9 +217,9 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 15,293 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 13,793 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,582 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,085 | 46 | 4 | 2 | 725,560 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,085 | 46 | 4 | 2 | 728,423 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,850 B |
-| **16 documents** | | **12,588** | **368** | **72** | | |
+| **16 documents** | | **12,616** | **369** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -265,7 +265,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 35,285 B | 35 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 44,143 B | 44 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 18,424 B | 18 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 22,827 B | 23 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 23,806 B | 24 kB |
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 47,427 B | 47 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 18,478 B | 18 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 49,574 B | 50 kB |
@@ -274,7 +274,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 15,293 B | 15 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 13,793 B | 14 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 15,582 B | 16 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 725,560 B | 726 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 728,423 B | 728 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 14,850 B | 15 kB |
 <!--/fact-->
 
@@ -597,10 +597,11 @@ it says.
 | `.transform(name, (row, x) => …)` | `{ kind: 'jslt', collection: name, stylesheet: [{ match: '$', body }] }` — one root rule, the body captured through the JSLT pen's `body()` over the WHOLE row, `x.root`/`x.path` the externals the engine binds (JSLT-FORMAT §8.2) | `row` is `Expr<Old>` (`DocOf<From, name>`); the result must spell `New` — a dropped, mistyped or foreign member does not compile; the honest top (`get()`) is admitted where a precise value is | native; a table the target model does not declare `JL0106`; an undeclared external `JL0104` |
 | `.transform(name, stylesheet(…))`, `.transform(name, rules)` | the rules ARRAY — a `jslt` step carries the array, so the envelope's `unmatched`/`modes` have no place in it | a typed stylesheet's or first rule's `Out` must be `New`; a hand-written rule is the honest top | native; a disposition or a mode table `JL0102`; not JSON `JL0101` |
 | `.assert(name, (row) => …, { expect? })` | `{ kind: 'query', collection: name, assert: { $for: { it: '$[*]' }, $where: <predicate>, $return: '$it' }, expect? }` — the format's own `$for` over the rows; the predicate names the VIOLATION (`expect: 'empty'`, the default, absent from the document) or the witness (`expect: 'ebv'`) | `row` is the members the two shapes share — a precondition sees old rows, a postcondition new ones, and what both agree on is what neither lies about; annotate (`(row: Expr<User>) => …`) when one shape is meant | native; another `expect` `JL0101`; an external `JL0104`; an undeclared table `JL0106` |
-| `.assert(name, query, { expect? })` | the query document verbatim | — | native |
+| `.assert(name, query, { expect?, model? })` | the query document verbatim, plus an optional current model | — | native |
+| `.transform(name, spelling, { model })`, `.assert(name, spelling, { model, expect? })` | the ordinary step plus an immutable current `$model` document | transform input/output and assertion rows use this model's layout; names may be absent from the final model | native; an invalid model `JL0101`; a name absent from the selected model `JL0106` |
 | `.derive(name, columns)` | `{ kind: 'derive', collection: name, columns }` — a backfill of stored derived columns (§2.1), the columns verbatim | `readonly DeriveColumn[]` | native; no columns `JL0101`; an undeclared table `JL0106` |
-| `.step(raw)` | any planner-emitted step, verbatim — the escape that keeps `rebuild` (§10) authorable without the pen re-implementing it; a `draft` flag rides untouched | `MigrationStep` | native; an unrecognised kind or a missing member (the runner's `JD0023` rules, seen early) `JL0101` |
-| `fromPlanned(document, { from?, to? })` | the planner's document, taken up: `.transform(name, …)` replaces its draft for `name` in place; every other method appends | the models type the transforms and are checked against the document's hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and no target model `JL0106` |
+| `.step(raw)` | any planner-emitted step, including a complete guarded `{ kind: 'table', plan }` or a hybrid `rebuild`; a `draft` flag rides untouched | `MigrationStep`, including `TableStep`/`ReviewedTablePlan` | native; an unrecognised kind or incomplete plan/step `JL0101` |
+| `fromPlanned(document, { from?, to? })` | the planner's document, including its `physical` header and complete saved plans; `.transform(name, …)` replaces its draft in place, and other methods append | the models type transforms and are checked against the hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and neither target nor step model `JL0106` |
 | `.document`, `.toJSON()` | the deep-frozen `$migration` document — assembled once and memoized, so `a.document === a.document` | `MigrationDocument` | native |
 
 ### The Jaren contract pen — [CONTRACT-PEN.md §2](CONTRACT-PEN.md)

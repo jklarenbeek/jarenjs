@@ -46,11 +46,14 @@ shape change is a **transformation of values**, not a table rebuild.
   compiled JSLT stylesheet, in batches, inside the migration's
   transaction. The empty stylesheet (`[]`) is the identity transform.
   Over an ENTITY table the stylesheet sees the whole row — the mapped
-  columns merged into the document under the TARGET model's mapping —
-  and what it returns is split back into columns and document by that
-  mapping; the key member is kept from the row (a stylesheet that
-  omits it loses nothing) and a stylesheet that changes it is
-  `JD0023`. A step carrying `"draft": true` is a planner placeholder
+  columns merged into the document under `step.model`, when supplied,
+  or the target model otherwise. A hybrid row is split back into columns
+  and document by that mapping. A column-only physical entity is read
+  and written through its declared codecs, without a `doc` column.
+  Key members omitted by the stylesheet are retained; a changed key is
+  `JD0023`. Physical transforms assign only changed writable columns,
+  preserve omitted database-default/generated values, and refuse changed
+  generated fields, read-only views and unknown output fields. A step carrying `"draft": true` is a planner placeholder
   and MUST refuse to run (`JD0021`) until the author fills it in.
 - `kind: "query"` is an assertion: the query runs over the
   collection's documents and MUST answer an empty sequence (`expect:
@@ -68,6 +71,15 @@ shape change is a **transformation of values**, not a table rebuild.
   dry run always prints it with its note.
 - `kind: "rebuild"` is the entity restructure of §10, self-contained:
   the `CREATE` of the new shape, the copy and the index DDL.
+- `kind: "table"` carries `{ plan }`, the COMPLETE saved artifact from
+  `planTableMigration`. It delegates to the guarded table executor,
+  retaining source/checksum, row/storage, identity and object checks.
+  `statements` and `finish` are review output; flattening them into DDL
+  steps loses those guards and is not an equivalent migration.
+- `jslt` and `query` may carry an immutable `$model` 0.1 `model` describing
+  the layout at that step, including names absent from the final model.
+  An assertion before structural DDL can use the old model, and one after
+  it can use the new model. The selected mapping is verified before reads.
 - Steps are ordered, and the order is the contract.
 
 ### 2.1 Derived spatial columns and the backfill
@@ -140,6 +152,12 @@ recorded repair. The stored-column mapping does not need this repair.
 
 ### Model differences
 
+`planModelMigration` returns an empty migration for identical physical
+models. A changed physical declaration remains a specific `JD0021` policy
+refusal: use `planTableMigration` against the live schema and compose its
+saved artifact through `planPhysicalMigration`. The model diff does not
+infer application-owned DDL, key rewrites or business backfills.
+
 `planMigration(fromModel, toModel, { dialect, id, derived })` produces
 `{ migration, report }` by diffing the two models' PHYSICAL plans. The
 from-model is the previous model — the previous model FILE, or, under
@@ -189,25 +207,43 @@ so the previous shape lives beside the code, where a diff can read it.
 
 ## 4. The shadow database
 
-Before the real store is touched, the WHOLE chain — the baseline
-shape, every applied migration, every pending migration — replays on a
-shadow database (`:memory:` by default; free with SQLite, no server).
-The shadow proves **structure**: every DDL statement runs, every
-stylesheet and assertion compiles and executes, and the end shape is
-verified against the target model. A failure there leaves the real
-store untouched.
+When pending work exists and `shadow` is not `false`, the whole chain
+replays on a disposable shadow before real migration writes. The default
+initializer builds the baseline model into an empty database; a supplied
+`shadowFixture(connection)` instead creates the historical schema and
+fixture rows. Physical preservation plans require that initializer or an
+explicit `shadow: false`, because a query mapping cannot recreate all
+application-owned programs.
 
-The shadow runs over an empty data set; the real-data facts (the
-widening check, key consistency, the assertions over real rows) run on
-the real store inside its transaction. Batched transforms and validation
-include every row identity, including negative integer primary keys;
-target-schema validation visits every declared entity, even after an
-empty entity table.
-The shadow registers the same functions as the real run:
-`migrate(…, { registerFunctions })` runs on
-the shadow, the real and the reference connections before any DDL
-(§10), so a hand-created index over a registered deterministic
-function neither fails the shadow nor is silently dropped by it.
+Replay calls the SAME `migrate` executor with the shadow connection borrowed
+and recursive replay disabled. Guarded table steps, per-step mappings,
+preservation checks, target acceptance and history receipts all run there.
+`shadowDriver` defaults to the owned target's driver; borrowed targets need
+an explicit independent driver. `shadowPath` defaults to `':memory:'` and
+must name a disposable database independent of the primary. The acquired
+shadow closes after success, initialization failure or replay failure.
+
+Before shadow registration, fixture callbacks or replay, Node and Bun compare
+the opened files by device and inode, rejecting relative-path, dot-path, symlink
+and hardlink aliases of the primary, including borrowed primary connections.
+Separate private `:memory:` connections are allowed. An injected SQLite driver's
+optional `databaseIdentity(connection)` hook can provide the same guarantee;
+without it, the runner compares SQLite's canonical main filenames. Such a custom
+driver owns alias detection beyond that filename comparison. An opener returning
+the actual primary handle is refused without closing it.
+
+Fixture initialization is a callback outside the saved migration artifact.
+Use synthetic or appropriately isolated fixtures; do not put application
+row snapshots into a shared plan. Empty default replay proves structure;
+populated replay also exercises its fixture facts. Real-data validation
+and assertions still run inside the primary migration transaction.
+Batched work includes negative integer keys and visits every declared
+entity, even after an empty entity table.
+
+`registerFunctions` runs on the primary, shadow and independent reference
+connections before their DDL. No replay or fixture initialization is needed
+when the full chain is already applied; a supplied complete target is still
+checked at repeated startup.
 
 ## 5. History and checksums
 
@@ -227,7 +263,23 @@ hash of the `baseline` model when no migration has run.
 
 ## 6. Running and batching
 
-`migrate({ driver, path }, migrations, options)`:
+`migrate(target, migrations, options)` accepts two distinct ownership forms:
+
+| Target | Ownership and return boundary |
+|---|---|
+| `{ driver, path?, busyTimeout? }` | Opens and closes its own connection; returns a Promise. Acquired resources close even if function registration or initialization fails. |
+| `{ connection }` | Borrows an existing driver connection and leaves it open on success or failure; returns a value or Promise. Synchronous work with `shadow: false` stays synchronous when its connection and hooks do. |
+
+A borrowed target cannot also carry `driver`, `path` or `busyTimeout`.
+`migrationStatus` uses the same ownership forms. Borrowed model-only status
+comparison needs `shadowDriver`; a complete `physicalTarget` needs no
+fresh reference database. For a nested rebuild, enter
+`withForeignKeysSuspended(connection, callback)` before the migration so
+the driver can bracket FK settings outside the transaction and use nested
+savepoints inside it. Each acquired connection has one cleanup owner;
+if the operation and cleanup both fail, both errors are retained.
+
+The run options include:
 
 - `options.baseline` (REQUIRED) — the model the store was FIRST
   created with: the chain's anchor and the shadow's starting shape.
@@ -235,8 +287,18 @@ hash of the `baseline` model when no migration has run.
   last pending migration's `to` MUST equal its shape hash (`JD0020`
   otherwise), the physical end shape is verified, and the real-data
   validation of §3 runs.
-- `dryRun: true` prints every statement and the affected document
-  counts, validates the chain on the shadow, and writes NOTHING — not
+- `physicalTarget: { objects, tables? }` supplies the complete reviewed
+  application schema, using `readSchema(reference, { tables }).objects`.
+  It overrides the last plan's saved `physical.target` for final acceptance
+  and is also checked when there are no pending migrations. Each pending
+  plan's selected target is checked before its receipt is inserted.
+- `shadowFixture`, `shadowDriver` and `shadowPath` configure the disposable
+  replay described in §4.
+- `dryRun: true` prints every statement and current row counts by transform
+  collection. A count is `null` when that step's mapped table/view does not
+  exist yet. Counts describe the current database, not predicted affected
+  rows after pending SQL runs. It validates the chain on the shadow unless `shadow: false`, and
+  reports whether shadow validation ran. It writes NOTHING — not
   even the history table: it PROBES for one and reads an absent one as
   an empty history, so a dry run may be pointed at a production
   database and leave its file byte-identical. The API default is to
@@ -454,16 +516,16 @@ literally, OUTSIDE the transaction (inside one the pragma is a no-op):
 table could not even be dropped, so a migration holding a rebuild
 step turns enforcement off before `BEGIN IMMEDIATE` and back on after
 it settles, and `foreign_key_check` inside the transaction provides
-the guarantee the bracket suspended; (2) triggers and views are not re-created because this
-store creates none — a hand-added trigger is outside the model and
-outside the diff, which drift (§12) will name.
+the guarantee the bracket suspended; (2) this hybrid-model rebuild does
+not recreate arbitrary application triggers or views. Existing physical
+programs use reviewed `table` steps and preservation dispositions instead.
 
-**Shape equality is the acceptance criterion.** After a rebuild —
-after ANY relational migration — the database's declared schema
-(`schemaShapeOf`) must equal what a fresh `createModelShape(toModel)`
-produces, indexes, foreign keys and constraints included. The shadow
-asserts it before the real database is touched, and the real run
-asserts it again after the last migration.
+**Shape equality is the acceptance criterion.** A managed hybrid-model
+migration compares the database with a fresh `createModelShape(toModel)`,
+including indexes, foreign keys and constraints. Physical mappings verify
+their declared columns and invariants; complete application schema acceptance
+requires a reviewed `physicalTarget`, including retained programs. The
+shadow and primary use the same selected acceptance rule before publication.
 
 **UDF-expression indexes.** An index over a registered deterministic
 function is invisible to any connection that has not registered the
@@ -587,13 +649,31 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
 
 ## 12. Drift
 
-Drift is the database not matching what its history says it should
-be: someone changed it by hand. `status`/`check` detect it by
-verifying the current model's physical shape against the actual
-database (`schemaShapeOf` against `createModelShape`, when the chain
-is fully applied) — a hand-added index, a dropped column or a foreign
-key edited outside a migration is named early, which is the
-difference between a puzzled afternoon and a five-minute fix.
+Drift is a database that disagrees with its expected schema. Once the
+chain is fully applied, `migrationStatus` compares the explicit
+`options.physicalTarget`, or the last migration's saved `physical.target`.
+Without either target, `options.model` enables comparison with a fresh
+model build. With neither a target nor a model it reports history only.
+An already-applied `migrate` call also checks a supplied complete target.
+
+`comparableDeclaredSql` is the single conservative declaration comparator;
+`normalizeDeclaredSql` and `schemaShapeOf` delegate to it. Ordinary SQLite
+token whitespace, comments and a CREATE-prefix `IF NOT EXISTS` are
+formatting. String contents, quoted identifiers and escapes retain their
+bytes. Quote style and SQL/identifier case are not silently canonicalized.
+Physical column order, constraint order, index term order/collations/
+predicates and trigger programs remain significant. Malformed or unsupported
+lexical input refuses with `TypeError`; this is not a general SQL-equivalence
+proof.
+
+Managed named-column comparison explicitly selects
+`{ columnOrder: 'ignore' }`. It may reorder ordinary column declarations,
+but retains table constraints and falls back to strict order for unfamiliar
+forms or inline `DEFAULT`, `CHECK`, `UNIQUE`, `REFERENCES`, `COLLATE` and
+`CONFLICT` clauses. Even static defaults retain order; expression purity is
+not inferred. Direct public comparison and
+complete physical targets default to `{ columnOrder: 'preserve' }`.
+Exact saved source snapshots and checksums never use this relaxed policy.
 
 Down migrations REMAIN a non-goal (§7's reasoning is unchanged): a
 down migration is a data-loss generator wearing a seatbelt; recovery
@@ -601,34 +681,143 @@ is a backup restored plus the forward chain.
 
 ## Existing physical files and forward recovery
 
-`planPhysicalMigration(connection, fromModel, toModel, options)` records the
-source schema and explicit DDL/SQL/rebuild steps as an ordinary migration document.
-`options` supplies an `id`, `steps`, a disposition for every source `type:name`
-(`preserve`, `replace`, or `drop`), and optional `{ sql, params, expected }`
-preservation assertions. Assertions are SELECTs evaluated before and after the
-steps. They should cover committed identities, exact BLOB hex and application
-history facts. Unknown objects cannot disappear without a declared disposition.
-Automatic hybrid model diffing refuses column layouts; an explicit plan is required.
+`planPhysicalMigration(connection, fromModel, toModel, options)` returns
+a migration document or Promise, preserving the supplied step types in its
+`PhysicalMigrationDocument<Steps>` declaration. Its `options` contain `id`,
+ordered `steps`, and a disposition for EVERY observed application source
+`type:name`: `preserve`, `replace` or `drop`. Steps may be `ddl`, `sql`,
+`rebuild`, guarded `table`, `jslt` or `query`. Engine-owned metadata is
+excluded from source snapshots; arbitrary user objects are not.
 
-Apply through `migrate(target, [plan], { baseline, model, shadow: false })`.
-A physical plan must be qualified on an explicit backup and fresh-target fixture;
-an empty model-generated shadow cannot recreate the original file's application
-programs. The runner uses its existing immediate transaction, ordered steps,
-checksummed receipt and FK checks. It checks the source schema before destructive
-steps and preserved objects and assertions before publication. Target mapped
-columns and declared invariant triggers are verified. A changed source is
-`JD0020`, a lost object/fact is `JD0023`, and an edited applied receipt is `JD0022`.
+Optional `{ sql, params, expected }` preservation assertions are SELECTs
+checked before and after the steps. Use them for portable committed facts
+that must survive. A changed exact source is `JD0020`, a lost preserved
+object/fact or mismatched target is `JD0023`, and an edited applied
+migration is `JD0022`. SQL steps cannot take transaction or connection
+ownership; each step carries one statement or one complete trigger program.
 
-Migration history is created inside the applying transaction only when needed.
-An identical second run executes no DDL or DML. Failed steps and failed commits
-roll back; after a process kill SQLite recovery leaves the source or the committed
-target. Re-running resumes from committed receipts. Forward repair plans start
-from the newest file, including later application edits; restoring an older
-backup does not qualify as forward repair.
+`options.physicalTarget` is copied into `physical.target`. Its `objects`
+must be the complete declarations for its owned scope: tables/views and
+their indexes/triggers, each with `{ type, name, owner, sql }` and SQL text.
+`tables` defaults to object owners. Include an absent table name explicitly
+when the plan requires a dropped table to remain absent. Extra objects
+attached to owned tables are drift; unrelated tables outside the scope
+are allowed. Keep the inventory scoped with `readSchema(reference,
+{ tables: [...] })`; never silently discard unknown objects within it.
+A physical model's column mapping alone is not this complete target.
+
+### Runnable physical lifecycle
+
+Run this ES module in a project with `@jarenjs/db` and `@jarenjs/linq`
+installed, using Node 24 or Bun. All databases are disposable. The example
+uses aliased physical columns, a historical transform before a guarded
+rebuild, a target fixture, populated replay and checked repeat startup.
+The saved document contains schema and instructions; the synthetic rows
+remain in the initializer. In an application, persist and review that
+document before applying it to the intended connection.
+
+```js
+import assert from 'node:assert/strict';
+import { defineModel, object, integer, string } from '@jarenjs/linq/model';
+import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
+import { planTable, planTableMigration, applyTableMigration, planPhysicalMigration,
+  readSchema, migrate, migrationStatus } from '@jarenjs/db';
+
+const driver = process.versions.bun
+  ? (await import('@jarenjs/db/bun')).bunDriver()
+  : (await import('@jarenjs/db/node')).nodeDriver();
+const columns = {
+  id: { name: 'item_id', codec: 'integer', null: 'reject' },
+  value: { name: 'label', codec: 'text', null: 'reject' },
+};
+const before = defineModel({ entities: {
+  Item: object({ id: integer().key(), value: string() })
+    .physical({ table: 'items', columns }),
+} });
+const after = defineModel({ entities: {
+  Item: object({ id: integer().key(), value: string(), revision: integer() })
+    .physical({ table: 'items', columns: { ...columns,
+      revision: { name: 'revision', codec: 'integer', null: 'reject', default: 'database' },
+    } }),
+} });
+const oldTable = { name: 'items', primaryKey: ['item_id'], columns: [
+  { name: 'item_id', type: 'INTEGER', identity: 'autoincrement', nullable: false },
+  { name: 'label', type: 'TEXT', nullable: false },
+] };
+const newTable = { ...oldTable, columns: [...oldTable.columns,
+  { name: 'revision', type: 'INTEGER', default: 1, nullable: false },
+] };
+
+// Disposable synthetic data belongs to the fixture, outside the saved plan.
+function initializeHistorical(connection) {
+  for (const sql of planTable(oldTable).createSql) connection.exec(sql);
+  connection.exec("INSERT INTO items VALUES(1,'example'); INSERT INTO items VALUES(99,'retired'); DELETE FROM items WHERE item_id=99");
+  connection.exec('CREATE TABLE unrelated(note TEXT)');
+}
+
+const connection = await driver.open(':memory:');
+try {
+  initializeHistorical(connection);
+  const tablePlan = planTableMigration(connection, newTable, {
+    id: 'items-revision', allowRebuild: true,
+  });
+  // Review and save the complete artifact, including its guards and checksum.
+  const savedTablePlan = JSON.parse(JSON.stringify(tablePlan));
+  const reference = await driver.open(':memory:');
+  let physicalTarget;
+  try {
+    initializeHistorical(reference);
+    applyTableMigration(reference, savedTablePlan);
+    physicalTarget = {
+      objects: (await readSchema(reference, { tables: ['items'] })).objects,
+      tables: ['items', 'retired_items'], // retired_items must remain absent
+    };
+  }
+  finally { await reference.close(); }
+
+  const steps = defineMigration({ id: 'items-revision', from: before, to: after })
+    .assert('Item', (row) => row.value.isEmpty(), { model: before })
+    .transform('Item', (row) => ({ id: row.id, value: row.value.upper() }), { model: before })
+    .step({ kind: 'table', plan: savedTablePlan })
+    .assert('Item', (row) => row.revision.lt(1), { model: after }).document.steps;
+  const inventory = await readSchema(connection);
+  const planned = await planPhysicalMigration(connection, before, after, {
+    id: 'items-revision', steps, physicalTarget,
+    dispositions: Object.fromEntries(inventory.objects.map((item) =>
+      [`${item.type}:${item.name}`, item.name === 'items' ? 'replace' : 'preserve'])),
+  });
+  const migration = fromPlanned(planned, { from: before, to: after }).document;
+  const savedMigration = JSON.parse(JSON.stringify(migration));
+  const options = { baseline: before, model: after,
+    shadowDriver: driver, shadowFixture: initializeHistorical };
+  assert.deepEqual((await migrate({ connection }, [savedMigration], options)).applied, ['items-revision']);
+  assert.deepEqual({ ...connection.prepare('SELECT * FROM items').get([]) },
+    { item_id: 1, label: 'EXAMPLE', revision: 1 });
+  connection.exec('CREATE TABLE later_unrelated(note TEXT)');
+  assert.deepEqual((await migrate({ connection }, [savedMigration], options)).applied, []);
+  assert.equal((await migrationStatus({ connection }, [savedMigration])).upToDate, true);
+  assert.equal(Number(connection.prepare("INSERT INTO items(label) VALUES('later')").run([]).lastInsertRowid), 100);
+}
+finally { await connection.close(); }
+```
+
+The table executor preserves row counts, unchanged values/storage classes,
+keys/rowids, retained programs and AUTOINCREMENT high-water marks. The
+migration executor owns its existing IMMEDIATE transaction and receipt;
+it checks the selected target before recording that receipt. A successful
+repeat executes no migration DDL/DML and returns `upToDate: true`; an
+explicit target still detects drift. The borrowed handle stays open.
+
+Failures in steps, target checks, receipt writes or COMMIT roll back the
+active migration. SQLite process-recovery tests establish source-or-committed-
+target recovery after interruption, not power-loss durability. Earlier
+committed migrations remain committed. Re-running resumes from receipts;
+forward repair plans start from the newest file, including later application
+edits, rather than replacing it with an older backup.
 
 `backupTo()` publishes a sibling temporary only after a complete snapshot.
-Node uses online backup. Bun uses its native serialized SQLite snapshot under
+Node uses online backup. Bun writes a disk-backed `VACUUM INTO` snapshot under
 the store gate, then flushes and atomically renames through the same publisher.
-Bun holds a full database image in memory and cannot offer page-granular copy
-cancellation. Both snapshots include committed WAL; interruption before rename
+Bun does not build a full database image in JavaScript memory; it cannot offer
+page-granular copy cancellation. Both snapshots include committed WAL; interruption before rename
 leaves the previous destination valid, while a leftover temporary is not published.

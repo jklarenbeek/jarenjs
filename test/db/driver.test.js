@@ -19,7 +19,7 @@ import {
   openConnection, wrapStatement,
 } from '@jarenjs/db';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
-import { bunDriver, fromBunModule } from '@jarenjs/db/bun';
+import { bunDriver, fromBunModule, adaptBunDatabase } from '@jarenjs/db/bun';
 import { wasmDriver } from '@jarenjs/db/wasm';
 
 const PKG_SRC = path.resolve('packages/db/src');
@@ -180,6 +180,37 @@ describe('capability probing', () => {
     assert.strictEqual(connection.registerAggregate, null);
     assert.strictEqual(connection.session, null);
     connection.close();
+  });
+
+  it('Bun applies a validated timeout only when constructing a new handle', () => {
+    for (const timeout of [0, 1234]) {
+      const connection = fromBunModule({ Database: BunShapedDatabase }, ':memory:', { timeout });
+      try { assert.strictEqual(connection.prepare('PRAGMA busy_timeout').get([]).timeout, timeout); }
+      finally { connection.close(); }
+    }
+    const borrowed = new BunShapedDatabase(':memory:');
+    borrowed.run('PRAGMA busy_timeout=321');
+    const connection = adaptBunDatabase(borrowed);
+    try { assert.strictEqual(connection.prepare('PRAGMA busy_timeout').get([]).timeout, 321); }
+    finally { connection.close(); }
+    let opened = 0;
+    class UnopenedDatabase { constructor() { opened++; } }
+    for (const timeout of [-1, 1.5, Infinity, 2147483648, '100; DROP TABLE item']) {
+      assert.throws(() => fromBunModule({ Database: UnopenedDatabase }, ':memory:', { timeout }), /timeout/);
+    }
+    assert.strictEqual(opened, 0, 'invalid timeout refuses before acquiring a database');
+  });
+
+  it('Bun closes a newly constructed handle when setting its timeout fails', () => {
+    const failure = new Error('timeout configuration failed');
+    let closed = 0;
+    class FailedTimeoutDatabase extends BunShapedDatabase {
+      run() { throw failure; }
+      close() { closed++; super.close(); }
+    }
+    assert.throws(() => fromBunModule({ Database: FailedTimeoutDatabase }, ':memory:', { timeout: 1 }),
+      (error) => error === failure);
+    assert.strictEqual(closed, 1);
   });
 
   it('a library below the floor is JD0001 naming the version found', () => {

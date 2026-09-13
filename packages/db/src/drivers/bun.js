@@ -20,8 +20,9 @@
 
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
-import { PRAGMA_NAMES } from '../pragmas.js';
+import { PRAGMAS, PRAGMA_NAMES } from '../pragmas.js';
 import { writeSqliteSnapshot } from './snapshot.js';
+import { nativeDatabaseIdentity } from './file-identity.js';
 export { snapshotDatabase } from './snapshot.js';
 
 /**
@@ -128,11 +129,19 @@ export function adaptBunDatabase(db, options) {
  * substitute module.
  * @param {any} mod - The `bun:sqlite` module (or a substitute)
  * @param {string} path
- * @param {{ readOnly?: boolean, queueTimeout?: number }} [options]
+ * @param {{ timeout?: number, readOnly?: boolean, queueTimeout?: number }} [options]
  * @returns {any}
  */
 export function fromBunModule(mod, path, options) {
+  const timeout = options?.timeout === undefined ? undefined
+    : PRAGMAS.busyTimeout.normalize(options.timeout, 'timeout');
   const db = options?.readOnly === true ? new mod.Database(path, { readonly: true }) : new mod.Database(path);
+  // Bun has no constructor timeout option. Configure newly owned handles
+  // before probing; adapting a caller-owned handle preserves its settings.
+  if (timeout !== undefined) {
+    try { db.run(sqliteDialect.pragma.set('busy_timeout', timeout)); }
+    catch (error) { db.close(); throw error; }
+  }
   const backup = {
     snapshot: true,
     copy: (target, copyOptions) => writeSqliteSnapshot(target, () => {
@@ -154,9 +163,10 @@ export function bunDriver() {
   return Object.freeze({
     name: 'bun-sqlite',
     dialect: sqliteDialect,
+    databaseIdentity: nativeDatabaseIdentity,
     /**
      * @param {string} path
-     * @param {{ readOnly?: boolean, queueTimeout?: number }} [options]
+     * @param {{ timeout?: number, readOnly?: boolean, queueTimeout?: number }} [options]
      * @returns {Promise<any>}
      */
     open: (path, options) => lazyOpen('bun:sqlite',

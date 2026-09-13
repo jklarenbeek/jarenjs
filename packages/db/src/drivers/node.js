@@ -9,6 +9,7 @@
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMA_NAMES } from '../pragmas.js';
+import { nativeDatabaseIdentity } from './file-identity.js';
 
 /**
  * Adapt an already-constructed `node:sqlite` `DatabaseSync` (or any
@@ -109,6 +110,7 @@ export function nodeDriver() {
   return Object.freeze({
     name: 'node-sqlite',
     dialect: sqliteDialect,
+    databaseIdentity: nativeDatabaseIdentity,
     /**
      * @param {string} path
      * @param {{ timeout?: number, readOnly?: boolean,

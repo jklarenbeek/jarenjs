@@ -94,6 +94,33 @@ describe('collection names that also name object members', () => {
   }
 });
 
+describe('declared keys that also name object members', () => {
+  for (const name of ['constructor', '__proto__']) {
+    it(`preserves an omitted '${name}' key and refuses its replacement in both execution modes`, async () => {
+      const input = { users: [{ [name]: 17, value: 2 }] };
+      const migration = documentHalf(documentMigration('0001-own-key', [
+        { kind: 'jslt', collection: 'users', stylesheet: [{ match: '$', body: { value: 3 } }] },
+      ]));
+      const keys = { users: [name] };
+      const materialized = await migrateDocuments(input, [migration], { keys });
+      assert.deepStrictEqual(materialized.documents.users, [{ [name]: 17, value: 3 }]);
+      assert.strictEqual(Object.hasOwn(materialized.documents.users[0], name), true);
+      assert.strictEqual(Object.getPrototypeOf(materialized.documents.users[0]), Object.prototype);
+      const written = [];
+      await streamDocuments(input, [migration], { keys,
+        write: (collection, document) => written.push([collection, document]),
+      });
+      assert.deepStrictEqual(written, [['users', { [name]: 17, value: 3 }]]);
+      const changed = documentHalf(documentMigration('0002-change-key', [
+        { kind: 'jslt', collection: 'users', stylesheet: [{ match: `$[${JSON.stringify(name)}]`, body: 18 }] },
+      ]));
+      await assert.rejects(migrateDocuments(input, [changed], { keys }), { code: 'JD0023' });
+      await assert.rejects(streamDocuments(input, [changed], { keys, write: () => {} }), { code: 'JD0023' });
+      assert.deepStrictEqual(input, { users: [{ [name]: 17, value: 2 }] });
+    });
+  }
+});
+
 /** Run one migration through a real Store and read the documents back. */
 async function throughStore(documents, migration) {
   const { dbPath, cleanup } = tempDbPath();

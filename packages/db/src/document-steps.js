@@ -17,6 +17,7 @@
  */
 
 import { analyzeQuery, createQueryAccumulator } from '@jarenjs/json/query';
+import { setObjectMember } from '@jarenjs/core/object';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
 
@@ -31,13 +32,13 @@ export const DOCUMENT_STEP_KINDS = new Set(['jslt', 'query']);
 
 /**
  * The step kinds that act on a PHYSICAL database — rendered DDL, a
- * data statement spelled as SQL, the table-rebuild procedure, and the
+ * data statement spelled as SQL, guarded table plans, the table-rebuild procedure, and the
  * backfill that recomputes stored derived COLUMNS. A host without
  * tables cannot honour any of them, and silently skipping one would
  * leave a migration half-applied, so it refuses instead.
  * @type {ReadonlySet<string>}
  */
-export const PHYSICAL_STEP_KINDS = new Set(['ddl', 'sql', 'rebuild', 'derive']);
+export const PHYSICAL_STEP_KINDS = new Set(['ddl', 'sql', 'rebuild', 'derive', 'table']);
 
 /**
  * The refusal a failing step raises, spelled the one way — a reader
@@ -185,8 +186,12 @@ export function compileDocumentStep(step, index, context) {
         // a body that leaves it out keeps it, a body that rewrites it
         // is refused, as a collection's key is
         for (const key of keys) {
-          if (next[key] === undefined) next[key] = document[key];
-          else if (next[key] !== document[key]) {
+          const present = Object.hasOwn(document, key);
+          const previous = present ? document[key] : undefined;
+          if (!Object.hasOwn(next, key) || next[key] === undefined) {
+            if (present) setObjectMember(next, key, previous);
+          }
+          else if (next[key] !== previous) {
             fail(`the transform changed the key member '${key}' of row ${identity} — `
               + `key changes are not supported in ${MIGRATION_VERSION}`);
           }
@@ -271,7 +276,7 @@ export function compileDocumentStep(step, index, context) {
   };
 }
 
-const STEP_KINDS = new Set(['ddl', 'jslt', 'query', 'sql', 'rebuild', 'derive']);
+const STEP_KINDS = new Set([...DOCUMENT_STEP_KINDS, ...PHYSICAL_STEP_KINDS]);
 
 /**
  * Structural validation of one migration document, including the
@@ -303,6 +308,19 @@ export function checkMigrationDocument(migration) {
     if (step.kind === 'sql' && typeof step.sql !== 'string') {
       throw new DbCompileError('JD0023',
         `migration '${migration.id}' step ${i} is a sql step without sql text`);
+    }
+    if (step.kind === 'table' && (!step.plan || typeof step.plan !== 'object' || Array.isArray(step.plan) || step.plan.version !== 1
+      || ['id', 'table', 'checksum', 'temporary'].some((key) => typeof step.plan[key] !== 'string' || step.plan[key].length === 0)
+      || typeof step.plan.rebuild !== 'boolean'
+      || ['source', 'after'].some((key) => !Array.isArray(step.plan[key])
+        || step.plan[key].some((value) => !value || typeof value !== 'object' || Array.isArray(value)))
+      || ['unchanged', 'statements', 'finish'].some((key) => !Array.isArray(step.plan[key])
+        || step.plan[key].some((value) => typeof value !== 'string' || value.length === 0)))) {
+      throw new DbCompileError('JD0023', `migration '${migration.id}' step ${i} is a table step without its reviewed plan`);
+    }
+    if (['jslt', 'query'].includes(step.kind) && step.model !== undefined
+      && (!step.model || typeof step.model !== 'object' || step.model.$model !== '0.1')) {
+      throw new DbCompileError('JD0023', `migration '${migration.id}' step ${i} has an invalid current model`);
     }
     if (step.kind === 'derive'
       && (typeof step.collection !== 'string' || !Array.isArray(step.columns)

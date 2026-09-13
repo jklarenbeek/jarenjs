@@ -135,8 +135,10 @@ Entity `.physical(...)` metadata can also supply column `type`, `defaultValue`,
 `planEntity(...).createSql` now emits explicit table DDL for complete writable
 declarations; views and incomplete generated/default definitions remain adoption
 metadata. `openStore` still verifies physical tables without creating them.
-Identical physical models produce an empty `planModelMigration`; changed
-physical tables use the live-schema `planTableMigration` API.
+Identical physical models produce an empty `planModelMigration`. Changed
+physical declarations remain a specific `JD0021` policy refusal; use the
+live-schema `planTableMigration` API and review the resulting structural plan.
+The model diff does not infer application-owned DDL or business backfills.
 
 ## Guarded upgrades
 
@@ -168,6 +170,31 @@ settle synchronously. A rebuild inside an already open FK-enabled transaction
 refuses before DDL. Node/Bun regressions cover populated history and references,
 failed copies, repeat reopening, nested rollback, and process death after DROP
 with WAL recovery. These tests do not establish power-loss durability.
+
+### Composing a guarded plan with migration history
+
+Pass the complete saved table artifact as `{ kind: 'table', plan }` in
+`planPhysicalMigration` or `.step({ kind: 'table', plan })` in the migration
+pen. It retains `version`, `id`, `table`, `source`, `after`, `rebuild`,
+`temporary`, `unchanged`, `statements`, `finish` and `checksum`; incomplete
+plans refuse. Do not flatten its SQL arrays into separate DDL steps: the
+guarded executor also preserves storage classes and allocated identities.
+
+`migrate` supplies the existing history/receipt transaction around that
+executor. It admits the writer with IMMEDIATE semantics before source reads,
+uses savepoints for nested work and restores FK/legacy settings exactly.
+`{ connection }` borrows the same driver handle; `{ driver, path? }` owns its
+resource. Both compose with optional historical transforms/assertions and a
+complete `physicalTarget` copied from a disposable target fixture. With
+`shadowFixture`, replay uses the same migration and history executor.
+The [runnable example](MIGRATION-FORMAT.md#runnable-physical-lifecycle) proves
+this composition and a checked second run.
+
+Complete physical targets retain physical column and constraint order,
+quoted text, index predicates/collations and trigger programs. Only token
+whitespace/comments and CREATE-prefix `IF NOT EXISTS` are formatting;
+quote styles and case are not inferred equivalent. The separate exact
+source snapshot/checksum remains the stale-plan guard.
 
 ## Additive and object operations
 

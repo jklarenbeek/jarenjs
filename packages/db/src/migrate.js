@@ -30,7 +30,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError } from './errors.js';
-import { chain, toPromise } from './driver.js';
+import { chain } from './driver.js';
 import { normalizeModel } from './store.js';
 import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
@@ -42,8 +42,13 @@ import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
 import { sqlTokens } from './dialects/check-read.js';
+import { comparableDeclaredSql } from './schema-sql.js';
+import { applyTableMigration } from './table-migration.js';
+import { withForeignKeySettings } from './foreign-key-scope.js';
+import { withMigrationConnection, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership } from './migration-target.js';
 import { readSchema } from './introspect.js';
-import { verifyPhysical, physicalSelection } from './physical.js';
+import { verifyPhysical } from './physical.js';
+import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
 import {
   MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument,
   normalizeAssertionBounds, ASSERTION_BOUNDS_DEFAULT, createAssertionBoundGuard,
@@ -889,73 +894,26 @@ export function createModelShape(connection, model, expressions = undefined) {
 }
 
 /**
- * The declared schema of a database, normalized for comparison: every
- * object carrying SQL text (tables, indexes), whitespace-collapsed,
- * engine-owned tables excluded, sorted. Shape equality after a migration —
- * this dump versus a fresh {@link createModelShape} — is the
- * acceptance criterion for every rebuild.
+ * The declared schema of a database, normalized through the SQL comparison
+ * owner. Physical column order is preserved by default; managed named-column
+ * parity may explicitly request `columnOrder: 'ignore'`. Engine-owned objects
+ * are excluded, and catalog object order is stable.
  * @param {any} connection
+ * @param {import('./schema-sql.js').DeclaredSqlOptions} [options]
  * @returns {any} value-or-promise of `{ type, name, owner, sql }[]`
  */
-export function schemaShapeOf(connection) {
+export function schemaShapeOf(connection, options = undefined) {
   const dialect = connection.dialect;
   return chain(connection.prepare(dialect.introspect.schemaDump()), (statement) =>
     chain(statement.all([]), (rows) => rows
-      // the engine's own tables — history, the change log and its state
-      // row, the job queue and replication ledger — are never a model's drift
+      // History, change logs, jobs and replication metadata are engine-owned.
       .filter((row) => !ENGINE_TABLES.has(String(row.name)) && !ENGINE_TABLES.has(String(row.owner)))
       .map((row) => ({
         type: String(row.type),
         name: String(row.name),
         owner: String(row.owner),
-        sql: normalizeSchemaSql(String(row.sql)),
+        sql: comparableDeclaredSql(String(row.sql), options),
       }))));
-}
-
-/**
- * Whitespace-collapse a schema statement and, for a CREATE TABLE,
- * SORT its top-level column/constraint list: `ALTER TABLE ADD COLUMN`
- * appends at the end, so a migrated table's declared order can differ
- * from a fresh build's without differing in meaning — every access in
- * this store is by name.
- * @param {string} sql
- * @returns {string}
- */
-function normalizeSchemaSql(sql) {
-  const collapsed = sql.replace(/\s+/g, ' ').trim();
-  const open = collapsed.indexOf('(');
-  if (!/^CREATE TABLE/i.test(collapsed) || open === -1) return collapsed;
-  const close = collapsed.lastIndexOf(')');
-  const head = collapsed.slice(0, open + 1);
-  const tail = collapsed.slice(close);
-  const body = collapsed.slice(open + 1, close);
-  /** @type {string[]} */
-  const parts = [];
-  let depth = 0;
-  let quote = null;
-  let current = '';
-  for (const character of body) {
-    if (quote !== null) {
-      current += character;
-      if (character === quote) quote = null;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      current += character;
-      continue;
-    }
-    if (character === '(') depth++;
-    if (character === ')') depth--;
-    if (character === ',' && depth === 0) {
-      parts.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += character;
-  }
-  if (current.trim() !== '') parts.push(current.trim());
-  return head + parts.sort().join(', ') + tail;
 }
 
 /**
@@ -977,15 +935,12 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
   // per collection and per entity either way, and `declaredSqlText` is
   // what tells a reader which half they got.
   if (connection.dialect.capabilities.declaredSqlText !== true) return null;
-  return chain(driver.open(':memory:', {}), (reference) =>
+  return withMigrationConnection({ driver, path: ':memory:' }, (reference) =>
     chain(chain(registerDeriveFunctions(reference),
       () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () => {
-      const finish = (result) => chain(reference.close(), () => result);
-      let outcome;
-      try {
-        outcome = chain(createModelShape(reference, model, expressions), () =>
-          chain(schemaShapeOf(reference), (wanted) =>
-            chain(schemaShapeOf(connection), (actual) => {
+      return chain(createModelShape(reference, model, expressions), () =>
+          chain(schemaShapeOf(reference, { columnOrder: 'ignore' }), (wanted) =>
+            chain(schemaShapeOf(connection, { columnOrder: 'ignore' }), (actual) => {
               const wantedText = JSON.stringify(wanted);
               const actualText = JSON.stringify(actual);
               if (wantedText === actualText) return null;
@@ -1003,16 +958,6 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
               }
               return 'schemas differ in ordering only';
             })));
-      }
-      catch (error) {
-        return chain(reference.close(), () => { throw error; });
-      }
-      if (outcome instanceof Promise) {
-        return outcome.then(
-          (value) => chain(reference.close(), () => value),
-          (error) => chain(reference.close(), () => { throw error; }));
-      }
-      return finish(outcome);
     }));
 }
 
@@ -1055,18 +1000,8 @@ function walkRows(connection, table, batchSize, handle, keyed = true, entityMapp
   // the rest-document alone could not see `id` or `name` at all
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
-  if (entityMapping?.document === false) {
-    const order = entityMapping.keys.map((k) => q(entityMapping.columns.find((c) => c.name === k).physical)).join(', ');
-    const next = (offset) => {
-      check?.();
-      const sql = `SELECT ${physicalSelection(entityMapping, dialect)} FROM ${q(entityMapping.table)} ORDER BY ${order} ${dialect.limitClause(batchSize, offset)}`;
-      return chain(connection.prepare(sql), (statement) => chain(statement.all([]), (rows) => {
-        if (!rows.length) return null;
-        return chain(handle(rows.map((row, i) => ({ ...row, rid: offset + i }))), () => next(offset + rows.length));
-      }));
-    };
-    return next(0);
-  }
+  if (entityMapping?.document === false)
+    return walkPhysicalRows(connection, entityMapping, batchSize, handle, check);
   const rid = dialect.rowIdentity();
   const keySelect = keyed ? `, ${q('key')} AS ${q('k')}` : '';
   const columnSelect = entityMapping === null ? '' : entityColumnsOf(entityMapping)
@@ -1098,21 +1033,24 @@ function entityColumnsOf(entityMapping) {
 }
 
 /**
- * The entity mapping a migration step over `table` runs under, or
- * `null` for a collection. The TARGET model maps the table: a chain's
- * intermediate shapes are hashes only, so an entity transform belongs
- * to the last migration of a chain (MIGRATION-FORMAT §9); without a
- * target model the step sees the rest-document, as it always did.
- * @param {any} options
- * @param {string} table
+ * Resolve the explicitly declared current layout, or the final model when the
+ * step carries none. Historical column names belong to their step's model.
+ * @param {any} options @param {string} table @param {any} step @param {any} dialect
  * @returns {{ entity: any, mapping: any } | null}
  */
-function entityStepMapping(options, table) {
-  if (options.model === undefined) return null;
-  const entities = normalizeEntities(options.model);
+function entityStepMapping(options, table, step, dialect) {
+  const model = step?.model ?? options.model;
+  if (model === undefined) return null;
+  const entities = normalizeEntities(model);
   const entity = entities.get(table);
-  if (entity === undefined) return null;
-  return { entity, mapping: explainMapping(options.model).entities[table] };
+  if (entity === undefined) {
+    if (step?.model !== undefined && !normalizeModel(model, options.expressions).has(table))
+      throw refuse('JD0021', `the step model declares no collection or entity '${table}'`);
+    return null;
+  }
+  const all = explainMapping(model), mapping = all.entities[table];
+  return { entity, mapping: mapping.document === false
+    ? planEntity(table, mapping, all, dialect).physical : mapping };
 }
 
 /**
@@ -1131,8 +1069,6 @@ function runSteps(connection, migration, options) {
     // migration in flight back whole, as any step failure does
     if (options.check !== undefined) options.check();
     const current = migration.steps[i];
-    if (migration.physical && !['ddl', 'sql', 'rebuild'].includes(current.kind))
-      throw refuse('JD0021', 'physical preservation plans use explicit SQL/rebuild steps and preservation assertions');
     const fail = (reason, cause) => {
       throw refuse('JD0023',
         `migration '${migration.id}' step ${i} (${current.kind}) failed: ${reason}`,
@@ -1140,6 +1076,7 @@ function runSteps(connection, migration, options) {
     };
     // every step is its own savepoint inside the migration transaction
     return chain(connection.transaction(() => {
+      if (current.kind === 'table') return applyTableMigration(connection, current.plan);
       if (current.kind === 'ddl' || current.kind === 'sql') {
         // 'sql' is a DATA step spelled directly (§9.4): same execution
         // as ddl, distinct on purpose — dry-run always shows it, and a
@@ -1215,13 +1152,19 @@ function runSteps(connection, migration, options) {
           }, false, null, options.check), () => derivedRows));
       }
       if (current.kind === 'jslt') {
-        const stepEntity = entityStepMapping(options, current.collection);
+        const stepEntity = entityStepMapping(options, current.collection, current, dialect);
         const operation = compileDocumentStep(current, i, {
           migrationId: migration.id,
           compileJslt: compileJsltStylesheet,
           compileQuery: compileJsonQuery,
           keys: stepEntity === null ? [] : stepEntity.mapping.keys,
         });
+        if (stepEntity?.mapping.document === false) {
+          return transformPhysicalRows(connection, stepEntity, operation, {
+            batchSize: options.batchSize, runtime: options.runtime, check: options.check,
+            onProgress: options.onProgress, migration: migration.id, collection: current.collection,
+          });
+        }
         if (stepEntity !== null) {
           // an entity row is transformed WHOLE: the mapped columns fold in
           // before the stylesheet and split out after it, through the
@@ -1275,7 +1218,7 @@ function runSteps(connection, migration, options) {
           }, keyed, null, options.check), () => transformed));
       }
       // kind === 'query': the assertion step
-      const assertionMapping = entityStepMapping(options, current.collection)?.mapping ?? null;
+      const assertionMapping = entityStepMapping(options, current.collection, current, dialect)?.mapping ?? null;
       const operation = compileDocumentStep(current, i, {
         migrationId: migration.id,
         compileJslt: compileJsltStylesheet,
@@ -1428,84 +1371,35 @@ function validateTargetState(connection, model, options) {
 }
 
 /**
- * Replay the whole migration chain on a shadow database: the baseline
- * shape is created, every migration's steps run (over an empty data
- * set — the shadow proves STRUCTURE; the real-data facts are checked
- * on the real store inside its transaction), and the end shape is
- * verified against the target model. The real store is untouched
- * until the shadow passes.
+ * Replay through the same history and transaction owner on a disposable
+ * connection. The default initializer creates an empty model shape; an explicit
+ * fixture can instead supply populated historical tables and programs. The
+ * primary remains untouched until replay and target acceptance pass.
+ * @param {any} primary
  * @param {any} driver
  * @param {string} shadowPath
  * @param {any} baseline
  * @param {any[]} migrations
  * @param {any} model - target model or undefined
- * @param {{ batchSize: number }} options
+ * @param {any} options
  * @returns {any} value-or-promise
  */
-function replayOnShadow(driver, shadowPath, baseline, migrations, model, options) {
-  return chain(driver.open(shadowPath, {}), (shadow) => {
-    const finish = (result) => chain(shadow.close(), () => result);
-    // a UDF-expression index is invisible to a connection that has not
-    // registered the function (probed, never assumed): the shadow
-    // re-registers every declared function BEFORE any DDL runs
-    const registered = chain(registerDeriveFunctions(shadow), () =>
-      (options.registerFunctions !== undefined ? options.registerFunctions(shadow) : null));
-    const apply = (i) => {
-      if (i >= migrations.length) return null;
-      // a rebuild moves rows between tables while their keys point at
-      // the old one, so the switch comes off around it — on an engine
-      // that HAS a switch. One that always enforces cannot rebuild that
-      // way, and `alterTableFull` is why it never has to
-      const bracket = migrations[i].steps.some(
-        (candidate) => candidate.kind === 'rebuild')
-        && shadow.dialect.capabilities.foreignKeysAlwaysOn !== true;
-      return chain(
-        bracket ? shadow.exec(shadow.dialect.pragma.foreignKeys(false)) : null,
-        () => chain(runSteps(shadow, migrations[i], options), () =>
-          chain(bracket ? shadow.exec(shadow.dialect.pragma.foreignKeys(true)) : null,
-            () => apply(i + 1))));
-    };
-    const run = () => chain(registered, () =>
-      chain(createModelShape(shadow, baseline, options.expressions), () => chain(apply(0), () => {
-        if (model === undefined) return null;
-        const target = [...normalizeModel(model, options.expressions).values()];
-        const verifyNext = (i) => {
-          if (i >= target.length) return null;
-          const plan = planCollection(target[i].name, target[i], shadow.dialect,
-            mappingFor(shadow, options.expressions));
-          return chain(
-            verifyShape(shadow, plan, target[i].name, target[i].docPath),
-            () => verifyNext(i + 1));
-        };
-        return chain(verifyNext(0), () => {
-          if (normalizeEntities(model).size === 0) return null;
-          // relational models: SHAPE EQUALITY against a fresh build is
-          // the acceptance criterion — stronger than per-plan checks
-          return chain(
-            compareShapeToModel(driver, shadow, model, options.registerFunctions),
-            (difference) => {
-              if (difference !== null) {
-                throw refuse('JD0023',
-                  `the shadow's migrated shape does not equal the target model's: ${difference}`);
-              }
-              return null;
-            });
-        });
-      })));
-    let outcome;
-    try {
-      outcome = run();
-    }
-    catch (error) {
-      return chain(shadow.close(), () => { throw error; });
-    }
-    if (outcome instanceof Promise) {
-      return outcome.then(
-        (value) => chain(shadow.close(), () => value),
-        (error) => chain(shadow.close(), () => { throw error; }));
-    }
-    return finish(outcome);
-  });
+function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model, options) {
+  const independent = { ...driver, open: (...args) => chain(driver.open(...args), (shadow) => {
+    // An injected opener returning the borrowed primary never transfers its
+    // ownership: reject before the cleanup bracket could close that handle.
+    if (shadow === primary) throw refuse('JD0021', 'shadow replay needs a different connection from the primary');
+    return shadow;
+  }) };
+  return withMigrationConnection({ driver: independent, path: shadowPath }, (shadow) =>
+    chain(verifyShadowOwnership(primary, shadow, driver), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
+      chain(options.shadowFixture === undefined ? createModelShape(shadow, baseline, options.expressions)
+        : options.shadowFixture(shadow), () => migrate({ connection: shadow }, migrations, {
+        ...options, baseline, model, shadow: false, shadowDriver: driver,
+        shadowFixture: undefined,
+        registerFunctions: options.registerFunctions === undefined ? undefined
+          : (reference) => reference === shadow ? null : options.registerFunctions(reference),
+      }))))));
 }
 
 /** History-table statement builders (dialect-spelled). */
@@ -1540,73 +1434,49 @@ function historyStatements(dialect) {
  * applied migration was edited, and — once the chain is fully applied —
  * whether the physical shape DRIFTED from the model (someone changed
  * the database by hand, §12).
- * @param {{ driver: any, path?: string }} target
+ * @param {{ driver?: any, path?: string, connection?: any }} target
  * @param {any[]} migrations - the full ordered list
- * @param {{ model?: any, registerFunctions?: (connection: any) => any,
+ * @param {{ model?: any, physicalTarget?: any, shadowDriver?: any,
+ *   registerFunctions?: (connection: any) => any,
  *   signal?: AbortSignal, deadline?: number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
  *   - `signal`/`deadline` refuse a call already cancelled (`JD2080`) or
  *   past its deadline (`JD2075`) on the runtime record's clock
- * @returns {Promise<{ applied: string[], pending: string[],
- *   drift: string | null, upToDate: boolean }>}
+ * @returns {any} value-or-promise of applied/pending/drift/upToDate;
+ *   a borrowed synchronous connection stays synchronous with a physical target
  */
 export function migrationStatus(target, migrations, options = {}) {
-  // a call already cancelled, or past its deadline on the caller's
-  // clock, opens nothing
   try {
-    refuseCancelled({ signal: options.signal, deadline: options.deadline },
-      resolveRuntime(options.runtime).now,
+    refuseCancelled({ signal: options.signal, deadline: options.deadline }, resolveRuntime(options.runtime).now,
       { abortCode: 'JD2080', aborted: 'it ran', passed: 'the status read ran', ran: 'no step ran' });
   }
-  catch (error) {
-    return Promise.reject(error);
-  }
-  return toPromise(chain(
-    target.driver.open(target.path ?? ':memory:', {}),
-    (connection) => {
-      const dialect = connection.dialect;
-      const statements = historyStatements(dialect);
-      const finish = (result) => chain(connection.close(), () => result);
-      const failClosed = (error) => chain(connection.close(), () => { throw error; });
-      let work;
-      try {
-        // §6's "writes NOTHING" holds for a status read too: the history
-        // table is probed, never created, and an absent one reads as an
-        // empty history — the same promise the dry run makes
-        work = chain(registerDeriveFunctions(connection), () =>
-          chain(chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
-            chain(probe.get([HISTORY_TABLE]), (present) => (present === undefined
-              ? []
-              : chain(connection.prepare(statements.select), (select) => select.all([]))))),
-          (rows) => chain(rows, () => {
-              for (let i = 0; i < rows.length; i++) {
-                const doc = migrations[i];
-                if (doc === undefined || doc.id !== rows[i].id
-                  || migrationChecksum(doc) !== rows[i].checksum) {
-                  throw refuse('JD0022',
-                    `history position ${i} records '${rows[i].id}' but the migration list `
-                    + `has '${doc?.id ?? '<nothing>'}' (or an edited document)`);
-                }
-              }
-              const applied = rows.map((row) => String(row.id));
-              const pending = migrations.slice(rows.length)
-                .map((migration) => String(migration.id));
-              if (pending.length > 0 || options.model === undefined) {
-                return { applied, pending, drift: null, upToDate: pending.length === 0 };
-              }
-              return chain(
-                compareShapeToModel(target.driver, connection, options.model,
-                  options.registerFunctions),
-                (difference) => ({
-                  applied, pending, drift: difference, upToDate: difference === null,
-                }));
-            })));
-      }
-      catch (error) {
-        return failClosed(error);
-      }
-      return work instanceof Promise ? work.then(finish, failClosed) : finish(work);
-    }));
+  catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
+  if (!Array.isArray(migrations)) throw new TypeError('migrationStatus needs the full ordered migration list');
+  return withMigrationConnection(target, (connection) => {
+    if (connection.mustQueue) throw refuse('JD0021', 'status needs an exclusively available connection or its owning transaction scope');
+    const dialect = connection.dialect, statements = historyStatements(dialect);
+    return chain(registerDeriveFunctions(connection), () => chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
+      chain(probe.get([HISTORY_TABLE]), (present) => chain(present === undefined ? []
+        : chain(connection.prepare(statements.select), (select) => select.all([])), (rows) => {
+        for (let i = 0; i < rows.length; i++) {
+          const doc = migrations[i];
+          if (doc === undefined || doc.id !== rows[i].id || migrationChecksum(doc) !== rows[i].checksum)
+            throw refuse('JD0022', `history position ${i} records '${rows[i].id}' but the migration list has '${doc?.id ?? '<nothing>'}' (or an edited document)`);
+        }
+        const applied = rows.map((row) => String(row.id));
+        const pending = migrations.slice(rows.length).map((migration) => String(migration.id));
+        if (pending.length > 0) return { applied, pending, drift: null, upToDate: false };
+        const physicalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target;
+        if (physicalTarget === undefined && options.model === undefined)
+          return { applied, pending, drift: null, upToDate: true };
+        const driver = options.shadowDriver ?? target.driver;
+        if (physicalTarget === undefined && typeof driver?.open !== 'function')
+          throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
+        return chain(physicalTarget !== undefined ? comparePhysicalTarget(connection, physicalTarget)
+          : compareShapeToModel(driver, connection, options.model, options.registerFunctions),
+        (difference) => ({ applied, pending, drift: difference, upToDate: difference === null }));
+      }))));
+  });
 }
 
 /**
@@ -1621,11 +1491,14 @@ export function migrationStatus(target, migrations, options = {}) {
  * The whole chain replays on a `:memory:` shadow before the real
  * store is touched.
  *
- * @param {{ driver: any, path?: string, busyTimeout?: number }} target
+ * @param {{ driver?: any, path?: string, busyTimeout?: number, connection?: any }} target
  * @param {any[]} migrations
  * @param {{ baseline: any, model?: any, compileSchema?: Function,
  *   dryRun?: boolean, batchSize?: number, onProgress?: Function,
  *   shadow?: boolean, shadowPath?: string, shadowDriver?: any,
+ *   shadowFixture?: Function, physicalTarget?: any,
+ *   registerFunctions?: Function, expressions?: any,
+ *   assertionBounds?: any, onAssertionPlan?: Function,
  *   signal?: AbortSignal, deadline?: number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
  *   `signal` and `deadline` cancel between migrations, steps and
@@ -1636,286 +1509,179 @@ export function migrationStatus(target, migrations, options = {}) {
  *   migration is stamped with, and the clock and identifiers an entity
  *   step's `default: 'now'` / `default: 'uuid'` fill; the platform's own
  *   when absent
- * @returns {Promise<any>}
+ * @returns {any} Owned targets return a promise. Borrowed synchronous targets
+ *   with shadow:false and synchronous hooks settle in their caller's transaction.
  */
 export function migrate(target, migrations, options) {
-  if (target === null || typeof target !== 'object'
-    || target.driver === null || typeof target.driver !== 'object'
-    || typeof target.driver.open !== 'function')
-    throw new TypeError('migrate needs { driver } (and usually { path })');
-  if (!Array.isArray(migrations))
-    throw new TypeError('migrate needs the full ordered migration list');
-  if (options === null || typeof options !== 'object' || options.baseline === undefined)
-    throw new TypeError(
-      'migrate needs { baseline }: the model the store was first created with '
-      + '(the chain anchor and the shadow starting shape)');
+  if (!target || typeof target !== 'object' || (target.connection === undefined && typeof target.driver?.open !== 'function'))
+    throw new TypeError('migrate needs { driver, path? } or { connection }');
+  if (!Array.isArray(migrations)) throw new TypeError('migrate needs the full ordered migration list');
+  if (!options || typeof options !== 'object' || options.baseline === undefined)
+    throw new TypeError('migrate needs { baseline }: the model the store was first created with');
   const batchSize = options.batchSize ?? 500;
-  if (!Number.isSafeInteger(batchSize) || batchSize < 1)
-    throw new TypeError('batchSize must be a positive safe integer');
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
+  if (options.shadowFixture !== undefined && typeof options.shadowFixture !== 'function') throw new TypeError('shadowFixture must initialize a disposable connection');
   const runtime = resolveRuntime(options.runtime);
-  /**
-   * The cancellation boundary: between migrations, between steps and
-   * between the batches of a data step, on the runtime record's clock.
-   * Nothing interrupts a statement that has started; a refusal inside a
-   * migration rolls that migration back whole and the completed ones
-   * stand, so a rerun resumes from the recorded position.
-   */
   const check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now, {
     abortCode: 'JD2080', aborted: 'its next step', passed: 'its next step',
-    ran: 'no further step ran; a migration in flight rolled back whole and a rerun resumes '
-      + 'from the recorded position',
+    ran: 'no further step ran; a migration in flight rolled back whole and a rerun resumes from the recorded position',
   });
-  const runOptions = {
-    batchSize,
-    assertionBounds: normalizeAssertionBounds(options.assertionBounds),
-    onProgress: options.onProgress,
-    onAssertionPlan: options.onAssertionPlan,
-    registerFunctions: options.registerFunctions,
-    // the host's declared index-expression functions ride to every
-    // planner and every connection this run opens — the shadow's
-    // baseline, the reference database and the real store all resolve a
-    // declared expression against the same declarations the open path
-    // was given, or they would plan DDL nobody can apply
-    expressions: options.expressions,
-    model: options.model,
-    runtime,
-    check,
-  };
-  try {
-    check();
-  }
-  catch (error) {
-    return Promise.reject(error);
-  }
-
-  return toPromise(chain(
-    target.driver.open(target.path ?? ':memory:', { timeout: target.busyTimeout ?? 5000 }),
-    (connection) => chain(
-      chain(registerDeriveFunctions(connection),
-        () => (options.registerFunctions !== undefined
-          ? options.registerFunctions(connection) : null)),
-      () => {
-      const dialect = connection.dialect;
-      const statements = historyStatements(dialect);
-      const finish = (result) => chain(connection.close(), () => result);
-      const failClosed = (error) => chain(connection.close(), () => { throw error; });
-
-      let work;
-      try {
-        // §6's "writes NOTHING": an apply creates the empty history
-        // table before reading it, a DRY RUN probes for it instead and
-        // reads an absent one as an empty history — the promise a dry
-        // run makes is the reason it is safe to point at production
-        let historyExists = false;
-        const history = chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
-          chain(probe.get([HISTORY_TABLE]), (row) => {
-            historyExists = row !== undefined;
-            return !historyExists ? [] : chain(connection.prepare(statements.select), (select) => select.all([]));
-          }));
-        work = chain(history, (appliedRows) => {
-          // the list must agree with the history: same ids, same
-          // order, same checksums — an edited applied migration is
-          // always a bug worth failing on
-          for (let i = 0; i < appliedRows.length; i++) {
-            const row = appliedRows[i];
-            const doc = migrations[i];
-            if (doc === undefined || doc.id !== row.id) {
-              throw refuse('JD0022',
-                `history position ${i} records '${row.id}' but the migration list has `
-                + `'${doc?.id ?? '<nothing>'}' — the list must contain every applied `
-                + 'migration, in order');
-            }
-            if (migrationChecksum(doc) !== row.checksum) {
-              throw refuse('JD0022',
-                `migration '${row.id}' differs from the document recorded in the `
-                + 'history — an applied migration must never be edited');
-            }
-          }
-          const pending = migrations.slice(appliedRows.length);
-          const currentShape = appliedRows.length > 0
-            ? appliedRows[appliedRows.length - 1].to_hash
-            : shapeHash(options.baseline);
-
-          let expectedFrom = currentShape;
-          for (const migration of pending) {
-            checkMigrationDocument(migration);
-            checkPreservationPlan(migration);
-            if (migration.from !== expectedFrom) {
-              throw refuse('JD0020',
-                `migration '${migration.id}' expects shape '${migration.from}' but the `
-                + `database is at '${expectedFrom}' — refusing to run against the wrong shape`);
-            }
-            expectedFrom = migration.to;
-          }
-          if (options.model !== undefined && pending.length > 0
-            && expectedFrom !== shapeHash(options.model)) {
-            throw refuse('JD0020',
-              "the last migration's to-hash is not the target model's shape — the "
-              + 'migration chain and the code disagree about where this ends');
-          }
-
-          if (pending.length === 0) {
-            return { applied: [], skipped: appliedRows.map((row) => row.id), upToDate: true };
-          }
-
-          if (pending.some((m) => m.physical) && options.shadow !== false)
-            throw refuse('JD0021', 'physical preservation plans require shadow:false; qualify against an explicit copy/fresh-target fixture');
-          const shadowRun = options.shadow === false
-            ? null
-            : replayOnShadow(options.shadowDriver ?? target.driver,
-              options.shadowPath ?? ':memory:',
-              options.baseline, migrations, options.model, runOptions);
-
-          return chain(shadowRun, () => {
-            if (options.dryRun === true) {
-              const rendered = [];
-              const counts = {};
-              const collect = (i) => {
-                if (i >= pending.length) return null;
-                const migration = pending[i];
-                for (const migrationStep of migration.steps) {
-                  if (migrationStep.kind === 'ddl') rendered.push(migrationStep.sql);
-                  else if (migrationStep.kind === 'sql') {
-                    rendered.push(`-- data step (sql): ${migrationStep.note ?? ''}`);
-                    rendered.push(migrationStep.sql);
-                  }
-                  else if (migrationStep.kind === 'rebuild') {
-                    rendered.push(`-- rebuild '${migrationStep.table}' (§10 procedure)`);
-                    rendered.push(...migrationStep.create, migrationStep.copy,
-                      dialect.ddl.dropTable(migrationStep.table),
-                      dialect.ddl.renameTable(`${migrationStep.table}__rebuild`,
-                        migrationStep.table),
-                      ...migrationStep.indexes);
-                    if (dialect.capabilities.foreignKeysAlwaysOn !== true)
-                      rendered.push(dialect.pragma.foreignKeyCheck());
-                  }
-                  else if (migrationStep.kind === 'jslt')
-                    rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
-                  else {
-                    const operation = compileDocumentStep(migrationStep, migration.steps.indexOf(migrationStep), {
-                      migrationId: migration.id, compileJslt: compileJsltStylesheet, compileQuery: compileJsonQuery,
-                      assertionBounds: runOptions.assertionBounds,
-                    });
-                    const strategy = assertionProvider(migrationStep.assert, migrationStep.collection, operation.shape) === null
-                      ? operation.strategy : 'provider';
-                    rendered.push(`-- assert over '${migrationStep.collection}' (${strategy}; ${operation.reason})`);
-                  }
-                }
-                const jsltCollections = [...new Set(migration.steps
-                  .filter((s) => s.kind === 'jslt').map((s) => s.collection))];
-                const count = (j) => {
-                  if (j >= jsltCollections.length) return null;
-                  const table = jsltCollections[j];
-                  const countSql = `SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} `
-                    + `FROM ${dialect.quoteIdentifier(table)}`;
-                  return chain(connection.prepare(countSql), (statement) =>
-                    chain(statement.get([]), (row) => {
-                      counts[table] = row.n;
-                      return count(j + 1);
-                    }));
-                };
-                return chain(count(0), () => collect(i + 1));
-              };
-              return chain(collect(0), () => ({
-                dryRun: true,
-                pending: pending.map((migration) => migration.id),
-                statements: rendered,
-                counts,
-                shadowValidated: options.shadow !== false,
-              }));
-            }
-
-            // the real run: one exclusive transaction per migration
-            const applied = [];
-            const applyNext = (i) => {
-              if (i >= pending.length) return null;
-              // the boundary between migrations
-              check();
-              const migration = pending[i];
-              const last = i === pending.length - 1;
-              // the §10 procedure's pragma bracket, literally: the
-              // foreign_keys pragma is a no-op inside a transaction,
-              // and node:sqlite enables enforcement BY DEFAULT — a
-              // parent-table rebuild could not even DROP without this
-              const bracket = migration.steps.some(
-                (candidate) => candidate.kind === 'rebuild');
-              return chain(
-                bracket && dialect.capabilities.foreignKeysAlwaysOn !== true
-                  ? connection.exec(dialect.pragma.foreignKeys(false)) : null,
-                () => chain(connection.exec(dialect.tx.beginImmediate), () => {
-                const body = () => chain(migration.physical ? verifyPreservation(connection, migration.physical, false) : null, () =>
-                  chain(historyExists ? null : connection.exec(statements.create), () =>
-                  chain(runSteps(connection, migration, runOptions), () =>
-                  chain(migration.physical ? verifyPreservation(connection, migration.physical, true) : null, () =>
-                  chain(last && options.model !== undefined
-                    ? chain(validateTargetState(connection, options.model,
-                      { compileSchema: options.compileSchema, batchSize }),
-                    () => (normalizeEntities(options.model).size === 0 || migration.physical ? null
-                      : chain(compareShapeToModel(target.driver, connection,
-                        options.model, options.registerFunctions), (difference) => {
-                        if (difference !== null) {
-                          throw refuse('JD0023',
-                            `the migrated shape does not equal the target model's: ${difference}`);
-                        }
-                        return null;
-                      })))
-                    : null,
-                  () => chain(connection.prepare(statements.insert), (insert) =>
-                    insert.run([migration.id, runtime.now(), migration.from,
-                      migration.to, migrationChecksum(migration),
-                      migration.steps.length])))))));
-                const restore = () => (bracket
-                  && dialect.capabilities.foreignKeysAlwaysOn !== true
-                  ? connection.exec(dialect.pragma.foreignKeys(true)) : null);
-                const rollback = (error) =>
-                  chain(connection.exec(dialect.tx.rollback), () =>
-                    chain(restore(), () => { throw error; }));
-                // only body() may route to this migration's rollback:
-                // commit() chains the NEXT migration, whose failure
-                // rolls ITSELF back — catching it here would roll
-                // back a transaction that already committed
-                let outcome;
-                try {
-                  outcome = body();
-                }
-                catch (error) {
-                  return rollback(error);
-                }
-                const settle = () => {
-                  let result;
-                  try { result = connection.exec(dialect.tx.commit); }
-                  catch (error) { return rollback(error); }
-                  return result instanceof Promise ? result.then(published, rollback) : published();
-                };
-                const published = () => chain(restore(), () => {
-                  historyExists = true; applied.push(migration.id); return applyNext(i + 1);
-                });
-                return outcome instanceof Promise ? outcome.then(settle, rollback) : settle();
-              }));
-            };
-            return chain(applyNext(0), () => ({
-              applied,
-              skipped: appliedRows.map((row) => row.id),
-              shape: expectedFrom,
-            }));
-          });
+  const runOptions = { batchSize, assertionBounds: normalizeAssertionBounds(options.assertionBounds),
+    onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
+    registerFunctions: options.registerFunctions, expressions: options.expressions,
+    compileSchema: options.compileSchema, physicalTarget: options.physicalTarget,
+    shadowFixture: options.shadowFixture, model: options.model,
+    signal: options.signal, deadline: options.deadline, runtime, check };
+  try { check(); }
+  catch (error) { if (target.connection !== undefined) throw error; return Promise.reject(error); }
+  if (options.physicalTarget !== undefined) physicalTargetOf(options.physicalTarget);
+  const referenceDriver = options.shadowDriver ?? target.driver;
+  return withMigrationConnection(target, (connection) => {
+    if (connection.mustQueue) throw refuse('JD0021', 'migration needs an exclusively available connection or its owning transaction scope');
+    return chain(registerDeriveFunctions(connection), () => chain(options.registerFunctions?.(connection), () => {
+      const dialect = connection.dialect, statements = historyStatements(dialect);
+      let historyExists = false;
+      const readHistory = () => chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
+        chain(probe.get([HISTORY_TABLE]), (row) => {
+          historyExists = row !== undefined;
+          return historyExists ? chain(connection.prepare(statements.select), (select) => select.all([])) : [];
+        }));
+      return chain(readHistory(), (appliedRows) => {
+        const verifyHistory = (count) => chain(readHistory(), (rows) => {
+          if (rows.length !== count || rows.some((row, at) => row.id !== migrations[at]?.id
+            || row.checksum !== migrationChecksum(migrations[at])))
+            throw refuse('JD0022', 'migration history changed while acquiring its writer; no step ran');
         });
-
-      }
-      catch (error) {
-        return failClosed(error);
-      }
-      return work instanceof Promise
-        ? work.then(finish, failClosed)
-        : finish(work);
-    })));
+        for (let i = 0; i < appliedRows.length; i++) {
+          const row = appliedRows[i], doc = migrations[i];
+          if (doc === undefined || doc.id !== row.id) throw refuse('JD0022',
+            `history position ${i} records '${row.id}' but the migration list has '${doc?.id ?? '<nothing>'}' — the list must contain every applied migration, in order`);
+          if (migrationChecksum(doc) !== row.checksum) throw refuse('JD0022',
+            `migration '${row.id}' differs from the document recorded in the history — an applied migration must never be edited`);
+        }
+        const pending = migrations.slice(appliedRows.length);
+        let expectedFrom = appliedRows.length ? appliedRows.at(-1).to_hash : shapeHash(options.baseline);
+        for (const migration of pending) {
+          checkMigrationDocument(migration); checkPreservationPlan(migration);
+          if (migration.from !== expectedFrom) throw refuse('JD0020',
+            `migration '${migration.id}' expects shape '${migration.from}' but the database is at '${expectedFrom}' — refusing to run against the wrong shape`);
+          expectedFrom = migration.to;
+        }
+        if (options.model !== undefined && expectedFrom !== shapeHash(options.model)) throw refuse('JD0020',
+          "the last migration's to-hash is not the target model's shape — the migration chain and the code disagree about where this ends");
+        const finalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target;
+        const acceptTarget = (scope, targetShape) => targetShape === undefined ? null
+          : chain(comparePhysicalTarget(scope, targetShape), (difference) => {
+            if (difference !== null) throw refuse('JD0023', `the migrated physical target differs: ${difference}`);
+          });
+        if (pending.length === 0) {
+          const result = { applied: [], skipped: appliedRows.map((row) => row.id), upToDate: true };
+          return finalTarget === undefined ? result : connection.transaction((scope) =>
+            chain(verifyHistory(appliedRows.length), () => chain(acceptTarget(scope, finalTarget), () => result)), options.signal, 'immediate');
+        }
+        if (pending.some((m) => m.physical) && options.shadow !== false && options.shadowFixture === undefined)
+          throw refuse('JD0021', 'physical preservation plans require shadow:false or an explicit shadowFixture initializer');
+        if (options.shadow !== false && (typeof referenceDriver?.open !== 'function'
+          || options.shadowPath !== undefined && options.shadowPath !== ':memory:'
+            && target.path !== undefined && options.shadowPath === target.path))
+          throw refuse('JD0021', 'shadow replay needs an independent driver and disposable path');
+        const shadowRun = options.shadow === false ? null : replayOnShadow(connection, referenceDriver,
+          options.shadowPath ?? ':memory:', options.baseline, migrations, options.model, runOptions);
+        return chain(shadowRun, () => {
+          if (options.dryRun === true) {
+            const rendered = [], counts = {};
+            const collect = (i) => {
+              if (i >= pending.length) return null;
+              const migration = pending[i];
+              for (const migrationStep of migration.steps) {
+                if (migrationStep.kind === 'ddl') rendered.push(migrationStep.sql);
+                else if (migrationStep.kind === 'sql') rendered.push(`-- data step (sql): ${migrationStep.note ?? ''}`, migrationStep.sql);
+                else if (migrationStep.kind === 'table') rendered.push(`-- guarded table '${migrationStep.plan.table}'`, ...migrationStep.plan.statements, ...migrationStep.plan.finish);
+                else if (migrationStep.kind === 'rebuild') {
+                  rendered.push(`-- rebuild '${migrationStep.table}' (§10 procedure)`, ...migrationStep.create,
+                    migrationStep.copy, dialect.ddl.dropTable(migrationStep.table),
+                    dialect.ddl.renameTable(`${migrationStep.table}__rebuild`, migrationStep.table), ...migrationStep.indexes);
+                  if (dialect.capabilities.foreignKeysAlwaysOn !== true) rendered.push(dialect.pragma.foreignKeyCheck());
+                }
+                else if (migrationStep.kind === 'jslt') rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
+                else {
+                  const operation = compileDocumentStep(migrationStep, migration.steps.indexOf(migrationStep), {
+                    migrationId: migration.id, compileJslt: compileJsltStylesheet, compileQuery: compileJsonQuery,
+                    assertionBounds: runOptions.assertionBounds,
+                  });
+                  const strategy = assertionProvider(migrationStep.assert, migrationStep.collection, operation.shape) === null ? operation.strategy : 'provider';
+                  rendered.push(`-- assert over '${migrationStep.collection}' (${strategy}; ${operation.reason})`);
+                }
+              }
+              const transforms = migration.steps.filter((s) => s.kind === 'jslt');
+              const count = (j) => {
+                if (j >= transforms.length) return null;
+                const current = transforms[j], mapping = entityStepMapping(runOptions, current.collection, current, dialect);
+                const table = mapping?.mapping.table ?? current.collection;
+                // Preview reads current relations; earlier planned SQL may create
+                // this table/view or change its rows, but is not executed here.
+                return chain(connection.prepare(dialect.introspect.tables()), (catalog) => chain(catalog.all([]), (relations) => {
+                  if (!relations.some((relation) => String(relation.name) === table)) {
+                    setObjectMember(counts, current.collection, null);
+                    return count(j + 1);
+                  }
+                  return chain(connection.prepare(`SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} FROM ${dialect.quoteIdentifier(table)}`), (statement) =>
+                    chain(statement.get([]), (row) => { setObjectMember(counts, current.collection, row.n); return count(j + 1); }));
+                }));
+              };
+              return chain(count(0), () => collect(i + 1));
+            };
+            return chain(collect(0), () => ({ dryRun: true, pending: pending.map((m) => m.id),
+              statements: rendered, counts, shadowValidated: options.shadow !== false }));
+          }
+          const applied = [];
+          const applyNext = (i) => {
+            if (i >= pending.length) return null;
+            check();
+            const migration = pending[i], last = i === pending.length - 1;
+            const bracket = migration.steps.some((s) => s.kind === 'rebuild' || s.kind === 'table' && s.plan.rebuild)
+              && dialect.capabilities.foreignKeysAlwaysOn !== true;
+            const body = (scope) => {
+              check();
+              // Admission may have waited behind a different process. Never rerun
+              // a body using receipts read before that process committed.
+              return chain(verifyHistory(appliedRows.length + applied.length), () => {
+                let work = migration.physical ? verifyPreservation(scope, migration.physical, false) : null;
+                work = chain(work, () => historyExists ? null : scope.exec(statements.create));
+                work = chain(work, () => runSteps(scope, migration, runOptions));
+                work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true) : null);
+                work = chain(work, () => acceptTarget(scope, last ? finalTarget : migration.physical?.target));
+                work = chain(work, () => last && options.model !== undefined ? chain(validateTargetState(scope, options.model,
+                    { compileSchema: options.compileSchema, batchSize }), () => {
+                    if (normalizeEntities(options.model).size === 0 || migration.physical || finalTarget !== undefined
+                      || [...normalizeEntities(options.model).values()].some((e) => e.physical)) return null;
+                    if (typeof referenceDriver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
+                    return chain(compareShapeToModel(referenceDriver, scope, options.model, options.registerFunctions, options.expressions), (difference) => {
+                      if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
+                    });
+                  }) : null);
+                return chain(work, () => chain(scope.prepare(statements.insert), (insert) =>
+                  insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
+              });
+            };
+            const transaction = () => connection.transaction(body, options.signal, 'immediate');
+            return chain(bracket ? withForeignKeySettings(connection, transaction) : transaction(), () => {
+              historyExists = true; applied.push(migration.id); return applyNext(i + 1);
+            });
+          };
+          return chain(applyNext(0), () => ({ applied, skipped: appliedRows.map((row) => row.id), shape: expectedFrom }));
+        });
+      });
+    }));
+  });
 }
 
 /** Plan an existing file's explicit preservation migration. Every source object
  * needs a disposition; source/target assertions preserve application-owned facts.
  * @param {any} connection @param {any} fromModel @param {any} toModel
  * @param {{ id: string, steps: any[], dispositions: Record<string, 'preserve'|'replace'|'drop'>,
- *   assertions?: { sql: string, params?: any[], expected: any[] }[] }} options @returns {any} */
+ *   assertions?: { sql: string, params?: any[], expected: any[] }[],
+ *   physicalTarget?: any }} options @returns {any} */
 export function planPhysicalMigration(connection, fromModel, toModel, options) {
   normalizeEntities(fromModel); normalizeEntities(toModel);
   if (!options || typeof options.id !== 'string' || !options.id || !Array.isArray(options.steps))
@@ -1931,7 +1697,8 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
         throw refuse('JD0021', 'preservation assertions require a SELECT and expected rows');
     }
     const migration = { $migration: MIGRATION_VERSION, id: options.id, from: shapeHash(fromModel), to: shapeHash(toModel),
-      steps: options.steps, physical: { source, dispositions, assertions } };
+      steps: options.steps, physical: { source, dispositions, assertions,
+        ...(options.physicalTarget === undefined ? {} : { target: structuredClone(options.physicalTarget) }) } };
     checkMigrationDocument(migration);
     checkPreservationPlan(migration);
     return migration;
@@ -1940,10 +1707,12 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
 
 /** Validate saved plans again at execution, including SQL ownership boundaries. */
 function checkPreservationPlan(migration) {
+  checkMigrationStatements(migration);
   const physical = migration.physical;
   if (physical === undefined) return;
   const fail = () => { throw refuse('JD0021', 'invalid physical source, dispositions, assertions or steps'); };
   if (!physical || !Array.isArray(physical.source) || !physical.dispositions || !Array.isArray(physical.assertions)) fail();
+  if (physical.target !== undefined) physicalTargetOf(physical.target);
   const keys = physical.source.map((object) => {
     if (!object || typeof object.name !== 'string' || !['table', 'view', 'index', 'trigger'].includes(object.type)) fail();
     return `${object.type}:${object.name}`;
@@ -1953,15 +1722,40 @@ function checkPreservationPlan(migration) {
   for (const assertion of physical.assertions)
     if (!assertion || typeof assertion.sql !== 'string' || !/^SELECT\b/i.test(assertion.sql.trim())
       || !Array.isArray(assertion.expected) || (assertion.params !== undefined && !Array.isArray(assertion.params))) fail();
-  if (migration.steps.some((step) => !['ddl', 'sql', 'rebuild'].includes(step.kind))) fail();
+  if (migration.steps.some((step) => !['ddl', 'sql', 'rebuild', 'table', 'jslt', 'query'].includes(step.kind))) fail();
+}
+
+/** A saved step is one statement or one trigger program. Transaction aliases
+ * and trailing statements cannot escape its savepoint or publish partial work. */
+function checkMigrationStatements(migration) {
   const fragments = migration.steps.flatMap((step) => step.kind === 'rebuild'
-    ? [...(step.create ?? []), step.copy, ...(step.indexes ?? [])] : [step.sql]);
+    ? [...(step.create ?? []), step.copy, ...(step.indexes ?? [])] : step.kind === 'table'
+      ? [...step.plan.statements, ...step.plan.finish] : ['ddl', 'sql'].includes(step.kind) ? [step.sql] : []);
   for (const sql of fragments) {
     const tokens = typeof sql === 'string' ? sqlTokens(sql) : [];
     const words = tokens.filter((t) => t.kind === 'word').map((t) => t.value.toUpperCase());
-    if (!['CREATE', 'ALTER', 'DROP', 'INSERT', 'UPDATE', 'DELETE'].includes(words[0])
+    const fail = () => { throw refuse('JD0021', 'migration steps cannot change transaction or connection ownership; use one statement per step'); };
+    if (!['CREATE', 'ALTER', 'DROP', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'REPLACE'].includes(words[0])
       || words.some((w) => /^(?:COMMIT|ROLLBACK|SAVEPOINT|RELEASE|ATTACH|DETACH|PRAGMA|VACUUM)$/.test(w)))
-      throw refuse('JD0021', 'physical steps cannot change transaction or connection ownership');
+      fail();
+    const trigger = words[0] === 'CREATE' && (words[1] === 'TRIGGER'
+      || ['TEMP', 'TEMPORARY'].includes(words[1]) && words[2] === 'TRIGGER');
+    if (!trigger) {
+      if (words.includes('BEGIN') || tokens.some((token, i) => token.kind === 'symbol'
+        && token.value === ';' && i !== tokens.length - 1)) fail();
+      continue;
+    }
+    const begin = tokens.findIndex((token) => token.kind === 'word' && token.value.toUpperCase() === 'BEGIN');
+    if (begin < 0) fail();
+    let depth = 1, end = -1;
+    for (let i = begin + 1; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token.kind !== 'word') continue;
+      const word = token.value.toUpperCase();
+      if (word === 'CASE' || word === 'BEGIN') depth++;
+      else if (word === 'END' && --depth === 0) { end = i; break; }
+    }
+    if (end < 0 || tokens.slice(end + 1).some((token, i) => i !== 0 || token.kind !== 'symbol' || token.value !== ';')) fail();
   }
 }
 

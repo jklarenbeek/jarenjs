@@ -80,6 +80,53 @@
       },
       "additionalProperties": false
      }
+    },
+    "target": {
+     "type": "object",
+     "properties": {
+      "objects": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "required": [
+         "type",
+         "name",
+         "owner",
+         "sql"
+        ],
+        "properties": {
+         "type": {
+          "enum": [
+           "table",
+           "view",
+           "index",
+           "trigger"
+          ]
+         },
+         "name": {
+          "type": "string"
+         },
+         "owner": {
+          "type": "string"
+         },
+         "sql": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "tables": {
+       "type": "array",
+       "uniqueItems": true,
+       "items": {
+        "type": "string"
+       }
+      }
+     },
+     "required": [
+      "objects"
+     ],
+     "additionalProperties": false
     }
    },
    "additionalProperties": false
@@ -113,6 +160,9 @@
     },
     {
      "$ref": "#/$defs/rebuildStep"
+    },
+    {
+     "$ref": "#/$defs/tableStep"
     }
    ]
   },
@@ -158,6 +208,18 @@
     },
     "note": {
      "type": "string"
+    },
+    "model": {
+     "description": "The immutable model describing this step’s current physical layout.",
+     "type": "object",
+     "properties": {
+      "$model": {
+       "const": "0.1"
+      }
+     },
+     "required": [
+      "$model"
+     ]
     }
    },
    "required": [
@@ -189,6 +251,18 @@
     },
     "note": {
      "type": "string"
+    },
+    "model": {
+     "description": "The immutable model describing this step’s current physical layout.",
+     "type": "object",
+     "properties": {
+      "$model": {
+       "const": "0.1"
+      }
+     },
+     "required": [
+      "$model"
+     ]
     }
    },
    "required": [
@@ -336,6 +410,96 @@
     "create",
     "copy",
     "indexes"
+   ],
+   "additionalProperties": false
+  },
+  "tableStep": {
+   "description": "A complete reviewed planTableMigration artifact, executed with its source, row, storage and identity guards.",
+   "type": "object",
+   "properties": {
+    "kind": {
+     "const": "table"
+    },
+    "plan": {
+     "type": "object",
+     "required": [
+      "version",
+      "id",
+      "table",
+      "checksum",
+      "source",
+      "after",
+      "rebuild",
+      "temporary",
+      "unchanged",
+      "statements",
+      "finish"
+     ],
+     "properties": {
+      "version": {
+       "const": 1
+      },
+      "id": {
+       "type": "string",
+       "minLength": 1
+      },
+      "table": {
+       "type": "string",
+       "minLength": 1
+      },
+      "checksum": {
+       "type": "string",
+       "minLength": 1
+      },
+      "source": {
+       "type": "array",
+       "items": {
+        "type": "object"
+       }
+      },
+      "after": {
+       "type": "array",
+       "items": {
+        "type": "object"
+       }
+      },
+      "rebuild": {
+       "type": "boolean"
+      },
+      "temporary": {
+       "type": "string",
+       "minLength": 1
+      },
+      "unchanged": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "minLength": 1
+       }
+      },
+      "statements": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "minLength": 1
+       }
+      },
+      "finish": {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "minLength": 1
+       }
+      }
+     }
+    },
+    "note": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "kind",
+    "plan"
    ],
    "additionalProperties": false
   }

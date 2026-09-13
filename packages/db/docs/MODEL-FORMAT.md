@@ -353,8 +353,8 @@ a control character, on SQLite) is `JD0004`.
 **Opening an existing database verifies, never alters.** If a declared
 collection's table already exists it MUST match what the model would
 create; any disagreement is `JD0002` naming the first difference.
-Reshaping a live database is the migration story — a later capability —
-and `openStore` MUST NOT attempt it.
+Reshaping a live database requires an explicit migration;
+`openStore` MUST NOT attempt it.
 
 "Match" means every physical property that decides behaviour, not just
 the names and types:
@@ -376,10 +376,14 @@ the names and types:
 - an index the database has and the model does not declare is also
   drift: it changes deletion semantics and the plans the optimizer picks.
 
-Physical column ORDER is deliberately **not** drift. SQLite's
-`ALTER TABLE … ADD COLUMN` can only append, so a migrated table and a
-freshly built one legitimately disagree there, and this store never reads
-a column positionally.
+Managed named-column comparison explicitly permits safe column reordering:
+SQLite's `ALTER TABLE … ADD COLUMN` appends, and these consumers address
+columns by name. The comparison retains constraint order and stays strict
+for inline defaults, other order-sensitive clauses or unfamiliar forms. Complete reviewed
+physical targets and direct `schemaShapeOf`/`comparableDeclaredSql` calls
+preserve physical column order by default. Literal and quoted-identifier
+bytes always remain significant; whitespace inside them is never formatting.
+See [the comparison policy](MIGRATION-FORMAT.md#12-drift).
 
 ### 3.1 Derived columns, and the capability branch
 
@@ -2373,6 +2377,34 @@ qualified; an explicit `take`/`skip` load remains available.
 Capture/live/replication for adopted application triggers is not qualified and
 is refused, rather than advertised as a complete change stream. PostgreSQL
 column adoption is not qualified; physical inventory remains available.
+
+### Physical migration rows and acceptance
+
+Physical mappings can participate in migration `jslt` and `query` steps.
+The step's optional `model` selects its current layout; absent it, the
+final model is used. The runner verifies that layout before reading mapped
+columns. Transforms keep scalar/composite keys fixed and assign only changed
+writable columns, preserving unchanged raw text/JSON/BLOB storage and avoiding
+unrelated `UPDATE OF` triggers. Omitted database-default/generated values
+remain owned by the database. Changed generated fields, read-only writes and
+unknown output fields refuse.
+
+Migration table scans use bounded pages with text, integer or bigint key
+codecs; view assertions use bounded offset pages, and views remain read-only.
+This internal migration cursor does not enable the public physical `page`/
+`after` APIs. Text keys must round-trip through the database encoding and
+native binding. Malformed text refuses `JD0021` before its batch is exposed,
+rolling back the active migration. Node supports leading-BOM text keys.
+Bun 1.4 strips a leading BOM when binding a cursor parameter; the migration
+reader detects that limitation and refuses those keys with `JD0021`.
+That is a binding limitation, not a claim that ordinary reads corrupt them.
+
+A mapping covers declared fields and invariants, not every schema object
+an application owns. For complete startup acceptance, supply a reviewed
+`physicalTarget` inventory of the intended owned tables and their programs.
+Changed physical declarations are a `JD0021` policy refusal in
+`planModelMigration`; use an explicit guarded table plan and the existing
+migration lifecycle. See [the runnable lifecycle](MIGRATION-FORMAT.md#runnable-physical-lifecycle).
 
 ## 13. Persistence invariants
 

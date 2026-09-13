@@ -24,9 +24,9 @@
       "api": "@jarenjs/db/node",
       "role": "prepared SQL and transaction coexistence",
       "matches": [
-        "25:export function adaptNodeDatabase(db, options) {",
-        "82:export function fromNodeModule(mod, path, options) {",
-        "108:export function nodeDriver() {"
+        "26:export function adaptNodeDatabase(db, options) {",
+        "83:export function fromNodeModule(mod, path, options) {",
+        "109:export function nodeDriver() {"
       ],
       "disposition": "retained"
     },

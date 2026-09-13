@@ -114,19 +114,16 @@ naming the reason).
 | `.transform(name, (row, x) => …)` | `{ kind: 'jslt', collection: name, stylesheet: [{ match: '$', body }] }` — one root rule, the body captured through the JSLT pen's `body()` over the WHOLE row, `x.root`/`x.path` the externals the engine binds (JSLT-FORMAT §8.2) | `row` is `Expr<Old>` (`DocOf<From, name>`); the result must spell `New` — a dropped, mistyped or foreign member does not compile; the honest top (`get()`) is admitted where a precise value is | native; a table the target model does not declare `JL0106`; an undeclared external `JL0104` |
 | `.transform(name, stylesheet(…))`, `.transform(name, rules)` | the rules ARRAY — a `jslt` step carries the array, so the envelope's `unmatched`/`modes` have no place in it | a typed stylesheet's or first rule's `Out` must be `New`; a hand-written rule is the honest top | native; a disposition or a mode table `JL0102`; not JSON `JL0101` |
 | `.assert(name, (row) => …, { expect? })` | `{ kind: 'query', collection: name, assert: { $for: { it: '$[*]' }, $where: <predicate>, $return: '$it' }, expect? }` — the format's own `$for` over the rows; the predicate names the VIOLATION (`expect: 'empty'`, the default, absent from the document) or the witness (`expect: 'ebv'`) | `row` is the members the two shapes share — a precondition sees old rows, a postcondition new ones, and what both agree on is what neither lies about; annotate (`(row: Expr<User>) => …`) when one shape is meant | native; another `expect` `JL0101`; an external `JL0104`; an undeclared table `JL0106` |
-| `.assert(name, query, { expect? })` | the query document verbatim | — | native |
+| `.assert(name, query, { expect?, model? })` | the query document verbatim, plus an optional current model | — | native |
+| `.transform(name, spelling, { model })`, `.assert(name, spelling, { model, expect? })` | the ordinary step plus an immutable current `$model` document | transform input/output and assertion rows use this model's layout; names may be absent from the final model | native; an invalid model `JL0101`; a name absent from the selected model `JL0106` |
 | `.derive(name, columns)` | `{ kind: 'derive', collection: name, columns }` — a backfill of stored derived columns (§2.1), the columns verbatim | `readonly DeriveColumn[]` | native; no columns `JL0101`; an undeclared table `JL0106` |
-| `.step(raw)` | any planner-emitted step, verbatim — the escape that keeps `rebuild` (§10) authorable without the pen re-implementing it; a `draft` flag rides untouched | `MigrationStep` | native; an unrecognised kind or a missing member (the runner's `JD0023` rules, seen early) `JL0101` |
-| `fromPlanned(document, { from?, to? })` | the planner's document, taken up: `.transform(name, …)` replaces its draft for `name` in place; every other method appends | the models type the transforms and are checked against the document's hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and no target model `JL0106` |
+| `.step(raw)` | any planner-emitted step, including a complete guarded `{ kind: 'table', plan }` or a hybrid `rebuild`; a `draft` flag rides untouched | `MigrationStep`, including `TableStep`/`ReviewedTablePlan` | native; an unrecognised kind or incomplete plan/step `JL0101` |
+| `fromPlanned(document, { from?, to? })` | the planner's document, including its `physical` header and complete saved plans; `.transform(name, …)` replaces its draft in place, and other methods append | the models type transforms and are checked against the hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and neither target nor step model `JL0106` |
 | `.document`, `.toJSON()` | the deep-frozen `$migration` document — assembled once and memoized, so `a.document === a.document` | `MigrationDocument` | native |
 
-**This table is complete, and deliberately short.** Ten callable names
-against eleven rows: the step vocabulary of `$migration` 0.1 is six kinds
-(`ddl`, `jslt`, `query`, `derive`, `sql`, `rebuild`), five of them have a
-method here and the sixth is `step()`. What makes this pen worth reading
-is not the size of its surface but what each step is checked against —
-§4 is the richest refusal section in the family relative to the pen's
-size, and it is the reason.
+The `$migration` 0.1 vocabulary has seven kinds: `ddl`, `jslt`, `query`,
+`derive`, `sql`, `rebuild` and `table`. The two structural artifact kinds use
+`step()`; the pen preserves their plans without implementing SQL execution.
 
 Three rules the table implies, spelled out:
 
@@ -137,13 +134,11 @@ Three rules the table implies, spelled out:
   instruction, not shape, so a model that keeps carrying a satisfied hint
   hashes the same as one without it and plans nothing (MIGRATION-FORMAT
   §3 — a rename is idempotent across `plan` runs).
-- **A step's table is one the target model declares.** The runner would
-  fail the statement on a table that does not exist; the pen says so
-  first (`JL0106`) — for `transform`, `assert` and `derive` alike,
-  whenever it knows the target. Entities and collections both count as
-  declared. Over a planned document alone it knows only the drafts, so
-  every other name is the runner's to judge and a transform for another
-  table is spelled with `step()`.
+- **A step's name belongs to its selected model.** `transform` and
+  `assert` use an explicit `{ model }` when supplied, or the known target
+  otherwise; `derive` uses the target. Entities and collections both count.
+  A planned transform with no draft and no known model refuses `JL0106`;
+  supply its current model or spell the raw step explicitly.
 - **Steps are appended in the order they are called**, and `transform`
   over a planned document is the one exception: it replaces the draft for
   that name IN PLACE, so the planner's ordering — DDL before the data
@@ -480,7 +475,7 @@ else.
 | `m().assert('User', p, { other: 1 })` | `assert() does not take 'other'` | `{ expect }` |
 | `m().assert('User', undefined)` | `assert() takes a predicate (row) => … or a query document over the rows` | a predicate |
 | `m().derive('User', [])` | `derive() takes a non-empty array of derived-column records ({ name, derive, segments }), got a Array instance` | the columns the planner emitted |
-| `m().step({ kind: 'nope' })`, `m().step(42)` | `step() takes a migration step with a recognised kind (ddl, jslt, query, derive, sql, rebuild), got kind a string` | one of the six kinds |
+| `m().step({ kind: 'nope' })`, `m().step(42)` | `step() takes a migration step with a recognised kind (ddl, jslt, query, derive, sql, rebuild, table), got kind a string` | one of the seven kinds |
 | `m().step({ kind: 'rebuild', table: 'User' })` | `step() 'rebuild' needs 'create' (MIGRATION-FORMAT §2)` — `docPath` `/create` | the rendered parts |
 | `m().step({ kind: 'sql' })` | `step() 'sql' needs 'sql' (MIGRATION-FORMAT §2)` — `docPath` `/sql` | the statement |
 | `m().step({ kind: 'jslt', collection: 'User' })` | `step() 'jslt' needs 'stylesheet' (MIGRATION-FORMAT §2)` — `docPath` `/stylesheet` | a rules array |
@@ -532,8 +527,9 @@ exactly what it must not have.
 
 This pen's own code. Two conditions, and no other pen raises either.
 
-**A step naming a table the target model does not declare.** Checked for
-`transform`, `assert` and `derive`, whenever the target model is known.
+**A step naming a table its selected model does not declare.** Checked for
+`transform` and `assert` against an explicit current model when supplied,
+or the known target otherwise. `derive` checks the known target.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
@@ -553,20 +549,20 @@ no steps, so there is never a draft.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
-| `fromPlanned(planned).transform('Nope', fn)` — no models given | `transform() over 'Nope': the planned migration drafts no transform for it and no target model was given — pass { to } to fromPlanned(), or spell the step with step()` | `fromPlanned(planned, { from: v1, to: v2 })`, or `.step({ kind: 'jslt', … })` |
+| `fromPlanned(planned).transform('Nope', fn)` — no models given | `transform() over 'Nope': the planned migration drafts no transform for it and no target model or explicit step model was given — pass { model } to transform(), { to } to fromPlanned(), or spell the step with step()` | supply the current `{ model }`, give `fromPlanned` its `{ to }`, or use `.step({ kind: 'jslt', … })` |
 | `fromPlanned(twoDrafts).transform('User', fn)` | `transform() cannot tell which draft to replace: the planned migration carries 2 draft transforms for 'User'` | edit the planned document down to one draft per table, or replace them with `step()` calls |
 
 The first is not a mistake so much as a missing fact: without a target
 model the pen knows only which tables the planner drafted, so a name it
 has never seen could be a typo or could be perfectly good. It refuses and
-names both ways out rather than guessing. The second cannot arise from
+names the available ways to supply that fact. The second cannot arise from
 `jaren-db plan`, which drafts at most one transform per table; it arises
 when a planned document is edited or two are concatenated, and a pen that
 picked one would be picking which of the author's two transforms to
 throw away.
 
-Note what is NOT checked: with no target model, `ddl`, `sql`, `assert`,
-`derive` and `step` take any identifier, and the runner judges. That is
+With neither a target nor an explicit step model, `ddl`, `sql`, `assert`,
+`derive` and `step` leave undeclared-name checks to the runner. That is
 the honest position — the pen refuses what it can see, and it cannot see
 a model it was not given.
 
@@ -608,6 +604,14 @@ DocOf<To, N>>` — the members the two shapes SHARE. A precondition runs
 over old rows and a postcondition over new ones, and the pen cannot know
 which this one is, so what both agree on is what neither lies about;
 annotate (`(u: Expr<NewUser>) => …`) when one shape is meant.
+
+An explicit `{ model: current }` overrides these default type readings.
+The transform row and result both use `DocOf<typeof current, name>`;
+an assertion reads that current shape. `fromPlanned` retains the entire
+physical header as immutable JSON. Db's generic `PhysicalMigrationDocument`
+preserves supplied step types, so `fromPlanned(await planPhysicalMigration(...))`
+composes directly when the steps are typed. Unknown saved input remains
+unknown until validated; incomplete table artifacts do not gain missing guards.
 
 ### 5.2 The honest limits, and the two routes past them
 
@@ -674,6 +678,27 @@ be re-implementing the planner. The alternative for all three is the same
 one the format intends: let `jaren-db plan` render them, and take the
 document up with `fromPlanned`.
 
+`table` also uses `step()`, carrying the entire reviewed
+`planTableMigration` artifact. Its `source`, `after`, row/storage and identity
+guards must not be replaced by a loop over `statements` and `finish`.
+The pen checks the complete artifact's structure and preserves it; db checks
+the source/checksum and executes its guarded transaction.
+
+Historical models can precede and follow that structural step:
+
+```js
+const steps = defineMigration({ id: 'upgrade', from: before, to: after })
+  .transform('Item', (row) => ({ id: row.id, value: row.value.upper() }), { model: before })
+  .step({ kind: 'table', plan: reviewedTablePlan })
+  .assert('Item', (row) => row.revision.lt(1), { model: after }).document.steps;
+```
+
+The [runnable db example](../../db/docs/MIGRATION-FORMAT.md#runnable-physical-lifecycle)
+supplies the complete model/table declarations, reviewed target fixture,
+physical dispositions, populated replay and checked second startup. Synthetic
+fixture rows stay outside the shared migration document. Physical model diffing
+still refuses changed declarations; the author reviews structural plans.
+
 ### 6.2 `defineMigration` does not validate a migration against a database
 
 This is the sentence a reader most needs, because believing otherwise
@@ -687,8 +712,10 @@ below is `@jarenjs/db`'s `migrate()`, and none of it has happened when
 - **The shadow replay.** Before the real store is touched, the WHOLE
   chain — baseline, applied and pending — replays on a shadow database:
   every DDL statement runs, every stylesheet and assertion compiles and
-  executes, and the end shape is verified against the target model
-  (MIGRATION-FORMAT §4). A step the pen accepted and SQLite rejects fails
+  executes, and the selected model or complete physical target is checked.
+  `shadowFixture` may initialize an application-owned historical schema;
+  replay still uses the same migration/history executor (MIGRATION-FORMAT §4).
+  A step the pen accepted and SQLite rejects fails
   there, with the real store untouched.
 - **The widening/narrowing check against real data.** At the end of the
   run, inside its transaction, every stored document is validated against
@@ -745,10 +772,10 @@ from a drop plus a create, and guessing risks silent data loss.
 
 ## 7. Cost
 
-`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->22,827<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->23,806<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.migration.kb-->23<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.migration.kb-->24<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-step migration as a

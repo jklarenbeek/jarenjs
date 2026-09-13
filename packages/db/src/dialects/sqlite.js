@@ -497,6 +497,7 @@ export const sqliteDialect = createDialect({
 
 /** SQLite schema inspection and identity preservation statements. */
 export const sqliteTableMigration = Object.freeze({
+    binaryCast: (sql) => `CAST(${sql} AS BLOB)`,
     schema: () => "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND substr(name,1,7) <> 'sqlite_' ORDER BY type,name",
     tableList: () => 'PRAGMA table_list',
     sequenceExists: () => "SELECT 1 AS present FROM sqlite_schema WHERE name='sqlite_sequence'",

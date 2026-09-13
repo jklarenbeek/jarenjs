@@ -708,7 +708,18 @@ backup publication retain their existing owners. See [db architecture](../packag
 `db/relational` owns native SQLite expressions and structural schema authoring.
 The same column renderer serves table creation and additive changes; reviewed
 object plans retain source/settings checks while the caller owns explicit key
-remapping, row dispositions and durable migration completion.
+remapping and row dispositions. Ordinary guarded table plans compose as complete
+`table` steps in the existing migration/history engine; no second receipt owner
+or flattened rebuild executor is introduced.
+
+The migration pen preserves physical headers and optional historical step
+models. Db owns bounded codec-aware transforms, unchanged-column preservation,
+complete reviewed target acceptance, and owned/borrowed connection cleanup.
+Disposable `shadowFixture` replay uses that same migration executor. One
+literal-aware SQL comparator preserves quoted bytes, programs, constraints and
+physical column order; managed named-column compatibility selects its narrow
+relaxation explicitly. Changed physical model diffs still require reviewed
+structural plans. See the [physical lifecycle](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery).
 
 The db entity planner owns adopted-column read lowering and bounded mutation documents. `linq/db` owns the headless [range adapter](../packages/app/docs/COLLECTION-PROVIDER.md), reusing db cursors, keyset pages, transactions and capture. Its structural shape is consumed through injection; there is no db/linq import of app or components and no second query or range engine.
 

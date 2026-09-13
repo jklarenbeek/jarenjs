@@ -68,6 +68,12 @@ delete it or fix it.
 
 ## @jarenjs/json — JSLT
 
+- [ ] **Literal root constructors must retain every own member.** A root-rule
+  body read from `JSON.parse('{"__proto__":18,"value":3}')` currently returns
+  only `{ value: 3 }`. Preserve the own `__proto__` property through stylesheet
+  compilation without changing the result object's prototype. Child-path rules
+  already retain this member; migration key restoration also uses own-property
+  semantics. Qualify the constructor boundary independently of those paths.
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
 - [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
 - [ ] **Standalone `@jarenjs/jslt` package** — publish the stylesheet layer as its own package only when the query-engine internals it needs have a deliberate public boundary; today the module stays colocated to avoid exposing compiler internals.

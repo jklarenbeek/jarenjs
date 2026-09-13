@@ -948,7 +948,7 @@ source. That makes it the SMALLEST of the nine pen bundles, and the
 reason is that a stylesheet is mostly bodies, and a body is the shared
 machine every pen already pays for.
 
-Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->22,827<!--/fact--> bytes)
+Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->23,806<!--/fact--> bytes)
 carries this pen's `body()` and pays for it, which is why the two prices
 sit so close; and `./flow` (<!--fact:bundle.flow-->18,478<!--/fact--> bytes) is within 60 bytes of this one
 despite writing two formats, because it shares the same capture and adds

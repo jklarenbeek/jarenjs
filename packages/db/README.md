@@ -1432,10 +1432,18 @@ and read-only views have explicit contracts in [MODEL-FORMAT](docs/MODEL-FORMAT.
 Inside `store.transaction`, `tx.sql.prepare(text, { access: 'read' | 'write' })`
 shares the entity/outbox connection and savepoint owner. Statements expire with
 the scope. [The client recipe](../linq/docs/DB-CLIENT.md#trusted-sql-during-adoption)
-documents trust, invalidation and synchronous execution. Schema changes use
-`planPhysicalMigration` and `migrate`; [preservation and forward recovery](docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)
-require explicit dispositions and assertions. `planInvariants` supplies declared
-SQLite constraint/audit triggers for installation through that migration boundary.
+documents trust, invalidation and synchronous execution. Schema changes compose
+a complete saved `planTableMigration` artifact as a guarded `table` step through
+`planPhysicalMigration` and `migrate`. Optional transforms/assertions carry their
+historical `model`; a reviewed `physicalTarget` checks complete owned objects,
+including on repeated startup. A borrowed `{ connection }` stays open and can
+finish synchronously with `shadow: false`; an owned `{ driver, path? }` returns
+a Promise and closes acquired resources on every path. Populated `shadowFixture`
+replay uses the same guarded executor and history owner. Start with the
+[runnable physical lifecycle](docs/MIGRATION-FORMAT.md#runnable-physical-lifecycle).
+Changed physical model diffs remain a specific `JD0021` policy refusal;
+structural changes are explicitly reviewed. `planInvariants` supplies declared
+SQLite constraint/audit triggers for installation through that boundary.
 
 Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.
 

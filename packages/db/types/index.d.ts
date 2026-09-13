@@ -1169,6 +1169,10 @@ export interface Dialect {
 export interface Driver {
   readonly name: string;
   readonly dialect: Dialect;
+  /** Optional storage identity for shadow isolation. Equal non-null values
+   * identify the same database; private memory databases return null. Native
+   * SQLite bindings use filesystem device/inode identity. */
+  databaseIdentity?(connection: unknown): string | null | Promise<string | null>;
   /** Open a connection (value-or-promise) at `path` (`':memory:'` for
    * none) with the driver's own options. */
   open(path: string, options?: unknown): unknown;
@@ -1259,6 +1263,37 @@ export interface MigrationTarget {
   path?: string;
   /** `PRAGMA busy_timeout` for the run's connection, ms (default 5000). */
   busyTimeout?: number;
+  connection?: never;
+}
+
+/** A caller-owned connection, never closed or reopened by migration entry points. */
+export interface BorrowedMigrationTarget {
+  connection: unknown;
+  driver?: never;
+  path?: never;
+  busyTimeout?: never;
+}
+
+/** One physical catalog object. Some dialects cannot supply declaration text. */
+export interface SchemaObject {
+  readonly type: 'table' | 'view' | 'index' | 'trigger';
+  readonly name: string;
+  readonly owner: string;
+  readonly sql: string | null;
+}
+
+export interface SchemaInventory {
+  readonly tables: readonly unknown[];
+  readonly views: readonly string[];
+  readonly objects: readonly SchemaObject[];
+}
+
+/** Complete reviewed SQLite objects in an explicitly owned scope.
+ * Every object must carry SQL text; missing declaration text refuses at runtime. */
+export interface PhysicalMigrationTarget {
+  readonly objects: readonly SchemaObject[];
+  /** Defaults to the object owners; an absent named table records an intended drop. */
+  readonly tables?: readonly string[];
 }
 
 /** One progress event: the migration and collection a data step is
@@ -1302,7 +1337,7 @@ export declare function introspectModel(connection: unknown, options?: {
  * model cannot declare. */
 export declare function readSchema(connection: unknown, options?: {
   tables?: readonly string[];
-}): unknown;
+}): SchemaInventory | Promise<SchemaInventory>;
 
 export interface AssertionBounds {
   maxRows?: number | null;
@@ -1328,6 +1363,10 @@ export interface MigrateOptions {
   dryRun?: boolean;
   batchSize?: number;
   shadow?: boolean;
+  /** Complete owned target; also checked when there are no pending steps. */
+  physicalTarget?: PhysicalMigrationTarget;
+  /** Initialize the disposable shadow with the actual historical schema and rows. */
+  shadowFixture?: (connection: unknown) => unknown;
   /** Where the shadow replay runs (default `':memory:'`). */
   shadowPath?: string;
   /** The host's declared index-expression functions, by name — the same
@@ -1337,7 +1376,7 @@ export interface MigrateOptions {
    * A file engine's shadow is another file; a SERVER engine's is another
    * schema, and only the host can name one — the baseline shape the
    * replay creates would otherwise collide with the real store's. */
-  shadowDriver?: unknown;
+  shadowDriver?: Driver;
   /** Called once per batch a data step walks (transform, derive, or a
    * per-document assertion). */
   onProgress?: (progress: MigrationProgress) => void;
@@ -1381,7 +1420,33 @@ export declare function classifyAssertion(query: unknown, options?: { expect?: s
 
 export declare function migrate(
   target: MigrationTarget, migrations: readonly unknown[], options: MigrateOptions,
-): Promise<unknown>;
+): Promise<MigrationResult>;
+/** Borrowed synchronous work stays synchronous when shadow replay is disabled;
+ * async connections or hooks retain their promise boundary. */
+export declare function migrate(
+  target: BorrowedMigrationTarget, migrations: readonly unknown[], options: MigrateOptions,
+): MigrationResult | Promise<MigrationResult>;
+
+export interface AppliedMigrationReport {
+  applied: string[];
+  skipped: string[];
+  shape: string;
+}
+export interface UpToDateMigrationReport {
+  applied: [];
+  skipped: string[];
+  upToDate: true;
+}
+export interface DryRunMigrationReport {
+  dryRun: true;
+  pending: string[];
+  statements: string[];
+  /** Current rows by transform collection; null when its mapped relation does
+   * not exist yet. These are not predictions after pending SQL runs. */
+  counts: Record<string, number | null>;
+  shadowValidated: boolean;
+}
+export type MigrationResult = AppliedMigrationReport | UpToDateMigrationReport | DryRunMigrationReport;
 /** Whether an assertion step is a per-document predicate (a FLWOR over
  * `$[*]` whose body reads only its binding), which the runner evaluates
  * per batch; anything else reads the collection whole. */
@@ -1396,20 +1461,33 @@ export interface MigrationStatusReport {
   drift: string | null;
   upToDate: boolean;
 }
+export interface MigrationStatusOptions {
+  model?: unknown;
+  physicalTarget?: PhysicalMigrationTarget;
+  /** Reference driver required by borrowed model-only comparison. */
+  shadowDriver?: Driver;
+  registerFunctions?: (connection: unknown) => unknown;
+  signal?: AbortSignal;
+  deadline?: number;
+  runtime?: Partial<Runtime>;
+}
 /** Report a database's migration state without touching it: the
  * history table is probed, never created. `model` enables the drift
  * comparison once the chain is fully applied. */
 export declare function migrationStatus(
   target: MigrationTarget,
   migrations: readonly unknown[],
-  options?: { model?: unknown;
-    registerFunctions?: (connection: unknown) => unknown;
-    signal?: AbortSignal; deadline?: number; runtime?: Partial<Runtime> },
+  options?: MigrationStatusOptions,
 ): Promise<MigrationStatusReport>;
+export declare function migrationStatus(
+  target: BorrowedMigrationTarget,
+  migrations: readonly unknown[],
+  options?: MigrationStatusOptions,
+): MigrationStatusReport | Promise<MigrationStatusReport>;
 /** Create a model's whole physical shape on a connection. */
 export declare function createModelShape(connection: unknown, model: unknown): unknown;
-/** The declared schema, normalized for shape-equality comparison. */
-export declare function schemaShapeOf(connection: unknown):
+/** The declared schema, preserving physical column order unless explicitly relaxed. */
+export declare function schemaShapeOf(connection: unknown, options?: DeclaredSqlOptions):
   Promise<Array<{ type: string; name: string; owner: string; sql: string }>>
   | Array<{ type: string; name: string; owner: string; sql: string }>;
 /** Null when the database's shape equals a fresh build of the model. */
@@ -1473,7 +1551,7 @@ export interface DocumentMigrationOptions {
  * source is rewindable, so the steps run exactly as a Store runs them —
  * every step over the whole collection, in step order — which is what
  * makes the answer, and the refusal, identical to the Store's. A step
- * that needs tables (`ddl`, `sql`, `rebuild`, `derive`) is refused
+ * that needs tables (`ddl`, `sql`, `rebuild`, `derive`, `table`) is refused
  * (`JD0023`) before the first document is read. */
 export declare function migrateDocuments(
   collections: Record<string, readonly unknown[]>,
@@ -1522,8 +1600,13 @@ export declare function stepFailure(
 
 export declare function planCollection(name: string, collection: unknown, dialect: Dialect): unknown;
 export declare function compileIndexPath(expression: string, docPath: string): unknown;
+/** Conservative declaration comparison policy. Index, trigger and constraint order is always preserved. */
+export interface DeclaredSqlOptions {
+  /** Preserve physical order by default; ignore only safe managed named-column order. */
+  columnOrder?: 'preserve' | 'ignore';
+}
 export declare function normalizeDeclaredSql(sql: string): string;
-export declare function comparableDeclaredSql(sql: string): string;
+export declare function comparableDeclaredSql(sql: string, options?: DeclaredSqlOptions): string;
 /** The comparison kind a declared schema type implies — what a column
  * over that member holds, and how its expression must read it. */
 export declare function columnKindFor(
@@ -2041,8 +2124,25 @@ export interface TrustedSyncSql {
 export declare function planInvariants(model: unknown, options: { dialect: Dialect }): {
   type: 'trigger'; name: string; owner: string; rule: string; sql: string;
 }[];
-export declare function planPhysicalMigration(connection: unknown, fromModel: unknown, toModel: unknown,
-  options: { id: string; steps: readonly unknown[]; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
-    assertions?: readonly { sql: string; params?: readonly unknown[]; expected: readonly unknown[] }[] }): unknown;
+/** A reviewed preservation document. The supplied steps retain their types;
+ * untyped saved steps remain unknown until the caller validates them. */
+export interface PhysicalMigrationDocument<Steps extends readonly unknown[] = readonly unknown[]> {
+  readonly $migration: '0.1';
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly steps: Steps;
+  readonly physical: {
+    readonly source: readonly SchemaObject[];
+    readonly dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
+    readonly assertions: readonly { readonly sql: string; readonly params?: readonly unknown[]; readonly expected: readonly unknown[] }[];
+    readonly target?: PhysicalMigrationTarget;
+  };
+}
+/** Planning retains a synchronous connection's value boundary. */
+export declare function planPhysicalMigration<const Steps extends readonly unknown[]>(connection: unknown, fromModel: unknown, toModel: unknown,
+  options: { id: string; steps: Steps; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
+    assertions?: readonly { sql: string; params?: readonly unknown[]; expected: readonly unknown[] }[];
+    physicalTarget?: PhysicalMigrationTarget }): PhysicalMigrationDocument<Steps> | Promise<PhysicalMigrationDocument<Steps>>;
 
 export { sql, relational, planRelational, defineTable, planTable, planTableMigration, applyTableMigration, withForeignKeysSuspended, planSchemaChange, applySchemaChange } from './relational.js';

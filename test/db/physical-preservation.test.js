@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { nodeDriver } from '@jarenjs/db/node';
+import { DatabaseSync } from 'node:sqlite';
+import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { migrate, planPhysicalMigration, schemaShapeOf } from '@jarenjs/db';
 const model = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
   id: { type: 'integer', 'x-entity': { key: true } }, value: { type: 'string' },
@@ -31,11 +32,18 @@ for (const failure of ['source', 'literal', 'object', 'assertion', 'receipt', 'c
       const before = JSON.stringify({ schema: await schemaShapeOf(db), rows: db.prepare('SELECT * FROM rows').all([]) });
       db.close();
       const driver = { ...nodeDriver(), open: async (...args) => {
-        const c = await nodeDriver().open(...args);
-        return { ...c, exec: (sql) => { if (failure === 'commit' && sql === 'COMMIT') throw new Error('commit failed'); return c.exec(sql); },
-          prepare: (sql, options) => { const s = c.prepare(sql, options); return failure === 'receipt' && /^INSERT INTO "_jaren_migrations"/.test(sql)
-            ? { ...s, run: () => { throw new Error('receipt failed'); } } : s; },
-        };
+        // Inject at the native binding so driver-owned transaction scopes and
+        // COMMIT encounter the same fault as ordinary statement calls.
+        const raw = new DatabaseSync(args[0], args[1]);
+        return adaptNodeDatabase({
+          exec: (sql) => { if (failure === 'commit' && sql === 'COMMIT') throw new Error('commit failed'); return raw.exec(sql); },
+          prepare: (sql) => {
+            const s = raw.prepare(sql);
+            if (failure === 'receipt' && /^INSERT INTO "_jaren_migrations"/.test(sql)) s.run = () => { throw new Error('receipt failed'); };
+            return s;
+          },
+          close: () => raw.close(),
+        });
       } };
       await assert.rejects(migrate({ driver, path }, [plan], { baseline: model, model, shadow: false }));
       db = await nodeDriver().open(path);

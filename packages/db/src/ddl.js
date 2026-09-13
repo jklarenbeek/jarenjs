@@ -21,6 +21,10 @@ import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
 import { planTable } from './dialects/sqlite-schema.js';
+import { comparableDeclaredSql } from './schema-sql.js';
+export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
+
+const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('ignore') });
 
 /** The fixed physical column names of the 0.1 mapping. */
 export const KEY_COLUMN = 'key';
@@ -621,88 +625,6 @@ export function planCollection(name, collection, dialect, options = undefined) {
 }
 
 /**
- * Normalize a stored `CREATE` statement for comparison: collapse runs of
- * whitespace, drop whitespace around punctuation, and strip the
- * `IF NOT EXISTS` SQLite does not keep. What survives is every token that
- * carries meaning, so two statements compare equal exactly when they
- * declare the same physical object.
- * @param {string} sql
- * @returns {string}
- */
-export function normalizeDeclaredSql(sql) {
-  return String(sql)
-    .replace(/\s+/g, ' ')
-    .replace(/\s*([(),])\s*/g, '$1')
-    .replace(/\bIF NOT EXISTS\s+/i, '')
-    .trim();
-}
-
-/**
- * Split a comma-separated list at TOP-LEVEL commas only, so a
- * `CHECK(x IN (1,2))` or a multi-column constraint stays one item.
- * @param {string} body
- * @returns {string[]}
- */
-function splitTopLevel(body) {
-  /** @type {string[]} */
-  const parts = [];
-  let depth = 0;
-  let quote = '';
-  let start = 0;
-  for (let i = 0; i < body.length; i++) {
-    const c = body[i];
-    if (quote !== '') {
-      if (c === quote) quote = '';
-      continue;
-    }
-    if (c === '"' || c === "'") quote = c;
-    else if (c === '(') depth++;
-    else if (c === ')') depth--;
-    else if (c === ',' && depth === 0) {
-      parts.push(body.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(body.slice(start));
-  return parts.map((part) => part.trim()).filter((part) => part !== '');
-}
-
-/**
- * A comparable form of one `CREATE` statement.
- *
- * For a TABLE the column definitions compare as a SET, because
- * `ALTER TABLE … ADD COLUMN` can only append — so a migrated table and a
- * freshly built one legitimately differ in column order, and this store
- * never reads a column positionally. Everything else is exact: each
- * column's full definition (type, `PRIMARY KEY`, `NOT NULL`, `DEFAULT`,
- * `CHECK`, `GENERATED … AS`, `REFERENCES … ON DELETE …`), the table
- * constraints, and the trailing table options (`STRICT`,
- * `WITHOUT ROWID`).
- *
- * For an INDEX the text compares whole, because an index IS its order —
- * `(a,b)` and `(b,a)` serve different lookups — as are its partial
- * predicate and each term's collation and direction.
- * @param {string} sql
- * @returns {string}
- */
-export function comparableDeclaredSql(sql) {
-  const normalized = normalizeDeclaredSql(sql);
-  const open = normalized.indexOf('(');
-  const close = normalized.lastIndexOf(')');
-  if (!/^CREATE\s+TABLE\b/i.test(normalized) || open < 0 || close < open)
-    return normalized;
-  const head = normalized.slice(0, open);
-  const options = normalized.slice(close + 1).trim();
-  const items = splitTopLevel(normalized.slice(open + 1, close));
-  // a column definition opens with the quoted column name; anything else
-  // (PRIMARY KEY(...), UNIQUE(...), CHECK(...), FOREIGN KEY(...)) is a
-  // table constraint, and those are unordered too
-  const columns = items.filter((item) => item.startsWith('"')).sort();
-  const constraints = items.filter((item) => !item.startsWith('"')).sort();
-  return `${head}(${[...columns, ...constraints].join(',')})${options}`;
-}
-
-/**
  * The declared-SQL half of verification: compare every schema object the
  * table owns against the statements the plan would have created.
  *
@@ -738,7 +660,7 @@ function verifyDeclaredSql(connection, plan, disagree) {
   // comparison for free.
   const owned = new Set(plan.virtualTables?.map((virtual) => virtual.name) ?? []);
   for (const sql of plan.createSql) {
-    const comparable = comparableDeclaredSql(sql);
+    const comparable = comparableDeclaredSql(sql, MANAGED_SQL_OPTIONS);
     // the object's name is the first quoted identifier in the statement
     const name = /"((?:[^"]|"")*)"/.exec(comparable)?.[1]?.replace(/""/g, '"');
     if (name === undefined || owned.has(name)) continue;
@@ -756,8 +678,8 @@ function verifyDeclaredSql(connection, plan, disagree) {
           disagree(`the model declares the virtual table '${virtual.name}', `
             + 'which the database does not have');
         }
-        const have = comparableDeclaredSql(row.sql);
-        const wanted = comparableDeclaredSql(virtual.createSql);
+        const have = comparableDeclaredSql(row.sql, MANAGED_SQL_OPTIONS);
+        const wanted = comparableDeclaredSql(virtual.createSql, MANAGED_SQL_OPTIONS);
         if (have !== wanted) {
           disagree(`'${virtual.name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}`);
         }
@@ -768,7 +690,7 @@ function verifyDeclaredSql(connection, plan, disagree) {
     (statement) => chain(statement.all([]), (rows) => {
       /** @type {Map<string, string>} */
       const actual = new Map();
-      for (const row of rows) actual.set(String(row.name), comparableDeclaredSql(row.sql));
+      for (const row of rows) actual.set(String(row.name), comparableDeclaredSql(row.sql, MANAGED_SQL_OPTIONS));
       for (const [name, wanted] of planned) {
         const have = actual.get(name);
         if (have === undefined)

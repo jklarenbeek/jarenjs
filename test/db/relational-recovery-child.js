@@ -13,20 +13,35 @@ if (point === 'seed') {
   for (const sql of spec.seed) db.exec(sql);
   process.exit(0);
 }
+// Migration statements and the driver's own COMMIT share the native seam.
+const intercept = (db, execute) => new Proxy(db, {
+  get(target, key) {
+    if (key === execute) return (sql) => {
+      const result = target[execute](sql);
+      if ((point === 'rebuild' && /^INSERT INTO "receipt__rebuild"/.test(sql))
+        || (point === 'drop' && /^DROP TABLE "receipt"/.test(sql))
+        || (point === 'commit' && sql === 'COMMIT')) crashAt(point);
+      return result;
+    };
+    const value = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  },
+});
 const wrapped = { ...driver, open: async (...args) => {
+  if (['rebuild', 'drop', 'commit'].includes(point)) {
+    if (process.versions.bun) {
+      const [{ Database }, { adaptBunDatabase }] = await Promise.all([import('bun:sqlite'), import('@jarenjs/db/bun')]);
+      return adaptBunDatabase(intercept(new Database(args[0]), 'run'));
+    }
+    const [{ DatabaseSync }, { adaptNodeDatabase }] = await Promise.all([import('node:sqlite'), import('@jarenjs/db/node')]);
+    return adaptNodeDatabase(intercept(new DatabaseSync(args[0]), 'exec'));
+  }
   const db = await driver.open(...args);
   return { ...db,
     ...(db.backup ? { backup: { ...db.backup,
       copy: async (...args) => { const result = await db.backup.copy(...args); if (point === 'copy') crashAt(point); return result; },
       rename: async (...args) => { if (point === 'publish-before') crashAt(point); const result = await db.backup.rename(...args); if (point === 'publish-after') crashAt(point); return result; },
     } } : {}),
-    exec: (sql) => {
-      const result = db.exec(sql);
-      if ((point === 'rebuild' && /^INSERT INTO "receipt__rebuild"/.test(sql))
-        || (point === 'drop' && /^DROP TABLE "receipt"/.test(sql))
-        || (point === 'commit' && sql === 'COMMIT')) crashAt(point);
-      return result;
-    },
   };
 } };
 if (point.startsWith('publish') || point === 'copy') {

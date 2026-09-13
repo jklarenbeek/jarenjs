@@ -20,7 +20,7 @@ import { describeValue, requireJson } from '../json-boundary.js';
 import { LinqBuildError } from '../errors.js';
 
 /** The kinds the runner accepts, in the artifact's order. */
-const STEP_KINDS = ['ddl', 'jslt', 'query', 'derive', 'sql', 'rebuild'];
+const STEP_KINDS = ['ddl', 'jslt', 'query', 'derive', 'sql', 'rebuild', 'table'];
 const EXPECTS = ['empty', 'ebv'];
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** An assertion evaluates with no externals: `p.x` cannot appear. */
@@ -59,6 +59,15 @@ function readNote(note, what) {
     throw new LinqBuildError('JL0101', `${what} note is a string, got ${describeValue(note)}`);
   }
   return note;
+}
+
+/** A current layout travels as immutable JSON, without importing the model pen. */
+function withModel(step, model) {
+  if (model === undefined) return step;
+  const doc = requireJson(model, 'step model');
+  if (!isJsonObject(doc) || doc.$model !== '0.1')
+    throw new LinqBuildError('JL0101', 'a step model must be a $model 0.1 document');
+  return { ...step, model: copy(doc) };
 }
 
 /** The externals proxy an assertion's predicate sees: nothing. */
@@ -104,8 +113,10 @@ export function sqlStep(sql, note = undefined) {
  * @param {string} name
  * @param {any} spelling
  */
-export function transformStep(name, spelling) {
+export function transformStep(name, spelling, options = undefined) {
   requireName(name, 'transform()');
+  if (options !== undefined && (!isJsonObject(options) || Object.keys(options).some((key) => key !== 'model')))
+    throw new LinqBuildError('JL0101', 'transform() options are { model? }');
   let stylesheet;
   if (typeof spelling === 'function') {
     stylesheet = [{ match: '$', body: body(spelling) }];
@@ -133,7 +144,7 @@ export function transformStep(name, spelling) {
       'transform() takes a callback (row, x) => …, a stylesheet(…) document or a rules array, '
       + `got ${describeValue(spelling)}`);
   }
-  return { kind: 'jslt', collection: name, stylesheet };
+  return withModel({ kind: 'jslt', collection: name, stylesheet }, options?.model);
 }
 
 /**
@@ -145,7 +156,7 @@ export function transformStep(name, spelling) {
  * are the witness. A document is taken verbatim.
  * @param {string} name
  * @param {any} spelling
- * @param {{ expect?: 'empty' | 'ebv' }} [options]
+ * @param {{ expect?: 'empty' | 'ebv', model?: any }} [options]
  */
 export function assertStep(name, spelling, options = undefined) {
   requireName(name, 'assert()');
@@ -155,7 +166,7 @@ export function assertStep(name, spelling, options = undefined) {
       throw new LinqBuildError('JL0101', `assert() options are { expect? }, got ${describeValue(options)}`);
     }
     for (const key of Object.keys(options)) {
-      if (key !== 'expect') throw new LinqBuildError('JL0101', `assert() does not take '${key}'`);
+      if (key !== 'expect' && key !== 'model') throw new LinqBuildError('JL0101', `assert() does not take '${key}'`);
     }
     if (options.expect !== undefined) {
       if (!EXPECTS.includes(options.expect)) {
@@ -180,7 +191,7 @@ export function assertStep(name, spelling, options = undefined) {
   }
   const out = { kind: 'query', collection: name, assert: query };
   if (expect === 'ebv') out.expect = 'ebv';
-  return out;
+  return withModel(out, options?.model);
 }
 
 /**
@@ -219,6 +230,14 @@ export function rawStep(step) {
     }
   };
   switch (raw.kind) {
+    case 'table':
+      need('plan', isJsonObject(raw.plan) && raw.plan.version === 1
+        && ['id', 'table', 'checksum', 'temporary'].every((key) => typeof raw.plan[key] === 'string' && raw.plan[key].length > 0)
+        && typeof raw.plan.rebuild === 'boolean'
+        && ['source', 'after'].every((key) => Array.isArray(raw.plan[key]) && raw.plan[key].every(isJsonObject))
+        && ['unchanged', 'statements', 'finish'].every((key) => Array.isArray(raw.plan[key])
+          && raw.plan[key].every((value) => typeof value === 'string' && value.length > 0)));
+      break;
     case 'ddl': case 'sql':
       need('sql', typeof raw.sql === 'string' && raw.sql !== '');
       break;
@@ -240,5 +259,5 @@ export function rawStep(step) {
       need('copy', typeof raw.copy === 'string');
       need('indexes', Array.isArray(raw.indexes));
   }
-  return raw;
+  return ['jslt', 'query'].includes(raw.kind) ? withModel(raw, raw.model) : raw;
 }

@@ -4,7 +4,7 @@
  * live store — writers proceeding meanwhile — and publishes the copy by
  * rename, so the target path never holds a partial file and a
  * cancelled or failed backup leaves neither the target nor its
- * temporary sibling behind. Node online backups and Bun serialized
+ * temporary sibling behind. Node online backups and Bun disk-backed
  * snapshots share the publisher; bindings without either refuse by code.
  */
 
