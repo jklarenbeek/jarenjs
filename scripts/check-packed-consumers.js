@@ -727,6 +727,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       program += "await import('./collection.js');\n";
     }
     if (name === '@jarenjs/db') {
+      cpSync(join(root, 'test/db/helpers.js'), join(consumerDir, 'helpers.js'));
       cpSync(join(root, 'test/db/async-host-contracts.test.js'), join(consumerDir, 'async-host-contracts.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./async-host-contracts.test.js');\n";
       cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
