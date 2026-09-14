@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { assertCrash } from './fixtures/abrupt-exit.js';
 import { planTable, planTableMigration, applyTableMigration, withForeignKeysSuspended, sql } from '@jarenjs/db';
 const b = sql.binary, c = sql.column;
 async function fixture(run) {
@@ -111,8 +113,8 @@ it('a process killed after DROP recovers its populated WAL database and repeats 
     const original = db.prepare('SELECT type,name,sql FROM sqlite_schema ORDER BY type,name').all([]).map((r) => ({ ...r }));
     const plan = planTableMigration(db, after(), { id: 'crash', allowRebuild: true });
     writeFileSync(planPath, JSON.stringify(plan)); db.close(); db = null;
-    const child = spawnSync(process.execPath, [new URL('./fixtures/table-migration-crash.mjs', import.meta.url).pathname, path, planPath], { encoding: 'utf8', timeout: 15000 });
-    assert.equal(child.signal, 'SIGKILL', child.stderr);
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('./fixtures/table-migration-crash.mjs', import.meta.url)), path, planPath], { encoding: 'utf8', timeout: 15000 });
+    assertCrash(child, 'table-drop');
     for (let opening = 0; opening < 2; opening++) {
       db = await driver.open(path); db.exec('PRAGMA foreign_keys=ON');
       if (opening === 0) assert.deepEqual(db.prepare('SELECT type,name,sql FROM sqlite_schema ORDER BY type,name').all([]).map((r) => ({ ...r })), original);

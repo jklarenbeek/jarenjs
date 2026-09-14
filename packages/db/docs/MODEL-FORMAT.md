@@ -648,6 +648,15 @@ the report says what the engine answers (`'memory'`, `null`).
 `store.capabilities.busyTimeoutMs` and `store.capabilities.journalMode`
 are the same two read-back values under their long-published names.
 
+Opening retries classified busy failures of its idempotent initialization
+sequence, yielding between attempts so a competing opener can finish. The
+configured `busyTimeout` bounds admission of retries, with at most 32 total
+attempts; zero admits only the first attempt. This elapsed-time window is
+independent of the injected logical clock. It does not interrupt an admitted
+native statement, which retains its own busy timeout. Exhaustion closes the
+acquired connection and rejects `JD0002` with the original busy cause. This
+startup policy does not replay ordinary application writes.
+
 **Maintenance is a typed operation, never raw SQL.** Four store members
 run what an operator runs on a production database, each under the
 store gate (so none interleaves an in-flight write) and each answering

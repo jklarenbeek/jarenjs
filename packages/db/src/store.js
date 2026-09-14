@@ -21,6 +21,7 @@
  */
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { backoffDelay, sleep } from '@jarenjs/core/retry';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
@@ -3118,20 +3119,24 @@ export function openStore(model, options) {
           });
         })))));
 
-      /**
-       * The open sequence, with ONE retry when it fails classed busy: the
-       * race window is another process's shape transaction on a fresh
-       * file, and one retry after it commits is the straggler case the
-       * immediate transaction cannot cover (the journal-mode write itself).
-       * Every step is idempotent, so a second pass re-applies nothing that
-       * matters; a second busy failure propagates classed.
-       * @param {boolean} retry
-       */
-      const attemptOpen = (retry) => {
-        const again = (error) => (retry && isDriverError(error)
-          && classifyDriverError(error).class === 'busy'
-          ? attemptOpen(false)
-          : failClosed(error));
+      // Journal-mode lock upgrades may report busy without invoking SQLite's
+      // busy handler. Yield before retrying this idempotent startup sequence
+      // so another opener can commit. Real elapsed time bounds admission,
+      // independently of the injected logical clock; the attempt cap also
+      // bounds a backwards clock adjustment. An admitted native call keeps
+      // its own busy timeout and cannot be interrupted by this retry window.
+      const retryUntil = Date.now() + busyTimeout;
+      let openAttempts = 0;
+      const attemptOpen = () => {
+        openAttempts++;
+        const again = (error) => {
+          const remaining = retryUntil - Date.now();
+          if (!isDriverError(error) || classifyDriverError(error).class !== 'busy'
+            || remaining <= 0 || openAttempts >= 32) return failClosed(error);
+          const delay = Math.min(remaining,
+            backoffDelay({ baseMs: 5, maxMs: 250, random: () => 1 }, openAttempts));
+          return sleep(delay).then(() => Date.now() < retryUntil ? attemptOpen() : failClosed(error));
+        };
         let opened_;
         try {
           opened_ = opening();
@@ -3141,6 +3146,6 @@ export function openStore(model, options) {
         }
         return isThenable(opened_) ? opened_.then((value) => value, again) : opened_;
       };
-      return attemptOpen(true);
+      return attemptOpen();
     }));
 }

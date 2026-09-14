@@ -1,6 +1,7 @@
 //@ts-check
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
+import { crashAt } from './abrupt-exit.js';
 import { relational, sql, planTable, planSchemaChange, applySchemaChange, withForeignKeysSuspended } from '@jarenjs/db/relational';
 const c = sql.column, b = sql.binary;
 export const target = { name: 'preferences', primaryKey: ['entity_id', 'source_id'], columns: [
@@ -44,7 +45,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   db.exec('PRAGMA foreign_keys=ON');
   const connection = { ...db, exec(statement) {
     const result = db.exec(statement);
-    if (statement === 'DROP TABLE "main"."preferences"') process.kill(process.pid, 'SIGKILL');
+    if (statement === 'DROP TABLE "main"."preferences"') crashAt('identity-drop');
     return result;
   } };
   upgradeIdentity(connection);

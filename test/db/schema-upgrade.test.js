@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { assertCrash } from './fixtures/abrupt-exit.js';
 import { planTableMigration } from '@jarenjs/db/relational';
 import { target, upgradeIdentity } from './fixtures/schema-upgrade.mjs';
 const host = async () => process.versions.bun ? (await import('@jarenjs/db/bun')).bunDriver() : (await import('@jarenjs/db/node')).nodeDriver();
@@ -55,8 +57,8 @@ it('a killed key-changing upgrade recovers its original schema and reruns once a
   try {
     seed(db); const before = snapshot(db), old = data(db);
     db.close(); db = null;
-    const child = spawnSync(process.execPath, [new URL('./fixtures/schema-upgrade.mjs', import.meta.url).pathname, path], { encoding: 'utf8', timeout: 15000 });
-    assert.equal(child.signal, 'SIGKILL', child.stderr);
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('./fixtures/schema-upgrade.mjs', import.meta.url)), path], { encoding: 'utf8', timeout: 15000 });
+    assertCrash(child, 'identity-drop');
     for (let opening = 0; opening < 3; opening++) {
       db = await driver.open(path); db.exec('PRAGMA foreign_keys=ON');
       if (opening === 0) { assert.deepEqual(snapshot(db), before); assert.deepEqual(data(db), old); }

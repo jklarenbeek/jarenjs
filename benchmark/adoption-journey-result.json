@@ -15,7 +15,7 @@
     "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
     "benchmark/adoption-journey.js": "685477fc875289a5229fcf6ec1804ac25e5e9e66f64f17df24a4cba18d80538e",
     "packages/db/src/jobs.js": "4388bbcdca28fa50e3a80b42aed26062c0dbfc89d30c8f1cd29e326d9139f950",
-    "packages/db/src/store.js": "1d5d08cbe8231fa8e1c9a0906f050a1b68501979a0106c5d5173d3c86825a24f"
+    "packages/db/src/store.js": "6faa4af63170c1d3713ea51b4b592d09893d4c6728b064ea77ca8b44d8c0aeb3"
   },
   "hosts": [
     {
@@ -30,7 +30,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 443.419283,
+          "searchMs": 441.934679,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -61,11 +61,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 954.926246,
-          "teardownMs": 0.29038100000002487,
+          "elapsedMs": 942.338192,
+          "teardownMs": 0.32244999999988977,
           "runtime": "v24.20.0",
-          "heapBytes": 65975296,
-          "peakRssBytes": 278867968
+          "heapBytes": 67144424,
+          "peakRssBytes": 281686016
         },
         {
           "consumer": "archive-stock",
@@ -76,7 +76,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 3099.3352990000003,
+          "searchMs": 3239.6983440000004,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -112,11 +112,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 4672.347058,
-          "teardownMs": 0.26440199999979086,
+          "elapsedMs": 4835.215506,
+          "teardownMs": 0.22827500000039436,
           "runtime": "v24.20.0",
-          "heapBytes": 323424736,
-          "peakRssBytes": 890052608
+          "heapBytes": 394682008,
+          "peakRssBytes": 905023488
         },
         {
           "consumer": "catalog",
@@ -130,11 +130,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 96.02918200000002,
-          "teardownMs": 0.6887320000000159,
+          "elapsedMs": 97.32629299999999,
+          "teardownMs": 0.8989819999999895,
           "runtime": "v24.20.0",
-          "heapBytes": 22759640,
-          "peakRssBytes": 118554624
+          "heapBytes": 36091240,
+          "peakRssBytes": 124088320
         }
       ],
       "crashExit": 73,
@@ -153,7 +153,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 349.31244,
+          "searchMs": 388.84747000000004,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -184,11 +184,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 761.7752800000001,
-          "teardownMs": 0.38488600000005135,
+          "elapsedMs": 808.6528099999999,
+          "teardownMs": 0.4742519999999786,
           "runtime": "1.4.0",
-          "heapBytes": 88111105,
-          "peakRssBytes": 293584896
+          "heapBytes": 50275755,
+          "peakRssBytes": 248197120
         },
         {
           "consumer": "archive-stock",
@@ -199,7 +199,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2356.048194,
+          "searchMs": 2455.222444,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -235,11 +235,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3661.5784750000003,
-          "teardownMs": 0.40535399999998845,
+          "elapsedMs": 3840.637662,
+          "teardownMs": 0.408038999999917,
           "runtime": "1.4.0",
-          "heapBytes": 335730452,
-          "peakRssBytes": 1019547648
+          "heapBytes": 335430014,
+          "peakRssBytes": 1012051968
         },
         {
           "consumer": "catalog",
@@ -253,11 +253,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 106.576434,
-          "teardownMs": 1.580161000000004,
+          "elapsedMs": 85.50263099999998,
+          "teardownMs": 0.7087180000000046,
           "runtime": "1.4.0",
-          "heapBytes": 8491628,
-          "peakRssBytes": 80293888
+          "heapBytes": 8504529,
+          "peakRssBytes": 79314944
         }
       ],
       "crashExit": 73,
@@ -273,25 +273,25 @@
         {
           "metric": "startupMs",
           "limit": 15000,
-          "value": 443.419283,
+          "value": 441.934679,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 65975296,
+          "value": 67144424,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 278867968,
+          "value": 281686016,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.29038100000002487,
+          "value": 0.32244999999988977,
           "status": "pass"
         },
         {
@@ -309,25 +309,25 @@
         {
           "metric": "startupMs",
           "limit": 45000,
-          "value": 3099.3352990000003,
+          "value": 3239.6983440000004,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 323424736,
+          "value": 394682008,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 890052608,
+          "value": 905023488,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.26440199999979086,
+          "value": 0.22827500000039436,
           "status": "pass"
         },
         {
@@ -345,25 +345,25 @@
         {
           "metric": "startupMs",
           "limit": 15000,
-          "value": 349.31244,
+          "value": 388.84747000000004,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 88111105,
+          "value": 50275755,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 293584896,
+          "value": 248197120,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.38488600000005135,
+          "value": 0.4742519999999786,
           "status": "pass"
         },
         {
@@ -381,25 +381,25 @@
         {
           "metric": "startupMs",
           "limit": 45000,
-          "value": 2356.048194,
+          "value": 2455.222444,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 335730452,
+          "value": 335430014,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 1019547648,
+          "value": 1012051968,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.40535399999998845,
+          "value": 0.408038999999917,
           "status": "pass"
         },
         {

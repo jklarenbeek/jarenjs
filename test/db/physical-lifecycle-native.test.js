@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { assertCrash } from './fixtures/abrupt-exit.js';
 import { planTable, planTableMigration, applyTableMigration, planPhysicalMigration, migrate, readSchema,
   withForeignKeysSuspended } from '@jarenjs/db';
 
@@ -90,7 +91,7 @@ for (const boundary of ['drop', 'receipt', 'commit']) {
       const child = spawnSync(process.execPath,
         [fileURLToPath(new URL('./fixtures/physical-lifecycle-crash.mjs', import.meta.url)), path, input, boundary],
         { encoding: 'utf8', timeout: 15000 });
-      assert.equal(child.signal, 'SIGKILL', child.stderr);
+      assertCrash(child, boundary);
       assert.equal(readFileSync(`${input}.boundary`, 'utf8'), boundary, 'the requested native operation was reached');
       db = await host.open(path); db.exec('PRAGMA foreign_keys=ON');
       assert.deepEqual(snapshot(db), original, 'schema, rows, allocation and prior receipts roll back together');

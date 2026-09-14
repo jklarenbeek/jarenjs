@@ -2,11 +2,12 @@
 /** Kill at the native statement boundary, including the driver's own COMMIT. */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { migrate } from '@jarenjs/db';
+import { crashAt } from './abrupt-exit.js';
 
 const [path, input, boundary] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(input, 'utf8'));
 const drop = spec.migrations.at(-1).steps.find((step) => step.kind === 'table').plan.finish[0];
-const kill = () => { writeFileSync(`${input}.boundary`, boundary); process.kill(process.pid, 'SIGKILL'); };
+const kill = () => { writeFileSync(`${input}.boundary`, boundary); crashAt(boundary); };
 const intercept = (db, execute) => new Proxy(db, {
   get(target, key) {
     if (key === execute) return (sql) => {

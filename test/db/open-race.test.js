@@ -9,8 +9,8 @@
  * retry, and the open path let the driver's error escape. Shape
  * creation now takes the write lock up front (`BEGIN IMMEDIATE`), the
  * DDL is idempotent (`CREATE … IF NOT EXISTS`), and an open-path
- * failure classed busy is retried once inside the busy window before
- * the classed `JD0002` propagates.
+ * failure classed busy yields between bounded retries inside the busy
+ * window before the classed `JD0002` propagates.
  */
 
 import { describe, it } from 'node:test';
@@ -225,24 +225,79 @@ describe('the mechanism', () => {
     }
   });
 
-  it('an open that fails classed busy is retried once, then rejects JD0002 with class busy', async () => {
+  for (const asynchronous of [false, true]) it(`fast startup contention yields until release (${asynchronous ? 'async' : 'sync'})`, async () => {
     const { dbPath, cleanup } = tempDbPath();
+    const base = nodeDriver();
+    let available = false, calls = 0, timer, closes = 0;
+    const driver = { ...base, open: async (...args) => {
+      const connection = await base.open(...args);
+      return { ...connection,
+        exec(sql) {
+          if (/^PRAGMA journal_mode = /i.test(sql)) {
+            calls++;
+            if (!available) {
+              timer ??= setTimeout(() => { available = true; }, 25);
+              const failure = Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY', errcode: 5 });
+              if (asynchronous) return Promise.reject(failure);
+              throw failure;
+            }
+          }
+          return connection.exec(sql);
+        },
+        close() { closes++; return connection.close(); },
+      };
+    } };
+    let store;
+    try {
+      store = await openStore(MODEL, { driver, path: dbPath, busyTimeout: 1000 });
+      assert.ok(available, 'the event loop released contention before opening succeeded');
+      assert.ok(calls > 1 && calls <= 32, 'startup retries use finite admission');
+      await store.collection('notes').insert({ id: 'after-release', by: 'one' });
+      assert.strictEqual((await store.collection('notes').get('after-release')).by, 'one');
+      await store.close(); store = null;
+      assert.strictEqual(closes, 1);
+    }
+    finally { clearTimeout(timer); await store?.close(); cleanup(); }
+  });
+
+  it('zero busy timeout refuses the first busy attempt and closes its handle', async () => {
+    const base = nodeDriver();
+    let calls = 0, closes = 0;
+    const failure = Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY', errcode: 5 });
+    const driver = { ...base, open: async (...args) => {
+      const connection = await base.open(...args);
+      return { ...connection,
+        exec() { calls++; throw failure; },
+        close() { closes++; return connection.close(); },
+      };
+    } };
+    await assert.rejects(openStore(MODEL, { driver, busyTimeout: 0 }),
+      (error) => error.code === 'JD0002' && error.class === 'busy' && error.cause === failure);
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(closes, 1);
+  });
+
+  it('persistent contention exhausts bounded admission and rejects JD0002 with class busy', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    let holder;
     try {
       const seed = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
       await seed.close();
-      const holder = new DatabaseSync(dbPath);
+      holder = new DatabaseSync(dbPath);
       holder.exec('BEGIN EXCLUSIVE');
       const { driver, executed } = recordingDriver(nodeDriver());
       await assert.rejects(openStore(MODEL, { driver, path: dbPath, busyTimeout: 40 }),
         (error) => error.code === 'JD0002' && error.class === 'busy' && error.retryable === true);
-      // the pragma chain ran twice: one retry, no more
-      assert.strictEqual(executed.filter((sql) => sql === 'PRAGMA busy_timeout = 40').length, 2);
+      const attempts = executed.filter((sql) => sql === 'PRAGMA busy_timeout = 40').length;
+      assert.ok(attempts >= 1 && attempts <= 32, 'persistent contention has finite admission');
       holder.exec('ROLLBACK');
       holder.close();
+      holder = null;
       const recovered = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
       await recovered.close();
     }
     finally {
+      holder?.close();
       cleanup();
     }
   });

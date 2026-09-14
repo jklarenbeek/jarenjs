@@ -106,10 +106,10 @@ npm run docs:derive
 
 | Host | Consumer | Rows | Journey ms | Search startup ms | Heap MiB | Peak RSS MiB | Second writes |
 |---|---|---:|---:|---:|---:|---:|---:|
-| node | catalog | 10000 | 954.93 | 443.42 | 62.92 | 265.95 | 0 |
-| node | archive-stock | 75000 | 4672.35 | 3099.34 | 308.44 | 848.82 | 0 |
-| bun | catalog | 10000 | 761.78 | 349.31 | 84.03 | 279.98 | 0 |
-| bun | archive-stock | 75000 | 3661.58 | 2356.05 | 320.18 | 972.32 | 0 |
+| node | catalog | 10000 | 942.34 | 441.93 | 64.03 | 268.64 | 0 |
+| node | archive-stock | 75000 | 4835.22 | 3239.70 | 376.40 | 863.10 | 0 |
+| bun | catalog | 10000 | 808.65 | 388.85 | 47.95 | 236.70 | 0 |
+| bun | archive-stock | 75000 | 3840.64 | 2455.22 | 319.89 | 965.17 | 0 |
 
 Retained reference adapters: 105 lines; adopted application policy: 195 lines. Third-party search/virtualization mechanisms in the application: 2 → 0.
 
@@ -148,6 +148,14 @@ library-only allocation. The unchanged-source pass prevents attributing the
 improvement to startup serialization. Allocator/GC causality and exact peak heap
 remain unmeasured; these passing repeats qualify the observation without proving
 a general memory guarantee or removing the earlier failure.
+
+After the opening retry correction, the complete combined workload measured
+Bun archive-stock RSS at 1,012,051,968 bytes and passed all 20 unchanged
+resource checks. The separate native-host run measured its Bun executable at
+1,064,697,856 bytes. The history retains both complete native-host reports,
+including the earlier executable peak of 1,078,005,760 bytes, which exceeded
+the same 1,073,741,824-byte ceiling. These observations do not establish a
+causal memory improvement from changing startup retries.
 
 ## Retained reference costs
 
@@ -258,7 +266,7 @@ and host-wide remaining handles lack matching combined measurements.
 | catalog | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | catalog | relational.queryMs | 100 | 0.09 (pass) | relational: 0.49 (pass) | pending | pending |
 | catalog | relational.recoveryMs | 5000 | 34.73 (pass) | relational: 43.50 (pass) | pending | pending |
-| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 444.67 (pass) | 443.42 (pass) | 349.31 (pass) |
+| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 444.67 (pass) | 441.93 (pass) | 388.85 (pass) |
 | catalog | search.coldIndexMs | 15000 | 169.51 (pass) | lexical: 203.59 (pass) | pending | pending |
 | catalog | search.warmIndexMs | 15000 | 65.05 (pass) | lexical: 201.37 (pass) | pending | pending |
 | catalog | search.queryMs | 100 | 14.11 (pass) | lexical: 10.89 (pass) | pending | pending |
@@ -278,15 +286,15 @@ and host-wide remaining handles lack matching combined measurements.
 | catalog | providers.bytes | 262144 | 269 (pass) | providers: 66426 (pass) | pending | pending |
 | catalog | providers.attempts | 3 | pending | providers: pending | pending | pending |
 | catalog | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
-| catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 65975296 (pass) | 88111105 (pass) |
-| catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 278867968 (pass) | 293584896 (pass) |
+| catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 67144424 (pass) | 50275755 (pass) |
+| catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 281686016 (pass) | 248197120 (pass) |
 | catalog | resources.peakHeapBytes | 268435456 | pending | —: pending | pending | pending |
-| catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.29 (pass) | 0.38 (pass) |
+| catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.32 (pass) | 0.47 (pass) |
 | catalog | resources.remainingHandles | 0 | pending | —: pending | pending | pending |
 | archive-stock | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | archive-stock | relational.queryMs | 250 | 0.16 (pass) | relational: 0.60 (pass) | pending | pending |
 | archive-stock | relational.recoveryMs | 5000 | 49.20 (pass) | relational: 76.04 (pass) | pending | pending |
-| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 3565.13 (pass) | 3099.34 (pass) | 2356.05 (pass) |
+| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 3565.13 (pass) | 3239.70 (pass) | 2455.22 (pass) |
 | archive-stock | search.coldIndexMs | 45000 | 970.36 (pass) | lexical: 1500.68 (pass) | pending | pending |
 | archive-stock | search.warmIndexMs | 45000 | 479.46 (pass) | lexical: 1775.38 (pass) | pending | pending |
 | archive-stock | search.queryMs | 250 | 88.96 (pass) | lexical: 98.43 (pass) | pending | pending |
@@ -306,10 +314,10 @@ and host-wide remaining handles lack matching combined measurements.
 | archive-stock | providers.bytes | 524288 | 269 (pass) | providers: 135886 (pass) | pending | pending |
 | archive-stock | providers.attempts | 3 | pending | providers: pending | pending | pending |
 | archive-stock | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
-| archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 323424736 (pass) | 335730452 (pass) |
-| archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 890052608 (pass) | 1019547648 (pass) |
+| archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 394682008 (pass) | 335430014 (pass) |
+| archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 905023488 (pass) | 1012051968 (pass) |
 | archive-stock | resources.peakHeapBytes | 805306368 | pending | —: pending | pending | pending |
-| archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.26 (pass) | 0.41 (pass) |
+| archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.23 (pass) | 0.41 (pass) |
 | archive-stock | resources.remainingHandles | 0 | pending | —: pending | pending | pending |
 
 <!--/fact-->
