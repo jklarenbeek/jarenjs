@@ -794,6 +794,7 @@ wire response:
 | `JC1010` | `client.subscribe` was asked for an operation that is not a subscribe operation (§19) |
 | `JC1011` | a ledger `commit`/`fail` named a ref that settles no started record — expired, reclaimed under a newer generation, or settled already (§8); refused by the ledger, reported to `onError` by the binding |
 | `JC1013` | a durable command settlement capability is malformed |
+| `JC1014` | continuation host options, key material or JSON input are malformed (§20) |
 | `JC2110` | a durable command was refused or failed validation |
 | `JC1012` | a provider executor, descriptor host or run capability is malformed (PROVIDER-FORMAT.md) |
 
@@ -2638,3 +2639,83 @@ not by the transport capability. Cancellation cannot undo an already committed
 receipt or establish that a remote effect did not happen.
 
 See [durable composition](DURABLE.md) for the crash matrix and public recipe.
+
+## §20 Scoped continuations at a Node host
+
+`@jarenjs/contract/continuation-node` exports `sealContinuation(cursor, options)`
+and `openContinuation(token, options)`. The browser root imports no Node
+crypto. `Continuation` is a string type exported from the root; the existing
+schema asset entry exposes `schemas/continuation.schema.json`. Put that schema
+in the operation's `$defs.Continuation` and refer to it with
+`{ "$ref": "#/$defs/Continuation" }`. Schema validation checks the bounded wire
+shape; it does not authenticate the token.
+
+Both calls require `scope` (JSON identity), `query` (a nonempty host fingerprint
+of at most 256 characters), `order` (the JSON ordering identity array) and
+`now` (an epoch-millisecond safe integer or synchronous clock function). Seal
+also requires `keyId`, `key` and `expiresAt`. Key ids contain 1–64 ASCII letters,
+digits, underscores or hyphens; key material is a Uint8Array of 32–1024 bytes.
+Open requires synchronous `getKey(keyId)`, returning key bytes or null/undefined
+for an unknown key. A throwing clock/lookup or malformed key is a host error.
+Keys should come from the host's secret provider. Nothing retains a global key,
+clock, principal or tenant.
+
+The wire is `jc1.<payload>.<signature>`, with unpadded canonical base64url.
+Payload is canonical JSON containing exactly `v:1`, `alg:"HS256"`, `kid`, `iat`,
+`exp`, `scope`, `query`, `order` and `cursor`. Signature is HMAC-SHA256 over the
+UTF-8 domain `jaren-continuation` followed by a NUL byte and the ASCII string
+`jc1.<payload>`. Verification compares the 32 signature bytes with Node's
+`timingSafeEqual`. Alternate encodings, invalid UTF-8/BOM, duplicate members,
+noncanonical JSON, unknown versions and other algorithms refuse. The helper
+uses the shared canonical JSON owner and refuses non-JSON inputs, accessors,
+classes and cycles instead of invoking `toJSON` or coercing their values.
+
+The default and hard ceiling is 16,384 ASCII wire bytes; `maxBytes` can lower
+it to an integer of at least 256. Wire length is checked before decoding or
+parsing. Canonicalization additionally bounds cumulative string data, depth
+(32), and total visited values/members (2,048). JSON and base64 expansion must
+fit the byte ceiling too. Injected host callbacks and ordinary host data remain
+the host's responsibility; peer tokens never choose execution code.
+
+A token is valid only while `iat <= now < exp`, with `exp > iat`. Rotation can
+retain previous keys in the lookup for the host's chosen overlap; removal
+immediately refuses their tokens. Canonical scope/order equality and exact
+query fingerprint equality are required. HMAC authenticates the contents; it
+does not encrypt them, authorize delivery or establish a database snapshot.
+Include every filter, projection, model revision and policy revision that
+matters in the host query/scope identities. Authorize each request independently.
+
+| code | when |
+|---|---|
+| `JC2120` | malformed wire encoding, JSON, cursor/envelope shape, version or algorithm |
+| `JC2121` | wire/JSON byte, depth or value/member work limit exceeded |
+| `JC2122` | signature mismatch or unknown key id |
+| `JC2123` | now precedes issue time or is at/after expiry |
+| `JC2124` | expected scope, query or order differs |
+
+These are `ContractRuntimeError` refusals with `retryable:false`; status is 413
+for the limit and 400 otherwise. They reuse `contract/invalid-input` with
+`op:"continuation"`. `JC1014` is a `ContractHostError` for invalid host options
+or input JSON. A transport should map these through its declared error policy.
+
+A Store consumer supplies trusted identity and signing configuration from its
+host. Store keeps the structural validation owner, including `JD0035`:
+
+```js
+import { sealContinuation, openContinuation } from '@jarenjs/contract/continuation-node';
+
+// items is a public Store entity; authorize and construct spec/context first.
+// context = { scope, query, order, now }; signing = { keyId, key, expiresAt }.
+const after = wireAfter === undefined ? undefined
+  : openContinuation(wireAfter, { ...context, getKey });
+const page = await items.page(spec, { after, limit: 50, maxBytes: 65536 });
+const next = page.continuation === null ? null
+  : sealContinuation(page.continuation, { ...context, ...signing });
+return { items: page.items, next, hasMore: page.hasMore };
+```
+
+`openContinuation` returns unknown JSON, because a generic transport helper
+cannot prove an application's cursor type. Use the consumer's structural
+validator (the Store validates `after`) at that boundary. The helper leaves
+`LoadContinuation` and unsigned internal paging unchanged. The same envelope
+can carry the structural continuation emitted by the LINQ graph client.

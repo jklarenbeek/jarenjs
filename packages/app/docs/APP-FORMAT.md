@@ -332,49 +332,85 @@ allow-list (§3.1). The extractor receives the native event and MUST
 return a JSON value; `undefined` is coerced to `null`. An extractor
 that throws surfaces as the dispatching action's `JA2002`.
 
-This is the escape hatch for everything the allow-list deliberately
-cannot serialize. The worked example: a `"fileTokens"` extractor that
-stows `event.target.files` in a host-side registry and returns opaque
-string tokens, so a form can dispatch a file selection without a
-`File` object ever entering `$event` or the state:
+`createFileTokenRegistry` from `@jarenjs/app/file-tokens` supplies a
+bounded owner for native `File` objects. Its extractor returns opaque
+strings; neither a File nor a signing key enters the app document:
 
 ```javascript
-// Token identity is MONOTONIC (or a UUID): a registry key is never
-// reused, so a stale token can never rebind to a different File.
-let nextFileToken = 1;
-const fileRegistry = new Map();
-createApp(doc, {
-  node,
-  eventFields: {
-    fileTokens: (event) =>
-      Array.from(event.target?.files ?? [], (file) => {
-        const token = `file:${nextFileToken++}`;
-        fileRegistry.set(token, file);
-        return token;
-      }),
-  },
+import { createApp } from '@jarenjs/app';
+import { createFileTokenRegistry } from '@jarenjs/app/file-tokens';
+
+const files = createFileTokenRegistry({ runtime, ttlMs: 300_000,
+  maxFiles: 8, maxBytes: 32 * 1024 * 1024 });
+const releaseFiles = Object.assign(({ tokens }) => files.release(tokens), {
+  dispose: files.dispose, // app.destroy() invokes the existing effect disposer
+});
+const app = createApp(doc, {
+  node, eventFields: { fileTokens: files.extract },
+  effects: { releaseFiles },
 });
 ```
 
 A binding `{ "action": "pickFiles", "event": ["fileTokens"] }` then
-binds `$event.fileTokens` to `["file:1", ...]` — JSON all the way —
-and an upload effect later redeems the tokens at the boundary.
+binds `$event.fileTokens` to an array of strings. Guard the action with
+`{ "$ne": ["$event.fileTokens", null] }`: an extractor refusal reports
+`JA2002` with the registry code as its cause and binds the field to
+`null`. Keep the previous selection on that refusal. Disable further
+selection until upload or explicit cancel, or retain all outstanding
+tokens in a bounded application list; replacing the state array alone
+does not release its Files.
 
-The registry the host builds around those tokens needs an explicit
-lifecycle, because the tokens in state outlive the objects they name:
+| Member | Contract |
+|---|---|
+| `register(files)` | Native `FileList` or `ArrayLike<File>`; returns a frozen token array in selection order. The whole selection fits or is refused before registration. Active tokens are never silently evicted. |
+| `extract(event)` | Calls `register(event.target?.files ?? [])`; compatible with `eventFields`. |
+| `take(token)` | Atomically removes and returns the exact native `File` once. Unknown, foreign, expired, released or disposed tokens return `null`. The caller owns a taken File. |
+| `release(tokens)` | Releases remaining references and returns their count. Duplicate/unknown tokens do nothing; at most 4096 token arguments per call. It works without consulting the clock. |
+| `stats()` | Frozen `{ files, bytes, maxFiles, maxBytes, disposed }` after expiry cleanup. Bytes are the sum of native File sizes, not process memory. |
+| `dispose()` | Idempotently closes admission and drops all registry references. `take` returns `null`, `release` returns zero, `stats` remains available, and registration throws `JA2020`. |
 
-- **identity** — monotonic or UUID, never derived from the registry's
-  current size; a token is never rebound to a different `File`;
-- **per-attempt identity** — each upload attempt gets its own request
-  id; a failed or canceled attempt may retain the same session-owned
-  `File` for an explicit retry;
-- **consume** — a successfully committed file is removed from the
-  registry (and its object URLs revoked);
-- **discard/revoke** — canceling the selection, closing the owning
-  route/session, or `app.destroy()` revokes every remaining token;
-- **expiry** — a bounded retention policy, so an abandoned selection
-  cannot hold file handles forever; a redeemed-but-expired token MUST
-  fail safely (a structured error), never select another file.
+Defaults: `ttlMs=300000`, `maxFiles=32`, `maxBytes=67108864`. All
+limits are positive safe integers; `maxFiles` is capped at 4096.
+Expiry is inclusive (`now >= expiresAt`); registration, take and stats
+sweep expired references. There is no background timer: dispose the
+owner when its route/session ends. `runtime` uses the shared core
+runtime; explicit `now` and `mintToken` callbacks override its clock
+and per-token UUID provider. Time is epoch milliseconds. Each registry
+also needs a fresh namespace from `runtime.uuid()`; injected providers
+must honor that fresh-identifier contract. A monotonic serial prevents
+stale tokens rebinding even when a custom suffix minter repeats.
+Identifiers use 1–128 ASCII letters, digits, hyphens or underscores.
+
+A host can consume a token for a bounded upload/commit operation:
+
+```javascript
+const file = files.take(token);
+if (file === null) return { ok: false, kind: 'missing-file' };
+// The host now owns this File, its AbortController and retry budget.
+const uploaded = await client.bytes('upload', { id: uploadId }, {
+  body: file.stream(), signal, attempt: 1,
+});
+if (!uploaded.ok) return uploaded;
+await uploaded.value.body?.cancel(); // release an unused response stream
+return client.invoke('commit', { id: uploadId, name: file.name }, { signal });
+```
+
+The contract client's byte operation never retries automatically. An
+explicit retry needs a new `file.stream()` from the same taken File,
+a finite attempt budget and the host's upload/receipt policy. Drop the
+taken reference on success, cancellation or abandoned retry; it no
+longer belongs to registry statistics or expiry. An upload followed by
+a JSON commit is not one transaction: uncertain commits need a durable
+receipt and reconciliation at the host. Cancel a queued selection with
+`files.release(tokens)` before clearing state. Abort active uploads on
+owner teardown, and revoke any object URLs the host created. The
+registry creates no object URLs and grants no upload authorization.
+
+Direct helper calls throw `AppRuntimeError`: `JA2018` for malformed
+options, clock or native File selection; `JA2019` for a count, byte or
+lifetime bound; `JA2020` for closed admission; `JA2021` for malformed
+identifiers or reentrant operations. Unexpected host callback failures
+are normalized without retaining the callback's cause or File objects.
 
 ### 5.5 Widgets
 
@@ -624,17 +660,55 @@ ran every key and props expression of a runaway query first, so the
 limit cost memory and CPU proportional to the mistake it existed to
 contain.
 
-### 8.7 Accessible component contracts (non-normative)
+### 8.7 Dialog widget and accessible component contracts
+
+`createDialogWidget({ widgets? }?)` from `@jarenjs/app/dialog` registers
+a modal using the view layer's [native dialog owner](../../view/docs/VIEW-FORMAT.md#75-native-modal-dialog-owner).
+The renderer's existing mount/update/unmount lifecycle owns every
+listener and nested content widget. DOM values remain outside state:
+
+```javascript
+import { createDialogWidget } from '@jarenjs/app/dialog';
+const widgets = {};
+widgets.dialog = createDialogWidget({ widgets });
+const app = createApp(doc, { node, widgets });
+```
+
+An ordinary `jaren-widget` uses these JSON props:
+
+```json
+["jaren-widget", {"name":"dialog", "key":"settings", "props": {
+  "id":"settings", "title":"Settings", "open":true,
+  "initialFocusRef":"name", "fallbackFocusRef":"settings-opener",
+  "close":"closeSettings", "closeLabel":"Close",
+  "content":["input", {"data-ref":"name", "aria-label":"Name"}]
+}}]
+```
+
+`close` is an action name or an ordinary `{ action, with?, event? }`
+binding. Escape and the visible close button emit that binding; its
+action must change `open` to false or remove the widget. This keeps a
+confirmation policy in app state. A missing close action is `JA2022`.
+For a state-driven stylesheet, set `open` to `"$.dialog.open"` in the
+template. Other props follow VIEW-FORMAT §7.5. Child widgets receive
+the supplied `widgets` registry, so nested dialogs reuse the same
+definition. Closing a parent destroys its content owners first.
+
+The native browser owns background inertness and modal stacking. The
+helper handles visible naming, both Tab boundaries, chosen initial
+focus, disconnected opener fallback, dynamic content and cleanup.
+Existing §8.4 focus intents use the same `data-ref` resolver and can
+still target a control after a frame commits. Chromium, Firefox and
+WebKit exercise these behaviors; this is not physical screen-reader
+or assistive-technology qualification.
 
 The format's accessibility position: **the widget escape hatch is not
 an accessibility escape hatch**, and the primitives above exist so the
 accessible patterns are expressible as data.
 
-- **Dialogs**: opening moves focus into the dialog through a §8.4
-  intent (`data-ref` on its first control); closing restores it to the
-  opener the same way; the dialog element carries `role="dialog"`,
-  `aria-modal` and a label. The executable skeleton lives in the
-  focus-queue test suite and is the pattern to copy.
+- **Dialogs**: use the owned widget above, or compose an explicit
+  dialog with the view helper. The original §8.4 focus-queue skeleton
+  remains a test of post-render intent ordering.
 - **Tabs**: a tablist/tab/tabpanel triple is ordinary vnode data —
   `role`/`aria-selected`/`aria-controls` are props like any other, and
   arrow-key movement is a `keydown` binding requesting `key` (§3.1).
@@ -654,10 +728,98 @@ accessible patterns are expressible as data.
   keyboard activation of the router, and rapid route churn, each
   asserting zero page errors under real engine scheduling. What that
   matrix does **not** yet cover — and this document does not claim — is
-  the **accessibility** half: dialog focus traps and focus restoration
-  under an actual screen reader, AT semantics, and
+  physical screen-reader/AT semantics and
   `prefers-reduced-motion`. Those remain open and are tracked in the
   roadmap.
+
+### 8.8 Hash and history route subscriptions
+
+`createHashRouteSubscription(options?)` and
+`createHistoryRouteSubscription(options?)` from `@jarenjs/app/routes`
+return a subscription handler with `navigate`, `replace`, `refresh`
+and `dispose` controls. One factory owns one active subscription and
+its native listeners. Stop it before reusing it for another app:
+
+```javascript
+import { createHistoryRouteSubscription } from '@jarenjs/app/routes';
+const routes = createHistoryRouteSubscription({ window, basePath: '/app' });
+const app = createApp({
+  state: { route: null }, view: [{ match: '$', body: ['main'] }],
+  actions: { arrived: { patch: [
+    { op: 'replace', path: '/route', value: '$payload' },
+  ] } },
+  subs: [{ run: 'routes', with: { action: 'arrived' } }],
+}, { subs: { routes } });
+routes.navigate('/app/items?tag=one&tag=two#details');
+routes.replace('/app/items?tag=three');
+// app.stop()/destroy() run the returned subscription cleanup.
+app.destroy();
+routes.dispose(); // optional terminal disposal of the reusable factory
+```
+
+Each initial subscription synchronously dispatches one frozen JSON
+record. Distinct observed addresses then dispatch once; identical
+refreshes or paired native events are deduplicated:
+
+| Field | Meaning |
+|---|---|
+| `mode` | `hash` or `history`. |
+| `path` | URL pathname relative to `basePath`, with a leading slash. Percent escapes remain encoded, so `%2F` is not mistaken for a path separator. |
+| `query` | Frozen object of frozen string arrays. Repeated keys retain their encounter order; even a single value is an array. Prototype names are ordinary own keys. |
+| `fragment` | Inner fragment without `#`, still percent-encoded. In hash mode this is the second hash, inside the route. |
+| `raw` | Original location hash in hash mode; pathname+search+hash in history mode. Adapters can preserve their own existing route grammar. |
+
+Parsing follows URL pathname normalization and URLSearchParams query
+decoding: plus becomes a space, malformed percent escapes remain
+literal where possible and invalid UTF-8 becomes U+FFFD. No implicit
+path decoding changes an encoded separator. A base path matches a
+whole segment prefix (`/app` also matches `/app/`, but not `/apple`).
+The default base is `/`. A history deployment still needs its server
+to serve the application at deep links; the helper does not configure
+server fallback routing.
+
+Hash mode observes `hashchange`; history mode observes `popstate` and
+fragment `hashchange`, deduplicating their current address. Native
+events publish the address visible when observed; they are not a
+durable log of every transient external write. `navigate(target)` and
+`replace(target)` use owned pushState/replaceState calls and publish
+immediately in both modes. They do not synthesize global native events
+or monkey-patch history. Hash targets can be `#/path`, `/path` or a
+same-origin full URL that retains the outer pathname/search. History
+targets resolve against the current URL and must remain inside the
+base. Navigation permits HTTP(S) on the current origin without URL
+credentials. A no-change target publishes no duplicate record.
+
+External pushState/replaceState calls do not emit popstate: call
+`refresh()` after them, or adapt a host-owned router to dispatch the
+same application action. New history entries carry null state;
+replacement preserves the current history state. Use the host's own
+router when it needs another history-state policy.
+
+Bounds are explicit: `maxLength=8192` URL code units (hard maximum
+65536), `maxQueryEntries=128` including repeats (maximum 1024), and
+`maxTurns=64` queued deliveries per synchronous drain (maximum 1024).
+Navigation validates these limits before changing history. Reentrant
+redirects queue in order and cannot grow the call stack without a
+bound. Earlier accepted navigations remain in history if a later
+redirect exceeds its budget. Only one active subscriber is admitted;
+each stop is idempotent and stale cleanup cannot stop a later owner.
+Disposed or inactive controls refuse; unsubscribe permits another
+subscription, while `dispose()` is terminal.
+
+Options accept an injected `window` (default current browser window)
+and optional `onError(error)` for native event errors. Direct calls
+throw; without a sink, native event errors also surface. Codes:
+`JA2023` malformed host/input/action, `JA2024` URL/origin/protocol/base
+refusal, `JA2025` bounds, `JA2026` unavailable subscription ownership.
+Initial delivery failure removes every listener it acquired. A host
+must configure its action/error policy; these helpers add no auth or
+application page vocabulary.
+
+The website uses the shared hash owner with a 65536-character/1024-query
+ceiling to accommodate its existing share-token budget. Its page adapter
+still consumes `raw`, preserving its established last-value query and
+unknown-page rules.
 
 ## 9. Tasks and host concurrency
 
@@ -829,6 +991,15 @@ defaults to rethrowing):
 | `JA2015` | the `validateState` hook itself threw (the transaction failed; the queue keeps draining) |
 | `JA2016` | a subscription dynamic query (`withQuery`/`key`/`for`) threw while evaluating — cyclic resolved values included; the subscription failed closed (§5.3) |
 | `JA2017` | a subscription fan-out resolved more instances than `maxSubInstances`; the previous instance set was kept (§5.3) |
+| `JA2018` | file registry options, clock or native File selection are malformed (§5.4; direct helper calls throw) |
+| `JA2019` | a file registry count, byte or lifetime bound would be exceeded; the selection is refused atomically (§5.4) |
+| `JA2020` | registration attempted after file registry disposal (§5.4) |
+| `JA2021` | a file registry identifier is malformed or a host callback reentered an operation (§5.4) |
+| `JA2022` | a dialog widget has no usable close action binding (§8.7) |
+| `JA2023` | route host options, subscription action or navigation input are malformed (§8.8) |
+| `JA2024` | route URL, origin, protocol or base-path boundary refuses navigation (§8.8) |
+| `JA2025` | a route URL, query-entry or delivery bound would be exceeded (§8.8) |
+| `JA2026` | route owner is disposed, inactive or already has an active subscription (§8.8) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —

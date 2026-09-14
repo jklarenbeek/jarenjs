@@ -487,6 +487,68 @@ registered and has `ssr`, else empty content. Serialization stays pure
 — no state, no DOM, no widget is mounted; the client-side first render
 mounts widgets as usual (§6).
 
+### 7.5 Native modal dialog owner
+
+`createDialog(host, props, options?)` from
+`@jarenjs/view/helpers/dialog` returns `{ update(props), dispose() }`.
+It owns one native `<dialog>` and one nested vnode renderer inside a
+connected, empty host; it never reparents that host. A native
+`showModal()`/`close()` implementation is required. The browser's top
+layer owns nesting and background inertness; no global focus manager
+or background attribute rewrite is installed.
+
+Required props are `id` (unique DOM id without whitespace), `title`
+(nonempty visible text) and boolean `open`. Optional props:
+
+| Prop | Behavior |
+|---|---|
+| `content` | Ordinary vnode JSON, reconciled while open. Closing disposes its nested widgets; reopening mounts fresh content. |
+| `initialFocusRef` | Exact `data-ref` inside the dialog. If unavailable, the first eligible control or visible title provides focus. |
+| `fallbackFocusRef` | Exact `data-ref` in the owner document, used when the saved opener is disconnected or cannot receive focus. |
+| `closeLabel` | Visible close button text; default `Close`. Hosts supply localized text. |
+
+The title receives `id + '-title'` and is associated through
+`aria-labelledby`. The native dialog also carries `role=dialog` and
+`aria-modal=true`. Text props are limited to 1024 code units; ids must
+be unique across the owner document, including the derived title id.
+Style the `jaren-dialog` class and its `::backdrop` in the host's CSS.
+The native backdrop remains in use when no custom style is supplied.
+
+Options are `onClose(reason, event)`, `onEvent(binding, event)` for
+content bindings, and a `widgets` registry for nested content. Close
+reasons are `escape`, `button` or `native` (for example a form with
+`method=dialog`). Escape/close-button interactions request closure;
+the host commits it with `update({ ...props, open:false })`. Native
+form closure is reported after the browser closes the dialog. Owned
+programmatic close events do not emit another request.
+
+Keyboard qualification covers ordinary light-DOM controls with
+nonpositive `tabindex`. Tab boundaries are recomputed on every key
+press and hidden, disabled or inert controls are excluded. Native
+modal isolation prevents a background dialog from taking focus.
+Dynamic removal of the focused control restores initial/fallback
+focus inside the active dialog. On close, the saved opener receives
+focus when possible; otherwise the supplied fallback does. Without
+a usable fallback, native browser focus settlement remains visible.
+The helper does not cross shadow roots or iframe documents to search
+for a `data-ref`. `findByRef(root, token)` is separately public at
+`@jarenjs/view/helpers/focus` and is shared with app focus intents.
+
+`dispose()` is idempotent, closes the native modal, restores focus,
+destroys nested owners and removes listeners/DOM even when a nested
+cleanup throws. Repeated updates do not add listeners. Invalid
+properties, duplicate ids or a nonempty/disconnected host throw
+`ViewHostError` `JV1001`; missing native modal execution throws
+`JV1002`. Both use core's shared `CodedError` family. A failed initial
+mount removes every resource it acquired. The helper accepts trusted
+host composition; render untrusted display documents with §8's safe
+profile instead of granting them a modal widget.
+
+Behavior follows the [W3C APG modal pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/)
+and the [HTML dialog primitive](https://html.spec.whatwg.org/multipage/interactive-elements.html#the-dialog-element).
+The browser matrix verifies keyboard/focus behavior separately from
+physical screen-reader and assistive-technology testing.
+
 ## 8. The safe profile
 
 The default renderers **trust** their input (§1.1): every prop writes

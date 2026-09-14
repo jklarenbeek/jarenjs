@@ -70,6 +70,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1011: 'a ledger commit or fail named a ref that settles no started record: the key expired, was reclaimed under a newer generation, or was settled already — the settlement is refused; the binding reports it to onError and the response still goes out',
   JC1012: 'a provider executor, descriptor host or run capability is malformed',
   JC1013: 'a durable command settlement capability is malformed',
+  JC1014: 'continuation host options, key material or JSON input are malformed',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them)',
@@ -112,6 +113,11 @@ export const CONTRACT_CODES = Object.freeze({
   JC2096: 'the stream\'s bounded queue would overflow — the consumer reads slower than the source emits, or a replay page outran it (kind network, retryable; the stream ends with an error event carrying this code and the carrier tears the connection down)',
   JC2097: 'the client\'s reconnect budget is exhausted: every attempt after a network loss failed the same way (kind network, not retryable; details carry the attempts made and the last network code, client-side)',
   JC2110: 'a durable command was refused or failed validation',
+  JC2120: 'a continuation token has malformed encoding, JSON, shape, version or algorithm',
+  JC2121: 'a continuation exceeds its byte, depth or value limit',
+  JC2122: 'continuation authentication failed or its key id is unknown',
+  JC2123: 'a continuation is outside its issued-to-expiry interval',
+  JC2124: 'a continuation does not match the expected scope, query or ordering',
 });
 
 /**

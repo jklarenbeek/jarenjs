@@ -146,6 +146,49 @@ the engine policy above and `locateSource(key) => {container,key,column}` for it
 current cell. `disabled(target)` may additionally reject a cell. Resolvers are
 synchronous and must be bounded; unloaded or unmounted targets are unavailable.
 
+An ordinary DOM list or popover can supply handles through `sourcePanels`;
+it does not need a collection controller. At most eight panels are admitted.
+Each supplies `{element, retain(key)}`, where synchronous `retain` keeps the
+source handle stable and returns cleanup. Panel roots must be disjoint from
+each other and the target collections and share their document. The adapter
+snapshots these owners at mount; `update` changes authority, not panel ownership.
+The existing `resolveSource` still supplies the item's stable key and revision.
+For a panel handle, `locateSource` supplies the initial keyboard **target**;
+keyboard activation scrolls that cell into view, using existing virtualization.
+Pointer activation can start with a null initial target and uses measured hits.
+
+```js
+const drag = mountCollectionDrag(targets, {
+  sourcePanels: [{ element: itemPanel, retain: key => panelOwner.retain(key) }],
+  resolveSource: key => items.get(key),
+  locateSource: () => selectedGridCell,
+  validTarget: target => allowedCells.has(target.key),
+  validate: (intent, { signal }) => authority.check(intent, { signal }),
+  commit: (intent, { signal }) => commands.moveOrCopy(intent, { signal })
+});
+// Close through the existing cancellation owner before hiding the panel.
+function closeItems() {
+  drag.cancel('panel-closed');
+  itemPanel.hidden = true;
+  opener.focus();
+}
+```
+
+The panel provides ordinary focusable `data-jc-drag` buttons with the same
+dedicated touch policy below. One source retention belongs to the gesture and
+is released on every terminal path. Removal, hiding, disabling, inertness or
+changing the active handle's key cancels on the next animation frame during
+dragging or pending validation, and is rechecked when validation resolves.
+Explicit `cancel`/`dispose` is the deterministic panel-lifecycle boundary;
+animation frames can be throttled in background documents. Authority calls
+must honor host deadlines and the supplied abort signal. An unresolved call
+still consumes the single pending admission even after cancellation; cleanup
+does not invent its settlement. After commit starts, the host command owns
+transaction fate and idempotency. A late cancellation cannot undo its effects.
+The reusable public example is `test/collection/fixtures/drag-grid.js`,
+`mountPanelDragGrid`: plain panel, two grids, stable revisions, one move/copy
+command, keyboard open/close and finite source retention.
+
 ```js
 import { mountCollectionDrag } from '@jarenjs/collection/component';
 
@@ -204,7 +247,8 @@ The drag handle exposes `interaction`, `cancel`, `update`, `stats` and idempoten
 ownership are fixed for a mount. Window blur, pointer cancellation, lost capture,
 source reset, removed source and collection disposal clear the gesture. Disposal
 attempts every acquired cleanup even if an observer throws. Stats count owned
-listeners, subscriptions, frames, overlays, status nodes and pending authority.
+listeners, subscriptions, frames, overlays, pointer captures, source retainers,
+status nodes and pending authority.
 
 `createDraggableCollectionWidget(options)` combines one collection and its drag
 adapter with the existing WidgetDef lifetime. Supply `id`, `collection`,

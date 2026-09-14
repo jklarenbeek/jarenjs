@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-contract/continuation/1",
+  "title": "Continuation",
+  "description": "Bounded authenticated continuation wire string. Schema validation does not authenticate or authorize it.",
+  "type": "string",
+  "maxLength": 16384,
+  "pattern": "^jc1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{43}(?![\\s\\S])"
+}

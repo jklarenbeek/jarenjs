@@ -51,6 +51,8 @@ const contractResult = await build({
 });
 
 const contractInputs = Object.values(contractResult.metafile.outputs)[0].inputs;
+if (Object.keys(contractResult.metafile.inputs).some(file => file.endsWith('/continuation-node.js')))
+  throw new Error('The browser contract entry pulled in its optional Node continuation adapter.');
 const emitLeak = Object.entries(contractInputs)
   .filter(([file, info]) => (file.includes('packages/emit/') || file.includes('contract/src/project/')) && info.bytesInOutput > 0);
 if (emitLeak.length > 0)

@@ -23,6 +23,7 @@
  */
 
 import { AppRuntimeError } from './errors.js';
+import { findByRef } from '@jarenjs/view/helpers/focus';
 
 /**
  * @typedef {Object} FocusEffectOptions
@@ -163,26 +164,4 @@ export function createFocusEffect(options) {
   };
 
   return focusEffect;
-}
-
-/**
- * Depth-first search for the element whose `data-ref` attribute equals
- * the token. Attribute-based on purpose: it works on any DOM the
- * renderer can write to (real, stub, test), independent of
- * `querySelector` and CSS escaping rules.
- * @param {any} node
- * @param {string} token
- * @returns {any | null}
- */
-function findByRef(node, token) {
-  if (typeof node?.getAttribute === 'function' && node.getAttribute('data-ref') === token) {
-    return node;
-  }
-  const children = node?.childNodes;
-  if (children === undefined) return null;
-  for (let i = 0; i < children.length; i++) {
-    const found = findByRef(children[i], token);
-    if (found !== null) return found;
-  }
-  return null;
 }

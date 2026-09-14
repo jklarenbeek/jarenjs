@@ -208,6 +208,7 @@ export function mountCollection(host, options) {
 
 export { mountCollectionDrag, createDraggableCollectionWidget } from './drag.js';
 /** @typedef {import('./drag.js').DragContainer} DragContainer */
+/** @typedef {import('./drag.js').DragSourcePanel} DragSourcePanel */
 /** @typedef {import('./drag.js').CollectionDragOptions} CollectionDragOptions */
 
 /** Adapt controller disposal to the existing WidgetDef unmount lifecycle.

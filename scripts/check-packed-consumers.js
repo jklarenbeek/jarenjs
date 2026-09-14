@@ -165,7 +165,36 @@ const render = createDomRenderer(({} as any), {
 render(['p', {}, 'hi']);
 render.destroy();
 `,
+  '@jarenjs/josl': `
+import { stringifyCsv, stringifyCsvChunks, createCsvRowFormatter, type CsvWriterOptions } from '@jarenjs/josl/csv';
+import { stringifyCsvStream, createCsvStreamWriter } from '@jarenjs/josl/csv-stream';
+const policy: CsvWriterOptions = { neutralizeFormulas: true };
+const csvText: string = stringifyCsv([], policy);
+const csvLines: Iterable<string> = stringifyCsvChunks([], policy);
+const csvPull: AsyncIterable<string> = stringifyCsvStream([], { ...policy, signal: new AbortController().signal });
+createCsvRowFormatter(policy).tail(); createCsvStreamWriter(policy).end();
+void [csvText, csvLines, csvPull];
+// @ts-expect-error neutralization is an explicit boolean
+stringifyCsv([], { neutralizeFormulas: 'true' });
+`,
   '@jarenjs/app': `
+import { createHashRouteSubscription, type RouteRecord } from '@jarenjs/app/routes';
+const routeSub = createHashRouteSubscription({ window });
+const routeStop = routeSub({ action: 'arrived' }, (_action, route: Readonly<RouteRecord>) => { void route.query.tag; });
+routeSub.navigate('/next'); routeSub.replace('/final'); routeSub.refresh(); routeStop(); routeSub.dispose();
+import { createDialogWidget, type DialogWidgetProps } from '@jarenjs/app/dialog';
+import { createDialog, type DialogOwner } from '@jarenjs/view/helpers/dialog';
+const dialogProps: DialogWidgetProps = { id: 'settings', title: 'Settings', open: true, close: 'close' };
+const dialogWidget = createDialogWidget(); void [dialogProps, dialogWidget];
+const modal: DialogOwner = createDialog(document.createElement('div'), dialogProps);
+modal.update(dialogProps); modal.dispose();
+import { createFileTokenRegistry, type FileTokenOptions } from '@jarenjs/app/file-tokens';
+const fileOptions: FileTokenOptions = { now: () => 1, maxFiles: 2 };
+const files = createFileTokenRegistry(fileOptions);
+const tokens: readonly string[] = files.register([new File(['a'], 'a.txt')]);
+const taken: File | null = files.take(tokens[0]);
+const released: number = files.release(tokens);
+void [taken, released, files.stats().bytes]; files.dispose();
 import { createApp, createTaskEffect, createFocusEffect } from '@jarenjs/app';
 const app = createApp({ state: {}, view: [{ match: '$', body: ['p', {}, 'x'] }] }, {
   validateState: (next, context) =>
@@ -370,6 +399,12 @@ const workflow = compileWorkflow({ $workflow: '0.2', revision: '1', initial: 'do
 workflow.run(null, { runId: 'packed' }).then((r: WorkflowResult) => { const s: 'waiting'|'done' = r.status; void s; });
 `,
   '@jarenjs/contract': `
+import { sealContinuation, openContinuation, type SealContinuationOptions } from '@jarenjs/contract/continuation-node';
+import type { Continuation } from '@jarenjs/contract';
+const tokenOptions: SealContinuationOptions = { scope: 'tenant', query: 'items:v1', order: [], now: 1, expiresAt: 2, keyId: 'key', key: new Uint8Array(32) };
+const sealedCursor: Continuation = sealContinuation({ key: 'a' }, tokenOptions);
+const openedCursor: unknown = openContinuation(sealedCursor, { ...tokenOptions, getKey: () => tokenOptions.key });
+void openedCursor;
 import { registerWebMcp, type WebMcpResult } from '@jarenjs/contract/webmcp';
 const registration = registerWebMcp([{ name: 'read', description: 'Read', inputSchema: { type: 'object' }, execute: () => ({ value: 1 }) }], { realm: {} });
 const registered: WebMcpResult = await registration.ready;
@@ -608,6 +643,10 @@ try {
       }
     }
     let program = subpaths.map((s) => `await import(${JSON.stringify(s)});`).join('\n') + '\n';
+    if (name === '@jarenjs/josl') {
+      writeFileSync(join(consumerDir, 'csv.js'), readFileSync(join(root, 'test/consumer/csv.js')));
+      program += "const csv = await import('./csv.js'); csv.qualifyCsvPolicy(); csv.qualifyCsvDialects(); await csv.qualifyCsvWriters();\n";
+    }
     if (name === '@jarenjs/json') program += `
 const { compileJsonQuery, createQueryAccumulator } = await import('@jarenjs/json/query');
 const state = createQueryAccumulator('$sum');
@@ -688,6 +727,8 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       program += "await import('./collection.js');\n";
     }
     if (name === '@jarenjs/db') {
+      cpSync(join(root, 'test/db/async-host-contracts.test.js'), join(consumerDir, 'async-host-contracts.test.js'));
+      program += "if (typeof Bun === 'undefined') await import('./async-host-contracts.test.js');\n";
       cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./node-process.test.js');\n";
       mkdirSync(join(consumerDir, 'fixtures'), { recursive: true });
@@ -759,9 +800,15 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       }
     }
 
+    if (name === '@jarenjs/app') {
+      writeFileSync(join(consumerDir, 'dialog.js'), readFileSync(join(root, 'test/consumer/dialog.js')));
+      writeFileSync(join(consumerDir, 'routes.js'), readFileSync(join(root, 'test/consumer/routes.js')));
+    }
     // Optional, relocatable qualification artifacts for native and browser hosts.
     const output = { '@jarenjs/collection': process.env.COLLECTION_CONSUMER_OUTPUT,
-      '@jarenjs/db': process.env.DB_PROCESS_CONSUMER_OUTPUT }[name];
+      '@jarenjs/db': process.env.DB_PROCESS_CONSUMER_OUTPUT,
+      '@jarenjs/josl': process.env.JOSL_CONSUMER_OUTPUT,
+      '@jarenjs/app': process.env.APP_CONSUMER_OUTPUT }[name];
     if (output) {
       cpSync(consumerDir, output, { recursive: true });
       writeFileSync(join(output, 'node.log'), node.stdout + node.stderr);
@@ -847,7 +894,14 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   const manifest = JSON.parse(readFileSync(join(root, 'test/adoption/manifest.json'), 'utf8'));
   writeFileSync(join(compositionDir, 'providers.js'), readFileSync(join(root, 'test/consumer/providers.js')));
   const compositionFile = join(compositionDir, 'consumer.mjs');
+  writeFileSync(join(compositionDir, 'continuation.js'), readFileSync(join(root, 'test/consumer/continuation.js')));
+  writeFileSync(join(compositionDir, 'file-tokens.js'), readFileSync(join(root, 'test/consumer/file-tokens.js')));
+  writeFileSync(join(compositionDir, 'outbox-relay.js'), readFileSync(join(root, 'test/consumer/outbox-relay.js')));
+  const relayFile = join(compositionDir, 'outbox-relay.test.js');
+  writeFileSync(relayFile, readFileSync(join(root, 'test/db/outbox-relay.test.js'), 'utf8').replace('../consumer/outbox-relay.js', './outbox-relay.js'));
   writeFileSync(compositionFile, "import { qualifyDialects, runIngestionConsumer } from './providers.js';\n"
+    + "import { qualifyContinuation } from './continuation.js';\nawait qualifyContinuation();\n"
+    + "import { qualifyFileTokens } from './file-tokens.js';\nawait qualifyFileTokens();\n"
     + `await qualifyDialects(${readFileSync(join(root, 'test/adoption/fixtures/providers.json'), 'utf8')}, ${readFileSync(join(root, 'test/contract/fixtures/provider-descriptors.json'), 'utf8')});\n`
     + manifest.consumers.map((definition) => `await runIngestionConsumer(${JSON.stringify(definition)}, ${JSON.stringify(adoptionRows(definition).slice(0, definition.budgets.providers.rows))});`).join('\n'));
   writeFileSync(join(compositionDir, 'durable.js'), readFileSync(join(root, 'test/consumer/durable.js')));
@@ -862,6 +916,12 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     + manifest.consumers.map((definition) => `runFormulaConsumer(${JSON.stringify(definition)}, ${JSON.stringify(adoptionRows(definition))});`).join('\n')
     + "\nawait qualifyRuleCommand(openRuleExample, savedRule);\n");
   for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
+    const relayResult = spawnSync(runtime, runtime === 'bun' ? ['test', relayFile]
+      : ['--no-warnings=ExperimentalWarning', '--test', '--test-isolation=none', relayFile],
+    { cwd: compositionDir, encoding: 'utf8', timeout: 60000 });
+    if (relayResult.status !== 0) { failures++; console.error(`Outbox composition (${runtime}): ${relayResult.stdout}${relayResult.stderr}`); }
+    else console.log(`✓ outbox composition — separate files, lost acknowledgment, receipt replay, unchanged revisions (${runtime})`);
+    writeFileSync(join(compositionDir, runtime === 'bun' ? 'relay-bun.log' : 'relay-node.log'), relayResult.stdout + relayResult.stderr);
     const formulaResult = spawnSync(runtime, [formulaFile], { cwd: compositionDir, encoding: 'utf8' });
     if (formulaResult.status !== 0) { failures++; console.error(`Formula composition (${runtime}): ${formulaResult.stderr}`); }
     else console.log(`✓ formula composition — preserved sources, two workloads, reviewed command replay (${runtime})`);
@@ -876,6 +936,15 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
     qualifyAdoptionRuntime(runtime, [journey], compositionDir, runtime === 'bun' ? 'packed-bun' : 'packed-node');
     console.log(`✓ combined adoption — two full workloads, abrupt remote-success termination, recovery and zero-write replay (${runtime})`);
+  }
+  if (process.env.HOST_CONSUMER_OUTPUT) {
+    const output = process.env.HOST_CONSUMER_OUTPUT;
+    cpSync(compositionDir, output, { recursive: true });
+    writeFileSync(join(output, 'receipt.json'), JSON.stringify({ source: 'local npm pack; not registry publication',
+      node: process.versions.node, bun: bun ? bunProbe.stdout.trim() : null,
+      packages: [...compositionPackages].map((dependency) => ({ name: dependency,
+        version: byName.get(dependency).pkg.version,
+        integrity: `sha512-${createHash('sha512').update(readFileSync(tarballs.get(dependency))).digest('base64')}` })) }, null, 2));
   }
 }
 finally {

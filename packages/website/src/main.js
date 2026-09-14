@@ -15,6 +15,7 @@ import '@jarenjs/play/styles/play.css';
 import { createSiteApp } from './app/createSiteApp.js';
 import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';
+import { createHashRouteSubscription } from '@jarenjs/app/routes';
 import { createMotion, prefersReducedMotion } from './lib/motion.js';
 
 const BASE = import.meta.env.BASE_URL;
@@ -25,6 +26,8 @@ const SITE_FILES = {
 };
 const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
+// Keep the existing 8000-character share tokens plus deployment URL overhead.
+const routes = createHashRouteSubscription({ window, maxLength: 65536, maxQueryEntries: 1024 });
 
 /** A localStorage-backed JSON slot; failures degrade to in-memory. */
 const jsonStore = (key) => ({
@@ -111,13 +114,8 @@ const app = createSiteApp({
     document.documentElement.classList.toggle('dark', next === 'dark');
     localStorage.setItem(THEME_KEY, next);
   },
-  listenHash: (cb) => {
-    const fire = () => cb(parseHash(location.hash));
-    addEventListener('hashchange', fire);
-    fire();
-    return () => removeEventListener('hashchange', fire);
-  },
-  navigate: (hash) => { location.hash = hash; },
+  listenHash: (cb) => routes({ action: 'route' }, (_action, route) => cb(parseHash(route.raw))),
+  navigate: routes.navigate,
   share: (hash) => {
     const url = `${location.origin}${location.pathname}${hash}`;
     navigator.clipboard?.writeText(url).catch(() => {});

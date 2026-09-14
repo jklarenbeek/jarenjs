@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/contract",
   "private": false,
-  "version": "0.89.0",
+  "version": "0.90.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -25,6 +25,10 @@
     "./node": {
       "types": "./dist/types/adapters/node.d.ts",
       "default": "./src/adapters/node.js"
+    },
+    "./continuation-node": {
+      "types": "./dist/types/continuation-node.d.ts",
+      "default": "./src/continuation-node.js"
     },
     "./ledger": {
       "types": "./dist/types/ledger.d.ts",
@@ -114,9 +118,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.89.0",
-    "@jarenjs/json": "^0.89.0",
-    "@jarenjs/validate": "^0.89.0",
-    "@jarenjs/emit": "^0.89.0"
+    "@jarenjs/core": "^0.90.0",
+    "@jarenjs/json": "^0.90.0",
+    "@jarenjs/validate": "^0.90.0",
+    "@jarenjs/emit": "^0.90.0"
   }
 }

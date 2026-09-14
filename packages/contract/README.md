@@ -723,6 +723,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/contract/http` | JavaScript | declared |
 | `@jarenjs/contract/fetch` | JavaScript | declared |
 | `@jarenjs/contract/node` | JavaScript | declared |
+| `@jarenjs/contract/continuation-node` | JavaScript | declared |
 | `@jarenjs/contract/ledger` | JavaScript | declared |
 | `@jarenjs/contract/diff` | JavaScript | declared |
 | `@jarenjs/contract/client` | JavaScript | declared |
@@ -731,6 +732,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/contract/stream` | JavaScript | declared |
 | `@jarenjs/contract/app` | JavaScript | declared |
 | `@jarenjs/contract/project` | JavaScript | declared |
+| `@jarenjs/contract/schemas/continuation.schema.json` | schema | — |
 | `@jarenjs/contract/schemas/jaren-contract-port.draft-07.schema.json` | schema | — |
 | `@jarenjs/contract/schemas/jaren-contract-port.schema.json` | schema | — |
 | `@jarenjs/contract/schemas/jaren-contract.draft-07.schema.json` | schema | — |

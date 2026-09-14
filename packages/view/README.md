@@ -66,7 +66,7 @@ renderToString(['p', { class: 'note' }, 'a < b'])
 // '<p class="note">a &lt; b</p>'
 ```
 
-Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup. Hydration is a client-side first render into the same container (the container is emptied and rebuilt — DOM adoption is on the roadmap).
+Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup. On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
 
 ### With JavaScript in the middle
 
@@ -149,12 +149,12 @@ identically. It is **not a complete sandbox** — the allow-list still includes
 anchors, forms, controls and media, so native navigation, form submission,
 focus and network loads remain possible; treat safe mode as one layer under a
 Content-Security-Policy, not a replacement for one. It also applies to the
-**renderer only**: [`@jarenjs/app`](../app) does not pass `safe` through, and
+**renderer only**: [`@jarenjs/app`](../app) forwards `safe` to the renderer, while
 an app document names host actions, effects and subscriptions, so a safe
 *view* does not make an untrusted *app document* safe — run only self-authored
-app documents. Still open, and tracked in the roadmap: caret/IME fidelity
-across engines, `multiple`-select and composition behavior proven in real
-Chromium/Firefox/WebKit, and a Trusted Types integration.
+app documents. Automated Chromium/Firefox/WebKit tests cover controlled inputs,
+composition and multiple-select behavior. Native OS IME and assistive-technology
+qualification and a Trusted Types integration remain separate work.
 
 ### Shared view helpers — `@jarenjs/view/helpers`
 
@@ -193,6 +193,8 @@ Every subpath a consumer can import, derived from the manifest by
 |---|---|---|
 | `@jarenjs/view` | JavaScript | declared |
 | `@jarenjs/view/helpers` | JavaScript | declared |
+| `@jarenjs/view/helpers/dialog` | JavaScript | declared |
+| `@jarenjs/view/helpers/focus` | JavaScript | declared |
 | `@jarenjs/view/helpers/index` | JavaScript | declared |
 | `@jarenjs/view/helpers/memo` | JavaScript | declared |
 | `@jarenjs/view/helpers/metrics` | JavaScript | declared |

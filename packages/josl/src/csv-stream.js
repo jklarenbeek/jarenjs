@@ -129,7 +129,7 @@ export async function* iterateCsvStream(chunks, options = undefined) {
  * the signal's reason); an abort, a consumer that stops early or a throw
  * closes the record source exactly once.
  * @param {AsyncIterable<Array|object>|Iterable<Array|object>} rows - Records
- * @param {object} [options] - Writer options; see `stringifyCsv`, plus `signal`
+ * @param {import('./csv.js').CsvWriterOptions & {signal?:AbortSignal|null}} [options] - Shared writer policy, plus cancellation.
  * @yields {string} One line at a time
  * @example
  * response.body = stringifyCsvStream(store.collection('rows').query(doc), { signal });
@@ -169,7 +169,7 @@ export async function* stringifyCsvStream(rows, options = {}) {
  */
 export class CsvStreamWriter {
   /**
-   * @param {object} [options] - Writer options; see `stringifyCsv`
+   * @param {import('./csv.js').CsvWriterOptions & {onChunk?:(chunk:string)=>void}} [options] - Shared writer policy, plus an optional chunk sink.
    */
   constructor(options = {}) {
     this.options = options;
@@ -236,9 +236,8 @@ export class CsvStreamWriter {
 
 /**
  * Create an incremental CSV writer.
- * @param {object} [options] - Writer options; see `stringifyCsv`
- * @param {(chunk: string) => void} [options.onChunk] - Chunk sink; without
- *  one, chunks buffer until `end()`
+ * @param {import('./csv.js').CsvWriterOptions & {onChunk?:(chunk:string)=>void}} [options] - Shared writer policy.
+ *  Without onChunk, chunks buffer until end().
  * @returns {CsvStreamWriter} The writer
  * @example
  * const w = createCsvStreamWriter();

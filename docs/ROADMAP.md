@@ -133,6 +133,18 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
+Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),
+the [owned native dialog](../packages/view/docs/VIEW-FORMAT.md), and
+[ordinary-panel drag sources](../components/collection/docs/COLLECTION.md).
+Public consumers exercise disposal, interrupted interaction and three browser
+engines; the manual device and assistive-technology qualification below remains
+open. [Signed Node continuations](../packages/contract/docs/CONTRACT-FORMAT.md)
+bind injected host context, while [CSV formula neutralization](../packages/josl/FORMAT.md)
+is an opt-in formatter policy with unchanged default bytes. SQLite
+[async jobs, committed feeds and separate-file receipt replay](../packages/db/docs/HOSTS.md)
+have source and isolated-package fixtures. These source capabilities do not
+establish registry publication or downstream acceptance.
+
 - [ ] **Collection platform and large-source qualification.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches. Remaining work is segmented logical scrolling beyond the conservative CSS extent ceiling, physical touch-device qualification, actual assistive technology and native OS IME sessions, and complete sequential database snapshots/index seeks backed by an independently qualified source contract. Keep the retained virtualizer oracle until real downstream/manual acceptance permits retirement; installed synthetic consumers alone do not authorize an external cutover.
 
 - [ ] **Real-browser accessibility audit** — the *lifecycle* half of the matrix

@@ -1439,30 +1439,6 @@ export function openStore(model, options) {
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, readOnly || options.adopt === true), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, readOnly || options.adopt === true), () => {
-          /** @type {Map<string, any>} */
-          const cores = new Map();
-          const coreFor = (name) => {
-            let core = cores.get(name);
-            if (core === undefined) {
-              const collection = collections.get(name);
-              if (collection === undefined) {
-                throw new DbRuntimeError('JD2004',
-                  `the model declares no collection '${name}'`,
-                  { docPath: '/collections', collection: name });
-              }
-              const validate = options.compileSchema !== undefined
-                ? options.compileSchema(collection.schema)
-                : null;
-              if (validate !== null && typeof validate !== 'function')
-                throw new TypeError('openStore: compileSchema must return a validation function');
-              core = captureCollection(name, collectionCore(connection, collection,
-                plans.get(name), validate, queryState,
-                { profile: storeProfile, roots: declaredRoots }, runtime));
-              cores.set(name, core);
-            }
-            return core;
-          };
-
           // ————— change capture (LIVE-FORMAT §§1–6) —————
           const captureOption = options.capture ?? (options.replication === undefined ? undefined : true);
           const captureRequested = captureOption === true
@@ -1474,10 +1450,8 @@ export function openStore(model, options) {
           let captureMode = 'none';
           if (captureRequested !== null) {
             const wanted = captureRequested.mode ?? 'auto';
-            // the ledger and its journal are SQLite spellings; a
-            // connection that says it has no change capture is refused
-            // by name rather than at the first statement over a table
-            // this store would never have created there
+            // Capture requires a qualified backend, even where log SQL
+            // can already be emitted through the dialect.
             if (connection.capabilities.changeCapture !== true) {
               throw new DbCompileError('JD0051',
                 'change capture is unavailable on this driver: it declares no change '
@@ -1489,7 +1463,7 @@ export function openStore(model, options) {
             if (wanted === 'session' && !hasSessions) {
               throw new TypeError(
                 "capture mode 'session' is unavailable on this driver "
-                + '(bun:sqlite and some wasm builds ship no session extension) — '
+                + '(Node worker/pool/process hosts, bun:sqlite and some wasm builds do not expose sessions) — '
                 + "use mode 'journal' or 'auto'");
             }
             captureMode = wanted === 'auto'
@@ -1568,6 +1542,34 @@ export function openStore(model, options) {
             now: runtime.now,
             beforeCommit: (patch, context) => replicationEngine?.commit(patch, context),
           });
+          // Finish capture's first-open transaction before constructing the
+          // jobs engine, whose constructor starts another first-open bracket.
+          // Awaiting both at the end lets asynchronous hosts overlap BEGINs.
+          return chain(capture === null ? null : capture.ready, () => {
+          /** @type {Map<string, any>} */
+          const cores = new Map();
+          const coreFor = (name) => {
+            let core = cores.get(name);
+            if (core === undefined) {
+              const collection = collections.get(name);
+              if (collection === undefined) {
+                throw new DbRuntimeError('JD2004',
+                  `the model declares no collection '${name}'`,
+                  { docPath: '/collections', collection: name });
+              }
+              const validate = options.compileSchema !== undefined
+                ? options.compileSchema(collection.schema)
+                : null;
+              if (validate !== null && typeof validate !== 'function')
+                throw new TypeError('openStore: compileSchema must return a validation function');
+              core = captureCollection(name, collectionCore(connection, collection,
+                plans.get(name), validate, queryState,
+                { profile: storeProfile, roots: declaredRoots }, runtime));
+              cores.set(name, core);
+            }
+            return core;
+          };
+
           // the capture scope around a write runs statements of its own
           // (a session's changeset read, the journal's old-row read, the
           // log's allocation); a driver failure there is classified as
@@ -3093,8 +3095,7 @@ export function openStore(model, options) {
               relations: entityEngine === null ? undefined : entityEngine.relations,
             });
           }
-          return chain(capture === null ? null : capture.ready,
-            () => chain(jobsEngine === null ? null : jobsEngine.ready, () => {
+          return chain(jobsEngine === null ? null : jobsEngine.ready, () => {
           if (options.replication !== undefined) {
             replicationEngine = createReplicationEngine({ connection, capture,
               config: options.replication, model: shapeHash(model), now: runtime.now, bracket: firstOpen,
@@ -3113,7 +3114,8 @@ export function openStore(model, options) {
             });
           }
           return chain(replicationEngine === null ? null : replicationEngine.ready, () => Object.freeze(store));
-          }));
+          });
+          });
         })))));
 
       /**

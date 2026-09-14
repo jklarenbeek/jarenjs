@@ -261,6 +261,9 @@ Every subpath a consumer can import, derived from the manifest by
 <!--fact:exports.app-->
 | Import | Kind | Declarations |
 |---|---|---|
+| `@jarenjs/app/routes` | JavaScript | declared |
+| `@jarenjs/app/dialog` | JavaScript | declared |
+| `@jarenjs/app/file-tokens` | JavaScript | declared |
 | `@jarenjs/app/search` | JavaScript | declared |
 | `@jarenjs/app` | JavaScript | declared |
 | `@jarenjs/app/schemas/jaren-app.authoring.schema.json` | schema | — |

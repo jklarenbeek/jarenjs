@@ -34,3 +34,5 @@ export {
 } from './safe.js';
 
 /** @typedef {import('./dom.js').DomRendererOptions} DomRendererOptions */
+/** @typedef {import('./dom.js').WidgetDef} WidgetDef */
+/** @typedef {import('./dom.js').EventBindingHandler} EventBindingHandler */

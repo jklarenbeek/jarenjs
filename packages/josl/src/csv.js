@@ -6,6 +6,17 @@
 import { CsvMachine, CSV_CODES, coerceCsvValue } from './csv-machine.js';
 import { CsvSyntaxError } from './errors.js';
 
+/**
+ * @typedef {Object} CsvWriterOptions
+ * @property {string} [delimiter=','] - Field separator.
+ * @property {string} [quote='"'] - Quote character; empty disables quoting.
+ * @property {string} [newline='\r\n'] - Record terminator.
+ * @property {string[]} [fields] - Column order, inferred from the first object.
+ * @property {boolean} [header=true] - Emit headers for object records.
+ * @property {boolean} [neutralizeFormulas=false] - Prefix an apostrophe when converted
+ * cell text starts with =, +, -, @, tab, CR or LF, including headers and numbers.
+ */
+
 //#region reading
 
 /**
@@ -286,14 +297,7 @@ export function formatCsvValue(value) {
  * both smaller and diff-friendly.
  *
  * @param {Array<Array|object>} rows - Records: arrays, or objects keyed by column
- * @param {object} [options] - Writer options
- * @param {string} [options.delimiter=','] - Field separator
- * @param {string} [options.quote='"'] - Quote character
- * @param {string} [options.newline='\r\n'] - Record terminator; RFC 4180 §2.1
- *  specifies CRLF, which is also what spreadsheet software expects
- * @param {string[]} [options.fields] - Column order; inferred from the first
- *  object record when omitted
- * @param {boolean} [options.header=true] - Emit a header row for object records
+ * @param {CsvWriterOptions} [options] - Writer options; the default preserves cell text.
  * @returns {string} The CSV document
  * @example
  * stringifyCsv([{ a: 1, b: 'x,y' }]); // 'a,b\r\n1,"x,y"\r\n'
@@ -311,7 +315,7 @@ export function stringifyCsv(rows, options = {}) {
  * rows arrive as an array, an iterable, an async iterable or one at a
  * time through the stream writer — so all of them produce byte-identical
  * text for the same records by construction.
- * @param {object} [options] - Writer options; see `stringifyCsv`
+ * @param {CsvWriterOptions} [options] - Writer options; see `stringifyCsv`
  * @returns {{ lines: (row: Array|object) => string[], tail: () => string, fields: () => string[] | null }}
  *   `lines` formats one record as its line — preceded by the header
  *   line exactly once, before the first object row — `tail` answers the
@@ -323,11 +327,14 @@ export function createCsvRowFormatter(options = {}) {
   const quote = options.quote ?? '"';
   const newline = options.newline ?? '\r\n';
   const wantHeader = options.header !== false;
+  const neutralize = options.neutralizeFormulas === true;
   const unsafe = needsQuoteTester(delimiter, quote);
   const escaped = quote + quote;
 
   const cell = (value) => {
-    const s = formatCsvValue(value);
+    let s = formatCsvValue(value);
+    if (neutralize && s.length > 0 && '=+-@\t\r\n'.includes(s[0]))
+      s = "'" + s;
     if (quote.length === 0 || !unsafe(s))
       return s;
     return quote + (s.includes(quote) ? s.replaceAll(quote, escaped) : s) + quote;
@@ -374,7 +381,7 @@ export function createCsvRowFormatter(options = {}) {
  * large table never exists as a single string. The header precedes the
  * first object row; a chunk is one line.
  * @param {Iterable<Array|object>} rows - Records
- * @param {object} [options] - Writer options; see `stringifyCsv`
+ * @param {CsvWriterOptions} [options] - Writer options; see `stringifyCsv`
  * @yields {string} One record (or the header) at a time
  */
 export function* stringifyCsvChunks(rows, options = {}) {

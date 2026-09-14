@@ -2019,7 +2019,11 @@ whose `key` is not the entity's key shape, is `JD0035` too. Signing,
 tenant scoping, expiry and wire encoding are the **host's**: the store
 has no principal and no key, so any signature it invented would be
 security theatre — a host that ships a continuation to an untrusted
-client signs it first.
+client signs it first. The optional
+[`@jarenjs/contract/continuation-node`](../../contract/docs/CONTRACT-FORMAT.md#20-scoped-continuations-at-a-node-host)
+helper supplies bounded HMAC envelopes with injected scope, query/order
+identity, key lookup and time. Open the envelope before passing its structural
+cursor back to `page`; Store still validates that cursor and retains `JD0035`.
 
 **The page.** `store.entity(name).page(spec, { limit, after, maxBytes,
 consistency, signal })` — `graph.page(options)` on the client — drains

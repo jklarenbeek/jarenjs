@@ -54,6 +54,6 @@ test('offline catalog preserves original data, reviews pages and recovers remote
   expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('adoption-remote')).length)).toBe(2);
   await context.setOffline(true);
   await page.getByRole('button', { name: 'Ingest snapshot' }).click(); await expect(status).toContainText('0 changes');
-  await page.screenshot({ path: `/tmp/adoption-${testInfo.project.name}.png`, fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('adoption.png'), fullPage: true });
   await page.goto('/jarenjs/#/docs'); await expect(page.locator('[data-journey-editor]')).toHaveCount(0);
 });

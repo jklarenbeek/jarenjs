@@ -243,6 +243,31 @@ and the pull form `stringifyCsvStream` share one row formatter and are
 byte-identical for the same records; the pull form requests a record only
 when its consumer asks for the next line.
 
+`neutralizeFormulas: true` selects a spreadsheet export transformation in that
+shared formatter. After normal value conversion and before CSV quoting, it
+prefixes one apostrophe (`'`) exactly when the first character is `=`, `+`, `-`,
+`@`, tab (U+0009), CR (U+000D) or LF (U+000A). Headers, including a header-only
+document with explicit fields, follow the same rule. A leading apostrophe is
+left unchanged. Null/undefined and empty cells remain empty. A negative number
+or bigint becomes apostrophe-prefixed text in this mode: `-12` becomes `'-12`.
+The default is lossless with respect to this policy and leaves these prefixes
+unchanged; `formatCsvValue` itself does not apply it.
+
+```js
+stringifyCsv([['=1+2', -12, "'=already", 'x,y']], { neutralizeFormulas: true });
+// "'=1+2,'-12,'=already,\"x,y\"\r\n"
+```
+
+The policy does not trim whitespace, recognize full-width variants or inspect
+formula syntax. Delimiter, quote and newline settings retain their existing
+meanings; disabling quoting still disables escaping and does not produce safe
+cell boundaries for values containing a separator. Ordinary CSV quoting alone
+does not neutralize formulas. This exact text transformation is not a guarantee
+for every spreadsheet or subsequent save/reimport. Qualify the intended consumer
+and dialect; locale-sensitive forms and spreadsheet rewrites need their own
+policy. [OWASP's CSV injection reference](https://community.owasp.org/attacks/CSV_Injection)
+describes those limits. CSV readers preserve the added apostrophe as data.
+
 **Limits.** Optional, `Infinity` by default, in UTF-8 bytes, judged before
 the text is kept; a crossing is a `JoslLimitError`, never a repair:
 

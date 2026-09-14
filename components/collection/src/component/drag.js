@@ -5,9 +5,11 @@ import { mountCollection } from './index.js';
 /** @typedef {import('../drag.js').DragTarget} DragTarget */
 /** @typedef {{id:string, mounted:ReturnType<typeof mountCollection>,
  * columnKey:(index:number)=>string, indexOfColumn:(key:string)=>number}} DragContainer */
+/** @typedef {{element:HTMLElement, retain:(key:string)=>()=>void}} DragSourcePanel */
 /** @typedef {import('../drag.js').DragOptions & {
  * locateSource:(key:string)=>DragTarget|null, disabled?:(target:DragTarget)=>boolean,
  * label?:(key:string)=>string, portal?:HTMLElement, maxContainers?:number,
+ * sourcePanels?:DragSourcePanel[],
  * edgeSize?:number, maxScrollPerFrame?:number,
  * requestFrame?:(fn:FrameRequestCallback)=>number, cancelFrame?:(id:number)=>void
  * }} CollectionDragOptions */
@@ -26,11 +28,19 @@ export function mountCollectionDrag(containers, options) {
     || typeof c.columnKey !== 'function' || typeof c.indexOfColumn !== 'function')) throw new TypeError('Drag containers need unique stable identities and column lookups');
   const document = containers[0].mounted.element.ownerDocument, window = document.defaultView;
   if (containers.some((c) => c.mounted.element.ownerDocument !== document)) throw new TypeError('Drag containers must share a document');
+  const panels = options.sourcePanels ?? [];
+  if (!Array.isArray(panels) || panels.length > 8) throw new RangeError('At most eight drag source panels are allowed');
+  if (Array.from(panels).some((p, i) => !p?.element || p.element.ownerDocument !== document || typeof p.element.contains !== 'function'
+    || typeof p.retain !== 'function' || [...panels.slice(0, i).map(p => p.element), ...containers.map(c => c.mounted.element)]
+      .some(element => element.contains(p.element) || p.element.contains(element))))
+    throw new TypeError('Drag source panels need disjoint elements in the target document and synchronous retention');
+  const sourcePanels = panels.map(p => ({ element: p.element, retain: p.retain }));
   const portal = options.portal ?? document.documentElement;
   const requestFrame = options.requestFrame ?? ((fn) => window.requestAnimationFrame(fn));
   const cancelFrame = options.cancelFrame ?? ((id) => window.cancelAnimationFrame(id));
   let disposed = false, frame = null, overlay = null, pointer = null, retained = null, focusBefore = null;
   let lastPoint = null, copy = false, suppressedClick = null, announcement = '';
+  let activePanel = null;
   const stops = [];
   const status = document.createElement('div');
   status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); status.setAttribute('aria-atomic', 'true');
@@ -51,6 +61,12 @@ export function mountCollectionDrag(containers, options) {
     return !!found?.cell && !options.disabled?.(target) && (options.validTarget?.(target) ?? true);
   };
   const editing = (target) => !!target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])');
+  const visible = element => element?.isConnected && element.getClientRects().length > 0
+    && !['hidden', 'collapse'].includes(window.getComputedStyle(element).visibility);
+  const panelAvailable = key => !activePanel || (activePanel.panel.element.contains(activePanel.handle)
+    && activePanel.handle.getAttribute('data-jc-drag') === key && visible(activePanel.handle)
+    && !activePanel.handle.closest('[inert],[disabled]'));
+  const watching = state => ['armed', 'dragging'].includes(state.phase) || (activePanel && state.phase === 'validating');
   function cleanGesture() {
     let failure;
     const clean = (fn) => { try { fn(); } catch (error) { failure ??= error; } };
@@ -58,12 +74,12 @@ export function mountCollectionDrag(containers, options) {
     frame = null;
     const capture = pointer; pointer = null;
     clean(() => { if (capture?.element.hasPointerCapture?.(capture.id)) capture.element.releasePointerCapture(capture.id); });
-    const release = retained; retained = null; if (release) clean(release);
+    const release = retained; retained = null; activePanel = null; if (release) clean(release);
     const priorOverlay = overlay; overlay = null; clean(() => priorOverlay?.remove());
     if (focusBefore) {
       const target = focusBefore; focusBefore = null;
       clean(() => {
-        if (target.isConnected) target.focus({ preventScroll: true });
+        if (visible(target)) target.focus({ preventScroll: true });
         else containers.find((c) => c.mounted.element.isConnected)?.mounted.element.focus({ preventScroll: true });
       });
     }
@@ -84,7 +100,7 @@ export function mountCollectionDrag(containers, options) {
       overlay.style.left = `${state.point.x + 12}px`; overlay.style.top = `${state.point.y + 12}px`;
     }
     if (!['armed', 'dragging', 'validating', 'committing'].includes(state.phase)) cleanGesture();
-    if (!['armed', 'dragging'].includes(state.phase) && frame !== null) { cancelFrame(frame); frame = null; }
+    if (!watching(state) && frame !== null) { cancelFrame(frame); frame = null; }
     const message = state.phase === 'dragging' ? `${state.mode === 'copy' ? 'Copying' : 'Moving'} ${state.source.key}${state.target ? ` to ${state.target.key}, ${state.target.column}` : ''}. Enter to drop, Escape to cancel.`
       : state.phase === 'settled' ? 'Drop accepted.' : state.phase === 'cancelled' ? `Drag cancelled: ${state.reason}.`
         : state.phase === 'validating' || state.phase === 'committing' ? 'Checking drop.' : '';
@@ -92,7 +108,7 @@ export function mountCollectionDrag(containers, options) {
     options.onChange?.(state);
   }
   const interaction = createDragInteraction({ activationDistance: options.activationDistance,
-    resolveSource: (key) => options.resolveSource(key), validTarget: available,
+    resolveSource: (key) => panelAvailable(key) ? options.resolveSource(key) : null, validTarget: available,
     validate: (intent, context) => options.validate?.(intent, context) ?? true,
     commit: (intent, context) => options.commit(intent, context), onChange: changed });
   function hit(point) {
@@ -134,33 +150,46 @@ export function mountCollectionDrag(containers, options) {
   }
   function tick() {
     frame = null;
-    if (disposed || !['armed', 'dragging'].includes(interaction.revalidate().phase)) return;
-    if (!location(options.locateSource(interaction.state().source.key))?.cell) { interaction.cancel('source-unavailable'); return; }
-    if (lastPoint && interaction.state().input !== 'keyboard') {
+    if (disposed || !watching(interaction.revalidate())) return;
+    if (!activePanel && !location(options.locateSource(interaction.state().source.key))?.cell) { interaction.cancel('source-unavailable'); return; }
+    if (lastPoint && interaction.state().input !== 'keyboard' && ['armed', 'dragging'].includes(interaction.state().phase)) {
       if (interaction.state().phase === 'dragging') {
         interaction.move(lastPoint, null, copy);
         scroll(lastPoint);
       }
       interaction.move(lastPoint, hit(lastPoint), copy);
     }
-    if (['armed', 'dragging'].includes(interaction.state().phase)) frame = requestFrame(tick);
+    if (watching(interaction.state())) frame = requestFrame(tick);
   }
-  function start(key, input, point, copyMode) {
+  function start(handle, input, point, copyMode) {
     const current = interaction.state();
     if (current.pending || ['armed', 'dragging'].includes(current.phase)) return false;
+    const key = handle.getAttribute('data-jc-drag');
+    const panel = sourcePanels.find(p => p.element.contains(handle));
     const origin = options.locateSource(key), place = location(origin);
-    if (!place?.cell) return false;
+    if (panel ? !visible(handle) || (input === 'keyboard' && !place) : !place?.cell) return false;
     focusBefore = document.activeElement; lastPoint = point; copy = copyMode;
     try {
+      if (panel) {
+        activePanel = { panel, handle };
+        const release = panel.retain(key);
+        if (typeof release !== 'function') throw new TypeError('Panel retention must return synchronous cleanup');
+        if (disposed || !activePanel) { release(); cleanGesture(); return false; }
+        retained = release;
+        if (input === 'keyboard') place.container.mounted.scrollToIndex(place.row, place.column);
+      }
       const started = interaction.begin(key, { input, point, copy: copyMode });
-      if (!['armed', 'dragging'].includes(started.phase)) { focusBefore = null; return false; }
-      retained = place.container.mounted.retain(() => {
-        const current = location(options.locateSource(key));
-        return current ? { rows: [current.row], columns: [current.column] } : { rows: [], columns: [] };
-      });
-      place.container.mounted.refresh();
+      if (!['armed', 'dragging'].includes(started.phase)) { cleanGesture(); return false; }
+      if (!panel) {
+        retained = place.container.mounted.retain(() => {
+          const current = location(options.locateSource(key));
+          return current ? { rows: [current.row], columns: [current.column] } : { rows: [], columns: [] };
+        });
+        place.container.mounted.refresh();
+      }
       if (!['armed', 'dragging'].includes(interaction.state().phase)) return false;
       if (input === 'keyboard') interaction.move(point, origin, copyMode);
+      if (!['armed', 'dragging'].includes(interaction.state().phase)) return false;
       frame = requestFrame(tick); return true;
     }
     catch (error) {
@@ -172,9 +201,9 @@ export function mountCollectionDrag(containers, options) {
     suppressedClick = null;
     if (disposed || pointer || event.button !== 0 || !event.isPrimary || editing(event.target)) return;
     const handle = event.target.closest?.('[data-jc-drag]');
-    if (!handle || !containers.some((c) => c.mounted.element.contains(handle))) return;
+    if (!handle || ![...containers.map(c => c.mounted.element), ...sourcePanels.map(p => p.element)].some(element => element.contains(handle))) return;
     if (event.pointerType === 'touch' && window.getComputedStyle(handle).touchAction !== 'none') return;
-    if (start(handle.getAttribute('data-jc-drag'), event.pointerType === 'touch' ? 'touch' : 'pointer', { x: event.clientX, y: event.clientY }, event.altKey)) {
+    if (start(handle, event.pointerType === 'touch' ? 'touch' : 'pointer', { x: event.clientX, y: event.clientY }, event.altKey)) {
       pointer = { id: event.pointerId, element: handle };
       try { handle.setPointerCapture(event.pointerId); }
       catch (error) { interaction.cancel('capture-failed'); throw error; }
@@ -232,9 +261,9 @@ export function mountCollectionDrag(containers, options) {
     }
     if (![' ', 'Enter'].includes(event.key)) return;
     const handle = event.target.closest?.('[data-jc-drag]');
-    if (!handle || !containers.some((c) => c.mounted.element.contains(handle))) return;
+    if (!handle || ![...containers.map(c => c.mounted.element), ...sourcePanels.map(p => p.element)].some(element => element.contains(handle))) return;
     const rect = handle.getBoundingClientRect();
-    if (start(handle.getAttribute('data-jc-drag'), 'keyboard', { x: rect.left, y: rect.top }, event.altKey)) {
+    if (start(handle, 'keyboard', { x: rect.left, y: rect.top }, event.altKey)) {
       event.preventDefault(); event.stopImmediatePropagation();
     }
   }
@@ -289,6 +318,7 @@ export function mountCollectionDrag(containers, options) {
     update(next) { options = { ...options, ...next }; return interaction.revalidate(); },
     stats: () => ({ listeners: disposed ? 0 : 9, subscriptions: disposed ? 0 : containers.length,
       frames: frame === null ? 0 : 1, overlays: overlay ? 1 : 0, statusNodes: disposed ? 0 : 1,
+      captures: pointer ? 1 : 0, retainers: retained ? 1 : 0,
       pending: interaction.state().pending ? 1 : 0 }) };
 }
 

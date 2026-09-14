@@ -25,8 +25,14 @@ dragging.move({x:0,y:0}, {container:'grid',key:'a',column:'day-a'});
 dragging.drop(); dragging.dispose();
 const dragHost = mountCollectionDrag([{id:'grid',mounted,columnKey:String,indexOfColumn:Number}], {
   ...dragPolicy, locateSource: () => ({container:'grid',key:'a',column:'day-a'}),
+  sourcePanels: [{ element: document.createElement('aside'), retain: (key: string) => () => { void key; } }],
 });
 dragHost.update({ validTarget: () => false }); dragHost.cancel(); dragHost.dispose();
 createDraggableCollectionWidget({collection:engine.options()});
 // @ts-expect-error target columns are stable string keys
 dragging.move({x:0,y:0}, {container:'grid',key:'a',column:0});
+mountCollectionDrag([{id:'grid',mounted,columnKey:String,indexOfColumn:Number}], {
+  ...dragPolicy, locateSource: () => null,
+  // @ts-expect-error retention must synchronously return cleanup
+  sourcePanels: [{ element, retain: async () => () => {} }],
+});

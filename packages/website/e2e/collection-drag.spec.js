@@ -2,15 +2,27 @@ import { test, expect } from '@playwright/test';
 import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { resolve, sep } from 'node:path';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const example = readFileSync(new URL('../../../test/collection/fixtures/drag-grid.js', import.meta.url), 'utf8');
 const bundle = await build({ stdin: { contents: example, resolveDir: process.env.JAREN_PACKED_ROOT ?? root },
-  bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'DragExample' });
+  bundle: true, write: false, metafile: true, platform: 'browser', format: 'iife', globalName: 'DragExample' });
+if (process.env.JAREN_PACKED_ROOT) {
+  const inputs = Object.keys(bundle.metafile.inputs).filter(path => path !== '<stdin>');
+  if (inputs.some(path => !resolve(path).startsWith(resolve(process.env.JAREN_PACKED_ROOT) + sep)))
+    throw new Error('Installed drag consumer resolved a module outside its package closure');
+}
 
 async function setup(page, options = {}) {
   await page.setContent('<button id="before">Before</button><main id="host" style="display:flex;gap:32px"></main>');
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await page.evaluate((options) => { window.demo = window.DragExample.mountDragGrid(document.getElementById('host'), options); }, options);
+}
+async function setupPanel(page) {
+  await page.setContent('<main id="host" style="display:flex;gap:16px"></main>');
+  await page.addScriptTag({ content: bundle.outputFiles[0].text });
+  await page.evaluate(() => { window.demo = window.DragExample.mountPanelDragGrid(document.getElementById('host')); });
+  await page.getByRole('button', { name: 'Open items' }).press('Enter');
 }
 const source = (page) => page.locator('[data-jc-drag="item-a"]');
 const cell = (page, row = 'row-4', column = 2, container = 1) => page.locator('.jc-viewport').nth(container).locator(`[data-key="${row}"] [data-column="${column}"]`);
@@ -165,4 +177,78 @@ test('public WidgetDef updates authority and repeatedly unmounts without retaine
     expect(counts.collection.frames + counts.collection.listeners + counts.collection.subscribers + counts.collection.retainers).toBe(0);
   }
   await page.evaluate(() => window.widget.dispose());
+});
+
+test('ordinary panel keyboard opening, offscreen grid target and closing share the existing owner', async ({ page }) => {
+  await setupPanel(page);
+  await expect(source(page)).toBeFocused();
+  await page.evaluate(() => window.demo.setInitialTarget({ container: 'right', key: 'row-9000', column: 'day-b' }));
+  await source(page).press('Space');
+  expect(await page.evaluate(() => window.demo.drag.interaction.state().phase)).toBe('dragging');
+  await page.keyboard.press('ArrowDown'); await page.keyboard.down('Alt'); await page.keyboard.press('Enter'); await page.keyboard.up('Alt');
+  await expect.poll(() => page.evaluate(() => window.demo.commands.length)).toBe(1);
+  expect(await page.evaluate(() => window.demo.commands[0])).toEqual({ source: { key: 'item-a', revision: 1 },
+    target: { container: 'right', key: 'row-9001', column: 'day-b' }, mode: 'copy' });
+  await expect(source(page)).toBeFocused();
+  await source(page).press('Escape'); await expect(page.getByRole('button', { name: 'Open items' })).toBeFocused();
+  await page.getByRole('button', { name: 'Open items' }).press('Enter');
+  await page.getByRole('textbox', { name: 'Filter items' }).fill('typing');
+  await page.getByRole('textbox', { name: 'Filter items' }).press('Space');
+  expect(await page.evaluate(() => window.demo.commands.length)).toBe(1);
+  await source(page).press('Space'); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Open items' })).toBeFocused();
+  const counts = await page.evaluate(() => window.demo.stats());
+  expect(counts.panelRetainers).toBe(0); expect(counts.panelReleases).toBe(2);
+  expect(counts.collections.every(c => c.rows < 14 && c.cells < 70)).toBe(true);
+  await page.evaluate(() => { window.demo.dispose(); window.demo.dispose(); });
+  const final = await page.evaluate(() => window.demo.stats());
+  expect(final.listeners + final.subscriptions + final.frames + final.overlays + final.statusNodes + final.panelRetainers + final.panelListeners).toBe(0);
+  await test.info().attach('panel-resource-counts', { body: JSON.stringify({ counts, final }), contentType: 'application/json' });
+});
+
+test('ordinary panel pointer move and copy use measured grid cells and one host command', async ({ page }) => {
+  await setupPanel(page);
+  await page.evaluate(() => { const host = document.getElementById('host'); host.style.zoom = '0.8'; host.style.transform = 'translate(20px, 30px)'; });
+  for (const mode of ['move', 'copy']) {
+    await pointerStart(page);
+    expect(await page.evaluate(() => window.demo.stats().panelRetainers)).toBe(1);
+    if (mode === 'copy') await page.keyboard.down('Alt');
+    const box = await cell(page).boundingBox(); await page.mouse.move(box.x + 25, box.y + 20); await page.mouse.up();
+    if (mode === 'copy') await page.keyboard.up('Alt');
+    await expect.poll(() => page.evaluate(() => window.demo.commands.length)).toBe(mode === 'move' ? 1 : 2);
+    expect(await page.evaluate(() => window.demo.commands.at(-1))).toEqual({ source: { key: 'item-a', revision: 1 },
+      target: { container: 'right', key: 'row-4', column: 'day-c' }, mode });
+    await expect(source(page)).toBeFocused();
+    const settled = await page.evaluate(() => window.demo.stats());
+    expect(settled.overlays + settled.frames + settled.captures + settled.retainers + settled.panelRetainers).toBe(0);
+  }
+  await page.evaluate(() => window.demo.dispose());
+});
+
+test('ordinary panel removal, closure and stale delayed authority dispatch nothing and release ownership', async ({ page }) => {
+  for (const reason of ['rejected', 'revision', 'removed', 'hidden', 'closed', 'disposed']) {
+    await setupPanel(page);
+    await page.evaluate(() => window.demo.setPermission('pending'));
+    await source(page).press('Space'); await page.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate(() => window.demo.drag.interaction.state().phase)).toBe('validating');
+    expect(await page.evaluate(() => window.demo.stats().panelRetainers)).toBe(1);
+    await page.evaluate(reason => {
+      if (reason === 'revision') window.demo.items.get('item-a').revision++;
+      if (reason === 'removed') window.demo.panel.remove();
+      if (reason === 'hidden') window.demo.panel.hidden = true;
+      if (reason === 'closed') window.demo.closePanel();
+      if (reason === 'disposed') window.demo.dispose();
+      if (reason === 'rejected' || reason === 'revision') window.demo.resolvePermission(reason !== 'rejected');
+    }, reason);
+    await expect(page.locator('[data-jc-overlay]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.demo.stats().panelRetainers)).toBe(0);
+    await page.evaluate(() => window.demo.resolvePermission(true));
+    await expect.poll(() => page.evaluate(() => window.demo.drag.stats().pending)).toBe(0);
+    expect(await page.evaluate(() => window.demo.commands.length)).toBe(0);
+    await page.evaluate(() => { window.demo.dispose(); window.demo.dispose(); });
+    const final = await page.evaluate(() => window.demo.stats());
+    expect(final.listeners + final.subscriptions + final.frames + final.overlays + final.statusNodes
+      + final.captures + final.retainers + final.panelRetainers + final.panelListeners).toBe(0);
+    expect(final.panelReleases).toBe(1);
+  }
 });

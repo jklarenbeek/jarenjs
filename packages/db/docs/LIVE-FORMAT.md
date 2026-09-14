@@ -106,6 +106,13 @@ them).
   `TypeError` at open — an application that needs completeness can
   refuse to start rather than silently miss changes.
 
+Node worker, worker-pool and process Stores expose no sessions. Their `auto`
+mode selects `journal`; explicit `journal` plus `log` supports asynchronous
+`changes.page()` with finite row/byte limits, rollback exclusion, retention
+resets and resume after reopen. Their `live` capability remains false: reading
+the durable feed does not require the synchronous live-query engine. The public
+host matrix and delivery recipe are in [HOSTS](HOSTS.md#async-sqlite-jobs-and-committed-feeds).
+
 ## 5. The persisted log and retention
 
 With `capture.log`, each record is appended to `_jaren_changes`

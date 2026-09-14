@@ -1,12 +1,24 @@
 {
   "name": "@jarenjs/app",
   "private": false,
-  "version": "0.89.0",
+  "version": "0.90.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
   "sideEffects": false,
   "exports": {
+    "./routes": {
+      "types": "./dist/types/routes.d.ts",
+      "default": "./src/routes.js"
+    },
+    "./dialog": {
+      "types": "./dist/types/dialog.d.ts",
+      "default": "./src/dialog.js"
+    },
+    "./file-tokens": {
+      "types": "./dist/types/file-tokens.d.ts",
+      "default": "./src/file-tokens.js"
+    },
     "./search": {
       "types": "./dist/types/search.d.ts",
       "default": "./src/search.js"
@@ -58,8 +70,8 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.89.0",
-    "@jarenjs/json": "^0.89.0",
-    "@jarenjs/view": "^0.89.0"
+    "@jarenjs/core": "^0.90.0",
+    "@jarenjs/json": "^0.90.0",
+    "@jarenjs/view": "^0.90.0"
   }
 }

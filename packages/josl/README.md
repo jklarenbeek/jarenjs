@@ -401,7 +401,12 @@ response.body = stringifyCsvStream(store.collection('rows').query(doc), { signal
 source is never asked for a row the consumer has not asked for; `signal`
 aborts between pulls, and an abort, an early return or a throw closes the
 source exactly once. The reader's `signal` does the same for
-`iterateCsvStream`. The hostile-input limits (`maxTotalBytes`,
+`iterateCsvStream`. All writers accept `neutralizeFormulas: true` to prefix
+an apostrophe on converted cells starting with `=`, `+`, `-`, `@`, tab, CR or LF,
+including headers and negative numbers. The default remains unchanged. This
+is an explicit text export policy; see [the format contract](FORMAT.md#csv)
+for exact quoting behavior and spreadsheet qualification limits.
+The hostile-input limits (`maxTotalBytes`,
 `maxRecordBytes`, `maxFieldBytes`, `maxColumns`, the `CSV2xxx` codes) are
 listed under Streaming.
 

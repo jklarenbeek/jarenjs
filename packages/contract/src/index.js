@@ -18,6 +18,7 @@ export {
 export { contractMessagesEn, contractCatalogEn } from './messages.js';
 
 /**
+ * @typedef {string} Continuation - Bounded wire string; authentication belongs to the optional Node host adapter.
  * @typedef {import('./compile.js').Contract} Contract
  * @typedef {import('./compile.js').CompiledOperation} CompiledOperation
  * @typedef {import('./compile.js').CompiledHttp} CompiledHttp

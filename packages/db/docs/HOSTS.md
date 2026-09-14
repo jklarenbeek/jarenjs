@@ -77,6 +77,64 @@ run on the caller. Synchronous Store methods and live queries are unavailable on
 these asynchronous connections. Bun can import both subpaths; opening a Node
 SQLite worker there reports the named unavailable-binding failure (`JD0003`).
 
+## Async SQLite jobs and committed feeds
+
+| Host entry | Jobs | `capture.mode: 'auto'` | Sessions | Synchronous Store / live |
+|---|---|---|---|---|
+| `@jarenjs/db/node-worker` | yes | journal | no | no |
+| `@jarenjs/db/node-pool` | yes | journal | no | no |
+| `@jarenjs/db/node-process` | yes | journal | no | no |
+
+Job statements resolve asynchronous preparation through the shared queue engine.
+Enqueue, claim, renewal, settlement and flow checkpoints use the same public API
+as direct Node SQLite. A failed preparation keeps its classified error and can
+be retried; it does not leave an unusable cached statement. Connection close owns
+statement cleanup. The executable public contract is
+`test/db/async-host-contracts.test.js`, including transactional outbox rollback
+and expired-lease recovery with persisted checkpoints.
+Capture setup settles before job-table setup starts, so opting into both features
+also works on asynchronous connections. The same public host fixture runs from
+isolated local package tarballs in `npm run test:packed`.
+
+```js
+const store = await openStore(model, {
+  driver: nodeWorkerDriver(), path: 'tenant.sqlite', jobs: true,
+  capture: { mode: 'journal', log: { retention: 1000 } },
+});
+try {
+  await store.transaction(async tx => {
+    await tx.collection('notes').put({ id: 'note-1', body: 'saved' });
+    await tx.jobs.enqueue('deliver', { id: 'note-1' }, { id: 'delivery-1' });
+  });
+  const page = await store.changes.page({ after: savedSequence, limit: 100, maxBytes: 65536 });
+  if (page.resetRequired) await resnapshotAuthorizedData();
+  else await deliverAuthorizedPage(page);
+} finally { await store.close(); }
+```
+
+The host authorizes and scopes feed delivery, persists the acknowledged cursor,
+and handles retention resets. Journal capture covers enrolled Store writes;
+arbitrary SQL, other connections and all trigger/cascade effects are not covered.
+Explicit `session` mode refuses with `TypeError`, without a JD code. A committed
+feed does not enable synchronous Store methods or live queries on async hosts.
+
+Business rows and `tx.jobs` in one tenant file share a transaction. Separate
+tenant/control/jobs files do not: persist an outbox intent in the tenant
+transaction, then relay it idempotently to the other database. The destination
+must commit its effect and deduplication receipt together before acknowledging
+delivery. PostgreSQL business data with a separate SQLite queue has the same
+cross-database boundary.
+
+The public [relay fixture](../../../test/consumer/outbox-relay.js) composes
+`createCommand` and `createDbReceipts` with two separate SQLite files. It loses
+the acknowledgment after the destination commit, reopens both files, reclaims
+the expired source lease and verifies a receipt replay with zero business writes
+or revisions. Another relay pass is idle; destination journal pages are unchanged.
+The fixture also rejects changed input under the same receipt identity and a
+foreign tenant. It runs across all four Node SQLite hosts and direct Bun in
+installed-package qualification. This is retry/receipt evidence, not a power-loss
+durability test or authorization policy for a particular application.
+
 ## Supervised Node processes
 
 `nodeProcessDriver` from `@jarenjs/db/node-process` implements the same asynchronous
@@ -143,6 +201,7 @@ invalid. No statement, transaction or callback is automatically replayed.
 
 The transaction observation is conservative:
 
+- Before an observed transaction or mutation, the observation is `none`.
 - A live, acknowledged native transaction is `active`.
 - An acknowledged single-statement completion is `committed`, or `rolled-back`
   after rollback. A multi-statement program with no open transaction remains
@@ -174,6 +233,15 @@ call `owner.supervise(() => store.transaction(body), options)`. This uses the sa
 Store and transaction APIs. After owner loss, close the invalid Store, await owner
 exit and explicitly reopen/reconcile. A failed-generation `close()` may reject;
 its rejection never substitutes for the separate exit observation.
+
+For an unknown outcome, the receipt key must identify the logical host request
+and be stored in the same transaction as its business effect. After confirmed
+exit, reopen and check that receipt under the host's normal authorization before
+deciding whether to retry. SQLite journal/WAL recovery restores database state;
+it cannot reconstruct a logical request identity the host never persisted.
+The [Node SQLite API](https://nodejs.org/api/sqlite.html) documents no statement
+interruption method. Jaren reports its observed cancellation capability; this
+does not promise an upstream schedule or a permanent Node limitation.
 
 All options below are positive safe integers. Row/byte/statement/cursor limits
 retain the thread worker meanings. `maxOwners` includes startup and quarantine;

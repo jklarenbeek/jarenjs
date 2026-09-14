@@ -190,6 +190,12 @@ hands it to `explain()` and asserts `mode: 'native'` with no residual.
 | `toArray()` | — | `load(spec)`: the store's one statement |
 | `cursor(options?)` | — | `loadCursor(spec, options)`: one root graph per pull from that same statement, its includes attached and bounded per root; `return()` releases it; `{ signal?, tracking? }` — untracked unless `tracking: true` |
 | `page(options?)` | — | `page(spec, options)`: one bounded page over the composite keyset — `{ items, continuation, hasMore, snapshot }`, never more than `limit` roots or `maxBytes` bytes; `{ limit?, after?, maxBytes?, consistency?, signal?, tracking? }`; a `take`/`skip` on the graph beside it is the store's `JD0032` |
+
+For an untrusted transport, the Node host can wrap the structural continuation
+with [`@jarenjs/contract/continuation-node`](../../contract/docs/CONTRACT-FORMAT.md#20-scoped-continuations-at-a-node-host).
+Open the token with the authorized scope and original query/order identity,
+then pass the result through the normal Store cursor validation. Signing adds
+no snapshot isolation and does not change the graph's ordering or `JD0035`.
 | `explain()` | — | `explainLoad(spec)`: the SQL, the includes, the pagination strategy, the per-root bounds |
 
 The spec's member order is fixed — `where, orderBy, take, skip, after,
@@ -843,10 +849,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->728,423<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->728,500<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->728<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->729<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather

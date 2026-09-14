@@ -61,3 +61,37 @@ export function mountDragWidget(host) {
     hide: () => render(null), dispose: () => render.destroy(),
     stats: () => ({ drag: handle.drag.stats(), collection: handle.mounted.stats() }) };
 }
+
+/** Ordinary DOM panel to the same public grid adapter; no collection in the panel. */
+export function mountPanelDragGrid(host) {
+  const document = host.ownerDocument, panel = document.createElement('aside');
+  panel.setAttribute('aria-label', 'Available items'); panel.style.width = '180px'; panel.style.flexShrink = '0';
+  const opener = document.createElement('button'); opener.textContent = 'Open items'; host.before(opener);
+  const handle = document.createElement('button'); handle.textContent = 'Assign item';
+  handle.setAttribute('data-jc-drag', 'item-a'); handle.style.touchAction = 'none';
+  const input = document.createElement('input'); input.setAttribute('aria-label', 'Filter items');
+  const closer = document.createElement('button'); closer.textContent = 'Close items';
+  panel.append(input, handle, closer); panel.hidden = true; host.append(panel);
+  let retainers = 0, releases = 0, disposed = false;
+  let target = { container: 'right', key: 'row-4', column: 'day-c' };
+  const demo = mountDragGrid(host, {
+    collection: { renderCell: (row, column) => `${row.key} ${column}` },
+    drag: { locateSource: () => target, sourcePanels: [{ element: panel, retain: () => {
+      retainers++; let active = true;
+      return () => { if (active) { active = false; retainers--; releases++; } };
+    } }] },
+  });
+  function openPanel() { if (!disposed) { panel.hidden = false; handle.focus(); } }
+  function closePanel() { demo.drag.cancel('panel-closed'); panel.hidden = true; opener.focus(); }
+  function key(event) { if (event.key === 'Escape' && !event.isComposing) closePanel(); }
+  opener.addEventListener('click', openPanel); closer.addEventListener('click', closePanel); panel.addEventListener('keydown', key);
+  return { ...demo, panel, handle, openPanel, closePanel, setInitialTarget: next => { target = next; },
+    stats: () => ({ ...demo.stats(), panelRetainers: retainers, panelReleases: releases, panelListeners: disposed ? 0 : 3 }),
+    dispose() {
+      if (disposed) return; disposed = true;
+      try { demo.dispose(); } finally {
+        opener.removeEventListener('click', openPanel); closer.removeEventListener('click', closePanel); panel.removeEventListener('keydown', key);
+        panel.remove(); opener.remove();
+      }
+    } };
+}

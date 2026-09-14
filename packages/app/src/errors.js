@@ -40,6 +40,15 @@ export const APP_CODES = Object.freeze({
   JA2015: 'the validateState hook itself threw',
   JA2016: 'a subscription dynamic query (withQuery, key or for) failed at runtime',
   JA2017: 'a subscription fan-out exceeded maxSubInstances',
+  JA2018: 'file-token registry options, clock or native File selection are malformed',
+  JA2019: 'a file-token registry count, byte or lifetime bound would be exceeded',
+  JA2020: 'a disposed file-token registry refused a selection',
+  JA2021: 'a file-token identifier is malformed or a registry operation was reentered',
+  JA2022: 'dialog widget requires a close action binding',
+  JA2023: 'route host options, subscription or navigation input are malformed',
+  JA2024: 'route navigation violates the origin, protocol or base-path boundary',
+  JA2025: 'a route URL, query or delivery bound would be exceeded',
+  JA2026: 'route owner is disposed, inactive or already subscribed',
 });
 
 /**

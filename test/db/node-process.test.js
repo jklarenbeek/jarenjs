@@ -181,9 +181,11 @@ it('native close deadlines and unsolicited crashes fence work and release file l
 
 it('failed startup returns its capacity and acknowledged SQL programs never invent a commit', native, () => fixture(async ({ connection, path }) => {
   const other = nodeProcessDriver({ maxOwners: 1 });
-  const started = performance.now();
   await assert.rejects(other.open(join(path, 'missing.sqlite')), /unable to open/);
-  while (other.metrics().owners && performance.now() - started < 1000) await wait(5);
+  // Rejection and OS exit are distinct settlements. Native startup under
+  // coverage may consume a second before rejection; give exit its own bound.
+  const cleanupStarted = performance.now();
+  while (other.metrics().owners && performance.now() - cleanupStarted < 1000) await wait(5);
   assert.equal(other.metrics().owners, 0);
   const healthy = await other.open(); await healthy.close();
   await connection.exec('CREATE TABLE receipts(id TEXT PRIMARY KEY)');
@@ -206,7 +208,8 @@ it('startup deadlines reject separately from eventual owner-credit release', nat
   await assert.rejects(driver.open(), { code: 'JD2090' });
   assert.ok(performance.now() - started < 1000);
   assert.ok(driver.metrics().owners <= 1);
-  while (driver.metrics().owners && performance.now() - started < 1000) await wait(5);
+  const cleanupStarted = performance.now();
+  while (driver.metrics().owners && performance.now() - cleanupStarted < 1000) await wait(5);
   assert.equal(driver.metrics().owners, 0);
 });
 

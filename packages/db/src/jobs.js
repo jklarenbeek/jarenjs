@@ -236,11 +236,17 @@ export function createJobEngine(options) {
   const prepared = (key, sql) => {
     let statement = statements.get(key);
     if (statement === undefined) {
-      const raw = connection.prepare(sql);
+      const raw = attempt(() => connection.prepare(sql), (error) => {
+        // A failed preparation owns no statement and must not poison retries.
+        statements.delete(key);
+        return wrapJobs(error);
+      });
+      const invoke = (method, params) => attempt(
+        () => chain(raw, (resolved) => resolved[method](params)), wrapJobs);
       statement = {
-        run: (params) => attempt(() => raw.run(params), wrapJobs),
-        get: (params) => attempt(() => raw.get(params), wrapJobs),
-        all: (params) => attempt(() => raw.all(params), wrapJobs),
+        run: (params) => invoke('run', params),
+        get: (params) => invoke('get', params),
+        all: (params) => invoke('all', params),
       };
       statements.set(key, statement);
     }
