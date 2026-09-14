@@ -2,12 +2,12 @@
 /** Native receipts, guarded rebuilds and application initialization share one owner. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { writeFileSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertCrash } from './fixtures/abrupt-exit.js';
+import { tempDbPath } from './helpers.js';
 import { planTable, planTableMigration, applyTableMigration, planPhysicalMigration, migrate, readSchema,
   withForeignKeysSuspended } from '@jarenjs/db';
 
@@ -77,8 +77,8 @@ async function review(db, host) {
 
 for (const boundary of ['drop', 'receipt', 'commit']) {
   it(`a process killed at ${boundary} leaves the guarded table and existing receipts unchanged`, async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'jaren-physical-lifecycle-'));
-    const path = join(directory, 'data.sqlite'), input = join(directory, 'migration.json');
+    const { dbPath: path, cleanup } = tempDbPath();
+    const input = join(dirname(path), 'migration.json');
     const host = await driver();
     let db;
     try {
@@ -113,7 +113,7 @@ for (const boundary of ['drop', 'receipt', 'commit']) {
       assert.deepEqual(receipts(db).map((row) => row.id), ['baseline', 'upgrade']);
       assert.equal(db.prepare('SELECT count(*) AS n FROM items').get([]).n, 2);
     }
-    finally { db?.close(); rmSync(directory, { recursive: true, force: true }); }
+    finally { db?.close(); cleanup(); }
   });
 }
 

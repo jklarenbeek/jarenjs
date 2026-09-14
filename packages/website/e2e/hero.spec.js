@@ -36,6 +36,14 @@ const stages = (page) => page.locator('.hero-stage');
 const artifact = (page) => page.locator('.hero-artifact');
 const focused = (page) => page.locator('.hero-stage.is-focus');
 
+/** Settle input geometry before stepping beside the sticky header. */
+async function stepHero(page) {
+  await page.evaluate(() => document.fonts.ready);
+  const step = page.locator('.hero-step');
+  await step.evaluate((node) => node.scrollIntoView({ behavior: 'instant', block: 'center' }));
+  await step.click();
+}
+
 test('the hero stacks at the shared tablet breakpoint without widening the page', async ({ page }) => {
   await openHero(page, 'reduce');
   for (const width of [1280, 1025, 1024, 901, 760, 390]) {
@@ -139,9 +147,9 @@ test.describe('with motion allowed', function () {
     expect(await lifted(), 'the focused stage sits off its resting place').not.toBe('none');
     const title = await focused(page).locator('.hero-stage-title').textContent();
 
-    await page.locator('.hero-step').click();
+    await stepHero(page);
     await expect(focused(page)).toHaveCount(1);
-    expect(await focused(page).locator('.hero-stage-title').textContent()).not.toBe(title);
+    await expect(focused(page).locator('.hero-stage-title')).not.toHaveText(title ?? '');
     await expect.poll(lifted, { timeout: 3_000 }).not.toBe('none');
     // and the artifact panel follows the focus, so stepping is reading
     await expect(artifact(page)).not.toHaveText('');
@@ -177,7 +185,7 @@ test.describe('with reduced motion asked for', function () {
   test('stepping jumps: the focus is on the next stage with no animation in flight', async function ({ page }) {
     await openHero(page, 'reduce');
     const title = await focused(page).locator('.hero-stage-title').textContent();
-    await page.locator('.hero-step').click();
+    await stepHero(page);
     // no poll and no wait: instant means the very next read is the answer
     const after = await focused(page).evaluate((el) => ({
       title: el.querySelector('.hero-stage-title')?.textContent,

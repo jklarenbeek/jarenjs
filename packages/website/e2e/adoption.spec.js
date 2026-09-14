@@ -20,10 +20,24 @@ test('offline catalog preserves original data, reviews pages and recovers remote
   await page.getByRole('button', { name: 'Preview rules', exact: true }).click();
   await expect(page.locator('[data-rule-status]')).toContainText('128 proposed');
   // The application owns manual-fact protection; choose two automatic rows on different pages.
-  await page.locator('[data-rule-change]').nth(1).check();
+  const pages = page.getByRole('navigation', { name: 'Preview pages' });
+  const selectAutomatic = async () => {
+    const choice = page.locator('[data-rule-change]').nth(1);
+    const id = await choice.getAttribute('data-rule-change');
+    // Settle the input's geometry before pointer activation beside the sticky header.
+    await choice.evaluate((node) => node.scrollIntoView({ behavior: 'instant', block: 'center' }));
+    await choice.check();
+    await expect(choice).toBeChecked();
+    return id;
+  };
+  await expect(pages).toContainText('Page 1 of 13');
+  const firstChoice = await selectAutomatic();
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await page.locator('[data-rule-change]').nth(1).check();
+  await expect(pages).toContainText('Page 2 of 13');
+  expect(await selectAutomatic()).not.toBe(firstChoice);
   await page.getByRole('button', { name: 'Previous', exact: true }).click();
+  await expect(pages).toContainText('Page 1 of 13');
+  await expect(page.locator('[data-rule-change]').nth(1)).toHaveAttribute('data-rule-change', firstChoice);
   await expect(page.locator('[data-rule-change]').nth(1)).toBeChecked();
   await page.getByRole('button', { name: 'Commit selected (2)' }).click();
   await expect(page.locator('[data-rule-status]')).toContainText('Selected changes committed.');

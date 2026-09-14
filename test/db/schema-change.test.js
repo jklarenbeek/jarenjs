@@ -1,10 +1,8 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { planTable, planSchemaChange, applySchemaChange, sql } from '@jarenjs/db/relational';
+import { tempDbPath } from './helpers.js';
 
 const driver = async () => process.versions.bun ? (await import('@jarenjs/db/bun')).bunDriver() : (await import('@jarenjs/db/node')).nodeDriver();
 const change = (db, operation) => applySchemaChange(db, planSchemaChange(db, operation));
@@ -66,8 +64,7 @@ it('additive plans append only the requested column and preserve unknown schema 
 }));
 
 it('additive upgrades roll back and repeated openings leave rows and schema unchanged', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'jaren-additive-'));
-  const path = join(directory, 'data.db');
+  const { dbPath: path, cleanup } = tempDbPath();
   const host = await driver();
   let db = await host.open(path);
   try {
@@ -83,7 +80,7 @@ it('additive upgrades roll back and repeated openings leave rows and schema unch
       assert.equal(db.prepare('PRAGMA integrity_check').get([]).integrity_check, 'ok');
     }
   }
-  finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  finally { db.close(); cleanup(); }
 });
 
 it('schema changes refuse stale source/settings, altered SQL and unavailable connection ownership', async () => fixture((db) => {

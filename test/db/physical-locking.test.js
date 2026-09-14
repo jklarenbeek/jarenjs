@@ -2,12 +2,10 @@
 /** Native writer admission for physical changes on both SQLite hosts. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { planSchemaChange, applySchemaChange, planTableMigration, applyTableMigration, withForeignKeysSuspended } from '@jarenjs/db';
+import { tempDbPath } from './helpers.js';
 
 const driver = async () => process.versions.bun
   ? (await import('@jarenjs/db/bun')).bunDriver() : (await import('@jarenjs/db/node')).nodeDriver();
@@ -16,8 +14,7 @@ const settings = (db) => [db.prepare('PRAGMA foreign_keys').get([]).foreign_keys
 const busy = (error) => error.errcode === 5 || error.code === 'SQLITE_BUSY';
 
 async function fixture(run) {
-  const directory = mkdtempSync(join(tmpdir(), 'jaren-physical-lock-'));
-  const path = join(directory, 'data.sqlite');
+  const { dbPath: path, cleanup } = tempDbPath();
   const host = await driver();
   let db, other;
   try {
@@ -26,7 +23,7 @@ async function fixture(run) {
     other = await host.open(path, { timeout: 0 });
     await run(db, other, path);
   }
-  finally { other?.close(); db?.close(); rmSync(directory, { recursive: true, force: true }); }
+  finally { other?.close(); db?.close(); cleanup(); }
 }
 
 for (const kind of ['schema', 'fresh', 'rebuild', 'scope']) {

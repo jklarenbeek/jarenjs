@@ -1,12 +1,10 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertCrash } from './fixtures/abrupt-exit.js';
+import { tempDbPath } from './helpers.js';
 import { planTableMigration } from '@jarenjs/db/relational';
 import { target, upgradeIdentity } from './fixtures/schema-upgrade.mjs';
 const host = async () => process.versions.bun ? (await import('@jarenjs/db/bun')).bunDriver() : (await import('@jarenjs/db/node')).nodeDriver();
@@ -50,8 +48,7 @@ it('an explicit identity policy selects scoped minimum IDs, accounts for exclude
 });
 
 it('a killed key-changing upgrade recovers its original schema and reruns once across reopened databases', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'jaren-identity-crash-'));
-  const path = join(directory, 'data.db');
+  const { dbPath: path, cleanup } = tempDbPath();
   const driver = await host();
   let db = await driver.open(path);
   try {
@@ -71,5 +68,5 @@ it('a killed key-changing upgrade recovers its original schema and reruns once a
       db.close(); db = null;
     }
   }
-  finally { db?.close(); rmSync(directory, { recursive: true, force: true }); }
+  finally { db?.close(); cleanup(); }
 });

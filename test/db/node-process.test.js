@@ -1,22 +1,21 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nodeProcessDriver } from '@jarenjs/db/node-process';
 import { nodeDriver } from '@jarenjs/db/node';
 import { openStore } from '@jarenjs/db';
+import { tempDbPath } from './helpers.js';
 
 const native = { skip: !!process.versions.bun };
 const longRead = 'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000000) SELECT sum(x) AS n FROM n';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function fixture(body) {
-  const folder = await mkdtemp(join(tmpdir(), 'jaren-process-'));
+  const { dbPath: path, cleanup } = tempDbPath();
   const driver = nodeProcessDriver({ maxOwners: 1, timeoutMs: 100, closeTimeoutMs: 100 });
-  let connection = await driver.open(join(folder, 'data.sqlite'));
-  try { await body({ driver, connection, path: join(folder, 'data.sqlite'), replace: (next) => { connection = next; } }); }
-  finally { await connection.close().catch(() => {}); await connection.settled(); await rm(folder, { recursive: true, force: true }); }
+  let connection = await driver.open(path);
+  try { await body({ driver, connection, path, replace: (next) => { connection = next; } }); }
+  finally { await connection.close().catch(() => {}); await connection.settled(); cleanup(); }
 }
 
 it('process cancellation fences replies before releasing owner credits, with a responsive parent', native, (t) => fixture(async ({ driver, connection }) => {

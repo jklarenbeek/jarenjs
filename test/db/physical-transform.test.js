@@ -1,10 +1,8 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { migrate, shapeHash, createModelShape, openConnection, sqliteDialect } from '@jarenjs/db';
+import { tempDbPath } from './helpers.js';
 
 const driver = process.versions.bun
   ? (await import('@jarenjs/db/bun')).bunDriver()
@@ -18,13 +16,12 @@ const transform = (model, body) => ({ kind: 'jslt', collection: 'Row', model,
   stylesheet: [{ match: '$', body }] });
 const document = (id, model, steps) => ({ $migration: '0.1', id, from: shapeHash(model), to: shapeHash(model), steps });
 async function fixture(run) {
-  const directory = mkdtempSync(join(tmpdir(), 'jaren-physical-transform-'));
-  const path = join(directory, 'fixture.sqlite');
+  const { dbPath: path, cleanup } = tempDbPath();
   const db = await driver.open(path);
   const apply = (model, migrations, options = {}) => migrate({ driver, path }, migrations,
     { baseline: model, batchSize: 1, shadow: false, ...options });
   try { await run(db, apply, path); }
-  finally { await db.close(); rmSync(directory, { recursive: true, force: true }); }
+  finally { await db.close(); cleanup(); }
 }
 
 it('physical transform previews count the historical aliased table without changing data or history', async () => fixture(async (db, apply) => {
