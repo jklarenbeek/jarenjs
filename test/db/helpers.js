@@ -155,30 +155,39 @@ export function recordingDriver(driver) {
   };
 }
 
+const removalRetryCodes = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
+
+/**
+ * Enforce the same finite removal budget even when a host accepts but
+ * ignores rmSync's retry options. Windows may retain a deleted directory
+ * entry briefly after its last handle closes. Ten linear 100ms retries
+ * cover that race; a persistent handle still fails. Do not lengthen this
+ * budget to hide a missing close or an undrained worker.
+ * @param {string} dir
+ * @param {typeof fs.rmSync} [remove]
+ * @param {(milliseconds: number) => void} [wait]
+ */
+export function removeTempDirectory(dir, remove = fs.rmSync,
+  wait = (milliseconds) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds); }) {
+  for (let retries = 0; ; retries++) {
+    try {
+      remove(dir, { recursive: true, force: true, maxRetries: 0 });
+      return;
+    }
+    catch (error) {
+      if (retries === 10 || !removalRetryCodes.has(error?.code)) throw error;
+      wait((retries + 1) * 100);
+    }
+  }
+}
+
 /**
  * A fresh temp database path plus its cleanup.
  * @returns {{ dbPath: string, cleanup: () => void }}
  */
 export function tempDbPath() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-db-'));
-  return {
-    dbPath: path.join(dir, 'store.db'),
-    // Windows keeps a deleted file's directory entry until the LAST
-    // handle to it closes, so a bare `rmSync` races the kernel and throws
-    // EPERM. `maxRetries` is node's own answer — it retries EPERM/EBUSY
-    // with a backoff — and POSIX, which unlinks an open file immediately,
-    // never reaches it.
-    //
-    // This hardens the RACE, and only the race: retries cannot cure a
-    // handle that is genuinely still open. The one caller that used to
-    // hold one — a worker claim loop `stop()` left running — is closed at
-    // the source: `worker.stop()` now cancels or drains every claim,
-    // renewal, checkpoint and settlement before it resolves, and
-    // `jobs-concurrency.test.js` asserts every stop is
-    // `{ drained: true, inFlight: 0 }` before its store closes. Do not
-    // answer a future EPERM here by lengthening these retries.
-    cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
-  };
+  return { dbPath: path.join(dir, 'store.db'), cleanup: () => removeTempDirectory(dir) };
 }
 
 /**
