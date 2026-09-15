@@ -85,7 +85,8 @@ it('configured admission waits for a child process writer, then runs once', asyn
   let output = '', errors = '';
   child.stderr.on('data', (data) => { errors += data; });
   child.stdout.on('data', (data) => { output += data; });
-  const stopped = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
+  // File cleanup follows process and stdio closure, not merely process exit.
+  const stopped = new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })));
   const waitFor = (message) => new Promise((resolve, reject) => {
     const cleanup = () => { child.stdout.off('data', received); child.off('exit', exited); child.off('error', failed); };
     const received = () => { if (output.includes(message)) { cleanup(); resolve(undefined); } };
@@ -112,6 +113,7 @@ it('configured admission waits for a child process writer, then runs once', asyn
     assert.equal(bodies, 1);
     assert.equal(db.prepare('SELECT n FROM marker').get([]).n, 1, 'the other transaction committed before admission');
     assert.deepEqual(await stopped, { code: 0, signal: null }, errors);
+    for (const stream of child.stdio) assert.equal(stream.destroyed, true, 'the child pipe is closed before fixture removal');
   }
   finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await stopped; }
 }));

@@ -109,7 +109,8 @@ it('migration with two subscribers cannot go negative when both old wrappers clo
   let snapshots = 0;
   const subs = [0, 1].map(() => client.subscribe('data.live', liveInput, { onSnapshot: () => snapshots++ }));
   await until(() => snapshots === 2);
-  assert.equal((await client.invoke('data.migrate', { to: indexed(), id: 'title' })).ok, true);
+  const migrated = await client.invoke('data.migrate', { to: indexed(), id: 'title' });
+  assert.equal(migrated.ok, true, JSON.stringify(migrated));
   for (const sub of subs) sub.stop();
   const lives = await client.invoke('data.lives', null);
   assert.equal(lives.ok, true);
