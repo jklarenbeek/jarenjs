@@ -103,6 +103,7 @@ describe('the Bun binding releases uncached prepared statements', () => {
     assert.deepStrictEqual(finalized, ['SELECT 1 AS n', 'SELECT 2 AS n']);
     assert.deepStrictEqual(unregistered, refs.slice(1));
     assert.strictEqual(close.mock.callCount(), 1);
+    assert.deepStrictEqual(close.mock.calls[0].arguments, [true], 'native close also drains unreachable statements');
   });
 
   for (const failureMode of ['statement', 'database', 'both']) {
@@ -208,6 +209,7 @@ describe('the Bun binding declares its iterator honestly', () => {
     assert.deepStrictEqual(report.rows, ['a', 'b']);
     assert.strictEqual(report.closedFileRemoved, true);
     assert.strictEqual(report.reopenedFileRemoved, true);
+    assert.strictEqual(report.unreachableNativeStatementsClosed, true);
     assert.deepStrictEqual(report.failedTransactionRows, { deferred: [], immediate: [] });
   });
 });

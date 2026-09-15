@@ -96,7 +96,9 @@ export function adaptBunDatabase(db, options) {
       }
       statements.clear();
       try {
-        db.close();
+        // Weak targets can disappear before their native statements drain.
+        // Immediate close finalizes those statements at the database owner.
+        db.close(true);
       }
       catch (error) {
         errors.push(error);

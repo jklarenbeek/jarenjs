@@ -477,6 +477,12 @@ sync twin. Physical adoption on PostgreSQL refuses pending a separate mapping
 and codec qualification. Unknown application-trigger effects do not qualify
 capture or replication; those combinations refuse before an adoption claim.
 
+Closing a Bun connection requests immediate native database closure. This also
+finalizes prepared statements whose JavaScript weak references have cleared;
+file release does not depend on a later garbage-collection cycle. Reachable
+statement cleanup and native close errors remain observable. Statements cannot
+outlive the connection, including when adapting an existing Bun database.
+
 Node backups use the built-in online snapshot. Bun uses disk-backed `VACUUM INTO`
 under the store gate, flushes a sibling temporary, then uses the shared atomic
 publisher. Both include committed WAL. Bun allocates no whole-database JavaScript

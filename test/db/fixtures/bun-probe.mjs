@@ -2,7 +2,8 @@
 // through the driver and print what the connection declares and what a
 // cursor over it reports — one JSON line the spawning test reads.
 import { openStore } from '@jarenjs/db';
-import { bunDriver } from '@jarenjs/db/bun';
+import { adaptBunDatabase, bunDriver } from '@jarenjs/db/bun';
+import { Database } from 'bun:sqlite';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -61,4 +62,36 @@ finally {
 rmSync(path);
 report.reopenedFileRemoved = true;
 report.failedTransactionRows = failedTransactionRows;
+
+// A cleared JS weak target does not prove its native statement was destroyed.
+// Hold native statements while making the adapter's weak references empty;
+// connection close must finalize them without depending on a later GC cycle.
+const native = new Database(path);
+const pending = [];
+const prepare = native.prepare.bind(native);
+native.prepare = (...args) => {
+  const statement = prepare(...args);
+  pending.push(statement);
+  return statement;
+};
+const NativeWeakRef = globalThis.WeakRef;
+let closing;
+try {
+  globalThis.WeakRef = class { deref() { return undefined; } };
+  closing = adaptBunDatabase(native);
+  assert.equal(closing.prepare('SELECT 42 AS n').get().n, 42);
+}
+finally { globalThis.WeakRef = NativeWeakRef; }
+try {
+  closing.close();
+  closing.close();
+  assert.ok(pending.length > 0);
+  for (const statement of pending) assert.throws(() => statement.get(), /closed|finalized/i);
+  rmSync(path);
+  report.unreachableNativeStatementsClosed = true;
+}
+finally {
+  native.close(true);
+  rmSync(path, { force: true });
+}
 process.stdout.write(`${JSON.stringify(report)}\n`);

@@ -733,8 +733,9 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./node-process.test.js');\n";
       mkdirSync(join(consumerDir, 'fixtures'), { recursive: true });
-      for (const fixture of ['schema-upgrade.mjs', 'mutation-model.mjs', 'mutation-memory.mjs', 'physical-writer.mjs', 'physical-lifecycle-crash.mjs', 'abrupt-exit.js'])
+      for (const fixture of ['bun-probe.mjs', 'schema-upgrade.mjs', 'mutation-model.mjs', 'mutation-memory.mjs', 'physical-writer.mjs', 'physical-lifecycle-crash.mjs', 'abrupt-exit.js'])
         cpSync(join(root, 'test/db/fixtures', fixture), join(consumerDir, 'fixtures', fixture));
+      program += "if (typeof Bun !== 'undefined') await import('./fixtures/bun-probe.mjs');\n";
       for (const fixture of ['fixture-cleanup.test.js', 'json-type.test.js', 'schema-change.test.js', 'schema-upgrade.test.js', 'mutation-reuse.test.js', 'physical-locking.test.js', 'physical-lifecycle-native.test.js', 'physical-lifecycle.test.js', 'physical-transform.test.js', 'schema-sql.test.js', 'foreign-key-restoration.test.js', 'shadow-identity.test.js', 'physical-preview.test.js']) {
         cpSync(join(root, 'test/db', fixture), join(consumerDir, fixture));
         program += `if (typeof Bun === 'undefined') await import('./${fixture}');\n`;
