@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import pg from 'pg';
+import { ownPostgresPool } from './lib/postgres-pool.js';
 import { postgresDriver } from '@jarenjs/db/postgres';
 import { recoverySnapshot, seedRecovery, writeAfterRecoveryTarget, verifyRecovery } from '../test/consumer/postgres-recovery.js';
 
@@ -13,8 +14,9 @@ const container = process.env.JAREN_PG_CONTAINER;
 if (!address || !['127.0.0.1', 'localhost', '[::1]'].includes(address.hostname) || !container)
   throw new Error('Select a disposable loopback JAREN_PG_URL and its JAREN_PG_CONTAINER');
 const admin = new pg.Pool({ connectionString: address.href, max: 1, connectionTimeoutMillis: 5000 });
+const closeAdmin = ownPostgresPool(admin);
 const names = ['source', 'restore'].map(name => `jaren_backup_${randomUUID().replaceAll('-', '')}_${name}`);
-const pools = [], created = [];
+const pools = [], closePools = [], created = [];
 const schema = 'jaren_recovery_tenant';
 const allowed = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'XDG_RUNTIME_DIR'];
 const environment = { ...Object.fromEntries(allowed.filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]])),
@@ -23,6 +25,7 @@ const command = (program, args, input) => execFileSync('docker', ['exec', '-i', 
   ...(args[0] === '--version' ? [] : ['-h', '127.0.0.1', '-p', '5432', '-U', decodeURIComponent(address.username)]), ...args],
 { env: environment, input, timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
 const started = performance.now();
+let evidence;
 try {
   const identity = (await admin.query('SELECT system_identifier::text FROM pg_control_system()')).rows[0].system_identifier;
   const inside = command('psql', ['-d', decodeURIComponent(address.pathname.slice(1)), '-Atc', 'SELECT system_identifier::text FROM pg_control_system()']).toString().trim();
@@ -36,7 +39,8 @@ try {
   for (const name of names) {
     await admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`); created.push(name);
     const url = new URL(address); url.pathname = `/${name}`;
-    pools.push(new pg.Pool({ connectionString: url.href, max: 1, connectionTimeoutMillis: 5000 }));
+    const pool = new pg.Pool({ connectionString: url.href, max: 1, connectionTimeoutMillis: 5000 });
+    closePools.push(ownPostgresPool(pool)); pools.push(pool);
   }
   await pools[0].query(`CREATE SCHEMA "${schema}"`);
   const drivers = pools.map(pool => postgresDriver(pool, { schema, maxConnections: 1 }));
@@ -67,17 +71,18 @@ try {
   const result = await verifyRecovery(drivers[1], seed);
   for (const driver of drivers) { assert.equal(driver.metrics().active, 0); assert.equal(driver.metrics().queued, 0); }
   for (const pool of pools) { assert.equal(pool.waitingCount, 0); assert.equal(pool.idleCount, pool.totalCount); }
-  const evidence = { format: 'jaren-postgres-backup/1', postgres: settings, toolVersions, metadataOmissionCases,
+  evidence = { format: 'jaren-postgres-backup/1', postgres: settings, toolVersions, metadataOmissionCases,
     archiveBytes: archive.byteLength, archiveSha256: createHash('sha256').update(archive).digest('hex'),
     tables: Object.keys(before.tables).length, rows: before.rows, bytes: before.bytes,
     elapsedMs: performance.now() - started, result, roleAndAclRestore: false, powerLoss: false };
-  if (process.env.JAREN_PG_OPERATION_REPORT) writeFileSync(process.env.JAREN_PG_OPERATION_REPORT, JSON.stringify(evidence, null, 2) + '\n');
-  console.log(JSON.stringify(evidence, null, 2));
 }
 finally {
   try {
-    await Promise.all(pools.map(pool => pool.end()));
-    for (const name of created) await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    await Promise.all(closePools.map(close => close()));
+    for (const name of created) await admin.query(`DROP DATABASE "${name}"`);
   }
-  finally { await admin.end(); }
+  finally { await closeAdmin(); }
 }
+evidence.clientsClosedBeforeRemoval = true;
+if (process.env.JAREN_PG_OPERATION_REPORT) writeFileSync(process.env.JAREN_PG_OPERATION_REPORT, JSON.stringify(evidence, null, 2) + '\n');
+console.log(JSON.stringify(evidence, null, 2));

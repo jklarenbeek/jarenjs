@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import pg from 'pg';
+import { ownPostgresPool } from './lib/postgres-pool.js';
 import { postgresDriver } from '@jarenjs/db/postgres';
 import { recoverySnapshot, seedRecovery, writeAfterRecoveryTarget, verifyRecovery } from '../test/consumer/postgres-recovery.js';
 
@@ -23,11 +24,17 @@ const environment = { ...Object.fromEntries(allowed.filter(key => process.env[ke
   JAREN_PG_IMAGE: image, JAREN_PG_RECOVERY_SOURCE_PORT: sourcePort, JAREN_PG_RECOVERY_TARGET_PORT: targetPort };
 const compose = args => execFileSync('docker', ['compose', '-p', project, '-f', file, ...args],
   { env: environment, encoding: 'utf8', timeout: 120000, maxBuffer: 4194304 });
-const open = port => new pg.Pool({ connectionString: `postgres://jaren:jaren@127.0.0.1:${port}/jaren`,
-  max: 1, connectionTimeoutMillis: 1000 });
+const owners = new Map();
+const open = port => {
+  const pool = new pg.Pool({ connectionString: `postgres://jaren:jaren@127.0.0.1:${port}/jaren`,
+    max: 1, connectionTimeoutMillis: 1000 });
+  owners.set(pool, ownPostgresPool(pool));
+  return pool;
+};
 const schema = 'jaren_recovery_tenant';
 let source, restored;
 const started = performance.now();
+let evidence;
 try {
   compose(['up', '-d', '--wait', 'source']);
   source = open(sourcePort);
@@ -56,7 +63,7 @@ try {
   }
   assert.equal(archived, true, 'the target WAL was not archived within the fixture deadline');
   assert.equal(driver.metrics().active, 0);
-  await source.end(); source = null;
+  await owners.get(source)(); source = null;
   // Only one writable owner may resume the preserved replica identity.
   compose(['stop', '-t', '5', 'source']);
   compose(['up', '-d', '--wait', 'restore']);
@@ -89,14 +96,15 @@ try {
     assert.ok(BigInt(next) > BigInt(sequence.last_value), 'recovered allocation would reuse an existing physical identifier');
   }
   assert.equal(recoveredDriver.metrics().active, 0); assert.equal(restored.waitingCount, 0);
-  const evidence = { format: 'jaren-postgres-pitr/1', image, postgres: version, basebackupVersion,
+  evidence = { format: 'jaren-postgres-pitr/1', image, postgres: version, basebackupVersion,
     targetLsn: target, targetWal: wal, tables: Object.keys(before.tables).length, rows: before.rows,
     bytes: before.bytes, sourceStoppedBeforePromotion: true, sequenceAdvances, result,
     elapsedMs: performance.now() - started, powerLoss: false, fleetFailover: false };
-  if (process.env.JAREN_PG_RECOVERY_REPORT) writeFileSync(process.env.JAREN_PG_RECOVERY_REPORT, JSON.stringify(evidence, null, 2) + '\n');
-  console.log(JSON.stringify(evidence, null, 2));
 }
 finally {
-  try { await Promise.all([source?.end(), restored?.end()]); }
+  try { await Promise.all([...owners.values()].map(close => close())); }
   finally { compose(['down', '--volumes', '--timeout', '5']); }
 }
+evidence.clientsClosedBeforeRemoval = true;
+if (process.env.JAREN_PG_RECOVERY_REPORT) writeFileSync(process.env.JAREN_PG_RECOVERY_REPORT, JSON.stringify(evidence, null, 2) + '\n');
+console.log(JSON.stringify(evidence, null, 2));
