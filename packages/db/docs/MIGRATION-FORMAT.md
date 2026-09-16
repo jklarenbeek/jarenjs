@@ -232,6 +232,15 @@ without it, the runner compares SQLite's canonical main filenames. Such a custom
 driver owns alias detection beyond that filename comparison. An opener returning
 the actual primary handle is refused without closing it.
 
+PostgreSQL compares server address/port, database and schema before fixture
+initialization. Managed model replay can use an independent schema. Native
+physical artifacts require an independent **database** with the same schema
+name: qualified identifiers and function bodies remain byte-for-byte SQL and
+are never rewritten for a temporary namespace. The host provisions that
+disposable database, matching roles, extensions and database locale settings.
+This identity check assumes the host's injected sources identify their actual
+servers; it does not establish isolation across arbitrary proxy aliases.
+
 Fixture initialization is a callback outside the saved migration artifact.
 Use synthetic or appropriately isolated fixtures; do not put application
 row snapshots into a shared plan. Empty default replay proves structure;
@@ -705,6 +714,87 @@ attached to owned tables are drift; unrelated tables outside the scope
 are allowed. Keep the inventory scoped with `readSchema(reference,
 { tables: [...] })`; never silently discard unknown objects within it.
 A physical model's column mapping alone is not this complete target.
+
+### PostgreSQL native preservation
+
+The same public planning, `migrate` and `migrationStatus` entries accept
+`physicalTarget: { dialect: 'postgres', schema, catalog }`. Obtain `catalog`
+from `readSchema(reference).catalog` on an independently prepared target;
+the planner reads the primary and never executes target DDL to discover its
+effect. Use the complete driver-owned namespace, including unrelated objects
+that must survive. Each row retains its native SQL and metadata. Native
+disposition keys come from `physicalObjectKey(object)` and include schema,
+kind, owner and name, so equal column or policy names on different tables do
+not collide. SQLite's existing object keys and CREATE-text comparison remain
+unchanged.
+
+The inventory includes schema ownership/ACL and locale context, constraints
+with deferral and validation, identity/sequence configuration, generated
+columns, indexes, views, triggers, functions, RLS policies and recorded
+dependency edges. Extension membership records installed version and namespace;
+installation or upgrading an extension is a separately owned administrative
+operation. Incoming cross-schema view dependencies retain their definition.
+Every source row requires an explicit preservation disposition; no absent
+policy, program or dependency is interpreted as permission to drop it.
+PostgreSQL does not record every reference inside dynamic SQL or procedural
+bodies. Hosts must review those opaque programs and supply bounded SELECT
+assertions for application facts; this catalog is not a universal dependency
+analyzer or a sandbox for privileged SQL.
+Foreign tables and aggregate/window-function definitions refuse native
+preservation planning with `JD0021`; their external server and transition-state
+contracts need a separately qualified inventory.
+
+Application takes a transaction-scoped advisory lock for the owned namespace
+before checking history again. A waiting runner with stale history refuses
+`JD0022` without replaying writes; rerunning with the saved artifact checks the
+committed receipt. The driver's finite `lockTimeoutMs` bounds admission to the
+lock. Native migrations also require `standard_conforming_strings=on` and a
+nonzero `lock_timeout`. Dollar-quoted bodies, escaped strings and nested
+comments retain native token boundaries. Concurrent index builds, transaction
+control, and database/role/extension administration refuse `JD0021` in this
+atomic runner. Use ordinary transactional index creation here.
+
+Before commit, preserved noncycling sequences must retain their catalog
+configuration and their allocated high-water state. Both positive and negative
+increments are compared as exact integers, including `is_called`. Cyclic
+sequences require an explicit replacement policy (`JD0021`); a detected rewind
+is `JD0023`. Allocation gaps from `nextval`, caching or an aborted transaction
+remain PostgreSQL behavior. Arbitrary `setval` calls and external effects of
+host-supplied functions are not made transactional by the migration wrapper.
+Transactional DDL, declared data steps and the receipt commit together. A lost
+COMMIT reply remains unknown until a new connection checks the durable receipt.
+
+Native table and individual schema changes use the same guarded executor:
+
+```js
+import { readSchema, physicalObjectKey, planPhysicalMigration } from '@jarenjs/db';
+import { planTableMigration, planSchemaChange } from '@jarenjs/db/relational';
+
+const source = await readSchema(connection);
+const target = { dialect: 'postgres', schema, catalog: (await readSchema(reference)).catalog };
+const dispositions = Object.fromEntries(source.catalog.map((object) =>
+  [physicalObjectKey(object), 'preserve']));
+const sql = 'ALTER TABLE items ADD COLUMN note text';
+const table = await planTableMigration(connection, target, {
+  id: 'items-note', table: 'items', statements: [sql], dispositions,
+});
+const change = await planSchemaChange(connection, {
+  op: 'native', table: 'items', sql, target, dispositions,
+});
+const migration = await planPhysicalMigration(connection, fromModel, toModel, {
+  id: 'items-note', steps: [{ kind: 'table', plan: table }],
+  dispositions, physicalTarget: target,
+});
+```
+
+Review and persist one chosen artifact before execution. The async
+`applyTableMigration`/`applySchemaChange` checks its full source, checksum and
+target; repeating a completed native plan reports `{ changed: 0 }`. A table
+plan requires a catalog change when it contains statements. Data-only changes
+belong in `migrate`, which owns receipts. Composing the table plan as a `table`
+step also adds the existing ordered receipt and checked restart contract.
+The SQLite structural `defineTable`/`planTable` vocabulary remains SQLite SQL;
+native PostgreSQL plans take explicitly reviewed SQL and native catalog targets.
 
 ### Runnable physical lifecycle
 

@@ -1050,6 +1050,17 @@ never folded in silently — the view re-reads and the emission carries a
 `lateData` record — which is the one place this layer spends a full
 re-query to keep a promise rather than a number.
 
+**Asynchronous maintenance** is opt-in through `@jarenjs/db/async-live`. The
+existing live registry owns results, reference sharing, patches and registration
+lifecycle. `src/async-live.js` supplies its serialized poll/resnapshot strategy;
+`src/live-executor.js` owns one bounded ordinary query engine and cursor budget
+per registration. `src/snapshot.js` brackets reads with source revisions, shared
+with lexical persistence. Reads take the Store transaction gate without the
+journal's writer lock, and catch-up rejects mixed enrolled revisions. Retention
+gaps reset; sustained churn reports lag within finite attempts. Observer delivery
+uses core's `createLatestDelivery`, also shared with lexical invalidations.
+The optional scheduler/executor stay outside ordinary synchronous client imports.
+
 ## Durable runs and the job queue (`src/jobs.js`, `src/dag-job.js`)
 
 The queue's correctness story has two halves. The claim UPDATE selects
@@ -1158,6 +1169,13 @@ shares mapped, validated row access between replication and live dependencies.
 Remote application suppresses only local envelope allocation: its data still
 invalidates capture subscribers after commit. Snapshot reset carries complete
 receipt evidence and refuses histories beyond its explicit credits.
+
+`dialects/replication.js` declares the metadata schema once; SQL values use
+the connection's parameter vocabulary. `dialects/postgres-replication.js`
+supplies bigint sequence storage, binary text collation, enrollment checks and
+the shared capture write lock. `dialects/postgres-metadata.js` verifies table
+shapes for both jobs and replication. Native replay defers managed foreign keys
+inside its transaction; no checkpoint, receipt or outbox engine is duplicated.
 
 `live-join.js` compiles indexed dependency descriptors from the entity planner
 and mapping. The same cache strategy maintains inner/left joins and eligible

@@ -2990,7 +2990,8 @@ export function entityShape(entity, entityMapping) {
       codecColumn: column.codec === undefined ? undefined : column,
       nullPolicy: column.null,
       format: epoch ? entity.properties.get(column.name)?.format : undefined,
-      unsafe: column.codec !== undefined && !['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec),
+      unsafe: column.nativeQuery === false || column.codec !== undefined
+        && !['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec),
     });
   }
   for (const fk of entityMapping.foreignKeys) {

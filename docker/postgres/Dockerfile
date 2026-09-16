@@ -8,14 +8,15 @@
 # reaches PostgreSQL through an injected, standards-shaped client; this image
 # exists so the live half of the portability corpus has an endpoint to run
 # against.
-ARG POSTGIS_TAG=latest
-FROM postgis/postgis:${POSTGIS_TAG}
+ARG POSTGIS_IMAGE=postgis/postgis@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
+FROM ${POSTGIS_IMAGE}
+ARG PGVECTOR_PACKAGE_VERSION=0.8.6-1.pgdg11+1
 
 # PG_MAJOR comes from the base image, so the extension matches the server
 # that will load it rather than a version guessed here.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends "postgresql-${PG_MAJOR}-pgvector"; \
+    apt-get install -y --no-install-recommends "postgresql-${PG_MAJOR}-pgvector=${PGVECTOR_PACKAGE_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 COPY init/ /docker-entrypoint-initdb.d/

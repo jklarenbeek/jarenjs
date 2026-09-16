@@ -511,6 +511,14 @@ export interface StoreCapabilities {
    * `false` every cursor reports `streaming: 'buffered'` with a
    * `{ construct: 'driver' }` barrier. Probed at open. */
   readonly lazyIteration: boolean;
+  /** Effective server statement timeout, independent of query AbortSignal. */
+  readonly statementTimeout: boolean;
+  /** Present on PostgreSQL connections; values come from its resource owner. */
+  readonly postgres?: Readonly<Omit<Partial<import('@jarenjs/db/postgres').PostgresLimits>, 'statementTimeoutMs' | 'lockTimeoutMs'> & {
+    statementTimeoutMs: number | null; lockTimeoutMs: number | null;
+    cursorMode: 'native' | 'buffered'; poolMode: 'session'; prepared: 'named' | 'unnamed';
+    cursorCancel: boolean;
+  }>;
   readonly sessions: boolean;
   readonly sessionReason: string | null;
   readonly worker: boolean;
@@ -522,6 +530,9 @@ export interface StoreCapabilities {
   readonly capture: 'session' | 'journal' | 'none';
   readonly captureLog: boolean;
   readonly live: boolean;
+  readonly liveModes: readonly ('incremental' | 'rerun' | 'resnapshot')[];
+  /** Whether dataVersion() can detect commits from other connections. */
+  readonly dataVersion: boolean;
   readonly jobs: boolean;
   /** Whether a temporal spec naming a ZONE compiles here (D7's
    * injected clock was supplied at open). Without it such a document
@@ -981,7 +992,7 @@ export interface LiveOptions {
   externals?: Record<string, unknown>;
   /** 'incremental' DEMANDS incrementality (JD0051 when the shape
    * re-runs); 'rerun' forces the re-run strategy. */
-  mode?: 'auto' | 'incremental' | 'rerun';
+  mode?: 'auto' | 'incremental' | 'rerun' | 'resnapshot';
   /** Event time for a `$resample` / `$rolling` view (LIVE-FORMAT §13).
    * Its members are closed: anything else is JD0053. */
   eventTime?: LiveEventTime;
@@ -1005,8 +1016,8 @@ export interface LiveEventTime {
 
 export interface LiveMode {
   readonly strategy: 'rows' | 'window' | 'accumulator' | 'group' | 'distinct'
-    | 'bucket' | 'rolling' | 'join' | 'graph' | 'nested-group' | 'rerun';
-  readonly mode: 'incremental' | 'rerun';
+    | 'bucket' | 'rolling' | 'join' | 'graph' | 'nested-group' | 'rerun' | 'resnapshot';
+  readonly mode: 'incremental' | 'rerun' | 'resnapshot';
   /** Present exactly when the strategy is 'rerun': the named reason. */
   readonly reason?: string;
 }
@@ -1017,6 +1028,12 @@ export interface LiveEvent {
   seq?: number;
   /** A maintenance failure (JD2060 …): the query closed after this. */
   error?: unknown;
+  /** Resnapshot recovered from a retained gap or an oversized log record. */
+  resetRequired?: boolean;
+  /** Snapshot validation exhausted this cycle's finite attempt credits. */
+  lag?: boolean;
+  /** A slow observer received the latest complete replacement. */
+  coalesced?: boolean;
   /** Present when a reading behind the lateness boundary forced this
    * emission: the view re-read, and the row was never folded in as
    * though it had arrived on time (LIVE-FORMAT §13). */
@@ -1048,6 +1065,16 @@ export interface LiveStats {
   recomputes?: number;
   /** the current watermark (event time). */
   watermark?: number;
+  checkpoint?: number;
+  lag?: boolean;
+  pending?: number;
+  subscriptions?: number;
+  resets?: number;
+  coalesced?: number;
+  reads?: number;
+  inputRows?: number;
+  inputBytes?: number;
+  observerPending?: number;
 }
 
 export interface LiveQuery {
@@ -1063,7 +1090,9 @@ export interface LiveQuery {
    * registered with `eventTime`; a non-finite or backward value is a
    * TypeError. */
   advance?(watermark: number): void;
-  close(): void;
+  /** Wake the durable reader; present on resnapshot mode. Calls coalesce. */
+  refresh?(): Promise<void>;
+  close(): void | Promise<void>;
 }
 
 export interface LiveBounds {
@@ -1193,7 +1222,7 @@ export declare const SQLITE_FLOOR: string;
  * capabilities a probe has already answered. */
 export declare function finishConnection(
   raw: unknown, dialect: Dialect, synchronous: boolean,
-  capabilities: Readonly<Record<string, unknown>>, queueTimeout: number,
+  capabilities: Readonly<Record<string, unknown>>, queueTimeout?: number,
 ): unknown;
 /** The default probe: SQLite's version report, its compile options and
  * what the binding declares. */
@@ -1286,15 +1315,39 @@ export interface SchemaInventory {
   readonly tables: readonly unknown[];
   readonly views: readonly string[];
   readonly objects: readonly SchemaObject[];
+  /** Native PostgreSQL definitions and metadata; preservation inventory, not executable migration authority. */
+  readonly catalog?: readonly NativeCatalogObject[];
+}
+export interface NativeCatalogObject {
+  readonly type: string;
+  readonly schema: string;
+  readonly name: string;
+  readonly owner: string;
+  readonly sql: string | null;
+  readonly metadata: Readonly<Record<string, unknown>>;
 }
 
 /** Complete reviewed SQLite objects in an explicitly owned scope.
  * Every object must carry SQL text; missing declaration text refuses at runtime. */
-export interface PhysicalMigrationTarget {
+export interface SqlitePhysicalMigrationTarget {
+  readonly dialect?: never;
+  readonly schema?: never;
+  readonly catalog?: never;
   readonly objects: readonly SchemaObject[];
   /** Defaults to the object owners; an absent named table records an intended drop. */
   readonly tables?: readonly string[];
 }
+/** A complete native namespace snapshot. SQL and metadata retain native meaning. */
+export interface PostgresPhysicalMigrationTarget {
+  readonly dialect: 'postgres';
+  readonly schema: string;
+  readonly catalog: readonly NativeCatalogObject[];
+  readonly objects?: never;
+  readonly tables?: never;
+}
+export type PhysicalMigrationTarget = SqlitePhysicalMigrationTarget | PostgresPhysicalMigrationTarget;
+/** Stable disposition key; native keys include schema, kind, owner and name. */
+export declare function physicalObjectKey(object: SchemaObject | NativeCatalogObject): string;
 
 /** One progress event: the migration and collection a data step is
  * walking, and the running count of the rows it has transformed,
@@ -1373,8 +1426,9 @@ export interface MigrateOptions {
    * declarations `openStore` is given, resolved into the planned DDL. */
   expressions?: Record<string, ExpressionFunction>;
   /** The driver the shadow replay opens through (default the target's).
-   * A file engine's shadow is another file; a SERVER engine's is another
-   * schema, and only the host can name one — the baseline shape the
+   * A file engine's shadow is another file; managed SERVER replay can use
+   * another schema. Native physical artifacts require an independent database
+   * with the same schema name, roles and extensions. The baseline shape the
    * replay creates would otherwise collide with the real store's. */
   shadowDriver?: Driver;
   /** Called once per batch a data step walks (transform, derive, or a
@@ -2073,13 +2127,15 @@ export interface ReplicationConflict {
   resolution: { action: 'local' | 'remote' | 'merged'; value: Record<string, unknown> | null } | null;
 }
 export interface ReplicationOptions {
+  /** Host-issued writer lineage. SQLite session/journal and PostgreSQL managed
+   * journal hosts share this protocol; native replication requires bounded cursors. */
   replica: string; retention?: number; maxOperations?: number; maxBytes?: number;
   resolver?: { id: string; resolve(conflict: Readonly<ReplicationConflict>):
     { action: 'local' | 'remote' } | { action: 'merged'; value: Record<string, unknown> | null } };
 }
 export interface ReplicationRequest { signal?: AbortSignal; deadline?: number }
 export interface Replication {
-  snapshot(request?: ReplicationRequest): Promise<ReplicationSnapshot>;
+  snapshot(request?: ReplicationRequest & { maxBytes?: number }): Promise<ReplicationSnapshot>;
   reset(snapshot: ReplicationSnapshot, request?: ReplicationRequest): Promise<{ status: 'reset'; frontier: ReplicationFrontier }>;
   frontier(): Promise<ReplicationFrontier>;
   apply(envelope: ReplicationEnvelope, request?: ReplicationRequest): Promise<{
@@ -2133,7 +2189,9 @@ export interface PhysicalMigrationDocument<Steps extends readonly unknown[] = re
   readonly to: string;
   readonly steps: Steps;
   readonly physical: {
-    readonly source: readonly SchemaObject[];
+    readonly source: readonly (SchemaObject | NativeCatalogObject)[];
+    readonly dialect?: 'postgres';
+    readonly schema?: string;
     readonly dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
     readonly assertions: readonly { readonly sql: string; readonly params?: readonly unknown[]; readonly expected: readonly unknown[] }[];
     readonly target?: PhysicalMigrationTarget;

@@ -1604,7 +1604,7 @@ export function createEntityQueryEngine(context) {
   const driverWrap = (/** @type {any} */ error) => wrapDriverError(error, { docPath: '/entities' });
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
-  const physicalOf = (name) => ({ table: mapping.entities[name].table,
+  const physicalOf = (name) => ({ table: mapping.entities[name].table, schema: mapping.entities[name].schema,
     // a join-table root has no document column of its own (§10.7)
     document: mapping.entities[name].document !== false,
     ...(entities.get(name)?.physical == null ? {} : {
@@ -1653,7 +1653,8 @@ export function createEntityQueryEngine(context) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
     }
-    if ((planned.plan?.group || planned.plan?.scalarAggregate) && dialect.name !== 'sqlite') {
+    if ((planned.plan?.group || planned.plan?.scalarAggregate) && dialect.name !== 'sqlite'
+      && !(dialect.physicalValueType && mapping.entities[planned.plan.bindings[0].entity]?.document === false)) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: '$groupby', reason: 'entity grouping runtime guards are qualified for SQLite' }] };
     }
@@ -1819,7 +1820,7 @@ export function createEntityQueryEngine(context) {
           sql: `SELECT ${entities.get(name)?.physical != null ? physicalSelection(mapping.entities[name], dialect, `${q('t')}.`)
             : `${q('t')}.*, ${mapping.entities[name].document === false ? dialect.stringLiteral('{}')
               : dialect.jsonText(`${q('t')}.${q('doc')}`)} AS ${q('__doc')}`} `
-            + `FROM ${q(mapping.entities[name].table)} AS ${q('t')}${where} `
+            + `FROM ${dialect.tableName(mapping.entities[name].table, mapping.entities[name].schema)} AS ${q('t')}${where} `
             + `ORDER BY ${entities.get(name)?.physical != null ? mapping.entities[name].keys.map((k) => {
               const column = mapping.entities[name].columns.find((c) => c.name === k);
               const value = `${q('t')}.${q(column.physical)}`;
@@ -2645,7 +2646,7 @@ export function createLoadEngine(context, entityName) {
     let sql = `SELECT ${tree.entity.physical != null ? physicalSelection(tree.entityMapping, dialect, `${rendered.aliasSql}.`)
       : `${rendered.aliasSql}.*, ${tree.entityMapping.document === false ? dialect.stringLiteral('{}') : dialect.jsonText(rendered.docSql)} AS ${q('__doc')}`}`
       + includeSql
-      + ` FROM ${q(tree.entityMapping.table)} AS ${rendered.aliasSql}`;
+      + ` FROM ${dialect.tableName(tree.entityMapping.table, tree.entityMapping.schema)} AS ${rendered.aliasSql}`;
     if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
     const orderSql = identity !== null
       ? identity.map((term) => `${rendered.aliasSql}.${q(term.column)} `

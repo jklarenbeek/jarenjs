@@ -146,7 +146,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->15<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->14<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->16<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->729<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->737<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -415,7 +415,9 @@ Hosts still provide business schemas, public summary projections, current
 permissions, provider guarantees and actor/reason decisions. Single-send outcomes
 remain unresolved until evidence settles them. Synthetic installed-consumer
 qualification does not establish real provider behavior, downstream cutover,
-native executable or PostgreSQL support, or operator reconciliation acceptance.
+operator reconciliation acceptance, or capabilities outside that fixture.
+Build-selected managed SQLite/PostgreSQL executables have a separate
+[public application and recovery qualification](../packages/db/docs/POSTGRESQL.md).
 
 ## Saved formula and rule composition
 

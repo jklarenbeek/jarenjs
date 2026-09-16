@@ -61,9 +61,10 @@ export interface EntityBlock {
   };
 }
 
-/** Explicit column-only layout for an existing SQLite object. */
+/** Explicit column-only layout for an existing qualified backend object. */
 export interface PhysicalLayout {
   readonly table: string;
+  readonly schema?: string;
   readonly kind?: 'table' | 'view';
   readonly keys?: readonly string[];
   readonly constraints?: readonly object[];
@@ -73,14 +74,14 @@ export interface PhysicalLayout {
   readonly withoutRowid?: boolean;
   readonly columns: Readonly<Record<string, {
     readonly name: string;
-    readonly codec: 'text' | 'integer' | 'number' | 'boolean' | 'json' | 'date' | 'datetime' | 'epoch-ms' | 'bigint' | 'decimal' | 'blob-hex';
+    readonly codec: 'text' | 'integer' | 'number' | 'boolean' | 'json' | 'date' | 'datetime' | 'epoch-ms' | 'bigint' | 'decimal' | 'blob-hex' | 'uuid' | 'local-timestamp' | 'instant';
     readonly null: 'null' | 'absent' | 'reject';
     readonly default?: 'database';
     readonly generated?: boolean;
-    readonly type?: 'INTEGER' | 'REAL' | 'TEXT' | 'BLOB' | 'NUMERIC';
+    readonly type?: string;
     readonly defaultValue?: unknown;
     readonly collation?: 'BINARY' | 'NOCASE' | 'RTRIM';
-    readonly identity?: 'rowid' | 'autoincrement';
+    readonly identity?: 'rowid' | 'autoincrement' | 'always' | 'by-default';
     readonly check?: unknown;
     readonly generatedExpression?: unknown;
     readonly stored?: boolean;

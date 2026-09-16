@@ -1,0 +1,23 @@
+# Independent disposable semantic/durability profile. No production data.
+# Override JAREN_PG_IMAGE with one exact image from matrix.json for each major.
+name: jaren-postgres-durable
+services:
+  postgres:
+    image: ${JAREN_PG_IMAGE:-postgres:17.11-bookworm@sha256:7bade6d532592ca8ce7ee32def7399dad2607c4ea5583839fc4352a095a11ea6}
+    environment:
+      POSTGRES_USER: jaren
+      POSTGRES_PASSWORD: jaren
+      POSTGRES_DB: jaren
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - '127.0.0.1:${JAREN_PG_PORT:-55433}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jaren -d jaren']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    command: ['postgres', '-c', 'max_connections=100', '-c', 'fsync=on',
+      '-c', 'synchronous_commit=on', '-c', 'full_page_writes=on']

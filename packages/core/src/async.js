@@ -283,3 +283,36 @@ export function createAwaitedSink(sink) {
     closed: () => closed,
   };
 }
+
+/** Deliver synchronously when idle; retain only the latest value while an async
+ * observer is running. Callback failures are isolated. close() drops pending
+ * delivery and prevents future callbacks; it cannot cancel host callback work.
+ * @param {(value:any)=>any} observer
+ * @param {(value:any)=>any} [coalesce] - make a skipped-history value standalone
+ * @returns {{ notify:(value:any)=>void, close:()=>void, pending:()=>number }} */
+export function createLatestDelivery(observer, coalesce = (value) => value) {
+  if (typeof observer !== 'function' || typeof coalesce !== 'function')
+    throw new TypeError('createLatestDelivery requires observer and coalesce functions');
+  let running = false, queued = false, latest;
+  const notify = (value) => {
+    if (!observer) return;
+    if (running) { latest = coalesce(value); queued = true; return; }
+    running = true;
+    let result;
+    try { result = observer(value); }
+    catch { /* One subscriber cannot fail its publisher or siblings. */ }
+    const settled = () => {
+      running = false;
+      const next = latest, again = queued;
+      latest = undefined; queued = false;
+      if (again) notify(next);
+    };
+    if (isThenable(result)) Promise.resolve(result).then(settled, settled);
+    else settled();
+  };
+  return {
+    notify,
+    pending: () => Number(running) + Number(queued),
+    close() { observer = null; latest = undefined; queued = false; coalesce = null; },
+  };
+}

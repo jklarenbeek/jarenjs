@@ -172,9 +172,9 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
       try {
         assert.match(String(store.capabilities.version), /^\d+\.\d+/);
         assert.strictEqual(Number.isFinite(POSTGRES_FLOOR), true);
-        // the two subsystems that write their own SQLite statements
+        // Jobs are opt-in per Store; the driver supplies their native strategy.
         assert.strictEqual(store.capabilities.jobs, false);
-        assert.strictEqual(store.capabilities.changeCapture, false);
+        assert.strictEqual(store.capabilities.changeCapture, true);
         // no configuration vocabulary: the effective record is all null
         assert.deepStrictEqual(
           Object.values(store.capabilities.pragmas).filter((value) => value !== null), []);
@@ -183,30 +183,21 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
           Object.values(store.capabilities.maintenance).filter((value) => value !== false), []);
         // and the one structural thing this engine has and SQLite does not
         assert.strictEqual(store.capabilities.alterTableFull, true);
-        assert.strictEqual(store.capabilities.lazyIteration, false,
-          'a cursor over this driver buffers, and says so');
+        assert.strictEqual(store.capabilities.lazyIteration, true,
+          'the native cursor fetches bounded frames on its owned transaction');
+        assert.strictEqual(store.capabilities.statementTimeout, true);
       }
       finally {
         await store.close();
       }
     });
 
-    it('refuses the SQLite-only subsystems by name rather than at the first statement',
+    it('refuses buffered replication before ledger statements',
       async () => {
         await assert.rejects(
-          () => openStore(MODEL, { driver: freshDriverSync(), capture: true }),
+          () => openStore(MODEL, { driver: postgresDriver(pool, { cursorMode: 'buffered' }), replication: { replica: 'host' } }),
           (error) => error.code === 'JD0051');
-        await assert.rejects(
-          () => openStore(MODEL, { driver: freshDriverSync(), jobs: true }),
-          (error) => error.code === 'JD0003');
       });
-
-    /** A driver per attempt: a failed open closes the client it took,
-     * so two refusals in a row need two of them. No schema is named —
-     * both refusals fire before any statement runs. */
-    function freshDriverSync() {
-      return postgresDriver(pool, { schema: undefined });
-    }
 
     it('a store reopened against the same schema verifies the shape it finds', async () => {
       const driver = await freshDriver();
@@ -531,15 +522,18 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
       await admin.query(`CREATE SCHEMA "${schema}"`);
       schemas.push(schema);
       const store = await openStore(SHAPES, { driver: postgresDriver(traced, { schema }) });
-      trace.length = 0;
-      await store.introspect();
-      assert.ok(trace.length > 0, 'it did read');
-      for (const sql of trace) {
-        assert.match(sql, /^SELECT\b/, `a read-only introspection issued: ${sql}`);
-        assert.ok(!/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|BEGIN|COMMIT|SAVEPOINT)\b/i
-          .test(sql), `a read-only introspection issued: ${sql}`);
+      try {
+        trace.length = 0;
+        await store.introspect();
+        assert.ok(trace.length > 0, 'it did read');
+        for (const sql of trace) {
+          assert.match(sql, /^(SELECT\b|BEGIN$|COMMIT$|DECLARE "jaren_c\d+" NO SCROLL CURSOR FOR (?:SELECT\b|WITH relations AS \()|FETCH FORWARD \d+ FROM "jaren_c\d+"$|CLOSE "jaren_c\d+"$)/,
+            `a read-only introspection issued: ${sql}`);
+          assert.ok(!/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|SAVEPOINT)\b/i
+            .test(sql), `a read-only introspection issued: ${sql}`);
+        }
       }
-      await store.close();
+      finally { await store.close(); }
     });
 
     it('the derived model plans against the declared one and finds nothing to do',

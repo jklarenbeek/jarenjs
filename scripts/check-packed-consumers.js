@@ -727,9 +727,12 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       program += "await import('./collection.js');\n";
     }
     if (name === '@jarenjs/db') {
+      cpSync(join(root, 'test/consumer/postgres.js'), join(consumerDir, 'postgres.js'));
       cpSync(join(root, 'test/db/helpers.js'), join(consumerDir, 'helpers.js'));
       cpSync(join(root, 'test/db/async-host-contracts.test.js'), join(consumerDir, 'async-host-contracts.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./async-host-contracts.test.js');\n";
+      cpSync(join(root, 'test/db/async-live.test.js'), join(consumerDir, 'async-live.test.js'));
+      program += "if (typeof Bun === 'undefined') await import('./async-live.test.js');\n";
       cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./node-process.test.js');\n";
       mkdirSync(join(consumerDir, 'fixtures'), { recursive: true });
@@ -767,13 +770,15 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     writeFileSync(join(consumerDir, 'consumer.ts'),
       subpaths.map((s, i) => `import * as m${i} from ${JSON.stringify(s)};\nvoid m${i};`).join('\n')
       + '\n' + (SEMANTIC_SNIPPETS[name] ?? ''));
+    if (name === '@jarenjs/db')
+      cpSync(join(root, 'test/consumer/db-postgres.ts'), join(consumerDir, 'postgres.ts'));
     writeFileSync(join(consumerDir, 'tsconfig.json'), JSON.stringify({
       compilerOptions: {
         noEmit: true, strict: true, skipLibCheck: false,
         module: 'nodenext', moduleResolution: 'nodenext',
         target: 'esnext', lib: ['esnext', 'dom'],
       },
-      files: ['consumer.ts'],
+      files: name === '@jarenjs/db' ? ['consumer.ts', 'postgres.ts'] : ['consumer.ts'],
     }));
     const tsc = spawnSync(process.execPath, [tscBin, '--noEmit', '-p', consumerDir],
       { cwd: consumerDir, encoding: 'utf8' });
@@ -897,6 +902,8 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
   const manifest = JSON.parse(readFileSync(join(root, 'test/adoption/manifest.json'), 'utf8'));
   writeFileSync(join(compositionDir, 'providers.js'), readFileSync(join(root, 'test/consumer/providers.js')));
   const compositionFile = join(compositionDir, 'consumer.mjs');
+  for (const file of ['backend-app.js', 'backend-entry.js'])
+    cpSync(join(root, 'test/consumer', file), join(compositionDir, file));
   writeFileSync(join(compositionDir, 'continuation.js'), readFileSync(join(root, 'test/consumer/continuation.js')));
   writeFileSync(join(compositionDir, 'file-tokens.js'), readFileSync(join(root, 'test/consumer/file-tokens.js')));
   writeFileSync(join(compositionDir, 'outbox-relay.js'), readFileSync(join(root, 'test/consumer/outbox-relay.js')));
@@ -919,6 +926,11 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     + manifest.consumers.map((definition) => `runFormulaConsumer(${JSON.stringify(definition)}, ${JSON.stringify(adoptionRows(definition))});`).join('\n')
     + "\nawait qualifyRuleCommand(openRuleExample, savedRule);\n");
   for (const runtime of [process.execPath, ...(bun ? ['bun'] : [])]) {
+    const backendResult = spawnSync(runtime, [join(compositionDir, 'backend-entry.js')],
+      { cwd: compositionDir, encoding: 'utf8', timeout: 60000,
+        env: { ...process.env, JAREN_BACKEND: 'sqlite', JAREN_RUNTIME: runtime === 'bun' ? 'bun' : 'node' } });
+    if (backendResult.status !== 0) { failures++; console.error(`Backend application (${runtime}): ${backendResult.stdout}${backendResult.stderr}`); }
+    else console.log(`✓ backend application — app, contract, atomic jobs, feed/live, replica and receipt recovery (${runtime})`);
     const relayResult = spawnSync(runtime, runtime === 'bun' ? ['test', relayFile]
       : ['--no-warnings=ExperimentalWarning', '--test', '--test-isolation=none', relayFile],
     { cwd: compositionDir, encoding: 'utf8', timeout: 60000 });

@@ -11,6 +11,103 @@ or entity table. Each initialization transaction retries one catalog-creation
 collision after rollback, then re-reads and verifies the winning shape. Ordinary
 constraint failures remain errors, and a repeated collision refuses the open.
 
+## PostgreSQL sessions
+
+`postgresDriver(source, { schema })` acquires one physical session for the Store.
+The source must hand out an idle session and retain it until release. The schema
+must already exist and grant USAGE; missing schema is cantopen/JD2005 (3F000),
+and absent USAGE is readonly/JD2083 (42501). Opening never creates a schema.
+The selected path places the owned schema before explicit `pg_temp`, so a
+temporary relation retained by a pool cannot shadow an existing managed table.
+The adapter preserves the exact original `search_path` and restores it before
+release, including a refused open. This is tenant selection, not authorization;
+the host owns role grants and row-level policies.
+
+Close drains owned prepared statements and rolls back an outstanding owned
+transaction. Failed rollback, deallocation or setting restoration makes the
+session unfit for reuse: pg-compatible `release(error)` discards it. A different
+source can supply `destroy(client, error)` in the driver options. Cleanup failure
+is reported and repeated close shares that settlement. A host supplying a single
+client without `release` owns its final disposal.
+
+A cached SELECT whose result type changes can retry unnamed only in autocommit,
+and only when the native planner rejected it before execution. Within a
+transaction, the original 0A000 is propagated; the transaction or nested
+savepoint owner rolls back. Generic 0A000 failures, function-raised errors and
+writes are never replayed by this recovery path.
+
+The default `cursorMode: 'native'` uses DECLARE/FETCH/CLOSE, without another
+runtime package. A root streaming cursor holds the Store admission gate from
+first pull through cleanup. Break, abort, consumer failure, expiry and Store
+close release it; unrelated writes wait. A cursor inside `transaction(tx => ...)`
+uses that transaction's client and never commits it. SQLite retains its existing
+admission per pull. Return cursors promptly: a paused PostgreSQL cursor keeps an
+MVCC snapshot and may delay database maintenance.
+
+`POSTGRES_DEFAULTS` is the public finite budget record. Driver options override
+its positive integer values. Each driver admits eight sessions and queues up to
+64 opens; each session queues up to 64 requests and holds at most 64 cursors and
+256 statement identities. Native fetches take up to 64 rows; `get()` fetches one.
+`windowBytes` limits a retained normalized frame to 1 MiB, and `all()` retains at
+most 100,000 rows / 16 MiB. Bounds refuse JD2092; queue or identity capacity
+refuses JD2091. An oversized received frame is rejected before delivery, but its
+wire allocation has already happened in the injected client. This is a retained
+frame bound, not a wire-message or process-RSS limit. Bound indivisible row sizes
+at ingestion and in the host client when those are untrusted.
+
+Explicit `cursorMode: 'buffered'` retains the compatibility client query path:
+the client receives all rows before the same all-result limits are checked, and
+`lazyIteration` is false. Native read cursors replan each declaration; the named
+cached-plan recovery above applies to buffered reads. `prepared: 'unnamed'`
+disables named plans. Named cache lifetime is also bounded across reuse of a
+physical client; an exhausted client is retired on close rather than retaining
+unlimited client-side parse metadata. `poolMode: 'session'` is required;
+transaction poolers refuse JD0003, including with unnamed statements. One Store
+needs one exclusive physical client. Driver admission is not a per-query pool.
+
+Acquisition includes queueing, source connection and session setup and defaults
+to 5 seconds; cursor lifetime and server statement timeout default
+to 30 seconds, server lock timeout and cleanup to 5 seconds. Server settings are
+read back after configuration and restored exactly on close. Effective values
+are in `capabilities.postgres`; `statementTimeout` does not promise AbortSignal
+interruption. `57014` is server cancellation (JD2089), and `55P03` is a lock-wait
+failure; transaction settlement remains independently observable. A root query's
+abort normally takes effect at a row boundary. An injected `cancel(client,
+queryGeneration)` may interrupt a cursor fetch; it must target that owned query
+and acknowledge delivery. The next request and clean session release wait for both
+cancellation delivery and the query response. Avoid a detached, delayed
+PID-only cancellation request against a reusable session.
+
+Cleanup expiry reports JD2090 and discards the physical client. Acquisition
+expiry or abort keeps its source credit until a late acquisition is released.
+A host whose release/destroy fails or never acknowledges keeps that credit
+quarantined; a caller deadline never makes an unclean session reusable. Driver
+`metrics()` reports admission credits (active/idle/queued and bounded wait
+percentiles); connection `metrics()` additionally reports fetched/peak retained
+rows and bytes, cursors, prepared identities and transaction fate. An ambiguous
+COMMIT remains `unknown`; reconcile a durable request receipt, never replay the
+write on the assumption that a lost connection rolled it back.
+
+`npm run test:postgres` requires an endpoint and refuses skipped cases. The
+pinned PostgreSQL 16/17/18 matrix and injected client version live in
+`docker/postgres/matrix.json`. CI runs each major against its real server.
+`docker/postgres/compose.durable.yaml` independently enables fsync,
+synchronous_commit and full_page_writes; the extension/performance profile
+explicitly disables them and cannot qualify power-loss durability. Neither
+profile contains production data. The runner prints observed versions,
+extension namespaces and effective durability settings before executing tests.
+
+Open PostgreSQL with `jobs: true` for the shared leased queue, transactional
+outbox and injected DAG runner. Claims use a bounded `FOR UPDATE SKIP LOCKED`
+candidate; checkpoint saves and `tx.jobs.assertLease` hold the job row through
+their transaction. Independent hosts must use comparable epoch clocks; the
+injected `jobs.now` contract is unchanged. Same-process enqueue wakes the local
+worker, while other hosts poll. Stop aborts handlers and drains database work;
+a handler that ignores abort may outlive the grace period and must not perform
+unguarded external effects. Read [queue locking and recovery](JOBS-FORMAT.md)
+for lease expiry, lost replies, forward upgrades and the separate-database
+relay boundary.
+
 ## Node workers
 
 ```js
@@ -73,17 +170,18 @@ promised rollback. `capabilities.cancellation.midStatement` remains false.
 
 Worker connections declare sessions, user functions, aggregates and online backup
 unavailable: journal capture provides the same logical patches, and query residuals
-run on the caller. Synchronous Store methods and live queries are unavailable on
-these asynchronous connections. Bun can import both subpaths; opening a Node
+run on the caller. Synchronous Store methods are unavailable on these asynchronous
+connections; `asyncLive()` enables bounded resnapshot queries over durable capture.
+Bun can import both subpaths; opening a Node
 SQLite worker there reports the named unavailable-binding failure (`JD0003`).
 
 ## Async SQLite jobs and committed feeds
 
-| Host entry | Jobs | `capture.mode: 'auto'` | Sessions | Synchronous Store / live |
+| Host entry | Jobs | `capture.mode: 'auto'` | Sessions | Live with `asyncLive()` + log |
 |---|---|---|---|---|
-| `@jarenjs/db/node-worker` | yes | journal | no | no |
-| `@jarenjs/db/node-pool` | yes | journal | no | no |
-| `@jarenjs/db/node-process` | yes | journal | no | no |
+| `@jarenjs/db/node-worker` | yes | journal | no | resnapshot |
+| `@jarenjs/db/node-pool` | yes | journal | no | resnapshot |
+| `@jarenjs/db/node-process` | yes | journal | no | resnapshot |
 
 Job statements resolve asynchronous preparation through the shared queue engine.
 Enqueue, claim, renewal, settlement and flow checkpoints use the same public API
@@ -115,8 +213,14 @@ try {
 The host authorizes and scopes feed delivery, persists the acknowledged cursor,
 and handles retention resets. Journal capture covers enrolled Store writes;
 arbitrary SQL, other connections and all trigger/cascade effects are not covered.
-Explicit `session` mode refuses with `TypeError`, without a JD code. A committed
-feed does not enable synchronous Store methods or live queries on async hosts.
+Explicit `session` mode refuses with `TypeError`, without a JD code. Synchronous
+Store methods remain unavailable. Import `asyncLive` from `@jarenjs/db/async-live`
+and pass `live: asyncLive(limits)` to select async maintenance. Its
+[snapshot/checkpoint and cleanup contract](LIVE-FORMAT.md#121-asynchronous-resnapshots)
+also applies to PostgreSQL. The default without the helper remains `live: false`.
+`capabilities.liveModes` reports the selected mechanisms; `dataVersion` reports
+the SQLite coarse revision facility separately. Native lexical freshness uses
+[enrolled revisions or an injected provider](SEARCH.md).
 
 Business rows and `tx.jobs` in one tenant file share a transaction. Separate
 tenant/control/jobs files do not: persist an outbox intent in the tenant
@@ -452,8 +556,9 @@ Confirmed beside this path, left unchanged:
   classified Connection reads are the pool's current parallelism boundary.
 - V8 termination cannot preempt native SQLite execution. A true statement interrupt
   would need binding support; shutdown documents the unknown outcome explicitly.
-- Asynchronous live maintenance remains unavailable; IndexedDB and Node workers
-  expose that capability limitation instead of returning stale live results.
+- The browser IndexedDB topology still exposes no synchronous live maintenance.
+  Node workers can explicitly select the shared durable resnapshot helper;
+  browser fallback qualification remains scoped to its existing refresh flow.
 
 Checked and dropped:
 
@@ -473,8 +578,10 @@ Checked and dropped:
 Node and Bun qualify explicit SQLite column mappings and scoped prepared SQL.
 The synchronous transaction API exists only when the driver's observed
 `synchronous` capability is true; worker and other async-only hosts expose no
-sync twin. Physical adoption on PostgreSQL refuses pending a separate mapping
-and codec qualification. Unknown application-trigger effects do not qualify
+sync twin. PostgreSQL qualifies asynchronous native scalar adoption with an
+explicit driver-owned schema; see [column adoption](MODEL-FORMAT.md#postgresql-column-adoption)
+for exact codecs, native query subsets and host RLS ownership.
+Unknown application-trigger effects do not qualify
 capture or replication; those combinations refuse before an adoption claim.
 
 Closing a Bun connection requests immediate native database closure. This also

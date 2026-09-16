@@ -1,7 +1,7 @@
 //@ts-check
 /** Column-first SQLite schema programs. No SQL strings are accepted as expressions. */
 import { DbCompileError } from '../errors.js';
-import { relationalEmitter, relationalIdentifier as q } from './sqlite-relational.js';
+import { relationalEmitter, relationalIdentifier as q } from '../relational.js';
 
 const fail = (message) => { throw new DbCompileError('JD0005', message); };
 const check = (v, keys, label) => {

@@ -319,14 +319,16 @@ what each does is its own documentation's job
   **Proof still needed:** preserve output cardinality, structural equality,
   ordering and errors, and never drop a member a residual predicate reads.
 
-- [ ] **A third SQL dialect, and the two capability slots still empty.**
+- [ ] **A third SQL dialect and native row estimates.**
   PostgreSQL and SQLite share the model, query documents and differential
-  oracle. `statementTimeout` and `rowEstimates` remain absent on both.
-  **Driver boundary:** the injected client contract names neither an in-flight
-  cancellation hook nor an estimate-returning operation; a server timeout is
-  not the store's `AbortSignal` promise. A third dialect also needs an explicit
-  disposition for the SQLite-only job queue and change ledger, currently
-  capability-gated refusals. This requires a driver/subsystem design, not
+  oracle. `rowEstimates` remains absent on both; SQLite also lacks a statement
+  timeout. PostgreSQL now provides bounded native cursors, a server timeout and
+  an optional cursor cancellation hook. **Driver boundary:** estimates need a
+  qualified estimate-returning operation; a server timeout is not the Store's
+  `AbortSignal` promise. A third dialect also needs an explicit
+  disposition for the job queue and journal concurrency/coverage. PostgreSQL
+  now qualifies managed journal capture and the shared leased job queue with
+  concurrent claims and fenced checkpoints. Remaining subsystem work needs backend strategies, not
   setting capability flags optimistically.
 - [ ] **Introspection outside the model vocabulary.** Partial indexes,
   direct SQL expression indexes and
@@ -339,13 +341,15 @@ what each does is its own documentation's job
   nullability, FK actions, generated columns, views and predicates independently
   of derivation. The explicit SQLite structural vocabulary now authors these declarations
   ([native SQLite programs](../packages/db/docs/SQLITE-RELATIONAL.md)); automatic
-  lossless derivation and stronger PostgreSQL catalog parity remain open; adoption does not infer
+  lossless derivation remains open. PostgreSQL now inventories schema-qualified
+  keys, exact types, constraints, opclasses, functions, RLS and identity sequences;
+  adoption does not infer
   application intent from their DDL.
-- [ ] **Broader relational mapping and query qualification.** Explicit SQLite
+- [ ] **Broader relational mapping and query qualification.** Explicit SQLite and PostgreSQL
   column layouts, codecs, read-only views and composite-key join-table entities
   are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
   Relation navigation across physical layouts, codec-aware keyset continuation,
-  pushdown beyond the qualified native census and PostgreSQL codec parity remain
+  pushdown beyond the qualified native census and additional PostgreSQL types remain
   open. Application trigger/cascade capture and replication remain refused until their complete
   writer population has an executable oracle.
 - [ ] **Broader database invariant lowering.** Declared scalar old/new/operation
@@ -367,7 +371,12 @@ what each does is its own documentation's job
   preservation plans, consistent committed-WAL backups, interrupted rebuild and
   publication recovery, and forward repair from the newest file are exercised
   under Node and Bun ([MIGRATION-FORMAT](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery)).
-  PostgreSQL snapshots, power-loss durability, deployment beyond the qualified
+  PostgreSQL now uses the shared receipt and preservation executor for reviewed
+  native catalog targets, recorded dependencies and sequence allocation guards;
+  independent-database shadow replay retains exact qualified programs.
+  PostgreSQL coherent dump/restore and archived-WAL recovery now have
+  [separate managed-data oracles](../packages/db/docs/POSTGRESQL.md).
+  Physical-schema cutover, power-loss durability, deployment beyond the qualified
   Linux executables and actual downstream cutover still require named evidence.
   Both host entries now provide disk-backed standalone snapshots and Bun backup
   no longer serializes the full database into JavaScript. Incremental progress,
@@ -379,12 +388,11 @@ what each does is its own documentation's job
   allocation inside the producer; spilling or a streaming intermediate engine
   needs a separate execution contract. Ordinary unrelated-source `join()`
   remains `JL0005`.
-- [ ] **Replication beyond bounded SQLite histories.** Portable envelopes,
+- [ ] **Replication beyond bounded managed histories.** Portable envelopes,
   causal frontiers, durable receipts, transactional apply, explicit conflicts
   and bounded snapshot resets are implemented in
-  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md).
-  **Capture/persistence boundary:** PostgreSQL declares no change capture;
-  paged snapshots need snapshot identity and continuation consistency;
+  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md)
+  on SQLite and PostgreSQL. Paged snapshots need snapshot identity and continuation consistency;
   receipt/tombstone compaction needs causal stability evidence beyond current
   reset credits. Journal replication explicitly refuses child cascade/set-null
   relations at open because its write journal cannot observe those database
@@ -402,7 +410,10 @@ what each does is its own documentation's job
   global ordering, and group-of-groups needs another dependency level. A native
   SQL plan alone proves none of those. The bounded database range adapter publishes
   source resets through committed capture; it does not close these incremental
-  cases. Offset windows remain rerun. Preserve
+  cases. The optional durable `resnapshot` mode now covers bounded async
+  queries on PostgreSQL and Node SQLite hosts, including cross-Store commits,
+  revision races and retention resets; it does not claim incremental maintenance
+  for these remaining shapes. Offset windows remain rerun. Preserve
   row/byte credits, transactional invalidation and equal-correctness measurements
   when extending these strategies.
 - [ ] **Typed SQL migration aggregates need an intermediate schema.**

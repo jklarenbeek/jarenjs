@@ -138,6 +138,13 @@ function normalizeCapabilities(declared) {
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
  *   isCreateRace?: (error: any) => boolean,
+ *   capture?: { check: (options: any) => void, beforeWrite: (connection: any) => any,
+ *     afterLog?: (connection: any) => any },
+ *   jobs?: any,
+ *   replication?: any,
+ *   foreignKeySuffix?: string,
+ *   foreignKeyActions?: Record<string, string>,
+ *   comparableForeignKeyAction?: (action: string) => string,
  *   derivedExpression?: (memberSql: string, column: { derive: string,
  *     precision?: number, component?: string, dims?: number }) => string,
  *   jsonSet: (exprSql: string, pathText: string, valueSql: string) => string,
@@ -186,9 +193,20 @@ function normalizeCapabilities(declared) {
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
  *   physicalRead?: (codec: string, sql: string) => string,
+ *   physicalCompare?: (codec: string, sql: string) => string,
+ *   physicalValueType?: (codec: string, sql: string) => string,
+ *   physicalDifferent?: (codec: string, left: string, right: string) => string,
+ *   numberCast?: (sql: string) => string,
+ *   distinct?: (left: string, right: string) => string,
  *   mutationRowGuard?: (count: string, limit: number) => string,
+ *   boundMutation?: (sql: string, limit: number) => string,
  *   codepoint?: (value: string) => string,
  *   physicalTypeMatches?: (codec: string, type: string) => boolean,
+ *   schema?: string,
+ *   relational?: any,
+ *   migration?: any,
+ *   physicalNamespaceRequired?: boolean,
+ *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any) => any[],
  *   readChecks?: (rows: any[]) => { name: string, column?: string, values?: any[] }[],
  *   introspect: { version: () => string, compileOptions: () => string,
@@ -204,6 +222,9 @@ function normalizeCapabilities(declared) {
 export function createDialect(spec) {
   const q = spec.quoteIdentifier;
   const p = spec.parameterRef;
+  const foreignKeyActions = spec.foreignKeyActions ?? { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
+  const referenceSql = (reference) => ` REFERENCES ${q(reference.table)} (${q(reference.column)})`
+    + ` ON DELETE ${foreignKeyActions[reference.onDelete]}${spec.foreignKeySuffix ?? ''}`;
 
   /**
    * One planned column's definition. A path column is a VIRTUAL
@@ -313,12 +334,10 @@ export function createDialect(spec) {
      * @returns {string}
      */
     addColumn({ table, column }) {
-      const onDeleteSql = { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
       let sql = `ALTER TABLE ${q(table)} ADD COLUMN ${q(column.name)} ${column.type}`;
       if (column.check !== undefined) sql += ` CHECK (${column.check})`;
       if (column.references !== undefined) {
-        sql += ` REFERENCES ${q(column.references.table)} (${q(column.references.column)})`
-          + ` ON DELETE ${onDeleteSql[column.references.onDelete]}`;
+        sql += referenceSql(column.references);
       }
       return sql;
     },
@@ -367,15 +386,13 @@ export function createDialect(spec) {
      * @returns {string}
      */
     createRelationalTable({ table, columns, compositeKey }) {
-      const onDeleteSql = { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
       const rendered = columns.map((column) => {
         let sql = `${q(column.name)} ${column.type}`;
         if (column.primaryKey === true) sql += ' PRIMARY KEY';
         if (column.notNull === true) sql += ' NOT NULL';
         if (column.check !== undefined) sql += ` CHECK (${column.check})`;
         if (column.references !== undefined) {
-          sql += ` REFERENCES ${q(column.references.table)} (${q(column.references.column)})`
-            + ` ON DELETE ${onDeleteSql[column.references.onDelete]}`;
+          sql += referenceSql(column.references);
         }
         return sql;
       });
@@ -540,6 +557,10 @@ export function createDialect(spec) {
     jsonPathText: spec.jsonPathText,
     jsonExtract: spec.jsonExtract,
     isCreateRace: spec.isCreateRace,
+    capture: spec.capture,
+    jobs: spec.jobs,
+    replication: spec.replication,
+    comparableForeignKeyAction: spec.comparableForeignKeyAction ?? ((action) => action),
     /**
      * The expression a DERIVED column is generated from: the member at
      * the index path, as JSON text, handed to the deterministic
@@ -648,9 +669,21 @@ export function createDialect(spec) {
     readGenerated: spec.readGenerated,
     readChecks: spec.readChecks,
     physicalRead: spec.physicalRead,
+    physicalCompare: spec.physicalCompare,
+    physicalValueType: spec.physicalValueType,
+    physicalDifferent: spec.physicalDifferent,
+    numberCast: spec.numberCast ?? ((sql) => `CAST(${sql} AS REAL)`),
+    distinct: spec.distinct ?? ((left, right) => `${left} IS NOT ${right}`),
     mutationRowGuard: spec.mutationRowGuard,
+    boundMutation: spec.boundMutation,
     codepoint: spec.codepoint,
     physicalTypeMatches: spec.physicalTypeMatches,
+    schema: spec.schema,
+    relational: spec.relational,
+    migration: spec.migration,
+    physicalNamespaceRequired: spec.physicalNamespaceRequired,
+    qualifyPhysicalColumn: spec.qualifyPhysicalColumn,
+    tableName: (name, schema) => schema === undefined ? q(name) : `${q(schema)}.${q(name)}`,
     invariantTriggers: spec.invariantTriggers,
     explainQuery: spec.explainQuery,
     /** The plan narrative, one line per row the engine answered. */

@@ -25,6 +25,20 @@ const q = pg.quoteIdentifier;
 
 runDialectConformance(pg, { describe, it, assert });
 
+it('managed foreign keys defer only when requested and retain distinct deletion actions', () => {
+  for (const [action, native] of [['restrict', 'NO ACTION'], ['cascade', 'CASCADE'], ['setNull', 'SET NULL']]) {
+    const column = { name: 'parent', type: 'TEXT', references: { table: 'Node', column: 'id', onDelete: action } };
+    for (const sql of [pg.ddl.createRelationalTable({ table: 'Child', columns: [column] }),
+      pg.ddl.addColumn({ table: 'Child', column })])
+      assert.ok(sql.includes(`ON DELETE ${native} DEFERRABLE INITIALLY IMMEDIATE`));
+    assert.strictEqual(pg.comparableForeignKeyAction(native), native);
+  }
+  assert.strictEqual(pg.comparableForeignKeyAction('RESTRICT'), pg.comparableForeignKeyAction('NO ACTION'));
+  assert.notStrictEqual(pg.comparableForeignKeyAction('CASCADE'), pg.comparableForeignKeyAction('NO ACTION'));
+  assert.notStrictEqual(sqliteDialect.comparableForeignKeyAction('RESTRICT'), sqliteDialect.comparableForeignKeyAction('NO ACTION'));
+  assert.strictEqual(pg.tx.deferForeignKeys, 'SET CONSTRAINTS ALL DEFERRED');
+});
+
 const MODEL = {
   $model: '0.1',
   collections: {

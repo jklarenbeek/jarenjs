@@ -44,6 +44,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const table = entityMapping.table;
+  const tableSql = dialect.tableName(table, entityMapping.schema);
   const docPath = entity.docPath;
   const physical = entityMapping.document === false;
   const physicalName = (name) => entityMapping.columns.find((c) => c.name === name)?.physical ?? name;
@@ -288,8 +289,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     const returning = autoKey !== null && !names.includes(autoKey)
       ? ` RETURNING ${q(physicalName(autoKey))} AS ${q('key')}`
       : '';
-    if (withDoc.length === 0) return `INSERT INTO ${q(table)} DEFAULT VALUES${returning}`;
-    return `INSERT INTO ${q(table)} (${withDoc.map((n) => q(physicalName(n))).join(', ')}) `
+    if (withDoc.length === 0) return `INSERT INTO ${tableSql} DEFAULT VALUES${returning}`;
+    return `INSERT INTO ${tableSql} (${withDoc.map((n) => q(physicalName(n))).join(', ')}) `
       + `VALUES (${refs.join(', ')})${returning}`;
   };
 
@@ -334,6 +335,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     // completion/validation/stamping machinery, one source of truth
     plan: {
       table,
+      tableSql,
       document: !physical,
       physicalName,
       writable,
@@ -392,7 +394,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     },
     get(key) {
       const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
-      const sql = `SELECT ${selectColumns} FROM ${q(table)} WHERE ${keyWhere(0)}`;
+      const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${keyWhere(0)}`;
       // classified like every read of the query engines, never raw
       return attempt(() => chain(prepared('get', sql), (statement) =>
         chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
@@ -434,7 +436,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
           ...values.map((value, i) => `${q(physicalName(value.name))} = ${parameterAt(i + 1)}`),
           ...(physical ? [] : [`${q('doc')} = ${dialect.jsonEncode(parameterAt(values.length + 1))}`]),
         ].join(', ');
-        const sql = `UPDATE ${q(table)} SET ${assignments} `
+        const sql = `UPDATE ${tableSql} SET ${assignments} `
           + `WHERE ${keyWhere(values.length + (physical ? 0 : 1))}`;
         return chain(prepared(`update:${values.map((v) => v.name).join(',')}`, sql), (statement) =>
           chain(attempt(() => statement.run([...values.map((value) => value.value),
@@ -459,7 +461,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   return core;
   function remove(key) {
       const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
-      const sql = `DELETE FROM ${q(table)} WHERE ${keyWhere(0)}`;
+      const sql = `DELETE FROM ${tableSql} WHERE ${keyWhere(0)}`;
       return chain(prepared('delete', sql), (statement) =>
         chain(attempt(() => statement.run(parts), (error) => wrapWrite(error, parts[0])),
           (result) => Number(result?.changes ?? 0) > 0));

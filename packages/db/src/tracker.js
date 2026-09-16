@@ -637,7 +637,7 @@ export function createTracker(context) {
             const returning = plan.autoKey !== null && !names.includes(plan.autoKey);
             const rowSql = (base) => `(${[...names.map((_, i) => parameterAt(base + i + 1)),
               ...(plan.document === false ? [] : [dialect.jsonEncode(parameterAt(base + names.length + 1))])].join(', ')})`;
-            const sql = (plan.document === false && names.length === 0 ? `INSERT INTO ${q(plan.table)} DEFAULT VALUES` : `INSERT INTO ${q(plan.table)} `
+            const sql = (plan.document === false && names.length === 0 ? `INSERT INTO ${plan.tableSql} DEFAULT VALUES` : `INSERT INTO ${plan.tableSql} `
               + `(${[...names.map((n) => q(plan.physicalName(n))), ...(plan.document === false ? [] : [q('doc')])].join(', ')}) VALUES `
               + batch.map((_, i) => rowSql(i * paramsPerRow)).join(', '))
               + (returning ? ` RETURNING ${q(plan.physicalName(plan.autoKey))} AS ${q('key')}` : '');
@@ -697,7 +697,7 @@ export function createTracker(context) {
         }
         statements.push({
           kind: 'update', entity: record.entity, record,
-          sql: `UPDATE ${q(plan.table)} SET ${assignments.join(', ')} `
+          sql: `UPDATE ${plan.tableSql} SET ${assignments.join(', ')} `
             + `WHERE ${wheres.join(' AND ')}`,
           params,
           guarded: plan.version !== null,
@@ -750,7 +750,7 @@ export function createTracker(context) {
           }
           statements.push({
             kind: 'delete', entity: entityName, removal,
-            sql: `DELETE FROM ${q(plan.table)} WHERE ${wheres.join(' AND ')}`,
+            sql: `DELETE FROM ${plan.tableSql} WHERE ${wheres.join(' AND ')}`,
             params,
             guarded: snapshotVersion !== null,
           });

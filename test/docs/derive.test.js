@@ -48,7 +48,12 @@ it('current runtime scope agrees with the public exports and normative control c
   const db = doc('packages/db/README.md');
   assert.doesNotMatch(db, /SQLite only|No replication(?: is shipped| or sync engine)|There is no replication/);
   assert.match(db, /REPLICATION-FORMAT/);
-  assert.match(doc('packages/db/docs/REPLICATION-FORMAT.md'), /PostgreSQL capture/);
+  const replication = doc('packages/db/docs/REPLICATION-FORMAT.md');
+  assert.match(replication, /PostgreSQL through journal capture and native bounded cursors/);
+  assert.match(replication, /PostgreSQL → SQLite, SQLite → PostgreSQL and\s+PostgreSQL → PostgreSQL/);
+  assert.match(replication, /Journal replication refuses models with cascading or set-null/);
+  assert.match(replication, /Opening never performs that migration implicitly/);
+  assert.doesNotMatch(replication, /replication ledger\/apply strategy still refuses/);
   const view = doc('packages/view/docs/VIEW-FORMAT.md');
   assert.doesNotMatch(view, /Composition\/IME coordination is not yet specified/);
   assert.match(view, /final input event/);

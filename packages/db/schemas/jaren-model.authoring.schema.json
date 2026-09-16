@@ -218,7 +218,10 @@
                       "epoch-ms",
                       "bigint",
                       "decimal",
-                      "blob-hex"
+                      "blob-hex",
+                      "uuid",
+                      "local-timestamp",
+                      "instant"
                     ]
                   },
                   "null": {
@@ -235,13 +238,9 @@
                     "type": "boolean"
                   },
                   "type": {
-                    "enum": [
-                      "INTEGER",
-                      "REAL",
-                      "TEXT",
-                      "BLOB",
-                      "NUMERIC"
-                    ]
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "SQLite affinity, or an exact catalog type in a schema-qualified native layout."
                   },
                   "defaultValue": {
                     "description": "A literal SQLite value or closed structural $sql expression; planTable validates its operator and contextual semantics.",
@@ -288,7 +287,9 @@
                   "identity": {
                     "enum": [
                       "rowid",
-                      "autoincrement"
+                      "autoincrement",
+                      "always",
+                      "by-default"
                     ]
                   },
                   "check": {
@@ -394,6 +395,11 @@
             },
             "withoutRowid": {
               "type": "boolean"
+            },
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Native schema identity, which must equal the driver-owned schema."
             }
           },
           "additionalProperties": false

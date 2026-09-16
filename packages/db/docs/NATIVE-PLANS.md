@@ -66,13 +66,20 @@ row limits bound fetched results; byte limits bound each decoded result item.
 ## Mutations
 
 The asynchronous entity set exposes `mutate(document)`. It compiles each closed
-document into one parameterized SQLite data statement and reuses statements by
+document into one parameterized native data statement and reuses statements by
 their complete SQL in a bounded cache. Bindings, projections and output limits
 remain local to each call; earlier payload-bearing documents are not retained.
 Execution uses the same guarded transaction as the entity writer. It supports adopted writable
-column layouts. Hybrid entities, PostgreSQL physical layouts, arbitrary SQL,
+SQLite and PostgreSQL column layouts. Hybrid entities, arbitrary SQL,
 store-enforced before/after invariants and unsupported expression shapes refuse
 with `JD0038`. Database constraints and invariant triggers retain enforcement.
+PostgreSQL verifies its explicit schema and exact scalar codecs before adoption;
+see [native column adoption](MODEL-FORMAT.md#postgresql-column-adoption).
+Its mutation result is limited on the server to `maxRows + 1` rows, so an
+overflow witness causes rollback without sending every affected row to the
+client. Server work and transactional trigger effects can exceed that result
+window; the effective statement timeout also applies. A single large row can
+exceed a receive-frame byte budget before the client refuses it.
 
 ```js
 const result = await store.entity('Inventory').mutate({

@@ -10,6 +10,34 @@ const open = (replica, config = {}, options = {}) => openStore(replicationModel,
   { driver: nodeDriver(), ...options, replication: { replica, ...config } });
 const allNotes = [{ $for: { n: '$[*]' }, $orderby: '$n.id', $return: '$n' }];
 
+it('snapshot byte credits include the complete empty document and refuse invalid bounds', async () => {
+  const store = await open('bounded');
+  try {
+    const document = await store.replication.snapshot();
+    const size = new TextEncoder().encode(JSON.stringify(document)).length;
+    await assert.rejects(store.replication.snapshot({ maxBytes: size - 1 }), { code: 'JD2074' });
+    assert.deepEqual(await store.replication.snapshot({ maxBytes: size }), document);
+    for (const maxBytes of [0, NaN, Infinity, 1.5]) await assert.rejects(store.replication.snapshot({ maxBytes }), TypeError);
+  }
+  finally { await store.close(); }
+});
+
+it('missing durable identity never adopts pre-existing replication metadata', async () => {
+  const temp = tempDbPath(), driver = nodeDriver();
+  let store, connection;
+  try {
+    store = await open('original', {}, { driver, path: temp.dbPath }); await store.close();
+    connection = await driver.open(temp.dbPath);
+    await connection.exec("DELETE FROM _jaren_replica; INSERT INTO _jaren_replica_claims(id,payload) VALUES ('unowned','{}')");
+    await connection.close(); connection = null;
+    await assert.rejects(open('replacement', {}, { path: temp.dbPath }), { code: 'JD2104' });
+    connection = await driver.open(temp.dbPath);
+    assert.deepEqual((await (await connection.prepare('SELECT id FROM _jaren_replica_claims')).all()).map((row) => row.id), ['unowned']);
+    assert.deepEqual(await (await connection.prepare('SELECT id FROM _jaren_replica')).all(), []);
+  }
+  finally { await connection?.close(); await store?.close(); temp.cleanup(); }
+});
+
 for (const mode of ['session', 'journal']) it(`${mode}: envelopes replicate documents, entities and relation changes without echoes`, async () => {
   const a = await open('a', {}, { capture: { mode } });
   const b = await open('b', {}, { capture: { mode } });

@@ -568,8 +568,8 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
                 /** @param {any} fk */
                 const describe = (fk) => `${fk.column} -> ${fk.references}`
                   + `${fk.targetColumn === null ? '' : `(${fk.targetColumn})`}`
-                  + ` ON DELETE ${String(fk.onDelete ?? 'NO ACTION').toUpperCase()}`
-                  + ` ON UPDATE ${String(fk.onUpdate ?? 'NO ACTION').toUpperCase()}`;
+                  + ` ON DELETE ${dialect.comparableForeignKeyAction(String(fk.onDelete ?? 'NO ACTION').toUpperCase())}`
+                  + ` ON UPDATE ${dialect.comparableForeignKeyAction(String(fk.onUpdate ?? 'NO ACTION').toUpperCase())}`;
                 const actual = fkRows.map((row) => describe({
                   column: String(row.source_column),
                   references: String(row.target),
@@ -1297,6 +1297,11 @@ export function openStore(model, options) {
         return withScope((inner) => opened.exclusively(inner, what, signal), fn);
       };
 
+      const cursorOwnership = opened.capabilities.cursorTransaction === true
+        ? { holdMs: opened.capabilities.cursorLifetimeMs, owners: new Set(), max: opened.capabilities.maxCursors } : undefined;
+      const admitRootCursor = (cursor, signal, what) =>
+        admitCursor(cursor, gated, signal, what, cursorOwnership);
+
       /** The synchronous surface's gate. It cannot wait — waiting hands
        * a Promise back under a value's type — so a contended call is a
        * refusal whatever the mode. */
@@ -1453,11 +1458,10 @@ export function openStore(model, options) {
             const wanted = captureRequested.mode ?? 'auto';
             // Capture requires a qualified backend, even where log SQL
             // can already be emitted through the dialect.
-            if (connection.capabilities.changeCapture !== true) {
+            if (connection.capabilities.changeCapture !== true
+              || (options.replication !== undefined && connection.capabilities.replication === false)) {
               throw new DbCompileError('JD0051',
-                'change capture is unavailable on this driver: it declares no change '
-                + 'ledger, so neither a changeset journal nor a live query can be built '
-                + 'on it');
+                `${options.replication === undefined ? 'change capture' : 'replication'} is unavailable on this driver`);
             }
             const hasSessions = connection.capabilities.sessions === true
               && typeof connection.session === 'function';
@@ -1595,10 +1599,13 @@ export function openStore(model, options) {
           // the live registry rides the capture stream; its dispatcher
           // registers FIRST so maintenance sees every record before any
           // user observer can commit a further write (LIVE-FORMAT §8)
+          const resnapshotEnabled = capture?.logged && connection.capabilities.lazyIteration === true
+            && typeof options.live?.resnapshot === 'function';
           const liveRegistry = capture === null ? null : createLiveRegistry({
             maxQueries: options.live?.maxQueries ?? LIVE_DEFAULTS.maxQueries,
             maxMaintained: options.live?.maxMaintained ?? LIVE_DEFAULTS.maxMaintained,
             maxBytes: options.live?.maxBytes ?? LIVE_DEFAULTS.maxBytes,
+            resnapshot: options.live?.resnapshot,
           });
           if (capture !== null) {
             capture.observe((record) => /** @type {any} */ (liveRegistry).deliver(record));
@@ -1609,7 +1616,7 @@ export function openStore(model, options) {
           if (jobsRequested && connection.capabilities.jobs !== true) {
             throw new DbCompileError('JD0003',
               'the durable job queue is unavailable on this driver: it declares no job '
-              + 'queue, and the queue writes its own SQLite statements');
+              + 'queue strategy');
           }
           const jobsEngine = !jobsRequested ? null : createJobEngine({
             connection,
@@ -1627,15 +1634,29 @@ export function openStore(model, options) {
             runtime,
           });
           /** Register a collection live query (LIVE-FORMAT §7). */
-          const refuseAsyncLive = () => {
-            if (connection.synchronous !== true) {
+          const liveSnapshot = (document, liveOptions, name = undefined) => {
+            if (connection.synchronous === true && liveOptions?.mode !== 'resnapshot') return {};
+            if (!resnapshotEnabled) {
               throw new DbCompileError('JD0051',
-                'live queries are not maintained over an asynchronous connection — a '
-                + 'synchronous driver (node, bun, a synchronous wasm handle) keeps them');
+                'resnapshot live queries require durable capture, lazy iteration and asyncLive() from @jarenjs/db/async-live');
             }
+            if (liveOptions?.eventTime !== undefined)
+              throw new DbCompileError('JD0053', 'resnapshot mode has no incremental event-time watermark');
+            return { classification: { strategy: 'resnapshot', reason: 'durable-feed asynchronous resnapshot' },
+              snapshot: {
+                snapshotContext: { connection, document, externals: liveOptions?.externals ?? {},
+                  ...(name === undefined ? { entities, mapping }
+                    : { collection: collections.get(name), physicalPlan: plans.get(name) }),
+                  profile: storeProfile, roots: declaredRoots, operators, zoneProvider, now: runtime.now },
+                feed: { bounds: capture.bounds, page: capture.page },
+                run: (read, signal, initial) => initial
+                  ? connection.transaction(read)
+                  // A snapshot takes the root transaction gate without opening
+                  // a write journal or holding its writer serialization lock.
+                  : withScope((inner) => beginTransaction(inner, signal), read),
+              } };
           };
           const registerCollectionLive = (core, document, liveOptions) => {
-            refuseAsyncLive();
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
             const eventTime = normalizeEventTime(liveOptions, core.model.name);
@@ -1655,6 +1676,7 @@ export function openStore(model, options) {
                 collectionCore: coreFor, entityCore: entityCoreFor }).position(core.model.name, token),
               keyOf: (doc) => String(extractKey(doc, core.model.keySegments,
                 core.model.key, core.model.name, core.model.docPath)),
+              ...liveSnapshot(document, liveOptions, core.model.name),
             }));
           };
           /** A live query registered INSIDE a transaction initialized from
@@ -1698,7 +1720,7 @@ export function openStore(model, options) {
                 const boundedRows = () => {
                   const { maxOperations = REPLICATION_DEFAULTS.maxOperations, maxBytes = REPLICATION_DEFAULTS.maxBytes } = options.replication;
                   const cursor = createCursor({ streaming: 'row', barrier: null,
-                    open: () => chain(connection.prepare(`${sql} LIMIT ?`), (statement) => statement.iterate([keyParts[0], maxOperations + 1])),
+                    open: () => chain(connection.prepare(`${sql} LIMIT ${dialect.parameterRef(2, 'v')}`), (statement) => statement.iterate([keyParts[0], maxOperations + 1])),
                     items: (row) => [row] });
                   return chain(drainPage(cursor, { limit: maxOperations, maxBytes,
                     sizeOf: (row) => utf8Length(JSON.stringify(row)), continuationOf: () => null }), (page) => {
@@ -1858,9 +1880,12 @@ export function openStore(model, options) {
             captureLog: captureMode !== 'none'
               && (captureRequested.log === true
                 || (captureRequested.log !== undefined && captureRequested.log !== false)),
-            // maintenance reads rows synchronously; an asynchronous
-            // connection is never maintained (LIVE-FORMAT §12) and says so
-            live: captureMode !== 'none' && connection.synchronous === true,
+            live: captureMode !== 'none' && (connection.synchronous === true || resnapshotEnabled),
+            liveModes: Object.freeze(captureMode === 'none' ? [] : [
+              ...(connection.synchronous === true ? ['incremental', 'rerun'] : []),
+              ...(resnapshotEnabled ? ['resnapshot'] : []),
+            ]),
+            dataVersion: typeof dialect.introspect.dataVersion === 'function',
             jobs: options.jobs === true
               || (options.jobs !== undefined && options.jobs !== false),
           });
@@ -2217,7 +2242,6 @@ export function openStore(model, options) {
               throw new DbCompileError('JD0050',
                 'live queries require change capture — open the store with { capture: true }');
             }
-            refuseAsyncLive();
             if (liveOptions?.eventTime !== undefined) {
               throw new DbCompileError('JD0053',
                 'live eventTime maintains a collection view — an entity document re-runs, '
@@ -2246,6 +2270,7 @@ export function openStore(model, options) {
               dependencyPosition: logicalRows.position,
               readRow: null,
               keyOf: null,
+              ...liveSnapshot(document, liveOptions),
             }));
           };
 
@@ -2316,8 +2341,8 @@ export function openStore(model, options) {
                   ...gatedMembers(inner,
                     ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
                     ['execute']),
-                  query: (document, queryOptions) => admitCursor(inner.query(document, queryOptions),
-                    gated, queryOptions?.signal, 'a root collection cursor pull'),
+                  query: (document, queryOptions) => admitRootCursor(inner.query(document, queryOptions),
+                    queryOptions?.signal, 'a root collection cursor pull'),
                 });
                 gatedCollections.set(name, handle);
               }
@@ -2339,10 +2364,10 @@ export function openStore(model, options) {
                 const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load']);
                 handle = Object.freeze({
                   ...handle,
-                  cursor: (document, queryOptions) => admitCursor(inner.cursor(document, queryOptions),
-                    gated, queryOptions?.signal, 'a root entity cursor pull'),
-                  loadCursor: (spec, cursorOptions) => admitCursor(inner.loadCursor(spec, cursorOptions),
-                    gated, cursorOptions?.signal, 'a root graph cursor pull'),
+                  cursor: (document, queryOptions) => admitRootCursor(inner.cursor(document, queryOptions),
+                    queryOptions?.signal, 'a root entity cursor pull'),
+                  loadCursor: (spec, cursorOptions) => admitRootCursor(inner.loadCursor(spec, cursorOptions),
+                    cursorOptions?.signal, 'a root graph cursor pull'),
                   asNoTracking: () => untracked,
                 });
                 gatedEntities.set(name, handle);
@@ -2479,8 +2504,8 @@ export function openStore(model, options) {
               // for a local attempt to wind up — the handler's own
               // settlement calls take the gate, so waiting inside it
               // would wait for itself
-              page: (pageOptions) => admitCursor(jobsEngine.page(pageOptions),
-                gated, pageOptions?.signal, 'a root job page pull'),
+              page: (pageOptions) => admitRootCursor(jobsEngine.page(pageOptions),
+                pageOptions?.signal, 'a root job page pull'),
               cancel: lift((id, cancelOptions) => chain(
                 gated(() => jobsEngine.cancel(id, cancelOptions), 'a root job cancellation'),
                 (outcome) => chain(jobsEngine.settledLocally(id), () => outcome))),
@@ -2498,10 +2523,11 @@ export function openStore(model, options) {
              * @param {{ graceMs?: number }} [closeOptions]
              */
             close: lift((closeOptions) => {
-              if (liveRegistry !== null) liveRegistry.closeAll();
-              return chain(
-                jobsEngine === null ? null : jobsEngine.stopAll(closeOptions),
-                (stopped) => chain(connection.close(), () => {
+              const liveCleanup = liveRegistry?.closeAll();
+              const cursorCleanup = cursorOwnership === undefined ? null
+                : Promise.allSettled([...cursorOwnership.owners].map((cursor) => cursor.return()));
+              return chain(jobsEngine === null ? null : jobsEngine.stopAll(closeOptions),
+                (stopped) => chain(connection.close(), () => chain(liveCleanup, () => chain(cursorCleanup, () => {
                   const stuck = (stopped ?? []).filter(
                     (/** @type {any} */ outcome) => outcome.drained === false);
                   if (stuck.length === 0) return undefined;
@@ -2512,7 +2538,7 @@ export function openStore(model, options) {
                       (/** @type {number} */ n, /** @type {any} */ o) => n + o.inFlight, 0)} `
                     + `job handler(s) still in flight across ${stuck.length} worker(s); `
                     + 'they were signalled to abort and did not settle within the grace period');
-                }));
+                }))));
             }),
           };
 
@@ -3099,6 +3125,7 @@ export function openStore(model, options) {
           return chain(jobsEngine === null ? null : jobsEngine.ready, () => {
           if (options.replication !== undefined) {
             replicationEngine = createReplicationEngine({ connection, capture,
+              managedTables: [...captureShapes.keys()],
               config: options.replication, model: shapeHash(model), now: runtime.now, bracket: firstOpen,
               rows: createLogicalRows({ connection, shapes: captureShapes, capture,
                 collectionCore: coreFor, entityCore: entityCoreFor, captureJoinDelete }),

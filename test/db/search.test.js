@@ -140,3 +140,43 @@ it('failed snapshot persistence retries the same generation and capture-free hos
   }
   finally { await source?.dispose(); await store.close(); }
 });
+
+it('validates injected source tokens around reads and bounds asynchronous invalidation observers', async () => {
+  const { store, options } = await host();
+  let token = 0, calls = 0, churn = false, source;
+  const release = Promise.withResolvers();
+  try {
+    const revision = { name: 'host-external-revision', read(tx) {
+      assert.equal(tx.close, undefined, 'the revision provider receives the exact transaction view');
+      calls++; return churn ? ++token : token;
+    } };
+    source = await createDbSearch(store, 'Item', definition, { ...options, revision });
+    assert.equal(source.explain().revision, 'host-external-revision');
+    const before = source.sourceRevision;
+    churn = true;
+    assert.equal((await source.refresh()).state, 'invalidated');
+    assert.equal(source.sourceRevision, before, 'a mixed token cannot publish a new index');
+    churn = false;
+    assert.equal((await source.refresh()).state, 'complete');
+    const events = [];
+    const unsubscribe = source.subscribe((event) => { events.push(event); return release.promise; });
+    for (let i = 0; i < 10; i++) await store.entity('Item').update('a', { title: String(i) });
+    assert.equal(events.length, 1); assert.equal(source.stats().observerPending, 2);
+    unsubscribe(); release.resolve(); await release.promise; await Promise.resolve();
+    assert.equal(events.length, 1, 'unsubscription suppresses pending delivery');
+    assert.equal(source.stats().subscriptions, 0);
+    const seen = []; let stop;
+    stop = source.subscribe(() => {
+      seen.push('original'); stop();
+      stop = source.subscribe(() => { seen.push('replacement'); });
+    });
+    await store.entity('Item').update('a', { title: 'original' });
+    assert.deepEqual(seen, ['original']);
+    await store.entity('Item').update('a', { title: 'replacement' });
+    assert.deepEqual(seen, ['original', 'replacement']); stop();
+    assert.ok(calls >= 6);
+    await assert.rejects(createDbSearch(store, 'Item', definition,
+      { source: 'bad-token', revision: { name: 'invalid', read: () => ({ token: 1 }) } }), /finite number or a string/);
+  }
+  finally { release.resolve(); await source?.dispose(); await store.close(); }
+});

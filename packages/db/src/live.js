@@ -11,11 +11,12 @@
  * the planner's, never a re-implementation. Everything outside the
  * table re-runs on invalidation with the reason named (`live.mode`).
  *
- * Maintenance is synchronous inside capture delivery (§8): inserts
+ * Incremental maintenance is synchronous inside capture delivery (§8): inserts
  * carry their document in the patch, updates point-read the touched
  * row, deletes are answered from maintained state. Per-row semantics
  * reuse the ENGINE via packed one-row compilation (the residual
- * discipline) — a live row evaluates exactly as the query would.
+ * discipline) — a live row evaluates exactly as the query would. Optional
+ * asynchronous resnapshots share this registry's result and lifecycle owner.
  */
 
 import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
@@ -23,7 +24,7 @@ import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { isJsonObject, stableStringify } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
-import { chain } from './driver.js';
+import { chain, attempt } from './driver.js';
 import { planQuery } from './plan.js';
 import { createSortedWindow } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
@@ -773,7 +774,7 @@ function rerunStrategy(description, context) {
 /**
  * The store-level live-query registry: registration against the §12
  * bounds, capture-record delivery in commit order, lifecycle.
- * @param {{ maxQueries: number, maxMaintained: number, maxBytes?: number }} bounds
+ * @param {{ maxQueries: number, maxMaintained: number, maxBytes?: number, resnapshot?: Function }} bounds
  */
 export function createLiveRegistry(bounds) {
   if (bounds.maxBytes !== undefined && (!Number.isSafeInteger(bounds.maxBytes) || bounds.maxBytes < 1))
@@ -792,7 +793,7 @@ export function createLiveRegistry(bounds) {
         `the store's live.maxQueries bound of ${bounds.maxQueries} was reached`);
     }
     const classification = definition.classification;
-    if (definition.demanded === 'incremental' && classification.strategy === 'rerun') {
+    if (definition.demanded === 'incremental' && ['rerun', 'resnapshot'].includes(classification.strategy)) {
       throw new DbCompileError('JD0051',
         `the demanded incremental mode is unavailable: ${classification.reason}`);
     }
@@ -810,6 +811,9 @@ export function createLiveRegistry(bounds) {
       maxMaintained: bounds.maxMaintained,
       maxBytes: bounds.maxBytes ?? LIVE_DEFAULTS.maxBytes,
       diff: diffAgainst,
+      share: shareByValue,
+      ...definition.snapshot,
+      tables: definition.tables,
       // §8's touched-key reader, handed to the strategies rather than
       // imported by them: `live-time.js` maintains its own state and
       // must not become a second implementation of the pointer walk
@@ -821,8 +825,9 @@ export function createLiveRegistry(bounds) {
       bucket: bucketStrategy, rolling: rollingStrategy, join: joinStrategy, graph: joinStrategy,
       'nested-group': nestedGroupStrategy,
     };
-    const strategy = (STRATEGIES[classification.strategy] ?? rerunStrategy)(
-      classification, context);
+    const strategy = classification.strategy === 'resnapshot'
+      ? bounds.resnapshot(context)
+      : (STRATEGIES[classification.strategy] ?? rerunStrategy)(classification, context);
 
     /** @type {Set<Function>} */
     const observers = new Set();
@@ -841,6 +846,26 @@ export function createLiveRegistry(bounds) {
           { collection: definition.name });
       }
     };
+    const emit = (event) => {
+      if (strategy.emit) { strategy.emit(event); return; }
+      for (const observer of observers) {
+        try { observer(event); }
+        catch { /* Observer isolation: committed writes remain committed. */ }
+      }
+    };
+    const failed = (error) => {
+      if (state.status !== 'live') return;
+      state.status = 'errored'; state.error = error;
+      emit({ error });
+      queries.delete(query); strategy.close?.(); observers.clear();
+    };
+    const publish = (outcome, event) => {
+      if (state.status !== 'live' || outcome === null) return;
+      checkBound(strategy.entries(outcome.rows));
+      state.stats.matched++; state.stats.emissions++;
+      state.result = { rows: outcome.rows };
+      emit({ patch: outcome.ops, ...event });
+    };
 
     const query = {
       deliver(record) {
@@ -854,6 +879,7 @@ export function createLiveRegistry(bounds) {
         }
         if (!relevant) return;
         state.stats.records += 1;
+        if (strategy.invalidate) { strategy.invalidate(record); return; }
         let outcome;
         try {
           outcome = strategy.apply(record, state.result.rows);
@@ -873,48 +899,38 @@ export function createLiveRegistry(bounds) {
           checkBound(strategy.entries(outcome?.rows ?? state.result.rows));
         }
         catch (error) {
-          state.status = 'errored';
-          state.error = error;
-          queries.delete(query);
-          strategy.close?.();
-          const failure = { error };
-          for (const observer of observers) {
-            try {
-              observer(failure);
-            }
-            catch { /* observer isolation, the capture precedent */ }
-          }
-          observers.clear();
+          failed(error);
           return;
         }
-        if (outcome === null) return;
-        state.stats.matched += 1;
-        state.stats.emissions += 1;
-        state.result = { rows: outcome.rows };
-        const event = { patch: outcome.ops, seq: record.seq,
-          ...(outcome.late === undefined ? {} : { lateData: outcome.late }) };
-        for (const observer of observers) {
-          try {
-            observer(event);
-          }
-          catch { /* isolation */ }
-        }
+        publish(outcome, { seq: record.seq,
+          ...(outcome?.late === undefined ? {} : { lateData: outcome.late }) });
       },
       close() {
-        if (state.status === 'live') { state.status = 'closed'; strategy.close?.(); }
+        if (state.status === 'live') state.status = 'closed';
         queries.delete(query);
         observers.clear();
+        return strategy.close?.();
       },
     };
 
-    return chain(strategy.init(), (rows) => {
+    queries.add(query);
+    return attempt(() => chain(strategy.init(), (rows) => {
+      if (state.status !== 'live') throw new DbRuntimeError('JD2072', 'live registration closed before its snapshot settled');
       checkBound(strategy.entries(rows));
       state.result = { rows };
-      queries.add(query);
+      let lag = false;
+      strategy.start?.((event) => {
+        const outcome = diffAgainst(state.result.rows, event.rows);
+        const changed = event.lag !== lag;
+        lag = event.lag;
+        if (outcome || event.resetRequired || event.lag || changed)
+          publish(outcome ?? { rows: event.rows, ops: [] }, {
+            seq: event.seq, resetRequired: event.resetRequired, lag: event.lag });
+      }, failed);
       const mode = Object.freeze({
         strategy: classification.strategy,
-        mode: classification.strategy === 'rerun' ? 'rerun' : 'incremental',
-        ...(classification.strategy === 'rerun' ? { reason: classification.reason } : {}),
+        mode: ['rerun', 'resnapshot'].includes(classification.strategy) ? classification.strategy : 'incremental',
+        ...(classification.reason ? { reason: classification.reason } : {}),
       });
       return Object.freeze({
         get result() { return state.result; },
@@ -922,6 +938,7 @@ export function createLiveRegistry(bounds) {
         get error() { return state.error; },
         mode,
         stats: () => ({ ...state.stats, ...(strategy.stats?.() ?? {}) }),
+        ...(strategy.refresh ? { refresh: strategy.refresh } : {}),
         ...(strategy.advance === undefined ? {} : {
           advance(watermark) {
             if (state.status !== 'live') throw new TypeError('the live query is closed');
@@ -930,12 +947,13 @@ export function createLiveRegistry(bounds) {
         }),
         subscribe(observer) {
           if (state.status !== 'live') throw new TypeError('the live query is closed');
+          if (strategy.subscribe) return strategy.subscribe(observer);
           observers.add(observer);
           return () => observers.delete(observer);
         },
         close: () => query.close(),
       });
-    });
+    }), (error) => { query.close(); return error; });
   };
 
   return {
@@ -945,7 +963,8 @@ export function createLiveRegistry(bounds) {
       for (const query of [...queries]) query.deliver(record);
     },
     closeAll() {
-      for (const query of [...queries]) query.close();
+      const pending = [...queries].map((query) => query.close()).filter(Boolean);
+      return pending.length ? Promise.all(pending) : undefined;
     },
   };
 }

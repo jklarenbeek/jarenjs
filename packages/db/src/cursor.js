@@ -282,16 +282,21 @@ function itemCursor(spec, synchronous) {
  * released, aborted — answers `{ done: true }` without borrowing the
  * gate at all. The decorator buffers no item and holds no gate between
  * two public pulls: `streaming`, `barrier` and the asynchronous-iterator
- * identity are the inner cursor's own.
+ * identity are the inner cursor's own. A native backend requiring a transaction
+ * across fetches supplies `ownership`: that cursor instead holds the gate from
+ * first pull until bounded cleanup. Its owner set is drained on Store close.
  * @param {any} cursor - the engine's `QueryCursor`
  * @param {(fn: () => any, what?: string, signal?: AbortSignal) => any} admit
  *   - the store gate: runs `fn` holding the connection, value-or-promise
  * @param {AbortSignal | undefined} signal - the cursor's own signal, so an
  *   abort abandons a queued pull
  * @param {string} what - what is waiting, for the gate's timeout message
+ * @param {{ holdMs: number, owners: Set<any>, max: number }} [ownership] - native transaction lifetime
  * @returns {any} the admitted `QueryCursor`
  */
-export function admitCursor(cursor, admit, signal, what) {
+export function admitCursor(cursor, admit, signal, what, ownership) {
+  if (ownership !== undefined && cursor.streaming === 'row')
+    return holdCursor(cursor, admit, signal, what, ownership);
   /**
    * @param {'next' | 'return'} member
    * @param {string} label
@@ -324,6 +329,73 @@ export function admitCursor(cursor, admit, signal, what) {
     [Symbol.asyncIterator]: () => admitted,
   };
   return Object.freeze(admitted);
+}
+
+/** A native cursor pins its gate until cleanup, with finite lifetime and one
+ * close owner shared by abort, expiry, return and Store close.
+ * @param {any} cursor @param {Function} admit @param {AbortSignal} signal
+ * @param {string} what @param {{holdMs:number, owners:Set<any>, max:number}} ownership */
+function holdCursor(cursor, admit, signal, what, ownership) {
+  if (ownership.owners.size >= ownership.max)
+    throw new DbRuntimeError('JD2091', 'the native cursor ownership capacity is exhausted');
+  let acquiring, gate, releaseGate, timer, cleanup, failure;
+  let stopped = false;
+  const acquire = () => {
+    if (acquiring !== undefined) return acquiring;
+    let ready, refused;
+    acquiring = new Promise((resolve, reject) => { ready = resolve; refused = reject; });
+    const held = new Promise((resolve) => { releaseGate = resolve; });
+    try {
+      gate = Promise.resolve(admit(() => {
+        if (!stopped) timer = setTimeout(() => {
+          failure = new DbRuntimeError('JD2075', `native cursor lifetime exceeded ${ownership.holdMs}ms`);
+          settle().catch(() => {});
+        }, ownership.holdMs);
+        ready();
+        return held;
+      }, what, signal));
+    }
+    catch (error) { gate = Promise.reject(error); }
+    gate.catch((error) => { failure = error; refused(error); });
+    return acquiring;
+  };
+  const settle = () => {
+    if (cleanup !== undefined) return cleanup;
+    stopped = true;
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    cleanup = (async () => {
+      try { await cursor.return(); }
+      finally {
+        releaseGate?.();
+        try { await gate; }
+        finally { ownership.owners.delete(owned); }
+      }
+    })();
+    return cleanup;
+  };
+  const abort = () => { settle().catch(() => {}); };
+  const owned = {
+    streaming: cursor.streaming, barrier: cursor.barrier,
+    next: async () => {
+      if (signal?.aborted) { await settle(); return cursor.next(); }
+      if (failure) throw failure;
+      if (stopped) return { done: true, value: undefined };
+      try {
+        await acquire();
+        if (stopped) return { done: true, value: undefined };
+        const step = await cursor.next();
+        if (step.done) await settle();
+        return step;
+      }
+      catch (error) { await settle().catch(() => {}); throw error; }
+    },
+    return: async () => { await settle(); return { done: true, value: undefined }; },
+    [Symbol.asyncIterator]: () => owned,
+  };
+  ownership.owners.add(owned);
+  signal?.addEventListener('abort', abort, { once: true });
+  return Object.freeze(owned);
 }
 
 /** Synchronous admission per pull; cleanup is permitted even after refusal.

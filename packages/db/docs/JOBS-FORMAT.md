@@ -28,6 +28,12 @@ The queue composes with `@jarenjs/flow` checkpointed runs through §7
 a run that crashes resumes from its recorded nodes instead of
 restarting.
 
+SQLite and PostgreSQL use this same queue and injected flow composition.
+Select the host driver when opening the Store; PostgreSQL needs an injected
+pg-compatible source and `jobs: true`. The queue's SQL, schema and locking
+strategy follow that driver. The public records, lease errors and checkpoint
+identities stay the same; no PostgreSQL job engine or flow document is needed.
+
 ## 2. The job record
 
 `_jaren_jobs`, one row per job, surfaced camel-cased and frozen:
@@ -60,6 +66,14 @@ they are stored: `runAt` must be a finite epoch in milliseconds and
 `maxAttempts` a positive integer (`TypeError`) — a `NaN` eligibility
 was once stored, and that job was pending forever.
 
+PostgreSQL stores epochs and counters as NUMERIC, preserving finite JavaScript
+epoch values including fractional milliseconds and attempt budgets beyond
+32-bit integers. The public API still answers JavaScript numbers. Its text
+columns use the C collation so queue key ordering is independent of server
+locale. Startup serializes schema creation and forward upgrades with a
+transaction advisory lock. `adopt: true` only verifies existing infrastructure;
+a missing column or incompatible table/index refuses JD0002 without DDL.
+
 ## 3. Leasing, the fence, and exactly-once settlement
 
 Claiming is ONE guarded statement — one statement is one transaction,
@@ -77,6 +91,23 @@ WHERE id = (SELECT id FROM "_jaren_jobs"
   ORDER BY run_at, created_at, id LIMIT 1)
 RETURNING *
 ```
+
+The example shows SQLite parameters. PostgreSQL emits numbered parameters and
+adds `FOR UPDATE SKIP LOCKED` to the bounded candidate SELECT. Independent
+workers skip candidates another transaction holds. Eligibility order therefore
+applies to the available rows, with no global FIFO or starvation guarantee.
+Lease assertions inside a Store transaction and checkpoint saves lock the job
+row until that transaction settles. A sweep uses one selected and locked victim
+set for both job and checkpoint deletion, even when another worker settles a
+job concurrently.
+
+Every host MUST inject a comparable epoch clock across workers sharing a queue,
+or keep their system clocks synchronized with an allowance in the lease budget.
+PostgreSQL does not silently replace `jobs.now` with its server clock. Clock
+skew, event-loop stalls and network latency can expire a lease; the token and
+expiry guards still apply. A lost claim or commit reply does not prove rollback:
+inspect the durable job/receipt and recover by expiry, rather than replaying an
+external effect. A caller-supplied enqueue id supplies durable request identity.
 
 - The `kind IN` clause is the deploy-ordering protection: **a job
   whose kind has no registered handler on this worker is simply never
@@ -404,11 +435,15 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 
 ## 8. Non-goals
 
-- **One database, one machine.** Leasing coordinates workers on one
+- **SQLite uses one local database.** Leasing coordinates workers on one
   SQLite file. Over a network filesystem (NFS, SMB, many container
   volume mounts) SQLite's locking is **not reliable — this queue is
   NOT a safe cross-machine coordination substrate there**. Same-host
   processes over WAL are the supported topology.
+- **PostgreSQL coordinates independent clients of one database.** Business
+  writes and `tx.jobs.enqueue` co-commit on the same Store transaction. Separate
+  databases, including PostgreSQL business rows and a SQLite queue, require an
+  idempotent outbox relay and durable receipts; they share no atomic transaction.
 - No priority classes in 0.1 (`run_at` ordering only), no cron or
   recurring schedules (re-enqueue from a completed handler if
   needed), no workflow-level compensation or sagas, no cross-process
@@ -416,8 +451,10 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   per-job cancellation exists (§10) and aborts a handler's signal in the
   process that holds the attempt; across processes the lease is still
   the timeout story.
-- Throughput is SQLite's single-writer throughput; the measured
-  numbers live in the execution notes, not in marketing.
+- SQLite throughput remains bounded by its single writer. PostgreSQL uses
+  row locks and separate clients, while each Store serializes its own work.
+  Jobs use the driver's finite admission, statement and cleanup bounds; a
+  paused job-page cursor must be returned promptly to release its snapshot.
 
 ## 9. Errors
 

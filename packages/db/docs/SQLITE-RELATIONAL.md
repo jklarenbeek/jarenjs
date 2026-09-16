@@ -3,6 +3,14 @@
 `@jarenjs/db/relational` provides structural SQL authoring, physical table DDL,
 and guarded migrations. `relational(connection)` requires an available
 synchronous SQLite connection from `@jarenjs/db/node` or `@jarenjs/db/bun`.
+The shared `relational` expression/execution entry also supports asynchronous
+PostgreSQL connections with a native vocabulary and bounded cursors; its scalar
+adoption contract is described in [MODEL-FORMAT](MODEL-FORMAT.md#postgresql-column-adoption).
+The schema creation and migration procedures below describe SQLite.
+The same migration entry points also accept explicitly reviewed PostgreSQL SQL
+and complete native catalog targets; see
+[native preservation](MIGRATION-FORMAT.md#postgresql-native-preservation) for
+their asynchronous ownership, schema policy and receipt composition.
 It opens no store and uses the supplied connection and transaction. Expressions
 are closed `$sql` nodes built by `sql`; strings are bound values, never SQL
 fragments. Identifiers are quoted as single names. `planRelational` returns

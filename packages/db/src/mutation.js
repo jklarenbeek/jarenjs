@@ -8,7 +8,7 @@ import { entityShape, planEntityPredicate } from './plan.js';
 import { createEntityPredicateEmitters } from './emit.js';
 import { physicalSelection } from './physical.js';
 import { utf8Length } from './cursor.js';
-import { relationalEmitter } from './dialects/sqlite-relational.js';
+import { relationalEmitter } from './relational.js';
 
 /** Bind each document, reuse its SQL statement within the guarded transaction.
  * @param {any} connection @param {any} entity @param {any} mapping @param {any} core */
@@ -31,10 +31,14 @@ export function createEntityMutation(connection, entity, mapping, core) {
   };
   const comparison = (c, prefix = '') => {
     const value = prefix + q(c.physical);
+    if (dialect.physicalDifferent) return value;
     return c.storage === 'string' ? dialect.codepoint(value) : value;
   };
+  const different = (column, left, right) => dialect.physicalDifferent?.(column.codec, left, right)
+    ?? `${left} IS NOT ${right}`;
   const compile = (document) => {
-    if (entity.physical == null || dialect.name !== 'sqlite') fail('native mutations require a declared SQLite column layout');
+    if (entity.physical == null || dialect.name !== 'sqlite' && !dialect.physicalDifferent)
+      fail('native mutations require a qualified column layout');
     core.plan.writable();
     if (!document || typeof document !== 'object' || Array.isArray(document)) fail('a mutation is an object');
     const allowed = { update: ['key', 'expectedRevision', 'set', 'where', 'reporting', 'expressions'],
@@ -55,7 +59,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
     if (entity.invariants.some((rule) => rule.enforcement === 'store')) fail('store invariants require the entity writer with before/after images');
     const params = [];
     const param = (value) => { params.push(value); return dialect.parameterRef(params.length, 'v'); };
-    const table = q(mapping.table);
+    const table = dialect.tableName(mapping.table, mapping.schema);
     const sqlExpression = (expression, inline = false) => {
       const mapped = (value, depth = 0) => {
         if (depth > 64) fail('SQL expression nesting exceeds 64');
@@ -69,12 +73,13 @@ export function createEntityMutation(connection, entity, mapping, core) {
         }
         return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, next(item)]));
       };
-      const emitter = relationalEmitter({ inline });
+      const emitter = relationalEmitter({ inline, dialect, parameterOffset: params.length });
       const result = emitter.expr(mapped(expression));
       params.push(...emitter.params);
       return result;
     };
     const predicate = (expression) => {
+      if (typeof expression === 'boolean') return dialect.booleanLiteral(expression);
       if (expression?.$sql !== undefined || typeof expression === 'number') return sqlExpression(expression);
       const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: expression, $return: '$it' });
       const planned = planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping));
@@ -96,12 +101,12 @@ export function createEntityMutation(connection, entity, mapping, core) {
       const assignments = Object.entries(set).map(([name, value]) => {
         const c = writableColumn(name);
         const encoded = core.plan.encodeColumn(name, value);
-        return { name: q(c.physical), compare: comparison(c), value: param(encoded), different: () => param(encoded) };
+        return { name: q(c.physical), column: c, compare: comparison(c), value: param(encoded), different: () => param(encoded) };
       });
       for (const [name, expression] of Object.entries(expressions)) {
         if (Object.hasOwn(set, name)) fail('an assignment has exactly one owner');
         const c = writableColumn(name);
-        assignments.push({ name: q(c.physical), compare: comparison(c), value: sqlExpression(expression), different: () => sqlExpression(expression) });
+        assignments.push({ name: q(c.physical), column: c, compare: comparison(c), value: sqlExpression(expression), different: () => sqlExpression(expression) });
       }
       const where = [];
       if (Object.hasOwn(document, 'key')) {
@@ -116,7 +121,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
       }
       else if (document.expectedRevision !== undefined) fail('expectedRevision needs a declared version member');
       if (document.op === 'update' && document.reporting !== 'matched')
-        where.push(`(${assignments.map((a) => `${a.compare} IS NOT ${a.different()}`).join(' OR ')})`);
+        where.push(`(${assignments.map((a) => different(a.column, a.compare, a.different())).join(' OR ')})`);
       const sets = assignments.map((a) => `${a.name} = ${a.value}`);
       if (entity.version !== null) sets.push(`${q(column(entity.version).physical)} = ${q(column(entity.version).physical)} + 1`);
       sql = document.op === 'delete' ? `DELETE FROM ${table} WHERE ${where.map((part) => `(${part})`).join(' AND ')}`
@@ -155,14 +160,17 @@ export function createEntityMutation(connection, entity, mapping, core) {
             return param(core.plan.encodeColumn(name, value.$literal));
           return fail('insert-select values are singular member paths or $literal values');
         });
-        const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: document.where ?? true, $return: '$it' });
-        const predicate = planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping));
-        if ('refusal' in predicate) fail(predicate.refusal.reason);
+        const filter = document.where ?? true;
+        const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: filter, $return: '$it' });
+        const predicate = typeof filter === 'boolean' ? null
+          : planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping));
+        if (predicate && 'refusal' in predicate) fail(predicate.refusal.reason);
         const emitter = createEntityPredicateEmitters(dialect, (slot) => {
           if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
           return param(slot.literal);
         });
-        const where = emitter.emitPred(q('s'), `${q('s')}.${q('doc')}`, predicate.pred);
+        const where = predicate === null ? dialect.booleanLiteral(filter)
+          : emitter.emitPred(q('s'), `${q('s')}.${q('doc')}`, predicate.pred);
         source = `SELECT ${values.join(', ')} FROM ${table} AS ${q('s')} WHERE ${where}`
           + ` ORDER BY ${core.plan.keys.map((key) => `${q('s')}.${q(column(key).physical)}`).join(', ')}`
           + ` LIMIT ${maxRows + 1}`;
@@ -181,15 +189,16 @@ export function createEntityMutation(connection, entity, mapping, core) {
         const changes = document.update.map((name) => {
           const c = writableColumn(name);
           if (!names.includes(name)) fail('an upsert update member must be supplied in values');
-          return { name: q(c.physical), compare: comparison(c, `${table}.`) };
+          return { name: q(c.physical), column: c, compare: comparison(c, `${table}.`) };
         });
         const sets = changes.map(({ name }) => `${name} = excluded.${name}`);
         if (entity.version !== null) sets.push(`${q(column(entity.version).physical)} = ${table}.${q(column(entity.version).physical)} + 1`);
         sql += ` DO UPDATE SET ${sets.join(', ')}`;
-        if (document.reporting !== 'matched') sql += ` WHERE ${changes.map(({ name, compare }) => `${compare} IS NOT excluded.${name}`).join(' OR ')}`;
+        if (document.reporting !== 'matched') sql += ` WHERE ${changes.map(({ name, column, compare }) => different(column, compare, `excluded.${name}`)).join(' OR ')}`;
       }
     }
     sql = prefix + sql + ` RETURNING ${physicalSelection(mapping, dialect)}`;
+    sql = dialect.boundMutation?.(sql, maxRows) ?? sql;
     return { sql, params, returning, maxRows, maxBytes };
   };
   return (document) => {

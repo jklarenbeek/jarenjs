@@ -76,6 +76,8 @@ export interface RebuildStep {
 }
 /** The complete serializable artifact returned by planTableMigration. */
 export interface ReviewedTablePlan {
+  readonly backend?: 'postgres';
+  readonly physical?: PhysicalHeader;
   readonly version: 1;
   readonly id: string;
   readonly table: string;
@@ -101,11 +103,24 @@ export interface PhysicalObject {
   readonly owner: string;
   readonly sql: string | null;
 }
+export interface NativePhysicalObject {
+  readonly type: string;
+  readonly schema: string;
+  readonly name: string;
+  readonly owner: string;
+  readonly sql: string | null;
+  readonly metadata: Readonly<Record<string, unknown>>;
+}
 export interface PhysicalHeader {
-  readonly source: readonly PhysicalObject[];
+  readonly source: readonly (PhysicalObject | NativePhysicalObject)[];
+  readonly dialect?: 'postgres';
+  readonly schema?: string;
   readonly dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
   readonly assertions: readonly { readonly sql: string; readonly params?: readonly unknown[]; readonly expected: readonly unknown[] }[];
-  readonly target?: { readonly objects: readonly PhysicalObject[]; readonly tables?: readonly string[] };
+  readonly target?: { readonly objects: readonly PhysicalObject[]; readonly tables?: readonly string[];
+    readonly dialect?: never; readonly schema?: never; readonly catalog?: never }
+    | { readonly dialect: 'postgres'; readonly schema: string; readonly catalog: readonly NativePhysicalObject[];
+      readonly objects?: never; readonly tables?: never };
 }
 
 /** The `$migration` 0.1 document (MIGRATION-FORMAT §2). */

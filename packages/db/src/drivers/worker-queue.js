@@ -13,6 +13,7 @@ export function workerQueue(slots, capacity, now) {
   const choose = (readOnly) => slots.find((slot) => !slot.active && slot.healthy
     && (readOnly ? slot.readOnly : !slot.readOnly));
   const grant = (slot, entry) => {
+    entry.cleanup?.();
     slot.active = true;
     const wait = Math.max(0, now() - entry.at);
     if (waits.length === 1024) waits.shift();
@@ -34,17 +35,38 @@ export function workerQueue(slots, capacity, now) {
     }
   };
   return {
-    acquire: (readOnly) => new Promise((resolve, reject) => {
+    acquire: (readOnly, options = {}) => new Promise((resolve, reject) => {
       if (stopped !== null) { reject(stopped); return; }
-      const entry = { readOnly, resolve, reject, at: now() };
+      if (options.signal?.aborted) {
+        reject(new DbRuntimeError('JD2064', 'the queued lease was aborted before acquisition'));
+        return;
+      }
+      let timer;
+      const entry = { readOnly, resolve, reject, at: now(), cleanup: () => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
+      } };
+      const abandon = (error) => {
+        const index = waiting.indexOf(entry);
+        if (index < 0) return;
+        waiting.splice(index, 1);
+        entry.cleanup();
+        reject(error);
+        pump();
+      };
+      const abort = () => abandon(new DbRuntimeError('JD2064',
+        'the queued lease was aborted before acquisition', { cause: options.signal?.reason }));
       const slot = waiting.length === 0 ? choose(readOnly) : undefined;
       if (slot !== undefined) { grant(slot, entry); return; }
-      if (waiting.length >= capacity) { reject(queueFailure(`worker pool queue capacity ${capacity} exceeded`, waiting.length)); return; }
+      if (waiting.length >= capacity) { reject(queueFailure(`lease queue capacity ${capacity} exceeded`, waiting.length)); return; }
       waiting.push(entry);
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.timeoutMs !== undefined) timer = setTimeout(() =>
+        abandon(queueFailure(`lease acquisition exceeded ${options.timeoutMs}ms`, waiting.length)), options.timeoutMs);
     }),
     stop(error = new DbRuntimeError('JD2063', 'the worker pool closed before the queued work ran')) {
       stopped = error;
-      for (const entry of waiting.splice(0)) entry.reject(error);
+      for (const entry of waiting.splice(0)) { entry.cleanup?.(); entry.reject(error); }
     },
     drain: () => slots.every((slot) => !slot.active) ? Promise.resolve()
       : new Promise((resolve) => { const done = () => { observers.delete(done); resolve(undefined); }; observers.add(done); }),

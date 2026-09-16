@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   // live: the rows are typed by the chain's item
   const live: TypedLiveQuery<Post> = await client.live(client.entities.Post.where((p) => p.stars.ge(3)));
   const rows: readonly Post[] = live.result.rows;
-  const mode: 'incremental' | 'rerun' = live.mode.mode;
+  const mode: 'incremental' | 'rerun' | 'resnapshot' = live.mode.mode;
   const handleLive: TypedLiveQuery<User> = await client.entities.User.live();
   void [rows, mode, handleLive, live.subscribe, live.close];
 

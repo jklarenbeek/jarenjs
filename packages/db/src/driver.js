@@ -24,12 +24,11 @@
  * source of truth for feature gating; never a `typeof` sniff at a call
  * site. {@link baseCapabilities} gives every slot the conservative
  * answer, so a probe that says nothing about a feature says `false`
- * rather than `undefined`. Two slots are deliberately EMPTY on every
- * driver this package ships: `statementTimeout` (SQLite has no
- * interrupt or progress handler to build one on, and a PostgreSQL
- * server-side timeout is not the same promise as the store's
- * `AbortSignal`) and `rowEstimates` (SQLite's query plan is prose, not
- * numbers). They exist so a driver that has the facts can fill
+ * rather than `undefined`. `statementTimeout` reports an effective
+ * server timeout, independently of the Store's AbortSignal; SQLite
+ * has no interrupt or progress handler to build one on. `rowEstimates`
+ * remains false (SQLite's query plan is prose, not numbers).
+ * These slots let a driver that has the facts fill
  * them without a contract change; pretending SQLite has them is the
  * silent degradation this suite refuses. A third, `lazyIteration`, is
  * probed rather than declared: whether the binding's statements carry
@@ -436,7 +435,7 @@ export function sqliteProbe(raw, dialect, declared) {
  * @param {number} queueTimeout
  * @returns {any}
  */
-export function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout) {
+export function finishConnection(raw, dialect, synchronous, capabilities, queueTimeout = DEFAULT_QUEUE_TIMEOUT) {
   const activeIterators = new Set();
   /** Savepoint names are never reused, so a stale name can never be
    * mistaken for a live one in an error or a log. */
@@ -507,6 +506,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   const whenFree = (work, what, signal) => {
     if (signal?.aborted === true) return Promise.reject(abortReason(signal));
     if (!owned) return work();
+    if (waiting.length >= (raw.queueCapacity ?? Infinity))
+      return Promise.reject(new DbRuntimeError('JD2091', 'the connection admission queue is full'));
     return new Promise((resolve, reject) => {
       let done = false;
       /** Leave the queue without running: the turn passes to the next
@@ -538,6 +539,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
         done = true;
         let out;
         try {
+          requireOpen();
           out = work();
         }
         catch (error) {
@@ -797,6 +799,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     close: () => {
       if (closed) return closeResult;
       closed = true;
+      for (const waitingCall of waiting.splice(0)) waitingCall();
       // Remote hosts own cursor cleanup within their bounded shutdown.
       // Waiting for a row here would postpone that deadline indefinitely.
       if (raw.closeDrainsIterators === true) {

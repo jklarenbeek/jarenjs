@@ -103,6 +103,7 @@ export { REPLICATION_VERSION, REPLICATION_DEFAULTS, normalizeFrontier,
 
 export { planInvariants } from './ddl.js';
 export { planPhysicalMigration } from './migrate.js';
-export { sql, planRelational, relational } from './dialects/sqlite-relational.js';
+export { physicalObjectKey } from './migration-target.js';
+export { sql, planRelational, relational } from './relational.js';
 export { defineTable, planTable } from './dialects/sqlite-schema.js';
 export { planTableMigration, applyTableMigration, withForeignKeysSuspended, planSchemaChange, applySchemaChange } from './table-migration.js';

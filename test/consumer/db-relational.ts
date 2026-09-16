@@ -22,10 +22,10 @@ async function example() {
   withForeignKeysSuspended(db, () => affected);
   return copy;
 }
-// @ts-expect-error boolean is not a native SQL parameter
-sql.value(true);
-// @ts-expect-error physical types are a closed SQLite vocabulary
-sql.cast(sql.column('id'), 'BIGINT');
+// @ts-expect-error SQL parameter objects need an explicit structural expression
+sql.value({ unexpected: true });
+// @ts-expect-error physical types are a closed native vocabulary
+sql.cast(sql.column('id'), 'TEXT; DROP TABLE images');
 // @ts-expect-error updates need an explicit predicate
 const refused: Parameters<ReturnType<typeof relational>['execute']>[0] = { op: 'update', table: 'images', set: { data: null } };
 // @ts-expect-error absence suppression belongs to drop operations

@@ -8,6 +8,7 @@ import { DbRuntimeError } from './errors.js';
 export function createLogicalRows({ connection, shapes, collectionCore, entityCore, capture, captureJoinDelete }) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
+  const p = (i) => dialect.parameterRef(i, 'row');
   const statement = (sql, method, params = []) => chain(connection.prepare(sql), (s) => s[method](params));
   const shapeOf = (table) => {
     const shape = shapes.get(table);
@@ -24,13 +25,13 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
       throw new DbRuntimeError('JD2104', 'replication contains an invalid composite key');
     return parts;
   };
-  const where = (keys) => keys.map((key) => `${q(key)} = ?`).join(' AND ');
+  const where = (keys, offset = 0) => keys.map((key, i) => `${q(key)} = ${p(offset + i + 1)}`).join(' AND ');
   const entityKey = (shape, key) => Object.fromEntries(keyColumns(shape).map((name, i) => [name, partsOf(shape, key)[i]]));
   const read = (table, key) => {
     const shape = shapeOf(table);
     if (shape.kind === 'collection') return collectionCore(table).get(key);
     if (shape.kind === 'entity') return entityCore(table).get(entityKey(shape, key));
-    return chain(statement(`SELECT * FROM ${q(table)} WHERE ${where(keyColumns(shape))}`, 'get', partsOf(shape, key)),
+    return chain(statement(`SELECT ${keyColumns(shape).map(q).join(', ')} FROM ${q(table)} WHERE ${where(keyColumns(shape))}`, 'get', partsOf(shape, key)),
       (row) => row === undefined ? undefined : { ...row });
   };
   const write = (operation) => {
@@ -53,19 +54,19 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
         const { values, rest } = core.plan.split(after);
         names = [...values.map((value) => value.name), 'doc'];
         params = [...values.map((value) => value.value), JSON.stringify(rest)];
-        expressions = names.map((name) => name === 'doc' ? dialect.jsonEncode('?') : '?');
+        expressions = names.map((name, i) => name === 'doc' ? dialect.jsonEncode(p(i + 1)) : p(i + 1));
       }
       else {
         if (Object.keys(after).length !== keys.length)
           throw new DbRuntimeError('JD2104', 'a membership row contains only its two keys');
         names = keys;
         params = keys.map((name) => after[name]);
-        expressions = keys.map(() => '?');
+        expressions = keys.map((_, i) => p(i + 1));
       }
     }
     const sql = after === null ? `DELETE FROM ${q(table)} WHERE ${where(keys)}`
       : before === null ? `INSERT INTO ${q(table)} (${names.map(q).join(', ')}) VALUES (${expressions.join(', ')})`
-        : `UPDATE ${q(table)} SET ${names.map((name, i) => `${q(name)} = ${expressions[i]}`).join(', ')} WHERE ${where(keys)}`;
+        : `UPDATE ${q(table)} SET ${names.map((name, i) => `${q(name)} = ${expressions[i]}`).join(', ')} WHERE ${where(keys, params.length)}`;
     return chain(after === null && shape.kind === 'entity' ? captureJoinDelete?.(table, partsOf(shape, key)) : null,
       () => chain(statement(sql, 'run', after === null ? partsOf(shape, key)
       : before === null ? params : [...params, ...partsOf(shape, key)]), () => {

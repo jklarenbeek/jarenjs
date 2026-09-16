@@ -1,0 +1,48 @@
+# Isolated operator recovery fixture. The runner selects an exact matrix image.
+services:
+  prepare:
+    image: ${JAREN_PG_IMAGE:?Select a pinned PostgreSQL image}
+    user: '0:0'
+    entrypoint: ['sh', '-c', 'chown postgres:postgres /archive /recovery && chmod 700 /archive /recovery']
+    volumes: ['archive:/archive', 'recovery:/recovery']
+  source:
+    image: ${JAREN_PG_IMAGE:?Select a pinned PostgreSQL image}
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: jaren
+      POSTGRES_PASSWORD: jaren
+      POSTGRES_DB: jaren
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+      TZ: UTC
+      PGTZ: UTC
+    ports: ['127.0.0.1:${JAREN_PG_RECOVERY_SOURCE_PORT:-55460}:5432']
+    volumes: ['source:/var/lib/postgresql/data', 'archive:/archive', 'recovery:/recovery']
+    command: ['postgres', '-c', 'fsync=on', '-c', 'synchronous_commit=on', '-c', 'full_page_writes=on',
+      '-c', 'archive_mode=on', '-c', 'archive_command=test ! -f /archive/%f && cp %p /archive/%f']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jaren -d jaren']
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  restore:
+    image: ${JAREN_PG_IMAGE:?Select a pinned PostgreSQL image}
+    environment:
+      PGDATA: /recovery
+      TZ: UTC
+      PGTZ: UTC
+    ports: ['127.0.0.1:${JAREN_PG_RECOVERY_TARGET_PORT:-55461}:5432']
+    volumes: ['archive:/archive:ro', 'recovery:/recovery']
+    command: ['postgres', '-c', 'fsync=on', '-c', 'synchronous_commit=on', '-c', 'full_page_writes=on',
+      '-c', 'archive_mode=off', '-c', 'restore_command=cp /archive/%f %p',
+      '-c', 'recovery_target_name=jaren_checkpoint', '-c', 'recovery_target_action=promote']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jaren -d jaren']
+      interval: 1s
+      timeout: 3s
+      retries: 30
+volumes:
+  source:
+  archive:
+  recovery:

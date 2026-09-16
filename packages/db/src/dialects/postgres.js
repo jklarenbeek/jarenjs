@@ -38,6 +38,13 @@
  */
 
 import { createDialect } from '../dialect.js';
+import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn } from './postgres-physical.js';
+import { postgresCatalog } from './postgres-catalog.js';
+import { postgresRelational } from './postgres-relational.js';
+import { postgresMigration } from './postgres-migration.js';
+import { postgresCapture } from './postgres-capture.js';
+import { postgresJobs } from './postgres-jobs.js';
+import { postgresReplication } from './postgres-replication.js';
 import { readExpression } from './expression-read.js';
 import { postgresChecks } from './check-read.js';
 
@@ -375,7 +382,7 @@ function pathOf(segments) {
  * may narrow it — today only the schema search path is worth naming,
  * and the default is the connection's own, which is what a disposable
  * per-run schema needs.
- * @param {{ searchPath?: string }} [options]
+ * @param {{ searchPath?: string, notifyChannel?: string }} [options]
  * @returns {any}
  */
 export function postgresDialect(options = undefined) {
@@ -389,6 +396,30 @@ export function postgresDialect(options = undefined) {
 
   return createDialect({
     name: 'postgres',
+    schema: options?.searchPath,
+    physicalNamespaceRequired: true,
+    relational: postgresRelational,
+    migration: postgresMigration(namespaces),
+    jobs: postgresJobs,
+    replication: postgresReplication,
+    // Ordinary writes still check after each statement. Logical replay alone
+    // defers validation so canonical envelope order need not follow FK order.
+    foreignKeyActions: { cascade: 'CASCADE', restrict: 'NO ACTION', setNull: 'SET NULL' },
+    foreignKeySuffix: ' DEFERRABLE INITIALLY IMMEDIATE',
+    // Existing immediate RESTRICT layouts retain their ordinary Store meaning.
+    // Replication separately verifies that every enrolled FK can be deferred.
+    comparableForeignKeyAction: (action) => action === 'RESTRICT' ? 'NO ACTION' : action,
+    capture: postgresCapture(options?.notifyChannel === undefined ? undefined
+      : `SELECT pg_catalog.pg_notify(${stringLiteral(options.notifyChannel)}, '')`),
+    physicalRead: postgresPhysicalRead,
+    physicalCompare: postgresPhysicalCompare,
+    physicalValueType: postgresPhysicalValueType,
+    physicalDifferent: postgresPhysicalDifferent,
+    mutationRowGuard: (count, limit) => `CAST(CASE WHEN ${count} > ${limit} THEN 'jaren-mutation-row-bound' ELSE '1' END AS INTEGER) = 1`,
+    boundMutation: (sql, limit) => `WITH "_jaren_result" AS (${sql}) SELECT * FROM "_jaren_result" LIMIT ${limit + 1}`,
+    numberCast: (sql) => `CAST(${sql} AS DOUBLE PRECISION)`,
+    physicalTypeMatches: postgresPhysicalTypeMatches,
+    qualifyPhysicalColumn: qualifyPostgresPhysicalColumn,
     capabilities: {
       jsonb: true,
       generatedColumns: true,
@@ -445,7 +476,9 @@ export function postgresDialect(options = undefined) {
     jsonExtract,
     // Concurrent first opens can both observe an absent relation before
     // either CREATE commits. Ordinary unique violations remain failures.
-    isCreateRace: (error) => error?.code === '42P07' || error?.code === '23505'
+    isCreateRace: (error) => error?.code === '42P07'
+      || error?.code === '42710' && error.routine === 'TypeCreate'
+      || error?.code === '23505'
       && (error.constraint === 'pg_type_typname_nsp_index' && error.table === 'pg_type'
         || error.constraint === 'pg_class_relname_nsp_index' && error.table === 'pg_class'),
     // a DERIVED column's expression names a function the HOST supplies;
@@ -547,11 +580,13 @@ export function postgresDialect(options = undefined) {
       beginImmediate: 'BEGIN',
       commit: 'COMMIT',
       rollback: 'ROLLBACK',
+      deferForeignKeys: 'SET CONSTRAINTS ALL DEFERRED',
       savepoint: (n) => `SAVEPOINT ${quoteIdentifier(n)}`,
       release: (n) => `RELEASE SAVEPOINT ${quoteIdentifier(n)}`,
       rollbackTo: (n) => `ROLLBACK TO SAVEPOINT ${quoteIdentifier(n)}`,
     },
     introspect: {
+      catalog: () => postgresCatalog(inNamespace),
       version: () => "SELECT current_setting('server_version') AS version",
       // the table probe binds its name, so a hostile collection name is
       // a value and never syntax
@@ -565,8 +600,13 @@ export function postgresDialect(options = undefined) {
         'SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, '
         + "CASE WHEN a.attgenerated <> '' THEN 1 ELSE 0 END AS hidden, "
         + 'CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS not_null, '
-        + 'pg_get_expr(d.adbin, d.adrelid) AS default_value '
+        + 'pg_get_expr(d.adbin, d.adrelid) AS default_value, n.nspname AS schema, '
+        + "CASE a.attidentity WHEN 'a' THEN 'always' WHEN 'd' THEN 'by-default' ELSE '' END AS identity, "
+        + 'a.attgenerated AS generated_kind, ty.typtype AS type_kind, tn.nspname AS type_schema, ty.typname AS type_name, '
+        + 'co.collname AS collation '
         + 'FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid '
+        + 'JOIN pg_type ty ON ty.oid = a.atttypid JOIN pg_namespace tn ON tn.oid = ty.typnamespace '
+        + 'LEFT JOIN pg_collation co ON co.oid = a.attcollation '
         + 'LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum '
         + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE c.relname = ${stringLiteral(table)} AND ${inNamespace} `

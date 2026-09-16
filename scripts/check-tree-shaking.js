@@ -413,11 +413,15 @@ const clientEdge = ['db', 'validate', 'formats'].filter((name) => Object.entries
   .some(([file, info]) => file.includes(`packages/${name}/`) && info.bytesInOutput > 0));
 if (clientEdge.length !== 3)
   throw new Error(`The client bundle is missing one of its peers: carried ${clientEdge.join(', ') || 'none'}`);
-// The complete store client now carries the explicit SQLite expression/schema
-// compiler, present-null and scalar-aggregate guards, and exact mutation options.
-// Publish this feature cost in the measured baseline. Lightweight public engine
-// imports have separate closure assertions; application RSS ceilings are unchanged.
-if (clientBytes > 735000)
+const asyncLiveLeak = Object.entries(clientInputs).filter(([file, info]) =>
+  /packages\/db\/src\/(async-live|live-executor|snapshot)\.js$/.test(file) && info.bytesInOutput > 0);
+if (asyncLiveLeak.length)
+  throw new Error(`The ordinary client retained optional async maintenance: ${asyncLiveLeak.map(([file]) => file).join(', ')}`);
+// The shared live registry's async lifecycle and declared mode integration add
+// 1515 bytes to the measured 734963-byte client. The optional scheduler and
+// evaluator stay outside this closure, checked above. This structural feature
+// allowance does not change application RSS, work or deadline budgets.
+if (clientBytes > 737500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

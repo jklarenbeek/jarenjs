@@ -3,18 +3,38 @@
 `jaren-replication` 0.1 is a transport-neutral logical transaction. Open an empty
 store with `replication: { replica: 'host-issued-id' }`; capture is enabled when
 omitted. Existing replication stores must reopen with the same identity and
-model. Every writer of that file must enable replication. External SQL writes
-and opening a replicated file without replication are outside the history
+model. Every writer of that database must enable replication. External SQL writes
+and opening a replicated database without replication are outside the history
 contract; a detected before-image disagreement refuses with `JD2104`.
 
 The host owns network transport, authentication, replica identity allocation and
 resolver policy. A replica id must remain unique to its writer lineage. The
 runtime works on SQLite Node, worker and wasm hosts through session or journal
-capture. Drivers without `changeCapture` refuse at open; PostgreSQL capture is
-not implemented. Journal replication refuses models with cascading or set-null
+capture, and on PostgreSQL through journal capture and native bounded cursors.
+The same envelopes apply PostgreSQL → SQLite, SQLite → PostgreSQL and
+PostgreSQL → PostgreSQL. Drivers without `changeCapture`, and PostgreSQL's
+buffered cursor mode, refuse at open. Journal replication refuses models with cascading or set-null
 child foreign keys (`JD0051`), because the journal cannot observe those effects.
 Session capture includes them. Both modes support membership cascades and
 roll back an envelope whose side effects are absent from its logical operations.
+
+PostgreSQL enrollment verifies engine metadata, deterministic binary text
+collation, permanent managed tables and deferrable foreign keys. New managed
+foreign keys are `DEFERRABLE INITIALLY IMMEDIATE`; the restrictive delete action
+uses `NO ACTION`. Ordinary writes still enforce each statement. Replay explicitly
+defers checks until transaction settlement, because canonical envelope ordering
+is independent of relationship order. Earlier immediate `RESTRICT` tables remain
+usable for ordinary Store operations; replication refuses them with `JD0051`
+until a reviewed native migration makes their foreign keys deferrable with
+`NO ACTION`. Opening never performs that migration implicitly. PostgreSQL's
+[constraint documentation](https://www.postgresql.org/docs/18/ddl-constraints.html)
+explains why `RESTRICT` cannot be deferred.
+
+Malformed replication metadata refuses with `JD0002`. Physical/adopted tables,
+user triggers, rewrite rules, row-level policies, inherited/unlogged tables and
+incoming foreign keys from unmanaged tables are outside enrollment. Schema changes
+and external writers after enrollment remain host-owned; startup verification
+is not continuous DDL monitoring or universal CDC.
 
 ## Envelope
 
@@ -94,14 +114,22 @@ Data, receipt, per-row causal metadata, capture record and frontier settle in
 the same transaction. Replication is available only on the root Store; transaction
 views expose no replication API. Failed validation, cancellation, constraint checks or
 commit roll everything back. Subscribers run through the existing committed
-capture delivery path. Tests kill a process immediately before and after commit
-and verify both data and frontier after reopening.
+capture delivery path. Tests kill disposable SQLite and PostgreSQL client
+processes before and after commit and verify data, frontier and receipt replay
+after reopening. Native tests repeat the restart and lose a successful COMMIT
+reply: the call fails with `JD2087`, and a fresh Store reconciles the durable
+receipt as `duplicate`. The lost connection alone does not establish rollback.
+These are client-death/acknowledgement tests; they do not simulate server power loss.
 
 Pages use the shared cursor and byte-credit drain. `limit` counts whole envelopes;
 `maxBytes` counts complete canonical envelope bytes. An indivisible oversize
 envelope is `JD2074`. Retention loss returns `resetRequired: true`, no items and
 no continuation. `earliestAvailable`, `highWatermark`, `next` and `hasMore` describe
 the local outbox. Pages and snapshots take a consistent store transaction.
+PostgreSQL shares the schema-scoped capture lock with writers while reading
+the frontier and bounded rows. The lock prevents mixed checkpoints under
+READ COMMITTED; a slow bounded snapshot can therefore delay a writer within
+the configured lock and statement deadlines.
 `signal` and `deadline` are honored through existing cancellation contracts:
 queue cancellation is `JD2064`, operation-boundary cancellation `JD2072`, and an
 expired deadline `JD2075`.

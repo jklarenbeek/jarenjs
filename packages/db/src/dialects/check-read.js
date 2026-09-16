@@ -2,14 +2,22 @@
 /** Recover only a complete scalar enum CHECK; unfamiliar SQL remains a loss. */
 
 /** Tokenize catalog SQL without treating quoted text or comments as syntax.
- * @param {string} sql @returns {{ kind: string, value: string }[]} */
-export function sqlTokens(sql) {
+ * @param {string} sql @param {(sql:string,at:number)=>any} [nativeToken]
+ * @returns {{ kind: string, value: string }[]} */
+export function sqlTokens(sql, nativeToken) {
   const tokens = [];
+  if (sql.includes('\0')) return [];
   for (let i = 0; i < sql.length;) {
     const c = sql[i];
     if (/\s/.test(c)) { i++; continue; }
     if (sql.startsWith('--', i)) {
       const end = sql.indexOf('\n', i + 2); i = end < 0 ? sql.length : end + 1; continue;
+    }
+    const native = nativeToken?.(sql, i);
+    if (native === null) return [];
+    if (native) {
+      if (native.kind !== 'comment') tokens.push({ kind: native.kind, value: native.value });
+      i = native.end; continue;
     }
     if (sql.startsWith('/*', i)) {
       const end = sql.indexOf('*/', i + 2);
@@ -17,16 +25,9 @@ export function sqlTokens(sql) {
       i = end + 2; continue;
     }
     if (c === "'" || c === '"' || c === '`') {
-      let value = '';
-      let closed = false;
-      for (i++; i < sql.length; i++) {
-        if (sql[i] !== c) { value += sql[i]; continue; }
-        if (sql[i + 1] === c) { value += c; i++; continue; }
-        i++; closed = true; break;
-      }
-      if (!closed) return [];
-      tokens.push({ kind: c === "'" ? 'string' : 'identifier', value });
-      continue;
+      const quoted = quotedSqlToken(sql, i);
+      if (!quoted) return [];
+      tokens.push({ kind: quoted.kind, value: quoted.value }); i = quoted.end; continue;
     }
     const number = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/.exec(sql.slice(i));
     if (number) { tokens.push({ kind: 'number', value: number[0] }); i += number[0].length; continue; }
@@ -38,8 +39,22 @@ export function sqlTokens(sql) {
   return tokens;
 }
 
-/** @param {any[]} tokens @returns {{ column: string, values: any[] } | null} */
-function enumOf(tokens) {
+/** One quote owner for catalog identifiers, SQL strings and native escape strings.
+ * @param {string} sql @param {number} at @param {boolean} [escaped] @returns {any} */
+export function quotedSqlToken(sql, at, escaped = false) {
+  const quote = sql[at];
+  let value = '';
+  for (let i = at + 1; i < sql.length; i++) {
+    if (escaped && sql[i] === '\\') { value += sql.slice(i, i + 2); i++; continue; }
+    if (sql[i] !== quote) { value += sql[i]; continue; }
+    if (sql[i + 1] === quote) { value += quote; i++; continue; }
+    return { kind: quote === "'" ? 'string' : 'identifier', value, end: i + 1 };
+  }
+  return null;
+}
+
+/** @param {any[]} tokens @param {any} [nativeCast] @returns {{ column: string, values: any[] } | null} */
+function enumOf(tokens, nativeCast) {
   let at = 0;
   const take = (value) => {
     const token = tokens[at];
@@ -66,27 +81,7 @@ function enumOf(tokens) {
   };
   const cast = (value) => {
     if (!take('::')) return value;
-    // Only exact scalar casts emitted by the catalog are understood.
-    // Rounding casts could change the enum's members.
-    const type = tokens[at++];
-    if (type?.kind !== 'word') return undefined;
-    const name = type.value.toLowerCase();
-    if (typeof value === 'string' && name === 'text') return value;
-    if (typeof value === 'boolean' && name === 'boolean') return value;
-    // PostgreSQL renders negative constants as quoted numeric casts,
-    // e.g. ('-1'::integer)::numeric. Decode only finite numeric syntax.
-    if (typeof value === 'string' && ['numeric', 'integer', 'bigint', 'smallint'].includes(name)
-      && /^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value)) {
-      const number = Number(value);
-      if (!Number.isFinite(number) || (['integer', 'bigint', 'smallint'].includes(name)
-        && !Number.isSafeInteger(number))) return undefined;
-      return number;
-    }
-    if (typeof value === 'number' && name === 'numeric') return value;
-    if (typeof value === 'number' && ['integer', 'bigint', 'smallint'].includes(name)
-      && Number.isSafeInteger(value)) return value;
-    if (typeof value === 'number' && name === 'double' && take('PRECISION')) return value;
-    return undefined;
+    return nativeCast?.(value, tokens[at++], take);
   };
   const expression = () => {
     if (take('(')) {
@@ -147,5 +142,20 @@ export function sqliteChecks(rows) {
  * @param {any[]} rows @returns {any[]} neutral constraints */
 export function postgresChecks(rows) {
   return rows.map((row) => ({ name: String(row.name),
-    ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')))) }));
+    ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')), postgresCast)) }));
+}
+
+/** Only exact scalar casts emitted by the native catalog are understood. */
+function postgresCast(value, type, take) {
+  if (type?.kind !== 'word') return undefined;
+  const name = type.value.toLowerCase();
+  if (typeof value === 'string' && name === 'text') return value;
+  if (typeof value === 'boolean' && name === 'boolean') return value;
+  // Negative constants are quoted numeric casts, e.g. ('-1'::integer)::numeric.
+  const integer = ['integer', 'bigint', 'smallint'].includes(name);
+  if (typeof value === 'string' && (name === 'numeric' || integer)
+    && /^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value)) value = Number(value);
+  if (typeof value === 'number' && Number.isFinite(value)
+    && (name === 'numeric' || integer && Number.isSafeInteger(value) || name === 'double' && take('PRECISION'))) return value;
+  return undefined;
 }

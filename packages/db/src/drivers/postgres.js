@@ -6,9 +6,8 @@
  * This module imports no PostgreSQL package and no runtime builtin.
  * The host supplies a connection source — anything with
  * `connect()` answering `{ query(text, values), release?() }`, which
- * `pg.Pool` is verbatim — and this driver adapts it. That is the whole
- * of D1's "never call a specific npm client outside the adapter seam":
- * there is no seam to leak through, because there is no import.
+ * `pg.Pool` is verbatim — and this driver adapts it. The host owns the
+ * client implementation; the public binding has no package to import.
  *
  * ONE client is acquired at open and held until `close()`, then
  * released exactly once. That is not a simplification: a connection
@@ -34,13 +33,32 @@
 
 import { chain, openConnection, baseCapabilities } from '../driver.js';
 import { postgresDialect } from '../dialects/postgres.js';
-import { DbCompileError, DbRuntimeError } from '../errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError } from '../errors.js';
+import { workerQueue } from './worker-queue.js';
+import { rowBytes } from './worker-protocol.js';
+import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS } from './postgres-options.js';
+import { postgresCursors } from './postgres-cursor.js';
+import { createPostgresNotifications } from './postgres-notifications.js';
+import { sqlTokens } from '../dialects/check-read.js';
+export { POSTGRES_DEFAULTS };
 
 export { postgresDialect, IDENTIFIER_BYTES } from '../dialects/postgres.js';
 
 /** The minimum PostgreSQL this store accepts, as the server's own
  * `server_version_num` spells it: 16.0. */
 export const POSTGRES_FLOOR = 160000;
+
+/**
+ * Own a dedicated, bounded LISTEN connection. Each null token asks the host
+ * to drain durable changes.page from its saved cursor. Tokens coalesce and
+ * contain no row, tenant or authorization data.
+ * @param {{ connect: Function }} source
+ * @param {any} options
+ * @returns {any}
+ */
+export function postgresNotifications(source, options) {
+  return createPostgresNotifications(postgresDriver, source, options);
+}
 
 /** Types the wire hands back as text because they can exceed a double,
  * and the two it hands back as text for width alone. The store's
@@ -64,6 +82,7 @@ const BOOL_OID = 16;
  * the driver having to know which client the pool will hand it.
  */
 let statementSequence = 0;
+const sessionStatementCounts = new WeakMap();
 
 /**
  * One column's converter, chosen once per result from the type the
@@ -88,7 +107,12 @@ function converterFor(dataTypeID) {
     return (value) => (value === null || value === undefined ? value : Number(value));
   }
   if (dataTypeID === BOOL_OID) {
-    return (value) => (value === null || value === undefined ? value : (value ? 1 : 0));
+    return (value) => {
+      if (value === null || value === undefined) return value;
+      if (value === true || value === 1 || value === 't' || value === 'true') return 1;
+      if (value === false || value === 0 || value === 'f' || value === 'false') return 0;
+      throw new DbRuntimeError('JD2003', 'PostgreSQL boolean parser returned an unsupported representation');
+    };
   }
   if (JSON_OIDS.has(dataTypeID)) {
     return (value) => (value === null || value === undefined || typeof value === 'string'
@@ -152,7 +176,7 @@ function encodeParam(value) {
  */
 export function postgresProbe(raw) {
   return chain(raw.prepare("SELECT current_setting('server_version_num') AS num, "
-    + "current_setting('server_version') AS version"), (statement) =>
+    + "current_setting('server_version') AS version", { buffered: true }), (statement) =>
     chain(statement.get([]), (row) => {
       const num = Number(row?.num);
       const version = String(row?.version ?? '');
@@ -171,9 +195,17 @@ export function postgresProbe(raw) {
         // a real ALTER, which is the one structural thing this engine
         // has and SQLite does not
         alterTableFull: true,
-        // no cursor without a second package; the store's cursor says it
-        // buffers rather than pretending it streams
-        lazyIteration: false,
+        // SQL cursors fetch bounded frames on the same owned session.
+        lazyIteration: raw.nativeCursor === true,
+        cursorTransaction: raw.nativeCursor === true,
+        cursorLifetimeMs: raw.limits?.cursorLifetimeMs,
+        maxCursors: raw.limits?.maxCursors,
+        statementTimeout: raw.serverTimeouts === true,
+        postgres: Object.freeze({ ...raw.limits,
+          statementTimeoutMs: raw.serverTimeouts === true ? raw.limits.statementTimeoutMs : null,
+          lockTimeoutMs: raw.serverTimeouts === true ? raw.limits.lockTimeoutMs : null,
+          cursorMode: raw.nativeCursor === true ? 'native' : 'buffered', poolMode: 'session',
+          prepared: raw.preparedMode, cursorCancel: raw.cursorCancel === true }),
         // the closed configuration vocabulary is SQLite's; a PostgreSQL
         // server is configured by its operator
         configurablePragmas: Object.freeze([]),
@@ -181,89 +213,233 @@ export function postgresProbe(raw) {
         maintenance: Object.freeze({
           checkpoint: false, integrityCheck: false, foreignKeyCheck: false, optimize: false,
         }),
-        // the job queue and the change ledger write their own SQLite
-        // statements; both refuse by name at open here
-        jobs: false,
-        changeCapture: false,
+        // Replication snapshots require the bounded native cursor path.
+        jobs: true,
+        changeCapture: true,
+        replication: raw.nativeCursor === true,
       });
     }));
 }
 
 /**
- * Adapt one acquired client into the raw binding contract.
- *
- * Statements are PREPARED by name, so the server plans each one once
- * and the store's statement caches are worth having. The one hazard is
- * a cached plan whose result type changed under it — a migration that
- * added a column to a table a live statement selects `*` from — which
- * PostgreSQL reports as `0A000`; the name is dropped and the statement
- * re-runs unnamed, so the caller sees a slower call rather than an
- * error it could do nothing about.
- * @param {{ query: Function, release?: Function }} client
- * @param {{ onClose?: () => any }} [options]
+ * Adapt one acquired session. Only an autocommit read whose cached plan
+ * was rejected before execution may retry unnamed. Transactions propagate
+ * that original failure so their owner can roll back before further work.
+ * @param {{ query: Function, release?: Function, getTransactionStatus?: Function }} client
+ * @param {any} [options]
  * @returns {any} the raw binding for {@link openConnection}
  */
 export function adaptPostgresClient(client, options = undefined) {
-  /** @type {Map<string, string>} sql -> the server-side statement name */
+  /** @type {Map<string, string>} */
   const names = new Map();
-  /** The names the server actually holds — a name is only prepared by
-   * its first execution, and deallocating one it never saw is an error
-   * of its own. */
   const prepared = new Set();
-  /** Released exactly once: on success, on failure, and on a second
-   * `close()`, which the connection contract makes a no-op anyway. */
   let released = false;
-
-  const run = (sql, params) => {
-    const values = params.map(encodeParam);
-    const name = names.get(sql);
-    const attempt = name === undefined
-      ? client.query(sql, values)
-      : client.query({ name, text: sql, values });
-    return Promise.resolve(attempt).then((result) => {
-      if (name !== undefined) prepared.add(name);
-      return result;
-    }, (error) => {
-      // the cached plan's result type changed under it
-      if (error?.code !== '0A000' || name === undefined) throw error;
-      names.delete(sql);
-      prepared.delete(name);
-      return client.query(sql, values);
-    });
+  let inTransaction = false;
+  let closing;
+  let poisoned = null;
+  let activeQuery = null;
+  let cancelling = null;
+  let fate = 'none';
+  let retire = false;
+  const limits = postgresSettings(options);
+  const requests = workerQueue([{ active: false, healthy: true, readOnly: false }], limits.maxPending, () => performance.now());
+  const status = () => client.getTransactionStatus?.() ?? (inTransaction ? 'T' : 'I');
+  const cancel = (owner) => {
+    if (activeQuery === null || activeQuery.owner !== owner || options?.cancel === undefined) return Promise.resolve();
+    if (cancelling !== null) return cancelling;
+    const target = activeQuery;
+    cancelling = Promise.resolve().then(() => options.cancel(client, target.id))
+      .catch((error) => { poisoned = error; throw error; })
+      .finally(() => { cancelling = null; });
+    return cancelling;
   };
 
+  // Command tags come from the server, including for statements prepared
+  // through the public raw adapter. ROLLBACK TO keeps the transaction open.
+  const observe = (result, sql) => {
+    for (const item of Array.isArray(result) ? result : [result]) {
+      if (item?.command === 'BEGIN' || /^\s*(BEGIN|START TRANSACTION)\b/i.test(sql)) {
+        inTransaction = true; fate = 'active';
+      }
+      if (item?.command === 'COMMIT' || /^\s*(COMMIT|END)\b/i.test(sql)) {
+        inTransaction = /\bAND CHAIN\s*;?\s*$/i.test(sql); fate = inTransaction ? 'active' : 'committed';
+      }
+      if ((item?.command === 'ROLLBACK' || /^\s*ROLLBACK\b/i.test(sql)) && !/\bTO\b/i.test(sql)) {
+        inTransaction = /\bAND CHAIN\s*;?\s*$/i.test(sql); fate = inTransaction ? 'active' : 'rolled-back';
+      }
+    }
+    return result;
+  };
+  let querySequence = 0;
+  const query = async (sql, values, name, owner) => {
+    if (released || poisoned) throw poisoned ?? new DbRuntimeError('JD2063', 'the PostgreSQL session is closed');
+    const lease = await requests.acquire(false, { timeoutMs: limits.statementTimeoutMs });
+    const operation = { id: ++querySequence, owner };
+    activeQuery = operation;
+    try {
+      if (released || poisoned) throw poisoned ?? new DbRuntimeError('JD2063', 'the PostgreSQL session is closed');
+      if (name !== undefined) {
+        prepared.add(name);
+        const count = (sessionStatementCounts.get(options?.cacheIdentity ?? client) ?? 0) + 1;
+        // Count issued names only once, independent of how often they run.
+        if (!operationNames.has(name)) { operationNames.add(name); sessionStatementCounts.set(options?.cacheIdentity ?? client, count); }
+        if ((sessionStatementCounts.get(options?.cacheIdentity ?? client) ?? 0) >= limits.maxStatements) retire = true;
+      }
+      const result = await (name !== undefined ? client.query({ name, text: sql, values })
+        : values !== undefined ? client.query({ text: sql, values, queryMode: 'extended' }) : client.query(sql));
+      return observe(result, sql);
+    }
+    catch (error) {
+      if (/^\s*COMMIT\b/i.test(sql) && !/^(23|40)/.test(error?.code ?? '')) fate = 'unknown';
+      if (/^08|^57P0|^ECONN|^EPIPE/.test(error?.code ?? '')) {
+        poisoned = error;
+        if (inTransaction || /^\s*COMMIT\b/i.test(sql)) fate = 'unknown';
+      }
+      throw error;
+    }
+    finally {
+      try { if (cancelling !== null) await cancelling; }
+      finally { if (activeQuery === operation) activeQuery = null; lease.release(); }
+    }
+  };
+  const operationNames = new Set();
+  const cursors = postgresCursors({ query: (sql, params, owner) => query(sql, params, undefined, owner), status, normalize: normalizeRows, cancel,
+    unhealthy: (error) => { poisoned = error; } }, limits);
+  const boundedRows = (result) => {
+    const rows = normalizeRows(result);
+    if (rows.length > limits.allMaxRows || rows.reduce((n, row) => n + rowBytes(row), 0) > limits.allMaxBytes)
+      throw new DbRuntimeError('JD2092', 'the buffered PostgreSQL result exceeds its row or byte bound');
+    return rows;
+  };
+  const run = (sql, params, read) => {
+    if (closing !== undefined) return Promise.reject(new DbRuntimeError('JD2063', 'the PostgreSQL session is closing'));
+    const values = params.map(encodeParam);
+    const name = names.get(sql);
+    return query(sql, values, name).catch((error) => {
+      // The routine identifies a planner refusal, not a feature error raised
+      // by a function after effects. Never replay a write or an aborted block.
+      if (status() !== 'I' || !read || name === undefined || error?.code !== '0A000'
+        || error?.routine !== 'RevalidateCachedQuery'
+        || error?.message !== 'cached plan must not change result type'
+        || !/^\s*SELECT\b/i.test(sql)) throw error;
+      names.delete(sql);
+      return query(sql, values);
+    });
+  };
+  // DECLARE accepts SELECT/VALUES and read CTEs, but cannot execute a data
+  // mutation CTE. Preserve the direct prepared result path for those writes.
+  const cursorSql = (sql) => /^\s*(SELECT|VALUES)\b/i.test(sql) || /^\s*WITH\b/i.test(sql)
+    && !sqlTokens(sql).some((token) => token.kind === 'word'
+      && ['INSERT', 'UPDATE', 'DELETE', 'MERGE', 'REPLACE'].includes(token.value.toUpperCase()));
+
   return {
+    closeDrainsIterators: true,
+    nativeCursor: options?.nativeCursor === true,
+    serverTimeouts: options?.serverTimeouts === true,
+    preparedMode: options?.prepared ?? 'named',
+    cursorCancel: typeof options?.cancel === 'function',
+    limits, queueCapacity: limits.maxPending,
+    metrics: () => Object.freeze({ ...requests.metrics(), ...cursors.metrics(), statements: names.size, transaction: fate }),
+    transactionState: () => fate,
+    settleCancellation: () => cancelling,
+    // Initialization uses the same request owner as normal SQL and cleanup.
+    query,
     /** @param {string} sql */
-    exec: (sql) => Promise.resolve(client.query(sql)).then(() => undefined),
+    exec: (sql) => closing !== undefined ? Promise.reject(new DbRuntimeError('JD2063', 'the PostgreSQL session is closing'))
+      : query(sql, undefined).then(() => undefined),
     /** @param {string} sql */
-    prepare: (sql) => {
-      if (!names.has(sql)) {
+    prepare: (sql, metadata = {}) => {
+      if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
+      if (!names.has(sql) && options?.prepared !== 'unnamed' && !metadata.ephemeral
+        && names.size < limits.maxStatements && (sessionStatementCounts.get(options?.cacheIdentity ?? client) ?? 0) < limits.maxStatements) {
         statementSequence += 1;
         names.set(sql, `jaren_s${statementSequence}`);
       }
       return {
-        run: (params = []) => run(sql, params)
+        run: (params = []) => run(sql, params, false)
           .then((result) => ({ changes: result.rowCount ?? 0 })),
-        get: (params = []) => run(sql, params).then((result) => normalizeRows(result)[0]),
-        all: (params = []) => run(sql, params).then((result) => normalizeRows(result)),
+        get: async (params = []) => {
+          if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
+          if (metadata.buffered || options?.nativeCursor !== true || !cursorSql(sql))
+            return boundedRows(await run(sql, params, true))[0];
+          const iterator = await cursors.open(sql, params.map(encodeParam), 1);
+          try { return (await iterator.next()).value; }
+          finally { await iterator.return(); }
+        },
+        all: async (params = []) => {
+          if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
+          if (options?.nativeCursor !== true || !cursorSql(sql))
+            return boundedRows(await run(sql, params, true));
+          const iterator = await cursors.open(sql, params.map(encodeParam));
+          const rows = [];
+          let bytes = 0;
+          try {
+            for await (const row of iterator) {
+              bytes += rowBytes(row);
+              if (rows.length >= limits.allMaxRows || bytes > limits.allMaxBytes)
+                throw new DbRuntimeError('JD2092', 'the buffered PostgreSQL result exceeds its row or byte bound');
+              rows.push(row);
+            }
+            return rows;
+          }
+          finally { await iterator.return(); }
+        },
+        ...(options?.nativeCursor !== true ? {} : { iterate: (params = []) => cursors.open(sql, params.map(encodeParam)) }),
       };
     },
     close: () => {
-      if (released) return Promise.resolve(undefined);
-      released = true;
-      // the session goes back to the pool without this store's
-      // statements on it. A failure here is not the caller's to handle:
-      // the client is being released either way, and a leaked plan is
-      // memory rather than a wrong answer
-      const deallocate = [...prepared].reduce(
-        (chained, name) => chained.then(
-          () => client.query(`DEALLOCATE "${name}"`), () => undefined).then(
-          () => undefined, () => undefined),
-        Promise.resolve(undefined));
-      return deallocate
-        .then(() => options?.onClose?.())
-        .then(() => client.release?.(), () => client.release?.())
-        .then(() => undefined);
+      if (closing !== undefined) return closing;
+      const clean = async () => {
+        let cursorFailure;
+        try { await cursors.close(); }
+        catch (error) { cursorFailure = error; poisoned ??= error; }
+        await requests.drain();
+        if (releasedClient) return;
+        released = true;
+        requests.stop();
+        if (poisoned !== null) {
+          await releaseClient(poisoned);
+          if (cursorFailure !== undefined) throw cursorFailure;
+          return;
+        }
+        const failures = [];
+        if (status() !== 'I') {
+          try { await client.query('ROLLBACK'); inTransaction = false; if (fate !== 'unknown') fate = 'rolled-back'; }
+          catch (error) { failures.push(error); }
+        }
+        if (status() === 'I') for (const name of prepared) {
+          try { await client.query(`DEALLOCATE "${name}"`); }
+          catch (error) { if (error?.code !== '26000') failures.push(error); }
+        }
+        try { await options?.onClose?.(); }
+        catch (error) { failures.push(error); }
+        const failure = failures.length === 1 ? failures[0]
+          : failures.length > 1 ? new AggregateError(failures, 'PostgreSQL session cleanup failed') : null;
+        await releaseClient(failure ?? (retire ? new Error('prepared session cache lifetime exhausted') : undefined));
+        if (failure !== null) throw failure;
+      };
+      let releasedClient = false;
+      const releaseClient = async (error) => {
+        if (releasedClient) return;
+        releasedClient = true;
+        names.clear(); prepared.clear(); operationNames.clear();
+        if (error && options?.destroy !== undefined) await options.destroy(client, error);
+        else await client.release?.(error);
+      };
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new DbRuntimeError('JD2090', 'PostgreSQL cleanup deadline expired; the session was discarded');
+          released = true; poisoned = error; requests.stop(error);
+          if (inTransaction) fate = 'unknown';
+          // A broken host's disposal must not postpone the caller's deadline.
+          // Its source credit stays quarantined until disposal acknowledges.
+          Promise.resolve(releaseClient(error)).catch(() => {});
+          reject(error);
+        }, limits.closeTimeoutMs);
+      });
+      closing = Promise.race([clean(), timeout]).finally(() => clearTimeout(timer));
+      return closing;
     },
   };
 }
@@ -282,7 +458,7 @@ export function adaptPostgresClient(client, options = undefined) {
  * created in — one value, two consumers, which is the failure this
  * option exists to prevent.
  * @param {{ connect: Function }} source
- * @param {{ schema?: string, queueTimeout?: number }} [options]
+ * @param {any} [options]
  * @returns {any}
  */
 export function postgresDriver(source, options = undefined) {
@@ -291,22 +467,27 @@ export function postgresDriver(source, options = undefined) {
       'postgresDriver needs an injected connection source exposing connect() — a pg.Pool is '
       + 'one as it stands, and a single client becomes one with { connect: () => client }');
   }
+  const limits = postgresSettings(options);
+  const admissions = workerQueue(Array.from({ length: limits.maxConnections }, () =>
+    ({ active: false, healthy: true, readOnly: false })), limits.queueCapacity, () => performance.now());
   const schema = options?.schema;
   if (schema !== undefined && !/^[A-Za-z_][A-Za-z0-9_$]*$/.test(schema)) {
     throw new DbCompileError('JD0003',
       `postgresDriver: '${schema}' is not a schema name this driver will set — the name is `
       + 'written into a SET, so it is a plain identifier or nothing');
   }
-  const dialect = postgresDialect(schema === undefined ? undefined : { searchPath: schema });
+  const notifyChannel = options?.notifyChannel === undefined ? undefined : postgresChannel(options.notifyChannel);
+  const dialect = postgresDialect({ searchPath: schema, notifyChannel });
 
   return Object.freeze({
     name: 'postgres',
     dialect,
+    metrics: () => admissions.metrics(),
     /**
      * @param {string} [path] - a PostgreSQL store lives in a SCHEMA on a
      *   server, not at a path; anything but the conventional `':memory:'`
      *   is refused by name rather than quietly ignored
-     * @param {{ queueTimeout?: number }} [openOptions]
+     * @param {{ queueTimeout?: number, signal?: AbortSignal }} [openOptions]
      * @returns {Promise<any>}
      */
     open: (path, openOptions) => {
@@ -316,26 +497,125 @@ export function postgresDriver(source, options = undefined) {
           + 'schema on a server rather than at a path — name it with '
           + 'postgresDriver(source, { schema })'));
       }
-      return Promise.resolve(source.connect()).then((client) => {
-        const raw = adaptPostgresClient(client);
-        const prepared = schema === undefined
-          ? Promise.resolve(undefined)
-          // the schema is created by the operator or by the caller; the
-          // driver only points the connection at it, and a name that is
-          // not there fails as `3F000` — classified `cantopen`
-          : raw.exec(`SET search_path TO ${dialect.quoteIdentifier(schema)}`);
-        return Promise.resolve(prepared)
-          .catch((error) => Promise.resolve(raw.close()).then(() => {
-            throw error;
-          }, () => {
-            throw error;
-          }))
-          .then(() => openConnection(raw, {
+      const deadline = performance.now() + limits.acquisitionTimeoutMs;
+      const remaining = () => Math.max(1, deadline - performance.now());
+      return admissions.acquire(false, { timeoutMs: remaining(), signal: openOptions?.signal }).then(async (lease) => {
+        let timer, abandon, abandoned = false;
+        const acquire = Promise.resolve().then(() => source.connect());
+        const timeout = new Promise((_, reject) => {
+          abandon = () => { abandoned = true; reject(new DbRuntimeError('JD2064',
+            'the PostgreSQL source acquisition was aborted', { cause: openOptions?.signal?.reason })); };
+          if (openOptions?.signal?.aborted) abandon();
+          else openOptions?.signal?.addEventListener('abort', abandon, { once: true });
+          timer = setTimeout(() => { abandoned = true; reject(new DbRuntimeError('JD2091',
+            'the PostgreSQL source exceeded its acquisition deadline')); }, remaining());
+        });
+        let client;
+        try { client = await Promise.race([acquire, timeout]); }
+        catch (error) {
+          if (abandoned) acquire.then(async (late) => {
+            await late.release?.();
+            lease.release();
+          }, () => lease.release()).catch(() => {});
+          else lease.release();
+          throw error;
+        }
+        finally { clearTimeout(timer); openOptions?.signal?.removeEventListener('abort', abandon); }
+        let released = false;
+        const release = async (error) => {
+          if (released) return;
+          released = true;
+          if (error && options?.destroy) await options.destroy(client, error);
+          else await client.release?.(error);
+          // Destruction may finish before an already-sent cancellation does.
+          // Retain the admission credit until that delivery settles as well.
+          await raw.settleCancellation();
+          lease.release();
+        };
+        let originalPath;
+        const savedSettings = new Map();
+        const adapted = { query: (...args) => client.query(...args), release,
+          ...(typeof client.getTransactionStatus !== 'function' ? {} : { getTransactionStatus: () => client.getTransactionStatus() }) };
+        const raw = adaptPostgresClient(adapted, {
+          ...options, ...limits, nativeCursor: options?.cursorMode !== 'buffered', serverTimeouts: false,
+          // The pool's physical client identity owns the bounded named cache.
+          cacheIdentity: client,
+          destroy: (_client, error) => release(error),
+          cancel: options?.cancel === undefined ? undefined : (_client, id) => options.cancel(client, id),
+          onClose: async () => {
+            for (const [name, value] of savedSettings)
+              await client.query('SELECT pg_catalog.set_config($1, $2, false)', [name, value]);
+            if (originalPath !== undefined)
+              await client.query("SELECT pg_catalog.set_config('search_path', $1, false)", [originalPath]);
+          },
+        });
+        let setupFailure;
+        const initialQuery = (sql, params = undefined) => {
+          if (setupFailure) throw setupFailure;
+          return raw.query(sql, params);
+        };
+        const initialize = async () => {
+          for (const [name, value] of [['statement_timeout', limits.statementTimeoutMs], ['lock_timeout', limits.lockTimeoutMs]]) {
+            const valueBefore = (await initialQuery(`SHOW ${name}`)).rows[0]?.[name];
+            if (typeof valueBefore !== 'string') throw new DbRuntimeError('JD2005', `the source did not return ${name}`);
+            savedSettings.set(name, valueBefore);
+            await initialQuery('SELECT pg_catalog.set_config($1, $2, false)', [name, String(value)]);
+          }
+          const effective = (await initialQuery("SELECT name, setting::text AS value, unit FROM pg_catalog.pg_settings "
+            + "WHERE name IN ('statement_timeout', 'lock_timeout')")).rows;
+          for (const [name, value] of [['statement_timeout', limits.statementTimeoutMs], ['lock_timeout', limits.lockTimeoutMs]]) {
+            const setting = effective.find((row) => row.name === name);
+            if (setting?.unit !== 'ms' || Number(setting?.value) !== value)
+              throw new DbRuntimeError('JD2005', `the PostgreSQL source did not apply ${name}`);
+          }
+          raw.serverTimeouts = true;
+          if (schema !== undefined) {
+            originalPath = (await initialQuery('SHOW search_path')).rows[0]?.search_path;
+            if (typeof originalPath !== 'string')
+              throw new DbRuntimeError('JD2005', 'the PostgreSQL source did not return its search_path');
+            const row = (await initialQuery(
+              "SELECT n.oid::text AS oid, pg_catalog.has_schema_privilege(n.oid, 'USAGE')::text AS usage "
+              + 'FROM pg_catalog.pg_namespace n WHERE n.nspname = $1', [schema])).rows[0];
+            if (row === undefined) throw Object.assign(new Error(`schema "${schema}" does not exist`), { code: '3F000' });
+            if (row.usage !== 'true') throw Object.assign(new Error(`schema "${schema}" requires USAGE`), { code: '42501' });
+            // Naming pg_temp explicitly puts it after the owned schema;
+            // otherwise PostgreSQL implicitly searches it first.
+            await initialQuery("SELECT pg_catalog.set_config('search_path', $1, false)", [`${dialect.quoteIdentifier(schema)}, pg_temp`]);
+          }
+          return Promise.resolve(openConnection(raw, {
             dialect,
             synchronous: false,
             probe: postgresProbe,
             queueTimeout: openOptions?.queueTimeout ?? options?.queueTimeout,
-          }));
+          })).then((connection) => Object.freeze({ ...connection,
+            get mustQueue() { return connection.mustQueue; }, metrics: () => raw.metrics(),
+          }), (error) => { throw wrapDriverError(error); });
+        };
+        const setupDeadline = new Promise((_, reject) => {
+          abandon = () => {
+            setupFailure = new DbRuntimeError('JD2064', 'PostgreSQL session initialization was aborted', { cause: openOptions?.signal?.reason });
+            reject(setupFailure);
+          };
+          if (openOptions?.signal?.aborted) abandon();
+          else openOptions?.signal?.addEventListener('abort', abandon, { once: true });
+          timer = setTimeout(() => {
+            setupFailure = new DbRuntimeError('JD2091', 'PostgreSQL session initialization exceeded its acquisition deadline');
+            reject(setupFailure);
+          }, remaining());
+        });
+        try {
+          return await Promise.race([initialize(), setupDeadline]);
+        }
+        catch (error) {
+          const failure = wrapDriverError(error);
+          try { await raw.close(); }
+          catch (cleanup) {
+            if (cleanup !== error) throw new AggregateError([failure, cleanup],
+              'the PostgreSQL connection failed to open and cleanup failed');
+          }
+          throw failure;
+        }
+        finally { clearTimeout(timer); openOptions?.signal?.removeEventListener('abort', abandon); }
       });
     },
   });

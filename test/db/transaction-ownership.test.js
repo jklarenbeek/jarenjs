@@ -48,6 +48,79 @@ const defer = () => {
 const settle = (p) => Promise.resolve(p).then(
   (value) => ({ value }), (error) => ({ code: error.code, message: error.message }));
 
+describe('native cursor transaction admission', () => {
+  it('async iteration observes abort, acknowledges cleanup and releases its owner once', async () => {
+    const connection = await nodeDriver().open(':memory:');
+    const controller = new AbortController();
+    const ownership = { holdMs: 1000, owners: new Set(), max: 1 };
+    let resets = 0;
+    const inner = createCursor({ streaming: 'row', signal: controller.signal, items: (row) => [row],
+      open: () => ({ next: () => ({ done: false, value: 1 }), return: () => { resets++; return { done: true }; } }) });
+    const cursor = admitCursor(inner, (fn, what, signal) => connection.exclusively(fn, what, signal),
+      controller.signal, 'aborted native read', ownership);
+    try {
+      await assert.rejects((async () => {
+        for await (const value of cursor) { assert.strictEqual(value, 1); controller.abort(); }
+      })(), { code: 'JD2072' });
+      await cursor.return();
+      assert.strictEqual(resets, 1);
+      assert.strictEqual(ownership.owners.size, 0);
+      assert.strictEqual(connection.mustQueue, false);
+    }
+    finally { await cursor.return(); await connection.close(); }
+  });
+  it('holds the existing gate through pauses and releases before a competing transaction enters', async () => {
+    const connection = await nodeDriver().open(':memory:');
+    const ownership = { holdMs: 1000, owners: new Set(), max: 1 };
+    let resets = 0;
+    const inner = () => createCursor({ streaming: 'row', items: (row) => [row],
+      open: () => ({ next: () => ({ done: false, value: 1 }), return: () => { resets++; return { done: true }; } }) });
+    const admit = (fn, what, signal) => connection.exclusively(fn, what, signal);
+    const cursor = admitCursor(inner(), admit, undefined, 'native test read', ownership);
+    try {
+      assert.throws(() => admitCursor(inner(), admit, undefined, 'excess read', ownership), { code: 'JD2091' });
+      assert.strictEqual((await cursor.next()).value, 1);
+      assert.strictEqual(connection.mustQueue, true);
+      let entered = false;
+      const writing = connection.transaction(() => { entered = true; });
+      await Promise.resolve();
+      assert.strictEqual(entered, false);
+      await cursor.return();
+      await writing;
+      assert.strictEqual(entered, true);
+      assert.strictEqual(resets, 1);
+      assert.strictEqual(ownership.owners.size, 0);
+      assert.strictEqual((await cursor.next()).done, true);
+    }
+    finally { await cursor.return(); await connection.close(); }
+  });
+  it('expires a paused owner and drops a returned queued owner without beginning its source', async () => {
+    const connection = await nodeDriver().open(':memory:');
+    const ownership = { holdMs: 20, owners: new Set(), max: 2 };
+    const admit = (fn, what, signal) => connection.exclusively(fn, what, signal);
+    let opens = 0;
+    const inner = () => createCursor({ streaming: 'row', items: (row) => [row], open: () => {
+      opens++;
+      return { next: () => ({ done: false, value: 1 }), return: () => ({ done: true }) };
+    } });
+    const first = admitCursor(inner(), admit, undefined, 'first', ownership);
+    const second = admitCursor(inner(), admit, undefined, 'second', ownership);
+    try {
+      await first.next();
+      const queued = second.next();
+      const returned = second.return();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      await returned;
+      assert.strictEqual((await queued).done, true);
+      await assert.rejects(first.next(), { code: 'JD2075' });
+      assert.strictEqual(opens, 1);
+      assert.strictEqual(ownership.owners.size, 0);
+      assert.strictEqual(connection.mustQueue, false);
+    }
+    finally { await first.return(); await second.return(); await connection.close(); }
+  });
+});
+
 describe('concurrent transactions on one connection', () => {
   it('overlapping transactions both commit and both report success', async () => {
     const store = await openStore(MODEL, { driver: nodeDriver() });
@@ -801,7 +874,8 @@ describe('root cursors borrow admission per pull (MODEL-FORMAT §5.1)', () => {
     assert.strictEqual((cursor.match(/export function admitCursor\(/g) ?? []).length, 1);
     // the collection query, the entity cursor, the graph cursor and the
     // job page: every root cursor surface routes through it
-    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 4, 'the four root cursor surfaces route through it');
+    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 1, 'one backend policy adapter calls the shared admission owner');
+    assert.strictEqual((store.match(/admitRootCursor\(/g) ?? []).length, 4, 'the four root cursor surfaces route through that adapter');
     assert.ok(!/query is deliberately NOT gated/.test(store), 'the ungated exception is gone');
     const body = cursor.slice(cursor.indexOf('export function admitCursor('));
     const fn = body.slice(0, body.indexOf('\n}\n') + 3);

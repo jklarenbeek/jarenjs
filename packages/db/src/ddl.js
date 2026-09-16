@@ -827,6 +827,8 @@ export function verifyShape(connection, plan, collection, docPath) {
  */
 export function planEntity(name, entityMapping, entities, dialect) {
   if (entityMapping.document === false) {
+    if (!dialect.invariantTriggers && entityMapping.invariants.some((rule) => rule.enforcement === 'database'))
+      throw new DbCompileError('JD0005', 'this dialect cannot verify declared database invariant triggers');
     const declared = entityMapping.ddl && dialect.name === 'sqlite' ? planTable(entityMapping.ddl) : null;
     return { table: entityMapping.table,
       physical: { ...entityMapping, triggers: dialect.invariantTriggers?.(entityMapping, entities, dialect) ?? [] },

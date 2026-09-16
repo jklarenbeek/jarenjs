@@ -109,9 +109,65 @@ them).
 Node worker, worker-pool and process Stores expose no sessions. Their `auto`
 mode selects `journal`; explicit `journal` plus `log` supports asynchronous
 `changes.page()` with finite row/byte limits, rollback exclusion, retention
-resets and resume after reopen. Their `live` capability remains false: reading
-the durable feed does not require the synchronous live-query engine. The public
+resets and resume after reopen. Opting into `asyncLive()` adds bounded
+`resnapshot` live maintenance (§12.1); without it `live` remains false. The public
 host matrix and delivery recipe are in [HOSTS](HOSTS.md#async-sqlite-jobs-and-committed-feeds).
+
+### PostgreSQL managed journals
+
+PostgreSQL supports `auto` → `journal`, optional durable `log`, bounded
+`changes.page`, and process-local `observe`. Sessions remain unavailable;
+explicit session mode refuses with `TypeError`. `asyncLive()` enables the shared
+resnapshot registry (§12.1); synchronous incremental maintenance is unavailable.
+Managed replication is a separate capability.
+
+Participating captured transactions take a schema-scoped transaction advisory
+lock before reading journal before-images, including absent rows. This
+serializes captured transactions within that schema and preserves the patch
+sequence when writers update the same document. A slow transaction delays
+other captured writers under the configured finite lock timeout. The durable
+high-water row is allocated and the log pruned in the same transaction as the
+business writes; a rollback rolls back both. A transaction begun earlier can
+reach that lock later and commit later: consumers resume by committed sequence,
+never transaction start time or wall-clock timestamps. Sequence overflow
+refuses before commit rather than persisting an imprecise continuation.
+
+The journal observes Jaren-managed API writes made with capture enabled.
+Other connections must also participate through that API for their writes to
+appear in the same log. Arbitrary SQL, custom triggers and child cascade or
+set-null effects are not enrolled. Physical-table adoption refuses capture;
+trusted SQL writes refuse while capture is active. Use an explicit schema on
+the driver; the driver puts it before `pg_temp` and restores the original
+search path before releasing the session. Host-provided unscoped search paths
+and external schema changes remain the host's responsibility.
+
+Optional `postgresDriver(source, { schema, notifyChannel })` sends an empty
+transactional notification after persisting each nonempty patch. It requires
+`capture.log`. `postgresNotifications(listenerSource, { channel })` owns a
+separate session and returns an async iterator of coalesced `null` wake tokens.
+There is one pending pull and at most one retained token. After initial LISTEN
+and every successful reconnect, it emits a token so the consumer re-reads the
+durable log from its saved cursor. Its lifetime reconnect budget is finite;
+terminal connection failures reach the pending/next pull. Close drains a
+pending pull, removes its LISTEN registration and restores the borrowed session
+before reuse; failed cleanup discards the session and is reported.
+
+Notifications carry no records or authorization and are visible to database
+users. Notification loss or coalescing does not remove durable records. Persist
+the returned `next` only after processing a page, handle `resetRequired` by a
+bounded resnapshot, and poll durable pages independently when prompt recovery
+is required. Never substitute `highWatermark` for the last processed `next`.
+The host owns channel allocation, tenant authorization, durable checkpoints,
+resnapshot policy and the lifetime of both pools. A listener needs a dedicated
+session lease with `on`, `off`, `query` and `release`; an already registered
+channel refuses rather than taking another owner's registration.
+
+These semantics follow PostgreSQL's
+[LISTEN startup ordering](https://www.postgresql.org/docs/17/sql-listen.html)
+and [transactional notification contract](https://www.postgresql.org/docs/17/sql-notify.html).
+The native journal tests include reversed start/commit order, concurrent first
+open, before-image consistency, rollback/log failures, retention, process
+restart, disconnect recovery and listener disposal.
 
 ## 5. The persisted log and retention
 
@@ -364,15 +420,15 @@ record) to re-evaluate; deletes are answered entirely from maintained
 state. `externals` are fixed at registration — a query whose inputs
 change is a new registration.
 
-Maintenance runs synchronously inside patch delivery, in commit
+Incremental and rerun maintenance runs synchronously inside patch delivery, in commit
 order, on the store's own connection. Delivery is never re-entered: a
 write made from inside an observer or a subscriber commits at once,
 but its record is queued and delivered after the current record has
 reached every consumer, so sibling live views see commits in commit
 order rather than in call-stack order. Writes from ANOTHER connection
-are invisible to capture (§6) and therefore to live queries; the
-coarse `dataVersion()` signal and the §11 topology are the honest
-answers, and re-registering re-reads.
+are invisible to this local synchronous registry; the coarse `dataVersion()`
+signal and the §11 topology apply. Resnapshot mode (§12.1) follows enrolled
+commits from other connections through the durable log.
 
 ## 9. The emitted patch contract
 
@@ -469,7 +525,7 @@ capture cleanup deletes every session even on rollback or connection close.
 The studio probes isolated SharedArrayBuffer OPFS, header-free SAH-pool OPFS,
 atomic IndexedDB snapshots, then visibly non-durable memory. IndexedDB snapshots
 require exclusive ownership and acknowledge writes after atomic version replacement.
-They expose no synchronous/live surface; the Store pane explicitly refreshes after
+The studio's configuration exposes no synchronous/live surface; its Store pane refreshes after
 writes. Failed snapshot persistence invalidates the connection without publishing
 partial state. [Execution hosts](HOSTS.md) specifies bounds and the observed matrix.
 
@@ -514,15 +570,79 @@ ERRORING rather than degrading (the D14 rule — the bound is printed):
   delete-correctness, and a count over a table larger than the bound
   is a conscious `maxMaintained` raise, not a silent one.
 
-Non-claims, in one place: no maintenance of unindexed or non-equality joins,
-no cross-connection invalidation (§6's `data_version` is
-the signal), no maintenance over asynchronous connections —
-`capabilities.live` is `false` there and a registration is `JD0051`
-naming the reason, because maintenance point-reads rows synchronously
-inside delivery (the wasm driver's oo1 API is synchronous, which is
-why the browser has live queries at all). Replication is specified separately in
+Incremental maintenance does not cover unindexed or non-equality joins or
+cross-connection changes. Async hosts require the optional resnapshot configuration
+below; a missing helper or durable log refuses with `JD0051` (missing capture
+itself remains `JD0050`). Replication is specified separately in
 [REPLICATION-FORMAT](REPLICATION-FORMAT.md). There is no ordering guarantee for
 unordered queries beyond §9's determinism.
+
+### 12.1 Asynchronous resnapshots
+
+```js
+import { asyncLive } from '@jarenjs/db/async-live';
+const store = await openStore(model, {
+  driver, capture: { mode: 'journal', log: { retention: 1000 } },
+  live: asyncLive({ maxInputRows: 10000, maxInputBytes: 4194304 }),
+});
+const live = await store.collection('notes').live(query);
+const unsubscribe = live.subscribe(event => render(live.result, event));
+await live.refresh();
+unsubscribe();
+await live.close();
+await store.close();
+```
+
+The same collection/entity query surface and result/patch registry are used on
+Node worker, pool and process SQLite and PostgreSQL. `capabilities.liveModes`
+names available `incremental`, `rerun` and `resnapshot` modes. Async connections
+offer only `resnapshot`; synchronous connections keep their existing default
+and select it per query with `{ mode: 'resnapshot' }`. The helper is executable
+host configuration, outside JSON application documents. It requires durable
+capture and lazy row iteration; incremental/event-time demands on the async
+path refuse (`JD0051`/`JD0053`).
+
+Registration fixes a detached query and external bindings. Each evaluation uses
+the ordinary query compiler and narrows host predicates, member permissions and
+execution limits. It reads the committed high-water mark before and after the
+query inside a transaction. A changed mark discards that evaluation. SQLite
+retains its transaction snapshot; PostgreSQL validates enrolled commits without
+holding the journal's writer lock. The immediate post-registration poll closes
+the read/subscribe gap. Local commits wake the reader; polling catches other
+Store connections. A host can also call `refresh()` from a notification hint;
+the durable checkpoint remains authoritative after reconnect or missed hints.
+
+One evaluation and one coalesced invalidation are owned per registration. The
+defaults are `maxQueries: 64`, `maxMaintained: 10000`, `maxBytes: 4194304`,
+`maxInputRows: 10000`, `maxInputBytes: 4194304`, `maxObservers: 8`,
+`pageRows: 32`, `pollMs: 1000` and `maxAttempts: 3`; all must be positive finite
+safe integers, with the timer also within its platform range. Input credits span
+all fetched roots/statements, including a small residual result over a large
+scan. Binding bytes are bounded at registration. Result bytes and observer event
+counts are bounded separately. These are serialized payload credits plus finite driver
+prefetch and a detection row, not a total JavaScript heap or database-internal
+work limit. Native work uses the driver's declared timeout capabilities.
+
+An expired checkpoint, oversized indivisible log record or bounded backlog causes
+an authoritative resnapshot; retention/record resets carry `resetRequired: true`.
+Repeated revision races stop after `maxAttempts`, retain the last verified rows
+and checkpoint, and emit `lag: true`; a later successful poll clears lag. Initial
+registration cannot publish unverified rows and refuses with `JD2060` on attempt
+exhaustion. Row/byte exhaustion is a terminal coded error; inspect `live.error`
+and `state`. No partial result is reported as complete.
+
+Each observer has one active callback and at most one latest pending event.
+Coalescing emits a complete `/rows` replacement with `coalesced: true`, so a
+consumer never applies a patch whose predecessor was dropped. Callbacks are
+isolated. Closing suppresses pending delivery, aborts and drains owned reads,
+releases registrations and timers, and is idempotent; it cannot cancel arbitrary
+work inside a host callback. An already busy observer may miss the terminal error
+event when closed, so `live.error` remains authoritative. Await async `close()`;
+the last verified `result` remains readable. Stats expose checkpoint, lag,
+pending work, input credits, subscriptions, coalescing and resets.
+
+Coverage is enrolled managed writes. Unenrolled SQL, arbitrary trigger/cascade
+effects and external databases require a separate host freshness mechanism.
 
 ## 13. Event time
 

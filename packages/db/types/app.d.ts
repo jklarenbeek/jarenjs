@@ -3,7 +3,7 @@
  * documents plus the subscription handler factory — the db package
  * never imports `@jarenjs/app`.
  */
-import type { Store } from './index.js';
+import type { Store, LiveOptions } from './index.js';
 
 export interface LiveAppBindingOptions {
   /** The registered subscription handler name (default 'db/live'). */
@@ -16,7 +16,7 @@ export interface LiveAppBindingOptions {
   collection?: string;
   query: unknown;
   externals?: Record<string, unknown>;
-  mode?: 'auto' | 'incremental' | 'rerun';
+  mode?: LiveOptions['mode'];
   /** An APP-FORMAT `when` query gating the subscription. */
   when?: unknown;
 }

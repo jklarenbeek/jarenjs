@@ -13,8 +13,9 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import * as fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { jobStatements } from '../../packages/db/src/dialects/jobs.js';
+import { postgresDialect } from '@jarenjs/db/postgres';
+import { sqliteDialect } from '../../packages/db/src/dialects/sqlite.js';
 
 import { DatabaseSync } from 'node:sqlite';
 
@@ -405,47 +406,26 @@ describe('the lease fence', () => {
 });
 
 describe('the drift gate the fence owes itself', () => {
-  it('no settling statement in jobs.js is guarded by lease_owner without a token', () => {
-    const source = fs.readFileSync(
-      fileURLToPath(new URL('../../packages/db/src/jobs.js', import.meta.url)), 'utf8');
-    // every UPDATE of the jobs table, split into what it writes and what
-    // it is guarded by. A statement that SETTLES a claim — done, dead,
-    // failed, or a renewed expiry — must be guarded by the token, and by
-    // nothing that a second attempt of the same worker would also match.
-    // That is the shape whose absence let a 30-second-dead lease complete
-    // a job, and the shape whose absence let a corpse discard the living
-    // attempt's result.
-    // the shared guard is a constant, so the gate reads it and puts it
-    // back — a fence weakened THERE has to fail here too
-    const fence = source.match(/const FENCE = ("|')(.*?)\1;/);
-    assert.ok(fence !== null, 'jobs.js declares one shared fence');
-    assert.strictEqual(fence[2], "state='leased' AND lease_token=? AND lease_until > ?");
-    const updates = [...source.matchAll(/UPDATE "\$\{JOBS_TABLE\}"([\s\S]*?)`/g)]
-      .map((match) => match[1].replaceAll('${FENCE}', fence[2]));
-    assert.ok(updates.length >= 5, `expected the job updates, found ${updates.length}`);
-    let settling = 0;
-    for (const sql of updates) {
-      const [writes, ...guard] = sql.split(/\bWHERE\b/);
-      const where = guard.join(' WHERE ');
-      // the CLAIM mints the fence rather than checking one: it is the
-      // only statement allowed to write an owner and a token
-      if (/state='leased'/.test(writes)) {
-        assert.match(writes, /lease_generation = lease_generation \+ 1/,
-          'the claim must bump the generation');
-        assert.match(writes, /lease_token=\?/, 'the claim must mint a token');
-        continue;
-      }
-      if (!/state='(done|dead|failed)'|lease_until=\?/.test(writes)) continue;
-      settling += 1;
-      assert.ok(/lease_token=\?/.test(where),
-        `a settling statement carries no token guard:\n${sql}`);
-      assert.ok(/lease_until > \?/.test(where),
-        `a settling statement does not check the lease is still valid:\n${sql}`);
-      assert.ok(!/lease_owner/.test(where),
-        `a settling statement is guarded by lease_owner:\n${sql}`);
+  for (const dialect of [sqliteDialect, postgresDialect()]) it(`every ${dialect.name} settling statement carries its token and expiry`, () => {
+    const statements = jobStatements(dialect);
+    const normalize = (sql) => sql.replace(/\$\d+/g, '?');
+    const claim = normalize(statements.claim(2));
+    assert.match(claim, /lease_generation\s*=\s*lease_generation\s*\+\s*1/);
+    assert.match(claim, /lease_token=\?/);
+    for (const name of ['renew', 'complete', 'dead', 'retry', 'cancelLeased', 'assertLease', 'cpFence']) {
+      const statement = normalize(statements[name]);
+      const where = statement.slice(statement.indexOf('WHERE'));
+      assert.match(where, /lease_token=\?/, `${name} guards the attempt token`);
+      assert.match(where, /lease_until\s*>\s*\?/, `${name} guards current expiry`);
+      assert.doesNotMatch(where, /lease_owner/, `${name} never settles by owner`);
     }
-    assert.ok(settling >= 4,
-      `expected renew, complete, dead and retry to be fenced, found ${settling}`);
+    assert.match(normalize(statements.cpPrune), /generation\s*<=\s*\?/);
+    if (dialect.name === 'postgres') {
+      assert.match(claim, /LIMIT 1 FOR UPDATE SKIP LOCKED/);
+      assert.match(statements.assertLease, /FOR UPDATE$/);
+      assert.match(statements.cpFence, /FOR UPDATE$/);
+      assert.equal(statements.sweep(true).length, 1);
+    }
   });
 });
 

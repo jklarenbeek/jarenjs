@@ -23,17 +23,33 @@ build order reproducible. The store must have committed capture. A complete
 bounded source is read inside a store transaction, and its canonical JSON is
 hashed by host WebCrypto SHA-256 into a source-backed revision. The digest includes
 non-indexed fields, so changed filter/facet facts invalidate search results too.
-Captured source writes issue resets; `dataVersion` checks detect external-connection
-SQL on requests. A cold open reads the source again, so uncaptured edits while the
-adapter was closed cannot validate a stale cache. A host without capture or the
-required data-version capability refuses freshness. PostgreSQL external capture
-remains unqualified; no native full-text claim is made for either dialect.
+Captured source writes issue resets. SQLite defaults to `revision: 'dataVersion'`,
+which detects external-connection SQL on requests. PostgreSQL defaults to
+`revision: 'capture'`, which requires a durable log and follows enrolled Store
+commits across clients. `explain().revision` names the provider and
+`explain().externalChanges` states its coverage; `nativeFTS` remains false.
+A cold open reads the source again, so uncaptured edits while the adapter was
+closed cannot validate a stale cache. A host without capture refuses freshness.
+
+`revision: 'authoritative'` re-reads the bounded source on every refresh. For
+external writers the host can inject `{ name, read(tx) }`: the token must be a
+finite number or a string of at most 1024 characters, read using the supplied
+transaction view. Tokens bracket the source read through the shared revision
+snapshot validator. A changed token produces `invalidated` and preserves the
+previous published revision; the next request tries again. A provider must
+advance for every source change it promises to cover. Enrolled log revisions
+do not promise arbitrary external SQL or trigger/cascade coverage. An
+authoritative refresh discovers current content but cannot prove a stable
+external multi-statement snapshot without a provider or host isolation contract.
 
 `search(text, request)` refreshes a dirty source, compiles the request through
 `createLexicalProvider`, then evaluates complete membership before result limits.
 `refresh()` reports zero changes on identical input. `row(id, revision)` supplies
 a detached authoritative row only under the current clean snapshot. `subscribe`
-receives explicit resets, not a claim of incremental SQL maintenance. Refresh
+receives explicit resets, not a claim of incremental SQL maintenance. Up to eight
+observers each retain one active callback and one latest reset; slow callbacks
+cannot accumulate an unbounded queue. `stats().observerPending` reports those
+credits. Unsubscribe/disposal drops pending delivery and isolates rejection. Refresh
 rebuilds rank statistics from the complete bounded source; core incremental
 updates remain available to other hosts. Source rows and index costs are separate
 from a collection's page cache and mounted cells.

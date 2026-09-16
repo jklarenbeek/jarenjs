@@ -176,15 +176,11 @@ const SQLITE_SPELLINGS = Object.freeze([
  */
 const SQLITE_ONLY_MODULES = Object.freeze({
   'replication.js': 'the durable replication ledger shares the SQLite capture transaction; '
-    + 'capabilities.changeCapture gates it at open. Its JSON envelopes are host-neutral; '
-    + 'PostgreSQL capture and ledger persistence remain unavailable by capability',
-  'jobs.js': 'the durable job queue writes its own statements; it is a SQLite-only '
-    + "subsystem in 0.1, and `capabilities.jobs` is false on a connection that cannot run "
-    + "it, so the store's job surface is absent there rather than failing at the first "
-    + 'statement',
-  'capture.js': 'the change ledger is built on the SQLite session extension and its '
-    + 'JSONB decoding; `capabilities.changeCapture` is false where neither exists, and '
-    + 'the live registry then refuses by name',
+    + 'capabilities.changeCapture and replication gate it at open. Its JSON envelopes are host-neutral; '
+    + 'PostgreSQL journal capture is available, but ledger persistence remains refused by capability',
+  'capture.js': 'the optional SQLite session decoder uses native JSONB decoding only '
+    + 'when capabilities.sessions selects that mode. The shared journal and durable '
+    + 'log use the dialect and also run on PostgreSQL without this session decoder',
 });
 
 describe('the portability census (no unapproved SQLite spelling outside the dialect)', () => {

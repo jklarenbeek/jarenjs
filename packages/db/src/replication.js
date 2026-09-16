@@ -9,6 +9,7 @@ import { DbRuntimeError } from './errors.js';
 import { refuseCancelled } from './cancellation.js';
 import { normalizeReplication, normalizeReplicationSnapshot, normalizeFrontier, replicationIdentity, REPLICATION_DEFAULTS } from './replication-format.js';
 import { REPLICATION_TABLES } from './replication-tables.js';
+import { replicationSchema } from './dialects/replication.js';
 
 const equal = (a, b) => stableStringify(a) === stableStringify(b);
 const position = (frontier, id) => Object.hasOwn(frontier, id) ? frontier[id] : 0;
@@ -39,12 +40,15 @@ export function createReplicationEngine(options) {
   }
   if (config.resolver !== undefined && (typeof config.resolver?.id !== 'string' || !config.resolver.id
     || typeof config.resolver.resolve !== 'function')) throw new TypeError('replication.resolver needs a stable id and pure resolve function');
+  const dialect = connection.dialect;
+  const p = (i) => dialect.parameterRef(i, 'replica');
+  const schema = replicationSchema(dialect);
   const sql = (text, method = 'run', params = []) => chain(connection.prepare(text), (s) => s[method](params));
   const state = () => chain(sql(`SELECT value FROM ${REPLICATION_TABLES.state} WHERE id = 1`, 'get'), (row) => JSON.parse(row.value));
-  const saveState = (value) => sql(`UPDATE ${REPLICATION_TABLES.state} SET value = ? WHERE id = 1`, 'run', [stableStringify(value)]);
-  const rowState = (table, key) => chain(sql(`SELECT value, frontier FROM ${REPLICATION_TABLES.rows} WHERE name = ? AND key = ?`, 'get', [table, key]),
+  const saveState = (value) => sql(`UPDATE ${REPLICATION_TABLES.state} SET value = ${p(1)} WHERE id = 1`, 'run', [stableStringify(value)]);
+  const rowState = (table, key) => chain(sql(`SELECT value, frontier FROM ${REPLICATION_TABLES.rows} WHERE name = ${p(1)} AND key = ${p(2)}`, 'get', [table, key]),
     (row) => row === undefined ? { value: null, frontier: {} } : { value: JSON.parse(row.value), frontier: JSON.parse(row.frontier) });
-  const saveRow = (operation, frontier) => sql(`INSERT INTO ${REPLICATION_TABLES.rows} (name, key, value, frontier) VALUES (?, ?, ?, ?) `
+  const saveRow = (operation, frontier) => sql(`INSERT INTO ${REPLICATION_TABLES.rows} (name, key, value, frontier) VALUES (${p(1)}, ${p(2)}, ${p(3)}, ${p(4)}) `
     + 'ON CONFLICT(name, key) DO UPDATE SET value = excluded.value, frontier = excluded.frontier', 'run',
   [operation.table, operation.key, stableStringify(operation.after), stableStringify(frontier)]);
   const cancelled = (request) => refuseCancelled(request, now, {
@@ -54,7 +58,7 @@ export function createReplicationEngine(options) {
     if (document.operations.length > config.maxOperations) fail('JD2106', 'replication operation bound exceeded');
     assertItemBytes(utf8Length(stableStringify(document)), config.maxBytes);
   };
-  const receipt = (envelope) => sql(`INSERT INTO ${REPLICATION_TABLES.receipts} (id, payload) VALUES (?, ?)`, 'run',
+  const receipt = (envelope) => sql(`INSERT INTO ${REPLICATION_TABLES.receipts} (id, payload) VALUES (${p(1)}, ${p(2)})`, 'run',
     [replicationIdentity(envelope.replica, envelope.seq), stableStringify(envelope)]);
   // Pull one row at a time and refuse before accumulating beyond shared credits.
   const collectBounded = async (query, params, map, request, credits) => {
@@ -70,14 +74,10 @@ export function createReplicationEngine(options) {
     return result;
   };
 
-  const ready = bracket(() => chain(each([
-    `CREATE TABLE IF NOT EXISTS ${REPLICATION_TABLES.state} (id INTEGER PRIMARY KEY, value TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS ${REPLICATION_TABLES.rows} (name TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, frontier TEXT NOT NULL, PRIMARY KEY(name, key))`,
-    `CREATE TABLE IF NOT EXISTS ${REPLICATION_TABLES.receipts} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS ${REPLICATION_TABLES.outbox} (seq INTEGER PRIMARY KEY, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS ${REPLICATION_TABLES.conflicts} (id TEXT PRIMARY KEY, evidence TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS ${REPLICATION_TABLES.claims} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
-  ], (ddl) => connection.exec(ddl)), () => chain(sql(`SELECT value FROM ${REPLICATION_TABLES.state} WHERE id = 1`, 'get'), (existing) => {
+  const ready = bracket(() => chain(dialect.replication?.initialize?.(connection), () =>
+    chain(each(schema.create, (ddl) => connection.exec(ddl)), () =>
+    chain(dialect.replication?.verify?.(connection, schema, options.managedTables ?? []), () =>
+    chain(sql(`SELECT value FROM ${REPLICATION_TABLES.state} WHERE id = 1`, 'get'), (existing) => {
     if (existing !== undefined) {
       const saved = JSON.parse(existing.value);
       if (saved.replica !== config.replica || saved.model !== model)
@@ -86,10 +86,12 @@ export function createReplicationEngine(options) {
     }
     return chain(rows.empty(), (empty) => {
       if (!empty) fail('JD2105', 'initialize replication on an empty store, then import an explicit snapshot');
-      return sql(`INSERT INTO ${REPLICATION_TABLES.state} (id, value) VALUES (1, ?)`, 'run',
-        [stableStringify({ replica: config.replica, model, frontier: {} })]);
+      return chain(each(schema.tables, (table) => chain(sql(`SELECT 1 AS present FROM ${table.name} LIMIT 1`, 'get'), (row) => {
+        if (row !== undefined) fail('JD2104', 'replication metadata exists without its durable identity');
+      })), () => sql(`INSERT INTO ${REPLICATION_TABLES.state} (id, value) VALUES (1, ${p(1)})`, 'run',
+        [stableStringify({ replica: config.replica, model, frontier: {} })]));
     });
-  })));
+  })))));
 
   /** Convert net capture patches against durable before-images, inside commit. */
   const commit = (patch, context) => {
@@ -132,8 +134,8 @@ export function createReplicationEngine(options) {
         bounded(envelope);
         const frontier = joinFrontiers(saved.frontier, { [config.replica]: seq });
         return chain(each(operations, (operation) => saveRow(operation, frontier)), () => chain(receipt(envelope), () =>
-          chain(sql(`INSERT INTO ${REPLICATION_TABLES.outbox} (seq, payload) VALUES (?, ?)`, 'run', [seq, stableStringify(envelope)]), () =>
-            chain(sql(`DELETE FROM ${REPLICATION_TABLES.outbox} WHERE seq <= ?`, 'run', [seq - config.retention]), () =>
+          chain(sql(`INSERT INTO ${REPLICATION_TABLES.outbox} (seq, payload) VALUES (${p(1)}, ${p(2)})`, 'run', [seq, stableStringify(envelope)]), () =>
+            chain(sql(`DELETE FROM ${REPLICATION_TABLES.outbox} WHERE seq <= ${p(1)}`, 'run', [seq - config.retention]), () =>
               saveState({ ...saved, frontier })))));
       });
     });
@@ -150,12 +152,12 @@ export function createReplicationEngine(options) {
       capture.setContext({ replication: true });
       cancelled(request);
       const saved = await state();
-      const previous = await sql(`SELECT payload FROM ${REPLICATION_TABLES.receipts} WHERE id = ?`, 'get', [identity]);
+      const previous = await sql(`SELECT payload FROM ${REPLICATION_TABLES.receipts} WHERE id = ${p(1)}`, 'get', [identity]);
       if (previous !== undefined) {
         if (previous.payload !== stableStringify(envelope)) fail('JD2101', 'the envelope identity already has a different payload');
         return { status: 'duplicate', frontier: saved.frontier, conflicts: [] };
       }
-      const claim = await sql(`SELECT payload FROM ${REPLICATION_TABLES.claims} WHERE id = ?`, 'get', [identity]);
+      const claim = await sql(`SELECT payload FROM ${REPLICATION_TABLES.claims} WHERE id = ${p(1)}`, 'get', [identity]);
       if (claim !== undefined && claim.payload !== stableStringify(envelope))
         fail('JD2101', 'a conflicted envelope identity already has a different payload');
       const seen = position(saved.frontier, envelope.replica);
@@ -200,11 +202,11 @@ export function createReplicationEngine(options) {
       bounded({ ...envelope, operations: chosen });
       assertItemBytes(utf8Length(stableStringify(conflicts)), config.maxBytes);
       for (const conflict of conflicts) {
-        await sql(`INSERT INTO ${REPLICATION_TABLES.conflicts} (id, evidence) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET evidence = excluded.evidence`,
+        await sql(`INSERT INTO ${REPLICATION_TABLES.conflicts} (id, evidence) VALUES (${p(1)}, ${p(2)}) ON CONFLICT(id) DO UPDATE SET evidence = excluded.evidence`,
           'run', [JSON.stringify([identity, conflict.table, conflict.key]), stableStringify(conflict)]);
       }
       if (conflicts.length > 0 && !config.resolver) {
-        if (claim === undefined) await sql(`INSERT INTO ${REPLICATION_TABLES.claims} (id, payload) VALUES (?, ?)`, 'run', [identity, stableStringify(envelope)]);
+        if (claim === undefined) await sql(`INSERT INTO ${REPLICATION_TABLES.claims} (id, payload) VALUES (${p(1)}, ${p(2)})`, 'run', [identity, stableStringify(envelope)]);
         return { status: 'conflict', frontier: saved.frontier, conflicts };
       }
       // Canonical capture order is independent of FK topology; defer constraints
@@ -240,7 +242,7 @@ export function createReplicationEngine(options) {
     if (after > highWatermark || after + 1 < (earliestAvailable ?? highWatermark + 1))
       return { items: [], ...bounds, resetRequired: true, hasMore: false };
     const cursor = createCursor({ streaming: 'row', barrier: null, signal: request.signal, deadline: request.deadline, now,
-      open: () => chain(connection.prepare(`SELECT payload FROM ${REPLICATION_TABLES.outbox} WHERE seq > ? ORDER BY seq LIMIT ?`),
+      open: () => chain(connection.prepare(`SELECT payload FROM ${REPLICATION_TABLES.outbox} WHERE seq > ${p(1)} ORDER BY seq LIMIT ${p(2)}`),
         (statement) => statement.iterate([after, limit + 1])),
       items: (row) => [{ envelope: JSON.parse(row.payload), bytes: utf8Length(row.payload) }] });
     const page = await drainPage(cursor, { limit, maxBytes: Math.min(maxBytes, config.maxBytes), after,
@@ -249,16 +251,18 @@ export function createReplicationEngine(options) {
       bytes: page.items.reduce((sum, item) => sum + item.bytes, 0), resetRequired: false, hasMore: page.hasMore };
   };
   const snapshot = async (request = {}) => {
+    const maxBytes = request.maxBytes ?? config.maxBytes;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new TypeError('snapshot.maxBytes must be a positive safe integer');
     cancelled(request);
     const saved = await state();
     const credits = { count: 0, bytes: 0 };
-    const values = await collectBounded(`SELECT name, key, value, frontier FROM ${REPLICATION_TABLES.rows} ORDER BY name, key LIMIT ?`, [config.maxOperations + 1],
+    const values = await collectBounded(`SELECT name, key, value, frontier FROM ${REPLICATION_TABLES.rows} ORDER BY name, key LIMIT ${p(1)}`, [config.maxOperations + 1],
       (row) => ({ table: row.name, key: row.key, value: JSON.parse(row.value), frontier: JSON.parse(row.frontier) }), request, credits);
-    const receipts = await collectBounded(`SELECT payload FROM ${REPLICATION_TABLES.receipts} ORDER BY id LIMIT ?`, [config.maxOperations + 1],
+    const receipts = await collectBounded(`SELECT payload FROM ${REPLICATION_TABLES.receipts} ORDER BY id LIMIT ${p(1)}`, [config.maxOperations + 1],
       (row) => JSON.parse(row.payload), request, credits);
     const document = normalizeReplicationSnapshot({ $replicationSnapshot: '0.1', model, frontier: saved.frontier,
       rows: values, receipts });
-    assertItemBytes(utf8Length(stableStringify(document)), config.maxBytes);
+    assertItemBytes(utf8Length(stableStringify(document)), Math.min(maxBytes, config.maxBytes));
     cancelled(request);
     return document;
   };
@@ -285,11 +289,11 @@ export function createReplicationEngine(options) {
       const saved = await state();
       if (!dominates(document.frontier, saved.frontier)) fail('JD2105', 'reset would discard acknowledged local history');
       const credits = { count: 0, bytes: 0 };
-      const localReceipts = await collectBounded(`SELECT id, payload FROM ${REPLICATION_TABLES.receipts} LIMIT ?`, [config.maxOperations + 1],
+      const localReceipts = await collectBounded(`SELECT id, payload FROM ${REPLICATION_TABLES.receipts} LIMIT ${p(1)}`, [config.maxOperations + 1],
         (row) => row, request, credits);
       for (const local of localReceipts) if (stableStringify(receipts.get(local.id)) !== local.payload)
         fail('JD2101', 'snapshot rewrites an acknowledged envelope identity');
-      const localRows = await collectBounded(`SELECT name, key, value FROM ${REPLICATION_TABLES.rows} LIMIT ?`, [config.maxOperations + 1],
+      const localRows = await collectBounded(`SELECT name, key, value FROM ${REPLICATION_TABLES.rows} LIMIT ${p(1)}`, [config.maxOperations + 1],
         (row) => row, request, credits);
       const desired = new Map(document.rows.map((row) => [JSON.stringify([row.table, row.key]), row]));
       const operations = new Map(localRows.map((row) => [JSON.stringify([row.name, row.key]),
@@ -325,7 +329,7 @@ export function createReplicationEngine(options) {
       if (request.maxBytes !== undefined && (!Number.isSafeInteger(request.maxBytes) || request.maxBytes < 1))
         throw new TypeError('conflicts.maxBytes must be a positive safe integer');
       cancelled(request);
-      return collectBounded(`SELECT evidence FROM ${REPLICATION_TABLES.conflicts} ORDER BY id LIMIT ?`, [Math.min(limit, config.maxOperations)],
+      return collectBounded(`SELECT evidence FROM ${REPLICATION_TABLES.conflicts} ORDER BY id LIMIT ${p(1)}`, [Math.min(limit, config.maxOperations)],
         (row) => JSON.parse(row.evidence), request, { count: 0, bytes: 1 });
     },
   };

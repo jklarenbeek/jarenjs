@@ -12,7 +12,11 @@ test('lexical search keeps complete counts, bounded cells and valid focus across
     return id === null || document.getElementById(id) !== null;
   });
   expect(await validFocus()).toBe(true);
-  await page.getByLabel('Organic only').check(); await expect(status).toContainText('84 matches');
+  const organic = page.getByLabel('Organic only');
+  // Grid focus can scroll the page; settle pointer geometry before activation.
+  await organic.evaluate(node => node.scrollIntoView({ behavior: 'instant', block: 'center' }));
+  await organic.check(); await expect(organic).toBeChecked();
+  await expect(status).toContainText('84 matches');
   await expect(grid).toHaveAttribute('aria-rowcount', '84');
   await page.getByLabel('Search sort').selectOption('sku');
   await expect(page.locator('.jc-row').first()).toHaveAttribute('data-key', 'item-0000');

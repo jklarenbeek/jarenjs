@@ -21,7 +21,7 @@
       }
     },
     "entities": {
-      "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md \u00a79; stripping it leaves a plain JSON Schema.",
+      "description": "Entity name (an identifier) to entity declaration. The x-entity vocabulary lives INSIDE each entity schema's property subschemas and is documented in MODEL-FORMAT.md §9; stripping it leaves a plain JSON Schema.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
@@ -46,7 +46,7 @@
           "type": "object"
         },
         "key": {
-          "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member \u2014 or null when the store allocates.",
+          "description": "Where the caller-supplied key lives in the document, as an RFC 6901 pointer selecting at least one member — or null when the store allocates.",
           "type": [
             "string",
             "null"
@@ -54,7 +54,7 @@
           "pattern": "^/"
         },
         "identity": {
-          "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or \u2014 only with \"key\": null \u2014 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
+          "description": "How keys come to be: 'caller' (the default when a key pointer is declared), or — only with \"key\": null — 'uuid' (crypto.randomUUID) or 'integer' (database-allocated).",
           "enum": [
             "caller",
             "uuid",
@@ -106,7 +106,7 @@
           ]
         },
         "expression": {
-          "description": "Index a computed value rather than a member: a closed expression over declared members, JSON scalars and functions the host declared deterministic. Mutually exclusive with path and derive (JD0004) \u2014 an expression names the members it reads itself.",
+          "description": "Index a computed value rather than a member: a closed expression over declared members, JSON scalars and functions the host declared deterministic. Mutually exclusive with path and derive (JD0004) — an expression names the members it reads itself.",
           "allOf": [
             {
               "$ref": "#/definitions/expression"
@@ -118,7 +118,7 @@
           "type": "boolean"
         },
         "derive": {
-          "description": "Derive columns from the selected member instead of indexing it: 'geohash' (one TEXT cell column, precision required), 'bbox' (four REAL columns \u2014 west, south, east, north), or 'vector' (one packed BLOB column holding the l2-normalized Float32 form of an array of numbers, dims required; stored on every driver, with no B-tree over it \u2014 a fetch-and-rank plan reads it whole). A derived index is never unique.",
+          "description": "Derive columns from the selected member instead of indexing it: 'geohash' (one TEXT cell column, precision required), 'bbox' (four REAL columns — west, south, east, north), or 'vector' (one packed BLOB column holding the l2-normalized Float32 form of an array of numbers, dims required; stored on every driver, with no B-tree over it — a fetch-and-rank plan reads it whole). A derived index is never unique.",
           "enum": [
             "geohash",
             "bbox",
@@ -126,13 +126,13 @@
           ]
         },
         "precision": {
-          "description": "Geohash cell length in characters, 1-12. Required beside derive: 'geohash' and refused anywhere else \u2014 there is no safe default, because the right cell size depends on the query radius, which the model cannot know.",
+          "description": "Geohash cell length in characters, 1-12. Required beside derive: 'geohash' and refused anywhere else — there is no safe default, because the right cell size depends on the query radius, which the model cannot know.",
           "type": "integer",
           "minimum": 1,
           "maximum": 12
         },
         "dims": {
-          "description": "The width of a derive: 'vector' column in components, 1-8192. Required beside derive: 'vector' and refused anywhere else: the width is the column's identity \u2014 two widths over one path are two columns \u2014 and a member that is not an array of exactly this many finite numbers stores NULL in the column (the document itself still stores). Constrain the member with minItems/maxItems equal to dims in the collection's schema so a wrong-width vector is refused at the write instead.",
+          "description": "The width of a derive: 'vector' column in components, 1-8192. Required beside derive: 'vector' and refused anywhere else: the width is the column's identity — two widths over one path are two columns — and a member that is not an array of exactly this many finite numbers stores NULL in the column (the document itself still stores). Constrain the member with minItems/maxItems equal to dims in the collection's schema so a wrong-width vector is refused at the write instead.",
           "type": "integer",
           "minimum": 1,
           "maximum": 8192
@@ -159,7 +159,7 @@
         },
         "x-rename": {
           "type": "string",
-          "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT \u00a79): a rename is declared, never inferred."
+          "description": "Declares this entity as the rename of the named from-model entity (MIGRATION-FORMAT §9): a rename is declared, never inferred."
         },
         "physical": {
           "type": "object",
@@ -212,7 +212,10 @@
                       "epoch-ms",
                       "bigint",
                       "decimal",
-                      "blob-hex"
+                      "blob-hex",
+                      "uuid",
+                      "local-timestamp",
+                      "instant"
                     ]
                   },
                   "null": {
@@ -229,13 +232,9 @@
                     "type": "boolean"
                   },
                   "type": {
-                    "enum": [
-                      "INTEGER",
-                      "REAL",
-                      "TEXT",
-                      "BLOB",
-                      "NUMERIC"
-                    ]
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "SQLite affinity, or an exact catalog type in a schema-qualified native layout."
                   },
                   "defaultValue": {
                     "description": "A literal SQLite value or closed structural $sql expression; planTable validates its operator and contextual semantics.",
@@ -282,7 +281,9 @@
                   "identity": {
                     "enum": [
                       "rowid",
-                      "autoincrement"
+                      "autoincrement",
+                      "always",
+                      "by-default"
                     ]
                   },
                   "check": {
@@ -388,6 +389,11 @@
             },
             "withoutRowid": {
               "type": "boolean"
+            },
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Native schema identity, which must equal the driver-owned schema."
             }
           },
           "additionalProperties": false
@@ -453,7 +459,7 @@
       "additionalProperties": false
     },
     "expression": {
-      "description": "One node of an index expression: a member path, a JSON scalar, or a call to a function the host declared. Exactly one of the three, and nothing else \u2014 an index expression is never SQL text, and the function it names is resolved for arity and determinism at open (JD0004).",
+      "description": "One node of an index expression: a member path, a JSON scalar, or a call to a function the host declared. Exactly one of the three, and nothing else — an index expression is never SQL text, and the function it names is resolved for arity and determinism at open (JD0004).",
       "type": "object",
       "oneOf": [
         {
@@ -491,7 +497,7 @@
           ],
           "properties": {
             "call": {
-              "description": "The name of a function the host declared through openStore({ expressions }). The store refuses a name it was not given, a wrong arity, and one not declared deterministic \u2014 before any DDL.",
+              "description": "The name of a function the host declared through openStore({ expressions }). The store refuses a name it was not given, a wrong arity, and one not declared deterministic — before any DDL.",
               "type": "string",
               "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
             },

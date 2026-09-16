@@ -21,7 +21,10 @@ import { physicalSelection } from './physical.js';
 
 /** Physical text expressions must not inherit an application's collation. */
 const physicalComparable = (ref, sql, dialect) => ref.codec !== undefined
-  && ['text', 'date', 'datetime'].includes(ref.codec) ? dialect.codepoint(sql) : sql;
+  ? dialect.physicalCompare?.(ref.codec, sql)
+    ?? (['text', 'date', 'datetime'].includes(ref.codec) ? dialect.codepoint(sql) : sql) : sql;
+const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
+  ? dialect.physicalValueType?.(ref.codec, sql) ?? dialect.valueTypeOf(sql) : dialect.valueTypeOf(sql);
 
 /**
  * A promoted path the dialect's JSON path grammar cannot spell (a
@@ -671,7 +674,7 @@ export function createEntityPredicateEmitters(dialect, param) {
       const wanted = pred.types[0] === 'true' ? 1 : 0;
       return pred.positive
         ? `(${column} IS NOT NULL AND ${column} = ${param({ literal: wanted })})`
-        : presentNull ? `${column} IS NOT ${param({ literal: wanted })}`
+        : presentNull ? dialect.distinct(column, param({ literal: wanted }))
           : `(${column} IS NOT NULL AND ${column} <> ${param({ literal: wanted })})`;
     }
     if (pred.p === 'strop') {
@@ -714,7 +717,7 @@ export function createEntityPredicateEmitters(dialect, param) {
       : pred.ref.storage === 'boolean' ? 'boolean' : 'number';
     if (storageKind === 'boolean' || litKind === 'other' || storageKind !== litKind)
       return pred.op === 'ne' ? present : dialect.booleanLiteral(false);
-    if (presentNull && pred.op === 'ne') return `${column} IS NOT ${param({ literal: lit })}`;
+    if (presentNull && pred.op === 'ne') return dialect.distinct(column, param({ literal: lit }));
     return `(${column} IS NOT NULL AND ${column} ${symbol} ${param({ literal: lit })})`;
   };
 
@@ -849,7 +852,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       const raw = `${aliasOf(leaf.binding)}.${q(leaf.ref.column)}`;
       const column = physicalComparable(leaf.ref,
         leaf.ref.codec === 'integer'
-          ? `CASE WHEN ${dialect.valueTypeOf(raw)} = ${sl('integer')} THEN CAST(${raw} AS REAL) ELSE ${raw} END`
+          ? `CASE WHEN ${physicalValueType(leaf.ref, raw, dialect)} = ${sl('integer')} THEN ${dialect.numberCast(raw)} ELSE ${raw} END`
           : raw, dialect);
       const emptyType = leaf.ref.nullPolicy === 'null' ? sl('null') : 'NULL';
       const type = leaf.ref.storage === 'boolean'
@@ -883,27 +886,27 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   // rejected group cannot overflow SQLite's integer accumulator first.
   const numericGroup = (entry) => ['sum', 'avg'].includes(entry.fn);
   const groupSafe = (entry) => `(COUNT(${groupValue(entry.ref)}) = 0 OR `
-    + `MAX(ABS(CAST(${groupValue(entry.ref)} AS REAL))) <= 9007199254740991 / COUNT(${groupValue(entry.ref)}))`;
+    + `MAX(ABS(${dialect.numberCast(groupValue(entry.ref))})) <= 9007199254740991 / COUNT(${groupValue(entry.ref)}))`;
   const groupValid = (ref) => {
     const value = groupValue(ref);
-    const type = dialect.valueTypeOf(value);
+    const type = physicalValueType(ref, value, dialect);
     const valid = ref.codec === 'text' ? `${type} = ${sl('text')}`
       : ref.codec === 'boolean' ? `${type} = ${sl('integer')} AND ${value} IN (0, 1)`
         : `${type} ${ref.codec === 'integer' ? `= ${sl('integer')}` : `IN (${sl('integer')}, ${sl('real')})`}`
-          + ` AND ABS(CAST(${value} AS REAL)) <= 9007199254740991`;
-    return `MIN(CASE WHEN ${ref.nullPolicy === 'reject' ? '' : `${value} IS NULL OR `}(${valid}) THEN 1 ELSE 0 END)`;
+          + ` AND ABS(${dialect.numberCast(value)}) <= 9007199254740991`;
+    return `(MIN(CASE WHEN ${ref.nullPolicy === 'reject' ? '' : `${value} IS NULL OR `}(${valid}) THEN 1 ELSE 0 END) = 1)`;
   };
   const groupRefs = group ? [...group.keys, ...group.aggregates].map((entry) => entry.ref).filter((ref) => ref?.codecColumn) : [];
   const selection = group
     ? [...group.keys.map((key, i) => projectedPair({ binding: plan.bindings[0].name, ref: key.ref }, `k${i}`)),
       ...group.aggregates.map((entry, i) => `${entry.fn === 'rows' ? 'COUNT(*)'
         : dialect.groupAggregate(entry.fn, numericGroup(entry) || entry.ref.codec === 'integer'
-          ? `CAST(${groupValue(entry.ref)} AS REAL)` : groupValue(entry.ref))} AS ${q(`a${i}`)}`),
+          ? dialect.numberCast(groupValue(entry.ref)) : groupValue(entry.ref))} AS ${q(`a${i}`)}`),
       ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
       ...(groupRefs.length ? [`${groupRefs.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
     : plan.scalarAggregate
     ? `${dialect.groupAggregate(plan.scalarAggregate.fn, plan.scalarAggregate.ref.type === 'string'
-      ? groupValue(plan.scalarAggregate.ref) : `CAST(${groupValue(plan.scalarAggregate.ref)} AS REAL)`)} AS ${q('value')}, `
+      ? groupValue(plan.scalarAggregate.ref) : dialect.numberCast(groupValue(plan.scalarAggregate.ref)))} AS ${q('value')}, `
       + `${groupValid(plan.scalarAggregate.ref)} AS ${q('_valid')}, `
       + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate.ref)})` : '0'} AS ${q('_nulls')}, `
       + `${numericGroup(plan.scalarAggregate) ? groupSafe(plan.scalarAggregate) : '1'} AS ${q('_safe')}`
@@ -923,7 +926,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
         : `${aliasOf(ret)}.*, ${dialect.jsonText(docOf(ret))} AS ${q('__doc')}`;
 
   const tableOf = (name) =>
-    `${q(physicalOf(entityOf.get(name)).table)} AS ${aliasOf(name)}`;
+    `${dialect.tableName(physicalOf(entityOf.get(name)).table, physicalOf(entityOf.get(name)).schema)} AS ${aliasOf(name)}`;
   const JOIN_OPS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
   const onSql = (edge) =>
     physicalComparable(edge.left, `${aliasOf(edge.left.binding)}.${q(edge.left.column)}`, dialect)

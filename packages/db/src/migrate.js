@@ -45,7 +45,7 @@ import { sqlTokens } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
-import { withMigrationConnection, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership } from './migration-target.js';
+import { withMigrationConnection, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema } from './introspect.js';
 import { verifyPhysical } from './physical.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
@@ -1388,11 +1388,12 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
   const independent = { ...driver, open: (...args) => chain(driver.open(...args), (shadow) => {
     // An injected opener returning the borrowed primary never transfers its
     // ownership: reject before the cleanup bracket could close that handle.
-    if (shadow === primary) throw refuse('JD0021', 'shadow replay needs a different connection from the primary');
+    if (shadow === migrationOwnerOf(primary) || shadow.mustQueue)
+      throw refuse('JD0021', 'shadow replay needs a different, exclusively available connection from the primary');
     return shadow;
   }) };
   return withMigrationConnection({ driver: independent, path: shadowPath }, (shadow) =>
-    chain(verifyShadowOwnership(primary, shadow, driver), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
+    chain(verifyShadowOwnership(primary, shadow, driver, migrations.some((migration) => migration.physical?.dialect === 'postgres')), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
       chain(options.shadowFixture === undefined ? createModelShape(shadow, baseline, options.expressions)
         : options.shadowFixture(shadow), () => migrate({ connection: shadow }, migrations, {
         ...options, baseline, model, shadow: false, shadowDriver: driver,
@@ -1562,7 +1563,7 @@ export function migrate(target, migrations, options) {
         const pending = migrations.slice(appliedRows.length);
         let expectedFrom = appliedRows.length ? appliedRows.at(-1).to_hash : shapeHash(options.baseline);
         for (const migration of pending) {
-          checkMigrationDocument(migration); checkPreservationPlan(migration);
+          checkMigrationDocument(migration); checkPreservationPlan(migration, dialect);
           if (migration.from !== expectedFrom) throw refuse('JD0020',
             `migration '${migration.id}' expects shape '${migration.from}' but the database is at '${expectedFrom}' — refusing to run against the wrong shape`);
           expectedFrom = migration.to;
@@ -1577,7 +1578,7 @@ export function migrate(target, migrations, options) {
         if (pending.length === 0) {
           const result = { applied: [], skipped: appliedRows.map((row) => row.id), upToDate: true };
           return finalTarget === undefined ? result : connection.transaction((scope) =>
-            chain(verifyHistory(appliedRows.length), () => chain(acceptTarget(scope, finalTarget), () => result)), options.signal, 'immediate');
+            chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length), () => chain(acceptTarget(scope, finalTarget), () => result))), options.signal, 'immediate');
         }
         if (pending.some((m) => m.physical) && options.shadow !== false && options.shadowFixture === undefined)
           throw refuse('JD0021', 'physical preservation plans require shadow:false or an explicit shadowFixture initializer');
@@ -1645,11 +1646,12 @@ export function migrate(target, migrations, options) {
               check();
               // Admission may have waited behind a different process. Never rerun
               // a body using receipts read before that process committed.
-              return chain(verifyHistory(appliedRows.length + applied.length), () => {
-                let work = migration.physical ? verifyPreservation(scope, migration.physical, false) : null;
+              return chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length + applied.length), () => {
+                let allocations;
+                let work = migration.physical ? chain(verifyPreservation(scope, migration.physical, false), (state) => { allocations = state; }) : null;
                 work = chain(work, () => historyExists ? null : scope.exec(statements.create));
                 work = chain(work, () => runSteps(scope, migration, runOptions));
-                work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true) : null);
+                work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true, allocations) : null);
                 work = chain(work, () => acceptTarget(scope, last ? finalTarget : migration.physical?.target));
                 work = chain(work, () => last && options.model !== undefined ? chain(validateTargetState(scope, options.model,
                     { compileSchema: options.compileSchema, batchSize }), () => {
@@ -1662,7 +1664,7 @@ export function migrate(target, migrations, options) {
                   }) : null);
                 return chain(work, () => chain(scope.prepare(statements.insert), (insert) =>
                   insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
-              });
+              }));
             };
             const transaction = () => connection.transaction(body, options.signal, 'immediate');
             return chain(bracket ? withForeignKeySettings(connection, transaction) : transaction(), () => {
@@ -1688,7 +1690,7 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
     throw refuse('JD0021', 'a physical plan requires id and explicit steps');
   return chain(preservationSchemaOf(connection), (source) => {
     const dispositions = options.dispositions ?? {};
-    const keys = source.map((o) => `${o.type}:${o.name}`);
+    const keys = source.map(physicalObjectKey);
     if (Object.keys(dispositions).some((key) => !keys.includes(key)) || keys.some((key) => !['preserve', 'replace', 'drop'].includes(dispositions[key])))
       throw refuse('JD0021', 'every physical source object must have an explicit preserve, replace or drop disposition');
     const assertions = options.assertions ?? [];
@@ -1698,40 +1700,30 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
     }
     const migration = { $migration: MIGRATION_VERSION, id: options.id, from: shapeHash(fromModel), to: shapeHash(toModel),
       steps: options.steps, physical: { source, dispositions, assertions,
+        ...(connection.dialect.migration ? { dialect: connection.dialect.name, schema: connection.dialect.schema } : {}),
         ...(options.physicalTarget === undefined ? {} : { target: structuredClone(options.physicalTarget) }) } };
     checkMigrationDocument(migration);
-    checkPreservationPlan(migration);
+    checkPreservationPlan(migration, connection.dialect);
     return migration;
   });
 }
 
 /** Validate saved plans again at execution, including SQL ownership boundaries. */
-function checkPreservationPlan(migration) {
-  checkMigrationStatements(migration);
-  const physical = migration.physical;
-  if (physical === undefined) return;
-  const fail = () => { throw refuse('JD0021', 'invalid physical source, dispositions, assertions or steps'); };
-  if (!physical || !Array.isArray(physical.source) || !physical.dispositions || !Array.isArray(physical.assertions)) fail();
-  if (physical.target !== undefined) physicalTargetOf(physical.target);
-  const keys = physical.source.map((object) => {
-    if (!object || typeof object.name !== 'string' || !['table', 'view', 'index', 'trigger'].includes(object.type)) fail();
-    return `${object.type}:${object.name}`;
-  });
-  if (new Set(keys).size !== keys.length || Object.keys(physical.dispositions).some((key) => !keys.includes(key))
-    || keys.some((key) => !['preserve', 'replace', 'drop'].includes(physical.dispositions[key]))) fail();
-  for (const assertion of physical.assertions)
-    if (!assertion || typeof assertion.sql !== 'string' || !/^SELECT\b/i.test(assertion.sql.trim())
-      || !Array.isArray(assertion.expected) || (assertion.params !== undefined && !Array.isArray(assertion.params))) fail();
-  if (migration.steps.some((step) => !['ddl', 'sql', 'rebuild', 'table', 'jslt', 'query'].includes(step.kind))) fail();
+function checkPreservationPlan(migration, dialect) {
+  checkMigrationStatements(migration, dialect);
+  checkPhysicalPreservation(migration.physical, dialect);
+  if (migration.physical !== undefined && migration.steps.some((step) => !['ddl', 'sql', 'rebuild', 'table', 'jslt', 'query'].includes(step.kind)))
+    throw refuse('JD0021', 'invalid physical preservation step');
 }
 
 /** A saved step is one statement or one trigger program. Transaction aliases
  * and trailing statements cannot escape its savepoint or publish partial work. */
-function checkMigrationStatements(migration) {
+function checkMigrationStatements(migration, dialect) {
   const fragments = migration.steps.flatMap((step) => step.kind === 'rebuild'
     ? [...(step.create ?? []), step.copy, ...(step.indexes ?? [])] : step.kind === 'table'
       ? [...step.plan.statements, ...step.plan.finish] : ['ddl', 'sql'].includes(step.kind) ? [step.sql] : []);
   for (const sql of fragments) {
+    if (dialect?.migration) { dialect.migration.checkSql(sql); continue; }
     const tokens = typeof sql === 'string' ? sqlTokens(sql) : [];
     const words = tokens.filter((t) => t.kind === 'word').map((t) => t.value.toUpperCase());
     const fail = () => { throw refuse('JD0021', 'migration steps cannot change transaction or connection ownership; use one statement per step'); };
@@ -1757,36 +1749,4 @@ function checkMigrationStatements(migration) {
     }
     if (end < 0 || tokens.slice(end + 1).some((token, i) => i !== 0 || token.kind !== 'symbol' || token.value !== ';')) fail();
   }
-}
-
-/** Preservation compares exact source programs, including whitespace in SQL literals. */
-function preservationSchemaOf(connection) {
-  return chain(readSchema(connection), (schema) => schema.objects
-    .filter((object) => !ENGINE_TABLES.has(object.name) && !ENGINE_TABLES.has(object.owner)));
-}
-
-/** Verify source identity before destructive steps, and every preserved object
- * and fact before publication. The migration transaction owns all these reads. */
-function verifyPreservation(connection, physical, after) {
-  return chain(preservationSchemaOf(connection), (actual) => {
-    if (!after && canonicalizeJson(actual) !== canonicalizeJson(physical.source))
-      throw refuse('JD0020', 'the physical source schema changed after the plan was prepared');
-    if (after) {
-      for (const object of physical.source) {
-        const key = `${object.type}:${object.name}`;
-        const current = actual.find((o) => o.type === object.type && o.name === object.name);
-        if (physical.dispositions[key] === 'preserve' && canonicalizeJson(current ?? null) !== canonicalizeJson(object))
-          throw refuse('JD0023', `preserved object '${key}' was changed or lost`);
-        if (physical.dispositions[key] === 'drop' && current) throw refuse('JD0023', `declared drop '${key}' remains`);
-      }
-    }
-    const next = (i) => i >= physical.assertions.length ? null
-      : chain(connection.prepare(physical.assertions[i].sql, { readOnly: true }), (s) =>
-        chain(s.all(physical.assertions[i].params ?? []), (rows) => {
-          if (canonicalizeJson(rows) !== canonicalizeJson(physical.assertions[i].expected))
-            throw refuse('JD0023', `preservation assertion ${i} disagrees ${after ? 'after' : 'before'} migration`);
-          return next(i + 1);
-        }));
-    return next(0);
-  });
 }

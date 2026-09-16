@@ -45,10 +45,7 @@ import { chain, attempt } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
-
-
-
-
+import { jobStatements } from './dialects/jobs.js';
 /** §4 defaults, all overridable per worker. */
 export const JOB_DEFAULTS = Object.freeze({
   maxAttempts: 5,
@@ -103,45 +100,6 @@ export function serializeResult(value) {
     return { reason: `the result could not be serialized: ${describeValue(error)}` };
   }
 }
-
-const CREATE_JOBS = `CREATE TABLE IF NOT EXISTS "${JOBS_TABLE}" (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  payload TEXT,
-  state TEXT NOT NULL DEFAULT 'pending',
-  run_at INTEGER NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  max_attempts INTEGER NOT NULL,
-  lease_until INTEGER,
-  lease_owner TEXT,
-  lease_generation INTEGER NOT NULL DEFAULT 0,
-  lease_token TEXT,
-  last_error TEXT,
-  result TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS "${JOBS_TABLE}_claim"
-  ON "${JOBS_TABLE}" (state, run_at);
-CREATE TABLE IF NOT EXISTS "${JOB_CHECKPOINTS_TABLE}" (
-  run_id TEXT NOT NULL,
-  node_id TEXT NOT NULL,
-  value TEXT NOT NULL,
-  generation INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (run_id, node_id)
-);`;
-
-/**
- * The columns a database written before the fence does not have, added
- * in place. Jobs rows are live work, so an existing queue is upgraded,
- * never rebuilt: every column carries a default that reads as "claimed
- * before the fence existed", which no token can ever match.
- */
-const ADDED_COLUMNS = Object.freeze([
-  { table: JOBS_TABLE, name: 'lease_generation', definition: 'INTEGER NOT NULL DEFAULT 0' },
-  { table: JOBS_TABLE, name: 'lease_token', definition: 'TEXT' },
-  { table: JOB_CHECKPOINTS_TABLE, name: 'generation', definition: 'INTEGER NOT NULL DEFAULT 0' },
-]);
 
 /** Map a raw row to the frozen public record (§2). The lease token is
  * deliberately absent: a record anyone can read must not carry the
@@ -209,6 +167,8 @@ function isLease(value) {
  */
 export function createJobEngine(options) {
   const { connection } = options;
+  const sql = jobStatements(connection.dialect);
+  const schema = sql.schema;
   const bracket = options.bracket ?? ((/** @type {() => any} */ fn) => fn());
   const runtime = resolveRuntime(options.runtime);
   const now = options.now ?? runtime.now;
@@ -233,10 +193,10 @@ export function createJobEngine(options) {
   const wrapJobs = (error) => wrapDriverError(error, { docPath: '/jobs', collection: JOBS_TABLE });
   /** @type {Map<string, any>} */
   const statements = new Map();
-  const prepared = (key, sql) => {
+  const prepared = (key, text = sql[key]) => {
     let statement = statements.get(key);
     if (statement === undefined) {
-      const raw = attempt(() => connection.prepare(sql), (error) => {
+      const raw = attempt(() => connection.prepare(text), (error) => {
         // A failed preparation owns no statement and must not poison retries.
         statements.delete(key);
         return wrapJobs(error);
@@ -269,13 +229,13 @@ export function createJobEngine(options) {
   const upgradeColumns = () => {
     const dialect = connection.dialect;
     const next = (i) => {
-      if (i >= ADDED_COLUMNS.length) return null;
-      const { table, name, definition } = ADDED_COLUMNS[i];
+      if (i >= schema.added.length) return null;
+      const { table, name, sql: upgrade } = schema.added[i];
       return chain(connection.prepare(dialect.introspect.columns(table)), (statement) =>
         chain(statement.all([]), (rows) => {
           if (rows.some((/** @type {any} */ row) => row.name === name)) return next(i + 1);
           return chain(
-            connection.exec(`ALTER TABLE "${table}" ADD COLUMN ${name} ${definition}`),
+            connection.exec(upgrade),
             () => next(i + 1));
         }));
     };
@@ -287,9 +247,11 @@ export function createJobEngine(options) {
   // Adoption accepts the current engine-owned schema without provisioning or
   // upgrading it. The DDL remains the single schema declaration; differently
   // shaped historical queues need an explicit upgrade before adoption.
-  const verifyExisting = () => chain(connection.prepare(connection.dialect.introspect.objects()), (statement) => chain(statement.all([]), (objects) => {
+  const verifyExisting = () => connection.dialect.jobs?.verify
+    ? connection.dialect.jobs.verify(connection, schema)
+    : chain(connection.prepare(connection.dialect.introspect.objects()), (statement) => chain(statement.all([]), (objects) => {
     const normalize = (sql) => sql.replace(/'[^']*'|\bIF\s+NOT\s+EXISTS\b|[\s";]/g, (part) => part.startsWith("'") ? part : '');
-    for (const sql of CREATE_JOBS.split(';').filter((part) => part.trim())) {
+    for (const sql of schema.create.split(';').filter((part) => part.trim())) {
       const name = sql.match(/(?:TABLE|INDEX) IF NOT EXISTS "([^"]+)"/)[1];
       const object = objects.find((value) => value.name === name);
       if (!object?.sql || normalize(object.sql) !== normalize(sql))
@@ -297,7 +259,8 @@ export function createJobEngine(options) {
     }
   }));
   const ready = attempt(() => bracket(() => options.adopt === true
-    ? verifyExisting() : chain(connection.exec(CREATE_JOBS), upgradeColumns)),
+    ? verifyExisting() : chain(connection.dialect.jobs?.initialize?.(connection),
+      () => chain(connection.exec(schema.create), upgradeColumns))),
     (error) => new DbCompileError('JD0002',
       `the job tables could not be opened (${error?.message ?? String(error)}) — `
       + 'a read-only store creates nothing; open it read-write once, or without jobs',
@@ -318,10 +281,7 @@ export function createJobEngine(options) {
       throw new TypeError('enqueue: "maxAttempts" is a positive integer');
     }
     const at = now();
-    return chain(prepared('enqueue', `INSERT INTO "${JOBS_TABLE}"
-      (id, kind, payload, state, run_at, max_attempts, created_at, updated_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
-      ON CONFLICT (id) DO NOTHING`).run([
+    return chain(prepared('enqueue').run([
       id, kind,
       payload === undefined || payload === null ? null : JSON.stringify(payload),
       enqueueOptions?.runAt ?? at,
@@ -334,14 +294,13 @@ export function createJobEngine(options) {
   };
 
   const get = (id) => chain(
-    prepared('get', `SELECT * FROM "${JOBS_TABLE}" WHERE id = ?`).get([id]),
+    prepared('get').get([id]),
     (row) => (row === undefined ? undefined : publicJob(row)));
 
   const counts = () => chain(
-    prepared('counts', `SELECT state, COUNT(*) AS n FROM "${JOBS_TABLE}" GROUP BY state`).all([]),
+    prepared('counts').all([]),
     (states) => chain(
-      prepared('pendingKinds', `SELECT kind, COUNT(*) AS n FROM "${JOBS_TABLE}"
-        WHERE state IN ('pending', 'failed') GROUP BY kind`).all([]),
+      prepared('pendingKinds').all([]),
       (kinds) => {
         const out = {
           pending: 0, leased: 0, done: 0, failed: 0, dead: 0, cancelled: 0,
@@ -365,21 +324,11 @@ export function createJobEngine(options) {
       throw new TypeError('claim: needs a non-empty "kinds" array and an "owner"');
     }
     const at = now();
-    const placeholders = kinds.map(() => '?').join(', ');
     // the claim MINTS the fence: a fresh token for this attempt, and a
     // generation one higher than whatever ran before it. Both come back
     // through the RETURNING the claim already had, so the attempt that
     // holds them is the only one that can settle the job
-    const statement = prepared(`claim:${kinds.length}`,
-      `UPDATE "${JOBS_TABLE}" SET state='leased', lease_owner=?, lease_until=?,
-        lease_generation = lease_generation + 1, lease_token=?,
-        attempts = attempts + 1, updated_at=?
-      WHERE id = (SELECT id FROM "${JOBS_TABLE}"
-        WHERE (state='pending' OR state='failed'
-               OR (state='leased' AND lease_until < ?))
-          AND run_at <= ? AND kind IN (${placeholders})
-        ORDER BY run_at, created_at, id LIMIT 1)
-      RETURNING *`);
+    const statement = prepared(`claim:${kinds.length}`, sql.claim(kinds.length));
     return chain(statement.get([
       owner, at + (claimOptions.leaseMs ?? defaults.leaseMs), uuid(),
       at, at, at, ...kinds,
@@ -397,8 +346,7 @@ export function createJobEngine(options) {
    * @param {string} verb
    */
   const refuseSettlement = (lease, verb) => chain(
-    prepared('fenceRow', `SELECT state, lease_token, lease_until, lease_generation
-      FROM "${JOBS_TABLE}" WHERE id = ?`).get([lease.jobId]),
+    prepared('fenceRow').get([lease.jobId]),
     (row) => {
       const at = now();
       // THIS attempt already settled it — a §7 handler that completed
@@ -436,11 +384,6 @@ export function createJobEngine(options) {
         { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
     });
 
-  /** The guard every settling statement carries (D1): the token, and a
-   * lease that is still valid. Never the owner — one worker reuses one
-   * owner for every attempt it ever makes. */
-  const FENCE = "state='leased' AND lease_token=? AND lease_until > ?";
-
   /**
    * Check the lease a settling call was given, before it is used. The
    * pre-fence `(id, owner)` spelling cannot stay a settling call — it is
@@ -463,7 +406,7 @@ export function createJobEngine(options) {
   const assertLease = (lease) => {
     const misuse = requireLease(lease, 'assertLease()');
     if (misuse !== null) throw misuse;
-    return chain(prepared('assertLease', `SELECT id FROM "${JOBS_TABLE}" WHERE id=? AND ${FENCE}`)
+    return chain(prepared('assertLease')
       .get([lease.jobId, lease.token, now()]), (row) => {
       if (row !== undefined) return true;
       return chain(refuseSettlement(lease, 'assertLease()'), (error) => {
@@ -492,10 +435,7 @@ export function createJobEngine(options) {
     const misuse = requireLease(lease, 'renew()');
     if (misuse !== null) throw misuse;
     const at = now();
-    return chain(prepared('renew', `UPDATE "${JOBS_TABLE}"
-      SET lease_until=?, lease_token=?, updated_at=?
-      WHERE id=? AND ${FENCE}
-      RETURNING *`).get([
+    return chain(prepared('renew').get([
       at + (renewOptions?.leaseMs ?? defaults.leaseMs), uuid(),
       at, lease.jobId, lease.token, at,
       ]), (row) => (row === undefined
@@ -507,6 +447,13 @@ export function createJobEngine(options) {
       })
       : leaseOf(row)));
   };
+
+  /** A successful or already landed settlement has the same public answer. */
+  const settled = (out, lease, verb) => Number(out.changes ?? 0) > 0
+    ? true : chain(refuseSettlement(lease, verb), (error) => {
+      if (error !== null) throw error;
+      return true;
+    });
 
   /**
    * Complete a leased job — guarded by the fence, exactly-once against
@@ -523,16 +470,9 @@ export function createJobEngine(options) {
     if (!('text' in serialized)) throw new TypeError(serialized.reason);
     const at = now();
     return chain(
-      prepared('complete', `UPDATE "${JOBS_TABLE}"
-        SET state='done', result=?, lease_until=NULL, lease_token=NULL, updated_at=?
-        WHERE id=? AND ${FENCE}`).run([
+      prepared('complete').run([
         serialized.text, at, lease.jobId, lease.token, at,
-      ]), (out) => (Number(out.changes ?? 0) > 0
-        ? true
-        : chain(refuseSettlement(lease, 'complete()'), (error) => {
-          if (error !== null) throw error;
-          return true; // this attempt's settlement already landed
-        })));
+      ]), (out) => settled(out, lease, 'complete()'));
   };
 
   /** Fail a leased job: schedule the retry or dead-letter (§4). */
@@ -550,25 +490,15 @@ export function createJobEngine(options) {
       const terminal = job.attempts >= job.maxAttempts;
       const at = now();
       const statement = terminal
-        ? prepared('dead', `UPDATE "${JOBS_TABLE}"
-            SET state='dead', last_error=?, lease_until=NULL, lease_token=NULL, updated_at=?
-            WHERE id=? AND ${FENCE}`)
-        : prepared('retry', `UPDATE "${JOBS_TABLE}"
-            SET state='failed', last_error=?, lease_until=NULL, lease_token=NULL,
-              run_at=?, updated_at=?
-            WHERE id=? AND ${FENCE}`);
+        ? prepared('dead')
+        : prepared('retry');
       // host code decides what it throws; reading it must not throw back
       const message = describeValue(error);
       const params = terminal
         ? [message, at, lease.jobId, lease.token, at]
         : [message, at + backoffOf(job.attempts, workerDefaults), at,
           lease.jobId, lease.token, at];
-      return chain(statement.run(params), (out) => (Number(out.changes ?? 0) > 0
-        ? true
-        : chain(refuseSettlement(lease, 'fail()'), (refusal) => {
-          if (refusal !== null) throw refusal;
-          return true; // this attempt's settlement already landed
-        })));
+      return chain(statement.run(params), (out) => settled(out, lease, 'fail()'));
     });
   };
 
@@ -594,14 +524,11 @@ export function createJobEngine(options) {
     const generation = isLease(lease) ? lease.generation : 0;
     return {
       inspect: (runId, nodeId) => chain(
-        prepared('cpIdentity', `SELECT value FROM "${JOB_CHECKPOINTS_TABLE}"
-          WHERE run_id=? AND node_id=? AND generation <= ?`).get([runId, nodeId, generation]),
-        (row) => chain(prepared('cpHasValues', `SELECT 1 AS present FROM "${JOB_CHECKPOINTS_TABLE}"
-          WHERE run_id=? AND node_id<>? AND generation <= ? LIMIT 1`).get([runId, nodeId, generation]),
+        prepared('cpIdentity').get([runId, nodeId, generation]),
+        (row) => chain(prepared('cpHasValues').get([runId, nodeId, generation]),
         (other) => ({ value: row === undefined ? undefined : JSON.parse(row.value), hasValues: other !== undefined }))),
       load: (runId) => chain(
-        prepared('cpLoad', `SELECT node_id, value FROM "${JOB_CHECKPOINTS_TABLE}"
-          WHERE run_id = ? AND generation <= ?`).all([runId, generation]),
+        prepared('cpLoad').all([runId, generation]),
         (rows) => (rows.length === 0
           ? null
           : {
@@ -613,8 +540,7 @@ export function createJobEngine(options) {
         if (misuse !== null) throw misuse;
         const at = now();
         return chain(
-          prepared('cpFence', `SELECT id FROM "${JOBS_TABLE}"
-            WHERE id=? AND ${FENCE}`).get([runId, lease.token, at]),
+          prepared('cpFence').get([runId, lease.token, at]),
           (row) => {
             if (row === undefined) {
               return chain(refuseSettlement({ ...lease, jobId: runId }, 'checkpoint save()'),
@@ -626,17 +552,13 @@ export function createJobEngine(options) {
                     { docPath: '/jobs', collection: JOBS_TABLE, key: runId });
                 });
             }
-            return prepared('cpSave', `INSERT INTO "${JOB_CHECKPOINTS_TABLE}"
-              (run_id, node_id, value, generation) VALUES (?, ?, ?, ?)
-              ON CONFLICT (run_id, node_id) DO UPDATE
-                SET value=excluded.value, generation=excluded.generation`)
+            return prepared('cpSave')
               .run([runId, nodeId, JSON.stringify(value), generation]);
           });
       }),
       complete: (runId, result) => connection.transaction(() => chain(
         complete(lease, result),
-        () => prepared('cpPrune', `DELETE FROM "${JOB_CHECKPOINTS_TABLE}"
-          WHERE run_id = ? AND generation <= ?`).run([runId, generation]))),
+        () => prepared('cpPrune').run([runId, generation]))),
     };
   };
 
@@ -656,7 +578,6 @@ export function createJobEngine(options) {
 
   const JOB_STATES = Object.freeze(['pending', 'leased', 'done', 'failed', 'dead', 'cancelled']);
   /** The states a job has when nothing more will happen to it on its own. */
-  const SETTLED = "('done', 'dead', 'cancelled')";
 
   /**
    * A keyset cursor over the queue, by job id: one record per pull, the
@@ -683,19 +604,14 @@ export function createJobEngine(options) {
     const limit = pageOptions?.limit ?? PAGE_LIMIT_DEFAULT;
     if (!Number.isSafeInteger(limit) || limit < 1)
       throw new TypeError('page: limit is a positive integer');
-    const conditions = ['id > ?'];
-    const params = [after ?? ''];
-    if (state !== undefined) { conditions.push('state = ?'); params.push(state); }
-    if (kind !== undefined) { conditions.push('kind = ?'); params.push(kind); }
-    params.push(limit);
-    const sql = `SELECT * FROM "${JOBS_TABLE}" WHERE ${conditions.join(' AND ')} ORDER BY id LIMIT ?`;
+    const page = sql.page(state, kind, after, limit);
     // a statement of its own per cursor: two live iterators over one
     // cached statement invalidate each other at the driver
     return createCursor({
       ...rowClassOf(connection),
       signal: pageOptions?.signal, deadline: pageOptions?.deadline, now,
       wrap: wrapJobs,
-      open: () => chain(connection.prepare(sql), (statement) => statement.iterate(params)),
+      open: () => chain(connection.prepare(page.sql), (statement) => statement.iterate(page.params)),
       items: (row) => [publicJob(row)],
     });
   };
@@ -728,9 +644,7 @@ export function createJobEngine(options) {
         { docPath: '/jobs', collection: JOBS_TABLE, key: id }));
     };
     if (lease === undefined) {
-      return chain(prepared('cancelQueued', `UPDATE "${JOBS_TABLE}"
-        SET state='cancelled', last_error='cancelled', lease_until=NULL, lease_token=NULL, updated_at=?
-        WHERE id=? AND state IN ('pending', 'failed')`).run([at, id]), (out) => {
+      return chain(prepared('cancelQueued').run([at, id]), (out) => {
         if (Number(out.changes ?? 0) > 0) return true;
         return chain(get(id), (job) => {
           if (job === undefined) {
@@ -753,9 +667,7 @@ export function createJobEngine(options) {
     const misuse = requireLease(lease, 'cancel()');
     if (misuse !== null) throw misuse;
     if (lease.jobId !== id) throw new TypeError('cancel: the lease belongs to another job');
-    return chain(prepared('cancelLeased', `UPDATE "${JOBS_TABLE}"
-      SET state='cancelled', last_error='cancelled', lease_until=NULL, lease_token=NULL, updated_at=?
-      WHERE id=? AND ${FENCE}`).run([at, id, lease.token, at]), (out) => {
+    return chain(prepared('cancelLeased').run([at, id, lease.token, at]), (out) => {
       if (Number(out.changes ?? 0) > 0) {
         abortLocal();
         return true;
@@ -787,10 +699,7 @@ export function createJobEngine(options) {
     if (typeof id !== 'string' || id === '') throw new TypeError('requeue: id is a non-empty string');
     refuseCancelled(requeueOptions, now, { abortCode: 'JD2081', aborted: 'requeue() ran', passed: 'requeue() ran' });
     const at = now();
-    return chain(prepared('requeue', `UPDATE "${JOBS_TABLE}"
-      SET state='pending', run_at=?, lease_until=NULL, lease_token=NULL, lease_owner=NULL, updated_at=?
-      WHERE id=? AND (state IN ('failed', 'dead', 'cancelled')
-        OR (state='leased' AND lease_until < ?))`).run([at, at, id, at]), (out) => {
+    return chain(prepared('requeue').run([at, at, id, at]), (out) => {
       if (Number(out.changes ?? 0) > 0) {
         wakeAll();
         return true;
@@ -829,11 +738,7 @@ export function createJobEngine(options) {
     refuseCancelled(resetOptions, now, { abortCode: 'JD2081', aborted: 'reset() ran', passed: 'reset() ran' });
     const at = now();
     return connection.transaction(() => chain(
-      prepared('resetJob', `UPDATE "${JOBS_TABLE}" SET state='pending', attempts=0,
-        result=NULL, last_error=NULL, run_at=?, updated_at=?, lease_until=NULL,
-        lease_owner=NULL, lease_token=NULL, lease_generation=lease_generation+1
-        WHERE id=? AND lease_generation=? AND state<>'done'
-          AND (state<>'leased' OR lease_until<=?)`).run([at, at, id, expected, at]),
+      prepared('resetJob').run([at, at, id, expected, at]),
       (out) => {
         if (Number(out.changes ?? 0) === 0) return chain(get(id), (job) => {
           const code = job?.state === 'leased' && job.leaseUntil > at ? 'JD2068'
@@ -842,7 +747,7 @@ export function createJobEngine(options) {
             `reset() refused: job '${id}' is unknown, completed, actively leased, or its generation changed; read it again before resetting`,
             { docPath: '/jobs', collection: JOBS_TABLE, key: id });
         });
-        return chain(prepared('resetCheckpoints', `DELETE FROM "${JOB_CHECKPOINTS_TABLE}" WHERE run_id=?`).run([id]),
+        return chain(prepared('resetCheckpoints').run([id]),
           (removed) => { wakeAll(); return { reset: true, discarded: Number(removed.changes ?? 0), generation: expected + 1 }; });
       }));
   };
@@ -863,15 +768,11 @@ export function createJobEngine(options) {
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1))
       throw new TypeError('sweep: limit is a positive integer');
     refuseCancelled(sweepOptions, now, { abortCode: 'JD2081', aborted: 'sweep() ran', passed: 'sweep() ran' });
-    const selection = `SELECT id FROM "${JOBS_TABLE}" WHERE state IN ${SETTLED} AND updated_at < ? `
-      + `ORDER BY updated_at, id${limit === undefined ? '' : ' LIMIT ?'}`;
+    const statements = sql.sweep(limit !== undefined);
     const params = limit === undefined ? [horizon] : [horizon, limit];
-    return connection.transaction(() => chain(
-      prepared(`sweepCheckpoints:${limit === undefined ? 'all' : 'bounded'}`,
-        `DELETE FROM "${JOB_CHECKPOINTS_TABLE}" WHERE run_id IN (${selection})`).run(params),
-      () => chain(prepared(`sweepJobs:${limit === undefined ? 'all' : 'bounded'}`,
-        `DELETE FROM "${JOBS_TABLE}" WHERE id IN (${selection})`).run(params),
-      (out) => ({ removed: Number(out.changes ?? 0) }))));
+    const next = (i) => chain(prepared(`sweep:${limit !== undefined}:${i}`, statements[i]).run(params),
+      (out) => i + 1 < statements.length ? next(i + 1) : { removed: Number(out.changes ?? 0) });
+    return connection.transaction(() => next(0));
   };
 
   /** A settling refusal, as opposed to a storage failure: the three

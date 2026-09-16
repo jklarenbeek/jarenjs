@@ -1,14 +1,17 @@
-/** Structural SQLite authoring, with explicit native SQL semantics. */
-export type SqlValue = string | number | bigint | Uint8Array | null;
+/** Structural authoring with explicit native dialect semantics. */
+import type { Dialect, QueryCursor, PhysicalMigrationDocument, PostgresPhysicalMigrationTarget } from './index.js';
+export type SqlValue = string | number | bigint | boolean | Uint8Array | null;
 export type SqlInput = SqlValue | SqlExpression;
 export type SqlOperator = '=' | '<>' | '<' | '<=' | '>' | '>=' | 'IS' | 'IS NOT'
   | '+' | '-' | '*' | '/' | '%' | '||' | 'AND' | 'OR' | 'LIKE' | 'NOT LIKE' | 'GLOB';
 export type SqlFunction = 'coalesce' | 'nullif' | 'trim' | 'ltrim' | 'rtrim' | 'lower' | 'upper'
   | 'length' | 'abs' | 'round' | 'typeof' | 'json_extract' | 'json_valid' | 'json_type'
   | 'count' | 'sum' | 'total' | 'avg' | 'min' | 'max'
-  | 'date' | 'time' | 'datetime' | 'julianday' | 'unixepoch' | 'strftime';
-export type SqlType = 'INTEGER' | 'REAL' | 'TEXT' | 'BLOB' | 'NUMERIC';
-export type SqlCollation = 'BINARY' | 'NOCASE' | 'RTRIM';
+  | 'date' | 'time' | 'datetime' | 'julianday' | 'unixepoch' | 'strftime'
+  | 'jsonb_typeof' | 'json_typeof' | 'octet_length';
+export type SqlType = 'INTEGER' | 'REAL' | 'TEXT' | 'BLOB' | 'NUMERIC' | 'SMALLINT' | 'BIGINT'
+  | 'DOUBLE PRECISION' | 'BYTEA' | 'BOOLEAN' | 'UUID' | 'JSON' | 'JSONB' | 'DATE' | 'TIMESTAMP' | 'TIMESTAMPTZ';
+export type SqlCollation = 'BINARY' | 'NOCASE' | 'RTRIM' | 'C' | 'POSIX';
 export type SqlExpression =
   | { readonly $sql: 'column'; readonly name: string; readonly table?: string }
   | { readonly $sql: 'value'; readonly value: SqlValue }
@@ -45,7 +48,7 @@ export type SqlMutation = { readonly table: string; readonly returning?: SqlProj
   | { readonly op: 'delete'; readonly where: SqlInput }
   | ({ readonly op: 'insert'; readonly conflict?: SqlConflict; readonly ignore?: boolean } & (
     { readonly values: Readonly<Record<string, SqlInput>> } | { readonly source: SqlSelect; readonly columns: readonly string[] })));
-export interface RelationalOptions { readonly externals?: Readonly<Record<string, SqlValue>> }
+export interface RelationalOptions { readonly externals?: Readonly<Record<string, SqlValue>>; readonly signal?: AbortSignal }
 export interface RelationalPlan { readonly sql: string; readonly params: readonly SqlValue[]; readonly access: 'read' | 'write' }
 export interface RelationalMutationResult { readonly affected: number; readonly rows?: readonly Record<string, unknown>[]; readonly lastInsertRowid?: number | bigint }
 export interface RelationalEngine {
@@ -54,6 +57,15 @@ export interface RelationalEngine {
   get<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): T | undefined;
   iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): IterableIterator<T>;
   execute(document: SqlMutation, options?: RelationalOptions): RelationalMutationResult;
+  dispose(): void;
+}
+export interface AsyncRelationalEngine {
+  plan(document: SqlSelect | SqlMutation, options?: RelationalOptions): RelationalPlan;
+  all<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): Promise<T[]>;
+  get<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): Promise<T | undefined>;
+  iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): QueryCursor<T>;
+  execute(document: SqlMutation, options?: RelationalOptions): Promise<RelationalMutationResult>;
+  dispose(): Promise<void>;
 }
 export declare const sql: {
   column(name: string, table?: string): SqlExpression;
@@ -69,8 +81,10 @@ export declare const sql: {
   scalar(query: SqlSelect): SqlExpression;
   exists(query: SqlSelect): SqlExpression;
 };
-export declare function planRelational(document: SqlSelect | SqlMutation, options?: RelationalOptions): RelationalPlan;
-/** Requires a synchronous SQLite connection; no model is opened. */
+export declare function planRelational(document: SqlSelect | SqlMutation, options?: RelationalOptions & { dialect?: Dialect }): RelationalPlan;
+/** PostgreSQL returns asynchronous operations and native bounded cursors. */
+export declare function relational(connection: { readonly synchronous: false }): AsyncRelationalEngine;
+/** Legacy untyped connections require synchronous SQLite; use a typed PostgreSQL connection for its async surface. */
 export declare function relational(connection: unknown): RelationalEngine;
 
 export interface TableColumn {
@@ -113,7 +127,18 @@ export interface TableMigrationPlan {
   readonly source: readonly unknown[]; readonly after: readonly unknown[]; readonly rebuild: boolean;
   readonly temporary: string; readonly unchanged: readonly string[]; readonly statements: readonly string[]; readonly finish: readonly string[];
 }
+export interface PostgresTableMigrationOptions {
+  readonly id: string; readonly table: string; readonly statements: readonly string[];
+  readonly dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
+  readonly assertions?: PhysicalMigrationDocument['physical']['assertions'];
+}
+export interface PostgresTableMigrationPlan extends TableMigrationPlan {
+  readonly backend: 'postgres'; readonly physical: PhysicalMigrationDocument['physical'];
+}
+/** Native planning reads a complete catalog; target DDL is never previewed on the primary. */
+export declare function planTableMigration(connection: unknown, target: PostgresPhysicalMigrationTarget, options: PostgresTableMigrationOptions): Promise<PostgresTableMigrationPlan>;
 export declare function planTableMigration(connection: unknown, definition: TableDefinition, options: TableMigrationOptions): TableMigrationPlan;
+export declare function applyTableMigration(connection: unknown, plan: PostgresTableMigrationPlan): Promise<{ changed: number }>;
 export declare function applyTableMigration(connection: unknown, plan: TableMigrationPlan): { changed: number };
 export declare function withForeignKeysSuspended<T>(connection: unknown, fn: () => T): T;
 export type SchemaChange =
@@ -125,8 +150,19 @@ export interface SchemaChangePlan {
   readonly version: 1; readonly operation: SchemaChange; readonly sql: string;
   readonly source: readonly unknown[]; readonly settings: readonly number[]; readonly checksum: string;
 }
+export interface PostgresSchemaChange {
+  readonly op: 'native'; readonly table: string; readonly sql: string;
+  readonly target: PostgresPhysicalMigrationTarget;
+  readonly dispositions: PostgresTableMigrationOptions['dispositions'];
+  readonly assertions?: PostgresTableMigrationOptions['assertions'];
+}
+export interface PostgresSchemaChangePlan extends PostgresTableMigrationPlan {
+  readonly operation: PostgresSchemaChange; readonly sql: string;
+}
+export declare function planSchemaChange(connection: unknown, operation: PostgresSchemaChange): Promise<PostgresSchemaChangePlan>;
 /** Main-schema snapshot; does not execute SQL or infer replay/disposition policy. */
 export declare function planSchemaChange(connection: unknown, operation: SchemaChange): SchemaChangePlan;
+export declare function applySchemaChange(connection: unknown, plan: PostgresSchemaChangePlan): Promise<{ changed: number }>;
 /** Refuses stale source/settings under an immediate transaction. */
 export declare function applySchemaChange(connection: unknown, plan: SchemaChangePlan): { changed: number };
 export { sqliteDialect } from './index.js';

@@ -16,8 +16,12 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import { setTimeout as delay } from 'node:timers/promises';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, createEntityQueryEngine, createQueryState } from '@jarenjs/db';
+import { relational, sql } from '@jarenjs/db/relational';
+import { compileEntityModel } from '@jarenjs/db/model';
+import { entityCore } from '@jarenjs/db/entity';
 import {
   postgresDriver, adaptPostgresClient, postgresProbe, postgresDialect, POSTGRES_FLOOR,
 } from '@jarenjs/db/postgres';
@@ -34,24 +38,54 @@ function scriptedClient(handlers, options = undefined) {
   /** @type {{ text: string, name: string | undefined, values: any[] }[]} */
   const calls = [];
   let releases = 0;
+  const discarded = [];
+  const cursors = new Map();
+  const settings = new Map([['statement_timeout', '0'], ['lock_timeout', '0']]);
   const client = {
-    calls,
+    calls, discarded,
     get releases() { return releases; },
     query(config, maybeValues) {
       const text = typeof config === 'string' ? config : config.text;
       const name = typeof config === 'string' ? undefined : config.name;
       const values = (typeof config === 'string' ? maybeValues : config.values) ?? [];
       calls.push({ text, name, values });
+      if (/^SHOW (statement_timeout|lock_timeout)$/.test(text))
+        return Promise.resolve({ rows: [{ [text.slice(5)]: settings.get(text.slice(5)) }] });
+      if (text === 'SELECT pg_catalog.set_config($1, $2, false)') {
+        settings.set(values[0], values[1]);
+        return Promise.resolve({ rows: [{ set_config: values[1] }] });
+      }
+      if (text.includes('FROM pg_catalog.pg_settings'))
+        return Promise.resolve({ rows: [...settings].map(([name, value]) => ({ name, value, unit: 'ms' })) });
+      const declaration = /^DECLARE "([^"]+)" NO SCROLL CURSOR FOR ([\s\S]+)$/.exec(text);
+      if (declaration) {
+        cursors.set(declaration[1], { sql: declaration[2], values, offset: 0, result: null });
+        return Promise.resolve({ rows: [], command: 'DECLARE' });
+      }
+      const fetch = /^FETCH FORWARD (\d+) FROM "([^"]+)"$/.exec(text);
+      if (fetch) {
+        const cursor = cursors.get(fetch[2]);
+        return Promise.resolve(cursor.result ?? client.query(cursor.sql, cursor.values)).then((result) => {
+          cursor.result = result;
+          const rows = result.rows.slice(cursor.offset, cursor.offset + Number(fetch[1]));
+          cursor.offset += rows.length;
+          return { ...result, rows, command: 'FETCH' };
+        });
+      }
+      if (/^CLOSE /.test(text)) { cursors.delete(text.slice(7, -1)); return Promise.resolve({ rows: [], command: 'CLOSE' }); }
       for (const [pattern, answer] of handlers) {
         if (!pattern.test(text)) continue;
         const result = typeof answer === 'function' ? answer(values, text) : answer;
         if (result instanceof Error) return Promise.reject(result);
         return Promise.resolve(result);
       }
-      return Promise.resolve({ rows: [], rowCount: 0, fields: [] });
+      if (text === 'SHOW search_path') return Promise.resolve({ rows: [{ search_path: '"$user", public' }] });
+      if (text.includes('FROM pg_catalog.pg_namespace')) return Promise.resolve({ rows: [{ oid: '42', usage: 'true' }] });
+      return Promise.resolve({ rows: [], rowCount: 0, fields: [], command: text.split(' ')[0] });
     },
-    release() {
+    release(error) {
       releases += 1;
+      if (error !== undefined) discarded.push(error);
       if (options?.failRelease === true) throw new Error('release blew up');
       return undefined;
     },
@@ -112,6 +146,106 @@ const EXISTING = /** @type {[RegExp, any][]} */ ([
 ]);
 
 describe('the injected PostgreSQL driver', () => {
+  it('binds fresh physical assignments and withdraws invalid native readbacks', async () => {
+    let returned = { id: 1, label: 'next', quantity: 2 };
+    const client = scriptedClient([VERSION, [/UPDATE "native_items"/, () => ({ rows: [returned] })],
+      [/^SELECT.*native_items/, { rows: [{ vp0: 2, tp0: 'integer' }] }]]);
+    const connection = await postgresDriver({ connect: () => client }).open();
+    try {
+      const model = { $model: '0.1', entities: { Item: { schema: { type: 'object', properties: {
+        id: { type: 'integer', 'x-entity': { key: true } }, label: { type: 'string' }, qty: { type: 'integer' },
+      } }, physical: { table: 'native_items', columns: { id: { name: 'id', codec: 'integer', null: 'reject' },
+        label: { name: 'label', codec: 'text', null: 'reject' }, qty: { name: 'quantity', codec: 'integer', null: 'reject' } } } } } };
+      const { entities, mapping } = compileEntityModel(model);
+      const query = createEntityQueryEngine({ connection, entities, mapping, state: createQueryState(8) });
+      assert.equal(await query.execute({ $for: { it: '$.Item[*]' }, $where: { $eq: ['$it.qty', 2] }, $return: '$it.qty' }, { strict: true }), 2);
+      const engine = entityCore(connection, entities.get('Item'), mapping.entities.Item, null);
+      assert.deepStrictEqual((await engine.mutate({ op: 'update', key: 1, set: { label: 'next', qty: 2 } })).rows,
+        [{ id: 1, label: 'next', qty: 2 }]);
+      returned = { ...returned, quantity: 2.5 };
+      await assert.rejects(engine.mutate({ op: 'update', key: 1, set: { label: 'other', qty: 3 } }), { code: 'JD2003' });
+      const writes = client.calls.filter((call) => call.text.includes('UPDATE "native_items"'));
+      assert.deepStrictEqual(writes.map((call) => call.values), [['next', 2, 1, 'next', 2], ['other', 3, 1, 'other', 3]]);
+      assert.strictEqual(connection.transactionState(), 'rolled-back');
+      const copied = await engine.mutate({ op: 'insert-select', source: 'Item', conflict: ['id'], onConflict: 'nothing',
+        select: { id: '$it.id', label: '$it.label', qty: '$it.qty' }, maxRows: 1 });
+      assert.equal(copied.affected, 0);
+    }
+    finally { await connection.close(); }
+  });
+  it('drains a structural cursor before disposal and retains the host connection', async () => {
+    const client = scriptedClient([VERSION, [/SELECT.*native_items/, { rows: [{ id: 1 }, { id: 2 }], fields: [{ name: 'id', dataTypeID: 23 }] }]]);
+    const connection = await postgresDriver({ connect: () => client }, { windowRows: 1 }).open();
+    const engine = relational(connection);
+    const cursor = engine.iterate({ from: 'native_items', columns: { id: sql.column('id') } });
+    assert.deepStrictEqual(await cursor.next(), { value: { id: 1 }, done: false });
+    await engine.dispose();
+    assert.strictEqual(connection.metrics().cursors, 0);
+    assert.strictEqual(client.releases, 0);
+    assert.deepStrictEqual(await (await connection.prepare('SELECT id FROM native_items')).all(), [{ id: 1 }, { id: 2 }]);
+    assert.throws(() => engine.all({ from: 'native_items' }), /disposed/);
+    await connection.close();
+  });
+  it('accepts declared boolean parser forms and refuses ambiguous representations', async () => {
+    for (const value of [false, true, 'f', 't', 'false', 'true', 0, 1, null, 'FALSE', 'yes', 2]) {
+      const client = scriptedClient([VERSION, [/SELECT parsed/, { rows: [{ parsed: value }], fields: [{ name: 'parsed', dataTypeID: 16 }] }]]);
+      const connection = await postgresDriver({ connect: () => client }).open();
+      try {
+        const statement = await connection.prepare('SELECT parsed');
+        if (['FALSE', 'yes', 2].includes(value)) await assert.rejects(statement.get(), { code: 'JD2003' });
+        else assert.deepStrictEqual(await statement.get(), { parsed: value === null ? null : [true, 't', 'true', 1].includes(value) ? 1 : 0 });
+      }
+      finally { await connection.close(); }
+    }
+  });
+  it('exposes effective ownership metrics and routes cancellation to one active query generation', async () => {
+    let enter, cancelQuery;
+    const entered = new Promise((resolve) => { enter = resolve; });
+    const response = new Promise((_, reject) => { cancelQuery = reject; });
+    const client = Object.assign(scriptedClient([VERSION, [/SELECT slow/, () => { enter(); return response; }]]), {
+      getTransactionStatus: () => 'I',
+    });
+    const cancelled = [];
+    const connection = await postgresDriver({ connect: () => client }, {
+      cancel: (target, generation) => {
+        assert.strictEqual(target, client);
+        cancelled.push(generation);
+        cancelQuery(Object.assign(new Error('cancelled'), { code: '57014' }));
+      },
+    }).open();
+    assert.strictEqual(connection.mustQueue, false);
+    const cursor = await (await connection.prepare('SELECT slow')).iterate();
+    const pulling = assert.rejects(cursor.next(), { code: '57014' });
+    await entered;
+    await cursor.return();
+    await pulling;
+    assert.strictEqual(cancelled.length, 1);
+    assert.ok(Number.isSafeInteger(cancelled[0]) && cancelled[0] > 0);
+    assert.strictEqual(connection.metrics().cursors, 0);
+    assert.strictEqual(connection.transactionState(), 'rolled-back');
+    await connection.close();
+  });
+  it('aborting session initialization discards a blocked source before any later setup runs', async () => {
+    let enter, answer;
+    const entered = new Promise((resolve) => { enter = resolve; });
+    const response = new Promise((resolve) => { answer = resolve; });
+    const trace = [], releases = [];
+    const controller = new AbortController();
+    const driver = postgresDriver({ connect: () => ({
+      query: (query) => { trace.push(query); enter(); return response; },
+      release: (error) => releases.push(error),
+    }) }, { closeTimeoutMs: 10 });
+    const failure = assert.rejects(driver.open(undefined, { signal: controller.signal }),
+      (error) => error instanceof AggregateError && error.errors[0].code === 'JD2064');
+    await entered;
+    controller.abort();
+    await failure;
+    answer({ rows: [{ statement_timeout: '0' }] });
+    await delay(0);
+    assert.deepStrictEqual(trace, ['SHOW statement_timeout']);
+    assert.strictEqual(releases.length, 1);
+    assert.strictEqual(driver.metrics().active, 0);
+  });
   it('needs a connection source, and names what one is', () => {
     for (const bad of [null, undefined, {}, { connect: 1 }, 'pool']) {
       assert.throws(() => postgresDriver(/** @type {any} */ (bad)), (error) => {
@@ -153,17 +287,49 @@ describe('the injected PostgreSQL driver', () => {
     }
   });
 
-  it('the open sequence: the search path, then the probe, and nothing else', async () => {
+  it('the open sequence validates schema access and preserves the session setting', async () => {
     const injected = source([VERSION]);
     const driver = postgresDriver(injected, { schema: 'jaren_run_1' });
     const connection = await Promise.resolve(driver.open());
     assert.deepStrictEqual(injected.client.calls.map((call) => call.text), [
-      'SET search_path TO "jaren_run_1"',
+      'SHOW statement_timeout',
+      'SELECT pg_catalog.set_config($1, $2, false)',
+      'SHOW lock_timeout',
+      'SELECT pg_catalog.set_config($1, $2, false)',
+      "SELECT name, setting::text AS value, unit FROM pg_catalog.pg_settings WHERE name IN ('statement_timeout', 'lock_timeout')",
+      'SHOW search_path',
+      "SELECT n.oid::text AS oid, pg_catalog.has_schema_privilege(n.oid, 'USAGE')::text AS usage "
+      + 'FROM pg_catalog.pg_namespace n WHERE n.nspname = $1',
+      "SELECT pg_catalog.set_config('search_path', $1, false)",
       "SELECT current_setting('server_version_num') AS num, "
       + "current_setting('server_version') AS version",
     ]);
     assert.strictEqual(connection.capabilities.version, '17.5');
     await connection.close();
+  });
+
+  it('missing schemas and absent USAGE refuse before any DDL and restore the path', async () => {
+    for (const [rows, code, state, classification] of [
+      [[], 'JD2005', '3F000', 'cantopen'],
+      [[{ oid: '42', usage: 'false' }], 'JD2083', '42501', 'readonly'],
+    ]) {
+      const injected = source([[/FROM pg_catalog.pg_namespace/, { rows }], VERSION]);
+      await assert.rejects(postgresDriver(injected, { schema: 'tenant' }).open(),
+        (error) => error.code === code && error.cause.code === state && error.class === classification);
+      assert.strictEqual(injected.client.releases, 1);
+      assert.deepStrictEqual(injected.client.calls.at(-1).values, ['"$user", public']);
+      assert.ok(!injected.client.calls.some((c) => /^(CREATE|ALTER|DROP)/.test(c.text)));
+    }
+  });
+
+  it('a probe failure restores the path and deallocates a failed prepared name', async () => {
+    const failure = Object.assign(new Error('probe failed'), { code: '42501' });
+    const injected = source([[/current_setting/, failure]]);
+    await assert.rejects(postgresDriver(injected, { schema: 'tenant' }).open(),
+      (error) => error.code === 'JD2083' && error.cause === failure);
+    assert.deepStrictEqual(injected.client.calls.at(-1).values, ['"$user", public']);
+    assert.strictEqual(injected.client.releases, 1);
+    assert.strictEqual(injected.client.calls.filter((c) => /^DEALLOCATE/.test(c.text)).length, 1);
   });
 
   it('a server below the floor refuses the open by version', async () => {
@@ -189,11 +355,13 @@ describe('the injected PostgreSQL driver', () => {
     assert.strictEqual(capabilities.generatedColumns, true);
     assert.strictEqual(capabilities.returning, true);
     assert.strictEqual(capabilities.upsert, true);
+    assert.strictEqual(capabilities.changeCapture, true);
+    assert.strictEqual(capabilities.jobs, true);
     assert.strictEqual(capabilities.savepoints, true);
     assert.strictEqual(capabilities.alterTableFull, true);
     for (const absent of ['rtree', 'fts', 'sessions', 'userFunctions',
       'deterministicIndexableFunctions', 'aggregateFunctions', 'backup',
-      'statementTimeout', 'rowEstimates', 'lazyIteration', 'jobs', 'changeCapture']) {
+      'statementTimeout', 'rowEstimates', 'lazyIteration']) {
       assert.strictEqual(capabilities[absent], false, absent);
     }
     assert.deepStrictEqual([...capabilities.configurablePragmas], []);
@@ -325,7 +493,7 @@ describe('the injected PostgreSQL driver', () => {
       const client = scriptedClient([[/SELECT \*/, () => {
         attempts += 1;
         if (attempts === 1)
-          return Object.assign(new Error('cached plan must not change result type'), { code: '0A000' });
+          return Object.assign(new Error('cached plan must not change result type'), { code: '0A000', routine: 'RevalidateCachedQuery' });
         return { rows: [{ a: 1 }], rowCount: 1, fields: [{ name: 'a', dataTypeID: 23 }] };
       }]]);
       const raw = adaptPostgresClient(client);
@@ -333,6 +501,24 @@ describe('the injected PostgreSQL driver', () => {
       assert.strictEqual(client.calls.length, 2);
       assert.ok(client.calls[0].name !== undefined);
       assert.strictEqual(client.calls[1].name, undefined, 'the retry is unnamed');
+    });
+
+    it('transaction and generic feature failures are never retried, nor are writes', async () => {
+      for (const [transaction, method, sql, routine] of [
+        [true, 'all', 'SELECT * FROM t', 'RevalidateCachedQuery'],
+        [false, 'all', 'SELECT * FROM t', 'exec_stmt_raise'],
+        [false, 'run', 'UPDATE t SET id = 1 RETURNING *', 'RevalidateCachedQuery'],
+      ]) {
+        const failure = Object.assign(new Error('cached plan must not change result type'),
+          { code: '0A000', routine });
+        const client = scriptedClient([[/^(SELECT|UPDATE)/, failure]]);
+        const raw = adaptPostgresClient(client);
+        if (transaction) await raw.exec('BEGIN');
+        await assert.rejects(raw.prepare(sql)[method](), (error) => error === failure);
+        assert.strictEqual(client.calls.filter((c) => c.text === sql).length, 1);
+        await raw.close();
+        assert.strictEqual(client.calls.some((c) => c.text === 'ROLLBACK'), transaction);
+      }
     });
 
     it('any other failure is the caller\'s, unretried', async () => {
@@ -384,6 +570,31 @@ describe('the injected PostgreSQL driver', () => {
       raw.prepare('SELECT 1'); // prepared here, never executed on the server
       await raw.close();
       assert.deepStrictEqual(client.calls.filter((c) => c.text.startsWith('DEALLOCATE')), []);
+    });
+
+    it('restoration failure discards once and concurrent closes share the failure', async () => {
+      const failure = new Error('restore refused');
+      const client = scriptedClient([]);
+      const raw = adaptPostgresClient(client, { onClose: () => { throw failure; } });
+      const first = raw.close();
+      assert.strictEqual(raw.close(), first);
+      await assert.rejects(first, (error) => error === failure);
+      assert.deepStrictEqual(client.discarded, [failure]);
+      assert.strictEqual(client.releases, 1);
+    });
+
+    it('rollback or deallocation failure uses the injected destroy owner', async () => {
+      for (const step of ['ROLLBACK', 'DEALLOCATE']) {
+        const failure = Object.assign(new Error(step), { code: '08006' });
+        const client = scriptedClient([[new RegExp(`^${step}`), failure]]);
+        const destroyed = [];
+        const raw = adaptPostgresClient(client, { destroy: (c, e) => { destroyed.push([c, e]); } });
+        await raw.exec('BEGIN');
+        await raw.prepare('SELECT 1').all();
+        await assert.rejects(raw.close(), (error) => error === failure);
+        assert.deepStrictEqual(destroyed, [[client, failure]]);
+        assert.strictEqual(client.releases, 0);
+      }
     });
 
     it('an onClose hook runs before the release', async () => {
@@ -502,14 +713,14 @@ describe('the injected PostgreSQL driver', () => {
       await store.close();
     });
 
-    it('a store asked for a SQLite-only subsystem is refused before any statement',
+    it('a store asked for buffered replication is refused before ledger statements',
       async () => {
         for (const [option, code] of /** @type {[any, string][]} */ ([
-          [{ capture: true }, 'JD0051'], [{ jobs: true }, 'JD0003']])) {
+          [{ replication: { replica: 'host' } }, 'JD0051']])) {
           const injected = source(EXISTING);
           await assert.rejects(
             () => openStore(MODEL,
-              { driver: postgresDriver(injected, { schema: 'jaren_run_1' }), ...option }),
+              { driver: postgresDriver(injected, { schema: 'jaren_run_1', cursorMode: 'buffered' }), ...option }),
             (error) => {
               assert.strictEqual(error.code, code);
               return true;

@@ -343,6 +343,8 @@ export function createCaptureEngine(options) {
   const bracket = options.bracket ?? ((/** @type {() => any} */ fn) => fn());
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
+  const afterSql = dialect.numberCast(dialect.parameterRef(1, 'v'));
+  dialect.capture?.check(options);
   if (options.log && !(Number.isInteger(options.retention) && options.retention >= 1)) {
     // a retention of 0 pruned every record the moment it was written,
     // with the log reported as enabled
@@ -389,7 +391,8 @@ export function createCaptureEngine(options) {
     hasState: `SELECT 1 AS ${q('present')} FROM ${q(CHANGES_STATE_TABLE)} WHERE ${q('id')} = 1`,
     seedState: `INSERT INTO ${q(CHANGES_STATE_TABLE)} (${q('id')}, ${q('high')}) `
       + `SELECT 1, (SELECT COALESCE(MAX(${q('seq')}), 0) FROM ${q(CHANGES_TABLE)}) `
-      + `WHERE NOT EXISTS (SELECT 1 FROM ${q(CHANGES_STATE_TABLE)} WHERE ${q('id')} = 1)`,
+      + `WHERE NOT EXISTS (SELECT 1 FROM ${q(CHANGES_STATE_TABLE)} WHERE ${q('id')} = 1) `
+      + `ON CONFLICT (${q('id')}) DO NOTHING`,
     // the sequence is allocated by ONE statement against the durable
     // row, inside the write's own transaction: the next value is one
     // past the higher of the durable watermark and whatever survives in
@@ -409,12 +412,12 @@ export function createCaptureEngine(options) {
       + `VALUES (${[1, 2, 3, 4].map((i) => dialect.parameterRef(i, 'v')).join(', ')})`,
     prune: `DELETE FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} <= ${dialect.parameterRef(1, 'v')}`,
     read: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
-      + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${dialect.parameterRef(1, 'v')} `
+      + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${afterSql} `
       + `ORDER BY ${q('seq')}`,
     // the bounded read: a page of records after a cursor, one more than
     // the page so `hasMore` is a fact and not a guess
     readPage: `SELECT ${['seq', 'at', 'source', 'patch'].map(q).join(', ')} `
-      + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${dialect.parameterRef(1, 'v')} `
+      + `FROM ${q(CHANGES_TABLE)} WHERE ${q('seq')} > ${afterSql} `
       + `ORDER BY ${q('seq')} LIMIT ${dialect.parameterRef(2, 'v')}`,
     // the two watermarks are the FILE's facts: the earliest surviving
     // row, and the durable high (falling back to the surviving maximum
@@ -521,10 +524,13 @@ export function createCaptureEngine(options) {
     return chain(connection.prepare(logStatements.allocate), (allocate) =>
       chain(allocate.get([]), (row) => {
         seq = Number(row.seq);
+        if (!Number.isSafeInteger(seq) || seq < 1)
+          throw new DbRuntimeError('JD2005', 'change sequence exceeds the safe positive integer range');
         return chain(connection.prepare(logStatements.insert), (insert) =>
           chain(insert.run([seq, at, mode, JSON.stringify(patch)]), () =>
             chain(connection.prepare(logStatements.prune), (prune) =>
-              chain(prune.run([seq - options.retention]), () => null))));
+              chain(prune.run([seq - options.retention]), () =>
+                dialect.capture?.afterLog?.(connection)))));
       }));
   };
 
@@ -588,6 +594,7 @@ export function createCaptureEngine(options) {
       if (mode === 'session') session = connection.session();
       else journal = [];
       outcome = connection.transaction((...scopeArgs) =>
+        chain(dialect.capture?.beforeWrite(connection), () =>
         chain(fn(...scopeArgs), (result) =>
           chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
             if (patch.length === 0) return { result, delivery: null };
@@ -602,7 +609,7 @@ export function createCaptureEngine(options) {
                 patch,
               },
             }));
-          }))));
+          })))));
     }
     catch (error) {
       cleanupFailure();

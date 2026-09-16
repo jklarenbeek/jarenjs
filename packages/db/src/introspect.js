@@ -118,6 +118,11 @@ function readTable(connection, table, objects) {
                 primaryKeyOrdinal: Number(row.pk ?? 0),
                 nullable: Number(row.not_null ?? 0) === 0,
                 default: row.default_value ?? null,
+                ...(row.schema === undefined ? {} : { native: {
+                  schema: String(row.schema), identity: String(row.identity ?? ''),
+                  generated: String(row.generated_kind ?? ''), typeKind: String(row.type_kind),
+                  typeSchema: String(row.type_schema), typeName: String(row.type_name), collation: row.collation ?? null,
+                } }),
               })),
               generated: dialect.readGenerated(generatedRows),
               indexes,
@@ -179,7 +184,14 @@ export function readSchema(connection, options = undefined) {
         const step = (i, out) => (i >= names.length
           ? { tables: out, views, objects }
           : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
-        return step(0, []);
+        return chain(step(0, []), (schema) => dialect.introspect.catalog === undefined ? schema
+          : chain(connection.prepare(dialect.introspect.catalog()), (statement) =>
+            chain(statement.all([]), (native) => ({ ...schema, catalog: native
+              .filter((row) => !engine.has(String(row.owner))
+                && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
+              .map((row) => ({ type: String(row.type), name: String(row.name), owner: String(row.owner),
+                schema: String(row.schema), sql: row.sql ?? null,
+                metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata })) }))));
       });
     }));
 }
@@ -639,8 +651,9 @@ export function introspectModel(connection, options = undefined) {
         + `thing(s) the model would — ${report.map((row) => `${row.code} (${row.object})`)
           .join(', ')}`);
     }
-    const inventory = schema.objects.map((object) => Object.freeze({ ...object,
+    const inventory = (schema.catalog ?? schema.objects).map((object) => Object.freeze({ ...object,
       disposition: object.type === 'trigger' || object.type === 'view'
+        || !['table', 'index'].includes(object.type)
         || report.some((row) => row.object === object.name
           || row.object === `${object.owner}.${object.name}`
           || (row.code === 'unmapped-table' && row.object === object.owner))

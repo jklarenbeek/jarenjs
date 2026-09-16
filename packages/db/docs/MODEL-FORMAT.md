@@ -1107,9 +1107,9 @@ error.
 | `JD2087` | the connection to the database was lost |
 | `JD2088` | the transaction was aborted by an earlier failure in it |
 | `JD2089` | the statement was cancelled by the server |
-| `JD2090` | worker generation lost; reopen, never automatically replay; retryable only outside a transaction |
-| `JD2091` | bounded worker/pool admission overflow; retryable, with queue depth |
-| `JD2092` | a worker row, compatibility result or remote identity count exceeds its declared bound |
+| `JD2090` | worker generation lost or PostgreSQL cleanup deadline expired; no automatic write replay |
+| `JD2091` | bounded host admission or identity capacity exhausted, or acquisition expired |
+| `JD2092` | a host frame or compatibility result exceeds its declared row/byte bound |
 | `JD2093` | malformed worker protocol request |
 | `JD2094` | invalid or uncommitted durable snapshot; reopen the last committed version |
 | `JD2095` | trusted SQL or synchronous callback authority refused |
@@ -1383,12 +1383,13 @@ table is missing), and leaves the file's journal mode untouched.
 
 **The non-claims, stated plainly.** This profile does NOT claim:
 
-- a statement timeout on the shipped drivers — `node:sqlite` and
+- a statement timeout on the SQLite drivers — `node:sqlite` and
   `bun:sqlite` expose no interrupt and no progress handler, the
   `statementTimeout` capability is `false`, and a long-running
   database-internal computation (a native aggregate over a large
-  table) is bounded by nothing here. A driver whose capability is
-  filled gets a real timeout without a contract change.
+  table) is bounded by nothing here. PostgreSQL's effective server timeout is
+  reported separately; it does not turn a row-boundary AbortSignal into an
+  interrupt. See [PostgreSQL host ownership](HOSTS.md#postgresql-sessions).
 - a row-estimate bound — SQLite's plan output is prose, so the
   structural SCAN refusal is the honest substitute.
 - safety for arbitrary untrusted SQL — none can be expressed.
@@ -2318,7 +2319,7 @@ persistence ladder are specified in [execution hosts](HOSTS.md).
 
 ## 12. Existing column layouts
 
-An entity's optional `physical` member declares a column-only SQLite layout.
+An entity's optional `physical` member declares an existing column-only layout.
 Omitting it retains the hybrid mapping. Opening a physical entity MUST verify
 its existing table or view and MUST NOT create it. `adopt: true` also prevents
 creation of hybrid tables and infrastructure. Inspection, adoption and explicit
@@ -2369,6 +2370,8 @@ relation navigation across physical layouts is not qualified.
 | `bigint` | signed integer decimal string within SQLite's integer range | INTEGER |
 | `decimal` | exact decimal string, including trailing zeros | TEXT |
 | `blob-hex` | lowercase hexadecimal string | BLOB |
+| `uuid` | canonical lowercase UUID string | TEXT |
+| `local-timestamp`, `instant` | fixed six-digit fractional timestamp, local or UTC Z | TEXT |
 
 Unsafe narrowing refuses `JD2003`. A byte handle never enters the JSON-facing entity;
 [the native SQLite channel](SQLITE-RELATIONAL.md#exact-writes-and-bytes) preserves
@@ -2389,7 +2392,77 @@ Physical `page` and `after` continuation refuse until codec-aware keysets are
 qualified; an explicit `take`/`skip` load remains available.
 Capture/live/replication for adopted application triggers is not qualified and
 is refused, rather than advertised as a complete change stream. PostgreSQL
-column adoption is not qualified; physical inventory remains available.
+supports explicit native scalar adoption as described below.
+
+### PostgreSQL column adoption
+
+Pass an explicit trusted `schema` to `postgresDriver`. A matching
+`physical.schema` qualifies table references; it MUST equal the driver's schema.
+`adopt: true` verifies the existing keys, types and generated/default ownership
+without creating tables or replacing application programs. A schema is a name
+boundary, not authorization. The host supplies database privileges, roles and
+any RLS settings, and restores its settings before releasing the session.
+Views are read-only; their host-selected security mode governs visibility.
+
+| Codec | PostgreSQL type | Exact public contract |
+|---|---|---|
+| `text`, `datetime` | text, varchar | existing string meaning; datetime remains text |
+| `uuid` | uuid | canonical lowercase UUID string |
+| `integer`, `bigint`, `epoch-ms` | smallint, integer, bigint | safe number, signed 64-bit string, or canonical UTC timestamp respectively |
+| `number` | double precision | finite number, safe when integral; real is refused |
+| `boolean` | boolean | boolean, independent of the client's boolean parser |
+| `json` | json, jsonb | JSON value; SQL NULL follows the declared null policy |
+| `blob-hex` | bytea | lowercase hexadecimal string |
+| `decimal` | numeric, numeric(p,s) | exact decimal string; constrained numeric requires exactly s fraction digits |
+| `date` | date | year 0001–9999 RFC 3339 date |
+| `local-timestamp` | timestamp without time zone | `YYYY-MM-DDTHH:mm:ss.ffffff`, no timezone |
+| `instant` | timestamp with time zone | `YYYY-MM-DDTHH:mm:ss.ffffffZ`, normalized to UTC |
+
+Native decimal negative zero refuses; PostgreSQL does not preserve its sign.
+Negative scales and scales greater than precision refuse. Timestamp precision
+below six permits only zeros beyond the native precision. BC dates, infinities
+and years outside 0001–9999 refuse `JD2003`. These restrictions prevent implicit
+rounding or temporal reinterpretation. Text projections bypass global client
+numeric, UUID, byte, JSON and timestamp parser overrides; no global parser or
+session timezone change is required. Domains, enums, arrays and extension types
+need a qualified codec and otherwise refuse `JD0002`.
+
+`identity: "always" | "by-default"` verifies native identity ownership;
+`x-entity.default: "auto"` permits an absent integer identity on insert.
+`default: "database"` requires an actual default or identity, and
+`generated: true` must agree with the catalog. Optional `type` must match
+PostgreSQL's catalog spelling, including precision. Schema-qualified adoption
+refuses inline default/check/generated/collation programs and declared table
+DDL; those require an explicit reviewed migration. Existing programs are
+inventoried and preserved. Declared database invariant triggers require a
+qualified dialect lowering and otherwise refuse before adoption.
+
+Text, safe integer, double and boolean columns with reject/absent NULL policy
+have native predicate/projection execution. Safe integer sums/averages and
+supported scalar min/max use the shared native runtime guards; floating sums
+and averages retain decoded evaluation to preserve accumulation order.
+Other scalar shapes retain a
+reported decoded residual or strict refusal. Keyset continuation remains
+unqualified. The shared native mutation engine supports bounded update, delete,
+upsert and same-entity insert-select; returned row/byte overflow rolls back the
+statement and its transactional trigger effects. Exact decimals, bytes and JSON
+use codec-aware changed reporting. Structural SQL through
+`relational(connection)` is asynchronous on PostgreSQL and uses
+the same expression grammar with native operators, functions and types.
+Its cursors use the connection's finite limits; dispose the engine before
+closing the host-owned connection. SQL expressions explicitly select native
+SQL semantics, including native collation, numeric and NULL behavior.
+
+`readSchema(connection).catalog` supplements the portable table view with
+schema-qualified native definitions and metadata: constraints, opclasses,
+views, functions, triggers, policies, identity sequences and user types.
+Unrepresented native objects receive preservation dispositions in
+`introspectModel`; inventory is not permission to reconstruct or drop them.
+Sequence metadata describes configuration, not a transactional current value.
+Scoped table inspection does not claim a complete external dependency closure.
+The server's numeric and timestamp behavior is specified in
+[PostgreSQL numeric types](https://www.postgresql.org/docs/17/datatype-numeric.html)
+and [date/time types](https://www.postgresql.org/docs/17/datatype-datetime.html).
 
 ### Physical migration rows and acceptance
 

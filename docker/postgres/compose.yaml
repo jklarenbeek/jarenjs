@@ -19,10 +19,9 @@ services:
     build:
       context: .
       args:
-        # The tag the portability matrix is measured against. `latest` today
-        # is PostgreSQL 17 with PostGIS 3.5; the router's floor is 16.
-        POSTGIS_TAG: ${POSTGIS_TAG:-latest}
-    image: jaren-postgis-pgvector:${POSTGIS_TAG:-latest}
+        POSTGIS_IMAGE: postgis/postgis@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
+        PGVECTOR_PACKAGE_VERSION: 0.8.6-1.pgdg11+1
+    image: jaren-postgis-pgvector:17.5-3.5.2-0.8.6
     environment:
       POSTGRES_USER: ${JAREN_PG_USER:-jaren}
       POSTGRES_PASSWORD: ${JAREN_PG_PASSWORD:-jaren}
@@ -34,7 +33,7 @@ services:
       TZ: UTC
       PGTZ: UTC
     ports:
-      - '${JAREN_PG_PORT:-55432}:5432'
+      - '127.0.0.1:${JAREN_PG_PORT:-55432}:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 2s

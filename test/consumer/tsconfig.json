@@ -28,7 +28,8 @@
     "linq-formula.ts",
     "studio-editors.ts",
     "db-relational.ts",
-    "db-process.ts"
+    "db-process.ts",
+    "db-postgres.ts"
   ],
   "include": [
     "linq-*.ts"

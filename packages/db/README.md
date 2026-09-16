@@ -1,8 +1,8 @@
 # @jarenjs/db
 
-For existing-file adoption with native queries, receipts and jobs, start with the [combined public recipe and evidence ledger](../../docs/ADOPTION-EVIDENCE.md). Adopted-trigger capture, physical keysets and PostgreSQL subsystem gaps retain their documented refusals; synthetic SQLite proof does not retire downstream SQL.
+For existing-file adoption with native queries, receipts and jobs, start with the [combined public recipe and evidence ledger](../../docs/ADOPTION-EVIDENCE.md). For build-selected SQLite/PostgreSQL applications, see the [backend capability and recovery matrix](docs/POSTGRESQL.md). Adopted-trigger capture and physical keysets retain their documented refusals; synthetic proof does not retire downstream SQL.
 
-Documents AND entities in SQLite. A **model document** declares
+Documents and entities in SQLite and PostgreSQL. A **model document** declares
 collections (a JSON Schema, a key, indexes) and — since phase B —
 **entities**: keys, typed columns, relations, defaults and an
 optimistic-concurrency token, all inside the schema through the
@@ -865,7 +865,9 @@ The client is INJECTED. `@jarenjs/db` depends on nothing outside
 `connect()` answering `{ query(text, values), release?() }` will do, and
 a `pg.Pool` is one as it stands. One client is acquired at open, held
 for the store's life (a connection owns one savepoint stack) and
-released exactly once at `close()`.
+released exactly once at `close()`. The schema must exist and grant USAGE.
+The original session search path is restored before reuse; failed cleanup
+discards the client. See [PostgreSQL session ownership](docs/HOSTS.md#postgresql-sessions).
 
 The same model, the same query documents and the same differential
 oracle run on both. What differs is declared rather than discovered:
@@ -881,15 +883,21 @@ oracle run on both. What differs is declared rather than discovered:
 | an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
 | configuration | the closed pragma set, read back at open | the operator's; `store.capabilities.pragmas` is all `null` |
 | drift detection | the stored `CREATE` text, exactly | the structural check: columns, indexes, foreign keys |
-| the job queue, the change ledger and live queries | yes | no — `capabilities.jobs` and `capabilities.changeCapture` are `false`, and asking for one is a coded refusal at open |
+| managed change ledger | journal or native sessions, according to host | journal with durable bounded pages and optional notification hints |
+| leased jobs / transactional outbox | shared queue and checkpoints | shared queue and checkpoints; concurrent row-locked claims |
+| live queries | synchronous incremental/rerun; optional async resnapshot | optional bounded resnapshot over durable journal |
 | maintenance (checkpoint, integrity, optimize) | yes | no — every one of them IS a pragma |
 | a spatial `physical: 'rtree'` | an R\*Tree virtual table | the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
 | a transaction a statement failed in | continues | is aborted until it ends (`JD2088`); catch-and-continue needs a nested `transaction()` |
 | `ALTER TABLE` | additive only | full, so a rebuild is never needed |
 
-Neither backend has a **statement timeout** (`capabilities.statementTimeout`
-is `false` on both) or **row estimates**. Portable replication uses SQLite
-change capture; PostgreSQL capture and replication remain unqualified.
+PostgreSQL has bounded native cursors, finite admission and a read-back server
+**statement timeout**; SQLite's `statementTimeout` remains `false`. Neither
+backend advertises **row estimates**. See [host limits and cleanup](docs/HOSTS.md#postgresql-sessions)
+for native versus buffered modes and cancellation settlement. PostgreSQL journal
+capture records participating managed writes; [its ordering and coverage](docs/LIVE-FORMAT.md#postgresql-managed-journals)
+remain explicit. Portable replication uses SQLite session/journal capture and
+PostgreSQL managed journal capture with native bounded cursors.
 Cross-process concurrency on SQLite is its own story — WAL plus a busy
 timeout, both set and visible on `store.capabilities`; on PostgreSQL it
 is the server's, and a serialization failure or a deadlock arrives as
@@ -898,14 +906,55 @@ caller branch, a locked SQLite file gets.
 
 ### What PostgreSQL costs
 
-`npm run benchmark:postgres` runs the same model, the same documents and
-the same query documents through the same store on both engines, checks
-that they answered identically, and prints the difference. It is **not**
-a rival comparison and reading it as one would be reading it wrong: an
-in-process database against a server over a socket loses every row that
-pays a round trip, and the shape of the loss is the point.
+`npm run benchmark:postgres -- --docs 500 --write` executes the same model and
+queries against SQLite and an injected PostgreSQL endpoint, checks identical
+answers, and records the operation costs. The ordinary recipe can show SQLite
+alone; writing accepted evidence requires both engines. The committed
+[result](../../benchmark/postgres-result.json) and source hashes feed this table.
 
-Measured here at 500 documents — PostgreSQL 17.5 in a container on the
+<!--fact:postgres.portability-->
+
+Measured 2026-09-16T12:14:20.545Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+
+| Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
+|---|---:|---:|---:|---:|---:|
+| open | 58.142 | 72.745 | 1.3× | 17 | 1 |
+| insert | 0.061 | 1.804 | 29.4× | 1 | 500 |
+| get | 0.065 | 1.512 | 23.3× | 5 | 50 |
+| indexed | 2.199 | 6.214 | 2.8× | 13 | 20 |
+| scanned | 2.518 | 5.775 | 2.3× | 13 | 20 |
+| range | 2.049 | 4.875 | 2.4× | 13 | 20 |
+| transaction | 0.239 | 1.343 | 5.6× | 3 | 20 |
+| migration (one index) | 32.392 | 126.110 | 3.9× | not separately counted | 1 |
+
+Sequential insert throughput: SQLite 16288, PostgreSQL 554 documents/second.
+
+| First-row probe | SQLite | PostgreSQL |
+|---|---:|---:|
+| First row ms | 1.939 | 1.899 |
+| First row plus cleanup ms | 2.118 | 2.375 |
+| Returned rows | 1 | 1 |
+| Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
+| Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
+| Client query calls including cleanup | no network | 5 |
+| Sampled RSS before / after MiB | 85.31 / 102.76 | 107.89 / 113.84 |
+| Sampled heap before / after MiB | 19.75 / 34.45 | 14.54 / 21.26 |
+
+After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
+
+Same-process sequential samples; client.query calls are SQL submissions, not TCP packet counts. Memory samples include shared process history and exclude server RSS. First row and cleanup are measured separately. No production latency claim.
+
+<!--/fact-->
+
+`client.query` counts SQL submissions, not physical packets. Native cursor reads
+also pay BEGIN/DECLARE/FETCH/CLOSE/COMMIT costs to retain bounded rows and explicit
+cleanup; the old buffered driver did not provide those bounds. First-row probes
+return one item and close immediately. The reported peak frame spans the measured
+session, including earlier full queries. Migration uses a second independent
+shadow session. Memory samples are sequential observations of the same process,
+not isolated backend peaks; PostgreSQL server memory is excluded.
+
+Historical sample, retained from the earlier backend: 500 documents — PostgreSQL 17.5 in a container on the
 same host, SQLite in memory, Node 24.19.0 — every row a loss except the
 first, and every one expected:
 
@@ -920,17 +969,12 @@ first, and every one expected:
 | one transaction with one write | 4.7× |
 | apply one migration (one new index) | 4.3× |
 
-The reading: a per-ROW operation pays about thirteen to fifteen times,
-because each one is a round trip that SQLite makes as a function call. A
-whole-collection query pays about one and a half, because the round trip
-is amortized over five hundred rows and the rest is the server doing the
-same work SQLite did. Two consequences worth stating: a loop of
-`insert()` is the wrong shape on PostgreSQL in a way it is not on SQLite,
-and pushdown matters MORE there — an unindexed scan that comes back as
-five hundred rows for the engine to filter would pay the per-row price,
-not the per-query one.
-
-Your numbers will differ; the command is the point, not the table.
+This older sample used a different runtime, server profile and cursor strategy.
+It is not an isolated before/after regression experiment. Higher ratios mean
+more latency; do not infer a universal win from one operation or hide a cost by
+switching native reads to unbounded buffering. Batch application work inside
+bounded transactions where its atomicity permits. Your workload, network and
+server configuration determine deployment costs.
 
 ## The relational half (phase B)
 
@@ -1009,7 +1053,8 @@ Your numbers will differ; the command is the point, not the table.
 thread; `@jarenjs/db/node-pool` exports `nodeWorkerPoolDriver()` for one writer and
 bounded read-only WAL workers. Both use the ordinary Store contract, with credited
 row frames, generation fencing, queue refusals and inspected lifecycle metrics.
-Async connections declare `store.sync` and live queries unavailable. See
+Async connections expose no `store.sync`. For live queries, configure the optional
+`asyncLive()` helper and durable journal; the declared mode is `resnapshot`. See
 [execution hosts](docs/HOSTS.md) for options, cleanup guarantees, native-call
 shutdown limits, the browser persistence matrix and measured latency/memory losses.
 
@@ -1080,7 +1125,8 @@ shutdown limits, the browser persistence matrix and measured latency/memory loss
   `OpfsSAHPoolDb` or `OpfsDb` for OPFS), and `adaptOo1Database(sqlite3, db)`
   wraps an oo1 database the host already opened. `indexedDbSnapshotHandle`
   adds bounded atomic persistence with asynchronous commit acknowledgements;
-  its connection declares synchronous/live methods unavailable.
+  its connection declares synchronous Store methods unavailable, and the studio
+  uses explicit refresh after writes.
 - **The runtime record** (`@jarenjs/core/runtime`): `openStore(model,
   { runtime })` and `migrate(target, migrations, { runtime })` take one
   frozen record — `{ now, uuid, random, zoneProvider }`, defaulting
@@ -1220,10 +1266,12 @@ resets. Data and acknowledgements commit together; hosts supply transport and an
 conflict resolver. The default preserves both contenders and rejects the write.
 See [REPLICATION-FORMAT](docs/REPLICATION-FORMAT.md) for the current contract.
 
-Capture observes participating Store writes on supported SQLite hosts. Arbitrary
-writes from another connection are not fine-grained capture events; `dataVersion()`
-provides coarse invalidation. Adopted triggers, unsupported layouts and PostgreSQL
-retain the explicit capture and replication qualification limits.
+Capture observes participating Store writes on qualified SQLite and PostgreSQL
+hosts. Arbitrary SQL from another connection is not a fine-grained journal
+event; SQLite's `dataVersion()` provides coarse invalidation. Adopted triggers
+and unsupported layouts retain explicit capture limits. PostgreSQL uses the
+same managed replication engine and receipts; enrollment requires permanent
+managed tables with deferrable foreign keys and no external trigger effects.
 
 ## Operating a store — configuration, maintenance, backup, cancellation, the queue
 
@@ -1315,19 +1363,24 @@ its side-effect-free status read are in
 ## What this is not — every non-claim in one place
 
 - **SQLite and PostgreSQL have different capabilities.** Both backends ship;
-  PostgreSQL does not provide the SQLite capture, replication, job queue or pragma
-  maintenance capabilities. See the dialect table and normative host contracts.
+  PostgreSQL provides managed journal capture, the shared leased queue and
+  optional durable-feed wake hints, bounded managed replication and opt-in
+  asynchronous live resnapshots. Sessions, synchronous incremental live queries
+  and pragma maintenance retain their separate qualifications/refusals.
+  See the dialect table and host contracts.
 - **Replication transport is supplied by the host.** Portable logical replication
   ships; arbitrary external writes are not captured as local row events.
 - **No statement timeout** on SQLite (the drivers expose no interrupt;
   the capability slot is honestly `false`), no row estimates.
 - **Not safe for mutually hostile tenants** without the profile's
   mandatory predicate — SECURITY states the claims and non-claims.
-- **The job queue is one database, one machine.** A shared SQLite file
+- **The job queue coordinates one database.** A shared SQLite file
   over a NETWORK FILESYSTEM (NFS, SMB, many container volume mounts) is
   NOT a safe coordination substrate — SQLite's locking is unreliable
-  there. Same-host processes over WAL are the supported topology. No
-  priority classes, no cron, no workflow compensation.
+  there. Same-host processes over WAL are SQLite's supported topology.
+  PostgreSQL supports independent clients and hosts through row-locked claims;
+  their epoch clocks must be comparable. Separate databases need an idempotent
+  relay. No priority classes, no cron, no workflow compensation.
 - **Live-query maintenance is limited to the declared table** (§7);
   indexed joins and graph projections require bounded dependencies. Offset
   windows, unindexed joins, load-spec graphs and non-canonical shapes re-run, reported.
@@ -1363,6 +1416,7 @@ Every subpath a consumer can import, derived from the manifest by
 <!--fact:exports.db-->
 | Import | Kind | Declarations |
 |---|---|---|
+| `@jarenjs/db/async-live` | JavaScript | declared |
 | `@jarenjs/db/node-process` | JavaScript | declared |
 | `@jarenjs/db/search` | JavaScript | declared |
 | `@jarenjs/db` | JavaScript | declared |
@@ -1421,18 +1475,25 @@ group outputs consume both state-entry and byte credits. See
 [LIVE-FORMAT](docs/LIVE-FORMAT.md) for the supported shapes and measured costs.
 
 
-## Existing relational SQLite files
+## Existing relational stores
 
 Use `readSchema(connection)` for physical inventory, then declare an entity's
 `physical` table, ordered keys and column codecs and open with `{ adopt: true }`.
 Opening verifies the existing shape and emits no DDL. Ordinary column tables need
 no document column; integer identities, exact hexadecimal BLOBs, database defaults
 and read-only views have explicit contracts in [MODEL-FORMAT](docs/MODEL-FORMAT.md#12-existing-column-layouts).
+PostgreSQL also qualifies asynchronous scalar adoption with an explicit schema,
+exact bigint/decimal and temporal codecs, native catalog metadata and bounded
+column mutations. Reviewed native schema/table migrations reuse the shared
+executor with exact catalog targets, explicit dispositions, bounded migration
+locks and durable receipts; see [native preservation](docs/MIGRATION-FORMAT.md#postgresql-native-preservation).
+See [PostgreSQL adoption](docs/MODEL-FORMAT.md#postgresql-column-adoption)
+for native/residual query behavior and host-owned authorization.
 
 Inside `store.transaction`, `tx.sql.prepare(text, { access: 'read' | 'write' })`
 shares the entity/outbox connection and savepoint owner. Statements expire with
 the scope. [The client recipe](../linq/docs/DB-CLIENT.md#trusted-sql-during-adoption)
-documents trust, invalidation and synchronous execution. Schema changes compose
+documents trust, invalidation and synchronous execution. SQLite schema changes compose
 a complete saved `planTableMigration` artifact as a guarded `table` step through
 `planPhysicalMigration` and `migrate`. Optional transforms/assertions carry their
 historical `model`; a reviewed `physicalTarget` checks complete owned objects,
