@@ -1,0 +1,147 @@
+name: Windows qualification (opt-in)
+
+# Kept outside .github/workflows so GitHub never schedules this backup.
+# Run locally with act on Windows, or copy into .github/workflows for an
+# explicitly dispatched hosted run. See docs/workflow/WINDOWS.md.
+# Keep these action/toolchain pins aligned with the active CI workflow.
+
+on:
+  workflow_dispatch:
+
+env:
+  NPM_VERSION: 11.12.1
+  BUN_VERSION: 1.4.2
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Pin npm
+        run: npm install --global npm@${{ env.NPM_VERSION }}
+
+      - name: Report toolchain
+        run: |
+          node --version
+          npm --version
+
+      # Before any install: a lock pruned of other platforms' exact optional
+      # records is a structural defect this job can prove from the file alone.
+      - name: Validate portable lock
+        id: lock
+        run: npm run test:lock
+
+      - name: Clean install
+        id: install
+        if: ${{ !cancelled() && steps.lock.outcome == 'success' }}
+        run: npm ci --include=optional
+
+      # After the install: THIS platform's native packages for the build
+      # tools must actually be on disk, loudly, not first discovered by tsc
+      # dying mid-build.
+      - name: Native toolchain probe
+        id: native
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:native
+
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint
+
+      # The durability tests execute both runtimes before packed consumers run.
+      - name: Set up Bun
+        id: bun
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Tests
+        id: tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        # Bounded at the step, not only the job: a hung test run must fail
+        # THIS step by name and let the independent build/type/tree/pack
+        # evidence below still execute, instead of a 30-minute job cancel
+        # that destroys it. The per-test `--test-timeout` in the test
+        # script is the first line; this is the backstop.
+        timeout-minutes: 15
+        run: npm test
+
+      - name: Clean generated output
+        id: clean
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run clean
+
+      - name: Build
+        id: build
+        if: >-
+          ${{ !cancelled() &&
+              steps.install.outcome == 'success' &&
+              steps.clean.outcome == 'success' }}
+        run: npm run build
+
+      - name: Type declarations
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run test:types
+
+      - name: Tree shaking
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run test:tree-shaking
+
+      - name: Packed consumers
+        if: >-
+          ${{ !cancelled() &&
+              steps.build.outcome == 'success' &&
+              steps.bun.outcome == 'success' }}
+        run: npm run test:packed:release
+
+      - name: Pack dry-run
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run pack:check
+
+  source-consumption:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Pin npm
+        run: npm install --global npm@${{ env.NPM_VERSION }}
+      - run: npm run test:lock
+      # The documented recipe installs inside the vendored checkout — that is
+      # what gives the source tree's internal edges a local home (see the job
+      # comment above).
+      - run: npm ci --include=optional
+      - run: npm run test:source:release

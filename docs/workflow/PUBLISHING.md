@@ -126,13 +126,14 @@ Review the resulting manifest changes. The release gate is every gate the workin
 npm run release:check
 ```
 
-CI runs the same **packaging** half on **Linux and Windows both**, because a
-Windows-only failure is a release failure — packed-consumer portability,
-glob quoting, newline normalization, `.cmd` shims, drive-letter paths and
-per-platform native packages are all platform classes of defect that a
-Linux-only green hides. A separate `browser` job runs the website's
-Playwright suite in Chromium, Firefox and WebKit, and the source-consumer
-fixture runs on Linux **and Windows**. CI does *not* run QT3 conformance or
+Hosted CI runs the same **packaging** half and source-consumer fixture on
+**Linux**. Windows checks are opt-in to control hosted runner cost; the
+[Windows workflow backup and local instructions](WINDOWS.md) preserve the
+same gates. A green hosted run does not prove Windows portability: executable
+shims, drive-letter paths and per-platform native packages still need native
+Windows evidence when that platform is being qualified. A separate `browser`
+job runs the website's Playwright suite in Chromium, Firefox and WebKit.
+CI does *not* run QT3 conformance or
 the dead-code audit (they need the `qt3tests` submodule and a long coverage
 pass), so a green CI does not imply them — but `release:check` does run the
 dead-code audit, which is the point of running it before publishing rather

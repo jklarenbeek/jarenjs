@@ -1,13 +1,11 @@
 name: CI
 
-# The release evidence matrix: the same gate on Linux and on Windows,
-# because a Windows-only failure is a release failure (packed-consumer
-# portability, glob quoting, newline normalization, `.cmd` shims, drive
-# letters and per-platform native packages are all platform classes of
-# defect — the last three found by a Windows consumer running this very
-# gate). QT3 conformance and the dead-code audit remain separate evidence
-# runs (they need the qt3tests submodule and a long coverage pass) — they
-# are not silently implied by this green.
+# Hosted qualification runs on Linux. Windows checks are opt-in to bound
+# hosted runner cost; the complete backup and local act instructions live
+# in .github/optional-workflows/windows.yml and docs/workflow/WINDOWS.md.
+# A green hosted run does not establish Windows qualification.
+# QT3 conformance and the dead-code audit remain separate evidence runs
+# (they need the qt3tests submodule and a long coverage pass).
 #
 # Third-party actions are pinned to commit SHAs rather than moving major
 # tags. A tag is a pointer its owner can repoint, so `@v6` means "whatever
@@ -46,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -169,9 +167,9 @@ jobs:
   # Consumption evidence, split by what it proves:
   #  - dependency-policy: the dependency closure a consumer inherits, plus
   #    the advisory audit — needs the installed tree, runs where it is cheap.
-  #  - source-consumption: the submodule/pnpm topology fixture. It runs on
-  #    Windows too — executable shims, drive letters and realpath containment
-  #    are demonstrably platform-sensitive. The root `npm ci` here is NOT a
+  #  - source-consumption: the submodule/pnpm topology fixture. Windows
+  #    shims, drive letters and containment remain in the optional backup.
+  #    The root `npm ci` here is NOT a
   #    confound, it is the documented recipe's own precondition (CONSUMING.md):
   #    a `link:`ed package's transitive `@jarenjs/*` imports resolve by Node's
   #    upward walk from the SOURCE directory, and the checkout's own
@@ -205,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:

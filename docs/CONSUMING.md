@@ -28,8 +28,8 @@ Runtime baseline for every package: **Node ≥ 24, ESM only** (`"type":
 package depends only on other `@jarenjs/*` packages.
 
 The Node floor is a floor, not a suggestion. It is the line every gate in
-this repository runs on (`.nvmrc`; the Windows, Ubuntu, packed-consumer and
-browser jobs all read it) and it is declared in every package's `engines`,
+this repository runs on (`.nvmrc`; hosted Linux jobs and the optional Windows
+qualification both read it) and it is declared in every package's `engines`,
 so an install under an older Node prints `EBADENGINE` and is unsupported by
 declaration — nothing here is tested on Node 22, and bundling a package into
 an application does not change what the package was verified against. A
@@ -47,7 +47,8 @@ committed `types/` for linq and db) and the package docs, so types resolve
 with no build on your side. Each release is gated by
 `npm run release:check`, which runs lint, the full test suite, all builds, a
 TypeScript consumer check, a tree-shaking check and npm pack dry-runs, on
-Linux **and** Windows CI. A separate check imports every packed package from
+Linux CI. [Windows qualification](workflow/WINDOWS.md) is opt-in and is not
+implied by the hosted CI result. A separate check imports every packed package from
 its declared dependency closure under **both Node and Bun**, resolves it
 under strict packed TypeScript, and bundles the `@jarenjs/app` closure under
 an isolated Vite build — so "it installs and imports cleanly from a registry
@@ -255,8 +256,9 @@ while (queue.length > 0) {
 ```
 
 This repository runs exactly that check against a real pnpm consumer — pinned
-to the exact 9.15.4 a vendoring consumer runs, on Linux **and Windows** — on
-every push: `npm run test:source`, in `scripts/check-source-consumer.js`.
+to the exact 9.15.4 a vendoring consumer runs, on Linux on every push:
+`npm run test:source`, in `scripts/check-source-consumer.js`. The same fixture
+is retained in the [optional Windows workflow](workflow/WINDOWS.md).
 Worth knowing what actually makes it pass: once you run the install **inside**
 the submodule, npm's own workspace symlinks in `vendor/jarenjs/node_modules`
 satisfy the internal edges, and they win before any consumer-side setting
