@@ -4,6 +4,7 @@ import { lexicalConfig, lexicalTokens, lexicalDistance } from './config.js';
 import { utf8ByteLength as textBytes, hashContent } from '../string.js';
 import { lexicalVocabulary } from './vocabulary.js';
 export { SEARCH_LIMITS } from './config.js';
+export { reciprocalRankFusion, weightedScoreFusion } from './fusion.js';
 
 /** @typedef {import('./config.js').LexicalDefinition} LexicalDefinition */
 /** @typedef {{generation?:number, sourceRevision?:string}} LexicalIdentity */

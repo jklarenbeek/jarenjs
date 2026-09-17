@@ -1,15 +1,15 @@
 //@ts-check
 import { checkOutcome } from './check.js';
+import { isThenable } from './function.js';
 
 const copy = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
   docPath: error?.docPath ?? '', message: error?.message ?? String(error), stage });
 
 /**
- * Guard edits to any JSON document using injected, synchronous validation and
- * planning. Neither apply nor a validator receives the reader's original object.
+ * Guard JSON edits with cloned inputs and serialized commits. prepare is
+ * synchronous; prepareAsync and commit await validation and planning hooks.
  * Commit owns atomic persistence (or snapshot/restore on a single writer).
- * A failed restore is attempted once and retains both diagnostic causes.
  * @param {{ read: () => Promise<any>, validateProposal: (proposal: any) => any,
  *   apply: (document: any, proposal: any) => any,
  *   validateCandidate: (next: any, previous: any) => any,
@@ -25,33 +25,58 @@ export function createGuardedRefiner(options) {
     throw new TypeError('snapshot and restore must be supplied together');
   let pending = Promise.resolve();
 
-  /** Validate and plan without mutating the source or proposal. */
-  function prepare(document, proposal) {
-    let stage = 'shape';
-    try {
-      const patch = copy(proposal);
-      const shape = checkOutcome(options.validateProposal(patch));
-      if (!shape.valid) return { valid: false, errors: shape.errors };
-      const previous = copy(document);
-      stage = 'apply';
-      const next = options.apply(copy(previous), patch);
-      stage = 'candidate';
-      const candidate = checkOutcome(options.validateCandidate(copy(next), copy(previous)));
-      if (!candidate.valid) return { valid: false, errors: candidate.errors };
-      stage = 'plan';
-      const planned = options.planCommit(copy(next), copy(previous));
-      if (planned?.valid === false) return { valid: false, errors: planned.errors };
-      return { valid: true, errors: [], next, plan: planned?.plan ?? planned };
-    }
-    catch (error) {
-      return { valid: false, errors: [stage === 'apply' && options.applyFailure
-        ? options.applyFailure(error) : failure(error, stage)] };
-    }
+  // One staged transition serves both preparation modes. The runner decides
+  // whether a suspension is allowed, never which checks to omit.
+  function* stages(document, proposal) {
+    const previous = copy(document), patch = copy(proposal);
+    const shape = checkOutcome(yield { stage: 'shape', run: () => options.validateProposal(patch) });
+    if (!shape.valid) return shape;
+    const next = yield { stage: 'apply', run: () => options.apply(copy(previous), patch) };
+    const candidate = checkOutcome(yield { stage: 'candidate', run: () => options.validateCandidate(copy(next), copy(previous)) });
+    if (!candidate.valid) return candidate;
+    const planned = yield { stage: 'plan', run: () => options.planCommit(copy(next), copy(previous)) };
+    if (planned?.valid === false) return { valid: false, errors: planned.errors };
+    return { valid: true, errors: [], next: copy(next), plan: copy(planned?.plan ?? planned) };
   }
+
+  function prepareWith(document, proposal, asynchronous) {
+    let stage = 'shape';
+    const iterator = stages(document, proposal);
+    const failed = error => ({ valid: false, errors: [stage === 'apply' && options.applyFailure
+      ? options.applyFailure(error) : failure(error, stage)] });
+    function step(value) {
+      try {
+        const item = iterator.next(value);
+        if (item.done) return item.value;
+        stage = item.value.stage;
+        const answer = item.value.run();
+        if (isThenable(answer)) {
+          if (!asynchronous) {
+            Promise.resolve(answer).catch(() => {});
+            throw new TypeError('asynchronous hook requires prepareAsync or commit');
+          }
+          return Promise.resolve(answer).then(step, failed);
+        }
+        return step(answer);
+      }
+      catch (error) { return failed(error); }
+    }
+    return step(undefined);
+  }
+
+  /** Validate and plan synchronously; thenables are refused, never committed. */
+  function prepare(document, proposal) { return prepareWith(document, proposal, false); }
+
+  /** Validate and plan while awaiting asynchronous hooks on cloned inputs. */
+  async function prepareAsync(document, proposal) { return prepareWith(document, proposal, true); }
 
   /** Commit a prepared candidate; callers must serialize any external writers. */
   async function commitPrepared(previous, prepared) {
     if (!prepared.valid) return { ok: false, stage: 'validation', errors: prepared.errors };
+    // Capture before snapshot can suspend; the caller cannot retarget a plan
+    // after validation by changing an object while persistence is preparing.
+    previous = copy(previous);
+    prepared = copy(prepared);
     let token;
     try { token = options.snapshot ? await options.snapshot() : null; }
     catch (error) { return { ok: false, stage: 'snapshot', cause: error, errors: [failure(error, 'snapshot')] }; }
@@ -81,10 +106,10 @@ export function createGuardedRefiner(options) {
     const captured = copy(proposal);
     const result = pending.then(async () => {
       const previous = await options.read();
-      return commitPrepared(previous, prepare(previous, captured));
+      return commitPrepared(previous, await prepareAsync(previous, captured));
     });
     pending = result.then(() => undefined, () => undefined);
     return result;
   }
-  return { prepare, commitPrepared, commit };
+  return { prepare, prepareAsync, commitPrepared, commit };
 }

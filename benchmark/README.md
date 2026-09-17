@@ -926,19 +926,19 @@ The reference remains a development-only oracle.
 
 <!--fact:lexical.measurements-->
 
-Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+Measured on v24.20.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer / engine | Rows | Cold / warm ms | Query p95 ms | One update ms | Snapshot gzip bytes | Sampled heap / RSS high-water MiB | V8 heap ceiling MiB |
 |---|---:|---|---:|---:|---:|---|---:|
-| catalog / reference | 10000 | 130.99 / 50.10 | 11.97 | 0.45 | 370591 | 95.97 / 190.46 | 240.00 |
-| catalog / native | 10000 | 203.59 / 201.37 | 10.89 | 63.60 | 121054 | 104.08 / 208.89 | 240.00 |
-| archive-stock / reference | 75000 | 1124.97 / 578.43 | 168.33 | 0.55 | 2820312 | 559.14 / 697.04 | 752.00 |
-| archive-stock / native | 75000 | 1500.68 / 1775.38 | 98.43 | 681.98 | 920811 | 579.94 / 726.00 | 752.00 |
+| catalog / reference | 10000 | 122.06 / 50.85 | 13.43 | 0.38 | 370591 | 96.60 / 191.95 | 240.00 |
+| catalog / native | 10000 | 192.24 / 186.44 | 9.06 | 59.98 | 121054 | 103.51 / 214.36 | 240.00 |
+| archive-stock / reference | 75000 | 982.17 / 417.50 | 152.46 | 0.51 | 2820312 | 550.26 / 688.02 | 752.00 |
+| archive-stock / native | 75000 | 1219.66 / 1531.59 | 83.80 | 593.38 | 920811 | 577.94 / 738.68 | 752.00 |
 
 | Consumer | Native logical index MiB | Peak update accounted MiB | Native teardown ms / remaining handles | Membership / order / score / native reload differences | Reference reload tie changes |
 |---|---:|---:|---|---|---:|
-| catalog | 24.58 | 35.37 | 0.04 / 0 | 0 / 0 / 0 / 0 | 1002 |
-| archive-stock | 186.22 | 267.03 | 0.03 / 0 | 0 / 0 / 0 / 0 | 6002 |
+| catalog | 24.58 | 35.37 | 0.03 / 0 | 0 / 0 / 0 / 0 | 1002 |
+| archive-stock | 186.22 | 267.03 | 0.04 / 0 | 0 / 0 / 0 / 0 | 6002 |
 
 Browser gzip: native 5606 bytes; reference 5874 bytes.
 

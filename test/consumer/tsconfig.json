@@ -29,7 +29,10 @@
     "studio-editors.ts",
     "db-relational.ts",
     "db-process.ts",
-    "db-postgres.ts"
+    "db-postgres.ts",
+    "host-primitives-core.ts",
+    "host-primitives-contract.ts",
+    "host-primitives-charts.ts"
   ],
   "include": [
     "linq-*.ts"

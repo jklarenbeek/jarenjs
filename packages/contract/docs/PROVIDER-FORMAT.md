@@ -155,3 +155,42 @@ Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 Offline synthetic Node SQLite ingestion. The retained reader only extracts recorded transcripts; native timings include opening storage, descriptor execution, private authority checks, page/checkpoint commits, publication and zero-write replay. Their timings describe different work. No real provider latency, credentials, external write reconciliation or production cutover is qualified.
 
 <!--/fact-->
+
+## Explicit safe-read capture and replay
+
+`createProviderExecutor({cache, cacheScope, replay = 'auto', ...limits})` opts in.
+`cache` supplies `get(key, {signal})` and `set(key, entry, {signal})`, sync or
+async; a Map works for a small host-owned in-memory capture. Missing entries are
+null/undefined. No cache means the existing uncached behavior. `auto` reads then
+captures on miss, `record` refreshes without reading, and `replay` refuses a miss
+without transport. Only declared `safe-read` requests may use this seam; unsafe
+requests refuse. Only bounded successful 2xx text responses are captured.
+
+`providerReplayKey(request, {scope, maxBytes = 262144})` is exported. Its SHA-256
+identity includes format version, explicit host scope, normalized absolute URL,
+uppercase method, normalized public headers, exact text body and account. Header
+names containing authorization, cookie, token, secret or api-key are stripped.
+Credential-bearing URL userinfo and recognized credential query parameters refuse;
+this is not a general secret detector. URL, body, account and remaining headers
+must already be public request data. Scope is mandatory and must partition tenant,
+visibility, provider/schema version and any credential-dependent representation.
+Never treat the digest as authorization. Hosts own expiry, storage bounds,
+confidentiality and invalidation. Response text itself may be private.
+
+Identity input is bounded to 1024 headers, scope at most 4096 code units and the
+request byte limit (standalone key maximum 64 MiB). Entries have
+`{format: 'jaren-provider-replay/1', key, status, text}`; malformed/mismatched entries
+refuse as `replay-entry-invalid`, oversized hits as `replay-byte-limit`, offline
+misses as `replay-miss`. Cache failures give `replay-cache-fault`; after a successful
+transport followed by failed storage, attempts and bytes remain charged. The cache
+is trusted storage, not a cryptographically authenticated response source.
+
+Hits return `state: 'ok', reason: 'replay', replayed: true, attempts: 0` with the
+original status/text and their UTF-8 byte count. Network results with cache enabled
+carry `replayed: false`. `beforeDispatch` is rechecked on a hit before returning
+its value. Cancellation/deadline bounds cover identity and cache calls; the cache
+owner uses the configured concurrency/queue/scope bounds independently of network
+attempt ownership. An adapter ignoring cancellation retains that owner's capacity
+until actual settlement; `close()` aborts admission and drains both owners. Hosts
+must provide settling adapters for shutdown to finish. The hybrid retrieval
+instrument and installed-package consumer demonstrate a zero-transport second read.

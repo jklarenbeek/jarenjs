@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import MiniSearch from 'minisearch';
 import { compareLexicalAnswers } from './lexical-compare.js';
+import { pairedBootstrap, mean } from '@jarenjs/core/stats';
 import { compileLexical } from '@jarenjs/core/search';
 import { adoptionRows } from '../scripts/lib/adoption.js';
 import { readAdoption, verifyFreeze, assessBudget } from '../test/adoption/evidence.js';
@@ -18,7 +19,7 @@ import { searchOptions } from '../test/adoption/oracles.js';
 const manifest = readAdoption('manifest.json'), fixture = readAdoption('fixtures/search.json');
 verifyFreeze(manifest);
 const sourceFiles = ['benchmark/lexical.js', 'packages/core/src/search/index.js', 'packages/core/src/search/config.js',
-  'packages/core/src/search/vocabulary.js', 'packages/core/src/string.js', 'scripts/lib/adoption.js', 'test/adoption/oracles.js', 'benchmark/lexical-compare.js'];
+  'packages/core/src/search/vocabulary.js', 'packages/core/src/search/fusion.js', 'packages/core/src/stats.js', 'packages/core/src/random.js', 'packages/core/src/string.js', 'scripts/lib/adoption.js', 'test/adoption/oracles.js', 'benchmark/lexical-compare.js'];
 const sourceHashes = Object.fromEntries(sourceFiles.map(file => [file, createHash('sha256').update(readFileSync(file)).digest('hex')]));
 const worker = process.argv.find((arg) => arg.startsWith('--measure='));
 if (worker) {
@@ -98,7 +99,11 @@ else {
     delete reference.answers; delete reference.reloadAnswers; delete native.answers; delete native.reloadAnswers;
     native.metrics.search.browserGzipBytes = browserBytes.native; reference.metrics.search.browserGzipBytes = browserBytes.reference;
     const budgets = { search: assessBudget(consumer.budgets.search, native.metrics.search), resources: assessBudget(consumer.budgets.resources, native.metrics.resources) };
-    consumers.push({ consumer: consumer.id, rows: consumer.rows, reference, native, differences, budgets });
+    const pairedQueryMeanMs = pairedBootstrap(native.querySamples.map((query, i) =>
+      [mean(reference.querySamples[i].ms), mean(query.ms)]), { resamples: 10000, seed: 20260916 });
+    consumers.push({ consumer: consumer.id, rows: consumer.rows, reference, native, differences, budgets,
+      pairedQueryMeanMs: { ...pairedQueryMeanMs, unit: 'query', difference: 'native minus reference milliseconds',
+        scope: 'Each shared query contributes its five-sample mean; queries, not timing repeats, are resampled. Descriptive interval for this fixed workload, not a population or p95 claim.' } });
   }
   const report = { format: 'lexical-measurements/1', freezeHash: manifest.freezeHash, sourceHashes, measuredAt: new Date().toISOString(),
     runtime: { node: process.version, platform: process.platform, arch: process.arch, cpu: cpus()[0].model, os: release() },

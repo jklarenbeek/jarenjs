@@ -3,3 +3,4 @@
 export { createProviderExecutor } from './execute.js';
 export { compileProvider } from './compile.js';
 export { withProviderRun } from './run.js';
+export { providerReplayKey } from './replay.js';

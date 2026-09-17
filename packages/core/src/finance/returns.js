@@ -88,3 +88,61 @@ export function maxDrawdown(values) {
   }
   return maxDd;
 }
+
+function returnInputs(returns, periodsPerYear = 1) {
+  if (!Number.isFinite(periodsPerYear) || periodsPerYear <= 0) throw new RangeError('periodsPerYear must be positive and finite');
+  if (!Number.isSafeInteger(returns?.length) || returns.length < 0) throw new TypeError('returns must be array-like');
+  for (let i = 0; i < returns.length; i++) if (!Number.isFinite(returns[i]) || returns[i] < -1)
+    throw new RangeError('simple returns must be finite and at least -1');
+}
+
+/** Compound simple returns to a year of the declared length; empty is NaN.
+ * @param {ArrayLike<number>} returns @param {number} periodsPerYear @returns {number} */
+export function annualizedReturn(returns, periodsPerYear) {
+  returnInputs(returns, periodsPerYear);
+  if (!returns.length) return NaN;
+  let growth = 1;
+  for (let i = 0; i < returns.length; i++) growth *= 1 + returns[i];
+  return Math.pow(growth, periodsPerYear / returns.length) - 1;
+}
+
+/** Mean excess return / downside RMS over ALL periods, scaled by sqrt(periodsPerYear).
+ * Target is per-step. Empty/no downside is NaN, not an infinite score.
+ * @param {ArrayLike<number>} returns @param {number} [target] @param {number} [periodsPerYear]
+ * @returns {number} */
+export function sortino(returns, target = 0, periodsPerYear = 1) {
+  returnInputs(returns, periodsPerYear);
+  if (!Number.isFinite(target)) throw new TypeError('Sortino target must be finite');
+  let excess = 0, downside = 0;
+  for (let i = 0; i < returns.length; i++) {
+    const value = returns[i] - target;
+    excess += value; downside += Math.min(value, 0) ** 2;
+  }
+  return !returns.length || downside === 0 ? NaN : (excess / returns.length) / Math.sqrt(downside / returns.length) * Math.sqrt(periodsPerYear);
+}
+
+/** Annualized compound return / drawdown of equity seeded at one.
+ * @param {ArrayLike<number>} returns @param {number} periodsPerYear @returns {number} */
+export function calmar(returns, periodsPerYear) {
+  returnInputs(returns, periodsPerYear);
+  const equity = [1];
+  for (let i = 0; i < returns.length; i++) equity.push(equity.at(-1) * (1 + returns[i]));
+  const drawdown = maxDrawdown(equity);
+  return drawdown === 0 ? NaN : annualizedReturn(returns, periodsPerYear) / drawdown;
+}
+
+/** Sample covariance with an aligned benchmark / benchmark sample variance.
+ * @param {ArrayLike<number>} returns @param {ArrayLike<number>} benchmark @returns {number} */
+export function beta(returns, benchmark) {
+  returnInputs(returns); returnInputs(benchmark);
+  if (returns.length !== benchmark.length) throw new RangeError('beta requires aligned return series');
+  if (returns.length < 2) return NaN;
+  let a = 0, b = 0;
+  for (let i = 0; i < returns.length; i++) { a += returns[i]; b += benchmark[i]; }
+  a /= returns.length; b /= returns.length;
+  let covariance = 0, variance = 0;
+  for (let i = 0; i < returns.length; i++) {
+    covariance += (returns[i] - a) * (benchmark[i] - b); variance += (benchmark[i] - b) ** 2;
+  }
+  return variance === 0 ? NaN : covariance / variance;
+}

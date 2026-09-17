@@ -3,6 +3,7 @@
 import { createScheduler } from '@jarenjs/core/schedule';
 import { backoffDelay, createAttemptBudget, parseRetryAfter, sleep as defaultSleep } from '@jarenjs/core/retry';
 import { ContractHostError } from '../errors.js';
+import { createProviderReplay } from './replay.js';
 
 /** @param {string} reason @returns {ContractHostError} */
 export const providerHostError = (reason) => new ContractHostError('JC1012', reason);
@@ -37,6 +38,10 @@ export const providerHostError = (reason) => new ContractHostError('JC1012', rea
  * @property {() => number} [now]
  * @property {() => number} [random]
  * @property {(ms: number, signal?: AbortSignal) => Promise<void>} [sleep]
+ * @property {{ get: (key: string, context?: { signal: AbortSignal }) => any,
+ *   set: (key: string, entry: any, context?: { signal: AbortSignal }) => any }} [cache]
+ * @property {string} [cacheScope] - required with cache: host/account visibility and schema version
+ * @property {'auto'|'record'|'replay'} [replay] - explicit offline replay refuses a miss
  */
 
 /**
@@ -62,13 +67,14 @@ export function createProviderExecutor(options = {}) {
   }));
   if (typeof transport !== 'function') throw providerHostError('transport must be a single-attempt function');
   const scheduler = createScheduler({ ...options, now, sleep });
+  const replay = createProviderReplay(options, providerHostError);
   const closer = new AbortController();
   /** @type {Set<Promise<any>>} */
   const running = new Set();
   const encoder = new TextEncoder();
 
   /** @param {ProviderRequest} request @param {any} context */
-  async function execute(request, context) {
+  async function execute(request, context, bypassReplay = false) {
     if (!request || !['safe-read', 'provider-idempotent', 'single-send'].includes(request.safety))
       throw providerHostError('request must declare replay safety');
     if (request.safety === 'provider-idempotent' && (typeof request.idempotencyKey !== 'string' || !request.idempotencyKey))
@@ -95,6 +101,8 @@ export function createProviderExecutor(options = {}) {
     if (request.safety === 'provider-idempotent' && options.transport === undefined)
       return outcome('refused', 'idempotency-transport-required');
     if (encoder.encode(request.body ?? '').byteLength > maxRequestBytes) return outcome('refused', 'request-byte-limit');
+    if (replay && !bypassReplay) return replay.run(request, { ...context, signal, deadline, maxBytes: byteLimit },
+      () => execute(request, { ...context, deadline, maxBytes: byteLimit }, true));
     for (;;) {
       if (signal.aborted) return outcome('cancelled', 'cancelled');
       if (now() >= deadline) return outcome('refused', 'deadline');
@@ -183,7 +191,7 @@ export function createProviderExecutor(options = {}) {
     /** Stop new work and drain requests, body readers and retry waits. */
     async close() {
       closer.abort();
-      await scheduler.close();
+      await Promise.all([scheduler.close(), replay?.close()]);
       await Promise.allSettled([...running]);
     },
     stats: scheduler.stats,

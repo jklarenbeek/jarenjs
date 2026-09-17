@@ -1,4 +1,5 @@
 //@ts-check
+import { mulberry32 } from './random.js';
 /**
  * @file Descriptive statistics over a sample of numbers: the mean, the
  * sample variance and its root, the median, and a quantile that will
@@ -130,4 +131,89 @@ export function quantile(values, p, options) {
   const hi = Math.ceil(rank);
   if (lo === hi) return sorted[lo];
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo);
+}
+
+/**
+ * @typedef {{ resamples: number, seed: number, maxWork?: number,
+ *   statistic?: 'mean-difference' | ((a: number[], b: number[]) => number) }} PairedOptions
+ */
+
+/** Validate the work before allocating any resample. */
+function pairedSample(pairs, options) {
+  if (!Array.isArray(pairs) || pairs.length === 0 || pairs.some(pair =>
+    !Array.isArray(pair) || pair.length !== 2 || !pair.every(Number.isFinite)))
+    throw new TypeError('paired samples require nonempty finite number pairs');
+  const { resamples, seed, statistic = 'mean-difference', maxWork = 10000000 } = options ?? {};
+  if (!Number.isSafeInteger(resamples) || resamples < 1 || resamples > 1000000
+    || !Number.isSafeInteger(maxWork) || maxWork < 1 || maxWork > 100000000
+    || pairs.length * resamples > maxWork)
+    throw new RangeError('paired resampling exceeds its finite work budget');
+  if (!Number.isSafeInteger(seed)) throw new TypeError('paired resampling requires an integer seed');
+  if (statistic !== 'mean-difference' && typeof statistic !== 'function') throw new TypeError('invalid paired statistic');
+  const a = pairs.map(pair => pair[0]), b = pairs.map(pair => pair[1]);
+  const deltas = b.map((value, i) => value - a[i]);
+  const finite = value => {
+    if (!Number.isFinite(value)) throw new RangeError('paired statistic must be finite');
+    return value;
+  };
+  const estimate = finite(statistic === 'mean-difference' ? mean(deltas) : statistic(a.slice(), b.slice()));
+  return { a, b, deltas, estimate, finite, statistic, resamples, seed: seed >>> 0, random: mulberry32(seed) };
+}
+
+/**
+ * Seeded paired percentile bootstrap. The default is the mean of (b - a),
+ * summing sampled deltas in draw order. Callbacks own their determinism.
+ * @param {readonly (readonly [number, number])[]} pairs
+ * @param {PairedOptions & { level?: number, quantile?: QuantileMethod }} options
+ * @returns {{ estimate: number, lower: number, upper: number, resamples: number,
+ *   seed: number, level: number, method: 'paired-bootstrap', quantile: QuantileMethod }}
+ */
+export function pairedBootstrap(pairs, options) {
+  const sample = pairedSample(pairs, options);
+  const { level = 0.95, quantile: method = 'nearest-rank' } = options;
+  if (!(level > 0 && level < 1) || !Number.isFinite(level)) throw new RangeError('bootstrap level must be between zero and one');
+  if (!METHODS.includes(method)) throw new TypeError('invalid bootstrap quantile method');
+  const values = [];
+  for (let r = 0; r < sample.resamples; r++) {
+    let sum = 0;
+    const a = [], b = [];
+    for (let i = 0; i < pairs.length; i++) {
+      const index = Math.floor(sample.random() * pairs.length);
+      if (sample.statistic === 'mean-difference') sum += sample.deltas[index];
+      else { a.push(sample.a[index]); b.push(sample.b[index]); }
+    }
+    values.push(sample.finite(sample.statistic === 'mean-difference' ? sum / pairs.length : sample.statistic(a, b)));
+  }
+  const tail = (1 - level) / 2;
+  return { estimate: sample.estimate, lower: quantile(values, tail, { method }), upper: quantile(values, 1 - tail, { method }),
+    resamples: sample.resamples, seed: sample.seed, level, method: 'paired-bootstrap', quantile: method };
+}
+
+/**
+ * Monte Carlo paired label-swap test, including ties; p = (extreme + 1)/(R + 1).
+ * The exchangeable unit is one pair, not independently sampled observations.
+ * @param {readonly (readonly [number, number])[]} pairs
+ * @param {PairedOptions & { alternative?: 'two-sided' | 'greater' | 'less' }} options
+ * @returns {{ estimate: number, pValue: number, resamples: number, seed: number,
+ *   alternative: string, method: 'paired-permutation', exact: false }}
+ */
+export function permutationTest(pairs, options) {
+  const sample = pairedSample(pairs, options);
+  const { alternative = 'two-sided' } = options;
+  if (!['two-sided', 'greater', 'less'].includes(alternative)) throw new TypeError('invalid permutation alternative');
+  let extreme = 0;
+  for (let r = 0; r < sample.resamples; r++) {
+    let sum = 0;
+    const a = [], b = [];
+    for (let i = 0; i < pairs.length; i++) {
+      const swap = sample.random() < 0.5;
+      if (sample.statistic === 'mean-difference') sum += sample.deltas[i] * (swap ? -1 : 1);
+      else { a.push(swap ? sample.b[i] : sample.a[i]); b.push(swap ? sample.a[i] : sample.b[i]); }
+    }
+    const value = sample.finite(sample.statistic === 'mean-difference' ? sum / pairs.length : sample.statistic(a, b));
+    if (alternative === 'two-sided' ? Math.abs(value) >= Math.abs(sample.estimate)
+      : alternative === 'greater' ? value >= sample.estimate : value <= sample.estimate) extreme++;
+  }
+  return { estimate: sample.estimate, pValue: (extreme + 1) / (sample.resamples + 1),
+    resamples: sample.resamples, seed: sample.seed, alternative, method: 'paired-permutation', exact: false };
 }

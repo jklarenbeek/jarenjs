@@ -54,6 +54,27 @@ const orderSchema = {
 };
 
 describe('jaren-emit — bundle mode', () => {
+  it('generates one terminal newline and passes both drift and new-file Git whitespace gates', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-emit-eof-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'schema.json'), JSON.stringify(userSchema));
+      execFileSync('git', ['init', '-q'], { cwd: dir });
+      for (const target of ['typescript', 'markdown']) for (const bundle of [false, true]) {
+        const out = `${target}-${bundle}`;
+        const args = [CLI, '--schema', 'schema.json', '--out', out, '--target', target,
+          ...(bundle ? ['--bundle', 'bundle.txt'] : [])];
+        execFileSync(process.execPath, args, { cwd: dir });
+        execFileSync(process.execPath, [...args, '--check'], { cwd: dir });
+        for (const file of fs.readdirSync(path.join(dir, out))) {
+          const text = fs.readFileSync(path.join(dir, out, file), 'utf8');
+          assert.ok(text.endsWith('\n') && !text.endsWith('\n\n'));
+        }
+        execFileSync('git', ['add', out], { cwd: dir });
+      }
+      execFileSync('git', ['-c', 'core.whitespace=blank-at-eof', 'diff', '--cached', '--check'], { cwd: dir });
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
   it('refuses missing option values before producing any output', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-emit-'));
     try {

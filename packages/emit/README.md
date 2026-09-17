@@ -362,3 +362,8 @@ Tests live in `test/emit/` at the repository root (`npm run test:emit`).
 `agreement.test.js` is the cyclic verification and needs the workspace's
 TypeScript. The internals are described in [ARCHITECTURE.md](./ARCHITECTURE.md);
 the model contract is in [EMIT-FORMAT.md](./docs/EMIT-FORMAT.md).
+
+TypeScript and Markdown output end in exactly one newline, for bundles and
+individual files. Generated files pass Git's new-blank-line-at-EOF check and the
+emitter's own `--check` without hand trimming. Regenerate older artifacts once to
+adopt this terminal formatting correction.

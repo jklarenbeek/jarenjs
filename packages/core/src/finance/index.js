@@ -21,7 +21,9 @@ export {
 } from './bond.js';
 export {
   sma, ema, wma, macd, rsi, bollinger, stochastic, atr, roc,
+  adx, cci, vwap, obv, volumeRatio, kdj, williamsR,
 } from './indicators.js';
 export {
   cagr, holdingPeriodReturn, returnsOf, volatility, sharpe, maxDrawdown,
+  annualizedReturn, sortino, calmar, beta,
 } from './returns.js';

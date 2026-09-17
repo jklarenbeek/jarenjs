@@ -7,6 +7,7 @@ import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { compileEmitModel } from './model.js';
+import { fileOutput } from './output.js';
 
 /** Match a model node by its `kind` — a schema match, so it survives the
  * location-less dispatch of `$apply` on the current node. */
@@ -93,7 +94,7 @@ const compiled = compileJtltStylesheet(MARKDOWN_STYLESHEET,
  * @returns {string} Markdown
  */
 export function renderMarkdown(model) {
-  return compiled(model);
+  return fileOutput(compiled(model));
 }
 
 /**

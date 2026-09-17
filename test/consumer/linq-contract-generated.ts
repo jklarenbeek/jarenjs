@@ -80,7 +80,6 @@ export interface ImageBytesInput {
 
 
 export type ImageBytesOutput = unknown;
-
 /** Every invokable public operation by id: its kind, input and output types, and the error codes it declares. */
 export interface Operations {
   'catalog.load': { kind: 'read'; input: CatalogLoadInput; output: CatalogLoadOutput; errors: 'stale' };
@@ -180,8 +179,6 @@ export namespace Health {
 export interface HealthCheckOutput {
   [key: string]: unknown;
 }
-
-
 /** Every invokable public operation by id: its kind, input and output types, and the error codes it declares. */
 export interface Operations {
   'health.check': { kind: 'read'; input: null; output: HealthCheckOutput; errors: never };
@@ -291,7 +288,6 @@ export interface DocRemoveInput {
 
 
 export type DocRemoveOutput = unknown;
-
 /** Every invokable public operation by id: its kind, input and output types, and the error codes it declares. */
 export interface Operations {
   'doc.put': { kind: 'command'; input: DocPutInput; output: DocPutOutput; errors: never };

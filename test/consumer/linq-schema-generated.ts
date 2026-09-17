@@ -16,13 +16,9 @@ export interface Account {
   tags?: Array<string>;
   [key: string]: unknown;
 }
-
-
 export interface Strict {
   kind: string;
 }
-
-
 export interface Config {
   host: string;
   /**
@@ -46,19 +42,14 @@ export interface ConfigInput {
   name: string;
   [key: string]: unknown;
 }
-
-
 export type Uuid = string;
 
 export type Id = Uuid;
-
 /**
  * Schema constraints this type cannot express: minItems=2
  */
 export type Exact = [string, number];
-
 export type Empty = Record<string, never>;
-
 export interface Job {
   cmd: string;
   /**
@@ -80,8 +71,6 @@ export interface JobInput {
   retries?: number;
   [key: string]: unknown;
 }
-
-
 export interface Scalars {
   s: string;
   n: number;
@@ -92,22 +81,16 @@ export interface Scalars {
   b: boolean;
   z: null;
 }
-
-
 export interface Literals {
   kind: "a";
   on: true;
   n: 1;
 }
-
-
 export interface Enums {
   role: "admin" | "user";
   mood: "up" | "down" | null;
   tag?: "x" | null;
 }
-
-
 export interface Nullables {
   name: string | null;
   /**
@@ -115,8 +98,6 @@ export interface Nullables {
    */
   age?: number | null;
 }
-
-
 export interface StringRules {
   /**
    * Schema constraints this type cannot express: format="uuid"
@@ -139,8 +120,6 @@ export interface StringRules {
    */
   slug: string;
 }
-
-
 export interface NumberRules {
   /**
    * Schema constraints this type cannot express: minimum=0, maximum=10
@@ -159,8 +138,6 @@ export interface NumberRules {
    */
   d: number;
 }
-
-
 /**
  * An RFC 3339 string branded for the date operators;
  * structurally identical to the @jarenjs/linq brand.
@@ -181,8 +158,6 @@ export interface Dates {
   seen?: DateTime | null;
   stamps?: Array<DateTime>;
 }
-
-
 /**
  * Schema constraints this type cannot express: type="integer"
  */
@@ -202,8 +177,6 @@ export interface ArrayRules {
    */
   has: Array<number>;
 }
-
-
 export interface Tuples {
   /**
    * Schema constraints this type cannot express: minItems=2
@@ -218,8 +191,6 @@ export interface Tuples {
    */
   exact: [string, number];
 }
-
-
 /**
  * Schema constraints this type cannot express: type="integer"
  */
@@ -228,18 +199,12 @@ export type DictAdditional = number;
 export interface Dict {
   [key: string]: DictAdditional;
 }
-
-
 export interface Either {
   v: string | number;
   w?: { a: string; } | { b: number; };
 }
-
-
 export type Shape = { kind: "circle"; r: number; } | { kind: "square"; side: number; };
-
 export type Both = { a: string; [key: string]: unknown; } & { b: number; [key: string]: unknown; };
-
 export interface Node {
   label: string;
   children?: Array<Node>;
@@ -247,7 +212,6 @@ export interface Node {
 
 
 export type Tree = Node;
-
 export interface Node2 {
   label: string;
   children?: Array<Node2>;
@@ -258,23 +222,18 @@ export interface Linked {
   head: Node2;
   tail?: Node2;
 }
-
-
 /**
  * Schema constraints this type cannot express: if={"type":"object","properties":{"k":{"const":"a"}},"required":["k"]}, then={"type":"object","properties":{"v":{"type":"string"}},"required":["v"]}, else={"type":"object","properties":{"v":{"type":"number"}},"required":["v"]}
  */
 export type ConditionalPart2 = unknown;
 
 export type Conditional = { k: string; v: unknown; [key: string]: unknown; } & ConditionalPart2;
-
 export interface Wrapped {
   meta: { a?: string; [key: string]: unknown; };
   anything: unknown;
   nothing?: never;
   yes?: unknown;
 }
-
-
 /**
  * Schema constraints this type cannot express: minProperties=1, maxProperties=9, dependentRequired={"a":["b"]}
  */
@@ -283,8 +242,6 @@ export interface Members {
   b?: number;
   [key: string]: unknown;
 }
-
-
 /**
  * Schema constraints this type cannot express: patternProperties=["^x-"]
  */
@@ -292,16 +249,12 @@ export interface Patterned {
   id: string;
   [key: string]: number | string;
 }
-
-
 /**
  * Schema constraints this type cannot express: propertyNames={"type":"string","pattern":"^[a-z]+$"}
  */
 export interface Keyed {
   [key: string]: unknown;
 }
-
-
 export interface DerivedOne {
   id: string;
   /**
@@ -316,8 +269,6 @@ export interface Derived {
   one: DerivedOne;
   two?: { name: string; };
 }
-
-
 /**
  * Schema constraints this type cannot express: $query={"$eq":["$.total",{"$sum":"$.lines[*].amount"}]}
  */
@@ -325,8 +276,6 @@ export interface Invoice {
   lines: Array<{ amount: number; }>;
   total: number;
 }
-
-
 /**
  * Schema constraints this type cannot express: $query={"$eq":["$root.currency","$.currency"]}
  */
@@ -348,8 +297,6 @@ export interface Order {
   end: DateTime;
   lines: Array<OrderLinesItem>;
 }
-
-
 export interface Coerced {
   /**
    * Schema constraints this type cannot express: type="integer"
@@ -375,8 +322,6 @@ export interface CoercedInput {
   ratio?: number | string;
   label?: string | null;
 }
-
-
 export interface Level {
   /**
    * Schema constraints this type cannot express: type="integer"
@@ -396,8 +341,6 @@ export interface LevelInput {
   level: 1 | 2 | 3 | string;
   role?: "admin" | "user" | null;
 }
-
-
 /**
  * An annotated object
  */
@@ -411,5 +354,3 @@ export interface Annotated {
    */
   n?: number;
 }
-
-

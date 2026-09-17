@@ -137,6 +137,68 @@ function pageOf(/** @type {any[]} */ items, /** @type {Partial<any>} */ extra = 
 }
 const patchAt = (/** @type {number} */ seq) => ({ patch: [{ op: 'add', path: '/rows/-', value: seq }], seq });
 
+describe('stream runner — snapshot cursor identity', () => {
+  it('reconnects immediately after a replay-backed snapshot without repeating rows', async () => {
+    const items = [patchAt(1), patchAt(2)];
+    const source = makeSource({ rows: [1, 2] }, { replay: after => pageOf(items.filter(item => item.seq > after), { highWatermark: 2 }) });
+    const first = makeCarrier({ sync: true });
+    const initial = runSubscription(ROUTE, source.sub, first.hooks, { lastSeq: null, validate: true });
+    assert.deepEqual(first.log, ['snapshot:2']);
+    initial.stop(null); await initial.done;
+    const next = makeCarrier({ sync: true });
+    const resumed = runSubscription(ROUTE, source.sub, next.hooks, { lastSeq: first.frames[0].seq, validate: true });
+    assert.deepEqual(next.frames, []);
+    source.emit(patchAt(3));
+    assert.deepEqual(next.log, ['patch:3']);
+    resumed.stop(null); await resumed.done;
+  });
+
+  it('includes a synchronous live write held while the initial page is loading', async () => {
+    const page = deferred(), source = makeSource({ rows: [1] }, { replay: () => page.promise });
+    const carrier = makeCarrier({ sync: true });
+    const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+    source.set({ rows: [1, 2] }); source.emit(patchAt(2));
+    page.resolve(pageOf([patchAt(1)], { highWatermark: 1 }));
+    await tick();
+    assert.deepEqual(carrier.log, ['snapshot:2']);
+    assert.deepEqual(carrier.frames[0].data.value.rows, [1, 2]);
+    runner.stop(null); await runner.done;
+  });
+
+  it('uses an atomic snapshot cursor and delivers held writes above that cursor', async () => {
+    const gate = deferred(), source = makeSource({ rows: [1] }, { replay: () => { throw new Error('no initial replay needed'); } });
+    source.sub.snapshotWithCursor = () => gate.promise;
+    const carrier = makeCarrier({ sync: true });
+    const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+    source.emit(patchAt(2));
+    gate.resolve({ value: { rows: [1] }, seq: 1 });
+    await tick();
+    assert.deepEqual(carrier.log, ['snapshot:1', 'patch:2']);
+    runner.stop(null); await runner.done;
+  });
+
+  it('refuses malformed atomic cursors and ignores a snapshot settling after cancellation', async () => {
+    for (const pair of [{ value: {}, seq: -1 }, { value: {}, seq: 0.5 }, { seq: 2 }]) {
+      const source = makeSource({ rows: [] }, { replay: () => null });
+      source.sub.snapshotWithCursor = () => pair;
+      const carrier = makeCarrier({ sync: true });
+      const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+      await runner.done;
+      assert.equal(carrier.frames[0].event, 'error');
+      assert.equal(source.counts.closes, 1);
+    }
+    const gate = deferred(), source = makeSource({ rows: [] }, { replay: () => null });
+    let signal;
+    source.sub.snapshotWithCursor = options => { signal = options.signal; return gate.promise; };
+    const carrier = makeCarrier({ sync: true });
+    const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+    runner.stop(null); await runner.done;
+    assert.equal(signal.aborted, true);
+    gate.resolve({ value: { rows: [] }, seq: 1 }); await tick();
+    assert.deepEqual(carrier.frames, []);
+  });
+});
+
 describe('stream runner — UTF-8 patch budgets', () => {
   it('sends a patch at maxPatchBytes and a fresh snapshot one byte over it', async () => {
     const patch = [{ op: 'add', path: '/rows/-', value: '界'.repeat(10) }];
@@ -624,4 +686,22 @@ describe('stream runner — a source error the operation declares', () => {
     source.emit({ error: { code: 'gone' } });
     assert.strictEqual(carrier.frames[carrier.frames.length - 1].data.intent, 'source');
   });
+});
+
+it('holds later buffered emissions while an oversized patch awaits an atomic resnapshot', async () => {
+  const contract = compileContract({ $contract: '0.1', operations: { feed: { kind: 'subscribe', output: true,
+    policy: { stream: { resume: 'replay', maxPatchBytes: 10 } } } } });
+  const route = { op: contract.operations.feed, validateOutput: contract.operations.feed.output.validate };
+  const first = deferred(), second = deferred(); let calls = 0;
+  const source = makeSource({ rows: [] }, { replay: () => null });
+  source.sub.snapshotWithCursor = () => ++calls === 1 ? first.promise : second.promise;
+  const carrier = makeCarrier({ sync: true });
+  const runner = runSubscription(route, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+  source.emit({ seq: 2, patch: [{ op: 'add', path: '/rows/-', value: 2 }] });
+  source.emit({ seq: 3, patch: [] });
+  first.resolve({ value: { rows: [1] }, seq: 1 }); await tick();
+  assert.deepStrictEqual(carrier.log, ['snapshot:1']); assert.strictEqual(calls, 2);
+  second.resolve({ value: { rows: [1, 2] }, seq: 2 }); await tick();
+  assert.deepStrictEqual(carrier.log, ['snapshot:1', 'snapshot:2', 'patch:3']);
+  runner.stop(null); await runner.done;
 });

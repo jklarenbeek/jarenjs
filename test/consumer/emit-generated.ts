@@ -8,8 +8,6 @@
 export interface Patterned {
   [key: string]: number | string;
 }
-
-
 export interface Account {
   /**
    * Schema constraints this type cannot express: minLength=3
@@ -23,13 +21,9 @@ export interface Account {
   tags?: Array<string>;
   [key: string]: unknown;
 }
-
-
 export interface Strict {
   kind: string;
 }
-
-
 export type Label = string;
 
 export interface Node {
@@ -37,8 +31,6 @@ export interface Node {
   children?: Array<Node>;
   [key: string]: unknown;
 }
-
-
 export interface Config {
   host: string;
   /**
@@ -62,12 +54,9 @@ export interface ConfigInput {
   name: string | number | boolean;
   [key: string]: unknown;
 }
-
-
 export type Uuid = string;
 
 export type Id = Uuid;
-
 export interface Base {
   id: string;
   [key: string]: unknown;
@@ -75,21 +64,16 @@ export interface Base {
 
 
 export type Wide = Base & { extra: number; [key: string]: unknown; };
-
 /**
  * Schema constraints this type cannot express: minItems=1, maxItems=4
  */
 export type Pair = [string, number?, ...Array<unknown>];
-
 /**
  * Schema constraints this type cannot express: minItems=2
  */
 export type Exact = [string, number];
-
 export type Loose = { a: string; [key: string]: unknown; } | Array<unknown> | string | number | boolean | null;
-
 export type Empty = Record<string, never>;
-
 export interface Level {
   /**
    * Schema constraints this type cannot express: type="integer"
@@ -109,8 +93,6 @@ export interface LevelInput {
   level: 1 | 2 | 3 | string;
   [key: string]: unknown;
 }
-
-
 export interface Job {
   cmd: string;
   /**
@@ -132,8 +114,6 @@ export interface JobInput {
   retries?: number;
   [key: string]: unknown;
 }
-
-
 /**
  * The declared shape of this schema where normalization does not reach: inside anyOf/oneOf branches the normalizer neither materializes defaults nor coerces.
  */
@@ -168,7 +148,4 @@ export interface ChoiceInput {
   opt?: ChoiceOptAnyOf1Plain | string;
   [key: string]: unknown;
 }
-
-
 export type Anything = unknown;
-

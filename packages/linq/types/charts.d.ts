@@ -422,7 +422,6 @@ export interface MapChart {
 
 export type ChartDefinition = PieChart | BarChart | LineChart | ScatterChart | CandlestickChart | RadarChart | GaugeChart | BoxplotChart | HeatmapChart | TreemapChart | StreamgraphChart | SankeyChart | MapChart;
 
-
 export interface ChartDefinitions {
   pie: PieChart;
   bar: BarChart;

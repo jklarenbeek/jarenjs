@@ -2465,6 +2465,24 @@ id. Otherwise — `resume: "snapshot"`, or no `replay` — the stream starts
 with a fresh `snapshot` whose data carries `resumed: false` (`JC2095`,
 informational, never an outcome).
 
+**Initial replay snapshot.** A fresh replay-backed stream subscribes first and
+uses a bounded `replay(0, options)` page to learn the source watermark. Its snapshot
+id is the maximum of that watermark and buffered live sequences, rather than zero.
+The synchronous snapshot must reflect those changes, with synchronous notifications
+for any newer changes it includes. Reconnecting immediately after it replays only
+newer changes. A snapshot-only source retains initial id zero.
+
+A source whose snapshot and cursor cannot satisfy that synchronous contract can
+add `snapshotWithCursor({signal}) -> {value, seq}` (value or Promise), capturing
+both from the same consistent storage read. The binding uses it for the initial
+replay snapshot, retention resets and oversized-patch resnapshots; it buffers newer
+emissions until the pair settles and drops those already included. The sequence
+must be a nonnegative safe integer at least the requested reset/patch watermark.
+Malformed/rejected pairs terminate as source faults; late completion after stop is
+ignored. Existing `snapshot()`/`result` remains required for one-shot invocation
+and snapshot-only policy. The host owns the atomic read and committed sequence
+ordering; independently reading a document and cursor cannot prove this contract.
+
 **Bounds.** `serveHttp`/`servePort` take `streamLimits: { replay: {
 limit, maxBytes }, queue: { events, bytes } }` (defaults 256 / 1 MiB
 for both): a replay page asks for at most `replay.limit` emissions and

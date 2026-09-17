@@ -165,7 +165,7 @@
         "source": "lexical",
         "metric": "startupMs",
         "limit": 15000,
-        "value": 444.67205,
+        "value": 414.328533,
         "status": "pass"
       },
       "combined": [
@@ -200,7 +200,7 @@
         "source": "lexical",
         "metric": "coldIndexMs",
         "limit": 15000,
-        "value": 203.59411400000005,
+        "value": 192.244373,
         "status": "pass"
       },
       "combined": [
@@ -235,7 +235,7 @@
         "source": "lexical",
         "metric": "warmIndexMs",
         "limit": 15000,
-        "value": 201.36683900000003,
+        "value": 186.442615,
         "status": "pass"
       },
       "combined": [
@@ -270,7 +270,7 @@
         "source": "lexical",
         "metric": "queryMs",
         "limit": 100,
-        "value": 10.893334000000095,
+        "value": 9.055718999999954,
         "status": "pass"
       },
       "combined": [
@@ -1145,7 +1145,7 @@
         "source": "lexical",
         "metric": "startupMs",
         "limit": 45000,
-        "value": 3565.130837,
+        "value": 3022.101197,
         "status": "pass"
       },
       "combined": [
@@ -1180,7 +1180,7 @@
         "source": "lexical",
         "metric": "coldIndexMs",
         "limit": 45000,
-        "value": 1500.681254,
+        "value": 1219.6621,
         "status": "pass"
       },
       "combined": [
@@ -1215,7 +1215,7 @@
         "source": "lexical",
         "metric": "warmIndexMs",
         "limit": 45000,
-        "value": 1775.376098,
+        "value": 1531.590452,
         "status": "pass"
       },
       "combined": [
@@ -1250,7 +1250,7 @@
         "source": "lexical",
         "metric": "queryMs",
         "limit": 250,
-        "value": 98.4298490000001,
+        "value": 83.80016499999965,
         "status": "pass"
       },
       "combined": [
@@ -2011,7 +2011,7 @@
     "benchmark/adoption-journey-result.json": "cd28bf551ba449fa1d9318c5fa9be9ab3b0cfeab9a9dfb9bc827cdfc67dec570",
     "benchmark/relational-result.json": "0da4b08f0aa8cbec3c9571f003239b30335199e1bbfa9370654dff3a890aaf92",
     "benchmark/collection-result.json": "fb8fb61487fe5a53f0c8befcc52fc6fc0e218b89f72dbfb69481f922f3119e26",
-    "benchmark/lexical-result.json": "93b2bbf068f3dc997462d9ed17e0ffb692a97f9bcc9e81746f1e561cff949fd3",
+    "benchmark/lexical-result.json": "17cc493c6c3a471bfc04ae02e57750521f6e2950e88867ae29a4ee5418c9c9d8",
     "benchmark/formula-result.json": "8a4980c1381e18bb5d6042e61b7a0bc08b9a6a307fb331a1c59531fda85a945c",
     "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
     "benchmark/adoption-hosts-result.json": "5e12a98ed64959411826c01cc10de82b898734d426841e5e10b076e23f3fe1c0",

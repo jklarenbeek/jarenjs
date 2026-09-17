@@ -790,3 +790,13 @@ if (Object.keys(ruleEngine.metafile.inputs).some((file) => /packages\/(json|app|
 const formulaEngine = await build({ stdin: { contents: "export { compileFormula } from '@jarenjs/json/formula';", resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', minify: true, metafile: true });
 if (Object.keys(formulaEngine.metafile.inputs).some((file) => /components\/|packages\/(app|view|db|validate)/.test(file))) throw new Error('Formula engine reverses dependency direction');
 console.log(`Rule/formula tree shaking passed (${ruleEngine.outputFiles[0].contents.length}/${formulaEngine.outputFiles[0].contents.length} bytes).`);
+
+// Pure host utilities stay browser-safe; the explicit process owner is never
+// resolved through core's root or the search/stats/text barrels.
+const hostPrimitives = await build({ stdin: { contents:
+  "export {isFn} from '@jarenjs/core'; export {pairedBootstrap} from '@jarenjs/core/stats';"
+  + "export {reciprocalRankFusion} from '@jarenjs/core/search'; export {compileTextEdits} from '@jarenjs/core/text/edits';",
+  resolveDir: process.cwd() }, bundle: true, write: false, minify: true, metafile: true, platform: 'browser', format: 'esm' });
+if (Object.keys(hostPrimitives.metafile.inputs).some(file => file.endsWith('/process-node.js')))
+  throw new Error('Pure core browser imports resolved the optional Node process executor.');
+console.log('Browser host primitives exclude the Node process executor.');

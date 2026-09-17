@@ -1238,3 +1238,11 @@ For questions about the broader architecture, see the root [`ARCHITECTURE.md`](.
 `src/virtual/` owns DOM-free fixed and sparse measured collection geometry. It imports no presentation, app or storage owner; the visible component and injected coordinator live above it.
 
 `src/search/` owns lexical definition compilation, postings, rank statistics and derived snapshots. The [search contract](docs/SEARCH.md) fixes tokenizer, scoring and tie semantics. `src/range/` owns the structural resident array provider; app re-exports it and linq injects it without importing an upper layer.
+
+## Optional host primitives
+
+Stats resampling, search fusion and text-edit compilation remain pure core modules.
+`./process-node` is a separate explicit export and imports Node builtins; it is
+never re-exported by core's browser root. Guarded preparation shares its staged
+checks between synchronous and asynchronous runners. Hosts retain persistence,
+authority and filesystem confinement. See [host contracts](docs/HOST-PRIMITIVES.md).

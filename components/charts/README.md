@@ -426,7 +426,17 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/charts/styles/charts.css` | asset | — |
 | `@jarenjs/charts/schemas/chart-definition.schema.json` | schema | — |
 | `@jarenjs/charts/package.json` | metadata | — |
+| `@jarenjs/charts/transforms/finance-adapter` | JavaScript | declared |
 <!--/fact-->
 
 Author definitions in code with the typed [chart pen](../../packages/linq/docs/CHARTS-PEN.md),
 then pass its `.schema` directly to `compileChart`.
+
+`@jarenjs/charts/transforms/finance-adapter` exports `financeCharts(samples,
+{periodsPerYear, period?, signalPeriod?, sessions?, target?, benchmark?})`.
+Each sample supplies `{t, high, low, close, volume}` with a finite timestamp and
+positive close. It returns eleven separate named indicator chart pairs and a risk
+summary; null warm-up points are omitted and timestamps are preserved. Units are
+kept in separate charts. The optional benchmark is a return series aligned to the
+price-derived returns. Formula/period conventions are in
+[core finance](../../packages/core/docs/FINANCE.md).

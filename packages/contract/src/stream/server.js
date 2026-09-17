@@ -85,6 +85,7 @@ import { verdict } from '../http/wire.js';
  * runner awaits each before it reports completion. `replay` answers one
  * page per call, value or promise.
  * @typedef {{ result?: unknown, snapshot?: () => unknown,
+ *   snapshotWithCursor?: (options: { signal: AbortSignal }) => { value: unknown, seq: number } | Promise<{ value: unknown, seq: number }>,
  *   subscribe: (cb: (emission: any) => void) => (() => unknown),
  *   close: () => unknown,
  *   replay?: (after: number, options: ReplayOptions) => ReplayPage | null | undefined | Promise<ReplayPage | null | undefined>,
@@ -571,8 +572,8 @@ export function runSubscription(route, sub, hooks, options) {
    * @param {{ reset: boolean, earliestAvailable: number | null, highWatermark: number | null }} info
    * @returns {boolean} false when the stream ended instead
    */
-  function emitSnapshot(seq, info) {
-    const snap = readSnapshot(sub);
+  function emitSnapshot(seq, info, captured = undefined) {
+    const snap = captured === undefined ? readSnapshot(sub) : { ok: true, value: captured.value };
     if (!snap.ok) {
       fail('source', snap.cause);
       return false;
@@ -620,7 +621,8 @@ export function runSubscription(route, sub, hooks, options) {
     if (item.seq <= lastSeq && lastSeq !== 0) return; // already delivered, or reflected by a snapshot
     if (maxPatchBytes !== null && utf8ByteLength(JSON.stringify(item.patch)) > maxPatchBytes) {
       // the consumer swaps its document instead of patching it (§18.1)
-      emitSnapshot(item.seq, { reset: false, earliestAvailable: null, highWatermark: null });
+      ready = false;
+      seedSnapshot(item.seq, { reset: false, earliestAvailable: null, highWatermark: null });
       return;
     }
     lastSeq = item.seq;
@@ -643,7 +645,7 @@ export function runSubscription(route, sub, hooks, options) {
   /** Flush what was held while the initial events were decided. */
   function flush() {
     ready = true;
-    while (early.length > 0 && !finished) deliver(early.shift());
+    while (ready && early.length > 0 && !finished) deliver(early.shift());
   }
 
   /** The highest valid seq among the emissions held so far. */
@@ -656,7 +658,39 @@ export function runSubscription(route, sub, hooks, options) {
     return top;
   }
 
-  const wantsReplay = options.lastSeq !== null && policy.resume === 'replay' && typeof sub.replay === 'function';
+  // Async sources can bind the document and cursor to one storage read. A
+  // watermark fetched independently of that document cannot establish what
+  // the snapshot includes. Legacy sources must reflect the page watermark
+  // and all already delivered emissions in their synchronous snapshot.
+  function seedSnapshot(seq, info) {
+    if (typeof sub.snapshotWithCursor !== 'function') {
+      if (emitSnapshot(seq, info)) flush();
+      return;
+    }
+    const settled = pair => {
+      if (finished) return;
+      try {
+        if (!pair || !Number.isSafeInteger(pair.seq) || pair.seq < seq || !Object.hasOwn(pair, 'value'))
+          throw new TypeError('snapshotWithCursor must return a value and a nonregressing safe sequence');
+        if (emitSnapshot(pair.seq, { ...info, highWatermark: pair.seq }, pair)) flush();
+      }
+      catch (error) { fail('source', error); }
+    };
+    try {
+      const result = sub.snapshotWithCursor({ signal: abort.signal });
+      if (isThenable(result)) toPromise(result).then(settled, error => { if (!finished) fail('source', error); });
+      else settled(result);
+    }
+    catch (error) { fail('source', error); }
+  }
+
+  const replaySource = policy.resume === 'replay' && typeof sub.replay === 'function';
+  const freshReplay = options.lastSeq === null && replaySource;
+  if (freshReplay && typeof sub.snapshotWithCursor === 'function') {
+    seedSnapshot(0, { reset: false, earliestAvailable: null, highWatermark: null });
+    return runner;
+  }
+  const wantsReplay = replaySource && (options.lastSeq !== null || freshReplay);
   if (!wantsReplay) {
     // a fresh stream, or a resume the policy answers with a snapshot
     if (emitSnapshot(0, { reset: false, earliestAvailable: null, highWatermark: null })) flush();
@@ -689,7 +723,7 @@ export function runSubscription(route, sub, hooks, options) {
       if (result === null || result === undefined) {
         // the source cannot replay this cursor at all: a fresh snapshot,
         // resume refused (JC2095) — informational, never a fault
-        if (emitSnapshot(0, { reset: false, earliestAvailable: null, highWatermark: null })) flush();
+        seedSnapshot(0, { reset: false, earliestAvailable: null, highWatermark: null });
         return;
       }
       const fault = pageFault(result, after, limits.replay);
@@ -698,13 +732,19 @@ export function runSubscription(route, sub, hooks, options) {
         return;
       }
       const p = /** @type {ReplayPage} */ (result);
+      if (freshReplay) {
+        const effective = Math.max(p.highWatermark, heldSeq());
+        seedSnapshot(effective, { reset: false, earliestAvailable: p.earliestAvailable, highWatermark: effective });
+        return;
+      }
       if (p.resetRequired) {
         // a total refusal: no suffix, a fresh snapshot instead. Its id
         // is the higher of the log's watermark and anything the live
         // source already delivered into the hold, because the snapshot
         // read now reflects every one of those emissions (§17.1)
         const effective = Math.max(p.highWatermark, heldSeq());
-        if (emitSnapshot(effective, { reset: true, earliestAvailable: p.earliestAvailable, highWatermark: effective })) flush();
+        seedSnapshot(typeof sub.snapshotWithCursor === 'function' ? p.highWatermark : effective,
+          { reset: true, earliestAvailable: p.earliestAvailable, highWatermark: effective });
         return;
       }
       const goal = target === null ? p.highWatermark : target;
@@ -735,7 +775,7 @@ export function runSubscription(route, sub, hooks, options) {
     }
     else settle(answer);
   }
-  page(/** @type {number} */ (options.lastSeq), null);
+  page(options.lastSeq ?? 0, null);
   return runner;
 }
 

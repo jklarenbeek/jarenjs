@@ -102,7 +102,6 @@ export interface ProductRemoveInput {
 
 
 export type ProductRemoveOutput = unknown;
-
 /** Every invokable public operation by id: its kind, input and output types, and the error codes it declares. */
 export interface Operations {
   'catalog.load': { kind: 'read'; input: CatalogLoadInput; output: CatalogLoadOutput; errors: 'stale' };

@@ -10,7 +10,7 @@ it('lexical measurements pin their source and preserve every frozen answer and r
   const manifest = readAdoption('manifest.json'); verifyFreeze(manifest);
   const report = JSON.parse(readFileSync(new URL('../../benchmark/lexical-result.json', import.meta.url), 'utf8'));
   assert.equal(report.freezeHash, manifest.freezeHash); assert.equal(report.format, 'lexical-measurements/1');
-  assert.equal(Object.keys(report.sourceHashes).length, 8);
+  assert.equal(Object.keys(report.sourceHashes).length, 11);
   for (const [file, hash] of Object.entries(report.sourceHashes))
     assert.equal(createHash('sha256').update(readFileSync(new URL(`../../${file}`, import.meta.url))).digest('hex'), hash, `Re-measure changed lexical source: ${file}`);
   for (const consumer of manifest.consumers) {

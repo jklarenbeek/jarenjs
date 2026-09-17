@@ -201,5 +201,3 @@ export interface EntityMetaMap {
   Label: { doc: Label; input: LabelInput; key: string; relations: { }; };
   Grade: { doc: Grade; input: GradeInput; key: { student: string; course: string; }; relations: { }; };
 }
-
-

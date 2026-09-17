@@ -17,7 +17,7 @@ describe('emitted schema agreement', () => {
     assert.deepEqual(rootType(schema), {
       kind: 'union', options: [{ kind: 'primitive', primitive: 'string' }, { kind: 'primitive', primitive: 'null' }],
     });
-    assert.equal(emitTypeScript(schema, { banner: false }), 'export type Root = string | null;\n\n');
+    assert.equal(emitTypeScript(schema, { banner: false }), 'export type Root = string | null;\n');
   });
 
   it('carries required members even without a properties declaration', () => {

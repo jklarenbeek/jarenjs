@@ -305,6 +305,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/schedule` | JavaScript | declared |
 | `@jarenjs/core/check` | JavaScript | declared |
 | `@jarenjs/core/guarded` | JavaScript | declared |
+| `@jarenjs/core/process-node` | JavaScript | declared |
 <!--/fact-->
 
 ## Development
@@ -328,3 +329,9 @@ copies JSON before validating/applying/planning, serializes its own commits,
 and pairs optional snapshot/restore hooks. A failed commit attempts restoration
 once and retains both original and restoration failures. External writers must
 share the host's serialization policy.
+
+`prepareAsync` and `commit` await candidate validation and commit planning;
+synchronous `prepare` refuses asynchronous hooks. See [host primitives](docs/HOST-PRIMITIVES.md)
+for paired bootstrap/permutation inference, pure anchored file proposals with
+atomic groups, and the explicit Node-only named process executor. Financial chart
+formulas and their conventions are documented in [FINANCE](docs/FINANCE.md).

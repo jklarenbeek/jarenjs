@@ -752,6 +752,10 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       cpSync(join(root, 'test/view/dom.stub.js'), join(consumerDir, 'test/view/dom.stub.js'));
       program += "await import('./test/consumer/studio-runtime.js');\n";
     }
+    if (['@jarenjs/core', '@jarenjs/contract', '@jarenjs/charts'].includes(name)) {
+      cpSync(join(root, 'test/consumer/host-primitives-' + name.split('/')[1] + '.js'), join(consumerDir, 'host-primitives.js'));
+      program += "await import('./host-primitives.js');\n";
+    }
     const programFile = join(consumerDir, 'consumer.mjs');
     writeFileSync(programFile, program);
 
@@ -770,6 +774,8 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     writeFileSync(join(consumerDir, 'consumer.ts'),
       subpaths.map((s, i) => `import * as m${i} from ${JSON.stringify(s)};\nvoid m${i};`).join('\n')
       + '\n' + (SEMANTIC_SNIPPETS[name] ?? ''));
+    const hostPrimitives = ['@jarenjs/core', '@jarenjs/contract', '@jarenjs/charts'].includes(name);
+    if (hostPrimitives) cpSync(join(root, 'test/consumer/host-primitives-' + name.split('/')[1] + '.ts'), join(consumerDir, 'host-primitives.ts'));
     if (name === '@jarenjs/db')
       cpSync(join(root, 'test/consumer/db-postgres.ts'), join(consumerDir, 'postgres.ts'));
     writeFileSync(join(consumerDir, 'tsconfig.json'), JSON.stringify({
@@ -778,7 +784,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         module: 'nodenext', moduleResolution: 'nodenext',
         target: 'esnext', lib: ['esnext', 'dom'],
       },
-      files: name === '@jarenjs/db' ? ['consumer.ts', 'postgres.ts'] : ['consumer.ts'],
+      files: ['consumer.ts', ...(name === '@jarenjs/db' ? ['postgres.ts'] : []), ...(hostPrimitives ? ['host-primitives.ts'] : [])],
     }));
     const tsc = spawnSync(process.execPath, [tscBin, '--noEmit', '-p', consumerDir],
       { cwd: consumerDir, encoding: 'utf8' });
