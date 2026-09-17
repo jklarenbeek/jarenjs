@@ -126,7 +126,7 @@ describe('schema registration', () => {
       try { validator.compile({ $ref: 'https://example.test/recursive' }); }
       catch (error) { console.log(error.message.includes('recursive schema compilation')); }
       console.log(new JarenValidator().compile({type:'string'})('ok'));
-    `], { encoding: 'utf8', timeout: 3000 });
+    `], { encoding: 'utf8', timeout: 3000, env: { ...process.env, FORCE_COLOR: '0' } });
     assert.equal(result.status, 0, result.error?.message ?? result.stderr);
     assert.equal(result.stdout, 'true\ntrue\n');
   });
