@@ -110,8 +110,12 @@ function render(tokens) {
   return out;
 }
 
-/** Reorder only ordinary named columns with no order-sensitive inline clauses.
- * Table constraints and every token inside a definition retain their order.
+/** Reorder named columns without reordering anything order-sensitive: a column
+ * with an order-sensitive inline clause keeps its place RELATIVE to the other
+ * such columns, and the plain columns around them sort freely — so a column a
+ * migration appended (`ADD COLUMN` lands after the document) compares equal to
+ * a fresh build, while two swapped foreign keys or checks never do. Table
+ * constraints and every token inside a definition retain their order.
  * Unrecognized table shapes keep strict order rather than guessing equivalence.
  * @param {SqlToken[]} tokens @returns {SqlToken[]} */
 function namedColumnOrder(tokens) {
@@ -148,22 +152,25 @@ function namedColumnOrder(tokens) {
   const columns = items.slice(0, split), constraints = items.slice(split);
   if (constraints.some((item) => !constraint(item)) || columns.some((item) => !name(item[0]))) return tokens;
   // Default evaluation and check/conflict/cascade order can change values,
-  // errors or surviving rows even when every access names its columns.
-  if (columns.some((item) => item.slice(1).some((token) =>
-    ['DEFAULT', 'CHECK', 'UNIQUE', 'REFERENCES', 'COLLATE', 'CONFLICT'].some((word) => isWord(token, word))))) return tokens;
-  columns.sort((a, b) => {
+  // errors or surviving rows even when every access names its columns: those
+  // columns keep their relative order. A plain column evaluates nothing, so
+  // where it sits among them changes nothing a by-name access can observe.
+  const ordered = (/** @type {SqlToken[]} */ item) => item.slice(1).some((token) =>
+    ['DEFAULT', 'CHECK', 'UNIQUE', 'REFERENCES', 'COLLATE', 'CONFLICT'].some((word) => isWord(token, word)));
+  const plain = columns.filter((item) => !ordered(item)).sort((a, b) => {
     const left = render(a), right = render(b);
     return left < right ? -1 : left > right ? 1 : 0;
   });
-  const reordered = [...columns, ...constraints];
+  const reordered = [...columns.filter(ordered), ...plain, ...constraints];
   return [...tokens.slice(0, open + 1), ...reordered.flatMap((item, i) =>
     i === 0 ? item : [{ kind: 'symbol', text: ',' }, ...item]), ...tokens.slice(close)];
 }
 
 /** A conservative declaration identity, preserving physical column order by default.
  * `ignore` is for managed tables whose consumers address columns by name. Index,
- * trigger and table-constraint order is always preserved; order-sensitive inline
- * constraints and unfamiliar table structures retain strict column order too.
+ * trigger and table-constraint order is always preserved; columns with
+ * order-sensitive inline constraints keep their order relative to each other,
+ * and unfamiliar table structures retain strict column order.
  * Quoted bytes are exact. Comments and ordinary token whitespace are formatting.
  * @param {string} sql
  * @param {DeclaredSqlOptions} [options]

@@ -159,7 +159,7 @@ it never joins `required` (`src/model/relation.js:44-46`).
 | Method | Emits | `InferMeta` reading | Status |
 |---|---|---|---|
 | `rel.hasMany(to, { via, onDelete })` | `relation: { to, many: true, via, onDelete }` — one-to-many; `via` names the foreign key on the TARGET entity | `doc`: `to[]`, optional; dropped from `input`; `relations[name] = { entity: to, doc, many: true }` | native |
-| `rel.hasOne(to, { via, onDelete })` | `relation: { to, via, onDelete }` — one-to-one, and the many-to-one side; `via` names the foreign key on the DECLARING entity | `doc`: `to`, optional; dropped from `input`; `many: false` | native |
+| `rel.hasOne(to, { via, onDelete })` | `relation: { to, via, onDelete }` — one-to-one, and the many-to-one side of a `hasMany` pair; `via` names the foreign key on the DECLARING entity. A lone `hasOne` is one-to-one (its foreign key is UNIQUE): for many-to-one, declare the parent's `hasMany` with the same `via` | `doc`: `to`, optional; dropped from `input`; `many: false` | native |
 | `rel.belongsToMany(to, { through? })` | `relation: { to, many: true, through? }` — many-to-many through a join table | `doc`: `to[]`, optional; `input`: `Array<key \| doc>`, optional; `many: true` | native |
 
 `onDelete` is REQUIRED on the two foreign-key kinds and never defaulted

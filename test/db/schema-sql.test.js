@@ -69,6 +69,18 @@ describe('literal-aware declaration identity', () => {
     assert.notDeepEqual(results[0].shape, results[1].shape);
   });
 
+  it('managed order moves plain columns around order-sensitive ones, never those past each other', () => {
+    const fresh = 'CREATE TABLE "t"("id" TEXT PRIMARY KEY,"n" INTEGER,"o" TEXT REFERENCES "p"("id") ON DELETE RESTRICT,'
+      + '"q" TEXT REFERENCES "r"("id") ON DELETE CASCADE,"doc" BLOB NOT NULL)STRICT';
+    const appended = 'CREATE TABLE "t"("id" TEXT PRIMARY KEY,"o" TEXT REFERENCES "p"("id") ON DELETE RESTRICT,'
+      + '"q" TEXT REFERENCES "r"("id") ON DELETE CASCADE,"doc" BLOB NOT NULL,"n" INTEGER)STRICT';
+    const swapped = 'CREATE TABLE "t"("id" TEXT PRIMARY KEY,"n" INTEGER,"q" TEXT REFERENCES "r"("id") ON DELETE CASCADE,'
+      + '"o" TEXT REFERENCES "p"("id") ON DELETE RESTRICT,"doc" BLOB NOT NULL)STRICT';
+    assert.equal(comparableDeclaredSql(appended, managed), comparableDeclaredSql(fresh, managed));
+    assert.notEqual(comparableDeclaredSql(swapped, managed), comparableDeclaredSql(fresh, managed));
+    assert.notEqual(comparableDeclaredSql(appended), comparableDeclaredSql(fresh), 'preserve stays strict');
+  });
+
   it('ignores actual comments and formatting while preserving token boundaries', () => {
     assert.equal(normalizeDeclaredSql('CREATE /* header */ TABLE IF NOT EXISTS "t" ( "a" TEXT,\n"b" INTEGER ) STRICT'),
       comparableDeclaredSql('CREATE TABLE "t"("a" TEXT,"b" INTEGER)STRICT'));
@@ -160,7 +172,10 @@ describe('explicit column-order compatibility', () => {
       comparableDeclaredSql(`CREATE TABLE t(${b},${a})`, managed));
     assert.notEqual(comparableDeclaredSql('CREATE TABLE t AS SELECT a,b FROM source', managed),
       comparableDeclaredSql('CREATE TABLE t AS SELECT b,a FROM source', managed));
-    assert.notEqual(comparableDeclaredSql('CREATE TABLE t(a TEXT CHECK(a != \'\'),b TEXT)', managed),
+    assert.notEqual(comparableDeclaredSql('CREATE TABLE t(a TEXT CHECK(a != \'\'),b TEXT CHECK(b != a))', managed),
+      comparableDeclaredSql('CREATE TABLE t(b TEXT CHECK(b != a),a TEXT CHECK(a != \'\'))', managed));
+    // a plain column evaluates nothing: it may move around a checked one
+    assert.equal(comparableDeclaredSql('CREATE TABLE t(a TEXT CHECK(a != \'\'),b TEXT)', managed),
       comparableDeclaredSql('CREATE TABLE t(b TEXT,a TEXT CHECK(a != \'\'))', managed));
   });
 
@@ -179,9 +194,12 @@ describe('explicit column-order compatibility', () => {
     assert.match(results[1].error, /integer overflow/);
     assert.notEqual(results[0].identity, results[1].identity);
     assert.notDeepEqual(results[0].shape, results[1].shape);
-    // The conservative policy preserves every DEFAULT clause; it does not
-    // maintain a second expression classifier to infer which ones are pure.
-    assert.notEqual(comparableDeclaredSql('CREATE TABLE t(a INTEGER DEFAULT 1,b INTEGER)', managed),
+    // The conservative policy preserves the relative order of every DEFAULT
+    // clause; it does not maintain a second expression classifier to infer
+    // which ones are pure. A plain column between them evaluates nothing.
+    assert.notEqual(comparableDeclaredSql('CREATE TABLE t(a INTEGER DEFAULT 1,b INTEGER DEFAULT 2)', managed),
+      comparableDeclaredSql('CREATE TABLE t(b INTEGER DEFAULT 2,a INTEGER DEFAULT 1)', managed));
+    assert.equal(comparableDeclaredSql('CREATE TABLE t(a INTEGER DEFAULT 1,b INTEGER)', managed),
       comparableDeclaredSql('CREATE TABLE t(b INTEGER,a INTEGER DEFAULT 1)', managed));
   });
 });

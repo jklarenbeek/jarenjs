@@ -678,9 +678,12 @@ proof.
 Managed named-column comparison explicitly selects
 `{ columnOrder: 'ignore' }`. It may reorder ordinary column declarations,
 but retains table constraints and falls back to strict order for unfamiliar
-forms or inline `DEFAULT`, `CHECK`, `UNIQUE`, `REFERENCES`, `COLLATE` and
-`CONFLICT` clauses. Even static defaults retain order; expression purity is
-not inferred. Direct public comparison and
+forms. Columns with an inline `DEFAULT`, `CHECK`, `UNIQUE`, `REFERENCES`,
+`COLLATE` or `CONFLICT` clause keep their order relative to each other, and an
+ordinary column may sit anywhere among them: it evaluates nothing, so an
+appended `ADD COLUMN` on a table with foreign keys compares equal to a fresh
+build while two swapped foreign keys never do. Even static defaults retain
+their relative order; expression purity is not inferred. Direct public comparison and
 complete physical targets default to `{ columnOrder: 'preserve' }`.
 Exact saved source snapshots and checksums never use this relaxed policy.
 

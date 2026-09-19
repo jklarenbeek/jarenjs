@@ -378,8 +378,9 @@ the names and types:
 
 Managed named-column comparison explicitly permits safe column reordering:
 SQLite's `ALTER TABLE … ADD COLUMN` appends, and these consumers address
-columns by name. The comparison retains constraint order and stays strict
-for inline defaults, other order-sensitive clauses or unfamiliar forms. Complete reviewed
+columns by name. The comparison retains constraint order, keeps columns with
+inline defaults or other order-sensitive clauses in their order relative to
+each other, and stays strict for unfamiliar forms. Complete reviewed
 physical targets and direct `schemaShapeOf`/`comparableDeclaredSql` calls
 preserve physical column order by default. Literal and quoted-identifier
 bytes always remain significant; whitespace inside them is never formatting.
@@ -1704,7 +1705,14 @@ facing a foreign-key relation is `JD0031`.
   inferred.
 - **one-to-one** — `{ to, via, onDelete }` (no `many`): `via` names
   the foreign-key property on the DECLARING entity, and its column is
-  unique.
+  unique. A lone declaration is always one-to-one; the same key is the
+  many-to-one side only when the target declares the inverse
+  `{ many: true, via }`, which drops the uniqueness.
+
+Every foreign-key column is indexed (unique for a one-to-one). An
+`index` or `unique` declared on that column is the SAME index, never a
+second one: `unique` wins, and `unique` on the key of a one-to-many
+edge is `JD0031` (children share their parent).
 - **many-to-many** — `{ to, many: true, through? }` (no `via`): a
   join table, named `through` when given, otherwise the deterministic
   `<A>_<B>` with the entity names sorted — implicit names are exactly

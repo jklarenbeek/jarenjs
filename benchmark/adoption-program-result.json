@@ -173,14 +173,14 @@
           "host": "node",
           "metric": "startupMs",
           "limit": 15000,
-          "value": 474.390981,
+          "value": 373.29629099999994,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "startupMs",
           "limit": 15000,
-          "value": 399.590952,
+          "value": 286.21972000000005,
           "status": "pass"
         }
       ]
@@ -873,14 +873,14 @@
           "host": "node",
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 66548512,
+          "value": 66695000,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 50379649,
+          "value": 51054226,
           "status": "pass"
         }
       ]
@@ -908,14 +908,14 @@
           "host": "node",
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 285261824,
+          "value": 286883840,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 248676352,
+          "value": 249397248,
           "status": "pass"
         }
       ]
@@ -978,14 +978,14 @@
           "host": "node",
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.22499800000014147,
+          "value": 0.19942100000002938,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.8137739999999667,
+          "value": 0.3309150000000045,
           "status": "pass"
         }
       ]
@@ -1153,14 +1153,14 @@
           "host": "node",
           "metric": "startupMs",
           "limit": 45000,
-          "value": 3561.9398399999995,
+          "value": 2659.140443,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "startupMs",
           "limit": 45000,
-          "value": 2843.526344,
+          "value": 2088.47408,
           "status": "pass"
         }
       ]
@@ -1853,14 +1853,14 @@
           "host": "node",
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 390718392,
+          "value": 394915752,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 334968235,
+          "value": 335573920,
           "status": "pass"
         }
       ]
@@ -1888,14 +1888,14 @@
           "host": "node",
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 903028736,
+          "value": 901742592,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 1003401216,
+          "value": 1002164224,
           "status": "pass"
         }
       ]
@@ -1958,14 +1958,14 @@
           "host": "node",
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.29562999999961903,
+          "value": 0.22565000000031432,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.39300100000036764,
+          "value": 0.32759900000019115,
           "status": "pass"
         }
       ]
@@ -2008,13 +2008,13 @@
   ],
   "sourceHashes": {
     "benchmark/adoption-result.json": "dc51288d0e955ee9ccd029816ff984c2b1e39d3f8fda126b868252eab0d4c08b",
-    "benchmark/adoption-journey-result.json": "cd28bf551ba449fa1d9318c5fa9be9ab3b0cfeab9a9dfb9bc827cdfc67dec570",
+    "benchmark/adoption-journey-result.json": "470dc3beab89544bc5e7f7334bf7d809a01dbbb46099d0d2fb075274c3330fcd",
     "benchmark/relational-result.json": "0da4b08f0aa8cbec3c9571f003239b30335199e1bbfa9370654dff3a890aaf92",
     "benchmark/collection-result.json": "fb8fb61487fe5a53f0c8befcc52fc6fc0e218b89f72dbfb69481f922f3119e26",
     "benchmark/lexical-result.json": "17cc493c6c3a471bfc04ae02e57750521f6e2950e88867ae29a4ee5418c9c9d8",
     "benchmark/formula-result.json": "8a4980c1381e18bb5d6042e61b7a0bc08b9a6a307fb331a1c59531fda85a945c",
     "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
-    "benchmark/adoption-hosts-result.json": "5e12a98ed64959411826c01cc10de82b898734d426841e5e10b076e23f3fe1c0",
+    "benchmark/adoption-hosts-result.json": "fa85a58c1e243749c160fe3298a7dee0ff30efc8799a0d164e173aca1e0d4cb9",
     "benchmark/durable-result.json": "f158c3968f5696035353335c93c2f8a5d112c485f6ee7028232618ce93ebc45f",
     "benchmark/adoption-program.js": "65641927fba330df879d6a0fcbc4e4298141d4e0de8dce33a2f9af75fb64f5cd",
     "scripts/lib/adoption-program.js": "7ee3ff433e68674b098ef2a1937dc2ce084dcba6bd2fdd80c8aad046ff4bd930"

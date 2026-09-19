@@ -877,23 +877,27 @@ export function planEntity(name, entityMapping, entities, dialect) {
     columns,
     compositeKey: singleKey ? undefined : entityMapping.keys,
   })];
-  const expectedIndexes = [];
-  for (const index of entityMapping.indexes) {
-    const indexName = `${name}_${index.property}`;
-    createSql.push(dialect.ddl.createIndex({
-      name: indexName, table: name, columns: [index.property], unique: index.unique,
-    }));
-    expectedIndexes.push({ name: indexName, unique: index.unique, columns: [index.property] });
-  }
+  // one index per column, keyed by its name: a declared `index`/`unique`
+  // on a foreign-key column and the key's own index are ONE index —
+  // planned twice, the second CREATE INDEX failed and a reopen counted
+  // two declared indexes against one physical. Unique when either asks
+  /** @type {Map<string, boolean>} */
+  const indexUnique = new Map();
+  for (const index of entityMapping.indexes)
+    indexUnique.set(index.property, index.unique);
   for (const fk of entityMapping.foreignKeys) {
     // every foreign key gets an index: unique for a strict one-to-one,
     // plain otherwise — the correlated graph-load subqueries probe the
     // child's via column once per parent
-    const indexName = `${name}_${fk.column}`;
+    indexUnique.set(fk.column, (indexUnique.get(fk.column) ?? false) || fk.unique);
+  }
+  const expectedIndexes = [];
+  for (const [column, unique] of indexUnique) {
+    const indexName = `${name}_${column}`;
     createSql.push(dialect.ddl.createIndex({
-      name: indexName, table: name, columns: [fk.column], unique: fk.unique,
+      name: indexName, table: name, columns: [column], unique,
     }));
-    expectedIndexes.push({ name: indexName, unique: fk.unique, columns: [fk.column] });
+    expectedIndexes.push({ name: indexName, unique, columns: [column] });
   }
 
   return {

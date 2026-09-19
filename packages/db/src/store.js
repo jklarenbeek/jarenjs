@@ -566,10 +566,16 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
                 // identical and deletes different rows
                 const expectedFks = (plan.expectedForeignKeys ?? []);
                 /** @param {any} fk */
+                // the model spells its actions in camelCase (`setNull`),
+                // the catalog in SQL (`SET NULL`): upper-casing alone
+                // read every set-null key as a changed model on reopen
+                /** @param {any} action */
+                const sqlAction = (action) => dialect.comparableForeignKeyAction(
+                  dialect.foreignKeyActionSql(action ?? 'NO ACTION'));
                 const describe = (fk) => `${fk.column} -> ${fk.references}`
                   + `${fk.targetColumn === null ? '' : `(${fk.targetColumn})`}`
-                  + ` ON DELETE ${dialect.comparableForeignKeyAction(String(fk.onDelete ?? 'NO ACTION').toUpperCase())}`
-                  + ` ON UPDATE ${dialect.comparableForeignKeyAction(String(fk.onUpdate ?? 'NO ACTION').toUpperCase())}`;
+                  + ` ON DELETE ${sqlAction(fk.onDelete)}`
+                  + ` ON UPDATE ${sqlAction(fk.onUpdate)}`;
                 const actual = fkRows.map((row) => describe({
                   column: String(row.source_column),
                   references: String(row.target),
@@ -1528,6 +1534,31 @@ export function openStore(model, options) {
               });
             }
           }
+          // a session changeset carries values in the PHYSICAL column
+          // order; a column added by `ALTER TABLE … ADD COLUMN` sits after
+          // `doc`, so the planned order misread every later value. Align
+          // each entity shape to the table as it stands (a shape the
+          // table does not match by name keeps the planned order)
+          const alignShapes = (names, i = 0) => (i >= names.length ? null
+            : chain(connection.prepare(dialect.introspect.columns(names[i])), (statement) =>
+              chain(statement.all([]), (rows) => {
+                const shape = captureShapes.get(names[i]);
+                const byName = new Map(shape.columns.map((column) => [column.name, column]));
+                const physical = rows.filter((row) => Number(row.hidden) === 0)
+                  .map((row) => String(row.name));
+                if (physical.length === shape.columns.length
+                  && physical.every((columnName) => byName.has(columnName))) {
+                  const keyNames = shape.keyIndexes.map((index) => shape.columns[index].name);
+                  shape.columns = physical.map((columnName) => byName.get(columnName));
+                  shape.keyIndexes = keyNames.map((key) => physical.indexOf(key));
+                  shape.docIndex = physical.indexOf('doc');
+                }
+                return alignShapes(names, i + 1);
+              })));
+          const aligned = captureMode === 'session'
+            ? alignShapes([...captureShapes.keys()]
+              .filter((table) => captureShapes.get(table).kind === 'entity'))
+            : null;
           // every first-open object — the change log and its state row
           // here, the job tables below — is created or verified under
           // the same immediate bracket as the collections' shape, so two
@@ -1536,21 +1567,28 @@ export function openStore(model, options) {
           // no lock
           const firstOpen = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
           let replicationEngine = null;
-          const capture = captureMode === 'none' ? null : createCaptureEngine({
-            connection,
-            bracket: firstOpen,
-            shapes: captureShapes,
-            mode: captureMode,
-            log: captureRequested.log === true
-              || (captureRequested.log !== undefined && captureRequested.log !== false),
-            retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
-            now: runtime.now,
-            beforeCommit: (patch, context) => replicationEngine?.commit(patch, context),
+          // the engine is built only once the shapes are aligned: it
+          // decodes by position from its first write
+          /** @type {any} */
+          let capture = null;
+          const captureReady = chain(aligned, () => {
+            capture = captureMode === 'none' ? null : createCaptureEngine({
+              connection,
+              bracket: firstOpen,
+              shapes: captureShapes,
+              mode: captureMode,
+              log: captureRequested.log === true
+                || (captureRequested.log !== undefined && captureRequested.log !== false),
+              retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
+              now: runtime.now,
+              beforeCommit: (patch, context) => replicationEngine?.commit(patch, context),
+            });
+            return capture === null ? null : capture.ready;
           });
           // Finish capture's first-open transaction before constructing the
           // jobs engine, whose constructor starts another first-open bracket.
           // Awaiting both at the end lets asynchronous hosts overlap BEGINs.
-          return chain(capture === null ? null : capture.ready, () => {
+          return chain(captureReady, () => {
           /** @type {Map<string, any>} */
           const cores = new Map();
           const coreFor = (name) => {

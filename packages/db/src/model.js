@@ -641,6 +641,17 @@ function mappingOf(model, entities) {
         foreignKeys.push(fk);
       }
     }
+    // a foreign key and a declared index on its column are ONE index
+    // (unique when either asks) — except `unique` on a key the many side
+    // shares: children share the parent, so the column cannot be unique
+    for (const fk of foreignKeys) {
+      if (fk.unique || !indexes.some((index) => index.property === fk.column && index.unique))
+        continue;
+      throw new DbCompileError('JD0031',
+        `'${entity.name}.${fk.column}' is declared unique, but it is the foreign key of a `
+        + 'one-to-many relation, whose children share their parent',
+        entity.properties.get(fk.column)?.docPath ?? `/entities/${entity.name}`);
+    }
     mapping.entities[entity.name] = {
       table: entity.name,
       keys: entity.keys,

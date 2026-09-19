@@ -562,6 +562,14 @@ export function createDialect(spec) {
     replication: spec.replication,
     comparableForeignKeyAction: spec.comparableForeignKeyAction ?? ((action) => action),
     /**
+     * A foreign-key action in this engine's SQL spelling: the model's
+     * camelCase (`setNull`) through the same map the DDL renders with; a
+     * catalog spelling (`SET NULL`, `NO ACTION`) passes through upper-cased.
+     * @param {string} action
+     * @returns {string}
+     */
+    foreignKeyActionSql: (action) => foreignKeyActions[action] ?? String(action).toUpperCase(),
+    /**
      * The expression a DERIVED column is generated from: the member at
      * the index path, as JSON text, handed to the deterministic
      * function that computes the cell or the box edge.
