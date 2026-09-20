@@ -47,9 +47,26 @@ const BLOCK = ['key', 'unique', 'index', 'default', 'column', 'relation', 'versi
  * scalar and the pen cannot tell.
  */
 const NEVER_COLUMN = new Set([
-  'object', 'record', 'array', 'tuple', 'enum', 'literal',
+  'object', 'record', 'array', 'tuple', 'literal',
   'any', 'never', 'union', 'discriminated', 'when',
 ]);
+
+/**
+ * An `enumOf()` of ONE scalar type is column-mapped — §9.3's `enum` of
+ * scalars row, a column plus a `CHECK (column IN (…))` — so it takes
+ * `index`/`unique` like any scalar. A MIXED enum has no one column
+ * type and stays in the document, so it is refused like an object.
+ * `null` is the set's nullability rather than a type of its own.
+ * @param {any} values
+ * @returns {boolean}
+ */
+function isScalarEnum(values) {
+  if (!Array.isArray(values)) return false;
+  const present = values.filter((value) => value !== null);
+  if (present.length === 0) return false;
+  const kinds = new Set(present.map((value) => (typeof value === 'number' ? 'number' : typeof value)));
+  return kinds.size === 1 && ['string', 'number', 'boolean'].includes([...kinds][0]);
+}
 
 /** Whether a builder is a string with a date or date-time format. */
 function isDateString(builder) {
@@ -68,6 +85,12 @@ function isDateString(builder) {
  */
 function requireColumnable(builder, what) {
   const kind = builder.state.kind;
+  if (kind === 'enum' && !isScalarEnum(builder.state.values)) {
+    throw new LinqBuildError('JL0102',
+      `${what}() applies to a member with a column of its own — this enum mixes JSON `
+      + 'types, so it has no one column type and stays in the JSON document; an enum of '
+      + 'one scalar type is column-mapped and takes it');
+  }
   if (NEVER_COLUMN.has(kind)) {
     throw new LinqBuildError('JL0102',
       `${what}() applies to a member with a column of its own — this one's kind is `

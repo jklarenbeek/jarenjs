@@ -164,7 +164,7 @@ optional payload schema.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9-]*$`, or an entry that is not a plain object, `JL0101` |
+| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9_-]*$`, or an entry that is not a plain object, `JL0101` |
 | `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 100–599, `JL0101` |
 
 `error()` is a checked declaration, and the same two members written by
@@ -829,7 +829,7 @@ Raised at the door of whichever function received it.
 | `read({ output: { type: 'string', default: () => 1 } })` | `the schema at /operations/a/output received a Object instance, which is not JSON — a document carries null, booleans, finite numbers (never -0), strings, arrays and plain objects, and nothing else` | a JSON value for the default |
 | `read({ output: 42 })` | `a schema is an object, true or false — got 42` | a builder, an object, or `true` |
 | `errors: 42` | `errors is a plain object of code → error(), got 42` | a plain object |
-| `errors: { Bad: error({}) }` | `an error code matches ^[a-z][a-z0-9-]*$, got 'Bad'` | `{ bad: error({}) }` |
+| `errors: { Bad: error({}) }` | `an error code matches ^[a-z][a-z0-9_-]*$, got 'Bad'` | `{ bad: error({}) }` |
 | `errors: { bad: 42 }` | `errors.bad is error({ status?, schema? }), got 42` | `error({ status: 400 })` |
 | `error({ code: 'x' })` | `error() does not take 'code' — it takes status, schema` | the code is the map's key |
 | `error({ status: 99 })` | `error() status is an integer in 100–599, got 99` | `error({ status: 409 })` |

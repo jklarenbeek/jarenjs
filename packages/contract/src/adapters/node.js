@@ -66,7 +66,7 @@ const LINGER_MS = 1000;
  * response already ended or destroyed refuses the write instead of
  * emitting `write after end`.
  * @typedef {Object} NodeResponseLike
- * @property {(status: number, headers?: Record<string, string>) => unknown} writeHead
+ * @property {(status: number, headers?: Record<string, string | readonly string[]>) => unknown} writeHead
  * @property {(body?: string | Uint8Array, callback?: () => void) => unknown} end
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} on
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} [once]
@@ -311,7 +311,9 @@ function headersOf(req) {
  * @param {(() => void) | undefined} done
  */
 function send(res, response, close, done) {
-  /** @type {Record<string, string>} */
+  // a list value stays a list: `writeHead` emits one field line per
+  // item, which is how `set-cookie` repeats
+  /** @type {Record<string, string | readonly string[]>} */
   const headers = { ...response.headers };
   if (typeof response.stream === 'function') {
     // an SSE response: headers out immediately, then the pump writes

@@ -297,6 +297,32 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
+- [ ] **Entity-level indexes: composite, partial, expression.** An
+  entity's index vocabulary is one single-column index per property
+  marked `unique`/`index`; a collection already declares ordered
+  multi-path indexes, `unique`, and expression indexes. A scheduling
+  rule such as `UNIQUE (employeeId, localStartDate) WHERE status IN
+  (…)` — one active row per owner per day — can therefore not be
+  declared on an entity at all, and §13's invariants cannot express it
+  either, because a rule sees `{ old, new, op }` and never another
+  row. Until it exists the guarantee lives in application code inside
+  the writing transaction, which is exactly where a concurrent writer
+  can slip past it. Wanted: an entity-level `indexes` array with the
+  collection's vocabulary, carried through `planEntity`, the migration
+  planner's index diff, and the introspection comparison that verifies
+  a partial predicate. MODEL-FORMAT §9.2 states the absence today.
+- [ ] **Database invariants over a store-owned layout.** `enforcement:
+  "database"` refuses (`JD0005`) unless the entity declares
+  `physical: { table, columns }` — hand-owning every column name and
+  codec — so the documented default layout can never have a rule the
+  database itself enforces, even `{ "$le": ["$.new.startsAt",
+  "$.new.endsAt"] }` over two mapped columns. The engine knows the
+  column for each member, which is all the trigger needs. Wanted: the
+  shape adapter from a store-owned mapping to the trigger lowering's
+  `{ physical, codec, null }` columns, the triggers carried into
+  `planEntity`'s expected shape and the migration planner, and a
+  decision on `audit` effects, whose trigger writes are invisible to
+  journal capture. MODEL-FORMAT §13 states the restriction today.
 - [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
   group returns that read the grouped row binding, ordering by sum/avg
   or other unproven aggregate expressions, multi-root entity grouping and floating

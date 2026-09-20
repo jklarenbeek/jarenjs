@@ -81,6 +81,10 @@ import {
  * @property {(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }) => ContractFailureValue} fail
  * @property {(tag: string, options?: { strong?: boolean }) => void} etag
  * @property {(status: number) => void} status
+ * @property {(name: string, value: string) => void} header - arm a response
+ *   header the handler owns; it is part of the response the ledger records,
+ *   so a replay carries it too. `set-cookie` appends, every other name
+ *   replaces, and a header the binding derives is refused (`JC1006`)
  */
 
 /**
@@ -99,7 +103,7 @@ import {
  * The raw response of an opaque operation's handler: `body` may be text,
  * bytes, a pull source of chunks (an async iterable, or a Web
  * `ReadableStream` — normalized, never collected), or none.
- * @typedef {{ status: number, headers?: Record<string, string>, body?: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null }} RawResponse
+ * @typedef {{ status: number, headers?: Record<string, string | readonly string[]>, body?: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null }} RawResponse
  */
 
 /**
@@ -369,8 +373,34 @@ function signalOf(request) {
  * down.
  * `settled` is set by a required settlement (§7.7) that recorded the
  * claim inside `enter`; the root ledger then stands down.
- * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean, settled: boolean }} Armed
+ * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean, settled: boolean, headers: Map<string, string | string[]> | null }} Armed
  */
+
+/**
+ * The response headers the BINDING owns: the wire facts it derives from
+ * the operation and the request, which a handler must not contradict.
+ * `ctx.header` refuses them (`JC1006`) rather than letting a handler
+ * set a value the binding then overwrites.
+ */
+const BINDING_HEADERS = new Set([
+  'content-type', 'content-length', 'transfer-encoding', 'connection',
+  'etag', 'x-jaren-trace',
+]);
+
+/** An HTTP field name: RFC 9110's token, compared lowercase. */
+const FIELD_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/;
+
+/**
+ * Write what `ctx.header` armed into an assembled response's header
+ * table. The binding's own names were refused when they were armed, so
+ * nothing here overwrites a wire fact.
+ * @param {Record<string, string | string[]>} headers
+ * @param {Armed} armed
+ */
+function applyArmedHeaders(headers, armed) {
+  if (armed.headers === null) return;
+  for (const [name, value] of armed.headers) headers[name] = value;
+}
 
 /**
  * The pipeline up to the handler: synchronous; returns a response for
@@ -435,7 +465,7 @@ function run(server, request) {
 
 /** A fresh per-request state record. @returns {Armed} */
 function freshArmed() {
-  return { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false, settled: false };
+  return { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false, settled: false, headers: null };
 }
 
 /**
@@ -673,6 +703,31 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
         throw new ContractHostError('JC1006', `ctx.status: the success status must be an integer in 200–299, got ${String(status)}`);
       }
       armed.status = status;
+    },
+    // A response header the handler owns. It is part of the response
+    // the ledger RECORDS, so a replay under the same idempotency key
+    // carries it too — which is what makes a credential-minting command
+    // idempotent: the retry of a lost answer is answered with the same
+    // credential rather than with a success holding nothing (§7.7).
+    // `set-cookie` is the one field that legitimately repeats, so it
+    // appends; every other name replaces.
+    header: (name, value) => {
+      if (typeof name !== 'string' || !FIELD_NAME.test(name.toLowerCase())) {
+        throw new ContractHostError('JC1006', `ctx.header: the name must be an HTTP field token, got ${JSON.stringify(name)}`);
+      }
+      const lower = name.toLowerCase();
+      if (BINDING_HEADERS.has(lower)) {
+        throw new ContractHostError('JC1006',
+          `ctx.header: '${lower}' is the binding's own — the operation's media type, the trace and `
+          + 'the entity tag are derived from the contract and the request (use ctx.etag for the tag)');
+      }
+      if (typeof value !== 'string' || /[\r\n\0]/.test(value)) {
+        throw new ContractHostError('JC1006', `ctx.header: '${lower}' takes a string without CR, LF or NUL`);
+      }
+      if (armed.headers === null) armed.headers = new Map();
+      const existing = armed.headers.get(lower);
+      if (lower !== 'set-cookie' || existing === undefined) armed.headers.set(lower, value);
+      else armed.headers.set(lower, Array.isArray(existing) ? [...existing, value] : [existing, value]);
     },
   };
 
@@ -959,7 +1014,7 @@ function subscribeBranch(server, route, ctx, input, trace, headers, armed, isHea
     // the stream owns the leases from here: they are released after the
     // runner's stop/close/done sequence, once the sink has ended
     life.deferred = true;
-    return sseResponse(server, route, ctx, sub, trace, headers, life);
+    return sseResponse(server, route, ctx, sub, trace, headers, life, armed);
   });
 }
 
@@ -1035,7 +1090,7 @@ function oneShotSnapshot(server, route, ctx, sub, trace, armed, isHead, ifMatch,
  * @param {Life} life
  * @returns {HttpResponse}
  */
-function sseResponse(server, route, ctx, sub, trace, headers, life) {
+function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
   const lastRaw = headerValue(headers, 'last-event-id');
   let lastSeq = null;
   if (lastRaw !== undefined) {
@@ -1130,12 +1185,10 @@ function sseResponse(server, route, ctx, sub, trace, headers, life) {
     return { stop: () => stopper(null), done: runner.done };
   };
 
-  return {
-    status: 200,
-    headers: { 'content-type': STREAM_MEDIA, 'cache-control': 'no-store', 'x-jaren-trace': trace },
-    body: null,
-    stream,
-  };
+  /** @type {Record<string, string | string[]>} */
+  const responseHeaders = { 'content-type': STREAM_MEDIA, 'cache-control': 'no-store', 'x-jaren-trace': trace };
+  applyArmedHeaders(responseHeaders, armed);
+  return { status: 200, headers: responseHeaders, body: null, stream };
 }
 
 //#endregion
@@ -1301,8 +1354,9 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
     return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
   }
   const status = armed.status !== 0 ? armed.status : route.status;
-  /** @type {Record<string, string>} */
+  /** @type {Record<string, string | string[]>} */
   const headers = { 'x-jaren-trace': trace };
+  applyArmedHeaders(headers, armed);
   if (armed.etag !== null) {
     const etag = formatEntityTag(armed.etag, armed.strong);
     if (!armed.decided) {
@@ -1356,7 +1410,7 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
 function finishRaw(server, route, ctx, value, trace, armed, isHead) {
   let status;
   let body;
-  /** @type {Record<string, string>} */
+  /** @type {Record<string, string | string[]>} */
   const headers = {};
   try {
     const r = /** @type {any} */ (value);
@@ -1372,7 +1426,21 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
       const names = Object.keys(rawHeaders);
       for (let i = 0; i < names.length; i++) {
         const v = rawHeaders[names[i]];
-        if (typeof v === 'string') headers[names[i].toLowerCase()] = v;
+        // a repeating field (set-cookie) may arrive as a list
+        if (typeof v === 'string'
+          || (Array.isArray(v) && v.every((item) => typeof item === 'string')))
+          headers[names[i].toLowerCase()] = v;
+      }
+    }
+    // a declared media RANGE (`image/*`) is a promise about the answer:
+    // the handler names the exact subtype and the binding holds it to
+    // the range, so a projection that says "an image" is not contradicted
+    // on the wire
+    if (route.media.endsWith('/*')) {
+      const declared = headers['content-type'];
+      if (typeof declared !== 'string' || !mediaMatches(declared, route.media)) {
+        throw new TypeError(`an opaque operation declaring ${route.media} must answer a content-type `
+          + `within that range; got ${declared === undefined ? 'none' : JSON.stringify(declared)}`);
       }
     }
   }
@@ -1381,6 +1449,7 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
     armed.outcome = 2;
     return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);
   }
+  applyArmedHeaders(headers, armed);
   headers['x-jaren-trace'] = trace;
   if (isHead && isAsyncByteSource(body)) {
     // a HEAD drops the body: a source nobody will read is released, never pulled
@@ -1465,7 +1534,13 @@ function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, if
   const ledger = /** @type {Ledger} */ (server.ledger);
   let scope;
   try {
-    scope = server.scope(ctx);
+    // §7.7's order is identify → validate → idempotency, so the input
+    // is already validated when the scope is derived: a command whose
+    // only evidence of who is asking travels in its body (a token
+    // exchange, a sign-up, an invite redemption) has something to scope
+    // by. It is a SECOND parameter, never a member of `ctx`, because
+    // `ctx.idempotency` is settled from what this returns
+    scope = server.scope(ctx, input);
     if (typeof scope !== 'string') throw new TypeError(`serveHttp: the scope function must return a string, got ${typeof scope}`);
   }
   catch (err) {

@@ -24,6 +24,24 @@
  */
 
 /**
+ * A `Headers` of the dispatcher's table: a list value is a field that
+ * repeats on the wire (`set-cookie`), appended once per item, because a
+ * record with an array value would be joined into one comma-separated
+ * line and a cookie's own commas make that unparseable.
+ * @param {Readonly<Record<string, string | readonly string[]>>} table
+ * @returns {Headers}
+ */
+function headersOf(table) {
+  const out = new Headers();
+  for (const name of Object.keys(table)) {
+    const value = table[name];
+    if (Array.isArray(value)) for (const item of value) out.append(name, item);
+    else out.set(name, /** @type {string} */ (value));
+  }
+  return out;
+}
+
+/**
  * A Web `ReadableStream` over an async byte source: one `pull` awaits
  * one `next()`, `cancel()` runs the source's `return()` once, and a
  * source that throws errors the stream.
@@ -216,13 +234,13 @@ export function toFetchHandler(dispatcher) {
           stopOnce();
         },
       }, { highWaterMark: 0 });
-      return new Response(streamBody, { status: response.status, headers: response.headers });
+      return new Response(streamBody, { status: response.status, headers: headersOf(response.headers) });
     }
     const out = response.body;
     if (out !== null && typeof out === 'object' && !(out instanceof Uint8Array)) {
       // a streamed body: one pull per chunk, cancelled once by the consumer
-      return new Response(bodyStream(out), { status: response.status, headers: response.headers });
+      return new Response(bodyStream(out), { status: response.status, headers: headersOf(response.headers) });
     }
-    return new Response(/** @type {BodyInit | null} */ (out), { status: response.status, headers: response.headers });
+    return new Response(/** @type {BodyInit | null} */ (out), { status: response.status, headers: headersOf(response.headers) });
   };
 }

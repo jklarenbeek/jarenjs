@@ -34,7 +34,10 @@ import { ContractHostError } from './errors.js';
  * @property {string} key
  * @property {string} hash - lowercase hex SHA-256 over the canonical input
  * @property {'started' | 'committed' | 'failed'} status
- * @property {any} response - the stored `{ status, headers, body }`, or null
+ * @property {any} response - the stored `{ status, headers, body }`, or null;
+ *   a header's value is a list when the field repeats on the wire
+ *   (`set-cookie`), so a replay re-issues the credential the first answer
+ *   carried
  * @property {boolean | null} retryable - of a failed record; null otherwise
  * @property {number} createdAt - epoch ms
  * @property {number} updatedAt - epoch ms
@@ -269,7 +272,9 @@ export const idempotencyLedgerModel = Object.freeze({
                 required: ['status', 'headers', 'body'],
                 properties: {
                   status: { type: 'integer', minimum: 100, maximum: 599 },
-                  headers: { type: 'object', additionalProperties: { type: 'string' } },
+                  headers: { type: 'object', additionalProperties: {
+                    oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+                  } },
                   body: { type: ['string', 'null'] },
                 },
               },

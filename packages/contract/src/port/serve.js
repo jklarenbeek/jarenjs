@@ -227,7 +227,7 @@ export function servePort(contract, handlers, options) {
   const contextOf = (route, trace, signal, hostValue) => Object.freeze({
     op: route.op, trace, carrier: /** @type {const} */ ('port'), host: hostValue, signal,
     method: null, path: null, params: null, headers: NO_HEADERS, body: null,
-    fail: ContractFailure, idempotency: null, etag: null, status: null,
+    fail: ContractFailure, idempotency: null, etag: null, status: null, header: null,
   });
 
   /**

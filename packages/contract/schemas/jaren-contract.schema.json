@@ -83,7 +83,7 @@
           "description": "Declared operation errors by code.",
           "type": "object",
           "propertyNames": {
-            "pattern": "^[a-z][a-z0-9-]*$"
+            "pattern": "^[a-z][a-z0-9_-]*$"
           },
           "additionalProperties": {
             "$ref": "#/$defs/errorDeclaration"

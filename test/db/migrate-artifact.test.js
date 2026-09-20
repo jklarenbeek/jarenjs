@@ -33,8 +33,10 @@ const belongsToMany = { 'x-entity': { relation: { to: 'Label', many: true } } };
 
 /** The §9 strategy table, one row per entry: the change, the model pair, the step kinds the row promises, whether the report says DESTRUCTIVE. */
 const ROWS = [
+  // additive and optional-only: every stored document still validates,
+  // so the plan is the ADD COLUMN and applies unattended (report.widened)
   ['add mapped column (property added)', model({ User: ent({ name: { type: 'string' } }) }),
-    model({ User: ent({ name: { type: 'string' }, age: { type: 'integer' } }) }), ['ddl', 'jslt'], false],
+    model({ User: ent({ name: { type: 'string' }, age: { type: 'integer' } }) }), ['ddl'], false],
   ['add mapped column (moved out of the document)', model({ User: ent({ age: { type: 'integer', 'x-entity': { column: 'json' } } }) }),
     model({ User: ent({ age: { type: 'integer' } }) }), ['ddl', 'sql'], false],
   ['drop mapped column (property removed)', model({ User: ent({ name: { type: 'string' }, age: { type: 'integer' } }) }),
@@ -53,14 +55,16 @@ const ROWS = [
     model({ User: ent({ name: { type: 'string', 'x-entity': { index: true } } }) }), ['ddl'], false],
   ['drop a unique index', model({ User: ent({ name: { type: 'string', 'x-entity': { unique: true } } }) }),
     model({ User: ent({ name: { type: 'string' } }) }), ['ddl'], false],
+  // a widening needs no transform, and the version token the rows
+  // predate is started rather than left NULL (no `JD2040` forever)
   ['add a version token', model({ User: ent({}) }),
-    model({ User: ent({ rev: { type: 'integer', 'x-entity': { version: true } } }) }), ['ddl', 'jslt'], false],
+    model({ User: ent({ rev: { type: 'integer', 'x-entity': { version: true } } }) }), ['ddl', 'sql'], false],
   ['add a relation (foreign key rebuilds the holder)', model({ User: ent({}), Post: post() }),
-    model({ User: ent({ posts: hasMany }), Post: post() }), ['jslt', 'rebuild'], false],
+    model({ User: ent({ posts: hasMany }), Post: post() }), ['rebuild'], false],
   ['drop a relation (the foreign key folds into the document the target declares)', model({ User: ent({ posts: hasMany }), Post: post() }),
     model({ User: ent({}), Post: post({ authorId: { type: 'string', 'x-entity': { column: 'json' } } }) }), ['jslt', 'rebuild'], false],
   ['add a relation (join table)', model({ User: ent({}), Label: label }),
-    model({ User: ent({ labels: belongsToMany }), Label: label }), ['jslt', 'ddl'], false],
+    model({ User: ent({ labels: belongsToMany }), Label: label }), ['ddl'], false],
   ['drop a relation (join table)', model({ User: ent({ labels: belongsToMany }), Label: label }),
     model({ User: ent({}), Label: label }), ['jslt', 'ddl'], true],
   ['entity added', model({ User: ent({}) }), model({ User: ent({}), Other: ent({}) }), ['ddl'], false],

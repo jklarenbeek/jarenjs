@@ -69,10 +69,17 @@ const DEFAULT_HEARTBEAT_MS = 15000;
 const CONTRACT_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 /** An operation id: dotted lowercase words. */
 const OP_ID = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*$/;
-/** A declared error code: a lowercase hyphenated word. */
-const ERROR_CODE = /^[a-z][a-z0-9-]*$/;
+/** A declared error code: a lowercase word, hyphenated or underscored
+ * — the underscore is admitted so a product migrating a `snake_case`
+ * wire does not have to rename its codes and keep a mapping table in
+ * every compatibility adapter (§6). */
+const ERROR_CODE = /^[a-z][a-z0-9_-]*$/;
 /** A media type: `type/subtype` with optional parameters. */
 const MEDIA_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:\s*;.*)?$/;
+
+/** A media RANGE: `type/*`, no parameters — an opaque operation whose
+ * exact subtype is decided by the stored object (§4.5). */
+const MEDIA_RANGE = /^[A-Za-z0-9!#$&^_.+-]+\/\*$/;
 
 /** JSON-value keywords whose content is data, not schema — not walked for `$ref`. */
 const DATA_KEYWORDS = new Set(['const', 'enum', 'default', 'examples']);
@@ -552,7 +559,7 @@ function checkErrors(errors, base, scope) {
     const code = codes[i];
     const path = at(base, code);
     if (!ERROR_CODE.test(code)) {
-      throw refuse('JC0011', `error code '${code}' must match ^[a-z][a-z0-9-]*$`, path);
+      throw refuse('JC0011', `error code '${code}' must match ^[a-z][a-z0-9_-]*$`, path);
     }
     const decl = errors[code];
     if (!isJsonObject(decl)) throw refuse('JC0011', `error '${code}' must be an object { status?, schema? }`, path);
@@ -813,9 +820,16 @@ function checkHttp(http, id, kind, members, base) {
   }
   let media = kind === 'subscribe' ? STREAM_MEDIA : DEFAULT_MEDIA;
   if (http.media !== undefined) {
-    if (typeof http.media !== 'string' || !MEDIA_TYPE.test(http.media)) {
-      throw refuse('JC0012', 'http.media must be a media type string (type/subtype)', at(base, 'media'));
+    if (typeof http.media !== 'string'
+      || !(MEDIA_TYPE.test(http.media) || MEDIA_RANGE.test(http.media))) {
+      throw refuse('JC0012', 'http.media must be a media type string (type/subtype), or a type/* range on an opaque operation', at(base, 'media'));
     }
+    // A RANGE says the answer's type depends on what is stored — a
+    // download that is a JPEG, a PNG or a WebP is honestly `image/*`
+    // rather than dishonestly `application/octet-stream`. It is never
+    // JSON, so it makes the operation OPAQUE (below): the handler
+    // writes the bytes and names their exact type, which the binding
+    // then checks against the range.
     if (kind === 'subscribe' && http.media !== STREAM_MEDIA) {
       // forced, never silently overridden: a declared conflicting media
       // would be a behavior the binding cannot honor

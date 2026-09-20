@@ -128,7 +128,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "pattern": "^([a-z][a-z0-9-]*|JC[0-9]{4})$"
+          "pattern": "^([a-z][a-z0-9_-]*|JC[0-9]{4})$"
         },
         "message": {
           "type": "string"

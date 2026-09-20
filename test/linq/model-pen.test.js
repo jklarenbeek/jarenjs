@@ -199,7 +199,7 @@ describe('the model pen — refusals, each with the fix in the message', () => {
       () => m.object({}).key(), () => m.array(m.string()).index(),
       () => m.tuple([m.string()]).unique(), () => m.record(m.string()).key(),
       () => m.object({}).unique(), () => m.when(m.string()).index(),
-      () => m.enumOf(['a']).index(), () => m.literal('a').key(),
+      () => m.enumOf(['a', 1]).index(), () => m.literal('a').key(),
       () => m.any().unique(), () => m.never().key(),
       () => m.union([m.string()]).index(), () => m.when(m.string()).key(),
       () => m.rel.hasMany('B', { via: 'a', onDelete: 'cascade' }).key(),
@@ -207,6 +207,12 @@ describe('the model pen — refusals, each with the fix in the message', () => {
       assert.throws(build, (e) => e instanceof LinqBuildError && e.code === 'JL0102'
         && /column of its own/.test(e.message), String(build));
     }
+    // an enum of ONE scalar type is column-mapped (§9.3's `enum` of
+    // scalars row: a column plus a CHECK), so it takes the vocabulary;
+    // only a MIXED one has no column type to take it with
+    assert.doesNotThrow(() => m.enumOf(['draft', 'open']).index());
+    assert.doesNotThrow(() => m.enumOf([1, 2, 3]).unique());
+    assert.doesNotThrow(() => m.enumOf(['a', null]).index(), 'null is the set\'s nullability');
     // an ARRAY's unique() is the schema pen's uniqueItems, not an entity
     // index: the base owns the name, so the mixin must not change what
     // the document asserts

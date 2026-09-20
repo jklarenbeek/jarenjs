@@ -245,10 +245,21 @@ export function selectPlan(collection) {
  * Whether an order term reads its value from a mapped column rather
  * than the document. Two ref shapes reach here — a collection
  * {@link PlanRef}, which has a column or does not, and an entity ref,
- * which also carries a flavor: an `entity-epoch` column exists but
- * orders by the document string (mixed stored precisions would sort
- * the integer column differently), so a flavored ref answers by its
- * flavor and only a plain one by its column.
+ * which also carries a flavor, so a flavored ref answers by its flavor
+ * and only a plain one by its column.
+ *
+ * An `entity-epoch` column EXISTS and is still not ordered by, which is
+ * the one case worth stating. That column is a pre-filter: a predicate
+ * narrows through its index and then decides on the document's string
+ * (see `emit.js`), so the string stays the value and the column stays
+ * an accelerator. An ordering has no such two-step form — what the
+ * `ORDER BY` names is the order — and the two orders differ whenever
+ * the stored strings are not canonical (one instant spelled `+01:00`
+ * and `Z`, or with and without milliseconds). Ordering by the column
+ * would answer a different order than the same member's predicates
+ * compare by, and than the residual sorts by in memory, so a member's
+ * order is its codepoint order everywhere, whatever column shadows it
+ * (MODEL-FORMAT §9.3).
  * @param {any} ref
  * @returns {boolean}
  */

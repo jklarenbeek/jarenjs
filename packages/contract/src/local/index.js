@@ -365,7 +365,7 @@ export function openLocalClient(contract, handlers, options = {}) {
     const identityCtx = Object.freeze({
       op: route.op, trace: id, carrier: /** @type {const} */ ('local'), host: identified.lease.host, signal,
       method: null, path: null, params: null, headers: NO_HEADERS, body: null,
-      fail: ContractFailure, idempotency: null, etag: null, status: null,
+      fail: ContractFailure, idempotency: null, etag: null, status: null, header: null,
     });
     const out = await acquireHost(lifecycle, value, identityCtx, (lease) => {
       acquired = once(lease.release, observed);

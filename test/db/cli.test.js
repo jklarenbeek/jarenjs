@@ -28,7 +28,10 @@ const CLI = path.resolve('packages/db/src/cli.js');
 const FROM = {
   $model: '0.1',
   entities: {
-    User: { schema: { type: 'object', required: ['id'], properties: {
+    // closed, as the model pen writes it: adding an optional member to
+    // a CLOSED schema is a widening (nothing can already be stored
+    // under that name), which is what makes the plan applicable as-is
+    User: { schema: { type: 'object', required: ['id'], additionalProperties: false, properties: {
       id: { type: 'string', 'x-entity': { key: true } },
       name: { type: 'string' },
     } } },
@@ -80,12 +83,11 @@ describe('jaren-db', () => {
     const migration = JSON.parse(fs.readFileSync(out, 'utf8'));
     assert.strictEqual(migration.id, '001-add-age');
     assert.ok(migration.steps.some((s) => /ADD COLUMN "age"/.test(s.sql ?? '')));
-    assert.ok(migration.steps.some((s) => s.draft === true),
-      'the schema changed, so the plan carries a draft transform');
-    // the review step a real user performs: a pure widening needs no
-    // transform, so the draft is deleted before applying
-    migration.steps = migration.steps.filter((s) => s.draft !== true);
-    fs.writeFileSync(out, JSON.stringify(migration, null, 2));
+    // an additive, optional-only change is a WIDENING: every stored
+    // document still validates, so the planner owes the operator no
+    // draft transform and the document applies as written
+    assert.ok(!migration.steps.some((s) => s.draft === true),
+      'a widening carries no draft transform to delete by hand');
   });
 
   it('plan refuses a from-model that does not match the store', () => {

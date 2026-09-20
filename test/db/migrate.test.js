@@ -284,7 +284,8 @@ describe('batching stays bounded', () => {
       import { openStore, planMigration, migrate, sqliteDialect } from '@jarenjs/db';
       import { nodeDriver } from '@jarenjs/db/node';
       const M0 = { $model: '0.1', collections: { rows: {
-        schema: { type: 'object', properties: { n: { type: 'integer' } } },
+        schema: { type: 'object', additionalProperties: false,
+          properties: { n: { type: 'integer' }, pad: { type: 'string' } } },
         key: null, identity: 'integer' } } };
       const M1 = structuredClone(M0);
       M1.collections.rows.schema.properties.twice = { type: 'integer' };
@@ -293,9 +294,11 @@ describe('batching stays bounded', () => {
       for (let i = 0; i < 10000; i++) rows.insert({ n: i, pad: 'x'.repeat(64) });
       await store.close();
       const { migration } = planMigration(M0, M1, { dialect: sqliteDialect, id: 'twice' });
-      const jslt = migration.steps.find((s) => s.kind === 'jslt');
-      delete jslt.draft;
-      jslt.stylesheet = [{ match: '$', body: { n: '$.n', pad: '$.pad', twice: { $mul: ['$.n', 2] } } }];
+      // adding an optional member is a WIDENING, so the planner drafts
+      // no transform; this author wants one anyway — to fill the new
+      // member for the rows that predate it — and writes it
+      migration.steps.push({ kind: 'jslt', collection: 'rows',
+        stylesheet: [{ match: '$', body: { n: '$.n', pad: '$.pad', twice: { $mul: ['$.n', 2] } } }] });
       globalThis.gc();
       const before = process.memoryUsage().heapUsed;
       await migrate({ driver: nodeDriver(), path: process.argv[1] }, [migration],

@@ -57,6 +57,61 @@ import {
 export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
 
 /**
+ * Whether every document valid under `from` is still valid under `to` —
+ * a WIDENING, so the stored documents need no transform and the planner
+ * owes the operator no draft step.
+ *
+ * The rule is deliberately narrow, because the consequence of a wrong
+ * `true` is an unattended migration leaving invalid documents behind:
+ * the two object schemas must be identical except that `to` may ADD
+ * properties none of which it requires, and may REQUIRE FEWER of them.
+ * Every keyword they share — including every property they share — must
+ * be canonically equal; a changed subschema, a removed property
+ * declaration (which a closed object would then refuse as an
+ * additional one) and a widened `additionalProperties` are all left to
+ * the operator. Anything not understood answers `false`.
+ * @param {any} from
+ * @param {any} to
+ * @returns {boolean}
+ */
+function isWidening(from, to) {
+  const plain = (node) => node !== null && typeof node === 'object' && !Array.isArray(node);
+  if (!plain(from) || !plain(to)) return false;
+  const fromRequired = from.required ?? [];
+  const toRequired = to.required ?? [];
+  if (!Array.isArray(fromRequired) || !Array.isArray(toRequired)) return false;
+  // a member `to` requires and `from` did not is a NARROWING
+  if (toRequired.some((name) => !fromRequired.includes(name))) return false;
+
+  for (const keyword of new Set([...Object.keys(from), ...Object.keys(to)])) {
+    if (keyword === 'required') continue;
+    if (keyword === 'properties') {
+      const fromProperties = from.properties ?? {};
+      const toProperties = to.properties ?? {};
+      if (!plain(fromProperties) || !plain(toProperties)) return false;
+      for (const name of Object.keys(fromProperties)) {
+        // a declaration that disappeared, or one whose shape changed
+        if (!Object.hasOwn(toProperties, name)) return false;
+        if (canonicalizeJson(fromProperties[name]) !== canonicalizeJson(toProperties[name])) return false;
+      }
+      // A NEW property is admitted only while nothing requires it AND
+      // the old schema was CLOSED. Under an open schema a stored
+      // document may already carry that member with any shape at all —
+      // `age: "seven"` was valid before and the new `age: { type:
+      // 'integer' }` refuses it — so naming the member for the first
+      // time NARROWS what is already stored.
+      for (const name of Object.keys(toProperties)) {
+        if (Object.hasOwn(fromProperties, name)) continue;
+        if (toRequired.includes(name) || from.additionalProperties !== false) return false;
+      }
+      continue;
+    }
+    if (canonicalizeJson(from[keyword]) !== canonicalizeJson(to[keyword])) return false;
+  }
+  return true;
+}
+
+/**
  * The physical mapping a connection's driver imposes on derived index
  * columns. A driver that can index a registered deterministic function
  * generates them; one that cannot has them written, which is why the
@@ -184,8 +239,13 @@ function deriveStep(collection, plan, columnNames, note) {
  * @returns {{ migration: any, report: {
  *   renamed: { from: string, to: string }[],
  *   added: string[], removed: string[],
- *   schemaChanged: string[], drafts: string[],
+ *   schemaChanged: string[], drafts: string[], widened: string[],
  *   destructive: boolean } }}
+ *   `widened` names the collections and entities whose document schema
+ *   changed by a WIDENING alone — new optional members, or fewer
+ *   required ones — so every stored document still validates and the
+ *   plan carries no draft transform for them. They are in
+ *   `schemaChanged` too; they are simply not in `drafts`.
  */
 export function planMigration(fromModel, toModel, options = undefined) {
   const dialect = options?.dialect ?? null;
@@ -199,7 +259,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
     return { migration: { $migration: MIGRATION_VERSION,
       id: options?.id ?? `to-${shapeHash(toModel).slice(0, 8)}`,
       from: shapeHash(fromModel), to: shapeHash(toModel), steps: [] },
-    report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], destructive: false } };
+    report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [], destructive: false } };
   }
   const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false,
     // a model that declares an index EXPRESSION resolves its functions
@@ -211,7 +271,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
 
   const steps = [];
   const report = {
-    renamed: [], added: [], removed: [], schemaChanged: [], drafts: [],
+    renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [],
     destructive: false,
   };
 
@@ -391,26 +451,34 @@ export function planMigration(fromModel, toModel, options = undefined) {
 
     if (canonicalizeJson(fromCollection.schema) !== canonicalizeJson(toCollection.schema)) {
       report.schemaChanged.push(name);
-      report.drafts.push(name);
-      steps.push({
-        kind: 'jslt',
-        collection: name,
-        stylesheet: [],
-        draft: true,
-        note: `the schema of '${name}' changed; the planner cannot infer the data `
-          + 'transform. Fill in the stylesheet (or delete this step if every stored '
-          + 'document already validates against the new schema) and remove "draft".',
-      });
-      // a transform rewrites the document, and a stored derived column
-      // is computed FROM the document: without this it keeps the value
-      // the old document had
-      const stale = toPlan.derived
-        .filter((column) => toColumns.get(column.name)?.stored === true)
-        .map((column) => column.name)
-        .filter((columnName) => !backfilled.includes(columnName));
-      if (stale.length > 0) {
-        steps.push(deriveStep(name, toPlan, stale,
-          `recompute derived column(s) ${stale.join(', ')} on '${name}' after the transform`));
+      // a widening needs no transform: every stored document already
+      // validates against the new schema, so the plan stays applicable
+      // unattended rather than waiting on a person to delete a step
+      if (isWidening(fromCollection.schema, toCollection.schema)) {
+        report.widened.push(name);
+      }
+      else {
+        report.drafts.push(name);
+        steps.push({
+          kind: 'jslt',
+          collection: name,
+          stylesheet: [],
+          draft: true,
+          note: `the schema of '${name}' changed; the planner cannot infer the data `
+            + 'transform. Fill in the stylesheet (or delete this step if every stored '
+            + 'document already validates against the new schema) and remove "draft".',
+        });
+        // a transform rewrites the document, and a stored derived column
+        // is computed FROM the document: without this it keeps the value
+        // the old document had
+        const stale = toPlan.derived
+          .filter((column) => toColumns.get(column.name)?.stored === true)
+          .map((column) => column.name)
+          .filter((columnName) => !backfilled.includes(columnName));
+        if (stale.length > 0) {
+          steps.push(deriveStep(name, toPlan, stale,
+            `recompute derived column(s) ${stale.join(', ')} on '${name}' after the transform`));
+        }
       }
     }
   }
@@ -655,6 +723,17 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report) {
           sql: dialect.ddl.addColumn({ table: name,
             column: { name: columnName, type: storageType(column.storage) } }),
           note: `add column '${columnName}' on '${name}'` });
+        // the VERSION token is engine-owned: a row whose token is NULL
+        // never matches the token a save carries, so every update of an
+        // already-stored row would refuse `JD2040` forever — re-reading
+        // cannot help, because the re-read carries the NULL back. The
+        // rows that existed before the token did start where an
+        // insert starts it, at 0 (§9.6)
+        if (columnName === tm.version) {
+          steps.push({ kind: 'sql',
+            sql: `UPDATE ${q(name)} SET ${q(columnName)} = 0 WHERE ${q(columnName)} IS NULL`,
+            note: `start the version token '${columnName}' on '${name}' for the rows that predate it` });
+        }
         const wasDocStored = fromEntity.properties.has(columnName);
         if (wasDocStored && column.source === 'epoch(document)') {
           steps.push({ kind: 'sql',
@@ -686,12 +765,20 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report) {
     if (canonicalizeJson(stripEntityVocabulary(fromEntity.schema))
       !== canonicalizeJson(stripEntityVocabulary(toEntity.schema))) {
       report.schemaChanged.push(name);
-      report.drafts.push(name);
-      steps.push({
-        kind: 'jslt', collection: name, stylesheet: [], draft: true,
-        note: `the document schema of entity '${name}' changed; fill in the transform `
-          + '(or delete this step if every stored document already validates) and remove "draft"',
-      });
+      // an additive, optional-only change leaves every stored document
+      // valid, so the plan applies unattended (the ADD COLUMN above is
+      // the whole of it)
+      if (isWidening(stripEntityVocabulary(fromEntity.schema), stripEntityVocabulary(toEntity.schema))) {
+        report.widened.push(name);
+      }
+      else {
+        report.drafts.push(name);
+        steps.push({
+          kind: 'jslt', collection: name, stylesheet: [], draft: true,
+          note: `the document schema of entity '${name}' changed; fill in the transform `
+            + '(or delete this step if every stored document already validates) and remove "draft"',
+        });
+      }
     }
   }
 
@@ -799,6 +886,14 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
       else {
         sources.push(`CAST(${q(columnName)} AS ${storageType(column.storage)})`);
       }
+      continue;
+    }
+    // a VERSION token the from-table did not carry: the copied rows
+    // start where an insert starts it, at 0 (§9.6) — never SQL NULL,
+    // which no save's token would match (`JD2040` on every update of a
+    // row that predates the token, re-reading included)
+    if (columnName === tm.version) {
+      sources.push('0');
       continue;
     }
     // a new column: from the document when the property existed there

@@ -55,8 +55,8 @@ export const POLICY_VALUES = Object.freeze({
   audience: ['public', 'server'],
 });
 
-/** An error code: `^[a-z][a-z0-9-]*$` (§3's table). */
-const CODE = /^[a-z][a-z0-9-]*$/;
+/** An error code: `^[a-z][a-z0-9_-]*$` (§3's table). */
+const CODE = /^[a-z][a-z0-9_-]*$/;
 
 /**
  * A member set the pen knows, or `JL0101` naming the one it does not.
@@ -238,7 +238,7 @@ export function readErrors(errors, at) {
   return Object.keys(errors).map((code) => {
     if (!CODE.test(code)) {
       throw new LinqBuildError('JL0101',
-        `an error code matches ^[a-z][a-z0-9-]*$, got '${code}'`, `${at}/${code}`);
+        `an error code matches ^[a-z][a-z0-9_-]*$, got '${code}'`, `${at}/${code}`);
     }
     const declared = errors[code];
     if (!isJsonObject(declared)) {

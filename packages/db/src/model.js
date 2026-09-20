@@ -38,6 +38,34 @@ const ENTITY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SCALARS = new Set(['string', 'integer', 'number', 'boolean']);
 
 /**
+ * The one JSON scalar type a closed set names, or `undefined` when it
+ * names none (no `enum`, an empty one, or a mix of types). `null` is
+ * not a type of its own here — it is the set's nullability, exactly as
+ * `['string', 'null']` is a nullable string — and a set of only `null`
+ * names nothing. Numbers answer `integer` when every value is one,
+ * since a column typed `number` would store `5` and read back `5.0`.
+ * @param {any} values - a schema's `enum`, whatever it is
+ * @returns {string | undefined}
+ */
+function enumScalarType(values) {
+  if (!Array.isArray(values)) return undefined;
+  const present = values.filter((value) => value !== null);
+  if (present.length === 0) return undefined;
+  /** @type {Set<string>} */
+  const types = new Set();
+  for (const value of present) {
+    const type = typeof value === 'number'
+      ? (Number.isInteger(value) ? 'integer' : 'number')
+      : typeof value;
+    if (!SCALARS.has(type)) return undefined;
+    types.add(type);
+  }
+  if (types.size === 1) return [...types][0];
+  // 5 and 5.5 are one numeric column, never two types
+  return types.size === 2 && types.has('integer') && types.has('number') ? 'number' : undefined;
+}
+
+/**
  * @param {string} reason
  * @param {string} docPath
  * @param {string} [code]
@@ -232,10 +260,18 @@ export function normalizeEntities(model) {
       const scalarMembers = Array.isArray(effective.type)
         ? effective.type.filter((t) => t !== 'null')
         : [effective.type];
-      const type = scalarMembers.length === 1 && typeof scalarMembers[0] === 'string'
+      const declaredType = scalarMembers.length === 1 && typeof scalarMembers[0] === 'string'
         ? scalarMembers[0]
         : undefined;
       const union = scalarMembers.length > 1;
+      // §9.3's `enum` of scalars row: a closed set of one scalar type
+      // names that type even when the member does not spell `type`
+      // ({ "enum": ["draft", "open"] }). It is the declaration most
+      // worth a CHECK and an index, so it gets the column the table
+      // promises rather than falling into the document. A MIXED enum
+      // has no one column type and stays in the document, as a union
+      // does.
+      const type = declaredType !== undefined || union ? declaredType : enumScalarType(effective.enum);
 
       if (entityBlock.default !== undefined)
         checkDefault(entityBlock.default, `${propertyPath}/x-entity/default`);
@@ -292,6 +328,11 @@ export function normalizeEntities(model) {
         enum: Array.isArray(effective.enum)
           && effective.enum.every((v) => v === null || SCALARS.has(typeof v === 'number' ? (Number.isInteger(v) ? 'integer' : 'number') : typeof v))
           ? effective.enum : undefined,
+        // a nullable scalar reads back ABSENT from its column (§9.3), so
+        // a write cannot be made to require it — see `writeSchemaOf`
+        nullable: (Array.isArray(effective.type) && effective.type.includes('null'))
+          || (declaredType === undefined && !union && Array.isArray(effective.enum)
+            && effective.enum.includes(null)),
         key: entityBlock.key === true,
         unique: entityBlock.unique === true,
         index: entityBlock.index === true,

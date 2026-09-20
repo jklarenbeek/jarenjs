@@ -59,7 +59,8 @@ import { contractCatalogEn } from '../messages.js';
  * once the subscription is released and the sink has ended.
  * @typedef {Object} HttpResponse
  * @property {number} status
- * @property {Readonly<Record<string, string>>} headers
+ * @property {Readonly<Record<string, string | readonly string[]>>} headers - a
+ *   list value is a field that repeats on the wire (`set-cookie`)
  * @property {string | Uint8Array | AsyncIterable<Uint8Array> | null} body
  * @property {(sink: import('@jarenjs/core/async').SinkLike<string>) => { stop: () => void, done: Promise<void> }} [stream]
  */
@@ -215,9 +216,10 @@ export function contentLength(headers) {
 }
 
 /**
- * Whether a request `content-type` names the operation's media:
- * type/subtype compared case-insensitively, parameters ignored, and a
- * `+json` structured-syntax suffix accepted for `application/json`.
+ * Whether a `content-type` names the operation's media: type/subtype
+ * compared case-insensitively, parameters ignored, a `+json`
+ * structured-syntax suffix accepted for `application/json`, and a
+ * declared `type/*` RANGE satisfied by any subtype of that type.
  * @param {string | undefined} contentType
  * @param {string} media - the operation's declared media
  * @returns {boolean}
@@ -227,6 +229,8 @@ export function mediaMatches(contentType, media) {
   const bare = bareMedia(contentType);
   const want = bareMedia(media);
   if (bare === want) return true;
+  // a `type/*` RANGE admits every subtype of that type, and nothing else
+  if (want.endsWith('/*')) return bare.startsWith(want.slice(0, -1)) && bare.length > want.length - 1;
   return want === JSON_MEDIA && bare.endsWith('+json') && bare.indexOf('/') !== -1;
 }
 

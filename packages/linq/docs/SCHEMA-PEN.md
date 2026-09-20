@@ -127,7 +127,7 @@ which admits nothing.
 | `boolean()` | `{ type: 'boolean' }` | `boolean` | native |
 | `nil()` | `{ type: 'null' }` | `null` | native |
 | `literal(v)` | `{ const: v }` | the literal | native |
-| `enumOf(values)` | `{ enum: values }` — an UNTYPED enum, any mix of JSON values | the literal union | native; an empty or non-array argument is `JL0101` |
+| `enumOf(values)` | `{ enum: values }` — an UNTYPED enum, any mix of JSON values. A store still maps it to a column when every value is ONE scalar type (the set names the type, MODEL-FORMAT §9.3); a set MIXING types has no column type and stays in the document | the literal union | native; an empty or non-array argument is `JL0101` |
 | string/number `.enumOf(values)` | `enum` beside the `type` — a typed enum (what a store maps to a column); values of another JSON type are `JL0101` | the literal union; with `.coerce()` the `Input` widens by the one source primitive that can reach a member (`1 \| 2 \| 3 \| string`) | native |
 | `datetime()`, `date()` | `{ type: 'string', format: 'date-time' \| 'date' }` | `DateTime` | native |
 | `time()`, `duration()` | `{ type: 'string', format: 'time' \| 'duration' }` | `string` | native |

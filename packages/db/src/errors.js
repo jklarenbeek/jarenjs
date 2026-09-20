@@ -35,6 +35,7 @@ export const DB_CODES = Object.freeze({
   JD0006: 'an open option named a pragma this store does not configure',
   JD0007: 'the pragma cannot be applied on this driver or store',
   JD0008: 'a pragma did not take: the read-back disagrees with the request',
+  JD0009: 'an open option is outside the closed set openStore reads',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
   JD0012: 'work waited too long for the open transaction to settle',

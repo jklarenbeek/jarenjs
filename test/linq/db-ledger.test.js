@@ -271,3 +271,29 @@ describe('createDbLedger — atomicity with a domain write', () => {
     assert.deepStrictEqual(await root.claim({ ...CLAIM, now: 1002 }), { state: 'replay', response: RESPONSE });
   });
 });
+
+describe('the ledger record under a real validator', () => {
+  it('stores and replays a response whose header REPEATS (set-cookie), so a credential survives a replay', async () => {
+    // every other test here opens with `validator: null`; this one runs
+    // the model's own schema, because a host settling through
+    // createDbLedger with compileSchema on is where a header value the
+    // schema does not admit would fail — in production, not here
+    const client = await open(idempotencyLedgerModel, { driver: nodeDriver() });
+    cleanups.push(() => client.close());
+    const ledger = createDbLedger(client);
+    const response = {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'set-cookie': ['session=s-1; HttpOnly; Path=/', 'refresh=r-1; HttpOnly; Path=/'],
+      },
+      body: '{"userId":"u1"}',
+    };
+    const claimed = await ledger.claim({ op: 'session.refresh', scope: 'anonymous', key: 'k', hash: 'a1'.repeat(32) });
+    assert.strictEqual(claimed.state, 'new');
+    await ledger.commit(claimed.ref, response);
+    const replay = await ledger.claim({ op: 'session.refresh', scope: 'anonymous', key: 'k', hash: 'a1'.repeat(32) });
+    assert.strictEqual(replay.state, 'replay');
+    assert.deepStrictEqual(replay.response, response);
+  });
+});

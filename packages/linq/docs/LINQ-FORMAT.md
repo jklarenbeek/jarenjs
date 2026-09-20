@@ -39,7 +39,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 946 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 1,761 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
-| [MODEL-PEN.md](MODEL-PEN.md) | 1,116 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
+| [MODEL-PEN.md](MODEL-PEN.md) | 1,117 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 808 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,221 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
@@ -206,7 +206,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 946 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,761 | 34 | 8 | 15 | 175,560 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 35,285 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,116 | 30 | 6 | 3 | 44,143 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 44,143 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 18,424 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 808 | 12 | 5 | 4 | 23,806 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 47,427 B |
@@ -219,7 +219,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,582 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,091 | 45 | 4 | 2 | 737,366 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,850 B |
-| **16 documents** | | **12,623** | **368** | **72** | | |
+| **16 documents** | | **12,624** | **368** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -375,7 +375,7 @@ it says.
 | `boolean()` | `{ type: 'boolean' }` | `boolean` | native |
 | `nil()` | `{ type: 'null' }` | `null` | native |
 | `literal(v)` | `{ const: v }` | the literal | native |
-| `enumOf(values)` | `{ enum: values }` — an UNTYPED enum, any mix of JSON values | the literal union | native; an empty or non-array argument is `JL0101` |
+| `enumOf(values)` | `{ enum: values }` — an UNTYPED enum, any mix of JSON values. A store still maps it to a column when every value is ONE scalar type (the set names the type, MODEL-FORMAT §9.3); a set MIXING types has no column type and stays in the document | the literal union | native; an empty or non-array argument is `JL0101` |
 | string/number `.enumOf(values)` | `enum` beside the `type` — a typed enum (what a store maps to a column); values of another JSON type are `JL0101` | the literal union; with `.coerce()` the `Input` widens by the one source primitive that can reach a member (`1 \| 2 \| 3 \| string`) | native |
 | `datetime()`, `date()` | `{ type: 'string', format: 'date-time' \| 'date' }` | `DateTime` | native |
 | `time()`, `duration()` | `{ type: 'string', format: 'time' \| 'duration' }` | `string` | native |
@@ -633,7 +633,7 @@ it says.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9-]*$`, or an entry that is not a plain object, `JL0101` |
+| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9_-]*$`, or an entry that is not a plain object, `JL0101` |
 | `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 100–599, `JL0101` |
 
 **The policy**

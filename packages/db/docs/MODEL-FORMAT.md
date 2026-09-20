@@ -649,6 +649,16 @@ the report says what the engine answers (`'memory'`, `null`).
 `store.capabilities.busyTimeoutMs` and `store.capabilities.journalMode`
 are the same two read-back values under their long-published names.
 
+**The store's OWN options are a closed set too.** `driver`, `path`,
+`readOnly`, `queueTimeout`, `compileSchema`, `capture`, `replication`,
+`jobs`, `live`, `adopt`, `transactions`, `expressions`, `operators`,
+`functions`, `extensions`, `profile`, `statementCacheBound`,
+`zoneProvider` and `runtime`, beside the pragmas above — anything else
+is `JD0009`, named and with the nearest option suggested, before the
+driver opens. A misspelt option is otherwise dropped in silence, and
+`{ captur: true }` opened a store with no capture at all, which the
+host discovers in production rather than at the call.
+
 Opening retries classified busy failures of its idempotent initialization
 sequence, yielding between attempts so a competing opener can finish. The
 configured `busyTimeout` bounds admission of retries, with at most 32 total
@@ -1051,6 +1061,7 @@ error.
 | `JD0006` | an open option named a pragma this store does not configure |
 | `JD0007` | the pragma cannot be applied on this driver or store |
 | `JD0008` | a pragma did not take: the read-back disagrees with the request |
+| `JD0009` | an open option is outside the closed set `openStore` reads |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |
 | `JD0012` | work waited too long for the open transaction to settle |
@@ -1632,6 +1643,19 @@ one specification.
 | `relation` | a property | `{ to, many?, via?, through?, onDelete? }` — §9.4 |
 | `version` | a property | the optimistic-concurrency token (§11.5): a plain integer column, one per entity, never the key — engine-owned and bumped on every successful write |
 
+**`unique` and `index` are PER PROPERTY, and that is the whole of an
+entity's index vocabulary.** `normalizeEntities` derives one
+single-column index per marked property; an entity declares no
+composite index, no partial (predicate) index and no expression
+index — a collection's `indexes` array (§4) is the only place that
+vocabulary exists. A rule such as "one active shift per employee per
+day" (`UNIQUE (employeeId, day) WHERE status IN (…)`) therefore cannot
+be declared on an entity, and §13's invariants cannot express it
+either: a rule sees `{ old, new, op }` and never another row. Such a
+guarantee lives in application code inside the writing transaction
+until entity-level `indexes` exist. This is stated here so a model
+author meets it while writing the model rather than at `openStore`.
+
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
 happen, so this vocabulary is deliberately stricter than the
@@ -1654,7 +1678,7 @@ Stated once, mechanically applied, and returned as data by
 |---|---|
 | scalar (`string`/`number`/`integer`/`boolean`) at the top level | a real typed column |
 | `format: date-time`/`date` with `column: "integer"` | an epoch-milliseconds `INTEGER` column; the document keeps the RFC 3339 string, the column carries the derived epoch |
-| `enum` of scalars | a column plus a `CHECK (column IN (…))` — a `null` member of the enum is left to the column's nullability, never written into the list |
+| `enum` of scalars | a column plus a `CHECK (column IN (…))` — a `null` member of the enum is left to the column's nullability, never written into the list. The set names the column's type, so `{ "enum": ["draft", "open"] }` with no `type` is a `TEXT` column; a set MIXING JSON types has no one column type and goes to the document, like a union |
 | a union of several scalar types (`['string', 'integer']`) | the JSONB document — a column has one affinity and a union has several; `['integer', 'null']` is that scalar, nullable |
 | nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |
 | relation | a foreign-key column, or a join table for many-to-many (§9.4) |
@@ -1671,6 +1695,35 @@ would answer, so a `null` handed in for a column-mapped scalar is
 absent from what comes back — a returned object never names a member
 no read will show. An epoch column (§9.3's `column: "integer"` row)
 keeps its string in the document, present-`null` included.
+
+**What an epoch column is for, exactly.** It is an index-friendly
+PRE-FILTER, not a second source of truth. The stored RFC 3339 string in
+the document is the value; the column is the instant derived from it.
+So a range predicate compiles to BOTH — the column narrows the rows
+through its index, and the document string decides the comparison:
+
+```sql
+WHERE "r"."startsAt" >= ?                                  -- the index
+  AND jsonb_extract("r"."doc", '$."startsAt"') >= ?        -- the answer
+```
+
+An ORDERING over such a member compiles to the document string alone,
+and this is deliberate rather than an oversight. Ordering has no
+"narrow, then decide" form: whatever the `ORDER BY` names IS the
+order. The two disagree whenever the stored strings are not in one
+canonical form — `2026-01-01T12:00:00+01:00` sorts after
+`2026-01-01T11:30:00Z` by codepoint and before it by instant, and
+`…T12:00:00Z` and `…T12:00:00.000Z` are one instant and two strings.
+Ordering by the column would therefore answer a different order than
+the same member's predicates compare by, and than a collection or an
+in-memory residual sorts by. The engine's order for a `string` member
+is its codepoint order, everywhere, whatever column shadows it.
+
+The consequence to plan for: an ordering on an instant member does not
+use that member's index. A list that wants "most recent first" from an
+index orders by a plain `integer` column the application owns and
+writes monotonically (a creation sequence), and uses the instant
+member in predicates, where the shadow column does its work.
 
 ### 9.4 Relations and referential integrity
 
@@ -1756,7 +1809,18 @@ optional for the same reason); the document the store answers carries
 it, and the read shape keeps it required. A `version` property is
 engine-owned and never defaulted by the caller: an insert without one
 writes `0` — not SQL `NULL`, which no `WHERE version = ?` guard could
-match — and every successful write bumps it (§11.5).
+match — and every successful write bumps it (§11.5). A migration that
+adds a `version` property to an entity already holding rows starts
+those rows at `0` for the same reason (MIGRATION-FORMAT §3).
+
+A **nullable column-mapped scalar** is dropped from `required` for
+write validation as well, and for a reason the key's carve-out shares:
+§9.3 stores JSON `null` and absence alike as SQL `NULL` and reads both
+back ABSENT, so the storage keeps no distinction a write could be held
+to — and requiring it would refuse the store's own read-modify-write,
+since the document a read answers omits the member. A nullable member
+that stays in the DOCUMENT (`column: "json"`) keeps its `required`
+entry, because there `null` round-trips as `null`.
 
 ### 9.7 Error-code additions
 
@@ -2510,7 +2574,17 @@ Store enforcement covers direct and tracked model writes; arbitrary external
 SQL is outside that population. Trusted SQL writes refuse while store rules are
 present. Failed rules use `JD2096`, with constraint classification.
 
-Database enforcement requires a writable physical layout and a bounded scalar
+Database enforcement requires a writable physical layout — in practice
+`physical: { table, columns }` (§12), an explicitly owned column layout.
+A model that lets the store own its layout is refused (`JD0005`,
+"database rules require a writable explicit column layout") however
+simple the rule, so `enforcement: "database"` implies `.physical()`
+today. A store-owned model's rules are `enforcement: "store"`, which
+covers direct and tracked writes but not an external SQL writer.
+Lowering rules over a store-owned layout is open work, not a
+limitation of the rule language.
+
+Database enforcement also requires a bounded scalar
 query expression: `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$and`, `$or`, `$not`,
 scalar literals, `$.op`, and `$.old.member` / `$.new.member` references. Unsupported
 expressions refuse at planning. `planInvariants(model, { dialect })` returns

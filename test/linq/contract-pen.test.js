@@ -359,7 +359,7 @@ describe('the contract pen: the refusals it can see earlier than the compiler', 
     assert.match(refusal(() => defineContract({}, {})).reason, /at least one operation/);
     assert.match(refusal(() => defineContract({}, {
       a: read({ output: true, errors: { Bad: error({}) } }),
-    })).reason, /matches \^\[a-z\]\[a-z0-9-\]\*\$/);
+    })).reason, /matches \^\[a-z\]\[a-z0-9_-\]\*\$/);
   });
 
   it('a member mapped to `path` the template does not declare is JL0102', () => {

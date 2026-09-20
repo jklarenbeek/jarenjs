@@ -483,7 +483,8 @@ describe('compileContract — every rule has its code and docPath', () => {
   it('JC0011 — errors', () => {
     refuses(one({ kind: 'read', output: true, errors: [] }), 'JC0011', '/operations/a/errors');
     refuses(one({ kind: 'read', output: true, errors: { Bad: {} } }), 'JC0011', '/operations/a/errors/Bad');
-    refuses(one({ kind: 'read', output: true, errors: { 'not_found': {} } }), 'JC0011', '/operations/a/errors/not_found');
+    refuses(one({ kind: 'read', output: true, errors: { _leading: {} } }), 'JC0011', '/operations/a/errors/_leading');
+    refuses(one({ kind: 'read', output: true, errors: { 'has space': {} } }), 'JC0011', '/operations/a/errors/has space');
     refuses(one({ kind: 'read', output: true, errors: { e: 404 } }), 'JC0011', '/operations/a/errors/e');
     refuses(one({ kind: 'read', output: true, errors: { e: { status: 99 } } }), 'JC0011', '/operations/a/errors/e/status');
     refuses(one({ kind: 'read', output: true, errors: { e: { status: 600 } } }), 'JC0011', '/operations/a/errors/e/status');
@@ -492,6 +493,11 @@ describe('compileContract — every rule has its code and docPath', () => {
     refuses(one({ kind: 'read', output: true, errors: { e: { schema: 5 } } }), 'JC0011', '/operations/a/errors/e/schema');
     const ok = compileContract(one({ kind: 'read', output: true, errors: { e: {} } }));
     assert.strictEqual(ok.operations.a.errors.e.status, 400, 'the default error status');
+    // a `snake_case` code is admitted beside the suite's own kebab-case
+    // one, so a product migrating a legacy wire keeps its code names
+    const snake = compileContract(one({ kind: 'read', output: true,
+      errors: { permission_denied: { status: 403 }, 'domain-conflict': { status: 409 } } }));
+    assert.deepStrictEqual(Object.keys(snake.operations.a.errors), ['permission_denied', 'domain-conflict']);
   });
 
   it('JC0012 — method, status, media', () => {

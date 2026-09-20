@@ -31,7 +31,7 @@ import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
 import { admitCursor, admitSyncCursor, createCursor, drainPage, utf8Length } from './cursor.js';
-import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas } from './pragmas.js';
+import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots } from './profile.js';
@@ -826,20 +826,72 @@ function asyncCollection(core, live) {
 }
 
 /**
+ * Every member `openStore` reads, besides the connection pragmas. It is
+ * a CLOSED set, checked before the driver opens, because a misspelt
+ * option is otherwise dropped in silence: `captur: true` opened a store
+ * with no capture at all, and the host found out in production. The
+ * pragma table has refused a misspelt pragma name since it existed
+ * (`JD0006`); this is the same promise for the store's own options.
+ */
+const OPEN_OPTIONS = new Set([
+  'driver', 'path', 'readOnly', 'queueTimeout', 'compileSchema',
+  'capture', 'replication', 'jobs', 'live', 'adopt', 'transactions',
+  'expressions', 'operators', 'functions', 'extensions',
+  'profile', 'statementCacheBound', 'zoneProvider', 'runtime',
+]);
+
+/**
+ * Refuse an open option outside the closed set (`JD0009`), naming the
+ * nearest member when the spelling is close enough to be a typo. Run
+ * after the pragma check, so a misspelt PRAGMA keeps its own more
+ * specific refusal.
+ * @param {Record<string, any>} options
+ */
+function refuseUnknownOpenOptions(options) {
+  const known = [...OPEN_OPTIONS, ...PRAGMA_NAMES];
+  for (const key of Object.keys(options)) {
+    if (OPEN_OPTIONS.has(key) || PRAGMA_NAMES.includes(key)) continue;
+    const lower = key.toLowerCase();
+    const near = known.find((name) => {
+      const other = name.toLowerCase();
+      return other.startsWith(lower) || lower.startsWith(other);
+    });
+    throw new DbCompileError('JD0009',
+      `openStore option '${key}' is not one this store reads`
+      + (near === undefined ? `; the options are ${known.join(', ')}` : ` — did you mean '${near}'?`));
+  }
+}
+
+/**
  * The schema a WRITE validates against. A store-allocated key (`default:
  * "auto"`) is absent from the document the injected hook sees — the
  * database allocates it after validation — so it cannot be required of a
  * write, and the generated input type already marks it optional; every
  * other member is the schema's own, defaults filled (§9.6). The read
  * shape is untouched: the document the store answers carries the key.
+ *
+ * A NULLABLE column-mapped scalar is carved out for the same reason.
+ * §9.3 stores JSON `null` and absence alike as SQL `NULL` and reads
+ * both back ABSENT, so the storage keeps no distinction a write could
+ * be held to — and requiring it would refuse the store's own
+ * read-modify-write: the document `get` answers omits the member, and
+ * putting it straight back would fail validation on a member the store
+ * itself dropped. A nullable member that stays in the DOCUMENT keeps
+ * its `required` entry, because there `null` round-trips as `null`.
  * @param {any} entity - a normalized entity
+ * @param {any} entityMapping - the entity's mapping (its `columns` say
+ *   which members have a column of their own)
  * @returns {any}
  */
-function writeSchemaOf(entity) {
+function writeSchemaOf(entity, entityMapping) {
   const schema = entity.schema;
   const generated = new Set(entity.keys.filter((key) => entity.properties.get(key).default === 'auto'));
   for (const column of entity.physical?.columns ?? [])
     if (column.databaseDefault || column.generated) generated.add(column.name);
+  for (const column of entityMapping?.columns ?? []) {
+    const property = entity.properties.get(column.name);
+    if (property?.nullable === true && property.key !== true) generated.add(column.name);
+  }
   if (!Array.isArray(schema?.required) || !schema.required.some((name) => generated.has(name))) return schema;
   const out = { ...schema, required: schema.required.filter((name) => !generated.has(name)) };
   if (out.required.length === 0) delete out.required;
@@ -1011,6 +1063,7 @@ export function openStore(model, options) {
   let pragmaRequests;
   try {
     refuseUnsupportedPragmaKeys(options);
+    refuseUnknownOpenOptions(options);
     pragmaRequests = resolvePragmaRequests(options, { memory, readOnly });
   }
   catch (error) {
@@ -1963,7 +2016,7 @@ export function openStore(model, options) {
                   { docPath: '/entities', collection: name });
               }
               const validate = options.compileSchema !== undefined
-                ? options.compileSchema(writeSchemaOf(entity))
+                ? options.compileSchema(writeSchemaOf(entity, mapping.entities[name]))
                 : null;
               if (validate !== null && typeof validate !== 'function')
                 throw new TypeError('openStore: compileSchema must return a validation function');

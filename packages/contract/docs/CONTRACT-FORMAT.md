@@ -178,7 +178,7 @@ An operation is `{ kind, input?, output, errors?, policy?, http?, doc? }`.
 | `kind` | yes | `"read"`, `"command"` or `"subscribe"`. A subscribe operation's `output` is its **snapshot** schema and its emissions travel the stream binding (§17–§19). |
 | `input` | no | A JSON Schema whose **effective type is `object`** — `"type": "object"` on the schema itself or on the schema a `$ref` chain reaches (`JC0005`). Its top-level `properties` are the members the HTTP binding places (§4). Absent means the operation takes no input. |
 | `output` | yes | Any JSON Schema, `true` included (`JC0006` when absent). |
-| `errors` | no | `code → { status?, schema? }`. A code matches `^[a-z][a-z0-9-]*$`; `status` is an integer in 100–599 (default **400**); `schema` a JSON Schema for the error's details (`JC0011`). |
+| `errors` | no | `code → { status?, schema? }`. A code matches `^[a-z][a-z0-9_-]*$` — kebab-case is the suite's own spelling, and the underscore is admitted so a product migrating a `snake_case` wire keeps its codes; `status` is an integer in 100–599 (default **400**); `schema` a JSON Schema for the error's details (`JC0011`). |
 | `policy` | no | The declared behavior — the table below. |
 | `http` | no | The REST binding (§4). Absent means the **canonical binding**. |
 | `doc` | no | A string for projections. |
@@ -357,7 +357,18 @@ generated `Operations` map — an HTTP client reaches it through `bytes`
 (§10.6), whose success owns the live response stream, and through `url`.
 Its bytes are **streamed** in both directions: the handler pulls the
 upload one chunk at a time and may answer a pull source of its own
-(§7.1). `image.bytes` in §2 is one. Because its body is
+(§7.1). `image.bytes` in §2 is one.
+
+**A media RANGE.** An opaque operation's `media` may be a `type/*`
+range (`image/*`) as well as an exact type, for a payload whose subtype
+depends on the stored object — a download that is a JPEG, a PNG or a
+WebP. The range is what the projections and `bytes` report, so the
+answer is honestly described as an image rather than as
+`application/octet-stream`. The handler names the EXACT subtype in its
+own `content-type`, and the binding holds it to the range: a response
+whose type is outside it, or that names none, is `JC2010`. A range is
+never JSON, so it always makes the operation opaque; on a `subscribe`
+operation, whose media the binding forces, it is `JC0012`. Because its body is
 bytes the contract never decodes, an opaque operation MUST NOT declare a
 **body-located member** — neither through `http.body`, nor `http.in`,
 nor the `command` default (`JC0017` at the member that placed it there,
@@ -422,8 +433,8 @@ carries the same codes and a test holds them equal.
 | JC0008 | `http.path` is not a valid path template (§4.2; the message names the reserved form) |
 | JC0009 | a path variable, `http.in` key or `http.body` names no input member, or a member is mapped to a location it cannot travel in (§4.1) |
 | JC0010 | two operations share method and canonical path shape (§4.4) |
-| JC0011 | `errors` is malformed: not an object, a code is not `^[a-z][a-z0-9-]*$`, a status is not a 100–599 integer, or a schema is not a schema |
-| JC0012 | `http.method` is not an uppercase token of the supported set, `http.status` is not a 200–299 integer, or `http.media` is not a media type |
+| JC0011 | `errors` is malformed: not an object, a code is not `^[a-z][a-z0-9_-]*$`, a status is not a 100–599 integer, or a schema is not a schema |
+| JC0012 | `http.method` is not an uppercase token of the supported set, `http.status` is not a 200–299 integer, or `http.media` is not a media type (or a `type/*` range, which only a non-`subscribe` operation may declare — §4.5) |
 | JC0013 | an unknown member in a closed object (the document root, an operation, `policy`, `limits`, `retry`, `policy.errors`, `http`, or an error declaration) |
 | JC0014 | a `policy` member is mistyped or outside its declared set (§3.1), a read declares `idempotency`, or a command declares `retry` without `idempotency: "required"` |
 | JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped |
@@ -537,6 +548,7 @@ is the operation's output. `ctx` is frozen per request:
 | `fail(code, params?, details?, { retryable? }?)` | a declared failure by code — returns a `ContractFailure` value the handler returns; `params` feed the message catalog, `details` become the wire `details` (validated against the declaration's schema when it has one), `retryable` overrides the default taken from `policy.retry.on` |
 | `etag(tag, { strong? }?)` | arm the entity-tag path (§7.5); `tag` is the opaque tag without quotes |
 | `status(n)` | override the success status; must be an integer in 200–299 (`JC1006` otherwise — a host error the handler boundary settles into `JC2008`, seen by `onError`) |
+| `header(name, value)` | arm a response header the handler owns. It is part of the response the LEDGER records, so a replay under the same idempotency key carries it too. `set-cookie` appends (it is the one field that legitimately repeats); every other name replaces. A header the binding derives — `content-type`, `content-length`, `transfer-encoding`, `connection`, `etag`, `x-jaren-trace` — is `JC1006`, as is a non-token name or a value carrying CR, LF or NUL. A handler that FAILS sends none of what it armed |
 
 An **opaque** operation (`http.opaque`) takes a *raw* handler: `(input,
 ctx) => { status, headers?, body? }` with the bytes in `ctx.body`; it
@@ -999,8 +1011,12 @@ not that the world outside the store agrees.
 
 An operation with `policy.idempotency` of `optional` or `required` runs
 under an **idempotency key**: the caller's, sent as `Idempotency-Key`,
-scoped by the host's `scope(ctx)` (an installation, a principal — never a
-rotating token) — one of the three identities this format keeps apart
+scoped by the host's `scope(ctx, input)` (an installation, a principal —
+never a rotating token). §7.7 validates BEFORE idempotency, so the
+second argument is the validated input: a pre-auth command whose only
+evidence of who is asking travels in its body — a token exchange, a
+sign-up, an invite redemption — scopes by that evidence rather than by
+a constant. A `scope` that reads only `ctx` is unchanged — one of the three identities this format keeps apart
 (the **trace** is the server's per request; the **attempt** id is the
 caller's per dispatch and never crosses). `serveHttp` refuses (`JC1003`)
 an idempotent operation without a `ledger`.

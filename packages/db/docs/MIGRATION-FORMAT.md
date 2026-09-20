@@ -190,8 +190,28 @@ so the previous shape lives beside the code, where a diff can read it.
 - A changed schema gets a `jslt` step with the identity stylesheet and
   `"draft": true`. The planner **cannot** infer a data transform and
   MUST NOT pretend to — a silent identity transform is how data gets
-  quietly lost. The author fills in the stylesheet, or deletes the
-  step when the change is a pure widening.
+  quietly lost. The author fills in the stylesheet.
+- **Unless the change is a WIDENING**, which the planner recognises
+  structurally and reports as `report.widened`. A widening is a change
+  where every stored document still validates by construction: the two
+  schemas are identical except that the new one adds properties none
+  of which it requires, and/or requires fewer of them; the added
+  properties are admitted only under a CLOSED schema
+  (`additionalProperties: false`), since an open one may already store
+  that member with some other shape. Such a plan carries NO `jslt`
+  step at all — the `ADD COLUMN` is the whole of it — so it applies
+  unattended instead of waiting for a person to delete a placeholder.
+  Anything the rule does not understand is not a widening, and drafts.
+  An author who wants a transform anyway — to FILL a new member for
+  the rows that predate it, rather than leave it absent — writes the
+  step: `{ "kind": "jslt", "collection": "<name>", "stylesheet": [ … ] }`.
+- A `version` property added to an entity that already holds rows is
+  STARTED at `0` for those rows (an `sql` step on the additive path, a
+  literal in the rebuild's copy), never left SQL `NULL`. §9.6 of
+  MODEL-FORMAT states the first value; a `NULL` token is one no save's
+  `WHERE version = ?` guard can match, so every update of a row that
+  predates the token would refuse `JD2040` forever — re-reading
+  included, because the re-read carries the `NULL` back.
 - **The widening/narrowing rule runs against real data, not schema
   comparison**: at the end of the migration run (inside its
   transaction) every stored document is validated against the target

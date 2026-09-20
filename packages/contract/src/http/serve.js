@@ -49,9 +49,12 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError };
  *   the runtime record's `uuid`, itself `crypto.randomUUID` by default
  * @property {Ledger | null} [ledger] - the idempotency ledger; `null` refuses
  *   (`JC1003`) any operation whose `policy.idempotency` is not `none`
- * @property {(ctx: RequestContext) => string} [scope] - the idempotency scope
- *   of a request (an installation, a principal — never a rotating token);
- *   default `''`; called before `ctx.idempotency` is set
+ * @property {(ctx: RequestContext, input: any) => string} [scope] - the
+ *   idempotency scope of a request (an installation, a principal — never a
+ *   rotating token); default `''`; called before `ctx.idempotency` is set.
+ *   `input` is the VALIDATED input (§7.7 validates before idempotency), so a
+ *   pre-auth command whose only evidence of who is asking travels in its body
+ *   can scope by that evidence instead of by a constant
  * @property {boolean} [partial] - allow missing handlers; a missing one answers 501 `JC2013`
  * @property {boolean} [head] - answer HEAD for GET operations by running the handler and dropping the body; default true
  * @property {'always' | 'never'} [validateOutput] - `'never'` is a declared downgrade, reported in `capabilities.validatedOutput`
