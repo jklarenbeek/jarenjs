@@ -552,3 +552,74 @@ describe('date fields carry their controls and bounds', () => {
     assert.strictEqual(c.formatExclusiveMaximum, '2026-12-31');
   });
 });
+
+describe('one meaning for the two nullable spellings', () => {
+  const spellings = {
+    array: { type: ['string', 'null'], format: 'date', title: 'Due' },
+    anyOf: { title: 'Due', anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] },
+    oneOf: { title: 'Due', oneOf: [{ type: 'null' }, { type: 'string', format: 'date' }] },
+  };
+  /** @param {any} member */
+  const fieldOf = (member) => buildFormModel({ type: 'object', properties: { due: member } }).children[0];
+
+  it('an anyOf/oneOf of one type and null is that type: the same kind, control, constraints and nullable as the type array', () => {
+    const array = fieldOf(spellings.array);
+    for (const [name, member] of Object.entries(spellings)) {
+      const field = fieldOf(member);
+      assert.deepStrictEqual(
+        [field.kind, field.control, field.constraints, field.nullable, field.label],
+        [array.kind, array.control, array.constraints, true, 'Due'], name);
+    }
+    assert.strictEqual(array.kind, 'string');
+    assert.strictEqual(array.control, 'date');
+  });
+
+  it('a union branch reached through $ref resolves like any other field', () => {
+    const model = buildFormModel({
+      type: 'object',
+      $defs: { money: { type: 'number', minimum: 0 } },
+      properties: { price: { anyOf: [{ $ref: '#/$defs/money' }, { type: 'null' }] } },
+    });
+    const price = model.children[0];
+    assert.deepStrictEqual([price.kind, price.control, price.constraints, price.nullable],
+      ['number', 'number', { minimum: 0 }, true]);
+  });
+
+  it('a type array listing null among several types is nullable too; a plain type is not', () => {
+    assert.strictEqual(fieldOf({ type: ['string', 'integer', 'null'] }).nullable, true);
+    assert.strictEqual(fieldOf({ type: 'string' }).nullable, false);
+  });
+});
+
+describe('layer 1 agrees with the validator about null and about a required boolean', () => {
+  const model = buildFormModel({
+    type: 'object',
+    required: ['manager', 'name', 'agreed'],
+    properties: {
+      manager: { type: ['string', 'null'] },
+      deputy: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      name: { type: 'string' },
+      age: { type: 'integer' },
+      agreed: { type: 'boolean' },
+      tags: { type: 'boolean', default: true },
+    },
+  });
+  /** @param {string} key */
+  const field = (key) => model.children.find((f) => f.key === key);
+
+  it('an explicit null is a value: a required nullable member accepts it, a non-nullable one refuses its type', () => {
+    assert.deepStrictEqual(validateField(field('manager'), null), []);
+    assert.deepStrictEqual(validateField(field('deputy'), null), []);
+    assert.deepStrictEqual(validateField(field('name'), null).map((e) => e.keyword), ['type']);
+    assert.deepStrictEqual(validateField(field('age'), null).map((e) => e.keyword), ['type']);
+    // absent is still absent: only `required` applies
+    assert.deepStrictEqual(validateField(field('manager'), undefined).map((e) => e.keyword), ['required']);
+  });
+
+  it('a required boolean without a default starts false, so the form holds what the validator judges', () => {
+    const data = createInitialData(model);
+    assert.strictEqual(data.agreed, false);
+    assert.strictEqual(data.tags, true, 'a default still wins');
+    assert.strictEqual(Object.hasOwn(data, 'manager'), false, 'nothing else is invented');
+  });
+});

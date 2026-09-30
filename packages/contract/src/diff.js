@@ -2,7 +2,7 @@
 /**
  * @file `diffContracts(a, b)`: what changed from contract `a` to contract
  * `b`, classified by the published rule table (docs/CONTRACT-FORMAT.md
- * §13, rows R1–R15) into `breaking`, `additive`, `neutral` and `unknown`
+ * §13, rows R1–R16) into `breaking`, `additive`, `neutral` and `unknown`
  * — where `unknown` is the honest fourth class: a schema construct the
  * checker does not model (`anyOf`, `if`, a changed `pattern`, an external
  * `$ref` that moved) is REPORTED, never silently classed.
@@ -17,6 +17,15 @@
  * `deprecated`) never move a wire byte and are ignored; every other
  * keyword that differs between the two sides lands in `unknown` (R15).
  *
+ * A nullable node has two spellings — `type: [T, 'null']` and a
+ * two-branch `anyOf`/`oneOf` with a null-only branch — and the walk reads
+ * them through `canonicalNullable` (`@jarenjs/core/schema`). Where they
+ * accept the same values a respelling is neutral R16, and a change beside
+ * it is read on the type-array spelling (its `docPath` names that
+ * spelling's keyword). Where they may not (a `$query`, an `enum` or a
+ * `$ref` in the branch), nothing is canonicalized and the walk above
+ * reports what differs.
+ *
  * A `Change`'s `docPath` points into the document that carries it — a
  * removal into `a`, everything else into `b` — composed over the RESOLVED
  * structure, so a constraint reached through a `$ref` reports the path a
@@ -25,6 +34,7 @@
 
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { canonicalNullable } from '@jarenjs/core/schema';
 import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
@@ -46,7 +56,7 @@ export { isCompatible, compatReason } from './compat.js';
  * @property {string} docPath - RFC 6901 pointer to the change (into `a` for a removal, into `b` otherwise)
  * @property {unknown} [from] - the old value, where one exists
  * @property {unknown} [to] - the new value, where one exists
- * @property {string} rule - the §13 row: `'R1'`–`'R15'`
+ * @property {string} rule - the §13 row: `'R1'`–`'R16'`
  * @property {string} [note] - the honesty rider some rows carry (R5's "now ignored, not validated")
  */
 
@@ -118,7 +128,18 @@ function resolveHops(node, side) {
  *   event (`null` when it is a no-op, e.g. an unconstrained optional
  *   member added to an open object)
  * @property {(keyword: string, path: string, from: unknown, to: unknown) => void} unknown
+ * @property {(path: string, from: unknown, to: unknown) => void} respelled - a nullable
+ *   node respelled between a type array and a two-branch `anyOf`/`oneOf` (R16)
  */
+
+/**
+ * Which of the two nullable spellings a node uses.
+ * @param {Record<string, any>} node
+ * @returns {'anyOf' | 'oneOf' | 'type'}
+ */
+function nullableSpelling(node) {
+  return Array.isArray(node.anyOf) ? 'anyOf' : Array.isArray(node.oneOf) ? 'oneOf' : 'type';
+}
 
 /**
  * Compare two schema nodes in parallel over the modeled structure.
@@ -163,6 +184,23 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   if (pairs !== undefined && pairs.has(B)) return;
   if (pairs === undefined) visited.set(A, (pairs = new Set()));
   pairs.add(B);
+
+  // A nullable node has two spellings — `type: [T, 'null']` and a
+  // two-branch anyOf/oneOf with a null-only branch — and they are one
+  // meaning exactly when canonicalNullable can say so (the value sets are
+  // equal). A respelling alone is neutral R16; a respelling beside a real
+  // change reports both, and the change is read on the one spelling.
+  const canonA = canonicalNullable(A);
+  const canonB = canonA === null ? null : canonicalNullable(B);
+  if (canonA !== null && canonB !== null) {
+    if (canon(canonA) === canon(canonB)) {
+      if (canon(A) !== canon(B)) sink.respelled(path, A, B);
+      return;
+    }
+    if (nullableSpelling(A) !== nullableSpelling(B)) sink.respelled(path, A, B);
+    A = canonA;
+    B = canonB;
+  }
 
   const keys = new Set([...Object.keys(A), ...Object.keys(B)]);
   let structure = false;
@@ -319,7 +357,7 @@ const push = (into, change) => { into.push(change); };
 function classOf(diff, rule) {
   switch (rule) {
     case 'R2': case 'R7': case 'R9': case 'R11': return diff.additive;
-    case 'R13': return diff.neutral;
+    case 'R13': case 'R16': return diff.neutral;
     case 'R15': return diff.unknown;
     default: return diff.breaking;
   }
@@ -362,6 +400,9 @@ function schemaSink(diff, op, root, what) {
     },
     unknown(keyword, path, from, to) {
       push(diff.unknown, { kind: 'schema-unknown', op, docPath: root + path, from, to, rule: 'R15', note: keyword });
+    },
+    respelled(path, from, to) {
+      push(diff.neutral, { kind: 'schema-respelled', op, docPath: root + path, from, to, rule: 'R16' });
     },
   };
 }

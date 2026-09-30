@@ -386,3 +386,47 @@ describe('openHttpClient — the platform fetch over a real socket', () => {
     }
   });
 });
+
+describe('openHttpClient — nullable transport members, one reading for both spellings', () => {
+  const contract = compileContract({ $contract: '0.1', operations: { 'list.find': {
+    kind: 'read', output: true,
+    input: { type: 'object', required: ['tag', 'region'], properties: {
+      ids: { anyOf: [{ type: 'array', items: { type: 'integer' } }, { type: 'null' }] },
+      codes: { type: ['array', 'null'], items: { type: 'string' } },
+      tag: { type: ['string', 'null'] },
+      region: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      note: { type: ['string', 'null'] },
+    } },
+    http: { method: 'GET', path: '/find', in: { ids: 'query', codes: 'query', tag: 'query', region: 'header', note: 'query' } },
+  } } });
+
+  it('an anyOf [array, null] query member travels as JSON exactly as a [array, null] one does, and round-trips', async () => {
+    /** @type {any} */
+    let seen;
+    const server = serveHttp(contract, { 'list.find': (input) => { seen = input; return true; } });
+    const handler = toFetchHandler(server);
+    /** @type {string[]} */
+    const urls = [];
+    const client = openHttpClient(contract, { baseUrl: 'http://x.test', fetch: async (url, init) => { urls.push(String(url)); return handler(new Request(url, init)); } });
+    const o = await client.invoke('list.find', { ids: [1, 2], codes: ['a'], tag: 't', region: 'eu' });
+    assert.strictEqual(o.ok, true, JSON.stringify(o));
+    const query = new URL(urls[0]).searchParams;
+    assert.deepStrictEqual([query.get('ids'), query.get('codes')], ['[1,2]', '["a"]']);
+    assert.deepStrictEqual([seen.ids, seen.codes], [[1, 2], ['a']]);
+  });
+
+  it('a null for a required query or header member is JC2050 encoding before any request; an optional one is left out', async () => {
+    let calls = 0;
+    const client = openHttpClient(contract, { fetch: async () => { calls++; return new Response('true'); } });
+    const tag = await client.invoke('list.find', { tag: null, region: 'eu' });
+    assert.ok(!tag.ok);
+    if (!tag.ok) assert.deepStrictEqual([tag.error.code, tag.error.details], ['JC2050', [{ path: '/tag', keyword: 'encoding' }]]);
+    const region = await client.invoke('list.find', { tag: 't', region: null });
+    assert.ok(!region.ok);
+    if (!region.ok) assert.deepStrictEqual([region.error.code, region.error.details], ['JC2050', [{ path: '/region', keyword: 'encoding' }]]);
+    assert.strictEqual(calls, 0, 'nothing was sent');
+    const optional = await client.invoke('list.find', { tag: 't', region: 'eu', note: null });
+    assert.strictEqual(optional.ok, true);
+    assert.strictEqual(calls, 1);
+  });
+});

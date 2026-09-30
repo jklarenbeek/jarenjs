@@ -312,6 +312,7 @@ function headerMemberText(member, v) {
  * @property {ReadonlySet<string>} queryJson
  * @property {readonly string[]} headerMembers
  * @property {readonly string[]} headerNames
+ * @property {ReadonlySet<string>} required - the required path, query and header members
  * @property {readonly string[]} bodyMembers - body-located members when the body is their object
  * @property {string | null} wholeBody - the member whose value IS the body
  * @property {boolean} hasBody
@@ -364,6 +365,7 @@ function prepare(op) {
     queryJson: new Set(transport === null ? [] : transport.queryJson),
     headerMembers,
     headerNames,
+    required: new Set(transport === null ? [] : transport.required),
     bodyMembers,
     wholeBody: http.body,
     hasBody: http.body !== null || bodyMembers.length > 0,
@@ -571,7 +573,13 @@ export function openHttpClient(contract, options = {}) {
         if (v !== undefined) params.append(m, JSON.stringify(v));
         continue;
       }
-      if (v === undefined || v === null) continue;
+      if (v === undefined) continue;
+      if (v === null) {
+        // a URL has no spelling for null, and a required member cannot
+        // be left out in its place: the server would answer JC2006
+        if (route.required.has(m)) throw new Unencodable(m, `query member '${m}' is required and null, which a URL cannot carry`);
+        continue;
+      }
       const text = transportString(v);
       // URLSearchParams would quietly send U+FFFD in its place
       if (!text.isWellFormed()) throw new Unencodable(m, `query member '${m}' holds an unpaired surrogate, which a URL cannot carry`);
@@ -614,7 +622,13 @@ export function openHttpClient(contract, options = {}) {
     }
     for (let i = 0; i < route.headerMembers.length; i++) {
       const v = value[route.headerMembers[i]];
-      if (v === undefined || v === null) continue;
+      if (v === undefined) continue;
+      if (v === null) {
+        if (route.required.has(route.headerMembers[i])) {
+          throw new Unencodable(route.headerMembers[i], `header member '${route.headerMembers[i]}' is required and null, which a header cannot carry`);
+        }
+        continue;
+      }
       setObjectMember(headers, route.headerNames[i], headerMemberText(route.headerMembers[i], v));
     }
     if (typeof ctx.ifNoneMatch === 'string') headers['if-none-match'] = ctx.ifNoneMatch;

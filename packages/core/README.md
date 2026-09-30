@@ -22,6 +22,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | `@jarenjs/core/chunk` | cutting a value down to size: `sizeOf` (the suite's one size rule — a string is its length, anything else its JSON), `excerpt`, `truncate`, and `chunkText` by size, line or separator with offsets that locate a piece in its source |
 | `@jarenjs/core/scan` | char-code constants and predicates for recursive-descent parsers |
 | `@jarenjs/core/message` | the message template/catalog compiler shared by the validator and the form layer |
+| `@jarenjs/core/schema` | the JSON Schema constraint-keyword groups (`NUMERIC_CONSTRAINTS`, `STRING_CONSTRAINTS`, `ARRAY_CONSTRAINTS`, `OBJECT_CONSTRAINTS`) that forms, emit and the validator compose, the per-type `TYPE_SCOPED_KEYWORDS` and `ANNOTATION_KEYWORDS`, and the suite's one nullable normalizer: `splitNullable` gives the non-null branch of `type: [T, 'null']` or of a two-branch `anyOf`/`oneOf` (structural — forms, the contract transport compiler), `canonicalNullable` the one spelling only where both accept the same values (value-exact — the contract diff) |
 | `@jarenjs/core/color` | pure color math (`lerpColor` — hex `#rrggbb` interpolation) |
 | `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) and `isJsonNumberString`, the strict lexical JSON-number predicate shared by query casts and schema normalization; conversion and overflow policy stay with each caller |
 | `@jarenjs/core/integer` | `int8` ... `uint64` ranges and validators |

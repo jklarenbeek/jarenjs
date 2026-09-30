@@ -570,7 +570,7 @@ await contract.revision();
 // compatibility decision.
 
 const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
-// every change classified by the CONTRACT-FORMAT §13 rule table (R1–R15):
+// every change classified by the CONTRACT-FORMAT §13 rule table (R1–R16):
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
 //              ized/narrowed output member, idempotency now required, an

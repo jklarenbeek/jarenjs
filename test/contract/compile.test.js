@@ -607,3 +607,22 @@ describe('compileContract — every rule has its code and docPath', () => {
     assert.strictEqual(compileContract(shop).operations['image.bytes'].http.opaque, true);
   });
 });
+
+describe('compileContract — a nullable transport member reads as its non-null branch, in both spellings', () => {
+  it('queryJson and repeated classify anyOf [array, null] exactly as [array, null]', () => {
+    const c = compileContract({ $contract: '0.1', operations: { 'a.b': {
+      kind: 'read', output: true,
+      input: { type: 'object', properties: {
+        q1: { type: ['array', 'null'], items: { type: 'string' } },
+        q2: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+        q3: { oneOf: [{ type: 'null' }, { type: 'object' }] },
+        q4: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        h1: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+      } },
+      http: { method: 'GET', path: '/a', in: { q1: 'query', q2: 'query', q3: 'query', q4: 'query', h1: 'header' } },
+    } } });
+    const transport = c.operations['a.b'].input?.transport;
+    assert.deepStrictEqual([...(transport?.queryJson ?? [])], ['q1', 'q2', 'q3']);
+    assert.deepStrictEqual([...(transport?.members.repeated ?? [])], ['q1', 'q2', 'h1']);
+  });
+});

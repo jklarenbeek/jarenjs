@@ -38,7 +38,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 946 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 1,761 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,205 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,236 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,117 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 955 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 808 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
@@ -205,21 +205,21 @@ and the bundle is the byte count the tree-shaking probe builds.
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 946 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,761 | 34 | 8 | 15 | 175,603 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,205 | 82 | 10 | 4 | 35,285 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 44,629 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,236 | 82 | 10 | 4 | 35,325 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 44,669 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 955 | 17 | 8 | 3 | 18,424 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 808 | 12 | 5 | 4 | 23,806 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 47,429 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 47,469 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,033 | 16 | 7 | 3 | 18,478 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 49,574 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 39,441 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,143 | 22 | 7 | 3 | 49,614 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 39,481 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 16,931 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 15,293 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 13,793 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,582 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,110 | 45 | 4 | 2 | 757,060 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,850 B |
-| **16 documents** | | **12,643** | **368** | **72** | | |
+| **16 documents** | | **12,674** | **368** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -262,14 +262,14 @@ it and each document publishes it. The rounded column is what
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
 | `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 175,603 B | 176 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 35,285 B | 35 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 44,629 B | 45 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 35,325 B | 35 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 44,669 B | 45 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 18,424 B | 18 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 23,806 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 47,429 B | 47 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 47,469 B | 47 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 18,478 B | 18 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 49,574 B | 50 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 39,441 B | 39 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 49,614 B | 50 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 39,481 B | 39 kB |
 | `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 16,931 B | 17 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 15,293 B | 15 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 13,793 B | 14 kB |
@@ -389,7 +389,7 @@ it says.
 | `object(props)` | `{ type: 'object', properties, required, additionalProperties: false }` — `required` lists every member not `optional()`, in declaration order, and is omitted when empty | a closed object: members required unless `optional()`; no index signature; `object({})` is `Record<string, never>` | native |
 | `.open()` | drops `additionalProperties: false` | `& { [k: string]: unknown }` | native |
 | `.optional()` | the member leaves `required` | `?:` (on both sides; a `default()`ed member is present on `Infer`) | native |
-| `.nullable()` | `type: [t, 'null']` on a typed node; `enum: [..., null]` on `enumOf`/`literal`; `anyOf: [node, { type: 'null' }]` on the rest | `\| null` | native / emulated |
+| `.nullable()` | `type: [t, 'null']` on a typed node; `enum: [..., null]` on `enumOf`/`literal`; `anyOf: [node, { type: 'null' }]` on the rest. `nil().nullable()` stays `{ type: 'null' }` and `literal(null).nullable()` is `{ enum: [null] }`: null is already the whole value set, and neither repeats an item | `\| null` | native / emulated |
 | `record(values)` | `{ type: 'object', additionalProperties: values }` | `{ [k: string]: V }` | native |
 | `.minProperties(n)`, `.maxProperties(n)` | `minProperties`, `maxProperties` | — | native |
 | `.dependentRequired(map)` | `dependentRequired`, cloned | — | native; anything but a name → array-of-names map is `JL0101` |

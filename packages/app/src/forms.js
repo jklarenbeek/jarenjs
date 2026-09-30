@@ -23,11 +23,11 @@
  * JavaScript at the DOM boundary (APP-FORMAT §5.4). A host that renders
  * these controls MUST register them.
  *
- * Remaining limitations: a cleared number input writes `null` (which
- * surfaces as a validation error, not a dispatch error), and standard
- * actions require intermediate object/array containers to exist in the
- * data. `createInitialData` supplies those containers for a new form;
- * loaded documents must supply them too.
+ * A cleared text or number control removes its member (an empty control
+ * means absent); a cleared array element keeps its slot. The remaining
+ * limitation: standard actions require intermediate object/array
+ * containers to exist in the data. `createInitialData` supplies those
+ * containers for a new form; loaded documents must supply them too.
  */
 
 /** The default action names shared by both factories. */
@@ -311,21 +311,37 @@ export function createFormActions(options = {}) {
   // element nodes must be written with `replace` instead. The view-model
   // `element` flag travels through the binding payload.
   const writeOp = { $if: ['$payload.element', 'replace', 'add'] };
+  // A cleared text or number control removes its member: an empty control
+  // means absent, as `parseFieldInput('')` says, so a required member is
+  // reported missing rather than satisfied by `''` or `null`. The write
+  // comes first and the second op settles it: `remove` when the control is
+  // cleared, else a `test` of the value just written, which cannot fail.
+  // Writing first makes clearing total: RFC 6902 refuses to remove a member
+  // that is already absent. An array element cannot be absent without
+  // renumbering the ones after it, so a cleared element keeps its slot:
+  // `''` from a text control, `null` from a number control. The empty
+  // string is false (QUERY-FORMAT §2.2), so "cleared, and not an element"
+  // is one `$or`: the actions ship inside app documents and share links,
+  // so they stay small.
+  const settle = { $if: [{ $or: ['$event.value', '$payload.element'] }, 'test', 'remove'] };
   return {
     [act.input]: {
-      patch: [{ op: writeOp, path: target, value: '$event.value' }],
+      patch: [
+        { op: writeOp, path: target, value: '$event.value' },
+        { op: settle, path: target, value: '$event.value' },
+      ],
     },
     [act.check]: {
       patch: [{ op: writeOp, path: target, value: '$event.checked' }],
     },
     [act.number]: {
-      patch: [{
-        op: writeOp,
-        path: target,
-        // a cleared input writes null: a visible validation problem, not
-        // a dispatch error
-        value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] },
-      }],
+      $let: { v: { $if: ['$event.value', { $number: '$event.value' }, null] } },
+      $return: {
+        patch: [
+          { op: writeOp, path: target, value: '$v' },
+          { op: settle, path: target, value: '$v' },
+        ],
+      },
     },
     // the two JSON-carrying controls (typed select, json editor) share
     // one action: the extractor already produced a JSON value

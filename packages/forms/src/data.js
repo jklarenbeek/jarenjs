@@ -237,6 +237,9 @@ export function createInitialData(field) {
   if (field == null) return undefined;
   if (field.defaultValue !== undefined) return field.defaultValue;
   if (field.constValue !== undefined) return field.constValue;
+  // a checkbox cannot show "absent": a required boolean starts unchecked,
+  // so the value the form shows is the value the validator judges
+  if (field.kind === 'boolean' && field.required) return false;
 
   if (field.kind === 'object') {
     const obj = {};

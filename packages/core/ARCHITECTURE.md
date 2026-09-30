@@ -30,7 +30,7 @@
 - **Vector mathematics** for 2D/3D computations
 - **Deep equality and object manipulation** utilities
 
-This package is intentionally **decoupled** from JSON Schema concepts, making it reusable for any JavaScript application requiring robust type checking and data validation.
+This package is intentionally **decoupled** from any JSON Schema engine, making it reusable for any JavaScript application requiring robust type checking and data validation. Its one schema-shaped module, `schema.js`, holds a keyword vocabulary and a pure nullable normalizer that the schema readers share (§5f); it validates nothing.
 
 ---
 
@@ -867,6 +867,48 @@ const runtime = createRuntime({
 });
 runtime.zoneProvider;                       // null — the one member left at its default
 createRuntime({ clock: Date.now });          // TypeError: a runtime record has 'now', 'uuid', 'random', 'zoneProvider', not 'clock'
+```
+
+### 5f. Schema vocabulary and the nullable normalizer (`schema.js`)
+
+The constraint-keyword groups (`NUMERIC_CONSTRAINTS`, `STRING_CONSTRAINTS`,
+`ARRAY_CONSTRAINTS`, `OBJECT_CONSTRAINTS`) are the vocabulary that forms'
+constraint extraction, emit's dropped-constraint table and the validator's
+dispatch compose. Their order is part of the contract: the validator applies
+`$data` keywords in list order.
+
+Beside them lives the suite's one nullable normalizer. `{ type: [T, 'null'] }`
+and a two-branch `anyOf`/`oneOf` with a null-only branch are two spellings,
+and readers ask two different questions of them:
+
+- **`splitNullable(schema)`** answers structurally. It returns the non-null
+  branch (and `nullable: true`) of either spelling, with the node's
+  annotations laid over the branch. Forms uses it to choose a control; the
+  contract transport compiler uses it to choose an encoding. Both leave
+  acceptance to the validator.
+- **`canonicalNullable(schema)`** answers value-exactly. It returns the one
+  type-array spelling only when the two spellings accept the same values:
+  every keyword of the branch is scoped to its type (`TYPE_SCOPED_KEYWORDS`,
+  composed from the groups) or annotates (`ANNOTATION_KEYWORDS`). A
+  `$query`, an applicator, `const`, `enum`, `$ref` or a `default` inside the
+  branch keeps them apart, and the answer is `null`. The contract diff reads
+  this, so it never calls two schemas equal unless they are.
+
+Readers whose reading is persisted do not use either. The db column mapper
+(a union spelling stays in the document, the type array gets a column),
+contract `revision()` bytes, and emit's generated alias names keep today's
+reading. Moving a member between spellings is a planned migration there,
+never a side effect of an upgrade.
+
+```javascript
+import { splitNullable, canonicalNullable } from '@jarenjs/core/schema';
+
+splitNullable({ anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] });
+// { schema: { type: 'string', format: 'date' }, nullable: true }
+canonicalNullable({ anyOf: [{ type: 'string', minLength: 2 }, { type: 'null' }] });
+// { type: ['string', 'null'], minLength: 2 }
+canonicalNullable({ anyOf: [{ type: 'string', $query: { $gt: [{ '$string-length': '$' }, 2] } }, { type: 'null' }] });
+// null: in the type array the check runs on null and refuses it; in the union null passes
 ```
 
 ### 6. Text Module (`text/`)

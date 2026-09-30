@@ -14,7 +14,7 @@ import { isJsonObject } from '@jarenjs/core/object';
 import { createWeakCache } from '@jarenjs/core/cache';
 import {
   NUMERIC_CONSTRAINTS, STRING_CONSTRAINTS,
-  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
+  ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS, splitNullable,
 } from '@jarenjs/core/schema';
 
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
@@ -40,6 +40,10 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {string} kind - 'string'|'number'|'integer'|'boolean'|'enum'|'const'|'object'|'array'|'unknown'
  * @property {string} control - Suggested control: 'text'|'email'|'url'|'password'|'textarea'|'number'|'checkbox'|'select'|'date'|'datetime-local'|'time'|'color'|'json'
  * @property {boolean} required - Whether the parent object requires this property
+ * @property {boolean} nullable - Whether the schema admits `null` beside its type: a type
+ *   array that lists `'null'`, or an `anyOf`/`oneOf` of one branch and a null-only branch.
+ *   The two spellings of one nullable type give the field the non-null branch's kind,
+ *   control and constraints
  * @property {boolean} readOnly
  * @property {Array<any>|null} enumValues - Options for a select control
  * @property {Array<string>|null} enumLabels - Display labels parallel to enumValues (oneOf const/title idiom, through the `t` hook)
@@ -195,6 +199,9 @@ export function getFieldKind(schema) {
   if (Array.isArray(schema.enum)) return 'enum';
   // The oneOf const/title idiom is an enum with per-option labels
   if (getOneOfConstBranches(schema) !== null) return 'enum';
+  // a nullable union is its non-null branch, exactly as the type array is
+  const split = splitNullable(schema);
+  if (split !== null && !Array.isArray(schema.type)) return getFieldKind(split.schema);
 
   let type = schema.type;
   if (Array.isArray(type)) {
@@ -283,7 +290,17 @@ function getConstraints(schema) {
  * @returns {FormField}
  */
 function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
-  const schema = resolveSchema(rawSchema, rootSchema, depth);
+  const resolved = resolveSchema(rawSchema, rootSchema, depth);
+  // One meaning for the two nullable spellings (@jarenjs/core/schema): an
+  // anyOf/oneOf of one branch and null renders as its branch — with the
+  // node's own annotations over it — just as `type: [T, 'null']` renders
+  // as T. The validator still judges the whole schema.
+  const split = splitNullable(resolved);
+  const nullable = split !== null
+    || (isJsonObject(resolved) && Array.isArray(resolved.type) && resolved.type.includes('null'));
+  const schema = split !== null && !Array.isArray(resolved.type)
+    ? resolveSchema(split.schema, rootSchema, depth + 1)
+    : resolved;
   const effective = (schema != null && typeof schema === 'object') ? schema : {};
   const kind = getFieldKind(schema);
   const control = getControl(kind, effective);
@@ -323,6 +340,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
     kind,
     control,
     required,
+    nullable,
     readOnly: effective.readOnly === true,
     enumValues,
     enumLabels,

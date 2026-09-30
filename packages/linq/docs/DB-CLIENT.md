@@ -898,7 +898,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->44,629<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->44,669<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

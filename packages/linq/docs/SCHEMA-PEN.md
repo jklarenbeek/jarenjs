@@ -146,7 +146,7 @@ afresh.
 | `object(props)` | `{ type: 'object', properties, required, additionalProperties: false }` — `required` lists every member not `optional()`, in declaration order, and is omitted when empty | a closed object: members required unless `optional()`; no index signature; `object({})` is `Record<string, never>` | native |
 | `.open()` | drops `additionalProperties: false` | `& { [k: string]: unknown }` | native |
 | `.optional()` | the member leaves `required` | `?:` (on both sides; a `default()`ed member is present on `Infer`) | native |
-| `.nullable()` | `type: [t, 'null']` on a typed node; `enum: [..., null]` on `enumOf`/`literal`; `anyOf: [node, { type: 'null' }]` on the rest | `\| null` | native / emulated |
+| `.nullable()` | `type: [t, 'null']` on a typed node; `enum: [..., null]` on `enumOf`/`literal`; `anyOf: [node, { type: 'null' }]` on the rest. `nil().nullable()` stays `{ type: 'null' }` and `literal(null).nullable()` is `{ enum: [null] }`: null is already the whole value set, and neither repeats an item | `\| null` | native / emulated |
 | `record(values)` | `{ type: 'object', additionalProperties: values }` | `{ [k: string]: V }` | native |
 | `.minProperties(n)`, `.maxProperties(n)` | `minProperties`, `maxProperties` | — | native |
 | `.dependentRequired(map)` | `dependentRequired`, cloned | — | native; anything but a name → array-of-names map is `JL0101` |
@@ -208,6 +208,37 @@ that" — and which of them the type reading can follow.
 | `discriminated(key, options)` | `{ oneOf }` — every option an object declaring `key` as a `literal()`/`enumOf()` member | `A \| B` | native; a missing tag is `JL0102` |
 | `intersection(parts)` | `{ allOf }` | `A & B` | native; a closed object part is `JL0102` (the parts would reject each other's members — `open()` them, or `extend()`) |
 | `when(cond)`, `.then(b)`, `.else(b)` | `{ if, then, else }` | `unknown` (emit records a conditional, never types it) | native |
+
+#### Two spellings of nullable
+
+`s.string().nullable()` writes `{ type: ['string', 'null'] }`, and
+`s.union([s.string(), s.nil()])` writes `{ anyOf: [{ type: 'string' },
+{ type: 'null' }] }`. The pen keeps both exactly as written. Changing the
+union's output would move an entity member from the document into a column
+(a physical migration, MODEL-FORMAT §9.3) and change every published
+contract's bytes.
+
+The readers that interpret a schema at runtime read the two as one:
+- the contract diff reports a pure respelling as neutral R16;
+- forms gives both the same field;
+- the contract transport encodes both the same way.
+
+So a published contract can be respelled to `.nullable()` safely, with one
+exception. **The spellings are read as one only where they provably accept
+the same values.** A check, a keyword applicator, an `enum` or a `$ref` on
+the typed branch keeps them apart. With a check they really differ:
+
+```js
+s.string().check((x) => x.length().gt(2)).nullable();
+// { type: ['string', 'null'], $query: … } — the check runs on null too, so null is REFUSED
+s.union([s.string().check((x) => x.length().gt(2)), s.nil()]);
+// { anyOf: [{ type: 'string', $query: … }, { type: 'null' }] } — null passes its own branch
+```
+
+The diff reports any respelling it cannot prove equal as R15 unknown,
+never neutral. Readers whose reading is persisted keep
+distinguishing the spellings: the db column mapper, `revision()` bytes, and
+emit's generated alias names.
 
 ### 2.7 References and `$defs`
 
@@ -1167,7 +1198,7 @@ hand, or generate it some other way, when:
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->35,285<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->35,325<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.schema.kb-->35<!--/fact--> kB) beside the other nine subpath prices in

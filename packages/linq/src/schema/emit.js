@@ -246,6 +246,9 @@ function emitKeyword(value, ctx, at, keyword) {
 
 /** Fold `null` into a typed node; wrap an untyped one in `anyOf`. */
 function nullableOf(node, st) {
+  // null is already the whole value set: `['null', 'null']` would repeat a
+  // type item (2020-12 requires them unique) and `[null, null]` an enum item
+  if (st.kind === 'null') return node;
   if (TYPED[st.kind] !== undefined) {
     node.type = [TYPED[st.kind], 'null'];
     // a typed enum admits null only when the enum lists it
@@ -256,7 +259,7 @@ function nullableOf(node, st) {
     if (!st.values.includes(null)) node.enum = [...st.values, null];
     return node;
   }
-  if (st.kind === 'literal') return { enum: [st.value, null] };
+  if (st.kind === 'literal') return { enum: st.value === null ? [null] : [st.value, null] };
   return { anyOf: [node, { type: 'null' }] };
 }
 

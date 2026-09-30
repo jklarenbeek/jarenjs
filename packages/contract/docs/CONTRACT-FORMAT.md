@@ -276,9 +276,13 @@ use JSON encoding. Empty arrays, nulls, arrays of objects, numeric object
 keys and strings inside those unions round-trip without guessing from
 text. An absent member is omitted. Plain `string` members remain literal,
 even when their text looks like JSON. `$ref` chains are resolved at
-compilation; unconstrained schemas and unions expressed only with
-`anyOf`/`oneOf` do not imply a codec — declare a top-level `type` to choose
-one. Malformed JSON or multiple occurrences of a JSON member are `JC2012`;
+compilation. A nullable union — an `anyOf`/`oneOf` of one branch and a
+null-only branch — reads as its branch (`splitNullable` from
+`@jarenjs/core/schema`), so `anyOf: [{ type: 'array', … }, { type: 'null' }]`
+travels as one JSON value exactly as `type: ['array', 'null']` does, and a
+header member of that shape is `repeated` like its type-array twin.
+Unconstrained schemas and any other `anyOf`/`oneOf` union do not imply a
+codec — declare a top-level `type` to choose one. Malformed JSON or multiple occurrences of a JSON member are `JC2012`;
 a well-formed value of the wrong type is `JC2006`. Undeclared query keys
 are ignored. Scalar query members remain last-wins.
 
@@ -1428,7 +1432,11 @@ is true exactly for a 304.
    per segment into the canonical template; query members →
    `URLSearchParams` (`queryJson` members use one JSON value, including
    null and empty arrays; undefined is omitted; scalar transport members
-   omit null/undefined and otherwise use their string); header members → the header named by the
+   omit undefined and an optional member's null, and otherwise use their
+   string — a URL has no spelling for null, so a `null` for a **required**
+   scalar query or header member is `JC2050` (`keyword: "encoding"`)
+   before anything is sent, where leaving it out would only meet the
+   server's `JC2006`); header members → the header named by the
    member lowercased (an array as a `, `-joined list); the body: `http.body`
    names a member → `JSON.stringify` of that member's value; otherwise
    the object of the body-located members, stringified. `method` from
@@ -2091,6 +2099,7 @@ validator error would name.
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision` or `doc` changed | neutral |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
 | R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …) | **unknown** — reported, never silently classed |
+| R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not |
 
 Riders the rows carry:
 
@@ -2130,6 +2139,17 @@ the other's `version` — `compatReason` returns which rule held
 `diffContracts` computes what changed; `isCompatible` reads what the
 authors claim. Never derive one from the other: a `version` is bumped
 by a person, a revision (§14) moves by itself.
+
+- **R16 is value-exact, never a guess.** The two spellings are read
+  through `canonicalNullable` (`@jarenjs/core/schema`), which calls them
+  equal only when every keyword of the non-null branch is scoped to its
+  type or annotates. A `$query`, an `enum` or `const`, an applicator or a
+  `$ref` in the branch keeps them apart: `{ type: ['string', 'null'],
+  $query: … }` runs the check on `null` and refuses it, while the union
+  lets `null` through its other branch. Such a respelling stays R15
+  unknown. A respelling beside a real change reports both. The change is
+  read on the type-array spelling, so its `docPath` names that
+  spelling's keyword.
 
 The CLI's compatibility gate: `jaren-contract diff --from a.json --to
 b.json [--fail-on breaking[,unknown,…]]` prints the classified diff as

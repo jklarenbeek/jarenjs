@@ -23,6 +23,7 @@
  */
 
 import { isJsonObject, setObjectMember, deepFreeze } from '@jarenjs/core/object';
+import { splitNullable } from '@jarenjs/core/schema';
 import { JarenValidator } from '@jarenjs/validate';
 import {
   compileNormalizer, collectSameDocumentAnchors, resolveSameDocumentRef,
@@ -1178,8 +1179,13 @@ export function compileContract(doc, options = {}) {
         else {
           if (loc === 'query') queryMembers.push(m);
           else headerMembers.push(m);
+          // a nullable member reads as its non-null branch, whichever of the
+          // two spellings it uses (splitNullable): `anyOf: [array, null]`
+          // travels as JSON exactly as `type: ['array', 'null']` does
           const eff = effectiveSchema(schema, scope);
-          const type = isJsonObject(eff) ? eff.type : undefined;
+          const split = splitNullable(eff);
+          const branch = split === null ? eff : effectiveSchema(split.schema, scope);
+          const type = isJsonObject(branch) ? branch.type : undefined;
           if (type === 'array' || (Array.isArray(type) && type.includes('array'))) repeated.push(m);
           if (loc === 'query' && (type === 'object' || type === 'array'
             || (Array.isArray(type) && (type.includes('object') || type.includes('array'))))) queryJson.push(m);

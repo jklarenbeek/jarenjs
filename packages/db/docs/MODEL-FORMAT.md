@@ -1888,8 +1888,21 @@ Stated once, mechanically applied, and returned as data by
 | `format: date-time`/`date` with `column: "integer"` | an epoch-milliseconds `INTEGER` column; the document keeps the RFC 3339 string, the column carries the derived epoch |
 | `enum` of scalars | a column plus a `CHECK (column IN (…))` — a `null` member of the enum is left to the column's nullability, never written into the list. The set names the column's type, so `{ "enum": ["draft", "open"] }` with no `type` is a `TEXT` column; a set MIXING JSON types has no one column type and goes to the document, like a union |
 | a union of several scalar types (`['string', 'integer']`) | the JSONB document — a column has one affinity and a union has several; `['integer', 'null']` is that scalar, nullable |
+| a nullable member spelled as a union, `{ "anyOf": [{ "type": "string" }, { "type": "null" }] }` | the JSONB document, while `{ "type": ["string", "null"] }` gets a nullable column — the mapper reads the spelling, not the value set (below) |
 | nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |
 | relation | a foreign-key column, or a join table for many-to-many (§9.4) |
+
+**The two nullable spellings map differently, and stay that way.** Forms,
+the contract diff and the contract transport read `type: [T, 'null']` and
+a two-branch `anyOf`/`oneOf` with a null-only branch as one meaning, through
+`@jarenjs/core/schema`. The mapper does not, because its reading is
+persisted: the union keeps the member in the document, and the type array
+gives it a column. An upgrade never moves a member between them. Changing a
+member's spelling is a physical migration, so plan it as one.
+`planModelMigration` writes it both ways. Union → type array adds the
+column and moves the value out of the document. Type array → union folds
+the value back into the document and drops the column. Each plan ends with
+a draft transform step for the changed document schema.
 
 `STRICT` tables throughout. The physical row is the key column(s),
 the mapped scalar columns, and one JSONB `doc` column holding

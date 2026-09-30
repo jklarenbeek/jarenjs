@@ -72,6 +72,7 @@ function mountForm(options = {}) {
         validateFields: options.validateFields === true,
       }),
     }),
+    ...(options.onError === undefined ? {} : { onError: options.onError }),
   });
   return { app, container, model, rules };
 }
@@ -195,12 +196,45 @@ describe('the standard forms stylesheet', function () {
     }
   });
 
-  it('number inputs coerce, clearing writes null', function () {
+  it('number inputs coerce, and clearing one removes its member (an empty control means absent)', function () {
     const { app, container } = mountForm();
     fire(fieldControl(container, '/age'), 'input', { target: { value: '44' } });
     assert.strictEqual(app.getState().data.age, 44);
     fire(fieldControl(container, '/age'), 'input', { target: { value: '' } });
-    assert.strictEqual(app.getState().data.age, null);
+    assert.strictEqual(Object.hasOwn(app.getState().data, 'age'), false);
+  });
+
+  it('clearing a text field removes its member, so a required one is reported missing, not satisfied by ""', function () {
+    const { app, container } = mountForm({ validateFields: true });
+    fire(fieldControl(container, '/name'), 'input', { target: { value: 'Joham' } });
+    assert.strictEqual(app.getState().data.name, 'Joham');
+    fire(fieldControl(container, '/name'), 'input', { target: { value: '' } });
+    assert.strictEqual(Object.hasOwn(app.getState().data, 'name'), false);
+    const wrapper = find(container, (n) => n.attributes?.get('data-pointer') === '/name');
+    const error = find(wrapper, (n) => n.attributes?.get('class') === 'jaren-form-error');
+    assert.notStrictEqual(error, undefined, 'the required field reports itself empty');
+  });
+
+  it('clearing a member that is already absent is total: no dispatch error, still absent', function () {
+    /** @type {unknown[]} */
+    const errors = [];
+    const { app, container } = mountForm({ onError: (/** @type {unknown} */ e) => errors.push(e) });
+    assert.strictEqual(Object.hasOwn(app.getState().data, 'company'), false);
+    fire(fieldControl(container, '/company'), 'input', { target: { value: '' } });
+    assert.strictEqual(Object.hasOwn(app.getState().data, 'company'), false);
+    assert.deepStrictEqual(errors, [], 'a bare remove of an absent member would be JA2004');
+  });
+
+  it('a cleared array element keeps its slot: removing it would renumber the items after it', function () {
+    const { app, container } = mountForm();
+    const arrayFieldset = find(container, (n) => n.attributes?.get('class') === 'jaren-form-array');
+    const addButton = find(arrayFieldset, (n) => n.attributes?.get('class') === 'jaren-form-add');
+    fire(addButton, 'click');
+    fire(addButton, 'click');
+    fire(fieldControl(container, '/tags/0'), 'input', { target: { value: 'a' } });
+    fire(fieldControl(container, '/tags/1'), 'input', { target: { value: 'b' } });
+    fire(fieldControl(container, '/tags/0'), 'input', { target: { value: '' } });
+    assert.deepStrictEqual(app.getState().data.tags, ['', 'b']);
   });
 
   it('checkboxes write through the check action', function () {

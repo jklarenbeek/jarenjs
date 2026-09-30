@@ -98,13 +98,16 @@ export function validateField(field, value, catalog = undefined) {
   const errors = [];
   if (field == null) return errors;
 
-  // Absent value: only `required` applies
-  if (value === undefined || value === null) {
+  // Absent value: only `required` applies. `null` is a value, as it is
+  // to the validator: a nullable field accepts it, and every other field
+  // judges it below like any value of the wrong type.
+  if (value === undefined) {
     if (field.required && field.kind !== 'boolean') {
       pushError(errors, catalog, 'required', {});
     }
     return errors;
   }
+  if (value === null && field.nullable) return errors;
 
   const c = field.constraints;
 
@@ -156,7 +159,7 @@ export function validateField(field, value, catalog = undefined) {
     case 'number':
     case 'integer': {
       const num = typeof value === 'number' ? value : Number(value);
-      if (typeof value === 'boolean' || Number.isNaN(num)) {
+      if (value === null || typeof value === 'boolean' || Number.isNaN(num)) {
         pushError(errors, catalog, 'type', { type: 'number' });
         return errors;
       }

@@ -1,9 +1,10 @@
 //@ts-check
 /**
  * @file `diffContracts` (CONTRACT-FORMAT.md §13): one test per rule
- * R1–R15 asserting the class, the `rule` and the `docPath`; the honesty
- * pins (an `anyOf` change lands in `unknown`, NEVER in `neutral`; a
- * changed `pattern` is unknown while an added one narrows); the R3
+ * R1–R16 asserting the class, the `rule` and the `docPath`; the honesty
+ * pins (an `anyOf` change lands in `unknown`, NEVER in `neutral`, unless
+ * it is a nullable respelling that accepts exactly the same values — R16;
+ * a changed `pattern` is unknown while an added one narrows); the R3
  * riders (a moved member location is breaking, a renamed path variable
  * alone is not a binding change); and a whole `shop v1 → v2` scenario.
  * Documents and compiled contracts are both accepted.
@@ -327,6 +328,71 @@ describe('diffContracts — the rule table, row by row', () => {
       one({ ...readOp(), errors: { gone: { status: 410, schema: { type: 'object' } } } }),
       one({ ...readOp(), errors: { gone: { status: 410, schema: { type: 'string' } } } })).unknown);
     assert.deepStrictEqual([detailsSchema.rule, detailsSchema.kind], ['R15', 'error-schema-changed']);
+  });
+
+  describe('R16: a nullable respelling that accepts the same values is neutral', () => {
+    const unionS = { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] };
+    const oneOfS = { oneOf: [{ type: 'null' }, { type: 'string', minLength: 1 }] };
+    const arrayS = { type: ['string', 'null'], minLength: 1 };
+    /** A read whose output member `x` is `schema`. @param {any} schema */
+    const readWith = (schema) => one({ kind: 'read', output: { type: 'object', properties: { x: schema } }, http: { method: 'GET', path: '/a' } });
+
+    for (const [label, from, to] of /** @type {[string, any, any][]} */ ([
+      ['anyOf → type array', unionS, arrayS],
+      ['type array → anyOf', arrayS, unionS],
+      ['oneOf → type array', oneOfS, arrayS],
+      ['anyOf → oneOf', unionS, oneOfS],
+    ])) {
+      it(`${label}: exactly one neutral R16 on an input member and on an output member`, () => {
+        const input = diffContracts(commandWith(from), commandWith(to));
+        const c = only(input.neutral);
+        assert.deepStrictEqual([c.rule, c.kind, c.docPath],
+          ['R16', 'schema-respelled', '/operations/a.b/input/properties/x']);
+        onlyClasses(input, ['neutral']);
+
+        const output = diffContracts(readWith(from), readWith(to));
+        const o = only(output.neutral);
+        assert.deepStrictEqual([o.rule, o.kind, o.docPath],
+          ['R16', 'schema-respelled', '/operations/a.b/output/properties/x']);
+        onlyClasses(output, ['neutral']);
+      });
+    }
+
+    it('the same respelling where the branch carries a $query stays unknown — the two accept different values', () => {
+      const check = { $gt: [{ '$string-length': '$' }, 2] };
+      const d = diffContracts(
+        commandWith({ anyOf: [{ type: 'string', $query: check }, { type: 'null' }] }),
+        commandWith({ type: ['string', 'null'], $query: check }));
+      assert.ok(d.unknown.some((c) => c.rule === 'R15'), JSON.stringify(d.unknown));
+      assert.deepStrictEqual(d.neutral, [], 'never neutral when the value sets can differ');
+    });
+
+    it('a respelling beside a real change reports both, the change read on the type-array spelling', () => {
+      const d = diffContracts(commandWith(unionS), commandWith({ type: ['string', 'null'], minLength: 3 }));
+      assert.deepStrictEqual(only(d.neutral).rule, 'R16');
+      const narrowed = only(d.breaking);
+      assert.deepStrictEqual([narrowed.rule, narrowed.note, narrowed.docPath],
+        ['R6', 'minLength', '/operations/a.b/input/properties/x/minLength']);
+      onlyClasses(d, ['neutral', 'breaking']);
+    });
+
+    it('a recursive nullable definition, respelled and changed, terminates and reports each once', () => {
+      // both spellings canonicalize and differ, so the walk descends the
+      // canonical forms into `next` and back to the definition: the pair
+      // memo is keyed on the original nodes, so the cycle ends there
+      const tree = (/** @type {any} */ node) => ({
+        $contract: '0.1',
+        $defs: { node },
+        operations: { 'a.b': { kind: 'read', output: { $ref: '#/$defs/node' }, http: { method: 'GET', path: '/a' } } },
+      });
+      const d = diffContracts(
+        tree({ type: ['object', 'null'], properties: { next: { $ref: '#/$defs/node' } } }),
+        tree({ anyOf: [{ type: 'object', minProperties: 1, properties: { next: { $ref: '#/$defs/node' } } }, { type: 'null' }] }));
+      assert.deepStrictEqual(d.neutral.map((c) => [c.rule, c.docPath]), [['R16', '/operations/a.b/output']]);
+      assert.deepStrictEqual(d.unknown.map((c) => [c.rule, c.note, c.docPath]),
+        [['R15', 'minProperties', '/operations/a.b/output/minProperties']]);
+      onlyClasses(d, ['neutral', 'unknown']);
+    });
   });
 });
 

@@ -199,6 +199,21 @@ describe('the schema pen — the document is the deliverable', () => {
     assert.deepStrictEqual(s.any().nullable().schema, { anyOf: [{}, { type: 'null' }] });
   });
 
+  it('a nullable null is null: nil() and literal(null) repeat no item, and both pass 2020-12 meta-validation', () => {
+    // `{ type: ['null', 'null'] }` repeated a type item, which the
+    // meta-schema refuses; `{ enum: [null, null] }` repeated an enum item
+    // (a SHOULD the 2020-12 meta-schema does not enforce)
+    assert.deepStrictEqual(s.nil().nullable().schema, { type: 'null' });
+    assert.deepStrictEqual(s.literal(null).nullable().schema, { enum: [null] });
+    assert.strictEqual(metaSchema(s.nil().nullable().schema), true);
+    assert.strictEqual(metaSchema(s.literal(null).nullable().schema), true);
+    // the value sets are unchanged: null, and nothing else
+    for (const b of [s.nil().nullable(), s.literal(null).nullable()]) {
+      const v = validator().compile(b.schema);
+      assert.deepStrictEqual([v(null), v(0), v('')], [true, false, false]);
+    }
+  });
+
   it('the remedy JL0102 names on never() works: nullable() first, then annotate', () => {
     // `false` carries no keywords, so every annotation on never() is
     // refused — and the refusal names two ways out. Both must WORK, or
