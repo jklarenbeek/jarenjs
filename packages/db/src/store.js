@@ -916,7 +916,7 @@ const OPEN_OPTIONS = new Set([
   'driver', 'path', 'readOnly', 'queueTimeout', 'compileSchema',
   'capture', 'replication', 'jobs', 'live', 'adopt', 'transactions',
   'expressions', 'operators', 'functions', 'extensions',
-  'profile', 'statementCacheBound', 'zoneProvider', 'runtime',
+  'profile', 'statementCacheBound', 'zoneProvider', 'runtime', 'holdTimeoutMs',
 ]);
 
 /**
@@ -965,6 +965,10 @@ function refuseMalformedOpenOptions(options) {
   }
   if (options.transactions !== undefined && options.transactions !== 'wait' && options.transactions !== 'strict')
     throw refuse('transactions', "is 'wait' or 'strict'");
+  const { holdTimeoutMs } = options;
+  if (holdTimeoutMs !== undefined
+    && (!Number.isInteger(holdTimeoutMs) || holdTimeoutMs < 1 || holdTimeoutMs > TIMER_MAX))
+    throw refuse('holdTimeoutMs', 'is a whole number of milliseconds from 1 to 2147483647');
 }
 
 /**
@@ -984,7 +988,13 @@ function describeValue(value) {
  * nested transaction. A member a surface cannot honour is not unknown
  * there; it is a guarantee requested where it cannot act (`JD0014`).
  */
-const TRANSACTION_OPTIONS = Object.freeze(['mode', 'signal', 'unitOfWork']);
+const TRANSACTION_OPTIONS = Object.freeze(['mode', 'signal', 'unitOfWork', 'retry', 'holdTimeoutMs']);
+
+/** The members `retry` reads. */
+const RETRY_MEMBERS = Object.freeze(['attempts', 'baseMs', 'maxMs']);
+
+/** The longest wait a timer can take — `2^31 − 1` ms. */
+const TIMER_MAX = 0x7fffffff;
 
 /**
  * Read one transaction's options, refusing before the transaction
@@ -993,13 +1003,19 @@ const TRANSACTION_OPTIONS = Object.freeze(['mode', 'signal', 'unitOfWork']);
  * transaction, `unitOfWork` and a `mode: 'immediate'` the enclosing
  * transaction did not take are `JD0014` — a savepoint writes through the
  * unit of work around it and cannot take the writer lock.
+ * `retry` and `holdTimeoutMs` act on the asynchronous root only: the
+ * synchronous twin cannot wait (between attempts, or for a hold clock),
+ * and a savepoint inherits its root's — both are `JD0014` there, as is
+ * `retry` with `unitOfWork: 'shared'` (a shared unit's restored pending
+ * records would be saved twice).
  * @param {unknown} options
- * @param {'root' | 'nested'} surface
+ * @param {'async' | 'sync' | 'nested'} surface
  * @param {string} spelling - how the call reads, for the messages
  * @param {'deferred' | 'immediate'} [enclosing] - the enclosing
  *   transaction's mode, for a nested one
  * @returns {{ mode?: 'deferred' | 'immediate', signal?: AbortSignal,
- *   unitOfWork?: 'shared' | 'own' }}
+ *   unitOfWork?: 'shared' | 'own', retry?: { attempts: number, baseMs: number, maxMs: number },
+ *   holdTimeoutMs?: number }}
  */
 function readTransactionOptions(options, surface, spelling, enclosing) {
   if (options === undefined) return {};
@@ -1010,7 +1026,7 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
   }
   refuseUnknownMembers(options, TRANSACTION_OPTIONS, (key, hint) =>
     new DbCompileError('JD0013', `${spelling} option '${key}' is not one a transaction reads${hint}`));
-  const { mode, signal, unitOfWork } = options;
+  const { mode, signal, unitOfWork, holdTimeoutMs } = options;
   if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate')
     throw new DbCompileError('JD0013', `${spelling}: mode must be 'deferred' or 'immediate'`);
   if (unitOfWork !== undefined && unitOfWork !== 'shared' && unitOfWork !== 'own')
@@ -1018,6 +1034,26 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
   if (signal !== undefined && (signal === null || typeof signal !== 'object'
     || typeof signal.aborted !== 'boolean' || typeof signal.addEventListener !== 'function'))
     throw new DbCompileError('JD0013', `${spelling}: signal must be an AbortSignal`);
+  const retry = options.retry === undefined ? undefined : readRetry(options.retry, spelling);
+  if (holdTimeoutMs !== undefined
+    && (!Number.isInteger(holdTimeoutMs) || holdTimeoutMs < 1 || holdTimeoutMs > TIMER_MAX)) {
+    throw new DbCompileError('JD0013',
+      `${spelling}: holdTimeoutMs is a whole number of milliseconds from 1 to ${TIMER_MAX}, not ${describeValue(holdTimeoutMs)}`);
+  }
+  if (surface !== 'async') {
+    const where = surface === 'sync'
+      ? 'the synchronous twin — it answers values, so it cannot wait'
+      : 'a nested transaction — a savepoint lives inside its root, which owns them';
+    if (retry !== undefined)
+      throw new DbCompileError('JD0014', `${spelling}: retry cannot act on ${where}; retry the root transaction`);
+    if (holdTimeoutMs !== undefined)
+      throw new DbCompileError('JD0014', `${spelling}: holdTimeoutMs cannot act on ${where}; limit the root transaction`);
+  }
+  if (retry !== undefined && unitOfWork === 'shared') {
+    throw new DbCompileError('JD0014',
+      `${spelling}: retry cannot act with unitOfWork 'shared' — each attempt must start from a fresh `
+      + "unit of work, or the restored pending records of a failed attempt are saved twice; omit unitOfWork");
+  }
   if (surface === 'nested') {
     if (unitOfWork !== undefined) {
       throw new DbCompileError('JD0014',
@@ -1030,7 +1066,32 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
         + "writer lock — a savepoint cannot take it; begin the ROOT transaction with { mode: 'immediate' }");
     }
   }
-  return { mode, signal, unitOfWork };
+  return { mode, signal, unitOfWork, retry, holdTimeoutMs };
+}
+
+/**
+ * Read `retry` — `{ attempts, baseMs?, maxMs? }`: `attempts` a whole
+ * number from 1 to 32 (1 is no retry), `baseMs` (default 5) and `maxMs`
+ * (default 250, at least `baseMs`) the full-jitter backoff's bounds — the
+ * policy the store's open retry measured and uses.
+ * @param {unknown} value
+ * @param {string} spelling
+ * @returns {{ attempts: number, baseMs: number, maxMs: number }}
+ */
+function readRetry(value, spelling) {
+  if (!isPlainOptions(value)) {
+    throw new DbCompileError('JD0013', `${spelling}: retry is { attempts, baseMs?, maxMs? }, not ${describeValue(value)}`);
+  }
+  refuseUnknownMembers(value, RETRY_MEMBERS, (key, hint) =>
+    new DbCompileError('JD0013', `${spelling}: retry member '${key}' is not one it reads${hint}`));
+  const { attempts, baseMs = 5, maxMs = 250 } = value;
+  if (!Number.isInteger(attempts) || attempts < 1 || attempts > 32)
+    throw new DbCompileError('JD0013', `${spelling}: retry.attempts is a whole number from 1 to 32, not ${describeValue(attempts)}`);
+  if (!Number.isInteger(baseMs) || baseMs < 0 || baseMs > TIMER_MAX)
+    throw new DbCompileError('JD0013', `${spelling}: retry.baseMs is a whole number of milliseconds, not ${describeValue(baseMs)}`);
+  if (!Number.isInteger(maxMs) || maxMs < baseMs || maxMs > TIMER_MAX)
+    throw new DbCompileError('JD0013', `${spelling}: retry.maxMs is a whole number of milliseconds no less than baseMs, not ${describeValue(maxMs)}`);
+  return { attempts, baseMs, maxMs };
 }
 
 /**
@@ -1299,13 +1360,53 @@ export function openStore(model, options) {
       let currentScope = null;
 
       /**
-       * The mode the OUTERMOST open transaction began in, or `null` while
-       * none is open. A nested transaction reads it to refuse a
-       * `mode: 'immediate'` its savepoint could not honour (`JD0014`):
-       * only the root transaction can take the writer lock.
-       * @type {'deferred' | 'immediate' | null}
+       * The ROOT record of the open top-level transaction, or `null` while
+       * none is open: its `mode` (a nested transaction reads it to refuse
+       * a `mode: 'immediate'` its savepoint could not honour, `JD0014`),
+       * its `attempt` (`tx.attempt`), and its hold limit's state — `hold`
+       * (ms, or `undefined`), `expired` (set when the limit passed: every
+       * handle of the transaction then refuses `JD2098`), and the handle
+       * operations in flight, which a hold waits for before it rolls back.
+       * @type {{ mode: 'deferred' | 'immediate', attempt: number, hold: number | undefined,
+       *   expired: { holdTimeoutMs: number, elapsedMs: number } | null, inFlight: number,
+       *   onIdle: (() => void) | null } | null}
        */
-      let currentMode = null;
+      let currentRoot = null;
+      /** Each scope identity's root record (a nested scope shares its root's).
+       * @type {WeakMap<object, any>} */
+      const rootOf = new WeakMap();
+
+      /** The root a handle operation belongs to has one fewer in flight. @param {any} root */
+      const settleInFlight = (root) => {
+        root.inFlight -= 1;
+        if (root.inFlight === 0 && root.onIdle !== null) {
+          const idle = root.onIdle;
+          root.onIdle = null;
+          idle();
+        }
+      };
+      /** Resolves once no handle operation of the root is in flight. @param {any} root */
+      const whenIdle = (root) => (root.inFlight === 0 ? Promise.resolve()
+        : new Promise((resolve) => { root.onIdle = () => resolve(undefined); }));
+
+      /**
+       * The refusal of a transaction that held its connection past its
+       * hold limit (`JD2098`): rolled back, and every handle it gave out
+       * refuses. It carries `holdTimeoutMs` and `elapsedMs` (when the
+       * rollback began).
+       * @param {{ holdTimeoutMs: number, elapsedMs: number }} expired
+       */
+      const heldTooLong = (expired) => {
+        const error = new DbRuntimeError('JD2098',
+          `the transaction held its connection past its hold limit (${expired.holdTimeoutMs} ms) and was `
+          + `rolled back after ${expired.elapsedMs} ms; nothing it wrote was committed, and its handles refuse`);
+        Object.assign(error, { class: 'timeout', retryable: false,
+          holdTimeoutMs: expired.holdTimeoutMs, elapsedMs: expired.elapsedMs });
+        return error;
+      };
+      /** The body a JD2098 is still waiting on, by the error the rollback raised.
+       * @type {WeakMap<object, Promise<unknown>>} */
+      const heldBodies = new WeakMap();
 
       /**
        * What the OPEN transaction owes its in-memory callers once the
@@ -1414,15 +1515,15 @@ export function openStore(model, options) {
        *   without one the scope writes through whatever is already in
        *   force, which is what makes an inner savepoint part of the same
        *   unit of work as the transaction around it
-       * @param {'deferred' | 'immediate'} [mode] - a ROOT transaction's
-       *   mode; an inner scope inherits the one in force
+       * @param {{ mode: 'deferred' | 'immediate', attempt?: number, holdTimeoutMs?: number }} [root]
+       *   - a ROOT transaction's record; an inner scope inherits the one in force
        */
-      function withScope(open, fn, ownWork, mode) {
+      function withScope(open, fn, ownWork, root) {
         return open((inner) => {
           const outer = scope;
           const outerWork = work;
           const outerIdentity = currentScope;
-          const outerMode = currentMode;
+          const outerRoot = currentRoot;
           const outermost = settlements === null;
           if (outermost) settlements = [];
           const list = /** @type {any[]} */ (settlements);
@@ -1433,7 +1534,11 @@ export function openStore(model, options) {
           const identity = {};
           scope = inner;
           currentScope = identity;
-          if (mode !== undefined) currentMode = mode;
+          if (root !== undefined) {
+            currentRoot = { mode: root.mode, attempt: root.attempt ?? 1, hold: root.holdTimeoutMs,
+              expired: null, inFlight: 0, onIdle: null };
+          }
+          if (currentRoot !== null) rootOf.set(identity, currentRoot);
           if (ownWork !== undefined) work = ownWork;
           const kept = () => {
             if (outermost) flushSettlements();
@@ -1443,12 +1548,17 @@ export function openStore(model, options) {
             for (let i = mine.length - 1; i >= 0; i--) mine[i].rollback?.();
           };
           const restore = (settled) => {
+            // a scope nested in a transaction that already settled around
+            // it — a hold limit rolled the root back while this body still
+            // ran — restores nothing: the root put the store back when it
+            // settled, and another owner may be current by now
+            if (!outermost && currentScope !== identity) return;
             if (settled) kept();
             else undone();
             scope = outer;
             work = outerWork;
             currentScope = outerIdentity;
-            currentMode = outerMode;
+            currentRoot = outerRoot;
             if (outermost) settlements = null;
           };
           let out;
@@ -1493,9 +1603,102 @@ export function openStore(model, options) {
       const beginTransaction = (inner, signal, mode) =>
         attempt(() => opened.transaction(inner, signal, mode),
           (error) => wrapDriverError(error, { docPath: '/transaction' }));
-      let topLevelTransaction = (fn, signal, ownWork, mode) =>
+      /** Gives the capture engine up for an expired transaction; set once
+       * capture exists (a store without capture has nothing to give up). */
+      let abandonCapture = () => {};
+
+      /**
+       * Run a top-level body under its hold limit (MODEL-FORMAT §5.1). The
+       * clock starts when the body does — after queue admission and after
+       * the transaction began — on the monotonic clock. At the limit the
+       * transaction is marked expired, so every handle it gave out refuses
+       * `JD2098`; the handle operations already in flight finish; then the
+       * body's race is lost: the driver rolls the transaction back and
+       * hands the connection on, while the body itself may still be
+       * awaiting. A body that settles synchronously never met the clock.
+       * @param {any} root
+       * @param {() => any} run
+       * @returns {any}
+       */
+      const holdAround = (root, run) => {
+        if (root === null || root.hold === undefined) return run();
+        const started = performance.now();
+        const out = run();
+        if (!isThenable(out)) return out;
+        return new Promise((resolve, reject) => {
+          let expired = false;
+          const timer = setTimeout(() => {
+            expired = true;
+            root.expired = Object.freeze({ holdTimeoutMs: root.hold,
+              elapsedMs: Math.round(performance.now() - started) });
+            void whenIdle(root).then(() => {
+              abandonCapture();
+              const error = heldTooLong(root.expired);
+              heldBodies.set(error, toPromise(out));
+              reject(error);
+            });
+          }, root.hold);
+          toPromise(out).then(
+            (value) => { clearTimeout(timer); if (!expired) resolve(value); },
+            (error) => { clearTimeout(timer); if (!expired) reject(error); });
+        });
+      };
+
+      /**
+       * The caller's answer to a transaction a hold limit rolled back: it
+       * waits for the body — which may still be awaiting — and then
+       * rejects with `JD2098`, so a caller never runs beside its own body.
+       * @param {any} out - value-or-promise of a top-level transaction
+       * @returns {any}
+       */
+      const afterHeldBody = (out) => {
+        if (!isThenable(out)) return out;
+        return toPromise(out).catch((error) => {
+          const body = heldBodies.get(error) ?? (error instanceof AggregateError ? heldBodies.get(error.errors[0]) : undefined);
+          if (body === undefined) throw error;
+          return body.then(() => { throw error; }, () => { throw error; });
+        });
+      };
+
+      let topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs) =>
         withScope((inner) => beginTransaction(inner, signal, mode),
-          (inner, identity) => fn(scopedStore(inner, identity)), ownWork, mode ?? 'deferred');
+          (inner, identity) => holdAround(currentRoot, () => fn(scopedStore(inner, identity))), ownWork,
+          { mode: mode ?? 'deferred', attempt, holdTimeoutMs });
+
+      /**
+       * Retry a transaction as a whole (MODEL-FORMAT §5.1): each attempt is
+       * a complete top-level transaction through the gate — FIFO order, a
+       * fresh queue wait, the same signal, a fresh unit of work — made only
+       * after a failure whose commit outcome is known and that says it may
+       * be retried (`class: 'busy'`, `retryable: true`): a lock or
+       * serialization conflict. Never after a connection loss, a lost
+       * generation, an ambiguous COMMIT (a `TransactionFailure`), a hold
+       * expiry or the callback's own error. Between attempts the backoff is
+       * the suite's (`@jarenjs/core/retry`, full jitter over the store's
+       * random); an abort during it rejects with the signal's reason. The
+       * error that ends it carries `attempts`.
+       * @param {(attempt: number) => any} once
+       * @param {{ attempts: number, baseMs: number, maxMs: number }} retry
+       * @param {AbortSignal | undefined} signal
+       * @returns {Promise<any>}
+       */
+      const retrying = async (once, retry, signal) => {
+        for (let attempt = 1; ; attempt++) {
+          try {
+            return await once(attempt);
+          }
+          catch (error) {
+            const safe = /** @type {any} */ (error)?.class === 'busy' && /** @type {any} */ (error)?.retryable === true
+              && !(error instanceof AggregateError);
+            if (!safe || attempt >= retry.attempts) {
+              if (error !== null && typeof error === 'object' && Object.isExtensible(error))
+                /** @type {any} */ (error).attempts = attempt;
+              throw error;
+            }
+            await sleep(backoffDelay({ baseMs: retry.baseMs, maxMs: retry.maxMs, random: runtime.random }, attempt), signal);
+          }
+        }
+      };
 
       /**
        * How a store-level call behaves when another caller's transaction
@@ -1867,11 +2070,12 @@ export function openStore(model, options) {
             // and `ownWork`, with `capture.nest` inside the opened scope.
             // The view is built from the scope capture's wrap opens —
             // the INNERMOST one, the exact scope the callback runs in.
-            topLevelTransaction = (fn, signal, ownWork, mode) =>
+            topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs) =>
               withScope((inner) => beginTransaction(inner, signal, mode),
-                () => capture.nest((innerScope, identity) =>
-                  fn(scopedStore(innerScope, identity))),
-                ownWork, mode ?? 'deferred');
+                () => holdAround(currentRoot, () => capture.nest((innerScope, identity) =>
+                  fn(scopedStore(innerScope, identity)))),
+                ownWork, { mode: mode ?? 'deferred', attempt, holdTimeoutMs });
+            abandonCapture = () => capture.abandon();
           }
           // the live registry rides the capture stream; its dispatcher
           // registers FIRST so maintenance sees every record before any
@@ -2692,11 +2896,18 @@ export function openStore(model, options) {
             // default stays the deferred savepoint; nesting is a savepoint
             // under either.
             transaction: lift((fn, transactionOptions) => {
-              // a closed set, read before anything begins (JD0013)
-              const { mode, signal, unitOfWork } =
-                readTransactionOptions(transactionOptions, 'root', 'store.transaction');
-              return topLevelTransaction(fn, signal,
-                unitOfWork === 'own' ? createUnitOfWork() : undefined, mode);
+              // a closed set, read before anything begins (JD0013, JD0014)
+              const { mode, signal, unitOfWork, retry, holdTimeoutMs } =
+                readTransactionOptions(transactionOptions, 'async', 'store.transaction');
+              const hold = holdTimeoutMs ?? options.holdTimeoutMs;
+              /** @param {number} attempt */
+              const once = (attempt) => afterHeldBody(topLevelTransaction(fn, signal,
+                // a retried transaction runs every attempt on a fresh own
+                // unit of work: a failed attempt's restored pending records
+                // must never be saved by the next one
+                unitOfWork === 'own' || retry !== undefined ? createUnitOfWork() : undefined,
+                mode, attempt, hold));
+              return retry === undefined ? once(1) : retrying(once, retry, signal);
             }),
             observe: (fn) => {
               if (capture === null) {
@@ -2824,6 +3035,10 @@ export function openStore(model, options) {
            * @param {any} identity
            */
           const requireScope = (identity) => {
+            // a transaction its hold limit rolled back: every handle it gave
+            // out refuses with the reason, not as a stale scope
+            const root = rootOf.get(identity);
+            if (root !== undefined && root.expired !== null) throw heldTooLong(root.expired);
             if (currentScope === identity) return;
             throw new DbRuntimeError('JD2070',
               'this transaction handle is pinned to a scope that is not current: '
@@ -2831,6 +3046,38 @@ export function openStore(model, options) {
               + 'store the LIVE transaction callback received (tx.collection / '
               + 'tx.entity / tx.saveChanges / tx.jobs) — a handle never outlives '
               + 'or crosses its own scope.');
+          };
+
+          /**
+           * One handle operation of a transaction: the scope check, and —
+           * when its root has a hold limit — a count of operations in
+           * flight, so the limit lets an operation already under way finish
+           * (its statements in the transaction it rolls back) and no
+           * statement of a later one ever reaches the connection.
+           * @param {any} identity
+           * @param {() => any} fn
+           * @returns {any}
+           */
+          const runScoped = (identity, fn) => {
+            requireScope(identity);
+            const root = rootOf.get(identity);
+            if (root === undefined || root.hold === undefined) return fn();
+            root.inFlight += 1;
+            let out;
+            try {
+              out = fn();
+            }
+            catch (error) {
+              settleInFlight(root);
+              throw error;
+            }
+            if (!isThenable(out)) {
+              settleInFlight(root);
+              return out;
+            }
+            return toPromise(out).then(
+              (value) => { settleInFlight(root); return value; },
+              (error) => { settleInFlight(root); throw error; });
           };
 
           /**
@@ -2849,17 +3096,11 @@ export function openStore(model, options) {
             for (const member of lifted) {
               if (typeof handle[member] !== 'function') continue;
               out[member] = (/** @type {any[]} */ ...args) =>
-                lift(() => {
-                  requireScope(identity);
-                  return handle[member](...args);
-                })();
+                lift(() => runScoped(identity, () => handle[member](...args)))();
             }
             for (const member of direct) {
               if (typeof handle[member] !== 'function') continue;
-              out[member] = (/** @type {any[]} */ ...args) => {
-                requireScope(identity);
-                return handle[member](...args);
-              };
+              out[member] = (/** @type {any[]} */ ...args) => runScoped(identity, () => handle[member](...args));
             }
             return out;
           };
@@ -2874,12 +3115,11 @@ export function openStore(model, options) {
             const cursor = open();
             const step = (/** @type {string} */ member) => () => {
               try {
-                requireScope(identity);
+                return runScoped(identity, () => cursor[member]());
               }
               catch (error) {
                 return Promise.reject(error);
               }
-              return cursor[member]();
             };
             /** @type {any} */
             const wrapped = {
@@ -2968,8 +3208,10 @@ export function openStore(model, options) {
             /** The unit of work in force for THIS scope, captured once:
              * the view's tracker surface never follows a later scope. */
             const myWork = work;
-            /** The mode the root transaction around this scope began in. */
-            const myMode = currentMode ?? 'deferred';
+            /** The root transaction around this scope: its mode (a nested
+             * transaction may not exceed it) and its attempt number. */
+            const myRoot = currentRoot;
+            const myMode = myRoot?.mode ?? 'deferred';
             /** @type {Map<string, any>} */
             const myCollections = new Map();
             /** @type {Map<string, any>} */
@@ -3039,8 +3281,7 @@ export function openStore(model, options) {
                 + 'transaction — it was never created here, or a rollback past it or a '
                 + 'release already invalidated it');
             };
-            const savepointCreate = (/** @type {string} */ label) => {
-              requireScope(identity);
+            const savepointCreate = (/** @type {string} */ label) => runScoped(identity, () => {
               requireLabel(label, 'create');
               if (checkpoints.has(label)) {
                 throw new DbRuntimeError('JD2071',
@@ -3057,9 +3298,8 @@ export function openStore(model, options) {
                 });
                 return undefined;
               });
-            };
-            const savepointRollbackTo = (/** @type {string} */ label) => {
-              requireScope(identity);
+            });
+            const savepointRollbackTo = (/** @type {string} */ label) => runScoped(identity, () => {
               const entry = resolveLabel(label, 'rollbackTo');
               // ROLLBACK TO first; only after database success do the
               // in-memory effects follow. The target stays active with
@@ -3079,9 +3319,8 @@ export function openStore(model, options) {
                 }
                 return undefined;
               });
-            };
-            const savepointRelease = (/** @type {string} */ label) => {
-              requireScope(identity);
+            });
+            const savepointRelease = (/** @type {string} */ label) => runScoped(identity, () => {
               const entry = resolveLabel(label, 'release');
               // RELEASE removes the target and every later entry WITHOUT
               // running rollback effects: those rows remain part of the
@@ -3097,9 +3336,10 @@ export function openStore(model, options) {
                 }
                 return undefined;
               });
-            };
+            });
 
             const sql = trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
+              track: (/** @type {() => any} */ fn) => runScoped(identity, fn),
               beforeWrite: () => {
                 if ([...entities.values()].some((e) => e.invariants.some((r) => r.enforcement === 'store')))
                   throw new DbRuntimeError('JD2095', 'trusted SQL cannot bypass store-only invariants');
@@ -3113,6 +3353,8 @@ export function openStore(model, options) {
               },
             });
             const members = {
+              // 1-based: the attempt of a retried transaction this callback runs in
+              attempt: override(myRoot?.attempt ?? 1),
               sql: override(sql),
               transaction: override((/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
                 lift(() => nested(fn, transactionOptions))()),
@@ -3134,14 +3376,8 @@ export function openStore(model, options) {
               // the transaction's own connection: the root's introspect
               // takes the gate, which from inside the transaction is a
               // wait for itself (JD0012 at queueTimeout, then a rollback)
-              introspect: override(lift((/** @type {any} */ introspectOptions) => {
-                requireScope(identity);
-                return introspectModel(connection, introspectOptions);
-              })),
-              dataVersion: override(lift(() => {
-                requireScope(identity);
-                return readDataVersion();
-              })),
+              introspect: override(lift((/** @type {any} */ introspectOptions) => runScoped(identity, () => introspectModel(connection, introspectOptions)))),
+              dataVersion: override(lift(() => runScoped(identity, () => readDataVersion()))),
               savepoints: override(Object.freeze({
                 create: lift(savepointCreate),
                 rollbackTo: lift(savepointRollbackTo),
@@ -3162,42 +3398,21 @@ export function openStore(model, options) {
               backupTo: override(undefined),
             };
             if (entities.size > 0) {
-              members.saveChanges = override(lift(() => {
-                requireScope(identity);
-                return guard(() => myWork.tracker.saveChanges());
-              }));
+              members.saveChanges = override(lift(() => runScoped(identity, () => guard(() => myWork.tracker.saveChanges()))));
             }
             if (entityEngine !== null) {
               members.execute = override(
-                (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
-                  requireScope(identity);
-                  return entityEngine.execute(document, queryOptions);
-                });
+                (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.execute(document, queryOptions)));
               members.explain = override(lift(
-                (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
-                  requireScope(identity);
-                  return entityEngine.explain(document, queryOptions);
-                }));
+                (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.explain(document, queryOptions))));
               members.live = override(lift(
-                (/** @type {any} */ document, /** @type {any} */ liveOptions) => {
-                  requireScope(identity);
-                  return registerEntityLive(document, liveOptions);
-                }));
+                (/** @type {any} */ document, /** @type {any} */ liveOptions) => runScoped(identity, () => registerEntityLive(document, liveOptions))));
             }
             if (capture !== null) {
-              members.changesSince = override(lift((/** @type {any} */ after) => {
-                requireScope(identity);
-                return capture.changesSince(after);
-              }));
+              members.changesSince = override(lift((/** @type {any} */ after) => runScoped(identity, () => capture.changesSince(after))));
               if (capture.logged) members.changes = override(Object.freeze({
-                bounds: lift(() => {
-                  requireScope(identity);
-                  return capture.bounds();
-                }),
-                page: lift((/** @type {any} */ pageOptions) => {
-                  requireScope(identity);
-                  return capture.page(pageOptions);
-                }),
+                bounds: lift(() => runScoped(identity, () => capture.bounds())),
+                page: lift((/** @type {any} */ pageOptions) => runScoped(identity, () => capture.page(pageOptions))),
               }));
             }
             if (jobsEngine !== null) {
@@ -3205,60 +3420,24 @@ export function openStore(model, options) {
               // scope, so an enqueue or settlement here co-commits with
               // the domain transaction — and a retained handle is JD2070
               members.jobs = override(Object.freeze({
-                enqueue: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.enqueue(...args);
-                }),
-                get: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.get(...args);
-                }),
-                counts: lift(() => {
-                  requireScope(identity);
-                  return jobsEngine.counts();
-                }),
-                claim: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.claim(...args);
-                }),
-                assertLease: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.assertLease(...args);
-                }),
-                renew: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.renew(...args);
-                }),
-                complete: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.complete(...args);
-                }),
-                fail: lift((/** @type {any[]} */ ...args) => {
-                  requireScope(identity);
-                  return jobsEngine.fail(...args);
-                }),
+                enqueue: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.enqueue(...args))),
+                get: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.get(...args))),
+                counts: lift(() => runScoped(identity, () => jobsEngine.counts())),
+                claim: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.claim(...args))),
+                assertLease: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.assertLease(...args))),
+                renew: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.renew(...args))),
+                complete: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.complete(...args))),
+                fail: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.fail(...args))),
                 // a checkpoint store keeps its creator's SCOPE ownership:
                 // its later calls cannot switch scopes, and outlive none
                 checkpointsFor: (/** @type {any} */ job) => {
                   const inner = jobsEngine.checkpointsFor(job);
                   return Object.freeze({
-                    inspect: lift((/** @type {any} */ runId, /** @type {any} */ nodeId) => {
-                      requireScope(identity);
-                      return inner.inspect(runId, nodeId);
-                    }),
-                    load: lift((/** @type {any} */ runId) => {
-                      requireScope(identity);
-                      return inner.load(runId);
-                    }),
+                    inspect: lift((/** @type {any} */ runId, /** @type {any} */ nodeId) => runScoped(identity, () => inner.inspect(runId, nodeId))),
+                    load: lift((/** @type {any} */ runId) => runScoped(identity, () => inner.load(runId))),
                     save: lift((/** @type {any} */ runId, /** @type {any} */ nodeId,
-                      /** @type {any} */ value) => {
-                      requireScope(identity);
-                      return inner.save(runId, nodeId, value);
-                    }),
-                    complete: lift((/** @type {any} */ runId, /** @type {any} */ result) => {
-                      requireScope(identity);
-                      return inner.complete(runId, result);
-                    }),
+                      /** @type {any} */ value) => runScoped(identity, () => inner.save(runId, nodeId, value))),
+                    complete: lift((/** @type {any} */ runId, /** @type {any} */ result) => runScoped(identity, () => inner.complete(runId, result))),
                   });
                 },
                 // a worker is a ROOT-owned long-lived component wherever
@@ -3292,6 +3471,7 @@ export function openStore(model, options) {
                   return handle;
                 },
                 sql,
+                attempt: myRoot?.attempt ?? 1,
                 transaction: (fn, transactionOptions) => nested((tx) => synchronousBody(fn, tx),
                   transactionOptions, 'tx.sync.transaction'),
                 savepoints: Object.freeze({
@@ -3300,20 +3480,11 @@ export function openStore(model, options) {
                   release: savepointRelease,
                 }),
                 saveChanges: entities.size === 0 ? undefined
-                  : () => {
-                    requireScope(identity);
-                    return guard(() => myWork.tracker.saveChanges());
-                  },
+                  : () => runScoped(identity, () => guard(() => myWork.tracker.saveChanges())),
                 execute: entityEngine === null ? undefined
-                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
-                    requireScope(identity);
-                    return entityEngine.execute(document, queryOptions);
-                  },
+                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.execute(document, queryOptions)),
                 explain: entityEngine === null ? undefined
-                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => {
-                    requireScope(identity);
-                    return entityEngine.explain(document, queryOptions);
-                  },
+                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.explain(document, queryOptions)),
                 roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
                 relations: entityEngine === null ? undefined : entityEngine.relations,
               }));
@@ -3377,7 +3548,7 @@ export function openStore(model, options) {
                 // the root's closed set (JD0013), read first; `unitOfWork`
                 // is honoured exactly as the asynchronous root honours it
                 const { mode, signal, unitOfWork } = readTransactionOptions(
-                  transactionOptions, 'root', 'store.sync.transaction');
+                  transactionOptions, 'sync', 'store.sync.transaction');
                 // the synchronous surface answers values: while a
                 // transaction owns the connection it could only QUEUE,
                 // which handed a Promise back under a value's type

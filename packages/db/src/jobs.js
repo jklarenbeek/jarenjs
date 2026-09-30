@@ -41,6 +41,7 @@ export { JOBS_TABLE, JOB_CHECKPOINTS_TABLE };
  */
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { backoffDelay } from '@jarenjs/core/retry';
 import { chain, attempt } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
@@ -415,12 +416,15 @@ export function createJobEngine(options) {
     });
   };
 
-  /** §4: the jittered exponential backoff. */
-  const backoffOf = (attempts, workerDefaults) => {
-    const base = workerDefaults?.backoffBase ?? defaults.backoffBase;
-    const cap = workerDefaults?.backoffCap ?? defaults.backoffCap;
-    return Math.round(Math.min(cap, base * 2 ** (attempts - 1)) * (0.5 + random() / 2));
-  };
+  /** §4: the jittered exponential backoff — the suite's one backoff
+   * (`@jarenjs/core/retry`), its equal-jitter policy: never under half the
+   * capped delay, so a busy queue still spreads its retries. */
+  const backoffOf = (attempts, workerDefaults) => Math.round(backoffDelay({
+    policy: 'equal',
+    baseMs: workerDefaults?.backoffBase ?? defaults.backoffBase,
+    maxMs: workerDefaults?.backoffCap ?? defaults.backoffCap,
+    random,
+  }, attempts));
 
   /**
    * Renew a lease (D2): a NEW token, a later expiry, the same attempt

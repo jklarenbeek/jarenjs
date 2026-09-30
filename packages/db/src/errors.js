@@ -116,6 +116,7 @@ export const DB_CODES = Object.freeze({
   JD2095: 'the trusted SQL or synchronous transaction authority was refused',
   JD2096: 'a persistence invariant rejected the mutation',
   JD2097: 'the supervised operation was cancelled or exceeded its response deadline',
+  JD2098: 'the transaction held its connection past its hold limit and was rolled back',
 });
 
 /**
@@ -418,6 +419,61 @@ const SQLSTATE_FAMILY = Object.freeze({
 /** A five-character SQLSTATE, or `null` for an error that carries none. */
 const SQLSTATE_SHAPE = /^[0-9A-Z]{5}$/;
 
+/** A lost connection that carries no SQLSTATE: the socket's errno. */
+const LOSS_ERRNO = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE', 'ETIMEDOUT',
+  'ENOTCONN', 'EHOSTUNREACH', 'ENETUNREACH']);
+
+/** …or node-postgres's own sentence for a connection it lost (it sets no code). */
+const LOSS_MESSAGE = /^(Connection terminated( unexpectedly| due to connection timeout)?|Client has encountered a connection error and is not queryable|Client was closed and is not queryable)\b/;
+
+const CONNECTION = Object.freeze({ class: 'connection', code: 'JD2087', retryable: true,
+  reason: 'the connection to the database was lost' });
+
+/**
+ * Whether a failure that carries no SQLSTATE is a lost connection — an
+ * errno the socket raised, or node-postgres's uncoded sentence.
+ * @param {any} error
+ * @returns {boolean}
+ */
+function isUncodedLoss(error) {
+  if (error === null || typeof error !== 'object' || sqlStateOf(error) !== null) return false;
+  if (typeof error.code === 'string' && LOSS_ERRNO.has(error.code)) return true;
+  return typeof error.message === 'string' && LOSS_MESSAGE.test(error.message);
+}
+
+/**
+ * THE connection-loss rule (one home, D4): SQLSTATE class 08 and
+ * 57P01–57P03 (by the table), a socket errno (`ECONNRESET`, `EPIPE`, …)
+ * and node-postgres's uncoded "Connection terminated …" all classify as
+ * `JD2087`, class `connection`.
+ * @param {any} error
+ * @returns {boolean}
+ */
+export function isConnectionLoss(error) {
+  return classifyDriverError(error).class === 'connection';
+}
+
+/**
+ * A lost connection as the coded failure the store reports, with
+ * `retryable` decided the way the process and worker hosts decide it:
+ * `true` only when no transaction outcome is at stake (the loss came
+ * before `BEGIN`, or during an autocommit read), `false` when a
+ * transaction was open or its `COMMIT` was in flight — a retry could
+ * then run work that already committed.
+ * @param {any} cause
+ * @param {{ outcomeAtStake: boolean }} context
+ * @returns {DbRuntimeError}
+ */
+export function connectionLost(cause, context) {
+  if (typeof cause?.code === 'string' && /^J[A-Z]\d{4}$/.test(cause.code) && cause.code !== 'JD2087') return cause;
+  const reason = typeof cause?.message === 'string' ? cause.message : String(cause);
+  const error = cause?.code === 'JD2087' ? cause
+    : new DbRuntimeError('JD2087', `${CONNECTION.reason}: ${reason}`, { cause });
+  error.class = CONNECTION.class;
+  error.retryable = context.outcomeAtStake !== true && (cause?.code !== 'JD2087' || cause.retryable !== false);
+  return error;
+}
+
 /**
  * @param {any} error
  * @returns {string | null}
@@ -425,7 +481,9 @@ const SQLSTATE_SHAPE = /^[0-9A-Z]{5}$/;
 function sqlStateOf(error) {
   if (error === null || typeof error !== 'object') return null;
   const code = error.code;
-  return typeof code === 'string' && SQLSTATE_SHAPE.test(code) ? code : null;
+  // `EPIPE` has the shape of a SQLSTATE; no SQLSTATE class begins with
+  // `E`, so an all-letter `E…` code is a socket errno, never a state
+  return typeof code === 'string' && SQLSTATE_SHAPE.test(code) && !/^E[A-Z]{4}$/.test(code) ? code : null;
 }
 
 /**
@@ -453,7 +511,8 @@ export function isDriverError(error) {
   return resultCodeOf(error) !== null
     || sqlStateOf(error) !== null
     || error?.code === 'ERR_SQLITE_ERROR'
-    || error?.name === 'SQLiteError' || error?.name === 'SQLite3Error';
+    || error?.name === 'SQLiteError' || error?.name === 'SQLite3Error'
+    || isUncodedLoss(error);
 }
 
 /**
@@ -467,6 +526,7 @@ export function isDriverError(error) {
 export function classifyDriverError(error, unique = undefined) {
   const state = sqlStateOf(error);
   if (state !== null) return classifySqlState(state, error, unique);
+  if (isUncodedLoss(error)) return { ...CONNECTION };
   const extended = resultCodeOf(error);
   const primary = extended === null ? null : extended & 0xff;
   const message = typeof error?.message === 'string' ? error.message : '';

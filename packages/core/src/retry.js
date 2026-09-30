@@ -3,8 +3,12 @@
 
 /**
  * Calculate a delay; strict never shortens the server's minimum wait.
- * Compatibility policies retain the published clients' distinct jitter shapes.
- * @param {{ policy?: 'strict' | 'ai-compat' | 'contract-compat', baseMs?: number, maxMs?: number, random?: () => number }} options
+ * `strict` is full jitter (`cap × random`); `equal` is equal jitter
+ * (`cap × (½ + ½·random)` — never under half the cap), the durable job
+ * queue's retry policy. Compatibility policies retain the published
+ * clients' distinct jitter shapes (`ai-compat` is equal jitter too, and
+ * caps a server's wait at `maxMs`).
+ * @param {{ policy?: 'strict' | 'equal' | 'ai-compat' | 'contract-compat', baseMs?: number, maxMs?: number, random?: () => number }} options
  * @param {number} attempt - failed attempt, counted from one
  * @param {number} [retryAfterMs]
  * @returns {number}
@@ -15,7 +19,7 @@ export function backoffDelay(options, attempt, retryAfterMs = undefined) {
   if (retryAfterMs !== undefined)
     return policy === 'ai-compat' ? Math.min(maxMs, retryAfterMs) : Math.max(0, retryAfterMs);
   if (policy === 'contract-compat') return cap + Math.floor(random() * 250);
-  return cap * (policy === 'ai-compat' ? 0.5 + 0.5 * random() : random());
+  return cap * (policy === 'ai-compat' || policy === 'equal' ? 0.5 + 0.5 * random() : random());
 }
 
 /**

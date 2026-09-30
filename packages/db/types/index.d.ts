@@ -733,7 +733,7 @@ export interface SyncStore {
   /** The synchronous root transaction: the root's closed option set
    * (`JD0013`); it never queues, so a contended call is `JD0012` and an
    * aborted `signal` refuses it before it begins. */
-  transaction<R>(fn: (store: TransactionStore) => R, options?: TransactionScopeOptions): R;
+  transaction<R>(fn: (store: TransactionStore) => R, options?: SyncTransactionOptions): R;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain?(document: unknown, options?: ExecuteOptions): unknown;
   /** The entity roots this store-level provider serves (present with
@@ -860,12 +860,49 @@ export interface TransactionScopeOptions {
    * root that did not take the lock (`JD0014`); the root synchronous
    * twin accepts the same mode. */
   mode?: 'deferred' | 'immediate';
+  /** Re-run the whole transaction after a failure that says it may be
+   * retried (`class: 'busy'`, `retryable: true`, a known commit outcome):
+   * each attempt through the gate, on a fresh own unit of work, with the
+   * suite's full-jitter backoff between; `tx.attempt` is the number. The
+   * error that ends it carries `attempts`. The asynchronous root only
+   * (`JD0014` on the synchronous twin, nested, or with `unitOfWork:
+   * 'shared'`). */
+  retry?: TransactionRetry;
+  /** Bound how long the body may hold the connection, from the moment
+   * it starts (after queue admission and after the transaction began):
+   * at the limit the transaction is rolled back and the connection handed
+   * on; its handles refuse `JD2098`, and the caller hears `JD2098` once the
+   * body settles. Overrides the store's `holdTimeoutMs`. The asynchronous
+   * root only (`JD0014` on the synchronous twin or nested). */
+  holdTimeoutMs?: number;
 }
 
-/** A nested transaction's options: the root's, less `unitOfWork` —
- * the root transaction chooses the unit of work every savepoint in it
- * writes through (`JD0014` at runtime). */
-export type NestedTransactionOptions = Omit<TransactionScopeOptions, 'unitOfWork'>;
+/** A transaction's retry policy: `attempts` 1–32 (1 is no retry); the
+ * backoff between attempts is full jitter between `baseMs` (default 5)
+ * and `maxMs` (default 250). */
+export interface TransactionRetry {
+  attempts: number;
+  baseMs?: number;
+  maxMs?: number;
+}
+
+/** What a transaction that held its connection past its limit rejects
+ * with (`JD2098`). */
+export interface HoldTimeoutError extends Error {
+  readonly code: 'JD2098';
+  readonly holdTimeoutMs: number;
+  /** When the rollback began, measured from the body's start. */
+  readonly elapsedMs: number;
+}
+
+/** A nested transaction's options: the root's, less what only the root
+ * transaction chooses — the unit of work every savepoint in it writes
+ * through, its retry and its hold limit (`JD0014` at runtime). */
+export type NestedTransactionOptions = Omit<TransactionScopeOptions, 'unitOfWork' | 'retry' | 'holdTimeoutMs'>;
+
+/** The synchronous twin's options: the root's, less what needs a wait —
+ * `retry` and `holdTimeoutMs` (`JD0014` at runtime). */
+export type SyncTransactionOptions = Omit<TransactionScopeOptions, 'retry' | 'holdTimeoutMs'>;
 
 /**
  * The named-savepoint group a live transaction view carries
@@ -897,6 +934,8 @@ export interface SyncSavepointController {
 export interface TransactionSyncStore extends SyncStore {
   readonly sql: TrustedSyncSql;
   readonly savepoints: SyncSavepointController;
+  /** The attempt of the retried transaction this callback runs in (1-based). */
+  readonly attempt: number;
   /** Nest through this scope's savepoint, synchronously — the nested
    * option set (`JD0014` for `unitOfWork` or an immediate the root did
    * not take). */
@@ -928,6 +967,9 @@ export interface TransactionStore extends Omit<Store,
    * an admin operation is a root call. */
   readonly sql: TrustedSql;
   readonly jobs?: JobsApi;
+  /** The attempt of the retried transaction this callback runs in —
+   * 1-based; always 1 without `retry`. */
+  readonly attempt: number;
   /** Nest through this scope's savepoint. Its options are the root's
    * closed set less `unitOfWork` (a savepoint writes through the unit of
    * work around it); `mode: 'immediate'` inside a root that did not take
@@ -1168,6 +1210,9 @@ export interface OpenStoreOptions {
   /** How long work waits for an open transaction to settle before
    * `JD0012` (MODEL-FORMAT §5.1); reaches every driver. */
   queueTimeout?: number;
+  /** The default hold limit of every `store.transaction` (a call's own
+   * `holdTimeoutMs` overrides it): milliseconds from 1 to 2^31 − 1. */
+  holdTimeoutMs?: number;
   /**
    * The connection pragmas — a closed, validated set (MODEL-FORMAT §4).
    * An option naming any other pragma is `JD0006`; a pragma the driver

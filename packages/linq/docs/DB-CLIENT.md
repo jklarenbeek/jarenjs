@@ -102,7 +102,22 @@ decides which document answers a question about behaviour.
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
 | `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `explain().bindings` as the externals (`options.externals` merge over them); the strategy, the reason and the maintenance are the store's |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
-| `saveChanges()`, `transaction(fn)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
+| `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
+
+**A transaction's options are the store's.** `client.transaction(fn,
+options)` hands `mode`, `signal`, `unitOfWork`, `retry` and
+`holdTimeoutMs` to the store as they are — the set is the store's closed
+one, so an unknown or malformed option is `JD0013` and one the scope
+cannot honour is `JD0014` (MODEL-FORMAT §5.1) — with one default of the
+client's own: a root transaction gets its own unit of work. The client
+the callback receives carries the store's `attempt`, 1-based and above 1
+only under `retry`, whose attempts each start on a fresh unit of work; a
+body held past `holdTimeoutMs` is rolled back at the limit and the call
+rejects `JD2098`. A nested `tx.transaction(fn, options)` is a savepoint
+and takes the savepoint's set — no `unitOfWork`, `retry` or
+`holdTimeoutMs`. `TransactionOptions` types the root's set,
+`TransactionClientOf<E>` carries `attempt`, and the store's README runs
+the retry-and-hold example end to end.
 
 ### 2.2 The exported names
 

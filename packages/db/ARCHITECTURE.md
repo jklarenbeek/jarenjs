@@ -276,6 +276,18 @@ the client's type parsers are the host's configuration, and the row decoder read
 JavaScript boolean is bound as 1 or 0, because a boolean member is 1 or
 0 in this mapping.
 
+A held session can die under the store — a terminated backend, a
+restarted server, a dropped socket. The client that reports it emits an
+`'error'` event, and an event nobody listens for is an uncaught exception
+that ends the process, so the adapter listens for the store's whole life:
+the event marks the session lost, and the next call refuses `JD2087`
+instead of reaching a client that can no longer be queried. Whether that
+refusal may be retried depends on what was at stake. A loss outside a
+transaction, or inside one that had written nothing, lost nothing
+(`retryable: true`); a transaction that had written, or its `COMMIT` in
+flight, has an outcome the store cannot know (`retryable: false`), so a
+caller never repeats a write that may already have landed.
+
 `schema` is where the store lives. It is set on the acquired connection
 AND given to the dialect, so the DDL and the catalog reads agree — one
 value, two consumers. A migration's SHADOW replay is a second database,
@@ -1149,7 +1161,10 @@ consumed by `src/store.js` and never reached by a query:
   cursor's `wrap`, maintenance and backup under their own code, the open
   sequence): class, retryability, code. The query path's only special
   case is the int64 overflow of a pushed aggregate, answered by the
-  engine as a coded residual.
+  engine as a coded residual. A lost connection has one rule wherever
+  it surfaces — SQLSTATE `57P01`–`57P03` and class `08`, the socket
+  errnos, the PostgreSQL client's uncoded sentences — `JD2087`, class
+  `connection`, retryable only while no transaction outcome is at stake.
 
 The open path itself creates or verifies the shape inside an IMMEDIATE
 transaction with idempotent DDL (one dialect spelling, applied on the
@@ -1158,6 +1173,31 @@ processes creating one fresh file never meet the deferred-upgrade
 `SQLITE_BUSY` the busy handler cannot retry. The job queue's
 administration (`page`, `cancel`, `requeue`, `sweep`) lives in
 `src/jobs.js` beside the fence it authorises through (JOBS-FORMAT §10).
+
+A transaction retries only when asked (`retry`), and the loop sits
+OUTSIDE everything a transaction is made of: each attempt is a complete
+top-level transaction, queued through the gate like any other, on a fresh
+unit of work, with change capture seeing one attempt at a time. The loop
+reads the failure's classification rather than guessing from the driver:
+it runs again only after `class: 'busy'` with `retryable: true` and a
+known commit outcome, and sleeps on `@jarenjs/core/retry`'s backoff —
+the same function the job queue schedules its attempts with — between
+attempts.
+
+The hold limit (`holdTimeoutMs`) is the harder half, because an async
+body cannot be stopped: it can only be made harmless. The clock starts
+after the transaction has begun. At the limit the root record is marked
+expired, so every scoped handle refuses `JD2098` from its next call. The
+store then waits for the handle operations already in flight (it counts
+them), gives up the capture engine's records for the attempt, and
+settles the transaction as failed: the driver rolls back and hands the
+connection to the next caller while the body may still be awaiting. Three
+fences keep the late body from touching what comes after. The driver
+scope refuses every method once its transaction has settled. The scope
+restore will not reinstate a scope that is no longer current. The
+capture engine drops records from an abandoned generation. The caller
+hears `JD2098` only once its own body has settled, so it never runs
+beside it.
 
 
 ## Replication and bounded dependency maintenance

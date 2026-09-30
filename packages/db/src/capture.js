@@ -358,6 +358,8 @@ export function createCaptureEngine(options) {
   // from the durable row — never an answer to a watermark question
   let seq = 0;
   let depth = 0;
+  /** Which outermost wrap owns the engine (`abandon()` moves it on). */
+  let generation = 0;
   let context = null;
   /** @type {any} */
   let session = null;
@@ -577,10 +579,21 @@ export function createCaptureEngine(options) {
    * and with capture that is the scope this wrap opens, not the one
    * around it. Callers that need no scope simply ignore the arguments.
    */
+  /** What an abandoned wrap's late continuation fails with — never seen
+   * by a caller whose transaction is still live. */
+  const abandonedCapture = () => new DbRuntimeError('JD2070',
+    'this capture scope was abandoned with its transaction; nothing it buffered is recorded');
+
   const wrap = (fn) => {
     if (depth > 0) return fn();
     depth = 1;
+    // this wrap's claim on the engine: `abandon()` moves the generation on,
+    // and a continuation of an abandoned wrap then touches nothing — the
+    // engine may already be serving the next transaction
+    const mine = ++generation;
+    const abandoned = () => generation !== mine;
     const cleanupFailure = () => {
+      if (abandoned()) return;
       depth = 0;
       context = null;
       if (session !== null) {
@@ -595,8 +608,9 @@ export function createCaptureEngine(options) {
       else journal = [];
       outcome = connection.transaction((...scopeArgs) =>
         chain(dialect.capture?.beforeWrite(connection), () =>
-        chain(fn(...scopeArgs), (result) =>
-          chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
+        chain(fn(...scopeArgs), (result) => {
+          if (abandoned()) throw abandonedCapture();
+          return chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
             if (patch.length === 0) return { result, delivery: null };
             const at = clock();
             return chain(persist(patch, at), () => ({
@@ -609,13 +623,15 @@ export function createCaptureEngine(options) {
                 patch,
               },
             }));
-          })))));
+          }));
+        })));
     }
     catch (error) {
       cleanupFailure();
       throw error;
     }
     const finish = (bundle) => {
+      if (abandoned()) throw abandonedCapture();
       depth = 0;
       context = null;
       if (bundle.delivery !== null) pendingDeliveries.push(bundle.delivery);
@@ -629,6 +645,24 @@ export function createCaptureEngine(options) {
       });
     }
     return finish(outcome);
+  };
+
+  /**
+   * Give the engine up for the transaction that holds it: a hold limit
+   * rolled that transaction back while its body still runs. The session
+   * (or journal) is discarded, the engine is free for the next owner, and
+   * the abandoned wrap's continuation — whenever its body settles —
+   * collects, persists and delivers nothing.
+   */
+  const abandon = () => {
+    generation++;
+    depth = 0;
+    context = null;
+    if (session !== null) {
+      session.close();
+      session = null;
+    }
+    journal = [];
   };
 
   /**
@@ -678,6 +712,7 @@ export function createCaptureEngine(options) {
     mode,
     ready,
     wrap,
+    abandon,
     nest,
     mark,
     truncate,

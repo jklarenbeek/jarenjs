@@ -378,6 +378,16 @@ for guarded rebuilds and narrow additive/object operations. Follow the
 [transaction recipe](../packages/linq/docs/DB-CLIENT.md#trusted-sql-during-adoption),
 and [recovery contract](../packages/db/docs/MIGRATION-FORMAT.md#existing-physical-files-and-forward-recovery).
 
+A transaction that meets contention is retried by asking for it:
+`client.transaction(fn, { retry: { attempts: 3 } })` runs the whole body
+again, on a fresh unit of work, and only after a failure that says a retry
+is safe. A loop written around `transaction` instead re-saves whatever a
+failed attempt left pending in a shared unit of work. `holdTimeoutMs`, at
+open or per call, rolls back a body that holds the connection too long and
+hands the connection on (`JD2098`). Both are defined in
+[MODEL-FORMAT §5.1](../packages/db/docs/MODEL-FORMAT.md#51-transaction-ownership),
+and the store's README runs them end to end.
+
 ### Native column plans and bounded ranges
 
 Installed `@jarenjs/db` exports execute the [native SQL census](../packages/db/docs/NATIVE-PLANS.md). `@jarenjs/linq/db` exports `createDbRangeProvider` and entity handles expose `range`. The [provider contract](../packages/app/docs/COLLECTION-PROVIDER.md) distinguishes source epochs from client generations, resident index seeks from sequential continuations, and complete totals from loaded rows. The packed consumer runs the retained SQL comparison and no-op mutations under Node and Bun.

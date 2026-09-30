@@ -108,6 +108,8 @@ export async function open(model, options) {
     const inner = {
       store: tx,
       capabilities: tx.capabilities,
+      // the attempt of a retried transaction this callback runs in (1-based)
+      attempt: tx.attempt,
       sql: tx.sql,
       jobs: tx.jobs,
       sync: tx.sync,

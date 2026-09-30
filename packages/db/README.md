@@ -1326,6 +1326,21 @@ it needs raw SQL or the raw handle. The rules, in one place:
   `cancel` (through the lease fence), `requeue` and `sweep` (with a
   required horizon) are mechanisms; WHEN to sweep or cancel is the
   host's call, and priority classes stay a documented non-goal.
+- **A transaction is retried only when asked, and can be bounded.**
+  `store.transaction(fn, { retry: { attempts, baseMs?, maxMs? } })`
+  re-runs the whole body — every attempt a complete transaction through
+  the gate, on a fresh unit of work, with `tx.attempt` its number — and
+  only after a failure that says a retry is safe: `class: 'busy'`,
+  `retryable: true`, the commit's outcome known. The body's own error,
+  a lost connection, an ambiguous COMMIT and an expired hold surface
+  after the attempt that met them, the error carrying `attempts`.
+  `holdTimeoutMs` — per store at open, per call on the transaction —
+  bounds how long a body may hold the connection once it has begun: at
+  the limit the transaction is rolled back and the connection handed
+  on, every later call through the body's handle refuses `JD2098`, and
+  the caller hears `JD2098` with `{ holdTimeoutMs, elapsedMs }` once the
+  body settles. Both belong to the asynchronous root transaction
+  (`JD0014` on the synchronous twin and on a nested one).
 
 ```js
 import { openStore } from '@jarenjs/db';
@@ -1357,6 +1372,72 @@ catch (error) {
   else throw error;
 }
 ```
+
+Retry and the hold limit, end to end — two connections to one file
+stand in for two processes, and every printed value is what the example
+answers when it runs:
+
+```js
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const model = {
+  $model: '0.1',
+  collections: {
+    counters: {
+      schema: {
+        type: 'object',
+        required: ['id', 'n'],
+        properties: { id: { type: 'string' }, n: { type: 'integer' } },
+      },
+      key: '/id',
+      indexes: [],
+    },
+  },
+};
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'counters-'));
+const file = path.join(dir, 'app.db');
+const store = await openStore(model, { driver: nodeDriver(), path: file, holdTimeoutMs: 5_000 });
+const elsewhere = await openStore(model, { driver: nodeDriver(), path: file });
+await store.collection('counters').put({ id: 'orders', n: 0 });
+
+// read, then write — and on the first attempt the other connection
+// commits in between: SQLite refuses the read→write upgrade with a busy
+// its handler cannot wait out, so `retry` runs the whole body again
+const claimed = await store.transaction(async (tx) => {
+  const counter = await tx.collection('counters').get('orders');
+  if (tx.attempt === 1) await elsewhere.collection('counters').put({ id: 'orders', n: 41 });
+  const n = (counter?.n ?? 0) + 1;
+  await tx.collection('counters').put({ id: 'orders', n });
+  return { n, attempt: tx.attempt };
+}, { retry: { attempts: 3 } });
+// → { n: 42, attempt: 2 }
+
+// a body that holds the connection past its limit is rolled back AT the
+// limit and the connection handed on; the caller hears JD2098 once the
+// body settles, and nothing the body wrote remains
+const expired = await store.transaction(async (tx) => {
+  await tx.collection('counters').put({ id: 'orders', n: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 250));   // a slow call, made inside the transaction
+  await tx.collection('counters').put({ id: 'late', n: 1 });  // refused: the handle is fenced
+}, { holdTimeoutMs: 100 }).catch((error) => error);
+const { code, holdTimeoutMs } = expired;
+// → { code: 'JD2098', holdTimeoutMs: 100 }
+const after = (await store.collection('counters').get('orders'))?.n;
+// → 42
+
+await elsewhere.close();
+await store.close();
+fs.rmSync(dir, { recursive: true, force: true });
+```
+
+`retry` and `holdTimeoutMs` are typed on `TransactionScopeOptions`, the
+rejection as `HoldTimeoutError` (`code: 'JD2098'`, `holdTimeoutMs`,
+`elapsedMs`), and `tx.attempt` on every transaction view — the linq
+client forwards all three ([DB-CLIENT](../linq/docs/DB-CLIENT.md)).
 
 The normative contract is [MODEL-FORMAT](docs/MODEL-FORMAT.md) §4 (the
 pragma set, the maintenance and backup rules, the cancellation report)

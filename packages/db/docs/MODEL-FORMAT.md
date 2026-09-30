@@ -803,7 +803,8 @@ unchanged; `patch` on an absent key is `JD2006`.
 and may itself call `transaction`; each level is one savepoint. A
 throw rolls back exactly its own level and rethrows — an outer
 transaction that catches the error continues and its own work
-commits. There is no implicit retry.
+commits. Retry is explicit only (`retry`, §5.1) — nothing retries by
+itself.
 If `COMMIT` or `RELEASE` itself fails, for example on a deferred foreign
 key constraint, that level rolls back before another caller acquires
 the connection. A rollback failure accompanies the original failure in
@@ -860,10 +861,53 @@ brackets every first-open object — collection, entity and join tables,
 indexes, the change log and its state row, the job tables — the same
 way (§2.4).
 
+**`retry` re-runs a transaction as a whole — explicitly, boundedly, and
+only when that is safe.** `store.transaction(fn, { retry: { attempts,
+baseMs?, maxMs? } })` — `attempts` 1–32 (1 is no retry), the backoff
+between attempts full jitter from `baseMs` (default 5 ms) up to `maxMs`
+(default 250 ms), the store's `runtime.random` drawing it. An attempt is
+retried only after a failure that says it may be (`class: 'busy'`,
+`retryable: true` — SQLite's busy and locked, PostgreSQL's 40001, 40P01,
+55P03) whose commit outcome is known; never after a connection loss, a
+lost worker generation, a failed rollback (`TransactionFailure`), a hold
+expiry or the callback's own error. Each attempt is a complete top-level
+transaction through the gate (FIFO, a fresh `queueTimeout`, the same
+`signal`) on a **fresh unit of work of its own** — a failed attempt's
+restored pending inserts would otherwise be saved beside the next
+attempt's, which is how re-running a callback by hand used to insert
+two rows; `unitOfWork: 'shared'` with `retry` is therefore `JD0014`. The
+callback sees its attempt as `tx.attempt` (1-based; also on `tx.sync`
+and the typed client). An abort during the backoff rejects with the
+signal's reason and makes no further attempt. The error that ends a
+retried transaction carries `attempts`.
+
+**`holdTimeoutMs` bounds how long a body may hold the connection.** Per
+store (`openStore(model, { holdTimeoutMs })`, the default) or per call
+(`store.transaction(fn, { holdTimeoutMs })`, which wins): milliseconds
+on the monotonic clock, counted from the moment the BODY starts — after
+queue admission and after the transaction began, so neither the queue
+(`queueTimeout`) nor a lock wait (the driver's lock timeout) counts. At
+the limit the transaction is rolled back and the connection handed on —
+another transaction proceeds while the body may still be awaiting — and
+every handle it gave out refuses **`JD2098`** (a handle operation
+already under way on an asynchronous host finishes first: its statements
+land in the transaction that is then rolled back, and none of a later
+one ever reaches the connection). When the body settles, `transaction()`
+rejects with `JD2098` carrying `holdTimeoutMs` and `elapsedMs` (when the
+rollback began), so a caller never runs beside its own body. Nothing of
+the body is committed. A nested transaction or a capture scope still
+open at the limit settles into nothing. On in-thread SQLite a
+synchronous statement blocks the event loop, so the limit acts after it
+returns (`capabilities.cancellation.midStatement` stays `false`).
+`retry` and `holdTimeoutMs` act on the asynchronous root only: the
+synchronous twin cannot wait and a nested transaction inherits its
+root's — both are `JD0014` there.
+
 **A transaction's options are one closed set, on every surface.**
 `store.transaction`, `store.sync.transaction`, a nested `tx.transaction`
 / `tx.sync.transaction` and the typed client's `client.transaction` read
-`mode`, `signal` and `unitOfWork` — nothing else. Anything but a plain
+`mode`, `signal`, `unitOfWork`, `retry` and `holdTimeoutMs` — nothing
+else. Anything but a plain
 object, an unknown member (named, with the nearest one: `{ mod:
 'immediate' }` is refused, where it used to run *deferred*) or a malformed
 value is **`JD0013`**, before the body runs. A nested transaction reads the
@@ -1205,6 +1249,7 @@ error.
 | `JD2095` | trusted SQL or synchronous callback authority refused |
 | `JD2096` | persistence invariant rejected the mutation; constraint class |
 | `JD2097` | supervised native operation cancelled or past its response deadline; owner exit and transaction fate are reported separately |
+| `JD2098` | the transaction held its connection past its hold limit and was rolled back |
 | `JD0060` | a replication envelope or snapshot is invalid |
 | `JD2100` | a replica sequence or causal dependency has a gap |
 | `JD2101` | an envelope identity names different content or an unknown local origin |

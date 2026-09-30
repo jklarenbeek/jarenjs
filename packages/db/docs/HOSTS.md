@@ -78,6 +78,29 @@ and acknowledge delivery. The next request and clean session release wait for bo
 cancellation delivery and the query response. Avoid a detached, delayed
 PID-only cancellation request against a reusable session.
 
+**A lost session is one coded failure, never a crash.** The adapter
+listens for the session client's `'error'` event for as long as it holds
+it (pg-pool removes its own idle listener on acquire, so a backend the
+server terminated while the Store held it used to raise two uncaught
+exceptions and end the process). A lost session is marked, and every
+later call refuses `JD2087`, class `connection`. The one connection-loss
+rule in `errors.js` classifies SQLSTATE class 08 and 57P01–57P03, a
+socket errno (`ECONNRESET`, `EPIPE`, `ECONNREFUSED`, `ETIMEDOUT`, …) and
+node-postgres's uncoded "Connection terminated …" alike, and sets
+`retryable` the way the worker and process hosts do: `true` only when no
+transaction outcome is at stake (the loss came outside a transaction, or
+inside one that had written nothing), `false` when a writing transaction
+was open or its COMMIT was in flight. `store.transaction`'s `retry`
+never retries a connection loss.
+
+**The hold limit is the Store's, not the server's.** `holdTimeoutMs`
+(MODEL-FORMAT §5.1) rolls a transaction back without ending the session
+(so the Store keeps its one client), which is why the driver leaves
+`idle_in_transaction_session_timeout` and `transaction_timeout` unset —
+either would kill the session, and with it the Store. A lock wait is
+bounded by the lock timeout (55P03, busy and retryable), never counted
+against the hold limit.
+
 Cleanup expiry reports JD2090 and discards the physical client. Acquisition
 expiry or abort keeps its source credit until a late acquisition is released.
 A host whose release/destroy fails or never acknowledges keeps that credit
@@ -167,6 +190,10 @@ call with V8 worker termination. The expired generation is fenced immediately,
 but the native call and its locks may outlive that refusal; process exit can wait
 for the native call too. A timeout therefore has an unknown write outcome, not a
 promised rollback. `capabilities.cancellation.midStatement` remains false.
+A transaction's hold limit (`holdTimeoutMs`) waits for a statement already in
+flight on the worker to return, then rolls the transaction back — the
+statement's work is undone with the rest, and no later statement of the
+expired body reaches the worker.
 
 Worker connections declare sessions, user functions, aggregates and online backup
 unavailable: journal capture provides the same logical patches, and query residuals

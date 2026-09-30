@@ -42,7 +42,10 @@ its error and does not close the shared scheduler.
 
 `backoffDelay({policy,baseMs,maxMs,random}, attempt, retryAfterMs)` uses an attempt
 count starting at one. Strict exponential backoff uses full jitter up to its
-cap, while an explicit server delay is honored without clamping. `ai-compat`
+cap, while an explicit server delay is honored without clamping. `equal` is
+equal jitter — `cap × (½ + ½·random)`, never under half the cap — the durable
+job queue's retry delay (`@jarenjs/db` calls it rather than keeping a copy of
+the formula). `ai-compat`
 preserves the AI clients' half-to-full jitter and clamps server delays to the
 cap. `contract-compat` preserves the HTTP client's additive integer jitter.
 The published AI/contract attempt counts and wire semantics remain unchanged;

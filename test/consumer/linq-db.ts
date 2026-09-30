@@ -145,6 +145,14 @@ async function main(): Promise<void> {
     await tx.transaction(async () => 1, { unitOfWork: 'own' });
     // @ts-expect-error — the options are a closed set (JD0013)
     await tx.transaction(async () => 1, { mod: 'immediate' });
+    // the attempt of a retried transaction, typed; retry and a hold limit
+    // are the root's alone
+    const attemptNumber: number = tx.attempt;
+    void attemptNumber;
+    // @ts-expect-error — retry acts on the root transaction only (JD0014)
+    await tx.transaction(async () => 1, { retry: { attempts: 2 } });
+    // @ts-expect-error — a hold limit is the root's (JD0014)
+    await tx.transaction(async () => 1, { holdTimeoutMs: 100 });
     // named savepoints are the transaction's alone, forwarded from the store
     await tx.savepoints.create('mid');
     await tx.savepoints.rollbackTo('mid');
@@ -160,6 +168,10 @@ async function main(): Promise<void> {
   void txTitles;
   // @ts-expect-error — the unit-of-work choice is one of exactly two words
   await client.transaction(async () => 1, { unitOfWork: 'private' });
+  // a retried, time-bounded root transaction
+  const retried: number = await client.transaction(async (tx) => tx.attempt,
+    { retry: { attempts: 3, baseMs: 5, maxMs: 250 }, holdTimeoutMs: 500 });
+  void retried;
   await client.close();
 
   // a JSON model is the wide map unless the caller names one

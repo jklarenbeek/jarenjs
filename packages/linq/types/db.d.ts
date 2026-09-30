@@ -355,6 +355,13 @@ export interface TransactionOptions {
   /** Abandons the call while it is still QUEUED: the callback never
    * runs and no statement is issued (`JD2064`). */
   readonly signal?: AbortSignal;
+  /** Re-run the whole transaction after a busy failure (the store's
+   * `retry`; each attempt on a fresh unit of work — `unitOfWork: 'shared'`
+   * with `retry` is `JD0014`); `tx.attempt` is the attempt number. */
+  readonly retry?: { readonly attempts: number; readonly baseMs?: number; readonly maxMs?: number };
+  /** Roll the transaction back when its body holds the connection
+   * longer than this (the store's `holdTimeoutMs`; `JD2098`). */
+  readonly holdTimeoutMs?: number;
 }
 
 /**
@@ -374,13 +381,15 @@ export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown
   readonly jobs: TransactionStore['jobs'];
   readonly sync: TransactionStore['sync'];
   readonly capabilities: StoreCapabilities;
+  /** The attempt of the retried transaction this callback runs in (1-based). */
+  readonly attempt: number;
   readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
   /** Nest through this transaction's savepoint. The options are the
    * root's less `unitOfWork` (`JD0014` at runtime), and `mode:
    * 'immediate'` needs a root that took the writer lock. */
   transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>,
-    options?: Omit<TransactionOptions, 'unitOfWork'>): Promise<Awaited<R>>;
+    options?: Omit<TransactionOptions, 'unitOfWork' | 'retry' | 'holdTimeoutMs'>): Promise<Awaited<R>>;
   /** Named partial rollback (MODEL-FORMAT §5.2) — the store's
    * `tx.savepoints`, forwarded unchanged: create, roll back to and
    * release a checkpoint by label without a sentinel exception. Only a

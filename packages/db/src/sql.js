@@ -5,7 +5,7 @@ import { chain, attempt } from './driver.js';
 import { DbRuntimeError, wrapDriverError } from './errors.js';
 
 /** @param {any} context @returns {any} a scoped SQL capability */
-export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, readOnly }) {
+export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, readOnly, track = (fn) => fn() }) {
   return Object.freeze({
     /** Compile one statement. Access is explicit; this is trusted application SQL,
      * not a sandbox for untrusted query text or side-effecting host functions.
@@ -29,7 +29,10 @@ export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, 
         if (closed) refuse('the prepared SQL statement is closed');
       };
       const statement = connection.prepare(sql, { readOnly: !writing });
-      const run = (method, params = []) => {
+      // one statement run is one operation of the transaction: `track`
+      // counts it in flight, so a hold limit waits for it before it rolls
+      // the transaction back
+      const run = (method, params = []) => track(() => {
         check();
         if (!Array.isArray(params)) refuse('SQL parameters must be an array');
         return attempt(() => chain(statement, (s) => {
@@ -40,7 +43,7 @@ export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, 
             return result;
           });
         }), (error) => wrapDriverError(error, { docPath: '/sql' }));
-      };
+      });
       return Object.freeze({ run: (params) => run('run', params),
         get: (params) => run('get', params), all: (params) => run('all', params),
         close: () => { requireScope(); closed = true; } });

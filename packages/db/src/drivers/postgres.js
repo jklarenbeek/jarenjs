@@ -33,7 +33,7 @@
 
 import { chain, openConnection, baseCapabilities } from '../driver.js';
 import { postgresDialect } from '../dialects/postgres.js';
-import { DbCompileError, DbRuntimeError, wrapDriverError } from '../errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss } from '../errors.js';
 import { workerQueue } from './worker-queue.js';
 import { rowBytes } from './worker-protocol.js';
 import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS, POSTGRES_ADAPTER_OPTIONS } from './postgres-options.js';
@@ -222,6 +222,20 @@ export function postgresProbe(raw) {
 }
 
 /**
+ * Whether a statement may write — what makes a lost transaction's outcome
+ * matter. Conservative: only statements that cannot change a row read as
+ * reads (a data-modifying `WITH` is a write).
+ * @param {string} sql
+ * @returns {boolean}
+ */
+function mayWrite(sql) {
+  const head = /^\s*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase();
+  if (head === 'WITH') return /\b(INSERT|UPDATE|DELETE|MERGE)\b/i.test(sql);
+  return !['SELECT', 'DECLARE', 'FETCH', 'CLOSE', 'MOVE', 'SHOW', 'SAVEPOINT', 'RELEASE', 'BEGIN', 'START',
+    'SET', 'RESET', 'EXPLAIN', 'VALUES', 'TABLE', 'DEALLOCATE', 'ROLLBACK', 'COMMIT', 'END'].includes(head ?? '');
+}
+
+/**
  * Adapt one acquired session. Only an autocommit read whose cached plan
  * was rejected before execution may retry unnamed. Transactions propagate
  * that original failure so their owner can roll back before further work.
@@ -241,8 +255,30 @@ export function adaptPostgresClient(client, options = undefined) {
   let cancelling = null;
   let fate = 'none';
   let retire = false;
+  // whether the open transaction issued a statement that may have written:
+  // only then is its outcome at stake when the connection is lost (a
+  // native cursor reads inside a transaction of its own, which loses
+  // nothing to a retry)
+  let wrote = false;
   const limits = postgresSettings(options, POSTGRES_ADAPTER_OPTIONS, 'adaptPostgresClient');
   const requests = workerQueue([{ active: false, healthy: true, readOnly: false }], limits.maxPending, () => performance.now());
+  // A session the server or the network drops while it is held emits
+  // 'error' on its client — and pg-pool removed its own idle listener when
+  // the session was acquired, so without this one the process died of an
+  // uncaught exception. The session is marked lost; the next call refuses
+  // coded (JD2087) instead of reaching a dead socket.
+  const lost = (/** @type {unknown} */ error) => {
+    const atStake = (inTransaction && wrote) || fate === 'unknown';
+    if (inTransaction) fate = 'unknown';
+    poisoned ??= connectionLost(error, { outcomeAtStake: atStake });
+  };
+  const listens = typeof client.on === 'function';
+  if (listens) client.on('error', lost);
+  const unlisten = () => {
+    if (!listens) return;
+    const off = /** @type {any} */ (client).off ?? /** @type {any} */ (client).removeListener;
+    if (typeof off === 'function') off.call(client, 'error', lost);
+  };
   const status = () => client.getTransactionStatus?.() ?? (inTransaction ? 'T' : 'I');
   const cancel = (owner) => {
     if (activeQuery === null || activeQuery.owner !== owner || options?.cancel === undefined) return Promise.resolve();
@@ -259,7 +295,7 @@ export function adaptPostgresClient(client, options = undefined) {
   const observe = (result, sql) => {
     for (const item of Array.isArray(result) ? result : [result]) {
       if (item?.command === 'BEGIN' || /^\s*(BEGIN|START TRANSACTION)\b/i.test(sql)) {
-        inTransaction = true; fate = 'active';
+        inTransaction = true; fate = 'active'; wrote = false;
       }
       if (item?.command === 'COMMIT' || /^\s*(COMMIT|END)\b/i.test(sql)) {
         inTransaction = /\bAND CHAIN\s*;?\s*$/i.test(sql); fate = inTransaction ? 'active' : 'committed';
@@ -276,6 +312,7 @@ export function adaptPostgresClient(client, options = undefined) {
     const lease = await requests.acquire(false, { timeoutMs: limits.statementTimeoutMs });
     const operation = { id: ++querySequence, owner };
     activeQuery = operation;
+    if (inTransaction && mayWrite(sql)) wrote = true;
     try {
       if (released || poisoned) throw poisoned ?? new DbRuntimeError('JD2063', 'the PostgreSQL session is closed');
       if (name !== undefined) {
@@ -291,9 +328,14 @@ export function adaptPostgresClient(client, options = undefined) {
     }
     catch (error) {
       if (/^\s*COMMIT\b/i.test(sql) && !/^(23|40)/.test(error?.code ?? '')) fate = 'unknown';
-      if (/^08|^57P0|^ECONN|^EPIPE/.test(error?.code ?? '')) {
-        poisoned = error;
-        if (inTransaction || /^\s*COMMIT\b/i.test(sql)) fate = 'unknown';
+      // the one connection-loss rule: a lost session is JD2087, and never
+      // retryable when a transaction's outcome is at stake (an open
+      // transaction, a COMMIT in flight) — it was, on a poisoned session
+      if (isConnectionLoss(error)) {
+        const atStake = (inTransaction && wrote) || (/^\s*COMMIT\b/i.test(sql) && wrote);
+        if (atStake) fate = 'unknown';
+        poisoned = connectionLost(error, { outcomeAtStake: atStake });
+        throw poisoned;
       }
       throw error;
     }
@@ -422,6 +464,7 @@ export function adaptPostgresClient(client, options = undefined) {
       const releaseClient = async (error) => {
         if (releasedClient) return;
         releasedClient = true;
+        unlisten();
         names.clear(); prepared.clear(); operationNames.clear();
         if (error && options?.destroy !== undefined) await options.destroy(client, error);
         else await client.release?.(error);
@@ -535,7 +578,12 @@ export function postgresDriver(source, options = undefined) {
         let originalPath;
         const savedSettings = new Map();
         const adapted = { query: (...args) => client.query(...args), release,
-          ...(typeof client.getTransactionStatus !== 'function' ? {} : { getTransactionStatus: () => client.getTransactionStatus() }) };
+          ...(typeof client.getTransactionStatus !== 'function' ? {} : { getTransactionStatus: () => client.getTransactionStatus() }),
+          // the session's own 'error' events reach the adapter's listener
+          ...(typeof client.on !== 'function' ? {} : {
+            on: (event, listener) => client.on(event, listener),
+            off: (event, listener) => (client.off ?? client.removeListener).call(client, event, listener),
+          }) };
         const raw = adaptPostgresClient(adapted, {
           ...options, ...limits, nativeCursor: options?.cursorMode !== 'buffered', serverTimeouts: false,
           // The pool's physical client identity owns the bounded named cache.

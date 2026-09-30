@@ -571,28 +571,30 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     requireOpen();
     // a synchronous extent inside an owning callback cannot interleave
     // with anything, so there is nothing to wait for
-    if (onStack) return fn(scopeFor());
+    if (onStack) return fn(scopeFor(ALWAYS_LIVE));
     return whenFree(() => {
       owned = true;
+      const life = { alive: true };
+      const end = () => { life.alive = false; release(); };
       const wasOnStack = onStack;
       onStack = true;
       let out;
       try {
-        out = fn(scopeFor());
+        out = fn(scopeFor(life));
       }
       catch (error) {
         onStack = wasOnStack;
-        release();
+        end();
         throw error;
       }
       onStack = wasOnStack;
       if (!isThenable(out)) {
-        release();
+        end();
         return out;
       }
       return out.then(
-        (value) => { release(); return value; },
-        (error) => { release(); throw error; });
+        (value) => { end(); return value; },
+        (error) => { end(); throw error; });
     }, what ?? 'a store-level call', signal);
   };
 
@@ -622,12 +624,45 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   const releaseCheckpoint = (checkpoint) =>
     raw.exec(dialect.tx.release(checkpoint.name));
 
-  /** Only the synchronous extent of the callback may implicitly nest. */
-  const callBody = (fn) => {
+  /**
+   * A transaction's rollback, unless the connection was closed under it:
+   * closing already discarded the uncommitted work (SQLite rolls back on
+   * close; a remote host's close does the same), so a ROLLBACK then
+   * could only fail — and that raw "not open" error used to ride beside
+   * the holder's own coded `JD2063` in a `TransactionFailure`.
+   * @param {() => any} rollback
+   * @returns {() => any}
+   */
+  const rollbackUnlessClosed = (rollback) => () => (closed ? undefined : rollback());
+
+  /** The life of scopes no settlement can outlive (a synchronous extent
+   * inside an owning callback). */
+  const ALWAYS_LIVE = Object.freeze({ alive: true });
+  /**
+   * Refuse a statement through a scope whose transaction (or exclusive
+   * extent) has settled. A body can outlive its transaction — a hold
+   * limit rolls the transaction back and hands the connection on while
+   * the body still awaits — and nothing it issues afterwards may reach a
+   * connection that belongs to the next owner (on PostgreSQL one stray
+   * failing statement aborts THAT owner's transaction).
+   * @param {{ alive: boolean }} life
+   */
+  const requireLive = (life) => {
+    if (!life.alive) {
+      throw new DbRuntimeError('JD2070',
+        'this transaction scope has settled — a statement from a body that outlived its transaction '
+        + 'never reaches the connection');
+    }
+  };
+
+  /** Only the synchronous extent of the callback may implicitly nest.
+   * @param {(scope: any) => any} fn
+   * @param {{ alive: boolean }} life */
+  const callBody = (fn, life) => {
     const wasOnStack = onStack;
     onStack = true;
     try {
-      return fn(scopeFor());
+      return fn(scopeFor(life));
     }
     finally {
       onStack = wasOnStack;
@@ -646,7 +681,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * wait the timeout covers. Nesting inside it is savepoints, as always.
    * @param {(scope: any) => any} fn
    */
-  const blockAround = (fn, mode) => {
+  const blockAround = (fn, mode, life) => {
     const begin = mode === 'immediate' ? dialect.tx.beginImmediate : dialect.tx.begin;
     return chain(raw.exec(begin), () => {
       let out;
@@ -654,8 +689,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
       inBlock = true;
       const restore = (value) => { inBlock = wasInBlock; return value; };
       try {
-        out = settleTransaction(() => callBody(fn),
-          () => raw.exec(dialect.tx.commit), () => raw.exec(dialect.tx.rollback));
+        out = settleTransaction(() => callBody(fn, life),
+          () => raw.exec(dialect.tx.commit), rollbackUnlessClosed(() => raw.exec(dialect.tx.rollback)));
       }
       catch (error) {
         restore(undefined);
@@ -671,46 +706,52 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * receives the scope so nested work can name itself.
    * @param {(scope: any) => any} fn
    */
-  const savepointAround = (fn) => {
+  const savepointAround = (fn, life) => {
     // an engine that refuses a savepoint outside a transaction gets the
     // block it needs; on every other one this is the same statement it
     // always was
     if (!inBlock && dialect.capabilities.savepointStartsTransaction !== true)
-      return blockAround(fn, 'deferred');
-    return chain(openCheckpoint(), (checkpoint) => settleTransaction(() => callBody(fn),
-      () => releaseCheckpoint(checkpoint),
-      () => chain(rollbackToCheckpoint(checkpoint), () => releaseCheckpoint(checkpoint))));
+      return blockAround(fn, 'deferred', life);
+    // a savepoint whose transaction settled under it (a hold limit rolled
+    // the whole block back while this body still ran) neither RELEASEs
+    // nor rolls back to anything: the block took it with it, and the
+    // connection may already belong to the next owner
+    return chain(openCheckpoint(), (checkpoint) => settleTransaction(() => callBody(fn, life),
+      () => { requireLive(life); return releaseCheckpoint(checkpoint); },
+      rollbackUnlessClosed(() => (life.alive
+        ? chain(rollbackToCheckpoint(checkpoint), () => releaseCheckpoint(checkpoint))
+        : undefined))));
   };
 
   /** The scope handed to a transaction callback: the owner's direct
    * access to the connection, plus nesting. Deliberately narrow —
    * registering a function or opening a change session belongs to store
    * setup, not to a transaction body. */
-  const scopeFor = () => Object.freeze({
+  const scopeFor = (/** @type {{ alive: boolean }} */ life) => Object.freeze({
     synchronous,
     capabilities,
     dialect,
     /** @param {string} sql */
-    exec: (sql) => { requireOpen(); return raw.exec(sql); },
+    exec: (sql) => { requireOpen(); requireLive(life); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql, metadata) => { requireOpen(); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
+    prepare: (sql, metadata) => { requireOpen(); requireLive(life); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
     /** A nested savepoint inside this transaction.
      * @param {(scope: any) => any} fn */
-    transaction: (fn) => savepointAround(fn),
+    transaction: (fn) => { requireLive(life); return savepointAround(fn, life); },
     /** A MANUAL checkpoint at the current depth, settled by the caller
      * through {@link rollbackTo}/{@link release} rather than around a
      * callback. It is the same primitive structured nesting uses — one
      * generated-identifier stack — so the two kinds cannot cross-release
      * each other by name, and no caller-supplied label reaches SQL. */
-    savepoint: () => { requireOpen(); return openCheckpoint(); },
+    savepoint: () => { requireOpen(); requireLive(life); return openCheckpoint(); },
     /** `ROLLBACK TO` a manual checkpoint: the target stays active; every
      * savepoint opened after it is discarded with its rows.
      * @param {{ name: string }} checkpoint */
-    rollbackTo: (checkpoint) => { requireOpen(); return rollbackToCheckpoint(checkpoint); },
+    rollbackTo: (checkpoint) => { requireOpen(); requireLive(life); return rollbackToCheckpoint(checkpoint); },
     /** `RELEASE` a manual checkpoint: the target and every savepoint
      * opened after it are removed; their rows remain.
      * @param {{ name: string }} checkpoint */
-    release: (checkpoint) => { requireOpen(); return releaseCheckpoint(checkpoint); },
+    release: (checkpoint) => { requireOpen(); requireLive(life); return releaseCheckpoint(checkpoint); },
   });
 
   return Object.freeze({
@@ -738,7 +779,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     /**
      * A transaction. `fn`'s value is returned; a throw rolls back exactly
      * this level and rethrows. A refused COMMIT or RELEASE also rolls
-     * back before the next owner runs. No implicit retry.
+     * back before the next owner runs. Retry is explicit only — the
+     * store's `retry` re-runs a whole transaction; nothing here does.
      *
      * Two shapes, decided here rather than by the caller:
      *
@@ -764,9 +806,13 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
      */
     transaction(fn, signal, mode = 'deferred') {
       requireOpen();
-      if (onStack) return savepointAround(fn);
+      if (onStack) return savepointAround(fn, ALWAYS_LIVE);
       return whenFree(() => {
         owned = true;
+        // the transaction's scope objects live exactly as long as it:
+        // settled, they refuse every statement (see requireLive)
+        const life = { alive: true };
+        const end = () => { life.alive = false; release(); };
         let out;
         try {
           // A top-level transaction is one CHECKPOINT where a savepoint
@@ -774,20 +820,20 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
           // not: an engine that refuses `SAVEPOINT` outside a
           // transaction has to be told one is starting.
           out = mode === 'immediate' || dialect.capabilities.savepointStartsTransaction !== true
-            ? blockAround(fn, mode)
-            : savepointAround(fn);
+            ? blockAround(fn, mode, life)
+            : savepointAround(fn, life);
         }
         catch (error) {
-          release();
+          end();
           throw error;
         }
         if (!isThenable(out)) {
-          release();
+          end();
           return out;
         }
         return out.then(
-          (value) => { release(); return value; },
-          (error) => { release(); throw error; });
+          (value) => { end(); return value; },
+          (error) => { end(); throw error; });
       }, 'a transaction', signal);
     },
     /** Hold the connection for one unrelated caller's whole extent,
