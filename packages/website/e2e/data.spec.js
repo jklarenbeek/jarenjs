@@ -102,6 +102,14 @@ test('the spatial round trip runs CSV → stylesheet → meta-schema → store �
   // the seed CSV is on the page, and the emitted query document beside it
   await expect(page.locator('.data-trip')).toContainText('Round trip');
   await expect(page.locator('.data-trip-query')).toContainText('$within');
+  // Click only once the boot has rendered its seed rows, as the tests
+  // above and below do. The Documents list sits above the viewport here,
+  // and when it grows mid-click WebKit hit-tests the mouseup before its
+  // scroll-anchoring correction: the mousedown lands on this button and
+  // the mouseup on the CSV editor, so no click reaches the button and the
+  // report never appears. Measured failing about one run in seven at
+  // 0.92.0 and after, always while the seed was still rendering.
+  await expect(page.locator('.data-rows')).toContainText('important', READY);
   await page.locator('.data-trip-run').click();
   await expect(page.locator('.data-trip-report')).toHaveAttribute('data-status', 'done', READY);
   await expect(page.locator('.data-trip-summary')).toContainText('5 CSV rows');
