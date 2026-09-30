@@ -564,11 +564,14 @@ Connection = {
   registerAggregate(name, spec) | null,
   session(table) | null
 }
-Statement = { run(params), get(params), all(params), iterate(params) }
+Statement = { run(params), get(params), all(params), iterate(params), finalize?() }
 ```
 
 Every method MAY return a value or a promise; the store never assumes
-either. Parameters bind positionally as arrays.
+either. Parameters bind positionally as arrays. `finalize` is optional:
+a binding that keeps prepared statements beyond their last reference (a
+worker, up to its `maxStatements`) releases one there, and the store
+calls it for a statement its bounded cache let go.
 
 **Capabilities** are read once at open — from the library's version
 report, its compile options, and the binding's declaration — and are
@@ -894,14 +897,21 @@ already under way on an asynchronous host finishes first: its statements
 land in the transaction that is then rolled back, and none of a later
 one ever reaches the connection). When the body settles, `transaction()`
 rejects with `JD2098` carrying `holdTimeoutMs` and `elapsedMs` (when the
-rollback began), so a caller never runs beside its own body. Nothing of
+rollback began — after the operations under way finished), so a caller
+never runs beside its own body. With change capture on, the clock starts
+inside capture's scope: what capture does before the body (PostgreSQL's
+journal takes its advisory lock there) is a wait too. Nothing of
 the body is committed. A nested transaction or a capture scope still
 open at the limit settles into nothing. On in-thread SQLite a
 synchronous statement blocks the event loop, so the limit acts after it
 returns (`capabilities.cancellation.midStatement` stays `false`).
 `retry` and `holdTimeoutMs` act on the asynchronous root only: the
 synchronous twin cannot wait and a nested transaction inherits its
-root's — both are `JD0014` there.
+root's — both are `JD0014` there. A `store.transaction` (or
+`store.sync.transaction`) called from inside an open transaction's own
+synchronous extent is nested by the driver, so it IS a nested
+transaction: it takes the nested option set and opens no root of its
+own.
 
 **A transaction's options are one closed set, on every surface.**
 `store.transaction`, `store.sync.transaction`, a nested `tx.transaction`
@@ -1018,7 +1028,10 @@ What that costs, stated plainly:
   is `JD2064`; an aborted cursor is `JD2072` at its row boundary; a
   passed deadline is `JD2075`; a settled cursor answers `{ done: true }`
   whatever the clock or the gate say. A transaction view's cursors are
-  pinned to their exact scope instead (`JD2070`), as above.
+  pinned to their exact scope instead (`JD2070`), as above, and belong to
+  it: a cursor the body left open is closed when the body settles, before
+  the scope commits or rolls back, and a retained cursor's `return()`
+  still releases.
 - `store.live()` and `collection.live()` register **under the gate through
   their initial query**: the registration is local but the first result is
   a statement, so it waits for an open transaction like every other
@@ -1156,8 +1169,17 @@ every other store operation is admitted:
 - **Statements are prepared once per text.** The engines of one store
   share one bounded cache (`statementCacheBound`), keyed by the SQL text
   and its access: a document with externals plans one text for every
-  binding, and a worker host caps the statements it keeps. Cursors
-  prepare their own.
+  binding. A statement the bound evicts is finalized once no call runs
+  on it — a worker keeps every statement it prepared until told
+  otherwise, so an unfinalized one held a slot of its `maxStatements`
+  forever. Cursors prepare their own. A table's rowid-ness is read from
+  the catalog on every reported insert, never remembered: a table
+  recreated `WITHOUT ROWID` changed its answer. Virtual tables (FTS5,
+  R*Tree) keep rowids and report them.
+- **A signal refuses up front everywhere.** An already-aborted `signal`
+  is `JD2064` on the root (which may also be waiting in the queue), on a
+  transaction's engine and on the synchronous surfaces — thrown where the
+  surface answers values.
 
 ## 6. Identity
 
@@ -1189,9 +1211,18 @@ driver's choice: node:sqlite bound a number as a REAL, which a TEXT
 column stores as `'7.0'`, while Bun stored `'7'` — a file both runtimes
 wrote could hold one key as two rows, and an index-only migration was
 refused as "a transform changed the key". A file an earlier node write
-left still works: a read of a numeric key matches either spelling, and a
-write first moves a legacy row onto the canonical text, in the same
-transaction, so the file converges as it is written. A key the file
+left still works: a read of a numeric key also finds a row under the
+spelling the running SQLite gives that number as a float (`'7.0'`) — but
+only when the row's document holds that number at its key member, so a
+string key spelled `'7.0'` stays a key of its own — and a write first
+moves such a row onto the canonical text, in the same transaction (which
+takes the writer lock before its first read), so the file converges as it
+is written. The float spelling depends on the SQLite that wrote it:
+SQLite 3.51 (Node 24.14 and 25.5) rounded to fifteen digits
+(`'1.23456789012346e+15'`, `'0.3'` for `0.1 + 0.2`), 3.52 and later keep
+seventeen. A row a fifteen-digit SQLite wrote for a number that needs
+more is not found by the other version's lookup — the statement below
+converges it whatever SQLite runs it. A key the file
 already holds under BOTH spellings is refused on write — `JD2001`,
 naming both rows — rather than merged in silence: keep the row you want,
 delete the other. Session capture reports that one-time move as what it
@@ -1256,7 +1287,7 @@ error.
 | `JD0052` | the live-query bound was reached |
 | `JD0053` | the live event-time declaration is invalid |
 | `JD2001` | insert found the key already present, or the key is stored under two spellings |
-| `JD2002` | a usable key could not be resolved for the write, or an explicit key disagrees with the document |
+| `JD2002` | a usable key could not be resolved for the write, or an explicit key disagrees with the document, or a patch rewrites the document's key member |
 | `JD2003` | the write failed schema validation |
 | `JD2004` | an undeclared collection was requested |
 | `JD2005` | a database operation failed |

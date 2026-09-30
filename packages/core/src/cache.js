@@ -46,9 +46,13 @@ import { semanticKey } from './object.js';
  * A bounded, string-or-value-keyed LRU cache.
  * @template K, V
  * @param {number} limit - Maximum number of retained entries (> 0)
+ * @param {(key: K, value: V) => void} [onEvict] - Called with the entry
+ *   the bound pushed out, after it left the cache — how an owner releases
+ *   what the value holds (a prepared statement a worker keeps). Not called
+ *   for `delete` or `clear`, whose caller already holds the value.
  * @returns {BoundedCache<K, V>}
  */
-export function createBoundedCache(limit) {
+export function createBoundedCache(limit, onEvict = undefined) {
   /** @type {Map<K, V>} */
   const map = new Map();
 
@@ -67,7 +71,11 @@ export function createBoundedCache(limit) {
   /** @type {BoundedCache<K, V>['set']} */
   function set(key, value) {
     if (map.has(key)) map.delete(key);
-    else if (map.size >= limit) map.delete(map.keys().next().value);
+    else if (map.size >= limit) {
+      const [oldest, evicted] = map.entries().next().value;
+      map.delete(oldest);
+      onEvict?.(oldest, evicted);
+    }
     map.set(key, value);
   }
 

@@ -417,11 +417,14 @@ const asyncLiveLeak = Object.entries(clientInputs).filter(([file, info]) =>
   /packages\/db\/src\/(async-live|live-executor|snapshot)\.js$/.test(file) && info.bytesInOutput > 0);
 if (asyncLiveLeak.length)
   throw new Error(`The ordinary client retained optional async maintenance: ${asyncLiveLeak.map(([file]) => file).join(', ')}`);
-// The shared live registry's async lifecycle and declared mode integration add
-// 1515 bytes to the measured 734963-byte client. The optional scheduler and
-// evaluator stay outside this closure, checked above. This structural feature
+// Measured 757116 bytes. The closed open options and scope input had already
+// taken the client to 739445 without a re-measure of this ceiling (737500);
+// whole-transaction retry, the hold limit, one connection-loss rule, the
+// Store-bound relational engine with its write rules, and the statement
+// finalization under its bounded cache add 17671 more. The optional scheduler
+// and evaluator stay outside this closure, checked above. This structural
 // allowance does not change application RSS, work or deadline budgets.
-if (clientBytes > 737500)
+if (clientBytes > 758500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

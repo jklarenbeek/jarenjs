@@ -88,9 +88,13 @@ rule in `errors.js` classifies SQLSTATE class 08 and 57P01–57P03, a
 socket errno (`ECONNRESET`, `EPIPE`, `ECONNREFUSED`, `ETIMEDOUT`, …) and
 node-postgres's uncoded "Connection terminated …" alike, and sets
 `retryable` the way the worker and process hosts do: `true` only when no
-transaction outcome is at stake (the loss came outside a transaction, or
-inside one that had written nothing), `false` when a writing transaction
-was open or its COMMIT was in flight. `store.transaction`'s `retry`
+transaction outcome is at stake (a read, outside a transaction or inside
+one that had written nothing), `false` when a writing transaction was open,
+its COMMIT was in flight, or an autocommit write was — any of them may have
+committed before the session went. A statement prepared for writing
+(trusted SQL's `access: 'write'`) counts as a write whatever its text
+(`SELECT fn()` can insert). A lost session answers every later call with a
+fresh `JD2087` of its own. `store.transaction`'s `retry`
 never retries a connection loss.
 
 **The hold limit is the Store's, not the server's.** `holdTimeoutMs`

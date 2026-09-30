@@ -930,16 +930,26 @@ export function createTracker(context) {
     // an auto-key insert was re-keyed under the key the database handed
     // out; the rollback took that row back, so the clean record filed
     // under it names nothing — the pending record returns to its slot
-    for (const key of undo.rekeyed ?? []) {
-      if (!undo.slots.has(key)) records.delete(key);
+    /** @type {Map<any, any>} */
+    const editedAfterSave = new Map();
+    for (const { key, record } of undo.rekeyed ?? []) {
+      if (undo.slots.has(key)) continue;
+      // an edit staged on the saved row after the save is work staged
+      // after it: the pending record the row came from carries it back
+      const saved = records.get(key);
+      if (saved !== undefined && saved.current !== saved.snapshot) editedAfterSave.set(record, saved.current);
+      records.delete(key);
     }
     for (const [key, entry] of undo.slots) {
       if (entry === undefined) records.delete(key);
       else records.set(key, entry);
     }
     for (const [record, was] of undo.fields) {
+      // an update the save left clean (current IS snapshot) and that was
+      // edited afterwards keeps the later edit: work staged after the save
+      const editedAfter = !was.pendingInsert && record.current !== record.snapshot;
       record.snapshot = was.snapshot;
-      record.current = was.current;
+      record.current = editedAfterSave.get(record) ?? (editedAfter ? record.current : was.current);
       record.stamped = was.stamped;
       record.joinOnly = was.joinOnly;
       record.pendingInsert = was.pendingInsert;
@@ -989,7 +999,7 @@ export function createTracker(context) {
           // re-key under the real identity
           records.delete(record.pendingKey);
           const key = recordKeyFor(statement.entity, doc);
-          if (key !== record.pendingKey) (undo.rekeyed ??= []).push(key);
+          if (key !== record.pendingKey) (undo.rekeyed ??= []).push({ key, record });
           records.set(/** @type {string} */ (key), {
             entity: statement.entity, snapshot: doc,
             current: untouched(record) ? doc : record.current, pendingInsert: false,

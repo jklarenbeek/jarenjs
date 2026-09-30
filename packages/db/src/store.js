@@ -377,6 +377,22 @@ export function normalizeModel(model, expressions = undefined) {
 }
 
 /**
+ * The value at a collection's key pointer, or `undefined` — a read that
+ * never refuses, for asking a stored document which key it holds.
+ * @param {any} doc
+ * @param {{ name: string }[]} keySegments
+ * @returns {unknown}
+ */
+function keyMemberOf(doc, keySegments) {
+  let node = doc;
+  for (const segment of keySegments) {
+    if (node === null || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    node = node[segment.name];
+  }
+  return node;
+}
+
+/**
  * Read a caller-supplied key out of a document along the declared
  * pointer.
  * @param {any} doc
@@ -728,10 +744,19 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   const bindKey = (/** @type {string | number} */ key) => (textKey ? canonicalKeyText(key) : key);
   const spelledTwice = (/** @type {unknown} */ key) => textKey && typeof key === 'number'
     && dialect.legacyNumericKeyText !== null;
-  /** Every stored row of a numeric key, under either spelling. */
+  /**
+   * Every stored row of a numeric key: its canonical spelling, and a legacy
+   * one only when the row's own document holds this number at the key
+   * member. The spelling alone cannot tell — the string key `'7.0'` is
+   * spelled like 7 written as a float, and a spelling an older SQLite
+   * rounded can name another number. A collection without a key member has
+   * no document to ask, and trusts the spelling.
+   */
   const spellingsOf = (/** @type {number} */ key) =>
     chain(prepared('keySpellings', dialect.dml.keySpellings(shape)), (statement) =>
-      statement.all([canonicalKeyText(key), key]));
+      chain(statement.all([canonicalKeyText(key), key]), (/** @type {any[]} */ rows) =>
+        rows.filter((row) => row.key === canonicalKeyText(key) || collection.keySegments === null
+          || keyMemberOf(JSON.parse(row.doc), collection.keySegments) === key)));
 
   const runWrite = (statementName, sql, params, key, reads) => {
     return chain(prepared(statementName, sql), (statement) =>
@@ -763,9 +788,14 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     });
   };
   /** A write addressed by `key`: converged first, atomically with it,
-   * when the key may be spelled twice; as it is otherwise. */
+   * when the key may be spelled twice; as it is otherwise. Its first
+   * statement is a read, so a transaction of its own takes the writer lock
+   * up front (`immediate`): a deferred one met the read→write upgrade busy
+   * the busy handler cannot wait out whenever another connection wrote. */
   const keyedWrite = (/** @type {string | number} */ key, /** @type {() => any} */ write) =>
-    (spelledTwice(key) ? connection.transaction(() => chain(converge(/** @type {number} */ (key)), write)) : write());
+    (spelledTwice(key)
+      ? connection.transaction(() => chain(converge(/** @type {number} */ (key)), write), 'immediate')
+      : write());
 
   // RETURNING is decoded after the server has inserted the row. Keep
   // decoding in the same transaction so an unrepresentable allocated
@@ -829,6 +859,18 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         // the copy-on-write engine validates the RESULT before any SQL
         const next = applyJSONPatch(current, ops);
         checkValid(next);
+        // the document's key IS its key: a patch that rewrites it is the
+        // same disagreement `put(doc, key)` refuses
+        if (collection.keySegments !== null) {
+          const own = extractKey(next, collection.keySegments, collection.key, collection.name, collection.docPath);
+          if (canonicalKeyText(own) !== canonicalKeyText(/** @type {string | number} */ (key))) {
+            throw new DbRuntimeError('JD2002',
+              `patch: the patched document's key ${JSON.stringify(own)} at '${collection.key}' disagrees with `
+              + `the key ${JSON.stringify(key)} it is stored under — a document's key is not patched; `
+              + 'write it under its new key and delete the old one',
+              { docPath: collection.docPath, collection: collection.name, key });
+          }
+        }
         const translated = translatePatch(ops, current, dialect);
         if (translated === null) {
           stats.patchFallback++;
@@ -1469,8 +1511,13 @@ export function openStore(model, options) {
         /** @param {string} sql */
         prepare: (sql, metadata) => (scope ?? opened).prepare(sql, metadata),
         /** Internal transaction users (jobs, checkpoints, migrations)
-         * nest when a transaction is open and take the gate when not. */
-        transaction: (fn) => withScope((scope ?? opened).transaction, fn),
+         * nest when a transaction is open and take the gate when not.
+         * `'immediate'` takes the writer lock up front when nothing is open
+         * yet; inside an open transaction the call is its savepoint.
+         * @param {(scope: any) => any} fn @param {'immediate'} [mode] */
+        transaction: (fn, mode) => withScope(scope === null
+          ? (/** @type {any} */ inner) => opened.transaction(inner, undefined, mode)
+          : (/** @type {any} */ inner) => /** @type {any} */ (scope).transaction(inner, mode), fn),
         /**
          * Register what settling the OPEN transaction owes an in-memory
          * caller: `commit` when it commits, `rollback` when it rolls back,
@@ -1520,6 +1567,26 @@ export function openStore(model, options) {
        * @param {{ mode: 'deferred' | 'immediate', attempt?: number, holdTimeoutMs?: number }} [root]
        *   - a ROOT transaction's record; an inner scope inherits the one in force
        */
+      /**
+       * The cursors a transaction scope opened and has not seen settle, as
+       * their release functions, by scope identity. A scope closes them when
+       * its body settles — before its COMMIT, RELEASE or ROLLBACK — so a
+       * cursor a body peeked and walked away from never outlives its
+       * transaction: on a worker it held one of `maxCursors` slots forever,
+       * and on PostgreSQL a `CLOSE` sent after the transaction ended would
+       * land in the next owner's.
+       * @type {WeakMap<object, Set<() => Promise<unknown>>>}
+       */
+      const scopeCursors = new WeakMap();
+      /** Close what a scope left open; `null` when it left nothing.
+       * @param {object} identity @returns {Promise<void> | null} */
+      const closeCursorsOf = (identity) => {
+        const open = scopeCursors.get(identity);
+        if (open === undefined || open.size === 0) return null;
+        scopeCursors.delete(identity);
+        return Promise.allSettled([...open].map((release) => release())).then(() => undefined);
+      };
+
       function withScope(open, fn, ownWork, root) {
         return open((inner) => {
           const outer = scope;
@@ -1575,9 +1642,10 @@ export function openStore(model, options) {
             restore(true);
             return out;
           }
+          // the scope's cursors close inside it, before it settles
           return out.then(
-            (value) => { restore(true); return value; },
-            (error) => { restore(false); throw error; });
+            (value) => chain(closeCursorsOf(identity), () => { restore(true); return value; }),
+            (error) => chain(closeCursorsOf(identity), () => { restore(false); throw error; }));
         });
       }
 
@@ -1631,13 +1699,24 @@ export function openStore(model, options) {
           let expired = false;
           const timer = setTimeout(() => {
             expired = true;
+            // the handles refuse from this instant...
             root.expired = Object.freeze({ holdTimeoutMs: root.hold,
               elapsedMs: Math.round(performance.now() - started) });
             void whenIdle(root).then(() => {
-              abandonCapture();
+              // ...and the rollback begins once the operations under way
+              // finished: `elapsedMs` says when that was
+              root.expired = Object.freeze({ holdTimeoutMs: root.hold,
+                elapsedMs: Math.round(performance.now() - started) });
               const error = heldTooLong(root.expired);
               heldBodies.set(error, toPromise(out));
-              reject(error);
+              try {
+                abandonCapture();
+              }
+              finally {
+                // whatever giving the capture engine up met, the
+                // transaction settles: the caller always hears JD2098
+                reject(error);
+              }
             });
           }, root.hold);
           toPromise(out).then(
@@ -2072,10 +2151,13 @@ export function openStore(model, options) {
             // and `ownWork`, with `capture.nest` inside the opened scope.
             // The view is built from the scope capture's wrap opens —
             // the INNERMOST one, the exact scope the callback runs in.
+            // The hold clock starts inside capture's scope: what capture does
+            // before the body (PostgreSQL's journal takes its advisory lock
+            // there) is a wait, and a wait never counts against the limit.
             topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs) =>
               withScope((inner) => beginTransaction(inner, signal, mode),
-                () => holdAround(currentRoot, () => capture.nest((innerScope, identity) =>
-                  fn(scopedStore(innerScope, identity)))),
+                () => capture.nest((innerScope, identity) =>
+                  holdAround(currentRoot, () => fn(scopedStore(innerScope, identity)))),
                 ownWork, { mode: mode ?? 'deferred', attempt, holdTimeoutMs });
             abandonCapture = () => capture.abandon();
           }
@@ -2840,6 +2922,27 @@ export function openStore(model, options) {
             for (const unit of works) unit.tracker?.invalidate();
           };
 
+          /**
+           * A store-level `transaction` call the driver nests: made from inside
+           * an open transaction's own synchronous extent, it becomes a
+           * savepoint of that transaction — so it takes the nested option set
+           * (`JD0014` for `unitOfWork`, `retry`, `holdTimeoutMs`, or a mode the
+           * root did not take) and opens no root of its own, exactly as
+           * `tx.transaction` would.
+           * @param {(tx: any) => any} fn
+           * @param {unknown} transactionOptions
+           * @param {string} spelling
+           */
+          const nestedAtRoot = (fn, transactionOptions, spelling) => {
+            const root = /** @type {any} */ (currentRoot);
+            const { signal } = readTransactionOptions(transactionOptions, 'nested', spelling, root.mode);
+            if (signal?.aborted === true) throw abortReason(signal);
+            const driverScope = /** @type {any} */ (scope);
+            return withScope(driverScope.transaction, (inner, innerIdentity) => (capture === null
+              ? fn(scopedStore(inner, innerIdentity))
+              : capture.nest(() => fn(scopedStore(inner, innerIdentity)))));
+          };
+
           // ————— the relational engine, bound to the store (MODEL-FORMAT §5.3) —————
           // One engine (relational.js) over the store's admission: here the
           // root's and the synchronous root's, and in each transaction view
@@ -2847,21 +2950,62 @@ export function openStore(model, options) {
           // cache, as the query cache is bounded: a document with externals
           // plans one text for every binding, and a worker host caps the
           // statements it keeps.
-          const relationalStatements = createBoundedCache(options.statementCacheBound ?? 128);
-          /** @type {Map<string, boolean>} */
-          const rowidTables = new Map();
+          /**
+           * One cached statement: the prepared statement (value-or-promise),
+           * the calls running on it, and whether the cache let it go. An
+           * evicted statement is finalized once no call runs on it — a
+           * worker keeps every statement it prepared until told otherwise,
+           * so without this the bound bounded nothing on a worker host.
+           * @typedef {{ made: any, uses: number, evicted: boolean }} CachedStatement
+           */
+          /** @param {CachedStatement} entry */
+          const finalizeIdle = (entry) => {
+            if (!entry.evicted || entry.uses > 0) return;
+            try {
+              void Promise.resolve(chain(entry.made, (/** @type {any} */ statement) => statement.finalize?.())).catch(() => {});
+            }
+            catch {
+              // a statement its connection already discarded
+            }
+          };
+          const relationalStatements = createBoundedCache(options.statementCacheBound ?? 128,
+            (/** @type {string} */ _key, /** @type {CachedStatement} */ entry) => { entry.evicted = true; finalizeIdle(entry); });
           /** @param {any} where @param {string} sql @param {any} [metadata] */
           const prepareRelational = (where, sql, metadata) => {
             const key = `${metadata?.readOnly === true ? 'read' : 'write'}\u0000${sql}`;
-            const cached = relationalStatements.get(key);
-            if (cached !== undefined) return cached;
-            const made = where.prepare(sql, metadata);
-            relationalStatements.set(key, made);
-            // a refused preparation is not a statement to keep
-            if (isThenable(made)) made.then(undefined, () => { if (relationalStatements.get(key) === made) relationalStatements.delete(key); });
-            return made;
+            /** @type {CachedStatement | undefined} */
+            let entry = relationalStatements.get(key);
+            if (entry === undefined) {
+              const made = { made: where.prepare(sql, metadata), uses: 0, evicted: false };
+              relationalStatements.set(key, made);
+              // a refused preparation is not a statement to keep
+              if (isThenable(made.made)) {
+                made.made.then(undefined, () => { if (relationalStatements.get(key) === made) relationalStatements.delete(key); });
+              }
+              entry = made;
+            }
+            const held = entry;
+            /** @param {'run' | 'get' | 'all'} method */
+            const use = (method) => (/** @type {any[]} */ params) => {
+              held.uses += 1;
+              const done = () => { held.uses -= 1; finalizeIdle(held); };
+              let out;
+              try {
+                out = chain(held.made, (/** @type {any} */ statement) => statement[method](params));
+              }
+              catch (error) {
+                done();
+                throw error;
+              }
+              if (!isThenable(out)) {
+                done();
+                return out;
+              }
+              return toPromise(out).finally(done);
+            };
+            return { run: use('run'), get: use('get'), all: use('all') };
           };
-          const relationalBase = { dialect, connection: opened, prepare: prepareRelational, rowidTables };
+          const relationalBase = { dialect, connection: opened, prepare: prepareRelational };
           // the root: reads under the gate, prepared read-only so a pool
           // reader can serve them; a cursor admitted per pull; a write in a
           // top-level transaction of its own that takes the writer lock
@@ -2993,6 +3137,10 @@ export function openStore(model, options) {
             // default stays the deferred savepoint; nesting is a savepoint
             // under either.
             transaction: lift((fn, transactionOptions) => {
+              // called from inside a transaction's own synchronous extent,
+              // the driver nests the call as a savepoint of that transaction:
+              // it IS a nested transaction, with the nested option set
+              if (currentRoot !== null && !opened.mustQueue) return nestedAtRoot(fn, transactionOptions, 'store.transaction');
               // a closed set, read before anything begins (JD0013, JD0014)
               const { mode, signal, unitOfWork, retry, holdTimeoutMs } =
                 readTransactionOptions(transactionOptions, 'async', 'store.transaction');
@@ -3210,20 +3358,50 @@ export function openStore(model, options) {
           const scopedCursor = (identity, open) => {
             requireScope(identity);
             const cursor = open();
-            const step = (/** @type {string} */ member) => () => {
-              try {
-                return runScoped(identity, () => cursor[member]());
-              }
-              catch (error) {
-                return Promise.reject(error);
-              }
+            /** Release the source: a reset reads and writes nothing, so it
+             * is safe whatever became of the scope. */
+            const release = () => {
+              scopeCursors.get(identity)?.delete(release);
+              return Promise.resolve().then(() => cursor.return()).catch(() => undefined);
             };
+            // the scope closes it when the body settles, if nobody did
+            let owned = scopeCursors.get(identity);
+            if (owned === undefined) scopeCursors.set(identity, owned = new Set());
+            owned.add(release);
             /** @type {any} */
             const wrapped = {
               streaming: cursor.streaming,
               barrier: cursor.barrier,
-              next: step('next'),
-              return: step('return'),
+              // a pull the scope refuses (settled, or past its hold limit)
+              // releases the source too: nothing can pull it again, and a
+              // `for await` whose next() rejected never calls return()
+              next: () => {
+                let pulled;
+                try {
+                  pulled = runScoped(identity, () => cursor.next());
+                }
+                catch (error) {
+                  return release().then(() => { throw error; });
+                }
+                // an exhausted or failed cursor has released its source
+                return Promise.resolve(pulled).then((step) => {
+                  if (step.done) scopeCursors.get(identity)?.delete(release);
+                  return step;
+                }, (error) => {
+                  scopeCursors.get(identity)?.delete(release);
+                  throw error;
+                });
+              },
+              // a refused release still releases, as a root cursor's does
+              return: () => {
+                const released = () => release().then(() => ({ done: true, value: undefined }));
+                try {
+                  return Promise.resolve(runScoped(identity, () => cursor.return())).catch(released);
+                }
+                catch {
+                  return released();
+                }
+              },
               [Symbol.asyncIterator]: () => wrapped,
             };
             return Object.freeze(wrapped);
@@ -3446,11 +3624,18 @@ export function openStore(model, options) {
             // the relational engine as THIS scope's owner: every call checks
             // the exact scope and counts in flight for a hold limit, a write
             // is a savepoint of the transaction, and a cursor is the scope's
+            // a scope never queues, so a signal can only refuse a call up
+            // front — as it refuses a nested transaction (JD2064)
+            const unaborted = (/** @type {AbortSignal | undefined} */ signal) => {
+              if (signal?.aborted === true) throw abortReason(signal);
+            };
             const relationalScope = {
               ...relationalBase,
               available: () => requireScope(identity),
-              read: (/** @type {any} */ run) => runScoped(identity, () => run(connection)),
-              write: (/** @type {any} */ run) => runScoped(identity, () => connection.transaction(() => run(connection))),
+              read: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) =>
+                runScoped(identity, () => { unaborted(signal); return run(connection); }),
+              write: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) =>
+                runScoped(identity, () => { unaborted(signal); return connection.transaction(() => run(connection)); }),
               beforeWrite: (/** @type {string} */ table) => beforeSqlWrite(table, sqlWorks),
               afterWrite: () => afterSqlWrite(sqlWorks),
             };
@@ -3655,9 +3840,14 @@ export function openStore(model, options) {
             const syncRootRelational = relationalEngine({
               ...relationalBase,
               available: () => {},
-              read: (run) => gatedSync(() => run(connection)),
+              // the synchronous surface never queues: a signal refuses up front
+              read: (run, signal) => {
+                if (signal?.aborted === true) throw abortReason(signal);
+                return gatedSync(() => run(connection));
+              },
               cursor: (spec) => admitSyncCursor(createSyncCursor({ ...spec, open: () => spec.open(connection) }), gatedSync),
-              write: (run) => {
+              write: (run, signal) => {
+                if (signal?.aborted === true) throw abortReason(signal);
                 if (opened.mustQueue) {
                   throw contended('the synchronous surface answers values, so it cannot '
                     + 'wait for the commit');
@@ -3679,6 +3869,10 @@ export function openStore(model, options) {
                 return handle;
               },
               transaction: (fn, transactionOptions) => {
+                // inside a transaction's own synchronous extent the call nests
+                if (currentRoot !== null && !opened.mustQueue) {
+                  return nestedAtRoot((tx) => synchronousBody(fn, tx), transactionOptions, 'store.sync.transaction');
+                }
                 // the root's closed set (JD0013), read first; `unitOfWork`
                 // is honoured exactly as the asynchronous root honours it
                 const { mode, signal, unitOfWork } = readTransactionOptions(

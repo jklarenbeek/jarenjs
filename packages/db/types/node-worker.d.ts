@@ -30,6 +30,9 @@ export interface WorkerStatement {
   get(params?: readonly unknown[]): Promise<Record<string, unknown> | undefined>;
   all(params?: readonly unknown[]): Promise<Record<string, unknown>[]>;
   iterate(params?: readonly unknown[]): Promise<AsyncIterableIterator<Record<string, unknown>>>;
+  /** Release the statement the worker keeps; the worker holds at most
+   * `maxStatements` until told otherwise. */
+  finalize(): Promise<unknown>;
 }
 /** The ordinary Connection operations; transactions pass their owning scope. */
 export interface WorkerConnectionScope {

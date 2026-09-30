@@ -4,7 +4,7 @@
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { sqliteDialect } from './dialects/sqlite.js';
 import { sqliteRelationalVocabulary } from './dialects/sqlite-relational.js';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, abortReason } from './driver.js';
 import { createCursor, createSyncCursor, admitCursor, rowClassOf } from './cursor.js';
 
 /** @typedef {{ sql: string, params: any[], access: 'read'|'write' }} RelationalPlan */
@@ -306,8 +306,6 @@ export function planRelational(document, options) {
  * @property {(scope: any, sql: string, metadata?: any) => any} [prepare] -
  *   how a reusable statement is prepared: the Store shares one bounded cache
  *   across its engines; by default every call prepares its own
- * @property {Map<string, boolean>} [rowidTables] - the tables known to keep
- *   (or not keep) rowids, shared by the engines of one Store
  */
 
 /** A driver failure met by a relational operation, classified — never raw. */
@@ -332,23 +330,18 @@ export function relationalEngine(policy) {
     ? (fn) => { try { return Promise.resolve(fn()); } catch (error) { return Promise.reject(error); } }
     : (fn) => fn();
   /**
-   * Whether a table keeps rowids. SQLite's last insert rowid belongs to the
-   * CONNECTION, so after an insert into a WITHOUT ROWID table it is some
-   * other row's; read once per table from the catalog.
-   * @type {Map<string, boolean>}
+   * Whether a table keeps rowids — an ordinary or virtual table (FTS5, an
+   * R*Tree) not declared WITHOUT ROWID. SQLite's last insert rowid belongs
+   * to the CONNECTION, so after an insert into a table without rowids it is
+   * some other row's. Read from the catalog on every reported insert: a
+   * table dropped and created again may have changed its mind.
    */
-  const rowidTables = policy.rowidTables ?? new Map();
-  const keepsRowids = (scope, table) => {
-    const known = rowidTables.get(table);
-    if (known !== undefined) return known;
-    return chain(prepare(scope, dialect.introspect.tableKind()), (statement) =>
+  const keepsRowids = (scope, table) =>
+    chain(prepare(scope, dialect.introspect.tableKind()), (statement) =>
       chain(statement.all([table]), (rows) => {
         const row = rows.find((r) => r.schema === 'temp') ?? rows.find((r) => r.schema === 'main') ?? rows[0];
-        const rowid = row !== undefined && row.type === 'table' && Number(row.wr) === 0;
-        rowidTables.set(table, rowid);
-        return rowid;
+        return row !== undefined && (row.type === 'table' || row.type === 'virtual') && Number(row.wr) === 0;
       }));
-  };
   const selected = (method, document, options) => {
     const plan = readPlan(document, options);
     return policy.read((scope) => attempt(() =>
@@ -409,11 +402,16 @@ export function relational(connection) {
     }
   };
   const admit = (fn, what, signal) => (connection.exclusively ? connection.exclusively(fn, what, signal) : fn(connection));
+  // a synchronous engine answers values: an aborted signal is a throw, never
+  // a rejected promise nothing awaits
+  const unaborted = (signal) => {
+    if (connection.synchronous && signal?.aborted === true) throw abortReason(signal);
+  };
   const engine = relationalEngine({
     dialect: connection.dialect,
     connection,
     available,
-    read: (run, signal) => { unqueued('a synchronous read'); return admit(run, 'relational read', signal); },
+    read: (run, signal) => { unqueued('a synchronous read'); unaborted(signal); return admit(run, 'relational read', signal); },
     cursor: (spec) => {
       if (connection.synchronous) {
         return createSyncCursor({ ...spec, open: () => { available(); unqueued('synchronous iteration'); return spec.open(connection); } });
@@ -423,7 +421,7 @@ export function relational(connection) {
         'relational cursor', { owners, max: connection.capabilities.postgres.maxCursors,
           holdMs: connection.capabilities.postgres.cursorLifetimeMs });
     },
-    write: (run, signal) => { unqueued('a synchronous mutation'); return connection.transaction(run, signal); },
+    write: (run, signal) => { unqueued('a synchronous mutation'); unaborted(signal); return connection.transaction(run, signal); },
   });
   return Object.freeze({
     ...engine,

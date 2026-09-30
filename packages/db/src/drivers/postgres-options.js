@@ -59,6 +59,12 @@ export function postgresSettings(options = {}, known = POSTGRES_DRIVER_OPTIONS, 
     if (key.endsWith('Ms') && result[key] > 2147483647)
       throw new TypeError(`${key} exceeds the timer range`);
   }
+  // the store's own rule for the same member: `Infinity`, a negative or a
+  // fraction used to become a 1 ms wait (or none) behind a transaction
+  const { queueTimeout } = options;
+  if (queueTimeout !== undefined
+    && (!Number.isInteger(queueTimeout) || queueTimeout < 0 || queueTimeout > 0x7fffffff))
+    throw new DbCompileError('JD0003', `${owner} option 'queueTimeout' is a whole number of milliseconds from 0 to 2147483647`);
   if (options.prepared !== undefined && !['named', 'unnamed'].includes(options.prepared))
     throw new TypeError('prepared is named or unnamed');
   if (options.cursorMode !== undefined && !['native', 'buffered'].includes(options.cursorMode))

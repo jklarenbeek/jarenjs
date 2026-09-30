@@ -268,9 +268,24 @@ export function adaptPostgresClient(client, options = undefined) {
   // uncaught exception. The session is marked lost; the next call refuses
   // coded (JD2087) instead of reaching a dead socket.
   const lost = (/** @type {unknown} */ error) => {
-    const atStake = (inTransaction && wrote) || fate === 'unknown';
-    if (inTransaction) fate = 'unknown';
+    // an autocommit write in flight has an outcome at stake too: it may
+    // have committed before the session went
+    const atStake = (inTransaction && wrote) || fate === 'unknown' || (activeQuery !== null && activeQuery.writes);
+    if (inTransaction || atStake) fate = 'unknown';
     poisoned ??= connectionLost(error, { outcomeAtStake: atStake });
+  };
+  /**
+   * What a call on a lost or closed session is refused with. A lost
+   * session answers every later call with an error of its own: one object
+   * thrown to many callers carried one caller's `attempts` to the rest.
+   * @returns {Error}
+   */
+  const refusal = () => {
+    if (poisoned === null) return new DbRuntimeError('JD2063', 'the PostgreSQL session is closed');
+    if (poisoned.code !== 'JD2087') return poisoned;
+    const again = new DbRuntimeError('JD2087', poisoned.reason ?? poisoned.message, { cause: poisoned.cause ?? poisoned });
+    Object.assign(again, { class: poisoned.class, retryable: poisoned.retryable });
+    return again;
   };
   const listens = typeof client.on === 'function';
   if (listens) client.on('error', lost);
@@ -307,14 +322,17 @@ export function adaptPostgresClient(client, options = undefined) {
     return result;
   };
   let querySequence = 0;
-  const query = async (sql, values, name, owner) => {
-    if (released || poisoned) throw poisoned ?? new DbRuntimeError('JD2063', 'the PostgreSQL session is closed');
+  const query = async (sql, values, name, owner, writes = false) => {
+    if (released || poisoned) throw refusal();
     const lease = await requests.acquire(false, { timeoutMs: limits.statementTimeoutMs });
-    const operation = { id: ++querySequence, owner };
+    // a statement prepared for writing may write whatever its text says
+    // (`SELECT fn()` can insert): the caller's declaration decides too
+    const changes = writes || mayWrite(sql);
+    const operation = { id: ++querySequence, owner, writes: changes && !inTransaction };
     activeQuery = operation;
-    if (inTransaction && mayWrite(sql)) wrote = true;
+    if (inTransaction && changes) wrote = true;
     try {
-      if (released || poisoned) throw poisoned ?? new DbRuntimeError('JD2063', 'the PostgreSQL session is closed');
+      if (released || poisoned) throw refusal();
       if (name !== undefined) {
         prepared.add(name);
         const count = (sessionStatementCounts.get(options?.cacheIdentity ?? client) ?? 0) + 1;
@@ -332,7 +350,9 @@ export function adaptPostgresClient(client, options = undefined) {
       // retryable when a transaction's outcome is at stake (an open
       // transaction, a COMMIT in flight) — it was, on a poisoned session
       if (isConnectionLoss(error)) {
-        const atStake = (inTransaction && wrote) || (/^\s*COMMIT\b/i.test(sql) && wrote);
+        // at stake: a writing transaction, its COMMIT, or an autocommit
+        // write — each may have committed before the session went
+        const atStake = (inTransaction && wrote) || (/^\s*COMMIT\b/i.test(sql) && wrote) || (!inTransaction && changes);
         if (atStake) fate = 'unknown';
         poisoned = connectionLost(error, { outcomeAtStake: atStake });
         throw poisoned;
@@ -353,11 +373,11 @@ export function adaptPostgresClient(client, options = undefined) {
       throw new DbRuntimeError('JD2092', 'the buffered PostgreSQL result exceeds its row or byte bound');
     return rows;
   };
-  const run = (sql, params, read) => {
+  const run = (sql, params, read, writes = false) => {
     if (closing !== undefined) return Promise.reject(new DbRuntimeError('JD2063', 'the PostgreSQL session is closing'));
     const values = params.map(encodeParam);
     const name = names.get(sql);
-    return query(sql, values, name).catch((error) => {
+    return query(sql, values, name, undefined, writes).catch((error) => {
       // The routine identifies a planner refusal, not a feature error raised
       // by a function after effects. Never replay a write or an aborted block.
       if (status() !== 'I' || !read || name === undefined || error?.code !== '0A000'
@@ -392,26 +412,30 @@ export function adaptPostgresClient(client, options = undefined) {
     /** @param {string} sql */
     prepare: (sql, metadata = {}) => {
       if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
+      // declared for writing (trusted SQL's `access: 'write'`): whatever the
+      // text looks like, running it may change rows, and it runs directly
+      // rather than through a cursor that would hide that
+      const writes = metadata.readOnly === false;
       if (!names.has(sql) && options?.prepared !== 'unnamed' && !metadata.ephemeral
         && names.size < limits.maxStatements && (sessionStatementCounts.get(options?.cacheIdentity ?? client) ?? 0) < limits.maxStatements) {
         statementSequence += 1;
         names.set(sql, `jaren_s${statementSequence}`);
       }
       return {
-        run: (params = []) => run(sql, params, false)
+        run: (params = []) => run(sql, params, false, writes)
           .then((result) => ({ changes: result.rowCount ?? 0 })),
         get: async (params = []) => {
           if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
-          if (metadata.buffered || options?.nativeCursor !== true || !cursorSql(sql))
-            return boundedRows(await run(sql, params, true))[0];
+          if (metadata.buffered || writes || options?.nativeCursor !== true || !cursorSql(sql))
+            return boundedRows(await run(sql, params, true, writes))[0];
           const iterator = await cursors.open(sql, params.map(encodeParam), 1);
           try { return (await iterator.next()).value; }
           finally { await iterator.return(); }
         },
         all: async (params = []) => {
           if (closing !== undefined) throw new DbRuntimeError('JD2063', 'the PostgreSQL session is closing');
-          if (options?.nativeCursor !== true || !cursorSql(sql))
-            return boundedRows(await run(sql, params, true));
+          if (writes || options?.nativeCursor !== true || !cursorSql(sql))
+            return boundedRows(await run(sql, params, true, writes));
           const iterator = await cursors.open(sql, params.map(encodeParam));
           const rows = [];
           let bytes = 0;

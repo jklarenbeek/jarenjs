@@ -22,6 +22,19 @@ describe('createBoundedCache', () => {
     assert.strictEqual(cache.get('d'), 'D');
   });
 
+  it('hands the entry the bound pushed out to onEvict, and only that one', () => {
+    /** @type {[string, number][]} */
+    const evicted = [];
+    const cache = createBoundedCache(2, (key, value) => { evicted.push([key, value]); });
+    cache.set('a', 1);
+    cache.set('b', 2);
+    cache.set('a', 10);   // a refresh evicts nothing
+    cache.set('c', 3);    // 'b' is the coldest
+    cache.delete('a');    // the caller holds what it deletes
+    cache.clear();
+    assert.deepStrictEqual(evicted, [['b', 2]]);
+  });
+
   it('evicts the least recently USED, not the oldest inserted', () => {
     const cache = createBoundedCache(3);
     cache.set('a', 1);

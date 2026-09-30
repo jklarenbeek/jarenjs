@@ -409,3 +409,61 @@ export function statementCountingDriver(counters) {
     }, { queueTimeout: options?.queueTimeout }),
   };
 }
+
+/**
+ * A TCP proxy in front of a PostgreSQL server that can lose a reply: once
+ * armed with a command tag (`'UPDATE'`, `'COMMIT'`), it lets the server
+ * finish that command — so whatever it committed is committed — then
+ * drops the session without passing the reply on. How a test makes "the
+ * connection went after the server acted" happen on demand.
+ * @param {number} [target] - the server's port
+ * @returns {Promise<{ port: number, arm: (tag: string) => void, close: () => void }>}
+ */
+export async function pgLossProxy(target = 55432) {
+  const net = await import('node:net');
+  /** @type {string | null} */
+  let armedTag = null;
+  const proxy = net.createServer((client) => {
+    const server = net.connect(target, '127.0.0.1');
+    client.pipe(server);
+    let buffered = Buffer.alloc(0);
+    let dropping = false;
+    server.on('data', (chunk) => {
+      if (armedTag === null && !dropping) { client.write(chunk); return; }
+      buffered = Buffer.concat([buffered, chunk]);
+      /** @type {Buffer[]} */
+      const out = [];
+      while (buffered.length >= 5) {
+        const type = String.fromCharCode(buffered[0]);
+        const length = buffered.readInt32BE(1);
+        if (buffered.length < 1 + length) break;
+        const message = buffered.subarray(0, 1 + length);
+        buffered = buffered.subarray(1 + length);
+        if (type === 'C' && armedTag !== null && message.subarray(5).toString().startsWith(armedTag)) {
+          dropping = true;
+          armedTag = null;
+        }
+        if (dropping) {
+          if (type === 'Z') {
+            if (out.length) client.write(Buffer.concat(out));
+            client.destroy();
+            server.destroy();
+            return;
+          }
+          continue;
+        }
+        out.push(message);
+      }
+      if (out.length) client.write(Buffer.concat(out));
+    });
+    server.on('error', () => client.destroy());
+    client.on('error', () => server.destroy());
+    client.on('close', () => server.destroy());
+  });
+  await new Promise((resolve) => proxy.listen(0, '127.0.0.1', () => resolve(undefined)));
+  return {
+    port: /** @type {import('node:net').AddressInfo} */ (proxy.address()).port,
+    arm: (tag) => { armedTag = tag; },
+    close: () => { proxy.close(); },
+  };
+}

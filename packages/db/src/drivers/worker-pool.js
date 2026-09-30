@@ -121,6 +121,15 @@ export function workerPoolDriver(configuration, driverFactory) {
             run: (params = []) => call('run', params),
             get: (params = []) => call('get', params),
             all: (params = []) => call('all', params),
+            // every slot that prepared the statement keeps it: release each
+            finalize: async () => {
+              for (const slot of slots) {
+                const kept = slot.statements.get(id);
+                if (kept === undefined) continue;
+                slot.statements.delete(id);
+                await kept.finalize?.();
+              }
+            },
             iterate: async (params = []) => {
               const pinned = transaction;
               const lease = pinned ?? await queue.acquire(readLane(metadata.readOnly === true));

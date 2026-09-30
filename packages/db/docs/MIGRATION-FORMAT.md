@@ -404,7 +404,11 @@ The run options include:
   distinct fold and bounds retained unique items; `maxBytes` applies to
   those items. Duplicates do not consume additional cardinality.
 - A transform MUST NOT change a caller-keyed document's key member —
-  the key column would go stale; the run refuses (`JD0023`).
+  the key column would go stale; the run refuses (`JD0023`). A stored
+  key matches a numeric member only as its canonical text or as the
+  spelling SQLite stores for that float (`'7.0'`, `'1.0e+21'`): text that
+  merely parses to the number (`'0042'`, `'1e3'`, `'7.00'`) is another
+  key, and the run refuses.
 
 ### 6.1 Running without a database
 

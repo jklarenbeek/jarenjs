@@ -584,6 +584,21 @@ export function createCaptureEngine(options) {
   const abandonedCapture = () => new DbRuntimeError('JD2070',
     'this capture scope was abandoned with its transaction; nothing it buffered is recorded');
 
+  /** Give the open session up. A closed database has already discarded
+   * it, and closing it again throws — which must not replace the failure
+   * that brought the capture scope down. */
+  const closeSession = () => {
+    if (session === null) return;
+    const open = session;
+    session = null;
+    try {
+      open.close();
+    }
+    catch {
+      // the database closed first: the session went with it
+    }
+  };
+
   const wrap = (fn) => {
     if (depth > 0) return fn();
     depth = 1;
@@ -596,16 +611,17 @@ export function createCaptureEngine(options) {
       if (abandoned()) return;
       depth = 0;
       context = null;
-      if (session !== null) {
-        session.close();
-        session = null;
-      }
+      closeSession();
       journal = [];
     };
     let outcome;
     try {
       if (mode === 'session') session = connection.session();
       else journal = [];
+      // a captured write reads before it writes (the journal's before-image,
+      // a key's spellings), so a transaction it opens takes the writer lock
+      // up front: a deferred one met the read→write upgrade busy the busy
+      // handler cannot wait out whenever another connection wrote
       outcome = connection.transaction((...scopeArgs) =>
         chain(dialect.capture?.beforeWrite(connection), () =>
         chain(fn(...scopeArgs), (result) => {
@@ -624,7 +640,7 @@ export function createCaptureEngine(options) {
               },
             }));
           }));
-        })));
+        })), 'immediate');
     }
     catch (error) {
       cleanupFailure();
@@ -658,10 +674,7 @@ export function createCaptureEngine(options) {
     generation++;
     depth = 0;
     context = null;
-    if (session !== null) {
-      session.close();
-      session = null;
-    }
+    closeSession();
     journal = [];
   };
 
@@ -676,17 +689,22 @@ export function createCaptureEngine(options) {
     if (depth === 0) return wrap(fn);
     if (mode !== 'journal') return fn();
     const mark = journal.length;
+    // a hold limit may give the engine up while this scope still runs:
+    // the journal is then the NEXT owner's, and a late failure here must
+    // not truncate what that owner buffered
+    const mine = generation;
+    const undo = () => { if (generation === mine) journal.length = mark; };
     let outcome;
     try {
       outcome = fn();
     }
     catch (error) {
-      journal.length = mark;
+      undo();
       throw error;
     }
     if (outcome instanceof Promise) {
       return outcome.then((value) => value, (error) => {
-        journal.length = mark;
+        undo();
         throw error;
       });
     }

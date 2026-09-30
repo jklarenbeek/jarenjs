@@ -150,6 +150,9 @@ export function wrapStatement(statement, guard = undefined, active = undefined) 
       ? (params = []) => { before(); return chain(/** @type {Function} */ (statement.iterate)(params), track); }
       : (params = []) => { before(); return chain(statement.all(params),
         (rows) => track(rows[Symbol.iterator]())); },
+    // release what the binding keeps for the statement (a worker's slot);
+    // a binding that keeps nothing answers nothing
+    finalize: () => (typeof statement.finalize === 'function' ? statement.finalize() : undefined),
   };
 }
 
@@ -452,6 +455,9 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * IS the block, and the flag is never read.
    */
   let inBlock = false;
+  /** The structured savepoints open right now: on SQLite the first one
+   * starts the transaction, so a scope that finds one is inside it. */
+  let structured = 0;
   /**
    * Whether an owning callback is on the stack RIGHT NOW — set around the
    * synchronous extent of every transaction body, cleared the moment it
@@ -716,11 +722,27 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // the whole block back while this body still ran) neither RELEASEs
     // nor rolls back to anything: the block took it with it, and the
     // connection may already belong to the next owner
-    return chain(openCheckpoint(), (checkpoint) => settleTransaction(() => callBody(fn, life),
-      () => { requireLive(life); return releaseCheckpoint(checkpoint); },
-      rollbackUnlessClosed(() => (life.alive
-        ? chain(rollbackToCheckpoint(checkpoint), () => releaseCheckpoint(checkpoint))
-        : undefined))));
+    return chain(openCheckpoint(), (checkpoint) => {
+      structured += 1;
+      const done = () => { structured -= 1; };
+      let out;
+      try {
+        out = settleTransaction(() => callBody(fn, life),
+          () => { requireLive(life); return releaseCheckpoint(checkpoint); },
+          rollbackUnlessClosed(() => (life.alive
+            ? chain(rollbackToCheckpoint(checkpoint), () => releaseCheckpoint(checkpoint))
+            : undefined)));
+      }
+      catch (error) {
+        done();
+        throw error;
+      }
+      if (!isThenable(out)) {
+        done();
+        return out;
+      }
+      return out.then((value) => { done(); return value; }, (error) => { done(); throw error; });
+    });
   };
 
   /** The scope handed to a transaction callback: the owner's direct
@@ -735,9 +757,17 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     exec: (sql) => { requireOpen(); requireLive(life); return raw.exec(sql); },
     /** @param {string} sql */
     prepare: (sql, metadata) => { requireOpen(); requireLive(life); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
-    /** A nested savepoint inside this transaction.
-     * @param {(scope: any) => any} fn */
-    transaction: (fn) => { requireLive(life); return savepointAround(fn, life); },
+    /** A nested savepoint inside this transaction — or, inside a scope
+     * that opened none yet (a gated call), a transaction of its own:
+     * `'immediate'` then takes the writer lock before the first statement.
+     * @param {(scope: any) => any} fn @param {'immediate'} [mode] */
+    transaction: (fn, mode) => {
+      requireLive(life);
+      // nothing open yet — no block, no savepoint (one starts a transaction
+      // on SQLite) — so this call begins the transaction itself
+      return mode === 'immediate' && !inBlock && structured === 0
+        ? blockAround(fn, 'immediate', life) : savepointAround(fn, life);
+    },
     /** A MANUAL checkpoint at the current depth, settled by the caller
      * through {@link rollbackTo}/{@link release} rather than around a
      * callback. It is the same primitive structured nesting uses — one
