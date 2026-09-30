@@ -303,7 +303,7 @@ exports a pen built over this one comes in by.
 | `.toJSON()` | the same document, so `JSON.stringify(builder)` is the document | `JsonSchema \| boolean` | native |
 | `.state` | the frozen builder state (kind, children, keywords, annotations) — what a subclass reads, never a document | the state object | native |
 | `.with(patch)` | nothing: a NEW builder of the same class with part of the state replaced. Every method above is written in terms of it, and a subclass keeps its own class through all of them | `this` | native |
-| `.keyword(key, value)` | one constraint keyword, in the order first set | `this` | native |
+| `.keyword(key, value)` | one constraint keyword, in the order first set. The value is JSON or holds builders (`KeywordValue`), and a builder is emitted as its schema node, `$defs` hoisting included, as a member would be. A `default()`, `coerce()` or `trim()` under a branch the normalizer never enters is `JL0102`, as `union()` already refuses. Those branches are `anyOf`, `oneOf`, `if`, `then`, `else`, `not`, `unevaluatedProperties`, `unevaluatedItems`, `dependentSchemas`, `dependencies` and `contentSchema`; `allOf` is descended, so it is not one of them | `this` | native |
 | `schemaOf(value)` | nothing: the document of a builder, or the value as given — the one call a consumer needs to accept "a schema, by hand or by pen" | `unknown` | native |
 | `requireJson(value, what)` | nothing: the JSON boundary every value entering a document crosses, exported so a pen built over this one uses the same door | `T` | native; a non-JSON value is `JL0101` |
 | `createFactories(classes)` | nothing: the named factories above, built for one SET of builder classes. `@jarenjs/linq/model` and `@jarenjs/linq/forms` call it with their subclasses, which is why the wiring exists exactly once and no subpath patches another's prototype | the factory record | native |
@@ -780,6 +780,13 @@ to the codes `packages/linq/src/schema/` throws. The full condition each
 code states across every pen is the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3.
 
+The capture every schema callback runs in adds one more refusal, which is
+the chain's and listed in QUERY-PEN. In a `check()` callback, `==`, `+`, a
+template literal or `<` over a captured value is `JL0108`
+([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
+`=== null` and truthiness cannot be refused, since they test the proxy
+and never the value. Write `.eq(null)`, `.exists()` or `.isEmpty()`.
+
 | Code | What this pen raises it for |
 |---|---|
 | `JL0101` | a value this pen cannot spell, or a name → value map it cannot read |
@@ -1198,10 +1205,10 @@ hand, or generate it some other way, when:
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->35,325<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->35,773<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.schema.kb-->35<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.schema.kb-->36<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building

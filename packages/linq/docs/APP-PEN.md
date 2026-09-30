@@ -1053,6 +1053,26 @@ application uses together. Compiled by `npm run test:types`, it holds:
   as the concrete types the three helpers answer, with
   `effect('save').run` pinned to the literal `'save'`.
 
+### 5.6 `=== null` compares the proxy, never the value
+
+A lambda's parameter is a capture proxy that stands for a value the
+engine computes later, not the value. So JavaScript's own comparisons
+cannot see the value:
+- `x.payload.tab == 'labels'`, `` `${x.payload.tab}` ``, `x.n + 1` and
+  `x.n < 2` ask the proxy for a primitive. The capture refuses with
+  `JL0108`, naming the spellings that work
+  ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
+- `x.payload === null` and `if (x.payload)` cannot be refused, because
+  JavaScript asks the proxy nothing: the first is `false` and the second
+  true, for every value. No TypeScript declaration can make `=== null` an
+  error either, since `null` is comparable to every type.
+
+```js
+action((st, x) => transition({ state: x.payload.eq(null) }))   // { "$eq": ["$payload", null] }
+action((st, x) => transition({ state: x.payload.exists() }))   // present at all
+action((st, x) => transition({ state: x.payload.isEmpty() }))  // the empty sequence
+```
+
 ## 6. What it cannot spell
 
 Every construct the app pen refuses as unspellable is `JL0102`, and §4.3
@@ -1123,7 +1143,7 @@ not look for them:
 
 ## 7. Cost
 
-`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->49,614<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->50,062<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -1133,8 +1153,8 @@ pen and the JSLT pen (state, and views), and no chain module, no
 
 It is the second-largest pen bundle after the client, and the two pens
 it carries are most of it. The three figures the same probe measures,
-side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->35,325<!--/fact--> bytes,
-`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->18,424<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->49,614<!--/fact-->. The subpath sums do not add — all
+side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->35,773<!--/fact--> bytes,
+`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->18,837<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->50,062<!--/fact-->. The subpath sums do not add — all
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:

@@ -260,10 +260,45 @@ export type Failure = {
 /** The binding a handler context comes from. */
 export type CarrierName = 'http' | 'port' | 'local';
 
+/** The operation a handler serves, as the binding compiled it: the
+ * structural subset of the contract package's `CompiledOperation` a
+ * handler reads (linq depends on core and json only, so the shape is
+ * declared here rather than imported; the TypeScript projection writes
+ * the same text). "Does my operation declare this failure?" is
+ * `Object.hasOwn(ctx.op.errors, code)`. */
+export interface OperationInfo {
+  readonly id: string;
+  readonly kind: 'read' | 'command' | 'subscribe';
+  readonly doc: string | null;
+  readonly errors: Readonly<Record<string, { readonly status: number }>>;
+  readonly policy: Readonly<{
+    task: 'switch' | 'exhaust' | 'concat' | 'parallel';
+    idempotency: 'none' | 'optional' | 'required';
+    revision: string | null;
+    cache: 'none' | 'revision';
+    limits: Readonly<{ maxBodyBytes: number }>;
+    errors: Readonly<{ details: 'none' | 'paths' | 'full' }>;
+    retry: Readonly<{ max: number; on: readonly string[] }> | null;
+    stream: Readonly<{ resume: 'snapshot' | 'replay'; heartbeatMs: number; maxPatchBytes: number | null }> | null;
+    audience: 'public' | 'server';
+  }>;
+  readonly http: Readonly<{
+    method: string;
+    path: string;
+    variables: readonly string[];
+    in: Readonly<Record<string, 'path' | 'query' | 'header' | 'body'>>;
+    body: string | null;
+    status: number;
+    media: string;
+    opaque: boolean;
+  }>;
+}
+
 /** The members every carrier's context shares; `host` is the host
- * lifecycle's acquired value (§7.7), `null` by default. */
+ * lifecycle's acquired value (§7.7), `null` by default; `op` is the
+ * operation the handler serves. */
 export interface HandlerContextBase<Host = null> {
-  op: unknown;
+  op: OperationInfo;
   trace: string;
   host: Host;
   headers: Readonly<Record<string, string>>;
@@ -284,6 +319,10 @@ export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host
   idempotency: Readonly<{ key: string; scope: string }> | null;
   etag(tag: string, options?: { strong?: boolean }): void;
   status(status: number): void;
+  /** Arm a response header the handler owns; the ledger records it, so a
+   * replay carries it too. `set-cookie` appends, every other name
+   * replaces; a header the binding derives is refused (`JC1006`). */
+  header(name: string, value: string): void;
 }
 
 /** The port and local bindings' context: no request line, no body, no
@@ -299,6 +338,7 @@ export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'lo
   idempotency: null;
   etag: null;
   status: null;
+  header: null;
 }
 
 /** The per-request context a server binding hands a handler, selected
@@ -308,6 +348,11 @@ export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'lo
  * member. */
 export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> =
   Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;
+
+/** The context a binding's `onError(error, ctx)` observer receives: the
+ * handler context of the request that failed, or `null` for a fault no
+ * request context reached. */
+export type ErrorContext<Host = null> = HandlerContext<Host, CarrierName> | null;
 
 /** Per-call options of `bytes` (§10.6): the members of `InvokeContext`
  * that apply to an opaque call, plus the request body to send. */
@@ -414,8 +459,9 @@ export type TypedTool<C> = {
     name: ToolName<Extract<K, string>>;
     description: string;
     inputSchema: JsonSchema;
+    /** Always a function: an operation without input ignores `args`. */
     execute: InvokableOf<C>[K] extends { accepts: infer In; output: infer O }
-      ? (In extends null ? null : (args: In) => Promise<Outcome<O>>)
+      ? (In extends null ? (args?: unknown) => Promise<Outcome<O>> : (args: In) => Promise<Outcome<O>>)
       : never;
   };
 }[keyof InvokableOf<C>];

@@ -151,35 +151,18 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
 }
 
 /** The typed store: every member of `Store` (a typed store is the same
- * object, identity at runtime), with the entity sets typed. */
-export interface TypedStore<E extends MetaMap<E>> {
-  /** Native statements over any table (MODEL-FORMAT §5.3). */
-  readonly relational: import('./relational.js').StoreRelational;
-  readonly capabilities: StoreCapabilities;
-  readonly dialect: Dialect;
-  stats(): StoreStats;
-  collection<T = unknown>(name: string): Collection<T>;
+ * object, identity at runtime), with the entity sets typed. It is declared
+ * over `Store` itself, so a member `Store` gains is a member here too —
+ * the maintenance calls, a transaction's options and the jobs admin API
+ * included — and a typed store is assignable wherever a `Store` is. */
+export interface TypedStore<E extends MetaMap<E>> extends Omit<Store, 'entity' | 'roots' | 'relations'> {
+  /** The typed entity set of one declared entity; a name the metadata
+   * does not declare is a compile error. */
   entity<K extends keyof E & string>(name: K): TypedEntitySet<E, E[K]>;
-  execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
-  explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   /** The entity roots this store-level provider serves (present with entities). */
   readonly roots?: readonly (keyof E & string)[];
   /** The relation tables of every entity, keyed by entity name. */
   readonly relations?: Readonly<Record<keyof E & string, RelationTable>>;
-  saveChanges?(): Promise<SaveReport>;
-  transaction<R>(fn: (store: TransactionStore) => R | Promise<R>,
-    options?: TransactionScopeOptions): Promise<Awaited<R>>;
-  observe(fn: (record: ChangeRecord) => void): () => void;
-  /** Unbounded, and unsafe for a reconnecting consumer: `changes.page()`
-   * is the supported path (LIVE-FORMAT §5). */
-  changesSince?(after: number): Promise<ChangeRecord[]>;
-  readonly changes?: ChangesReader;
-  dataVersion(): Promise<number>;
-  live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
-  close(options?: { graceMs?: number }): Promise<void>;
-  readonly jobs?: JobsApi;
-  readonly replication?: Replication;
-  readonly sync?: SyncStore;
 }
 
 /**

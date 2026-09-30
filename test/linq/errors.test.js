@@ -85,6 +85,22 @@ describe('every JL code fires', () => {
     await client.close();
   });
 
+  it('JL0108 — a captured expression met ==, +, a template literal or <, the spellings named', () => {
+    const tab = [{ tab: 'labels', n: 1 }];
+    for (const [label, fn] of /** @type {[string, (v: any) => unknown][]} */ ([
+      ['==', (v) => v.tab == 'labels'],
+      ['template literal', (v) => `${v.tab}` === 'labels'],
+      ['+', (v) => v.n + 1],
+      ['<', (v) => v.n < 2],
+    ])) {
+      assert.throws(() => from(tab).where(fn).toDocument(),
+        (e) => e instanceof LinqBuildError && e.code === 'JL0108'
+          && /\.eq\(x\)/.test(e.message) && /\.concat/.test(e.message) && /===/.test(e.message), label);
+    }
+    // the spellings it names work
+    assert.deepStrictEqual(from(tab).where((v) => v.tab.eq('labels')).select((v) => v.tab.concat('!')).toArray(), ['labels!']);
+  });
+
   it('JL0006 — the recorded unsupported operator', () => {
     assert.throws(() => from([]).zip(), (e) => e.code === 'JL0006' && /zip/.test(e.message));
   });
@@ -235,7 +251,7 @@ describe('every JL code fires', () => {
     assert.strictEqual(Object.isFrozen(LINQ_CODES), true);
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006', 'JL0007',
-      'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106', 'JL0107',
+      'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106', 'JL0107', 'JL0108',
       'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006', 'JL2007', 'JL2008', 'JL2009',
     ]);
   });

@@ -31,6 +31,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0105: 'a relation hop cannot lower: a composite or undeclared key, an incomplete many-to-many entry, or a malformed relation record',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
+  JL0108: 'a captured expression was converted to a JavaScript primitive',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
@@ -110,6 +111,12 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    refused naming the declared ones); `link()`/`unlink()` attach
  *    many-to-many memberships only (a to-one or to-many relation is
  *    refused naming its kind)
+ *  - `JL0108` — a captured expression met `==`, `+`, a template literal
+ *    or `<`: JavaScript asked the capture proxy for a primitive, which
+ *    it does not have (it stands for a value the query engine computes
+ *    later). `.eq()`, `.lt()`, `.concat()` and `.exists()` write those
+ *    comparisons; `===` and truthiness cannot be trapped and are
+ *    documented instead
  */
 export class LinqBuildError extends CodedError {
   /**

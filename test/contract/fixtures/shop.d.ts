@@ -160,9 +160,38 @@ export type Failure = { code: string; params: Readonly<Record<string, unknown>>;
 /** The binding a handler context comes from. */
 export type CarrierName = 'http' | 'port' | 'local';
 
-/** The members every carrier's context shares; `host` is the host lifecycle's acquired value (null by default). */
+/** The operation a handler serves, as the binding compiled it: "does my operation declare this failure?" is Object.hasOwn(ctx.op.errors, code). */
+export interface OperationInfo {
+  readonly id: string;
+  readonly kind: 'read' | 'command' | 'subscribe';
+  readonly doc: string | null;
+  readonly errors: Readonly<Record<string, { readonly status: number }>>;
+  readonly policy: Readonly<{
+    task: 'switch' | 'exhaust' | 'concat' | 'parallel';
+    idempotency: 'none' | 'optional' | 'required';
+    revision: string | null;
+    cache: 'none' | 'revision';
+    limits: Readonly<{ maxBodyBytes: number }>;
+    errors: Readonly<{ details: 'none' | 'paths' | 'full' }>;
+    retry: Readonly<{ max: number; on: readonly string[] }> | null;
+    stream: Readonly<{ resume: 'snapshot' | 'replay'; heartbeatMs: number; maxPatchBytes: number | null }> | null;
+    audience: 'public' | 'server';
+  }>;
+  readonly http: Readonly<{
+    method: string;
+    path: string;
+    variables: readonly string[];
+    in: Readonly<Record<string, 'path' | 'query' | 'header' | 'body'>>;
+    body: string | null;
+    status: number;
+    media: string;
+    opaque: boolean;
+  }>;
+}
+
+/** The members every carrier's context shares; `host` is the host lifecycle's acquired value (null by default); `op` is the operation the handler serves. */
 export interface HandlerContextBase<Host = null> {
-  op: unknown;
+  op: OperationInfo;
   trace: string;
   host: Host;
   headers: Readonly<Record<string, string>>;
@@ -180,6 +209,8 @@ export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host
   idempotency: Readonly<{ key: string; scope: string }> | null;
   etag(tag: string, options?: { strong?: boolean }): void;
   status(status: number): void;
+  /** Arm a response header the handler owns; the ledger records it, so a replay carries it too. set-cookie appends, every other name replaces; a header the binding derives is refused (JC1006). */
+  header(name: string, value: string): void;
 }
 
 /** The port and local bindings' context: no request line, no body, no key, and no callable etag or status — spelled null, never omitted. */
@@ -192,10 +223,14 @@ export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'lo
   idempotency: null;
   etag: null;
   status: null;
+  header: null;
 }
 
 /** The per-request context a server binding hands a handler, selected by carrier: the HTTP context by default; a carrier union is a discriminated union to narrow on `carrier`. */
 export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> = Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;
+
+/** The context a binding's onError(error, ctx) observer receives: the handler context of the request that failed, or null for a fault no request context reached. */
+export type ErrorContext<Host = null> = HandlerContext<Host, CarrierName> | null;
 
 /** The typed handler table of a server binding: one handler per invokable operation, answering the output, a declared failure, or a promise of either. */
 export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext<Host, Carrier>) => Operations[K]['output'] | Failure | Promise<Operations[K]['output'] | Failure> };

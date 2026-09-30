@@ -356,6 +356,38 @@ describe('the dag pen beyond §6', () => {
       'only the node that declared checkpoint is recorded (§7.6)');
   });
 
+  it('the consumer pin\'s graph runs: a checkpointed task declares its handler\'s version (test/consumer/linq-flow.ts)', async () => {
+    const graph = defineDag({
+      nodes: {
+        rows: input(),
+        threshold: constant(18),
+        adults: query((v) => v.all()),
+        named: jslt([{ match: '$', body: '$' }]),
+        summary: task('llm', (v) => ({ prompt: v.get('instruction') }), { version: '2026-09-05' }).checkpoint(),
+        out: output(),
+      },
+      edges: [
+        edge('rows', 'adults'),
+        edge('adults', 'named'),
+        edge('named', 'summary', { port: 'rows', select: (v) => v.all() }),
+        edge('threshold', 'summary', { port: 'min' }),
+        edge('summary', 'out'),
+      ],
+    });
+    /** @type {any[]} */
+    const saved = [];
+    const compiled = compileDag(graph, {
+      tasks: typedTasks(graph, { llm: { run: async () => ({ text: 'ok' }), version: '2026-09-05' } }),
+      checkpoint: { load: () => null, save: (runId, nodeId, value) => saved.push([runId, nodeId, value]), complete: () => undefined },
+    });
+    assert.deepStrictEqual(await compiled.run([{ instruction: 'sum' }], { runId: 'pin' }), { text: 'ok' });
+    assert.deepStrictEqual(saved, [['pin', 'summary', { text: 'ok' }]]);
+    // the spelling the pin used to compile: no version, so no replay identity — JL0101 at runtime,
+    // and a compile error in the declarations
+    assert.throws(() => task('llm', (v) => ({ prompt: v.get('instruction') })).checkpoint(),
+      (e) => e instanceof LinqBuildError && e.code === 'JL0101' && e.docPath === '/version');
+  });
+
   it('an undeclared node id is JL0102 naming it, before the compiler\'s JF0013', () => {
     const nodes = { rows: input(), out: output() };
     assert.throws(() => defineDag({ nodes, edges: [edge('nope', 'out')] }),

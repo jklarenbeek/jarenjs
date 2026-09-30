@@ -45,10 +45,14 @@ export function defaultValidator(): JarenValidator;
  * JSON literal is never inferred (the wide map). */
 export type MetaOf<M> = '__entities' extends keyof M ? InferMeta<M> : Record<string, EntityMeta>;
 
-/** The collection document shapes a pen model declares (a JSON model's
- * are `unknown`). */
-export type CollectionsOf<M> = M extends ModelDocument<any, infer C>
-  ? { [K in keyof C]: C[K] extends CollectionSpec<infer D> ? D : unknown }
+/** The collection document shapes a pen model declares; a JSON model's
+ * are `unknown`, under every name. The test is the pen's phantom itself,
+ * as `MetaOf`'s is: a JSON literal matches `ModelDocument` structurally
+ * (its phantoms are optional), and would otherwise type as `{}`. */
+export type CollectionsOf<M> = '__collections' extends keyof M
+  ? (M extends ModelDocument<any, infer C>
+    ? { [K in keyof C]: C[K] extends CollectionSpec<infer D> ? D : unknown }
+    : Record<string, unknown>)
   : Record<string, unknown>;
 
 /** The client a model opens to, with its metadata proven to be a map. */
@@ -321,13 +325,22 @@ export interface DbLedger {
   sweep(now?: number): Promise<number>;
 }
 
+/** What the durable adapters need of a client (DB-CLIENT.md §2.6): the
+ * declared collections and entities, and a transaction. It is the root
+ * client (writes take the write lock up front, `mode: 'immediate'`) or the
+ * one a transaction callback received (they nest in that transaction).
+ * Every `open()` client and transaction client fits, whatever its model.
+ * `createDbRunStore` and `createDbEffectStore` assert a job lease on the
+ * transaction client's `jobs`, so their store must be opened with `jobs`. */
+export interface DurableClient {
+  readonly collections: object;
+  readonly entities?: object;
+  transaction(fn: (tx: any) => unknown, options?: TransactionOptions): Promise<unknown>;
+}
+
 /** What `createDbLedger` needs of a client: the declared collections
- * and a transaction — the root client (claims take the write lock up
- * front, `mode: 'immediate'`) or the one a transaction callback
- * received (claims and settlements nest in that transaction). */
-export type LedgerClient =
-  | Pick<Client<any, any>, 'collections' | 'transaction' | 'close'>
-  | Pick<TransactionClientOf<any, any>, 'collections' | 'transaction'>;
+ * and a transaction (see `DurableClient`). */
+export type LedgerClient = Pick<DurableClient, 'collections' | 'transaction'>;
 
 /** The contract ledger over a declared collection of the client's
  * store — no import of `@jarenjs/contract`, no driver, the client's
@@ -428,7 +441,7 @@ export declare function createLexicalRangeProvider(source: import('@jarenjs/db/s
     source?:string; exactTotal?:boolean; seekIndex?:boolean; disposeSource?:boolean}): Promise<any>;
 
 /** Atomic staging and publication over application-declared collections. */
-export function createDbIngestionStore(client: Client<any> | TransactionClientOf<any>, options: {
+export function createDbIngestionStore(client: DurableClient, options: {
   staging: string; checkpoints: string; publications: string; facts?: string;
   reconcile?: (existing: any, incoming: any, evidence: any) => any;
 }): {
@@ -446,7 +459,7 @@ export interface CommandIdentity {
   tenant: string; environment: string; aggregate: string; op: string; key: string; hashVersion: string; hash: string;
 }
 /** Permanent business outcomes and independently expiring execution authority. */
-export function createDbReceipts(client: Client<any> | TransactionClientOf<any>, options: {
+export function createDbReceipts(client: DurableClient, options: {
   receipts: DurableRecordMapping; leases?: DurableRecordMapping; runtime?: Partial<import('@jarenjs/core/runtime').Runtime>;
 }): {
   lookup(identity: CommandIdentity): Promise<any>;
@@ -458,7 +471,7 @@ export function createDbReceipts(client: Client<any> | TransactionClientOf<any>,
   compact(identity: CommandIdentity, policy: { retainReplay: true; retainReferences: true; actor: string; reason: string }): Promise<any>;
 };
 /** Durable preparation, job-fenced sending and explicit reconciliation. */
-export function createDbEffectStore(client: Client<any> | TransactionClientOf<any>, options: {
+export function createDbEffectStore(client: DurableClient, options: {
   operations: DurableRecordMapping; maxLegs?: number; maxBytes?: number;
 }): {
   prepare(plan: any, prepare?: (tx: TransactionClientOf<any>) => any): Promise<any>;
@@ -469,7 +482,7 @@ export function createDbEffectStore(client: Client<any> | TransactionClientOf<an
   reconcile(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease, decision: any): Promise<any>;
 };
 /** Application run/checkpoint records and bounded public revision pages. */
-export function createDbRunStore(client: Client<any> | TransactionClientOf<any>, options: {
+export function createDbRunStore(client: DurableClient, options: {
   runs: DurableRecordMapping; events: DurableRecordMapping; statuses?: Record<string, string>;
   summary?: (snapshot: any) => any; canReset?: (tx: TransactionClientOf<any>, record: any) => any; maxPage?: number; maxBytes?: number;
 }): {

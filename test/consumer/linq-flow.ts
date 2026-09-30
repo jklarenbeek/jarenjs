@@ -72,7 +72,9 @@ const graph = defineDag({
     threshold: constant(18),
     adults: query((v) => v.all()),
     named: jslt([{ match: '$', body: '$' }]),
-    summary: task('llm', (v) => ({ prompt: v.get('instruction') })).checkpoint(),
+    // a checkpointed task declares its handler's version (an unversioned
+    // .checkpoint() is a compile error, and JL0101 at runtime)
+    summary: task('llm', (v) => ({ prompt: v.get('instruction') }), { version: '2026-09-05' }).checkpoint(),
     out: output(),
   },
   edges: [
@@ -89,8 +91,11 @@ const tasks: Equals<TasksOf<typeof graph>, 'llm'> = true;
 const asDag: Dag<'rows' | 'threshold' | 'adults' | 'named' | 'summary' | 'out', 'llm'> = graph;
 void [nodes, tasks, asDag];
 
-// the registry and the document agree: one handler per declared task name
-const registry = typedTasks(graph, { llm: async () => ({ text: 'ok' }) });
+// the registry and the document agree: one handler per declared task name,
+// carrying the version the checkpointed node declared (test/linq/flow-pen.test.js runs this graph)
+const registry = typedTasks(graph, { llm: { run: async () => ({ text: 'ok' }), version: '2026-09-05' } });
+const bare = typedTasks(graph, { llm: async () => ({ text: 'ok' }) });
+void bare;
 void registry.llm;
 // @ts-expect-error — the graph declares 'llm', not 'other'
 void typedTasks(graph, { other: async () => null });

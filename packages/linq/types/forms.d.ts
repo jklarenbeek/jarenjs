@@ -19,12 +19,11 @@
 
 import type { BoolExpr, DateTime, MemberExpr, StringExpr } from './index.js';
 import type {
-  Annotations, BuilderLike, Flag, Infer, Input, Json, JsonSchema, NamedLike, Simplify,
+  AnyBuilder, Annotations, BuilderLike, Flag, Infer, Input, Json, JsonSchema, NamedLike, Simplify,
   SchemaBuilder, StringBuilder, NumberBuilder, BooleanBuilder, NullBuilder, ArrayBuilder,
   TupleBuilder, ObjectBuilder, NamedBuilder, WhenBuilder, NeverBuilder,
 } from './schema.js';
 
-type AnyBuilder = BuilderLike<any, any, any>;
 type Props = Record<string, AnyBuilder>;
 type Nullify<T, N extends boolean> = N extends true ? T | null : T;
 

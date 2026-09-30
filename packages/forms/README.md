@@ -307,9 +307,15 @@ same error re-rendered through a second catalog answers in *that*
 language rather than repeating the first one's noun:
 
 ```javascript
+import { renderFormsMessage, compileMessageCatalog, formatDisplayName } from '@jarenjs/forms';
+import { de } from '@jarenjs/locales';
+
 const error = validateField(whenField, 'nope', catalog)[0];
 error.message;       // 'Moet een geldige datum en tijd zijn'
 error.params.format; // 'date-time'
+renderFormsMessage(compileMessageCatalog(de), error.msgid, error.params);
+// 'Muss dem Format Datum und Uhrzeit entsprechen'
+renderFormsMessage(undefined, error.msgid, error.params); // English: 'Must be a valid date-time'
 formatDisplayName(catalog, 'email');  // 'email' — already a word
 ```
 

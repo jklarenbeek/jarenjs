@@ -199,22 +199,28 @@ B extends BuilderLike<any, any, any> ? Infer<B> : unknown>;
 export type NodeKind = 'input' | 'output' | 'const' | 'query' | 'jslt' | 'task';
 
 /** One node declaration, carrying its kind and — for a task — the
- * handler name it will need, as literals. */
-export interface NodeDeclaration<K extends NodeKind = NodeKind, Run extends string = never> {
+ * handler name it will need, as literals, and whether a task declared its
+ * handler's version (every other kind counts as versioned). */
+export interface NodeDeclaration<K extends NodeKind = NodeKind, Run extends string = never, Versioned extends boolean = true> {
   readonly __kind: K;
   readonly __run: Run;
-  /** Declare this node's value durable (§7.6). */
-  checkpoint(): NodeDeclaration<K, Run>;
+  readonly __versioned: Versioned;
+  /** Declare this node's value durable (§7.6). A task node needs its
+   * handler's declared version — `task(run, props, { version })` — since a
+   * recorded value is replayed only while the handler that produced it is
+   * the same one: on an unversioned task this is a compile error here and
+   * `JL0101` at runtime. */
+  checkpoint(this: NodeDeclaration<K, Run, true>): NodeDeclaration<K, Run, true>;
 }
 
 /** A node of any kind. */
-export type AnyNode = NodeDeclaration<NodeKind, any>;
+export type AnyNode = NodeDeclaration<NodeKind, any, boolean>;
 
 /** A node map whose task nodes name handlers a registry provides:
  * `{ … } satisfies NodesFor<Tasks>` makes `task('nope')` a compile error. */
 export type NodesFor<Tasks> = Readonly<Record<string,
 | NodeDeclaration<Exclude<NodeKind, 'task'>, never>
-| NodeDeclaration<'task', Extract<keyof Tasks, string>>>>;
+| NodeDeclaration<'task', Extract<keyof Tasks, string>, boolean>>>;
 
 /** One edge (§6), carrying its two ends as literals. */
 export interface EdgeDeclaration<From extends string = string, To extends string = string> {
@@ -257,9 +263,15 @@ export function query<V extends ExprBase<unknown> = UnknownExpr>(
 export function jslt(document: Json | { readonly rules: readonly unknown[] }):
 NodeDeclaration<'jslt'>;
 /** A `task` node: a registered async handler, named here and resolved
- * by the registry `compileDag` is given (`JF0018` when it cannot). */
+ * by the registry `compileDag` is given (`JF0018` when it cannot). The
+ * `version` is the handler implementation's declared identity (§7.8),
+ * which the registry must supply too; a `.checkpoint()` task needs it. */
 export function task<const Run extends string, V extends ExprBase<unknown> = UnknownExpr>(
-  run: Run, props?: ((value: V) => Captured) | Json): NodeDeclaration<'task', Run>;
+  run: Run, props: ((value: V) => Captured) | Json | undefined,
+  options: { readonly version: string }): NodeDeclaration<'task', Run, true>;
+export function task<const Run extends string, V extends ExprBase<unknown> = UnknownExpr>(
+  run: Run, props?: ((value: V) => Captured) | Json,
+  options?: { readonly version?: undefined }): NodeDeclaration<'task', Run, false>;
 
 /** One edge (§6). `select` is applied to the source value before delivery. */
 export function edge<
@@ -277,9 +289,13 @@ export function defineDag<
 >(spec: { readonly nodes: N; readonly edges: E }): Dag<
 Extract<keyof N, string>,
 N[keyof N] extends never ? never : Extract<
-{ [K in keyof N]: N[K] extends NodeDeclaration<'task', infer R> ? R : never }[keyof N], string>>;
+{ [K in keyof N]: N[K] extends NodeDeclaration<'task', infer R, boolean> ? R : never }[keyof N], string>>;
+
+/** A registry entry: the handler, or the handler with its declared
+ * version (§7.8) — the engine's own two forms. */
+export type TaskEntry = TaskHandler | { readonly run: TaskHandler; readonly version?: string };
 
 /** Bind a task registry to the graph it serves. Identity at runtime; a
  * missing or misspelled handler name is a type error. */
-export function typedTasks<D extends Dag<any, any>, T extends { [K in TasksOf<D>]: TaskHandler }>(
+export function typedTasks<D extends Dag<any, any>, T extends { [K in TasksOf<D>]: TaskEntry }>(
   dag: D, tasks: T): T;

@@ -23,7 +23,7 @@ const schemaDrafts = {
  * vocabulary meta-schemas; for draft-06/07 it holds the single meta-schema.
  * @typedef {Object} SchemaDraftInfo
  * @property {string} draft - The draft's canonical URI (e.g. 'http://json-schema.org/draft-07/schema')
- * @property {object[]} schema - The meta-schema document(s) of the draft
+ * @property {Record<string, unknown>[]} schema - The meta-schema document(s) of the draft
  */
 
 /**

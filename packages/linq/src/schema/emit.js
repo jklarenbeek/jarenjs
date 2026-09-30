@@ -234,7 +234,11 @@ function emitNode(builder, ctx, at) {
 /** Emit schema-valued keywords in the root's shared definition context. */
 function emitKeyword(value, ctx, at, keyword) {
   if (isSchemaBuilder(value)) {
-    if (['not', 'unevaluatedProperties', 'unevaluatedItems', 'dependentSchemas', 'dependencies', 'contentSchema'].includes(keyword))
+    // the branches the normalizer never enters: a normalization written
+    // under one would be promised by the document and never happen.
+    // `allOf` is not among them — the normalizer descends it.
+    if (['not', 'unevaluatedProperties', 'unevaluatedItems', 'dependentSchemas', 'dependencies', 'contentSchema',
+      'anyOf', 'oneOf', 'if', 'then', 'else'].includes(keyword))
       refuseNormalizerUnder(value, keyword, at);
     return emitNode(value, ctx, at);
   }

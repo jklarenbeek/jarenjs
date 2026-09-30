@@ -1581,9 +1581,70 @@ export type MigrationResult = AppliedMigrationReport | UpToDateMigrationReport |
  * `$[*]` whose body reads only its binding), which the runner evaluates
  * per batch; anything else reads the collection whole. */
 export declare function isPerDocumentAssertion(query: unknown): boolean;
-export declare function planMigration(from: unknown, to: unknown, options?: unknown): unknown;
-/** The whole-model diff — collections AND entities (MIGRATION-FORMAT §9). */
-export declare function planModelMigration(from: unknown, to: unknown, options?: unknown): unknown;
+/** The options of `planMigration` / `planModelMigration`. `dialect` is
+ * required: the dialect renders the DDL (a `TypeError` without it). */
+export interface PlanMigrationOptions {
+  readonly dialect: Dialect;
+  /** The plan's id; default `to-<first 8 hex of the target shape hash>`. */
+  readonly id?: string;
+  /** The physical mapping of a derived index column — the driver that will
+   * run the plan decides it; default `'virtual'`. */
+  readonly derived?: 'virtual' | 'stored';
+  /** Plan R-tree spatial indexes where the model asks for them; default `true`. */
+  readonly rtree?: boolean;
+  /** The functions an index expression names (a plan is DDL, so DDL over
+   * a function the planner was not told about is refused). */
+  readonly expressions?: Readonly<Record<string, unknown>>;
+}
+
+/** One step of a planned migration: `ddl` and `sql` statements, and the
+ * `jslt` document transform (a `draft` refuses to run until filled in). */
+export interface MigrationStep {
+  readonly kind: string;
+  readonly note?: string;
+  readonly [member: string]: unknown;
+}
+
+/** A `$migration` 0.1 document, as the planner writes it and `migrate()`
+ * applies it. */
+export interface MigrationDocument {
+  readonly $migration: '0.1';
+  readonly id: string;
+  /** The shape hash of the model the plan starts from. */
+  readonly from: string;
+  /** The shape hash of the model the plan arrives at. */
+  readonly to: string;
+  readonly steps: readonly MigrationStep[];
+}
+
+/** What a plan changes. `widened` names the collections and entities
+ * whose document schema changed by a widening alone (new optional
+ * members, fewer required ones), so every stored document still
+ * validates and no draft transform is planned for them; they are in
+ * `schemaChanged` too, never in `drafts`. */
+export interface MigrationPlanReport {
+  renamed: { from: string; to: string }[];
+  added: string[];
+  removed: string[];
+  schemaChanged: string[];
+  drafts: string[];
+  widened: string[];
+  destructive: boolean;
+}
+
+export interface MigrationPlan {
+  migration: MigrationDocument;
+  report: MigrationPlanReport;
+}
+
+/** Plan a migration between two model documents (MIGRATION-FORMAT §9):
+ * the physical plans are diffed and rendered as DDL, a changed schema
+ * gets a draft transform, renames are declared (`x-rename`), never
+ * guessed. */
+export declare function planMigration(from: unknown, to: unknown, options: PlanMigrationOptions): MigrationPlan;
+/** The whole-model diff — collections AND entities (MIGRATION-FORMAT §9);
+ * the same function as `planMigration`. */
+export declare function planModelMigration(from: unknown, to: unknown, options: PlanMigrationOptions): MigrationPlan;
 export interface MigrationStatusReport {
   applied: string[];
   pending: string[];

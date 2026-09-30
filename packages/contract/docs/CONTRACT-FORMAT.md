@@ -1858,8 +1858,9 @@ calls `client.subscribe`, applies each emission host-side, and
 dispatches the named actions with `{ id, … }` payloads; an `onError`
 outcome lands in the error action as-is, and a server `end` lands there
 as a `network`-kind outcome with the channel-closed code (`JC2074`) —
-the stream is gone and the slot says so; reconnection is a fresh
-`start`, never automatic. The slice schema pins the subscribe slot like
+the stream is gone and the slot says so. Without `subs[op].reconnect`,
+reconnection is a fresh `start`; with it, the HTTP client re-establishes
+a network-lost stream before anything reaches the slot (above). The slice schema pins the subscribe slot like
 the task slots (`status` to its three states, `input` to the
 operation's input schema or `null`, `seq` to a non-negative integer).
 

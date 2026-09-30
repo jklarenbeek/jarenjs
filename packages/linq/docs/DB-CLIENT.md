@@ -290,6 +290,13 @@ commit together or roll back together — the ledger a lifecycle
 settlement lease carries. Atomicity is same-store only: a ledger on
 one file and a domain write on another are two commits.
 
+Both clients fit the declared type, whatever model opened them: a JSON
+model, a pen model or a transaction client. `LedgerClient` is the
+structural shape the ledger reads, the declared `collections` and a
+`transaction(fn, options?)`, with no cast. A JSON model's
+`client.collections` is typed per name (`CollectionHandle<unknown>`), so
+`db.collections.ledger` compiles as it runs.
+
 **The generation fence.** A `new` claim mints a `generation` (the
 runtime record's `uuid`), persists it with the record and hands it
 back in the ref (`{ id, generation }`). `commit`/`fail` settle the
@@ -864,7 +871,7 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->757,060<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->757,474<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.db.kb-->757<!--/fact--> kB) beside the other nine subpath prices in
@@ -898,7 +905,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->44,669<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->45,117<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at
@@ -1048,7 +1055,12 @@ API, read back the persisted result, and refuse lost identity before commit. A f
 round-trip or changed identity refuses `JL2009`. Physical tables and column names
 remain the model's declarations; no adapter creates a second authoritative
 business ledger. Root operations use immediate transactions; transaction-client
-adapters use the caller's savepoint and commit with that caller.
+adapters use the caller's savepoint and commit with that caller. All four
+adapters (with `createDbIngestionStore`) take a `DurableClient`: the
+declared `collections` and `entities` and a `transaction`, so any `open()`
+client or transaction client fits. The effect and run stores assert a job
+lease on the transaction client's `jobs`, so their store is opened with
+`jobs`.
 
 `createDbReceipts(client, { receipts, leases?, runtime? })` stores permanent
 command identity, validated outcome, stable references and creation/revision

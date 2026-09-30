@@ -725,6 +725,15 @@ export function groupRoot(relations, sink) {
  *   aggregates therefore range over the rows
  * @returns {any}
  */
+/** The capture proxy's `Symbol.toPrimitive`: always a refusal (JL0108). */
+function toPrimitive() {
+  throw new LinqBuildError('JL0108',
+    'a captured expression is not a JavaScript value yet — ==, +, a template literal and < '
+    + 'compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), '
+    + '.exists() or .isEmpty(), and a string join with .concat(…) (and note that === and '
+    + 'if (v) cannot be trapped: they compare or test the proxy, never the value)');
+}
+
 function makeExpr(doc, epoch, pathable, extra = undefined) {
   const record = {
     doc, epoch, pathable,
@@ -734,6 +743,10 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
   return new Proxy(record, {
     get(target, prop) {
       if (prop === NODE) return target;
+      // `==`, `+`, a template literal and `<` ask for a primitive; the
+      // proxy stands for a value the engine computes later, so the answer
+      // is a coded refusal naming the spelling, not a raw TypeError
+      if (prop === Symbol.toPrimitive) return toPrimitive;
       if (typeof prop === 'symbol') return undefined;
       const method = METHODS[prop];
       if (method !== undefined) {

@@ -199,6 +199,27 @@ describe('the schema pen — the document is the deliverable', () => {
     assert.deepStrictEqual(s.any().nullable().schema, { anyOf: [{}, { type: 'null' }] });
   });
 
+  it('keyword() takes builders in its value, and refuses a normalization under a branch the normalizer never enters (JL0102)', () => {
+    // the builder is emitted as its schema node, as a member would be
+    assert.deepStrictEqual(s.any().keyword('anyOf', [s.string().min(1), s.integer()]).schema,
+      { anyOf: [{ type: 'string', minLength: 1 }, { type: 'integer' }] });
+    assert.deepStrictEqual(s.any().keyword('x-kept', { a: [s.nil()] }).schema, { 'x-kept': { a: [{ type: 'null' }] } });
+    // union() already refused this; keyword() now refuses it the same way
+    for (const [keyword, value, at] of /** @type {[string, any, string][]} */ ([
+      ['anyOf', [s.string().default('x')], '/anyOf/0'],
+      ['oneOf', [s.string().coerce()], '/oneOf/0'],
+      ['if', s.string().trim(), '/if'],
+      ['then', s.string().default('x'), '/then'],
+      ['else', s.string().default('x'), '/else'],
+    ])) {
+      assert.throws(() => s.any().keyword(keyword, value).schema,
+        (e) => e instanceof LinqBuildError && e.code === 'JL0102' && e.docPath === at && /never runs/.test(e.message), keyword);
+    }
+    // allOf is not refused: the normalizer descends it
+    assert.deepStrictEqual(s.any().keyword('allOf', [s.string().default('x')]).schema,
+      { allOf: [{ type: 'string', default: 'x' }] });
+  });
+
   it('a nullable null is null: nil() and literal(null) repeat no item, and both pass 2020-12 meta-validation', () => {
     // `{ type: ['null', 'null'] }` repeated a type item, which the
     // meta-schema refuses; `{ enum: [null, null] }` repeated an enum item

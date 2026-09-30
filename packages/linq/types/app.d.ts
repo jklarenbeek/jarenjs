@@ -33,9 +33,8 @@
  */
 
 import type { Expr, MemberExpr, UnknownExpr } from './index.js';
-import type { BuilderLike, Infer, Json, JsonSchema } from './schema.js';
+import type { AnyBuilder, BuilderLike, Infer, Json, JsonSchema } from './schema.js';
 
-type AnyBuilder = BuilderLike<any, any, any>;
 
 /** `Expr<any>`/`Expr<unknown>` would pick a wrong arm; the honest top instead. */
 type ValueExpr<T> = MemberExpr<T>;

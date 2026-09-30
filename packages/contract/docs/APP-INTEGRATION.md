@@ -295,9 +295,13 @@ slots:
   (`status: 'error'`, the outcome's `kind`/`error`/`meta`); a server
   `end` lands the same way as a `network`-kind outcome with the
   channel-closed code — the stream is gone and the slot says so, so a
-  view can offer a reconnect: a fresh `start`. The binding passes no
-  `reconnect` to `client.subscribe`, so the client's opt-in reconnect
-  (CONTRACT-FORMAT.md §19) is for subscriptions the host opens itself;
-  a slot is re-entered by the view.
+  view can offer a reconnect: a fresh `start`. Without
+  `subs[op].reconnect` that is the only way back, and the view re-enters
+  the slot. With it —
+  `contractAppBinding(contract, { subs: { 'data.live': { reconnect: { max: 2 } } } })`
+  — the binding forwards the option to `client.subscribe`, and the HTTP
+  client re-establishes a stream lost to the network itself
+  (CONTRACT-FORMAT.md §19). The slot stays `live` meanwhile, and a spent
+  budget lands in it as `JC2097`.
 - **`reset` releases the slot** exactly as for tasks: `status 'idle'`,
   `kind`/`error` cleared, `id`/`input`/`value`/`meta`/`seq` kept.

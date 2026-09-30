@@ -80,6 +80,29 @@ describe('toTypeScript — what it declares', () => {
     assert.match(out, /^export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> \{$/m);
     assert.match(out, /^export interface ChannelHandlerContext<Host = null, Carrier extends 'port' \| 'local' = 'port' \| 'local'> extends HandlerContextBase<Host> \{$/m);
     assert.match(out, /^export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> = Extract<HttpHandlerContext<Host> \| ChannelHandlerContext<Host, 'port'> \| ChannelHandlerContext<Host, 'local'>, \{ carrier: Carrier \}>;$/m);
+    // the members: the operation, the header arm, and the onError context
+    assert.match(out, /^export interface HandlerContextBase<Host = null> \{\n {2}op: OperationInfo;$/m);
+    assert.match(out, /^export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> \{\n(?: {2}.*\n)*? {2}header\(name: string, value: string\): void;\n\}/m);
+    assert.match(out, /^export interface ChannelHandlerContext<[^\n]*\{\n(?: {2}.*\n)*? {2}header: null;\n\}/m);
+    assert.match(out, /^export type ErrorContext<Host = null> = HandlerContext<Host, CarrierName> \| null;$/m);
+    assert.match(out, /^ {2}readonly errors: Readonly<Record<string, \{ readonly status: number \}>>;$/m);
+  });
+
+  it('OperationInfo names only members the runtime compiled operation carries — the two written copies cannot drift from it', () => {
+    const block = /^export interface OperationInfo \{\n([\s\S]*?)\n\}$/m.exec(out);
+    assert.ok(block !== null);
+    const op = /** @type {any} */ (compileContract(load('./fixtures/shop.contract.json')).operations['product.save']);
+    const top = [...block[1].matchAll(/^ {2}readonly (\w+):/gm)].map((m) => m[1]);
+    assert.deepStrictEqual(top, ['id', 'kind', 'doc', 'errors', 'policy', 'http']);
+    for (const name of top) assert.ok(Object.hasOwn(op, name), name);
+    const nested = (/** @type {string} */ member) => {
+      const inner = new RegExp(`^ {2}readonly ${member}: Readonly<\\{\\n([\\s\\S]*?)\\n {2}\\}>;$`, 'm').exec(block[1]);
+      assert.ok(inner !== null, member);
+      return [...inner[1].matchAll(/^ {4}(\w+):/gm)].map((m) => m[1]);
+    };
+    assert.deepStrictEqual(nested('policy').sort(), Object.keys(op.policy).sort(), 'every policy member, and only those');
+    for (const name of nested('http')) assert.ok(Object.hasOwn(op.http, name), `http.${name}`);
+    for (const code of Object.keys(op.errors)) assert.strictEqual(typeof op.errors[code].status, 'number');
   });
 
   it('declares the byte surface: ByteOperations holds exactly the opaque operations, and HttpClient extends Client with bytes over them', () => {

@@ -42,6 +42,7 @@ export {
   formatDisplayName,
   compileMessageTemplate,
   compileMessageCatalog,
+  renderFormsMessage,
 } from './messages.js';
 
 export {

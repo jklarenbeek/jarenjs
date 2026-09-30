@@ -1166,12 +1166,15 @@ held equal to the runtime's `LINQ_CODES` by
 reader needs — the SPELLING that trips each one and the spelling that
 works.
 
-The chain raises fourteen of the twenty: `JL0001`–`JL0007` at build
-time, `JL2001`–`JL2006` while a terminal runs, and `JL0105`, which sits
-in the `JL01xx` block because a relation hop is a pen-shaped refusal but
-is raised by the chain's own expression capture. The other six —
-`JL0101`–`JL0104`, `JL0106` and `JL0107` — are the PENS' and the
-CLIENT's. Their per-code conditions are the binder's,
+The chain raises sixteen of the twenty-four codes:
+- `JL0001`–`JL0007` at build time;
+- `JL2001`–`JL2006` and `JL2008` while a terminal runs;
+- `JL0105` and `JL0108`. These sit in the `JL01xx` block because a
+  relation hop and a primitive conversion are pen-shaped refusals, but
+  the chain's own expression capture raises them.
+
+The other eight are the PENS' and the CLIENT's: `JL0101`–`JL0104`,
+`JL0106` and `JL0107`, and the client door's `JL2007` and `JL2009`. Their per-code conditions are the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3, and the spelling that trips each
 one is in §4 of the document of the pen that raises it:
 [SCHEMA-PEN.md](SCHEMA-PEN.md#4-refusals),
@@ -1200,6 +1203,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
+| `JL0108` | a captured expression was converted to a JavaScript primitive: `==`, `+`, a template literal or `<` met the capture proxy |
 | `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
 | `JL2002` | `single`/`singleOrDefault` over two or more elements |
 | `JL2003` | `elementAt` out of range |
@@ -1399,7 +1403,27 @@ honest refusal that names the join table beats a document that quietly
 reads the wrong rows. `load({ include })` reads the memberships through
 the client instead, which is the operation the store already has.
 
-### 14.9 The runtime codes
+### 14.9 `JL0108` — a capture converted to a primitive
+
+A captured value is a proxy that stands for a value the engine computes
+later, so JavaScript's own operators cannot see what it holds. Whenever
+JavaScript asks the proxy for a primitive, the capture refuses with a
+coded message instead of the raw `TypeError: Cannot convert object to
+primitive value`. That covers loose equality, `+`, a template literal
+and a relational comparison.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `(v) => v.tab == 'labels'` | `a captured expression is not a JavaScript value yet — ==, +, a template literal and < compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), .exists() or .isEmpty(), and a string join with .concat(…) (and note that === and if (v) cannot be trapped: they compare or test the proxy, never the value)` | `(v) => v.tab.eq('labels')` |
+| `` (v) => `${v.first} ${v.last}` `` | the same message | `(v) => v.first.concat(' ').concat(v.last)` |
+| `(v) => v.n + 1`, `(v) => v.n < 2` | the same message | `(v) => v.n.add(1)`, `(v) => v.n.lt(2)` |
+
+Two spellings cannot be trapped, because JavaScript never asks the
+proxy for anything. `v.payload === null` is `false` for every value,
+and `if (v.tab)` is always true: both test the proxy itself. Write
+`v.payload.eq(null)`, `v.payload.exists()` or `v.payload.isEmpty()`.
+
+### 14.10 The runtime codes
 
 `JL2001`–`JL2006` are raised while a terminal RUNS. The first three are
 the C# semantics, exactly (§6); the last three are the seam between a
@@ -1683,14 +1707,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->175,603<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->176,016<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->39,040<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->39,453<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
 is the query ENGINE and the core it stands on: a chain's document has to
@@ -1711,8 +1735,8 @@ making:
   `@jarenjs/formats`** — the client's optional peers. A consumer of the
   chain alone installs nothing new;
 - **no pen bytes at all**, in either direction: the pens carry no chain
-  module either, which is what keeps a <!--fact:bundle.jslt.kb-->18<!--/fact--> kB JSLT
-  pen <!--fact:bundle.jslt.kb-->18<!--/fact--> kB.
+  module either, which is what keeps a <!--fact:bundle.jslt.kb-->19<!--/fact--> kB JSLT
+  pen <!--fact:bundle.jslt.kb-->19<!--/fact--> kB.
 
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
@@ -1726,7 +1750,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->199,799<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,129<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->200,247<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,542<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

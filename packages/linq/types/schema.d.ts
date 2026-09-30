@@ -61,7 +61,13 @@ export interface NamedLike<Out = unknown, In = unknown> extends BuilderLike<Out,
   readonly __named: true;
 }
 
-type AnyBuilder = BuilderLike<any, any, any>;
+/** Any builder, whatever it infers — the bound every pen's builder
+ * parameters share. Declared once; the app, model and forms pens import it. */
+export type AnyBuilder = BuilderLike<any, any, any>;
+
+/** A value `keyword()` accepts: JSON, a builder (emitted as its schema
+ * node, hoisting as a member would), or arrays and objects of them. */
+export type KeywordValue = Json | AnyBuilder | readonly KeywordValue[] | { readonly [k: string]: KeywordValue };
 
 /** `Expr<any>` would pick the first conditional arm; the honest top instead. */
 type ValueExpr<Out> = 0 extends (1 & Out) ? UnknownExpr : Expr<Out>;
@@ -163,8 +169,12 @@ export class SchemaBuilder<Out = unknown, In = Out, F extends Flag = never> {
   toJSON(): JsonSchema | boolean;
   /** `$id`: resource identity; the phantom is unchanged. */
   id(uri: string): this;
-  /** Raw constraint escape hatch, without inferred narrowing. */
-  keyword(key: string, value: Json): this;
+  /** Raw constraint escape hatch, without inferred narrowing. A builder
+   * inside the value is emitted as its schema node. A `default()`,
+   * `coerce()` or `trim()` under `anyOf`, `oneOf`, `if`, `then`, `else`,
+   * `not` and the other branches the normalizer never enters is refused
+   * (`JL0102`); `allOf` is not one of them. */
+  keyword(key: string, value: KeywordValue): this;
   /** Validation or annotation only; retains the current phantom. */
   anchor(value: string): this;
   /** Validation or annotation only; retains the current phantom. */

@@ -470,3 +470,20 @@ describe('the date formats read as words', () => {
     assert.strictEqual(field.describedBy, `${field.id}-error`);
   });
 });
+
+describe('renderFormsMessage is exported, and the README\'s re-render example runs as written', () => {
+  it('one error re-renders through a second catalog in that catalog\'s language', async () => {
+    const forms = await import('@jarenjs/forms');
+    const { de } = await import('@jarenjs/locales');
+    assert.strictEqual(typeof forms.renderFormsMessage, 'function');
+    const catalog = forms.compileMessageCatalog(nl);
+    const whenField = forms.buildFormModel({ type: 'object', properties: { when: { type: 'string', format: 'date-time' } } }).children[0];
+    const error = forms.validateField(whenField, 'nope', catalog)[0];
+    assert.strictEqual(error.message, 'Moet een geldige datum en tijd zijn');
+    assert.strictEqual(error.params.format, 'date-time');
+    assert.strictEqual(forms.renderFormsMessage(forms.compileMessageCatalog(de), error.msgid, error.params),
+      'Muss dem Format Datum und Uhrzeit entsprechen');
+    assert.strictEqual(forms.renderFormsMessage(undefined, error.msgid, error.params), 'Must be a valid date-time');
+    assert.strictEqual(forms.formatDisplayName(catalog, 'email'), 'email');
+  });
+});

@@ -559,6 +559,13 @@ to the codes `packages/linq/src/flow/` throws. The full condition each
 code states across every pen is the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3.
 
+The capture every flow callback runs in adds one more refusal, which is
+the chain's and listed in QUERY-PEN. In a guard, effect, node or edge callback, `==`, `+`, a
+template literal or `<` over a captured value is `JL0108`
+([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
+`=== null` and truthiness cannot be refused, since they test the proxy
+and never the value. Write `.eq(null)`, `.exists()` or `.isEmpty()`.
+
 | Code | What this pen raises it for |
 |---|---|
 | `JL0101` | a value this pen cannot spell, a member it does not know, or a name → value map it cannot read |
@@ -985,10 +992,10 @@ meaning is a `$return` that constructs an array explicitly.
 
 ## 7. Cost
 
-`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->18,478<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->18,891<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.flow.kb-->18<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.flow.kb-->19<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report. Building a machine with a guard and
@@ -1015,7 +1022,7 @@ two effects as a consumer would — `defineFsm`, `state`, `on` and
   `packages/linq/src/flow/`.
 
 Two documents, two grammars, thirteen exported names — and 57 bytes more
-than `./jslt`'s <!--fact:bundle.jslt-->18,424<!--/fact-->, which writes one. The reason is that most of
+than `./jslt`'s <!--fact:bundle.jslt-->18,837<!--/fact-->, which writes one. The reason is that most of
 both prices is the same shared machinery: the recording proxy
 (`expression.js`), the root capture (`capture-root.js`) and the JSON
 boundary (`json-boundary.js`). What this pen adds on top of them is 685

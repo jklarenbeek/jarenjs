@@ -82,6 +82,9 @@ import { ContractHostError } from './errors.js';
  * @property {(ref: unknown, response: any, now?: number) => void | Promise<void>} commit
  * @property {(ref: unknown, retryable: boolean, response?: any, now?: number) => void | Promise<void>} fail
  * @property {(key: { op: string, scope: string, key: string, now?: number }) => LedgerRecord | null | Promise<LedgerRecord | null>} lookup
+ * @property {(now?: number) => number | Promise<number>} [sweep] - drop every
+ *   expired record and answer how many; optional — the binding never calls
+ *   it (retention is the host's schedule), and both suite ledgers carry it
  */
 
 /** One day, the default retention of a key. */
