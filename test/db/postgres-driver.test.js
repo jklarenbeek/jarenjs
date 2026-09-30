@@ -146,6 +146,29 @@ const EXISTING = /** @type {[RegExp, any][]} */ ([
 ]);
 
 describe('the injected PostgreSQL driver', () => {
+  it('a session error marks the session lost: the next call is JD2087, and closing stops listening', async () => {
+    const client = /** @type {any} */ (scriptedClient([VERSION]));
+    /** @type {Map<string, Set<Function>>} */
+    const listeners = new Map();
+    Object.assign(client, {
+      on: (/** @type {string} */ event, /** @type {Function} */ listener) => {
+        if (!listeners.has(event)) listeners.set(event, new Set());
+        listeners.get(event)?.add(listener);
+      },
+      off: (/** @type {string} */ event, /** @type {Function} */ listener) => { listeners.get(event)?.delete(listener); },
+    });
+    const connection = await postgresDriver({ connect: () => client }).open();
+    assert.strictEqual(listeners.get('error')?.size, 1, 'the adapter listens for as long as it holds the session');
+    // what pg emits when the server ends a session it holds
+    for (const listener of [...(listeners.get('error') ?? [])]) {
+      listener(Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' }));
+    }
+    await assert.rejects(connection.prepare('SELECT 1').get(),
+      (/** @type {any} */ error) => error.code === 'JD2087' && error.class === 'connection' && error.retryable === true);
+    await connection.close().catch(() => {});
+    assert.strictEqual(listeners.get('error')?.size ?? 0, 0, 'closing stops listening');
+  });
+
   it('binds fresh physical assignments and withdraws invalid native readbacks', async () => {
     let returned = { id: 1, label: 'next', quantity: 2 };
     const client = scriptedClient([VERSION, [/UPDATE "native_items"/, () => ({ rows: [returned] })],

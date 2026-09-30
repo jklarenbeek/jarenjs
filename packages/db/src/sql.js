@@ -22,7 +22,7 @@ export function writesRows(tokens) {
 }
 
 /** @param {any} context @returns {any} a scoped SQL capability */
-export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, readOnly, track = (fn) => fn() }) {
+export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, readOnly, track }) {
   return Object.freeze({
     /** Compile one statement. Access is explicit; this is trusted application SQL,
      * not a sandbox for untrusted query text or side-effecting host functions.

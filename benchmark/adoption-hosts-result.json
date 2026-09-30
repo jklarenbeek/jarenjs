@@ -11,8 +11,8 @@
     "packages/website/src/examples/adoption.js": "b9013cc001d1384c095e4348429bd065150e83bfc8195227da44b1fbb6bf375b",
     "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
     "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
-    "packages/db/src/jobs.js": "a1997e76d6b64ca9eeb5a302e2d44198bc572b04501566dc1ff981643ca0e959",
-    "packages/db/src/store.js": "1dae2671de1c77752cd9d47e608217cbcebbe69837095bbfd700ab0620465c3e"
+    "packages/db/src/jobs.js": "d814ea6a89cbfe26e6c492da8d5a57e19b33f55619039c074301a70da6c9c5d5",
+    "packages/db/src/store.js": "34b88205f7e3aa60282e425ffcc8a55399b9c6400bfa9a315dc48c6e7e0d7bd0"
   },
   "report": [
     {
@@ -27,7 +27,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 416.664979,
+          "searchMs": 450.07999500000005,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -58,11 +58,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 845.1097540000001,
-          "teardownMs": 0.2610549999999421,
+          "elapsedMs": 967.717911,
+          "teardownMs": 0.2096200000000863,
           "runtime": "v24.20.0",
-          "heapBytes": 66659712,
-          "peakRssBytes": 285638656
+          "heapBytes": 67986840,
+          "peakRssBytes": 288567296
         },
         {
           "consumer": "archive-stock",
@@ -73,7 +73,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 3008.784421,
+          "searchMs": 2912.598311,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -109,11 +109,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 4482.700564,
-          "teardownMs": 0.2436230000002979,
+          "elapsedMs": 4369.400583000001,
+          "teardownMs": 0.20182500000009895,
           "runtime": "v24.20.0",
-          "heapBytes": 394451264,
-          "peakRssBytes": 901271552
+          "heapBytes": 390988704,
+          "peakRssBytes": 903229440
         },
         {
           "consumer": "catalog",
@@ -127,11 +127,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 86.510549,
-          "teardownMs": 0.691976000000011,
+          "elapsedMs": 91.391819,
+          "teardownMs": 0.9473230000000399,
           "runtime": "v24.20.0",
-          "heapBytes": 23005616,
-          "peakRssBytes": 124940288
+          "heapBytes": 33100440,
+          "peakRssBytes": 116707328
         }
       ],
       "crashExit": 73,
@@ -150,7 +150,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 289.878278,
+          "searchMs": 278.521519,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -181,11 +181,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 643.064984,
-          "teardownMs": 0.33264900000006037,
-          "runtime": "1.4.0",
-          "heapBytes": 50608964,
-          "peakRssBytes": 266985472
+          "elapsedMs": 634.105541,
+          "teardownMs": 0.32320100000004004,
+          "runtime": "1.4.2",
+          "heapBytes": 49682572,
+          "peakRssBytes": 273305600
         },
         {
           "consumer": "archive-stock",
@@ -196,7 +196,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2026.8423529999998,
+          "searchMs": 2022.2203800000002,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -232,11 +232,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3249.573746,
-          "teardownMs": 0.35270600000012564,
-          "runtime": "1.4.0",
-          "heapBytes": 336004063,
-          "peakRssBytes": 1014136832
+          "elapsedMs": 3279.563826,
+          "teardownMs": 0.391208000000006,
+          "runtime": "1.4.2",
+          "heapBytes": 336473730,
+          "peakRssBytes": 986320896
         },
         {
           "consumer": "catalog",
@@ -250,16 +250,264 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 71.384059,
-          "teardownMs": 0.7756719999999859,
-          "runtime": "1.4.0",
-          "heapBytes": 8647110,
-          "peakRssBytes": 81256448
+          "elapsedMs": 80.86733100000001,
+          "teardownMs": 0.9466209999999933,
+          "runtime": "1.4.2",
+          "heapBytes": 8075896,
+          "peakRssBytes": 80388096
         }
       ],
       "crashExit": 73,
       "remoteSends": 2,
       "recoverySends": 0
+    },
+    {
+      "label": "bun-executable",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 281.310838,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 638.132502,
+          "teardownMs": 0.2023669999999811,
+          "runtime": "1.4.2",
+          "heapBytes": 65339251,
+          "peakRssBytes": 236105728
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 1987.2535240000002,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 3134.016697,
+          "teardownMs": 0.324884000000111,
+          "runtime": "1.4.2",
+          "heapBytes": 334813196,
+          "peakRssBytes": 978984960
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 64.462324,
+          "teardownMs": 0.8286209999999983,
+          "runtime": "1.4.2",
+          "heapBytes": 6918880,
+          "peakRssBytes": 70422528
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0,
+      "binaryBytes": 83318240
+    },
+    {
+      "label": "node-executable",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "pages": 3,
+          "sends": 2,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 256,
+          "searchMs": 415.32012399999996,
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=86",
+              "body": null
+            },
+            {
+              "method": "GET",
+              "url": "https://catalog.example/items?after=172",
+              "body": null
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1",
+              "body": "{\"id\":\"catalog-1\"}"
+            },
+            {
+              "method": "POST",
+              "url": "https://catalog.example/write/catalog-1022",
+              "body": "{\"id\":\"catalog-1022\"}"
+            }
+          ],
+          "elapsedMs": 853.790632,
+          "teardownMs": 0.1950729999999794,
+          "runtime": "v24.20.0",
+          "heapBytes": 101080528,
+          "peakRssBytes": 289456128
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "pages": 6,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 512,
+          "searchMs": 2894.609559,
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "startupDDL": 0,
+          "history": 1,
+          "wire": [
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":null}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"86\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"172\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"258\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"344\"}}"
+            },
+            {
+              "method": "POST",
+              "url": "https://archive-stock.example/items",
+              "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
+            }
+          ],
+          "elapsedMs": 4438.098606,
+          "teardownMs": 0.2684800000006362,
+          "runtime": "v24.20.0",
+          "heapBytes": 319886784,
+          "peakRssBytes": 853475328
+        },
+        {
+          "consumer": "catalog",
+          "rows": 256,
+          "phase": "recover",
+          "pages": 0,
+          "sends": 0,
+          "secondWrites": 0,
+          "secondRevisions": 0,
+          "changes": 0,
+          "startupDDL": 0,
+          "history": 3,
+          "wire": [],
+          "elapsedMs": 101.225742,
+          "teardownMs": 0.7675079999999923,
+          "runtime": "v24.20.0",
+          "heapBytes": 16430280,
+          "peakRssBytes": 84766720
+        }
+      ],
+      "crashExit": 73,
+      "remoteSends": 2,
+      "recoverySends": 0,
+      "binaryBytes": 128584896
     }
   ]
 }

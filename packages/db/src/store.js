@@ -1416,9 +1416,12 @@ export function openStore(model, options) {
        *   onIdle: (() => void) | null } | null}
        */
       let currentRoot = null;
-      /** Each scope identity's root record (a nested scope shares its root's).
-       * @type {WeakMap<object, any>} */
-      const rootOf = new WeakMap();
+      /** A scope identity's root record (a nested scope shares its root's):
+       * carried ON the identity, which lives exactly as long as the scope's
+       * handles do — a map from short-lived keys cost every transaction a
+       * garbage-collector ephemeron.
+       * @param {any} identity */
+      const rootOf = (identity) => identity.root;
 
       /** The root a handle operation belongs to has one fewer in flight. @param {any} root */
       const settleInFlight = (root) => {
@@ -1568,22 +1571,21 @@ export function openStore(model, options) {
        *   - a ROOT transaction's record; an inner scope inherits the one in force
        */
       /**
-       * The cursors a transaction scope opened and has not seen settle, as
-       * their release functions, by scope identity. A scope closes them when
-       * its body settles — before its COMMIT, RELEASE or ROLLBACK — so a
-       * cursor a body peeked and walked away from never outlives its
-       * transaction: on a worker it held one of `maxCursors` slots forever,
-       * and on PostgreSQL a `CLOSE` sent after the transaction ended would
-       * land in the next owner's.
-       * @type {WeakMap<object, Set<() => Promise<unknown>>>}
+       * Close the cursors a scope opened and has not seen settle — kept on
+       * its identity (`identity.cursors`, their release functions). A scope
+       * closes them when its body settles, before its COMMIT, RELEASE or
+       * ROLLBACK, so a cursor a body peeked and walked away from never
+       * outlives its transaction: on a worker it held one of `maxCursors`
+       * slots forever, and on PostgreSQL a `CLOSE` sent after the
+       * transaction ended would land in the next owner's. `null` when the
+       * scope left nothing open.
+       * @param {any} identity @returns {Promise<void> | null}
        */
-      const scopeCursors = new WeakMap();
-      /** Close what a scope left open; `null` when it left nothing.
-       * @param {object} identity @returns {Promise<void> | null} */
       const closeCursorsOf = (identity) => {
-        const open = scopeCursors.get(identity);
+        /** @type {Set<() => Promise<unknown>> | undefined} */
+        const open = identity.cursors;
         if (open === undefined || open.size === 0) return null;
-        scopeCursors.delete(identity);
+        identity.cursors = undefined;
         return Promise.allSettled([...open].map((release) => release())).then(() => undefined);
       };
 
@@ -1600,6 +1602,7 @@ export function openStore(model, options) {
           // from here, and everything before it belongs to a scope that
           // is still open
           const mark = list.length;
+          /** @type {{ root?: any, cursors?: Set<() => Promise<unknown>> }} */
           const identity = {};
           scope = inner;
           currentScope = identity;
@@ -1607,7 +1610,7 @@ export function openStore(model, options) {
             currentRoot = { mode: root.mode, attempt: root.attempt ?? 1, hold: root.holdTimeoutMs,
               expired: null, inFlight: 0, onIdle: null };
           }
-          if (currentRoot !== null) rootOf.set(identity, currentRoot);
+          if (currentRoot !== null) identity.root = currentRoot;
           if (ownWork !== undefined) work = ownWork;
           const kept = () => {
             if (outermost) flushSettlements();
@@ -2876,11 +2879,11 @@ export function openStore(model, options) {
            * identifier rules (SQLite folds ASCII case; PostgreSQL's quoted
            * names are exact). @param {string} table */
           const entityOfTable = (table) => {
-            const same = dialect.name === 'sqlite'
-              ? (/** @type {string} */ a) => a.replace(/[A-Z]/g, (c) => c.toLowerCase()) === table.replace(/[A-Z]/g, (c) => c.toLowerCase())
-              : (/** @type {string} */ a) => a === table;
+            const fold = (/** @type {string} */ name) => (dialect.name === 'sqlite'
+              ? name.replace(/[A-Z]/g, (c) => c.toLowerCase()) : name);
+            const wanted = fold(table);
             for (const [name, entityMapping] of Object.entries(mapping?.entities ?? {}))
-              if (typeof entityMapping?.table === 'string' && same(entityMapping.table)) return name;
+              if (typeof entityMapping?.table === 'string' && fold(entityMapping.table) === wanted) return name;
             return undefined;
           };
           /**
@@ -3282,7 +3285,7 @@ export function openStore(model, options) {
           const requireScope = (identity) => {
             // a transaction its hold limit rolled back: every handle it gave
             // out refuses with the reason, not as a stale scope
-            const root = rootOf.get(identity);
+            const root = rootOf(identity);
             if (root !== undefined && root.expired !== null) throw heldTooLong(root.expired);
             if (currentScope === identity) return;
             throw new DbRuntimeError('JD2070',
@@ -3305,7 +3308,7 @@ export function openStore(model, options) {
            */
           const runScoped = (identity, fn) => {
             requireScope(identity);
-            const root = rootOf.get(identity);
+            const root = rootOf(identity);
             if (root === undefined || root.hold === undefined) return fn();
             root.inFlight += 1;
             let out;
@@ -3361,13 +3364,11 @@ export function openStore(model, options) {
             /** Release the source: a reset reads and writes nothing, so it
              * is safe whatever became of the scope. */
             const release = () => {
-              scopeCursors.get(identity)?.delete(release);
+              identity.cursors?.delete(release);
               return Promise.resolve().then(() => cursor.return()).catch(() => undefined);
             };
             // the scope closes it when the body settles, if nobody did
-            let owned = scopeCursors.get(identity);
-            if (owned === undefined) scopeCursors.set(identity, owned = new Set());
-            owned.add(release);
+            (identity.cursors ??= new Set()).add(release);
             /** @type {any} */
             const wrapped = {
               streaming: cursor.streaming,
@@ -3385,10 +3386,10 @@ export function openStore(model, options) {
                 }
                 // an exhausted or failed cursor has released its source
                 return Promise.resolve(pulled).then((step) => {
-                  if (step.done) scopeCursors.get(identity)?.delete(release);
+                  if (step.done) identity.cursors?.delete(release);
                   return step;
                 }, (error) => {
-                  scopeCursors.get(identity)?.delete(release);
+                  identity.cursors?.delete(release);
                   throw error;
                 });
               },
@@ -3470,6 +3471,15 @@ export function openStore(model, options) {
            * assignment cannot shadow a non-writable inherited property. */
           const override = (/** @type {any} */ value) =>
             ({ value, writable: false, enumerable: true, configurable: false });
+          /** An overriding member built on its first read, and the same
+           * value on every read after it.
+           * @param {() => any} make */
+          const onFirstUse = (make) => {
+            let made = false;
+            /** @type {any} */
+            let value;
+            return { get: () => { if (!made) { value = make(); made = true; } return value; }, enumerable: true, configurable: false };
+          };
 
           // The transaction callback's argument, and the ONLY handle that
           // is inside the transaction: ONE view per exact scope, pinned to
@@ -3613,48 +3623,56 @@ export function openStore(model, options) {
               });
             });
 
+            // A view is built for every transaction and most bodies touch
+            // two or three of its members: the rest are built on first use
+            // (one getter each), which keeps a short transaction's cost to
+            // what it reaches for.
             // the units of work this scope's SQL may change: its own, and
             // the root's when the transaction has one of its own
-            const sqlWorks = rootWork === myWork ? [myWork] : [myWork, rootWork];
-            const sql = trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
+            const sqlWorks = () => (rootWork === myWork ? [myWork] : [myWork, rootWork]);
+            /** @type {any} */
+            let scopeSql;
+            const sqlOfScope = () => (scopeSql ??= trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
               track: (/** @type {() => any} */ fn) => runScoped(identity, fn),
-              beforeWrite: () => beforeSqlWrite(undefined, sqlWorks),
-              afterWrite: () => afterSqlWrite(sqlWorks),
-            });
+              beforeWrite: () => beforeSqlWrite(undefined, sqlWorks()),
+              afterWrite: () => afterSqlWrite(sqlWorks()),
+            }));
             // the relational engine as THIS scope's owner: every call checks
             // the exact scope and counts in flight for a hold limit, a write
-            // is a savepoint of the transaction, and a cursor is the scope's
+            // is a savepoint of the transaction, and a cursor is the scope's;
             // a scope never queues, so a signal can only refuse a call up
             // front — as it refuses a nested transaction (JD2064)
-            const unaborted = (/** @type {AbortSignal | undefined} */ signal) => {
-              if (signal?.aborted === true) throw abortReason(signal);
-            };
-            const relationalScope = {
+            /** @type {any} */
+            let scopePolicy;
+            const relationalPolicy = () => (scopePolicy ??= {
               ...relationalBase,
               available: () => requireScope(identity),
-              read: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) =>
-                runScoped(identity, () => { unaborted(signal); return run(connection); }),
-              write: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) =>
-                runScoped(identity, () => { unaborted(signal); return connection.transaction(() => run(connection)); }),
-              beforeWrite: (/** @type {string} */ table) => beforeSqlWrite(table, sqlWorks),
-              afterWrite: () => afterSqlWrite(sqlWorks),
-            };
+              read: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) => runScoped(identity, () => {
+                if (signal?.aborted === true) throw abortReason(signal);
+                return run(connection);
+              }),
+              write: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) => runScoped(identity, () => {
+                if (signal?.aborted === true) throw abortReason(signal);
+                return connection.transaction(() => run(connection));
+              }),
+              beforeWrite: (/** @type {string} */ table) => beforeSqlWrite(table, sqlWorks()),
+              afterWrite: () => afterSqlWrite(sqlWorks()),
+            });
             /** @type {any} */
             let scopeRelational;
             /** @type {any} */
             let scopeSyncRelational;
-            const relationalOfScope = () => (scopeRelational ??= relationalEngine({ ...relationalScope, lift: true,
+            const relationalOfScope = () => (scopeRelational ??= relationalEngine({ ...relationalPolicy(), lift: true,
               cursor: (/** @type {any} */ spec) => scopedCursor(identity,
                 () => createCursor({ ...spec, open: () => spec.open(connection) })) }));
-            const syncRelationalOfScope = () => (scopeSyncRelational ??= relationalEngine({ ...relationalScope,
+            const syncRelationalOfScope = () => (scopeSyncRelational ??= relationalEngine({ ...relationalPolicy(),
               cursor: (/** @type {any} */ spec) => admitSyncCursor(createSyncCursor({ ...spec, open: () => spec.open(connection) }),
                 (/** @type {() => any} */ fn) => runScoped(identity, fn)) }));
             const members = {
               // 1-based: the attempt of a retried transaction this callback runs in
               attempt: override(myRoot?.attempt ?? 1),
-              sql: override(sql),
-              // built on first use: most transactions never reach for it
-              relational: { get: relationalOfScope, enumerable: true, configurable: false },
+              sql: onFirstUse(sqlOfScope),
+              relational: onFirstUse(relationalOfScope),
               transaction: override((/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
                 lift(() => nested(fn, transactionOptions))()),
               collection: override(collectionFor),
@@ -3677,7 +3695,7 @@ export function openStore(model, options) {
               // wait for itself (JD0012 at queueTimeout, then a rollback)
               introspect: override(lift((/** @type {any} */ introspectOptions) => runScoped(identity, () => introspectModel(connection, introspectOptions)))),
               dataVersion: override(lift(() => runScoped(identity, () => readDataVersion()))),
-              savepoints: override(Object.freeze({
+              savepoints: onFirstUse(() => Object.freeze({
                 create: lift(savepointCreate),
                 rollbackTo: lift(savepointRollbackTo),
                 release: lift(savepointRelease),
@@ -3709,7 +3727,7 @@ export function openStore(model, options) {
             }
             if (capture !== null) {
               members.changesSince = override(lift((/** @type {any} */ after) => runScoped(identity, () => capture.changesSince(after))));
-              if (capture.logged) members.changes = override(Object.freeze({
+              if (capture.logged) members.changes = onFirstUse(() => Object.freeze({
                 bounds: lift(() => runScoped(identity, () => capture.bounds())),
                 page: lift((/** @type {any} */ pageOptions) => runScoped(identity, () => capture.page(pageOptions))),
               }));
@@ -3718,7 +3736,7 @@ export function openStore(model, options) {
               // the transactional-outbox spelling: these run as the exact
               // scope, so an enqueue or settlement here co-commits with
               // the domain transaction — and a retained handle is JD2070
-              members.jobs = override(Object.freeze({
+              members.jobs = onFirstUse(() => Object.freeze({
                 enqueue: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.enqueue(...args))),
                 get: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.get(...args))),
                 counts: lift(() => runScoped(identity, () => jobsEngine.counts())),
@@ -3746,12 +3764,13 @@ export function openStore(model, options) {
               }));
             }
             if (connection.synchronous && syncCollectionFor !== undefined) {
-              /** @type {Map<string, any>} */
-              const mySyncCollections = new Map();
-              /** @type {Map<string, any>} */
-              const mySyncEntities = new Map();
               const forSync = /** @type {(name: string) => any} */ (syncCollectionFor);
-              members.sync = override(Object.freeze({
+              members.sync = onFirstUse(() => {
+                /** @type {Map<string, any>} */
+                const mySyncCollections = new Map();
+                /** @type {Map<string, any>} */
+                const mySyncEntities = new Map();
+                return Object.freeze({
                 collection: (/** @type {string} */ name) => {
                   let handle = mySyncCollections.get(name);
                   if (handle === undefined) {
@@ -3769,7 +3788,7 @@ export function openStore(model, options) {
                   }
                   return handle;
                 },
-                sql,
+                get sql() { return sqlOfScope(); },
                 get relational() { return syncRelationalOfScope(); },
                 attempt: myRoot?.attempt ?? 1,
                 transaction: (fn, transactionOptions) => nested((tx) => synchronousBody(fn, tx),
@@ -3787,7 +3806,8 @@ export function openStore(model, options) {
                   : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.explain(document, queryOptions)),
                 roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
                 relations: entityEngine === null ? undefined : entityEngine.relations,
-              }));
+                });
+              });
             }
             return Object.freeze(Object.create(store, members));
           };

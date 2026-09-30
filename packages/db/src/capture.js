@@ -579,11 +579,6 @@ export function createCaptureEngine(options) {
    * and with capture that is the scope this wrap opens, not the one
    * around it. Callers that need no scope simply ignore the arguments.
    */
-  /** What an abandoned wrap's late continuation fails with — never seen
-   * by a caller whose transaction is still live. */
-  const abandonedCapture = () => new DbRuntimeError('JD2070',
-    'this capture scope was abandoned with its transaction; nothing it buffered is recorded');
-
   /** Give the open session up. A closed database has already discarded
    * it, and closing it again throws — which must not replace the failure
    * that brought the capture scope down. */
@@ -624,9 +619,8 @@ export function createCaptureEngine(options) {
       // handler cannot wait out whenever another connection wrote
       outcome = connection.transaction((...scopeArgs) =>
         chain(dialect.capture?.beforeWrite(connection), () =>
-        chain(fn(...scopeArgs), (result) => {
-          if (abandoned()) throw abandonedCapture();
-          return chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
+        chain(fn(...scopeArgs), (result) =>
+          chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
             if (patch.length === 0) return { result, delivery: null };
             const at = clock();
             return chain(persist(patch, at), () => ({
@@ -639,15 +633,16 @@ export function createCaptureEngine(options) {
                 patch,
               },
             }));
-          }));
-        })), 'immediate');
+          })))), 'immediate');
     }
     catch (error) {
       cleanupFailure();
       throw error;
     }
+    // an abandoned wrap never gets here: its hold limit rejected the body
+    // it wraps, so only the failure path runs, and that one gives up
+    // nothing that is no longer this wrap's (`cleanupFailure`)
     const finish = (bundle) => {
-      if (abandoned()) throw abandonedCapture();
       depth = 0;
       context = null;
       if (bundle.delivery !== null) pendingDeliveries.push(bundle.delivery);

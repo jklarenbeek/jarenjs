@@ -271,6 +271,9 @@ describe('store.sync.relational', () => {
       assert.equal(sync.get(count).n, 1);
       const inside = /** @type {any} */ (store.sync).transaction((/** @type {any} */ tx) => {
         tx.sync.relational.execute({ op: 'insert', table: 'items', values: { label: 'b' } });
+        const labels = [...tx.sync.relational.iterate({ from: 'items', columns: { label: c('label') }, orderBy: [{ by: c('id') }] })]
+          .map((row) => row.label);
+        assert.deepEqual(labels, ['a', 'b'], "the transaction's synchronous cursor reads its own write");
         return tx.sync.relational.all({ from: 'items' }).length;
       });
       assert.equal(inside, 2);

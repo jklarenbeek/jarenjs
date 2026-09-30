@@ -20,8 +20,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import fs from 'node:fs';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
+import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { sql, relational } from '@jarenjs/db/relational';
+import { tempDbPath } from './helpers.js';
 
 const MODEL = { $model: '0.1', collections: { items: { schema: { type: 'object', properties: { id: { type: 'string' } } }, key: '/id', indexes: [] } } };
 const coded = (/** @type {string} */ code) => (/** @type {any} */ e) => e?.code === code;
@@ -38,17 +41,27 @@ async function withStaging(/** @type {any} */ driver, /** @type {any} */ options
 }
 
 describe('relational quirks', () => {
-  it('1. the bounded statement cache releases what it evicts: a worker never runs out of statements', async () => {
-    const { store } = await withStaging(nodeWorkerDriver({ maxStatements: 24 }), { statementCacheBound: 4 });
+  it('1. the bounded statement cache releases what it evicts: a worker, or a pool of them, never runs out of statements', async () => {
+    const { dbPath, cleanup } = tempDbPath();
     try {
-      for (let n = 1; n <= 60; n++) {
-        const where = sql.in(sql.column('id'), Array.from({ length: n }, (_, i) => i));
-        await store.relational.all({ from: 'staging', where });
+      for (const driver of [nodeWorkerDriver({ maxStatements: 24 }),
+        nodeWorkerPoolDriver({ readers: 1, worker: { maxStatements: 24 } })]) {
+        const { store } = await withStaging(driver, { statementCacheBound: 4, path: dbPath });
+        try {
+          for (let n = 1; n <= 60; n++) {
+            const where = sql.in(sql.column('id'), Array.from({ length: n }, (_, i) => i));
+            await store.relational.all({ from: 'staging', where });
+          }
+          await store.collection('items').put({ id: 'still-writable' });
+          assert.equal((await store.collection('items').get('still-writable'))?.id, 'still-writable');
+        }
+        finally {
+          await store.close();
+        }
+        fs.rmSync(dbPath, { force: true });
       }
-      await store.collection('items').put({ id: 'still-writable' });
-      assert.equal((await store.collection('items').get('still-writable'))?.id, 'still-writable');
     }
-    finally { await store.close(); }
+    finally { cleanup(); }
   });
 
   it('2. a transaction closes the cursors it left open, and a retained cursor\'s return() still releases', async () => {
