@@ -1,0 +1,27 @@
+{
+  "migration": {
+    "$migration": "0.1",
+    "from": "1b9eirz",
+    "id": "additive",
+    "steps": [
+      {
+        "kind": "ddl",
+        "note": "create collection 'notes'",
+        "sql": "CREATE TABLE \"notes\" (\"key\" TEXT PRIMARY KEY, \"doc\" BLOB NOT NULL) STRICT"
+      }
+    ],
+    "to": "1qdwnm0"
+  },
+  "report": {
+    "added": [
+      "notes"
+    ],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [],
+    "transformed": [],
+    "widened": []
+  }
+}

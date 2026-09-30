@@ -1,0 +1,31 @@
+{
+  "migration": {
+    "$migration": "0.1",
+    "from": "1b9eirz",
+    "id": "narrowing",
+    "steps": [
+      {
+        "collection": "docs",
+        "draft": true,
+        "kind": "jslt",
+        "note": "the schema of 'docs' changed; the planner cannot infer the data transform. Fill in the stylesheet (or delete this step if every stored document already validates against the new schema) and remove \"draft\".",
+        "stylesheet": []
+      }
+    ],
+    "to": "acarg2"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [
+      "docs"
+    ],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [
+      "docs"
+    ],
+    "transformed": [],
+    "widened": []
+  }
+}

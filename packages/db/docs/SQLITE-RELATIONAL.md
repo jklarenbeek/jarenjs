@@ -233,8 +233,12 @@ guarded executor also preserves storage classes and allocated identities.
 executor. It admits the writer with IMMEDIATE semantics before source reads,
 uses savepoints for nested work and restores FK/legacy settings exactly.
 `{ connection }` borrows the same driver handle; `{ driver, path? }` owns its
-resource. Both compose with optional historical transforms/assertions and a
-complete `physicalTarget` copied from a disposable target fixture. With
+resource and switches foreign-key enforcement on when it opens. Both compose
+with optional historical transforms/assertions, `host` steps, and a
+complete `physicalTarget` copied from a disposable target fixture. A plan
+scoped to the tables it owns (`scope: { tables }`) applies to every
+installation whatever unrelated tables it keeps
+([adopting history](MIGRATION-FORMAT.md#adopting-history-on-an-existing-populated-schema)). With
 `shadowFixture`, replay uses the same migration and history executor.
 The [runnable example](MIGRATION-FORMAT.md#runnable-physical-lifecycle) proves
 this composition and a checked second run.

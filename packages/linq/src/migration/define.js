@@ -21,7 +21,7 @@ import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object'
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson } from '../json-boundary.js';
 import {
-  ddlStep, sqlStep, transformStep, assertStep, deriveStep, rawStep,
+  ddlStep, sqlStep, hostStep, transformStep, assertStep, deriveStep, rawStep,
 } from './steps.js';
 
 const MIGRATION_VERSION = '0.1';
@@ -151,6 +151,12 @@ export class Migration {
   /** One data statement spelled directly (§9.4). @param {string} sql @param {string} [note] */
   sql(sql, note = undefined) {
     return this.#append(sqlStep(sql, note));
+  }
+
+  /** Application code in the migration's transaction: the host registered
+   * under `run`, at `version`. @param {string} run @param {string} version @param {string} [note] */
+  host(run, version, note = undefined) {
+    return this.#append(hostStep(run, version, note));
   }
 
   /**

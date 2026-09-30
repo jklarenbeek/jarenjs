@@ -71,7 +71,8 @@ for (const host of [process.execPath, 'bun']) {
           const driver = { ...nodeDriver(), open: async (...args) => { const c = await nodeDriver().open(...args); return { ...c, exec: (sql) => { trace.push(sql); return c.exec(sql); } }; } };
           const repeated = await migrate({ driver, path: file }, [migration], { baseline, model: target, shadow: false });
           assert.equal(repeated.upToDate, true);
-          assert.deepEqual(trace, [], 'second migration issues no DDL or DML');
+          // the migration's own connection switches foreign-key enforcement on when it opens: a setting, not a change
+          assert.deepEqual(trace, ['PRAGMA foreign_keys = ON'], 'second migration issues no DDL or DML');
           const newest = await openStore(target, { driver: nodeDriver(), path: file, adopt: true });
           assert.equal((await newest.entity('Receipt').get(2)).note, 'later');
           await newest.close();

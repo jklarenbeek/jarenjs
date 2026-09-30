@@ -17,6 +17,7 @@
  */
 
 import type { Runtime } from '@jarenjs/core/runtime';
+import type { RelationalEngine, AsyncRelationalEngine } from './relational.js';
 
 // ————— errors —————
 
@@ -1622,6 +1623,44 @@ export interface MigrateOptions {
    * that bound, deliberately. */
   assertionBounds?: AssertionBounds;
   onAssertionPlan?: (plan: AssertionPlan) => void;
+  /** The application code `host` steps name, by host name, each at the
+   * version its steps name (`JD0025` otherwise) — every host step the run
+   * executes: the pending ones, and on the shadow the whole chain. */
+  hosts?: Readonly<Record<string, MigrationHost>>;
+  /** Run every pending link in ONE immediate transaction — a savepoint per
+   * link, the final checks once at the end — so the chain commits whole or
+   * not at all; a cancellation rolls the whole chain back. A link that
+   * rebuilds a table cannot be held (`JD0026`). */
+  atomic?: boolean;
+}
+
+/** One host a `host` step runs: its version, and the code. `run` works
+ * through `scope` alone, inside the step's savepoint; synchronous on a
+ * synchronous connection, and possibly async on an asynchronous one. */
+export interface MigrationHost {
+  readonly version: string;
+  run(scope: MigrationHostScope, ctx: MigrationHostContext): unknown;
+}
+/** What a host step reaches: the migration transaction's document
+ * collections and a relational engine bound to it. Nothing outlives the
+ * step (`JD0025`). */
+export interface MigrationHostScope {
+  collection(name: string): MigrationHostCollection;
+  readonly relational: Omit<RelationalEngine, 'dispose'> | Omit<AsyncRelationalEngine, 'dispose'>;
+}
+/** A collection or document-carrying entity as the transaction holds it:
+ * `all()` every document (an entity row whole), `update(fn)` replaces each
+ * document `fn` answers for (`undefined` keeps it) and answers how many. */
+export interface MigrationHostCollection {
+  all(): unknown[] | Promise<unknown[]>;
+  update(fn: (doc: any) => unknown): number | Promise<number>;
+}
+export interface MigrationHostContext {
+  readonly migration: string;
+  readonly step: number;
+  readonly version: string;
+  /** True on the shadow's replay, which runs every host step too. */
+  readonly shadow: boolean;
 }
 
 /** The finite defaults a materializing assertion runs under when the
@@ -1686,10 +1725,22 @@ export interface PlanMigrationOptions {
   /** The functions an index expression names (a plan is DDL, so DDL over
    * a function the planner was not told about is refused). */
   readonly expressions?: Readonly<Record<string, unknown>>;
+  /** What a narrowing's repair is, in place of the draft the planner would
+   * write: steps (every draft's place, at the first), or a map of them by
+   * collection or entity name — a `jslt` or a `host` step. A transform no
+   * draft asks for is a `TypeError`. */
+  readonly transform?: MigrationTransform;
 }
+/** A narrowing's repair step: a filled-in `jslt` transform or a `host` step. */
+export type MigrationTransformStep =
+  | { readonly kind: 'jslt'; readonly collection: string; readonly stylesheet: readonly unknown[]; readonly note?: string; readonly model?: unknown }
+  | { readonly kind: 'host'; readonly run: string; readonly version: string; readonly note?: string; readonly model?: unknown };
+export type MigrationTransform = MigrationTransformStep | readonly MigrationTransformStep[]
+  | Readonly<Record<string, MigrationTransformStep | readonly MigrationTransformStep[]>>;
 
 /** One step of a planned migration: `ddl` and `sql` statements, and the
- * `jslt` document transform (a `draft` refuses to run until filled in). */
+ * `jslt` document transform (a `draft` refuses to run until filled in);
+ * `host` runs a registered host's code (`MigrateOptions.hosts`). */
 export interface MigrationStep {
   readonly kind: string;
   readonly note?: string;
@@ -1720,6 +1771,8 @@ export interface MigrationPlanReport {
   schemaChanged: string[];
   drafts: string[];
   widened: string[];
+  /** The names whose draft the `transform` option replaced. */
+  transformed: string[];
   destructive: boolean;
 }
 
@@ -1742,6 +1795,9 @@ export interface MigrationStatusReport {
   /** A one-line difference when the database drifted; null in sync. */
   drift: string | null;
   upToDate: boolean;
+  /** The id of the applied receipt that anchors an adopted history — the
+   * first document, moving no shape and running nothing — or null. */
+  baseline: string | null;
 }
 export interface MigrationStatusOptions {
   model?: unknown;
@@ -2423,12 +2479,17 @@ export interface PhysicalMigrationDocument<Steps extends readonly unknown[] = re
     readonly dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
     readonly assertions: readonly { readonly sql: string; readonly params?: readonly unknown[]; readonly expected: readonly unknown[] }[];
     readonly target?: PhysicalMigrationTarget;
+    /** The tables a scoped plan inventories, and their programs. */
+    readonly scope?: { readonly tables: readonly string[] };
   };
 }
 /** Planning retains a synchronous connection's value boundary. */
 export declare function planPhysicalMigration<const Steps extends readonly unknown[]>(connection: unknown, fromModel: unknown, toModel: unknown,
   options: { id: string; steps: Steps; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;
     assertions?: readonly { sql: string; params?: readonly unknown[]; expected: readonly unknown[] }[];
-    physicalTarget?: PhysicalMigrationTarget }): PhysicalMigrationDocument<Steps> | Promise<PhysicalMigrationDocument<Steps>>;
+    physicalTarget?: PhysicalMigrationTarget;
+    /** Inventory these owned tables and their programs alone (`JD0027`
+     * when malformed or not owned); SQLite. */
+    scope?: { readonly tables: readonly string[] } }): PhysicalMigrationDocument<Steps> | Promise<PhysicalMigrationDocument<Steps>>;
 
 export { sql, relational, planRelational, defineTable, planTable, planTableMigration, applyTableMigration, withForeignKeysSuspended, planSchemaChange, applySchemaChange } from './relational.js';

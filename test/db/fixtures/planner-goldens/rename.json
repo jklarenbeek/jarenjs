@@ -1,0 +1,30 @@
+{
+  "migration": {
+    "$migration": "0.1",
+    "from": "1b9eirz",
+    "id": "rename",
+    "steps": [
+      {
+        "kind": "ddl",
+        "note": "rename collection 'docs' to 'records'",
+        "sql": "ALTER TABLE \"docs\" RENAME TO \"records\""
+      }
+    ],
+    "to": "2tw444"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [
+      {
+        "from": "docs",
+        "to": "records"
+      }
+    ],
+    "schemaChanged": [],
+    "transformed": [],
+    "widened": []
+  }
+}

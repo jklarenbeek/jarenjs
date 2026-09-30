@@ -198,6 +198,25 @@
     "schema": {
      "type": "string",
      "minLength": 1
+    },
+    "scope": {
+     "description": "A scoped plan inventories these tables and their programs (indexes, triggers) alone: the source snapshot, the dispositions and the source check ignore every other table, so one reviewed plan applies to every installation whatever unrelated tables it also keeps. SQLite.",
+     "type": "object",
+     "properties": {
+      "tables": {
+       "type": "array",
+       "minItems": 1,
+       "uniqueItems": true,
+       "items": {
+        "type": "string",
+        "minLength": 1
+       }
+      }
+     },
+     "required": [
+      "tables"
+     ],
+     "additionalProperties": false
     }
    },
    "additionalProperties": false
@@ -234,6 +253,9 @@
     },
     {
      "$ref": "#/$defs/tableStep"
+    },
+    {
+     "$ref": "#/$defs/hostStep"
     }
    ]
   },
@@ -577,6 +599,46 @@
    "required": [
     "kind",
     "plan"
+   ],
+   "additionalProperties": false
+  },
+  "hostStep": {
+   "description": "Application code in the migration's transaction (MIGRATION-FORMAT \u00a72): the step names a host the run registers (migrate's hosts option) and the version it was reviewed at; the host runs in the step's savepoint, on the shadow too, and the document carries both names, so the checksum changes when the version does.",
+   "type": "object",
+   "properties": {
+    "kind": {
+     "const": "host"
+    },
+    "run": {
+     "description": "The name of the host the run registers.",
+     "type": "string",
+     "minLength": 1
+    },
+    "version": {
+     "description": "The version of the host the step was reviewed at; a host of another version refuses (JD0025).",
+     "type": "string",
+     "minLength": 1
+    },
+    "note": {
+     "type": "string"
+    },
+    "model": {
+     "description": "The immutable model describing this step\u2019s current physical layout.",
+     "type": "object",
+     "properties": {
+      "$model": {
+       "const": "0.1"
+      }
+     },
+     "required": [
+      "$model"
+     ]
+    }
+   },
+   "required": [
+    "kind",
+    "run",
+    "version"
    ],
    "additionalProperties": false
   }

@@ -69,6 +69,9 @@ export const DB_CODES = Object.freeze({
   JD0022: 'an applied migration disagrees with the history record',
   JD0023: 'a migration step failed',
   JD0024: 'a document source or target could not be read or written',
+  JD0025: 'a migration host step is unknown, its version differs, or it appears where it cannot run',
+  JD0026: 'an atomic migration run contains a rebuild link',
+  JD0027: 'a physical scope is malformed or names a table the plan does not own',
   JD2001: 'insert found the key already present, or the key is stored under two spellings',
   JD2002: 'a usable key could not be resolved for the write, or an explicit key disagrees with the document',
   JD2003: 'the write failed schema validation',
@@ -205,7 +208,15 @@ export const DB_CODES = Object.freeze({
  *  - `JD0022` — the migration list disagrees with the applied history
  *    (an edited file, a missing file, a reordered sequence)
  *  - `JD0023` — a step failed: an assertion returned rows, DDL was
- *    rejected, or a transform produced an unstorable value
+ *    rejected, or a transform produced an unstorable value — classified
+ *    (`class`, `retryable`) like every driver failure
+ *  - `JD0025` — a migration host step has no registered host, a host
+ *    whose version differs, or runs where there is no transaction (a
+ *    documents-only migration)
+ *  - `JD0026` — an `atomic` run holds a link that rebuilds a table (the
+ *    rebuild changes connection settings outside any transaction)
+ *  - `JD0027` — a physical plan's `scope` is malformed, or names a table
+ *    the plan does not own
  */
 export class DbCompileError extends CodedError {
   /**

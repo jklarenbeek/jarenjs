@@ -19,7 +19,7 @@ for (const mode of ['session', 'journal']) {
       await store.close();
       for (let run = 0; run < 2; run++) {
         assert.deepEqual(await migrationStatus({ driver, path: temporary.dbPath }, [], { model: MODEL }),
-          { applied: [], pending: [], drift: null, upToDate: true });
+          { applied: [], pending: [], drift: null, upToDate: true, baseline: null });
       }
       const connection = await driver.open(temporary.dbPath, {});
       try {

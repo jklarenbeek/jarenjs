@@ -1455,7 +1455,8 @@ that creates the owner table.
 
 **One classification of driver failures.** Every path that meets a
 driver error — a collection or entity write, the job queue, the query
-path, a maintenance operation, the backup, the open sequence —
+path, a maintenance operation, the backup, the open sequence, a
+migration run —
 consults one table (`classifyDriverError`), so the same failure arrives
 under the same code with the same `class` and `retryable` verdict
 whichever path met it: `busy` (SQLITE_BUSY/LOCKED → `JD2005`,
@@ -1467,7 +1468,8 @@ document in the engine and answers the double, and `explain().fallback`
 records it), and the fallback `error` (`JD2005`). A classified error
 carries `class`, `retryable` and the driver's error as `cause`; a
 lifecycle that owns its failure code (`JD2078` for maintenance and
-backup, `JD0002` at open) keeps the code and still carries the class.
+backup, `JD0002` at open, `JD0023` for a migration — MIGRATION-FORMAT
+§6) keeps the code and still carries the class.
 
 The ENGINE is discriminated by the evidence the error itself carries,
 never by a table threaded down from the caller: a SQLite binding

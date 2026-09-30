@@ -1,6 +1,7 @@
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
 import type { MigrationDocument, MigrationStep } from '@jarenjs/linq/migration';
-import { migrate, migrationStatus, planPhysicalMigration, planTableMigration, readSchema } from '@jarenjs/db';
+import { migrate, migrationStatus, planModelMigration, planPhysicalMigration, planTableMigration, readSchema, sqliteDialect } from '@jarenjs/db';
+import type { MigrationHost, MigrationHostScope, MigrationHostContext, MigrationPlan } from '@jarenjs/db';
 import type { BorrowedMigrationTarget, Driver, MigrationResult, MigrationStatusReport, PhysicalMigrationDocument, PhysicalMigrationTarget } from '@jarenjs/db';
 import { model as v1 } from '../db/fixtures/models/v1.js';
 import { model as v2 } from '../db/fixtures/models/v2.js';
@@ -94,3 +95,43 @@ const targetObjects = completed.physical?.target?.objects;
 // @ts-expect-error — flattening the plan discards required source/identity guards
 void historical.step({ kind: 'table', plan: { statements: [], finish: [] } });
 void [historical, completed, targetObjects];
+
+// ————— host steps, atomic runs, a planned repair, a scoped baseline —————
+
+const repair: MigrationHost = {
+  version: '1',
+  run(scope: MigrationHostScope, ctx: MigrationHostContext) {
+    const shadow: boolean = ctx.shadow;
+    const step: number = ctx.step;
+    const docs = scope.collection('User');
+    void [shadow, step, docs.all(), docs.update((doc) => ({ ...doc, name: 'x' }))];
+    return scope.relational.all({ from: 'User' });
+  },
+};
+void migrate({ driver }, [], { baseline: v1, hosts: { repair }, atomic: true });
+// @ts-expect-error — a host names its version
+void migrate({ driver }, [], { baseline: v1, hosts: { repair: { run() {} } } });
+// @ts-expect-error — atomic is a boolean
+void migrate({ driver }, [], { baseline: v1, atomic: 'yes' });
+const plannedRepair: MigrationPlan = planModelMigration(v1, v2, { dialect: sqliteDialect,
+  transform: { kind: 'host', run: 'repair', version: '1' } });
+const transformed: string[] = plannedRepair.report.transformed;
+void planModelMigration(v1, v2, { dialect: sqliteDialect, transform: { User: [{ kind: 'jslt', collection: 'User', stylesheet: [] }] } });
+// @ts-expect-error — a transform is a jslt or a host step
+void planModelMigration(v1, v2, { dialect: sqliteDialect, transform: { kind: 'sql', sql: 'x' } });
+async function scopedBaseline() {
+  const baseline = await planPhysicalMigration(connection, v1, v1, { id: '0000-baseline', steps: [], dispositions: {},
+    scope: { tables: ['User'] } });
+  const tables: readonly string[] | undefined = baseline.physical.scope?.tables;
+  const status = await migrationStatus({ driver }, [baseline], {});
+  const anchor: string | null = status.baseline;
+  // @ts-expect-error — a scope is its tables
+  void planPhysicalMigration(connection, v1, v1, { id: 'x', steps: [], dispositions: {}, scope: ['User'] });
+  void [tables, anchor];
+}
+void [transformed, scopedBaseline];
+const withHost: MigrationDocument = defineMigration({ id: 'host', from: v1, to: v1 }).host('repair', '1', 'why').document;
+const hostStep: MigrationStep = { kind: 'host', run: 'repair', version: '1' };
+// @ts-expect-error — a host step names its version
+const versionless: MigrationStep = { kind: 'host', run: 'repair' };
+void [withHost, hostStep, versionless];

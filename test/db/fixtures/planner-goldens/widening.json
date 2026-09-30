@@ -1,0 +1,23 @@
+{
+  "migration": {
+    "$migration": "0.1",
+    "from": "1jpela7",
+    "id": "widening",
+    "steps": [],
+    "to": "1b9eirz"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [
+      "docs"
+    ],
+    "transformed": [],
+    "widened": [
+      "docs"
+    ]
+  }
+}

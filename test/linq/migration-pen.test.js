@@ -286,6 +286,9 @@ describe('the refusals, by code', () => {
     assert.throws(() => m().step(/** @type {any} */ ({ kind: 'jslt', collection: 'User' })), codeIs('JL0101', /'stylesheet'/));
     assert.throws(() => m().step(/** @type {any} */ ({ kind: 'query', collection: 'User' })), codeIs('JL0101', /'assert'/));
     assert.throws(() => m().step(/** @type {any} */ ({ kind: 'derive', collection: 'User', columns: [] })), codeIs('JL0101', /'columns'/));
+    assert.throws(() => m().host('', '1'), codeIs('JL0101', /run/));
+    assert.throws(() => m().host('repair', /** @type {any} */ (1)), codeIs('JL0101', /version/));
+    assert.throws(() => m().step(/** @type {any} */ ({ kind: 'host', run: 'repair' })), codeIs('JL0101', /'version'/));
   });
 
   it('JL0102 — a construct a jslt step cannot carry; JL0104 — an external an assertion or a body cannot bind', () => {
@@ -303,6 +306,27 @@ describe('the refusals, by code', () => {
     const withCollections = { $model: '0.1', collections: { rows: { schema: { type: 'object' }, key: null, identity: 'integer' } } };
     assert.doesNotThrow(() => defineMigration({ id: 'c', from: withCollections, to: withCollections })
       .transform('rows', (r) => ({ n: r.n })));
+  });
+});
+
+describe('a host step', () => {
+  it('spells { kind, run, version, note? }, validates against both artifacts, and applies through migrate()', async () => {
+    const m = defineMigration({ id: 'h', from: V1, to: V1 }).host('stamp', '1', 'stamp every user');
+    assert.deepStrictEqual(m.document.steps, [{ kind: 'host', run: 'stamp', version: '1', note: 'stamp every user' }]);
+    for (const [name, validate] of validators) assert.strictEqual(validate(m.document), true, name);
+    assert.deepStrictEqual(m.step({ kind: 'host', run: 'stamp', version: '1' }).document.steps.at(-1),
+      { kind: 'host', run: 'stamp', version: '1' });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-linq-host-'));
+    try {
+      const dbPath = path.join(dir, 'store.db');
+      const store = await openStore(V1, { driver: nodeDriver(), path: dbPath });
+      await store.close();
+      let ran = 0;
+      await migrate({ driver: nodeDriver(), path: dbPath }, [m.document], { baseline: V1, model: V1, shadow: false,
+        hosts: { stamp: { version: '1', run() { ran++; } } } });
+      assert.strictEqual(ran, 1);
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 });
 

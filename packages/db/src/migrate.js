@@ -29,9 +29,12 @@ import { setObjectMember } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
-import { DbCompileError } from './errors.js';
+import { DbCompileError, wrapDriverError } from './errors.js';
 import { storedKeyMatches } from './key-text.js';
-import { chain } from './driver.js';
+import { chain, attempt } from './driver.js';
+import { isThenable } from '@jarenjs/core/function';
+import { relationalEngine } from './relational.js';
+import { createCursor, createSyncCursor } from './cursor.js';
 import { normalizeModel } from './store.js';
 import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
@@ -196,6 +199,265 @@ function refuse(code, reason, cause) {
   return new DbCompileError(code, reason, undefined, cause);
 }
 
+/** A Jaren coded error: it already names its failure. @param {any} error */
+const isCoded = (error) => typeof error?.code === 'string' && /^J[A-Z]\d{4}$/.test(error.code);
+
+/**
+ * The class and retry verdict a failure carries: a classified error's own,
+ * a driver error's classification (a busy database, a constraint), and
+ * otherwise an `error` no rerun fixes.
+ * @param {any} cause @returns {{ class: string, retryable: boolean }}
+ */
+function verdictOf(cause) {
+  if (cause !== null && typeof cause === 'object' && typeof cause.class === 'string')
+    return { class: cause.class, retryable: cause.retryable === true };
+  if (cause === undefined || cause === null) return { class: 'error', retryable: false };
+  const wrapped = wrapDriverError(cause, { always: true });
+  return { class: typeof wrapped?.class === 'string' ? wrapped.class : 'error', retryable: wrapped?.retryable === true };
+}
+
+/**
+ * A step's failure, classified the way maintenance keeps `JD2078`
+ * (MODEL-FORMAT §7): the lifecycle code `JD0023` names the migration and the
+ * step, carries the driver's `class` and `retryable` verdict, and keeps the
+ * error it met as `cause` — a UNIQUE violation a transform ran into is a
+ * `constraint`, never a raw driver error. A coded refusal keeps its code.
+ * @param {any} migration @param {number} index @param {string} kind @param {any} error
+ */
+function stepFailed(migration, index, kind, error) {
+  if (isCoded(error)) {
+    if (error.code === 'JD0023' && typeof error.class !== 'string') Object.assign(error, { class: 'error', retryable: false });
+    return error;
+  }
+  return Object.assign(refuse('JD0023',
+    `migration '${migration.id}' step ${index} (${kind}) failed: ${error?.message ?? String(error)}`, error), verdictOf(error));
+}
+
+/**
+ * A failure met around the steps — the write transaction's begin behind a
+ * held writer, a history read, a connection that could not open: a driver
+ * error is `JD0023`, classified (a busy database is `busy`, retryable); a
+ * coded refusal keeps its code; a host's programming error (a `TypeError`
+ * in an option) passes as it is.
+ * @param {any} error @param {string} reason
+ */
+function runFailure(error, reason) {
+  if (isCoded(error)) {
+    if (error.code === 'JD0023' && typeof error.class !== 'string') Object.assign(error, { class: 'error', retryable: false });
+    return error;
+  }
+  return wrapDriverError(error, { code: 'JD0023', reason });
+}
+
+/** Run `fn` over `items` in order, waiting for each answer that is a promise.
+ * @param {any[]} items @param {(item: any) => any} fn @param {number} [from] @returns {any} */
+function sequentially(items, fn, from = 0) {
+  for (let j = from; j < items.length; j++) {
+    const out = fn(items[j]);
+    if (isThenable(out)) return out.then(() => sequentially(items, fn, j + 1));
+  }
+  return null;
+}
+
+/**
+ * How a data step writes one document back: a collection's `doc` by row
+ * identity, or a mapped entity row WHOLE — its columns split out through the
+ * entity's own split and the rest into its document (a column-mapped member
+ * a transform wrote used to land in the document and be shadowed on read).
+ * @param {any} connection @param {string} table
+ * @param {{ entity: any, mapping: any } | null} stepEntity @param {any} runtime
+ * @returns {any} value-or-promise of `(doc, rid) => value-or-promise`
+ */
+function documentWriter(connection, table, stepEntity, runtime) {
+  const dialect = connection.dialect;
+  const q = dialect.quoteIdentifier;
+  if (stepEntity !== null) {
+    const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null, runtime);
+    const columns = entityColumnsOf(stepEntity.mapping);
+    const assignments = [
+      ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
+      `${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(columns.length + 1, 'doc'))}`,
+    ];
+    return chain(connection.prepare(`UPDATE ${q(table)} SET ${assignments.join(', ')} `
+      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 2, 'rid')}`), (update) =>
+      (/** @type {any} */ next, /** @type {any} */ rid) => {
+        const { values, rest } = core.plan.split(next);
+        const byName = new Map(values.map((value) => [value.name, value.value]));
+        return update.run([...columns.map((column) => byName.get(column) ?? null), JSON.stringify(rest), rid]);
+      });
+  }
+  return chain(connection.prepare(`UPDATE ${q(table)} SET ${q('doc')} = `
+    + `${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))} `
+    + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(2, 'rid')}`), (update) =>
+    (/** @type {any} */ next, /** @type {any} */ rid) => update.run([JSON.stringify(next), rid]));
+}
+
+/**
+ * The `hosts` option: a plain object of `{ version, run }` by host name.
+ * @param {any} hosts @returns {Readonly<Record<string, { version: string, run: Function }>>}
+ */
+function readHosts(hosts) {
+  if (hosts === undefined) return Object.freeze(Object.create(null));
+  if (hosts === null || typeof hosts !== 'object' || Array.isArray(hosts))
+    throw new TypeError('hosts must be an object of { version, run } by host name');
+  const out = Object.create(null);
+  for (const [name, host] of Object.entries(hosts)) {
+    if (!host || typeof host !== 'object' || typeof host.run !== 'function' || typeof host.version !== 'string'
+      || host.version === '' || Object.keys(host).some((key) => key !== 'run' && key !== 'version'))
+      throw new TypeError(`host '${name}' must be { version: string, run(scope, ctx) }`);
+    out[name] = host;
+  }
+  return Object.freeze(out);
+}
+
+/**
+ * The refusal of a host step that cannot run as reviewed: no host of its
+ * name, or one of another version.
+ * @param {any} migration @param {number} index @param {any} step @param {any} host
+ */
+function hostRefusal(migration, index, step, host) {
+  return refuse('JD0025', host === undefined
+    ? `migration '${migration.id}' step ${index} runs host '${step.run}', which this run was not given — pass it in options.hosts`
+    : `migration '${migration.id}' step ${index} runs host '${step.run}' version ${JSON.stringify(step.version)}, and the host `
+      + `given is version ${JSON.stringify(host.version)} — a step runs the code its document names`);
+}
+
+/**
+ * A host step's document collection, inside the migration's transaction:
+ * `all()` — every document as the table holds it now (a mapped entity row
+ * WHOLE, as a jslt step reads it) — and `update(fn)`, the transform a jslt
+ * stylesheet is, spelled in code: `fn(doc)` answers the replacement, or
+ * `undefined` to keep the document; it answers how many it replaced.
+ * @param {any} connection @param {string} name @param {any} step @param {any} options
+ * @param {() => void} closed - throws once the step has returned
+ */
+function hostCollection(connection, name, step, options, closed) {
+  const stepEntity = entityStepMapping(options, name, step, connection.dialect);
+  if (stepEntity?.mapping.document === false) {
+    throw refuse('JD0025', `'${name}' is a column-mapped table without a document: a host step `
+      + 'reads and writes it through scope.relational');
+  }
+  const mapping = stepEntity?.mapping ?? null;
+  const read = (/** @type {any} */ row) => (mapping === null ? JSON.parse(row.doc) : mergeEntityRow(mapping, row, 'doc'));
+  return Object.freeze({
+    all() {
+      closed();
+      /** @type {any[]} */
+      const docs = [];
+      return chain(walkRows(connection, name, options.batchSize, (rows) => { for (const row of rows) docs.push(read(row)); },
+        false, mapping, options.check), () => docs);
+    },
+    update(/** @type {any} */ fn) {
+      closed();
+      if (typeof fn !== 'function') throw new TypeError('update() takes a function from a document to its replacement');
+      let replaced = 0;
+      return chain(documentWriter(connection, name, stepEntity, options.runtime), (write) =>
+        chain(walkRows(connection, name, options.batchSize, (rows) => sequentially(rows, (row) =>
+          chain(fn(read(row)), (next) => {
+            if (next === undefined) return null;
+            closed();
+            replaced++;
+            return write(next, row.rid);
+          })), false, mapping, options.check), () => replaced));
+    },
+  });
+}
+
+/**
+ * Run one host step: the named host's `run(scope, ctx)` inside the step's
+ * savepoint of its link's transaction. `scope` offers the transaction's
+ * document collections and a relational engine bound to it; nothing it
+ * holds outlives the step. On a synchronous connection the work is
+ * synchronous — a promise there would settle after the savepoint closed —
+ * and on an asynchronous one `run` may be async. A failure is `JD0023`
+ * naming the step, the host's error as `cause`, its verdict kept.
+ * @param {any} connection @param {any} migration @param {number} index
+ * @param {any} step @param {any} options
+ */
+function runHostStep(connection, migration, index, step, options) {
+  const host = options.hosts?.[step.run];
+  // checked before the run began; a borrowed caller could still pass another list
+  if (host === undefined || host.version !== step.version) throw hostRefusal(migration, index, step, host);
+  let open = true;
+  const closed = () => {
+    if (!open) {
+      throw refuse('JD0025', `migration '${migration.id}' step ${index}: host '${step.run}' used its scope after `
+        + 'the step ended — a host step runs inside its savepoint, and only there');
+    }
+  };
+  const relational = relationalEngine({
+    dialect: connection.dialect,
+    connection,
+    available: closed,
+    read: (run) => run(connection),
+    cursor: (spec) => (connection.synchronous ? createSyncCursor : createCursor)({
+      ...spec, open: () => { closed(); return spec.open(connection); } }),
+    // a write is a savepoint of the migration's transaction
+    write: (run) => connection.transaction(run),
+  });
+  const scope = Object.freeze({
+    collection: (/** @type {string} */ name) => { closed(); return hostCollection(connection, name, step, options, closed); },
+    relational,
+  });
+  const ctx = Object.freeze({ migration: migration.id, step: index, version: step.version, shadow: false });
+  const failed = (/** @type {any} */ error) => Object.assign(refuse('JD0023',
+    `migration '${migration.id}' step ${index} (host '${step.run}' ${step.version}) failed: ${error?.message ?? String(error)}`,
+    error), verdictOf(error));
+  let out;
+  try { out = host.run(scope, ctx); }
+  catch (error) { open = false; throw failed(error); }
+  if (!isThenable(out)) { open = false; return null; }
+  if (connection.synchronous) {
+    open = false;
+    out.then(undefined, () => undefined);
+    throw refuse('JD0025', `migration '${migration.id}' step ${index}: host '${step.run}' answered a promise on a `
+      + 'synchronous connection — a host step runs synchronously there; an asynchronous host needs an asynchronous driver');
+  }
+  return out.then(() => { open = false; return null; }, (error) => { open = false; throw failed(error); });
+}
+
+/**
+ * The tables a physical plan owns: every table its two models map — an
+ * entity's (physical or managed), a join table, a collection — and every
+ * table its guarded table steps name.
+ * @param {any} fromModel @param {any} toModel @param {any[]} steps @returns {Set<string>}
+ */
+function ownedTables(fromModel, toModel, steps) {
+  const owned = new Set();
+  for (const model of [fromModel, toModel]) {
+    const mapping = explainMapping(model);
+    for (const entity of Object.values(mapping.entities ?? {})) owned.add(/** @type {any} */ (entity).table);
+    for (const table of Object.keys(mapping.joinTables ?? {})) owned.add(table);
+    for (const name of normalizeModel(model).keys()) owned.add(name);
+  }
+  for (const step of steps) if (step?.kind === 'table' && typeof step.plan?.table === 'string') owned.add(step.plan.table);
+  return owned;
+}
+
+/**
+ * A physical plan's `scope`, validated: `{ tables }`, a non-empty list of
+ * distinct tables the plan owns. The source snapshot, the dispositions and
+ * the source check then cover those tables and their programs alone, so an
+ * installation that also keeps an unrelated table takes the same plan.
+ * @param {any} scope @param {any} dialect @param {Set<string>} owned
+ * @returns {{ tables: string[] }}
+ */
+function physicalScopeOf(scope, dialect, owned) {
+  if (dialect?.migration) {
+    throw refuse('JD0021', 'a physical scope is qualified on SQLite; a PostgreSQL plan inventories its schema whole');
+  }
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope) || Object.keys(scope).some((key) => key !== 'tables')
+    || !Array.isArray(scope.tables) || scope.tables.length === 0 || new Set(scope.tables).size !== scope.tables.length
+    || scope.tables.some((/** @type {any} */ table) => typeof table !== 'string' || table === '' || ENGINE_TABLES.has(table)))
+    throw refuse('JD0027', 'a physical scope is { tables: [...] }, a non-empty list of distinct table names');
+  const foreign = scope.tables.find((/** @type {string} */ table) => !owned.has(table));
+  if (foreign !== undefined) {
+    throw refuse('JD0027', `the scope names '${foreign}', which the plan does not own — it owns the tables its `
+      + `models map and its table steps name (${[...owned].sort().join(', ') || 'none'})`);
+  }
+  return { tables: [...scope.tables] };
+}
+
 /**
  * A backfill step: recompute named STORED derived columns from the
  * documents already in a collection. Idempotent by construction — the
@@ -272,9 +534,10 @@ export function planMigration(fromModel, toModel, options = undefined) {
 
   const steps = [];
   const report = {
-    renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [],
+    renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [], transformed: [],
     destructive: false,
   };
+  const transform = transformOf(options?.transform);
 
   // declared renames first: the physical table moves, its old-prefixed
   // indexes stay behind (probed) and are rebuilt by the index diff
@@ -459,19 +722,25 @@ export function planMigration(fromModel, toModel, options = undefined) {
         report.widened.push(name);
       }
       else {
-        report.drafts.push(name);
-        steps.push({
-          kind: 'jslt',
-          collection: name,
-          stylesheet: [],
-          draft: true,
-          note: `the schema of '${name}' changed; the planner cannot infer the data `
-            + 'transform. Fill in the stylesheet (or delete this step if every stored '
-            + 'document already validates against the new schema) and remove "draft".',
-        });
-        // a transform rewrites the document, and a stored derived column
-        // is computed FROM the document: without this it keeps the value
-        // the old document had
+        if (transform !== null && transform.covers(name)) {
+          report.transformed.push(name);
+          steps.push(...transform.take(name));
+        }
+        else {
+          report.drafts.push(name);
+          steps.push({
+            kind: 'jslt',
+            collection: name,
+            stylesheet: [],
+            draft: true,
+            note: `the schema of '${name}' changed; the planner cannot infer the data `
+              + 'transform. Fill in the stylesheet (or delete this step if every stored '
+              + 'document already validates against the new schema) and remove "draft".',
+          });
+        }
+        // a transform rewrites the document — the planner's draft, or the
+        // one the caller supplied — and a stored derived column is computed
+        // FROM the document: without this it keeps the old document's value
         const stale = toPlan.derived
           .filter((column) => toColumns.get(column.name)?.stored === true)
           .map((column) => column.name)
@@ -504,7 +773,8 @@ export function planMigration(fromModel, toModel, options = undefined) {
     }
   }
 
-  planEntityChanges(fromModel, toModel, dialect, steps, report);
+  planEntityChanges(fromModel, toModel, dialect, steps, report, transform);
+  transform?.finish();
 
   const migration = {
     $migration: MIGRATION_VERSION,
@@ -514,6 +784,51 @@ export function planMigration(fromModel, toModel, options = undefined) {
     steps,
   };
   return { migration, report };
+}
+
+/**
+ * The `transform` a plan puts in place of the drafts a narrowing needs — so
+ * a host that plans each link from model snapshots plans one that carries
+ * its own repair, and pins its checksum. Steps (one, or a list) are the
+ * link's repair and take the place of every draft, at the first; a map by
+ * collection or entity name replaces that name's draft only. A step is a
+ * `jslt` transform or a `host` step; a transform no draft asks for is a
+ * programming error.
+ * @param {any} transform
+ * @returns {{ covers(name: string): boolean, take(name: string): any[], finish(): void } | null}
+ */
+function transformOf(transform) {
+  if (transform === undefined) return null;
+  const checked = (step, where) => {
+    if (step === null || typeof step !== 'object' || Array.isArray(step)
+      || !(step.kind === 'jslt' && typeof step.collection === 'string' && Array.isArray(step.stylesheet) && step.draft !== true
+        || step.kind === 'host' && typeof step.run === 'string' && step.run !== '' && typeof step.version === 'string' && step.version !== ''))
+      throw new TypeError(`${where} is a jslt step (collection, stylesheet) or a host step (run, version)`);
+    return structuredClone(step);
+  };
+  const list = (value, where) => (Array.isArray(value) ? value : [value]).map((step) => checked(step, where));
+  if (Array.isArray(transform) || typeof transform?.kind === 'string') {
+    const steps = list(transform, 'a transform step');
+    if (steps.length === 0) throw new TypeError('a transform names at least one step');
+    let used = false;
+    return {
+      covers: () => true,
+      take: () => { if (used) return []; used = true; return steps; },
+      finish: () => { if (!used) throw new TypeError('the pair plans no draft transform — it widens, or no document schema changed; put the steps in the migration document directly'); },
+    };
+  }
+  if (transform === null || typeof transform !== 'object')
+    throw new TypeError('transform is a step, a list of steps, or a map of them by collection or entity name');
+  const byName = new Map(Object.entries(transform).map(([name, value]) => [name, list(value, `the transform for '${name}'`)]));
+  const taken = new Set();
+  return {
+    covers: (name) => byName.has(name),
+    take: (name) => { taken.add(name); return byName.get(name) ?? []; },
+    finish: () => {
+      const unused = [...byName.keys()].find((name) => !taken.has(name));
+      if (unused !== undefined) throw new TypeError(`the transform names '${unused}', whose schema this pair does not narrow`);
+    },
+  };
 }
 
 /** `planMigration` handles the whole model — collections AND entities
@@ -546,7 +861,7 @@ function stripEntityVocabulary(node) {
  * @param {any[]} steps
  * @param {any} report
  */
-function planEntityChanges(fromModel, toModel, dialect, steps, report) {
+function planEntityChanges(fromModel, toModel, dialect, steps, report, transform = null) {
   const fromEntities = normalizeEntities(fromModel);
   const toEntities = normalizeEntities(toModel);
   if (fromEntities.size === 0 && toEntities.size === 0) return;
@@ -771,6 +1086,10 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report) {
       // the whole of it)
       if (isWidening(stripEntityVocabulary(fromEntity.schema), stripEntityVocabulary(toEntity.schema))) {
         report.widened.push(name);
+      }
+      else if (transform !== null && transform.covers(name)) {
+        report.transformed.push(name);
+        steps.push(...transform.take(name));
       }
       else {
         report.drafts.push(name);
@@ -1165,14 +1484,16 @@ function runSteps(connection, migration, options) {
     // migration in flight back whole, as any step failure does
     if (options.check !== undefined) options.check();
     const current = migration.steps[i];
-    const fail = (reason, cause) => {
-      throw refuse('JD0023',
+    const fail = (reason, cause, verdict = verdictOf(cause)) => {
+      throw Object.assign(refuse('JD0023',
         `migration '${migration.id}' step ${i} (${current.kind}) failed: ${reason}`,
-        cause);
+        cause), verdict);
     };
-    // every step is its own savepoint inside the migration transaction
-    return chain(connection.transaction(() => {
+    // every step is its own savepoint inside the migration transaction, and
+    // whatever it meets leaves it classified (stepFailed)
+    return chain(attempt(() => connection.transaction(() => {
       if (current.kind === 'table') return applyTableMigration(connection, current.plan);
+      if (current.kind === 'host') return runHostStep(connection, migration, i, current, options);
       if (current.kind === 'ddl' || current.kind === 'sql') {
         // 'sql' is a DATA step spelled directly (§9.4): same execution
         // as ddl, distinct on purpose — dry-run always shows it, and a
@@ -1205,7 +1526,7 @@ function runSteps(connection, migration, options) {
                 if (violations.length > 0) {
                   fail(`foreign_key_check found ${violations.length} broken reference(s) `
                     + `after rebuilding '${current.table}' `
-                    + `(first: ${JSON.stringify(violations[0])})`);
+                    + `(first: ${JSON.stringify(violations[0])})`, undefined, { class: 'constraint', retryable: false });
                 }
                 return null;
               }));
@@ -1261,49 +1582,15 @@ function runSteps(connection, migration, options) {
             onProgress: options.onProgress, migration: migration.id, collection: current.collection,
           });
         }
-        if (stepEntity !== null) {
-          // an entity row is transformed WHOLE: the mapped columns fold in
-          // before the stylesheet and split out after it, through the
-          // entity's own split — a column-mapped member the stylesheet
-          // wrote used to land in the document and be shadowed on read
-          const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null,
-            options.runtime);
-          const columns = entityColumnsOf(stepEntity.mapping);
-          const assignments = [
-            ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
-            `${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(columns.length + 1, 'doc'))}`,
-          ];
-          const updateSql = `UPDATE ${q(current.collection)} SET ${assignments.join(', ')} `
-            + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 2, 'rid')}`;
-          let transformed = 0;
-          return chain(connection.prepare(updateSql), (update) =>
-            chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
-              for (const row of rows) {
-                const whole = mergeEntityRow(stepEntity.mapping, row, 'doc');
-                const next = operation.apply(whole, row.rid);
-                const { values, rest } = core.plan.split(next);
-                const byName = new Map(values.map((value) => [value.name, value.value]));
-                update.run([...columns.map((column) => byName.get(column) ?? null),
-                  JSON.stringify(rest), row.rid]);
-                transformed++;
-              }
-              options.onProgress?.({
-                migration: migration.id,
-                collection: current.collection,
-                transformed,
-              });
-            }, false, stepEntity.mapping, options.check), () => transformed));
-        }
-        const updateSql = `UPDATE ${q(current.collection)} SET ${q('doc')} = `
-          + `${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))} `
-          + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(2, 'rid')}`;
+        // an entity row is transformed WHOLE: the mapped columns fold in
+        // before the stylesheet and split out after it (documentWriter)
+        const mapping = stepEntity?.mapping ?? null;
         let transformed = 0;
-        const keyed = false;
-        return chain(connection.prepare(updateSql), (update) =>
+        return chain(documentWriter(connection, current.collection, stepEntity, options.runtime), (write) =>
           chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
             for (const row of rows) {
-              const next = operation.apply(JSON.parse(row.doc), row.rid);
-              update.run([JSON.stringify(next), row.rid]);
+              const doc = mapping === null ? JSON.parse(row.doc) : mergeEntityRow(mapping, row, 'doc');
+              write(operation.apply(doc, row.rid), row.rid);
               transformed++;
             }
             options.onProgress?.({
@@ -1311,7 +1598,7 @@ function runSteps(connection, migration, options) {
               collection: current.collection,
               transformed,
             });
-          }, keyed, null, options.check), () => transformed));
+          }, false, mapping, options.check), () => transformed));
       }
       // kind === 'query': the assertion step
       const assertionMapping = entityStepMapping(options, current.collection, current, dialect)?.mapping ?? null;
@@ -1382,7 +1669,7 @@ function runSteps(connection, migration, options) {
           asserted,
         });
       }, false, assertionMapping, options.check);
-    }), () => step(i + 1));
+    }), (error) => stepFailed(migration, i, current.kind, error)), () => step(i + 1));
   };
   return step(0);
 }
@@ -1496,10 +1783,18 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
       chain(options.shadowFixture === undefined ? createModelShape(shadow, baseline, options.expressions)
         : options.shadowFixture(shadow), () => migrate({ connection: shadow }, migrations, {
         ...options, baseline, model, shadow: false, shadowDriver: driver,
-        shadowFixture: undefined,
+        shadowFixture: undefined, hosts: shadowHosts(options.hosts),
         registerFunctions: options.registerFunctions === undefined ? undefined
           : (reference) => reference === shadow ? null : options.registerFunctions(reference),
       }))))));
+}
+
+/** The hosts a shadow replay runs: the same code, told it is the shadow.
+ * @param {any} hosts @returns {any} */
+function shadowHosts(hosts) {
+  if (hosts === undefined) return undefined;
+  return Object.fromEntries(Object.entries(hosts).map(([name, host]) => [name, {
+    version: host.version, run: (/** @type {any} */ scope, /** @type {any} */ ctx) => host.run(scope, { ...ctx, shadow: true }) }]));
 }
 
 /** History-table statement builders (dialect-spelled). */
@@ -1565,16 +1860,21 @@ export function migrationStatus(target, migrations, options = {}) {
         }
         const applied = rows.map((row) => String(row.id));
         const pending = migrations.slice(rows.length).map((migration) => String(migration.id));
-        if (pending.length > 0) return { applied, pending, drift: null, upToDate: false };
+        // a receipt that anchors an adopted history: the first applied
+        // document, which moves no shape and runs nothing
+        const first = migrations[0];
+        const baseline = rows.length > 0 && first?.from === first?.to && Array.isArray(first?.steps) && first.steps.length === 0
+          ? String(first.id) : null;
+        if (pending.length > 0) return { applied, pending, drift: null, upToDate: false, baseline };
         const physicalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target;
         if (physicalTarget === undefined && options.model === undefined)
-          return { applied, pending, drift: null, upToDate: true };
+          return { applied, pending, drift: null, upToDate: true, baseline };
         const driver = options.shadowDriver ?? target.driver;
         if (physicalTarget === undefined && typeof driver?.open !== 'function')
           throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
         return chain(physicalTarget !== undefined ? comparePhysicalTarget(connection, physicalTarget)
           : compareShapeToModel(driver, connection, options.model, options.registerFunctions),
-        (difference) => ({ applied, pending, drift: difference, upToDate: difference === null }));
+        (difference) => ({ applied, pending, drift: difference, upToDate: difference === null, baseline }));
       }))));
   });
 }
@@ -1626,17 +1926,25 @@ export function migrate(target, migrations, options) {
     abortCode: 'JD2080', aborted: 'its next step', passed: 'its next step',
     ran: 'no further step ran; a migration in flight rolled back whole and a rerun resumes from the recorded position',
   });
+  const hosts = readHosts(options.hosts);
+  if (options.atomic !== undefined && typeof options.atomic !== 'boolean') throw new TypeError('atomic must be a boolean');
+  const atomic = options.atomic === true;
+  // what the steps and the shadow's replay read; the shadow replays link by
+  // link — its last link makes the same final check an atomic run makes at
+  // its end — so `atomic` stays the primary's
   const runOptions = { batchSize, assertionBounds: normalizeAssertionBounds(options.assertionBounds),
     onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
     registerFunctions: options.registerFunctions, expressions: options.expressions,
     compileSchema: options.compileSchema, physicalTarget: options.physicalTarget,
-    shadowFixture: options.shadowFixture, model: options.model,
+    shadowFixture: options.shadowFixture, model: options.model, hosts,
     signal: options.signal, deadline: options.deadline, runtime, check };
   try { check(); }
   catch (error) { if (target.connection !== undefined) throw error; return Promise.reject(error); }
   if (options.physicalTarget !== undefined) physicalTargetOf(options.physicalTarget);
   const referenceDriver = options.shadowDriver ?? target.driver;
-  return withMigrationConnection(target, (connection) => {
+  // whatever a run meets leaves migrate() classified: a driver error is
+  // JD0023 with its class, never the binding's own error
+  return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'migration needs an exclusively available connection or its owning transaction scope');
     return chain(registerDeriveFunctions(connection), () => chain(options.registerFunctions?.(connection), () => {
       const dialect = connection.dialect, statements = historyStatements(dialect);
@@ -1679,6 +1987,25 @@ export function migrate(target, migrations, options) {
           return finalTarget === undefined ? result : connection.transaction((scope) =>
             chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length), () => chain(acceptTarget(scope, finalTarget), () => result))), options.signal, 'immediate');
         }
+        // every host step the run will execute has its host at the version
+        // its document names: the pending ones here, and — since the shadow
+        // replays the whole chain from the baseline — every one there
+        for (const migration of options.shadow === false ? pending : migrations) {
+          migration.steps.forEach((step, index) => {
+            if (step?.kind !== 'host') return;
+            const host = hosts[step.run];
+            if (host === undefined || host.version !== step.version) throw hostRefusal(migration, index, step, host);
+          });
+        }
+        // a rebuild changes the connection's foreign-key setting outside any
+        // transaction, so a link that rebuilds cannot share one with another
+        const bracketed = (migration) => migration.steps.some((s) => s.kind === 'rebuild' || s.kind === 'table' && s.plan.rebuild)
+          && dialect.capabilities.foreignKeysAlwaysOn !== true;
+        const rebuilding = atomic ? pending.find(bracketed) : undefined;
+        if (rebuilding !== undefined) {
+          throw refuse('JD0026', `migration '${rebuilding.id}' rebuilds a table, which changes the connection's `
+            + 'foreign-key setting outside any transaction — an atomic run cannot hold it; run the chain without atomic');
+        }
         if (pending.some((m) => m.physical) && options.shadow !== false && options.shadowFixture === undefined)
           throw refuse('JD0021', 'physical preservation plans require shadow:false or an explicit shadowFixture initializer');
         if (options.shadow !== false && (typeof referenceDriver?.open !== 'function'
@@ -1704,6 +2031,10 @@ export function migrate(target, migrations, options) {
                   if (dialect.capabilities.foreignKeysAlwaysOn !== true) rendered.push(dialect.pragma.foreignKeyCheck());
                 }
                 else if (migrationStep.kind === 'jslt') rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
+                else if (migrationStep.kind === 'host') {
+                  rendered.push(`-- host step '${migrationStep.run}' (version ${migrationStep.version})`
+                    + `${migrationStep.note === undefined ? '' : `: ${migrationStep.note}`}`);
+                }
                 else {
                   const operation = compileDocumentStep(migrationStep, migration.steps.indexOf(migrationStep), {
                     migrationId: migration.id, compileJslt: compileJsltStylesheet, compileQuery: compileJsonQuery,
@@ -1735,46 +2066,90 @@ export function migrate(target, migrations, options) {
               statements: rendered, counts, shadowValidated: options.shadow !== false }));
           }
           const applied = [];
+          // the checks the chain's end makes: the model's real-data
+          // validation and its shape, against the last link
+          const finalChecks = (scope, migration) => options.model === undefined ? null
+            : chain(validateTargetState(scope, options.model, { compileSchema: options.compileSchema, batchSize }), () => {
+              if (normalizeEntities(options.model).size === 0 || migration.physical || finalTarget !== undefined
+                || [...normalizeEntities(options.model).values()].some((e) => e.physical)) return null;
+              if (typeof referenceDriver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
+              return chain(compareShapeToModel(referenceDriver, scope, options.model, options.registerFunctions, options.expressions), (difference) => {
+                if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
+              });
+            });
+          // a link ends with the database's own foreign-key check, before its
+          // history row: a reference a step broke refuses the link, listed
+          const foreignKeyCheck = (scope, migration) => dialect.capabilities.foreignKeysAlwaysOn === true
+            || typeof dialect.pragma?.foreignKeyCheck !== 'function' ? null
+            : chain(scope.prepare(dialect.pragma.foreignKeyCheck()), (statement) => chain(statement.all([]), (violations) => {
+              if (violations.length === 0) return null;
+              const listed = violations.slice(0, 10).map((violation) => ({ ...violation }));
+              throw Object.assign(refuse('JD0023', `migration '${migration.id}' leaves ${violations.length} foreign-key `
+                + `violation(s): ${JSON.stringify(listed)}${violations.length > listed.length ? ' …' : ''}`),
+              { class: 'constraint', retryable: false });
+            }));
+          // one link's work in the transaction or savepoint it is given: its
+          // steps, its physical checks, the foreign-key check, its history row
+          // — and, for the chain's last link, the final checks
+          const linkWork = (scope, migration, final) => {
+            let allocations;
+            let work = migration.physical ? chain(verifyPreservation(scope, migration.physical, false), (state) => { allocations = state; }) : null;
+            work = chain(work, () => historyExists ? null : chain(scope.exec(statements.create), () => { historyExists = true; }));
+            work = chain(work, () => runSteps(scope, migration, runOptions));
+            work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true, allocations) : null);
+            work = chain(work, () => acceptTarget(scope, final ? finalTarget : migration.physical?.target));
+            work = chain(work, () => final ? finalChecks(scope, migration) : null);
+            work = chain(work, () => foreignKeyCheck(scope, migration));
+            return chain(work, () => chain(scope.prepare(statements.insert), (insert) =>
+              insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
+          };
+          // link by link: each commits on its own, and the last makes the final checks
           const applyNext = (i) => {
             if (i >= pending.length) return null;
             check();
             const migration = pending[i], last = i === pending.length - 1;
-            const bracket = migration.steps.some((s) => s.kind === 'rebuild' || s.kind === 'table' && s.plan.rebuild)
-              && dialect.capabilities.foreignKeysAlwaysOn !== true;
             const body = (scope) => {
               check();
               // Admission may have waited behind a different process. Never rerun
               // a body using receipts read before that process committed.
-              return chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length + applied.length), () => {
-                let allocations;
-                let work = migration.physical ? chain(verifyPreservation(scope, migration.physical, false), (state) => { allocations = state; }) : null;
-                work = chain(work, () => historyExists ? null : scope.exec(statements.create));
-                work = chain(work, () => runSteps(scope, migration, runOptions));
-                work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true, allocations) : null);
-                work = chain(work, () => acceptTarget(scope, last ? finalTarget : migration.physical?.target));
-                work = chain(work, () => last && options.model !== undefined ? chain(validateTargetState(scope, options.model,
-                    { compileSchema: options.compileSchema, batchSize }), () => {
-                    if (normalizeEntities(options.model).size === 0 || migration.physical || finalTarget !== undefined
-                      || [...normalizeEntities(options.model).values()].some((e) => e.physical)) return null;
-                    if (typeof referenceDriver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
-                    return chain(compareShapeToModel(referenceDriver, scope, options.model, options.registerFunctions, options.expressions), (difference) => {
-                      if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
-                    });
-                  }) : null);
-                return chain(work, () => chain(scope.prepare(statements.insert), (insert) =>
-                  insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
-              }));
+              return chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length + applied.length), () =>
+                linkWork(scope, migration, last)));
             };
             const transaction = () => connection.transaction(body, options.signal, 'immediate');
-            return chain(bracket ? withForeignKeySettings(connection, transaction) : transaction(), () => {
+            return chain(attempt(() => bracketed(migration) ? withForeignKeySettings(connection, transaction) : transaction(),
+              (error) => runFailure(error, `migration '${migration.id}' failed`)), () => {
               historyExists = true; applied.push(migration.id); return applyNext(i + 1);
             });
           };
-          return chain(applyNext(0), () => ({ applied, skipped: appliedRows.map((row) => row.id), shape: expectedFrom }));
+          // atomic: ONE immediate transaction, a savepoint per link, and the
+          // final checks once every link ran — the chain commits whole or not
+          // at all, so a repair link after a narrowing lands before the check
+          const applyAtomically = () => {
+            check();
+            const body = (scope) => {
+              check();
+              return chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length), () => {
+                const next = (i) => {
+                  if (i >= pending.length) return null;
+                  check();
+                  const migration = pending[i];
+                  return chain(attempt(() => scope.transaction((link) => linkWork(link, migration, false)),
+                    (error) => runFailure(error, `migration '${migration.id}' failed`)), () => {
+                    applied.push(migration.id); return next(i + 1);
+                  });
+                };
+                return chain(next(0), () => chain(acceptTarget(scope, finalTarget), () => finalChecks(scope, pending.at(-1))));
+              }));
+            };
+            return attempt(() => connection.transaction(body, options.signal, 'immediate'),
+              (error) => runFailure(error, 'the atomic migration run failed'));
+          };
+          return chain(atomic ? applyAtomically() : applyNext(0),
+            () => ({ applied, skipped: appliedRows.map((row) => row.id), shape: expectedFrom }));
         });
       });
     }));
-  });
+  }), (error) => runFailure(error, 'the migration failed'));
 }
 
 /** Plan an existing file's explicit preservation migration. Every source object
@@ -1787,7 +2162,11 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
   normalizeEntities(fromModel); normalizeEntities(toModel);
   if (!options || typeof options.id !== 'string' || !options.id || !Array.isArray(options.steps))
     throw refuse('JD0021', 'a physical plan requires id and explicit steps');
-  return chain(preservationSchemaOf(connection), (source) => {
+  const scope = options.scope === undefined ? undefined
+    : physicalScopeOf(options.scope, connection.dialect, ownedTables(fromModel, toModel, options.steps));
+  return chain(preservationSchemaOf(connection), (whole) => {
+    // a scoped plan inventories its own tables and their programs alone
+    const source = scope === undefined ? whole : whole.filter((object) => scope.tables.includes(object.owner));
     const dispositions = options.dispositions ?? {};
     const keys = source.map(physicalObjectKey);
     if (Object.keys(dispositions).some((key) => !keys.includes(key)) || keys.some((key) => !['preserve', 'replace', 'drop'].includes(dispositions[key])))
@@ -1798,7 +2177,7 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
         throw refuse('JD0021', 'preservation assertions require a SELECT and expected rows');
     }
     const migration = { $migration: MIGRATION_VERSION, id: options.id, from: shapeHash(fromModel), to: shapeHash(toModel),
-      steps: options.steps, physical: { source, dispositions, assertions,
+      steps: options.steps, physical: { source, ...(scope === undefined ? {} : { scope }), dispositions, assertions,
         ...(connection.dialect.migration ? { dialect: connection.dialect.name, schema: connection.dialect.schema } : {}),
         ...(options.physicalTarget === undefined ? {} : { target: structuredClone(options.physicalTarget) }) } };
     checkMigrationDocument(migration);
@@ -1811,7 +2190,7 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
 function checkPreservationPlan(migration, dialect) {
   checkMigrationStatements(migration, dialect);
   checkPhysicalPreservation(migration.physical, dialect);
-  if (migration.physical !== undefined && migration.steps.some((step) => !['ddl', 'sql', 'rebuild', 'table', 'jslt', 'query'].includes(step.kind)))
+  if (migration.physical !== undefined && migration.steps.some((step) => !['ddl', 'sql', 'rebuild', 'table', 'jslt', 'query', 'host'].includes(step.kind)))
     throw refuse('JD0021', 'invalid physical preservation step');
 }
 

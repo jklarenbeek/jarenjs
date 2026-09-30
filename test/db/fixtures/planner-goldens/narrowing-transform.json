@@ -1,0 +1,29 @@
+{
+  "migration": {
+    "$migration": "0.1",
+    "from": "1b9eirz",
+    "id": "narrowing",
+    "steps": [
+      {
+        "kind": "host",
+        "run": "truncate",
+        "version": "1"
+      }
+    ],
+    "to": "acarg2"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [
+      "docs"
+    ],
+    "transformed": [
+      "docs"
+    ],
+    "widened": []
+  }
+}

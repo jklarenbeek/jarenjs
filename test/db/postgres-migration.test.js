@@ -238,8 +238,10 @@ describe('PostgreSQL reviewed physical migrations', { skip: !url && 'JAREN_PG_UR
       const contender = await postgresDriver(source('contender'), { schema }).open(); connections.push(contender);
       firstWork = migrate({ connection: writer }, [plan], { baseline: model, shadow: false });
       await changed.promise;
+      // the lock waiter's timeout leaves migrate() classified: JD0023, busy, retryable, the server's error its cause
       await assert.rejects(migrate({ connection: timed }, [plan], { baseline: model, shadow: false }),
-        (error) => error.code === '55P03' && classifyDriverError(error).code === 'JD2005');
+        (error) => error.code === 'JD0023' && error.class === 'busy' && error.retryable === true
+          && error.cause?.code === '55P03' && classifyDriverError(error.cause).class === 'busy');
       const waiting = migrate({ connection: contender }, [plan], { baseline: model, shadow: false });
       const rejected = assert.rejects(waiting, { code: 'JD0022' });
       await locking.promise;

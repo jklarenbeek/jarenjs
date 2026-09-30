@@ -76,7 +76,37 @@ shape change is a **transformation of values**, not a table rebuild.
   retaining source/checksum, row/storage, identity and object checks.
   `statements` and `finish` are review output; flattening them into DDL
   steps loses those guards and is not an equivalent migration.
-- `jslt` and `query` may carry an immutable `$model` 0.1 `model` describing
+- `kind: "host"` runs application code inside the migration's
+  transaction. `{ "kind": "host", "run": "<name>", "version": "<v>" }`
+  (with an optional `note` and `model`) names a host the run registers —
+  `migrate(target, migrations, { hosts: { <name>: { version, run(scope,
+  ctx) } } })` — and the version it was reviewed at. The host runs in the
+  step's savepoint of its link's transaction, and on the shadow's replay
+  first (`ctx` is `{ migration, step, version, shadow }`).
+  `scope.collection(name)` answers the transaction's documents: `all()`,
+  and `update(fn)`, whose `fn(doc)` answers the replacement document or
+  `undefined` to keep it — an entity row whole, as a `jslt` step sees it,
+  under the step's `model` when it carries one. `scope.relational` is the
+  relational engine (MODEL-FORMAT §5.3) bound to the transaction, whose
+  writes are savepoints of it. Nothing the scope holds outlives the step
+  (`JD0025`), and a host must perform no effect outside it: a crash rolls
+  back only what the transaction holds. On a synchronous connection `run`
+  is synchronous — a promise there is `JD0025`, because it would settle
+  after the savepoint closed — and on an asynchronous one it may be
+  async. The document carries `run` and `version`, so the checksum covers
+  them: a changed version is a different migration. A missing host, a host
+  of another version, or a host step in a documents-only run (§6.1) is
+  `JD0025` before anything runs; a host that throws is `JD0023` naming the
+  step, with its error as `cause` and its `class`/`retryable` kept. Every
+  host step the run executes needs its host: the pending ones, and — since
+  the shadow replays the whole chain from the baseline — every one on the
+  shadow, so a host whose version moved on keeps the old version registered
+  for its applied steps, or the run passes `shadow: false`. Before host
+  steps, the only host code a migration could run was a function
+  registered through `registerFunctions` and called from a `sql` step:
+  node and wasm only, a synchronous scalar per row, and outside the
+  checksum.
+- `jslt`, `query` and `host` may carry an immutable `$model` 0.1 `model` describing
   the layout at that step, including names absent from the final model.
   An assertion before structural DDL can use the old model, and one after
   it can use the new model. The selected mapping is verified before reads.
@@ -213,12 +243,23 @@ so the previous shape lives beside the code, where a diff can read it.
   predates the token would refuse `JD2040` forever — re-reading
   included, because the re-read carries the `NULL` back.
 - **The widening/narrowing rule runs against real data, not schema
-  comparison**: at the end of the migration run (inside its
-  transaction) every stored document is validated against the target
+  comparison**: the run's LAST pending link ends — inside its
+  transaction — by validating every stored document against the target
   schema through the injected `compileSchema` hook. A document that no
-  longer validates is `JD0021` and the whole migration rolls back — a
-  narrowing without an adequate transform cannot land. A widening
-  needs no transform, and passes this check by fact. For an entity
+  longer validates is `JD0021`, and that link rolls back. Each link
+  commits on its own (§6), so an EARLIER link of the same run — a
+  narrowing without its transform, followed by another link — is already
+  committed and recorded when the last link refuses: `migrationStatus`
+  reports it applied, and a store opened on the file serves what it
+  narrowed. `atomic: true` (§6) runs the chain in one transaction, so it
+  commits whole or not at all, and a repair link after a narrowing lands
+  before the check. A narrowing's repair can also be planned up front:
+  `planModelMigration(from, to, { transform })` puts the supplied `jslt`
+  or `host` step where the draft would be — one step or a list in place
+  of every draft (at the first), or a map of them by collection or entity
+  name — and reports the names as `report.transformed`, so the plan
+  applies unattended; a transform no draft asks for is a `TypeError`.
+  A widening needs no transform, and passes this check by fact. For an entity
   the validated document is the whole row — columns merged back under
   the target mapping — so a pure widening of a column-mapped member
   passes and a narrowing of one is caught.
@@ -290,6 +331,28 @@ applied migration, which is always a bug and always worth failing on.
 The database's current shape is the last applied `to_hash`, or the
 hash of the `baseline` model when no migration has run.
 
+`migrationChecksum(migration)` is that checksum, exported: the hash of
+the WHOLE canonical document — every step, its SQL text, a host step's
+`run` and `version`, a physical plan's source, dispositions and scope.
+Two documents with one checksum are one migration.
+
+**Planner output is not promised stable across releases before 1.0.** A
+release may plan a different document for an unchanged pair of models —
+a better DDL spelling, a step the old one missed. So persist the
+documents you plan (`jaren-db plan --out`, or the plan's `migration`
+written to your migrations directory) and never re-plan an applied link:
+the history holds each applied link to its checksum (`JD0022`). A host
+that re-plans at load as a check compares `migrationChecksum` of the
+re-planned document with the persisted one, and treats a difference as
+that release's planner change, not as drift. The plan is typed:
+`planModelMigration` answers a `MigrationPlan`, a `MigrationDocument`
+and its `MigrationPlanReport`. Every release that changes the planner's
+output for an unchanged pair says so in its release notes, and
+`test/db/planner-goldens.test.js` — a corpus of pairs (additive,
+widening, a narrowing with and without its transform, a rename, an
+index, an entity rebuild, a physical plan) compared with committed
+documents — makes such a change impossible to ship unnoticed.
+
 ## 6. Running and batching
 
 `migrate(target, migrations, options)` accepts two distinct ownership forms:
@@ -342,7 +405,33 @@ The run options include:
   under the busy timeout) with a savepoint per step; any failure rolls
   back the whole migration including its earlier steps. Where a driver
   cannot open exclusively, the transaction still isolates; the busy
-  policy of MODEL-FORMAT §4 governs contention.
+  policy of MODEL-FORMAT §4 governs contention. Each link commits on its
+  own: when a later link fails, the run's earlier links stand (§3).
+- `atomic: true` runs every pending link in ONE immediate transaction —
+  a savepoint per link, each link's history row inside it, and the final
+  checks (§3's validation, the physical target, the model's shape) once
+  after the last — so the chain commits whole or not at all, a repair
+  link after a narrowing lands before the check, and a cancellation rolls
+  the whole chain back. A link that rebuilds a table changes the
+  connection's foreign-key setting outside any transaction (§10), so it
+  cannot be held: an atomic run with one is `JD0026`, before anything
+  runs. The shadow replays link by link either way; its last link makes
+  the same final check.
+- **Foreign keys are enforced on every driver.** A migration's own
+  connection — `{ driver, path }`, and the shadow's — switches enforcement
+  ON when it opens, whatever the binding's default (`bun:sqlite` leaves it
+  off, so a cascade the schema declares used to leave an orphan under Bun
+  that Node removed), and every link ends with the database's foreign-key
+  check before its history row: a reference a step broke refuses the link
+  `JD0023` (`class: 'constraint'`), listing the violations. A borrowed
+  connection keeps its caller's setting, and the check still refuses the
+  orphan an unenforced delete would leave.
+- **Every failure is classified** (MODEL-FORMAT §7): a step's is `JD0023`
+  naming the migration and the step, with `class`, `retryable` and the
+  driver's error as `cause` — a transform that meets a UNIQUE index is a
+  `constraint`, not a raw driver error, and a held writer at the begin is
+  `busy`, retryable, as opening a store answers it. A refusal that owns a
+  code keeps it.
 - A run is cancellable: `migrate(target, migrations, { signal,
   deadline })` checks both BETWEEN migrations, between steps and
   between the batches of a data step — never inside a statement, which
@@ -412,6 +501,9 @@ The run options include:
 
 ### 6.1 Running without a database
 
+(A `host` step needs the transaction a database run gives it: in a
+documents-only run it is `JD0025`, before the first document is read.)
+
 A migration's `jslt` and `query` steps act on DOCUMENTS, so they do not
 need tables. Two surfaces run them against documents a caller already
 holds, sharing one implementation of what a step means with the Store —
@@ -473,8 +565,11 @@ Two limits are the single pass's, and are stated rather than hidden:
 | `JD0020` | the migration's from-shape does not match the database |
 | `JD0021` | the migration is missing a required data transform |
 | `JD0022` | an applied migration disagrees with the history record |
-| `JD0023` | a migration step failed |
+| `JD0023` | a migration step failed (classified: `class` and `retryable`, the driver's error as `cause`) |
 | `JD0024` | a document source or target could not be read or written |
+| `JD0025` | a migration host step is unknown, its version differs, or it appears where it cannot run |
+| `JD0026` | an atomic migration run contains a rebuild link |
+| `JD0027` | a physical scope is malformed or names a table the plan does not own |
 
 These live in the same runtime `DB_CODES` table as the storage codes
 (MODEL-FORMAT §7); the union of both documents is proven in sync with
@@ -722,7 +817,7 @@ a migration document or Promise, preserving the supplied step types in its
 `PhysicalMigrationDocument<Steps>` declaration. Its `options` contain `id`,
 ordered `steps`, and a disposition for EVERY observed application source
 `type:name`: `preserve`, `replace` or `drop`. Steps may be `ddl`, `sql`,
-`rebuild`, guarded `table`, `jslt` or `query`. Engine-owned metadata is
+`rebuild`, guarded `table`, `jslt`, `query` or `host`. Engine-owned metadata is
 excluded from source snapshots; arbitrary user objects are not.
 
 Optional `{ sql, params, expected }` preservation assertions are SELECTs
@@ -741,6 +836,42 @@ attached to owned tables are drift; unrelated tables outside the scope
 are allowed. Keep the inventory scoped with `readSchema(reference,
 { tables: [...] })`; never silently discard unknown objects within it.
 A physical model's column mapping alone is not this complete target.
+
+### Adopting history on an existing populated schema
+
+An application whose SQLite schema predates Jaren adopts versioned
+history with a **baseline receipt**: a physical plan from the model to
+itself, with no steps, every inventoried object preserved and the
+reviewed target saved.
+
+```json
+{ "$migration": "0.1", "id": "0000-baseline", "from": "<shape>", "to": "<shape>", "steps": [],
+  "physical": { "source": [], "dispositions": {}, "assertions": [], "scope": { "tables": ["item"] } } }
+```
+
+`planPhysicalMigration(connection, model, model, { id: '0000-baseline',
+steps: [], dispositions, physicalTarget: { objects }, scope: { tables }
+})` writes it: `from` equals `to`, `migrate(target, [baseline], {
+baseline: model, model, shadow: false })` records one history row and
+changes nothing else, and every later run with the same list is `{
+applied: [], upToDate: true }`, checking the saved target on the way.
+`migrationStatus` names it: `baseline: '0000-baseline'`. Guarded `table`
+plans follow it as ordinary migrations, and an applied document is never
+rewritten (`JD0022`).
+
+**The scope** is what lets ONE reviewed plan ship to every installation.
+Unscoped, a plan's source inventory is the whole schema, so an
+installation that differs by one unrelated table refuses the plan
+(`JD0020`). `scope: { tables }` limits the source snapshot, the
+dispositions and the source check to the named tables and their programs
+(their indexes and triggers); every other table is none of the plan's
+business, and the target acceptance above already reads only the target's
+own tables. A scope names tables the plan owns — those its two models map
+(an entity's table, a join table, a collection) and its `table` steps
+name; anything else, or a malformed scope, is `JD0027`. The scope rides in
+the document (`physical.scope`), so the checksum covers it and a saved
+plan is checked again when it runs. PostgreSQL plans inventory their
+schema whole (`JD0021` for a scope).
 
 ### PostgreSQL native preservation
 

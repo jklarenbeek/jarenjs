@@ -341,7 +341,13 @@ no continuation to emit.
   replays the whole chain before the real store is touched; a
   checksummed history refuses edited or reordered migrations; a
   narrowing without an adequate transform is refused against the REAL
-  data, inside the transaction. And by code: `@jarenjs/linq/migration`
+  data, inside the transaction. A `host` step runs your own code in
+  the migration's transaction, `atomic: true` commits a chain whole or
+  not at all, `planModelMigration(from, to, { transform })` plans a
+  narrowing with its repair in place of the draft, a migration's own
+  connection enforces foreign keys on every driver, and a zero-step
+  baseline scoped to the tables it owns adopts history on an existing
+  schema (MIGRATION-FORMAT §2, §6, §5). And by code: `@jarenjs/linq/migration`
   ([MIGRATION-PEN.md](../linq/docs/MIGRATION-PEN.md))
   writes the same document with the data transform typed old row → new
   row, `jaren-db` loads model and migration MODULES beside JSON, plans

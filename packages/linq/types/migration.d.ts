@@ -34,6 +34,15 @@ import type { Externals, RuleDocument, RuleOut, ValueOf } from './jslt.js';
 
 export interface DdlStep { readonly kind: 'ddl'; readonly sql: string; readonly note?: string }
 export interface SqlStep { readonly kind: 'sql'; readonly sql: string; readonly note?: string }
+/** Application code in the migration's transaction: the host registered
+ * under `run` (`migrate(…, { hosts })`), at the version it was reviewed with. */
+export interface HostStep {
+  readonly kind: 'host';
+  readonly run: string;
+  readonly version: string;
+  readonly note?: string;
+  readonly model?: object;
+}
 export interface JsltStep {
   readonly kind: 'jslt';
   readonly collection: string;
@@ -95,7 +104,7 @@ export interface TableStep {
   readonly plan: ReviewedTablePlan;
   readonly note?: string;
 }
-export type MigrationStep = DdlStep | SqlStep | JsltStep | QueryStep | DeriveStep | RebuildStep | TableStep;
+export type MigrationStep = DdlStep | SqlStep | JsltStep | QueryStep | DeriveStep | RebuildStep | TableStep | HostStep;
 
 export interface PhysicalObject {
   readonly type: 'table' | 'view' | 'index' | 'trigger';
@@ -121,6 +130,8 @@ export interface PhysicalHeader {
     readonly dialect?: never; readonly schema?: never; readonly catalog?: never }
     | { readonly dialect: 'postgres'; readonly schema: string; readonly catalog: readonly NativePhysicalObject[];
       readonly objects?: never; readonly tables?: never };
+  /** A scoped plan inventories these tables and their programs alone. */
+  readonly scope?: { readonly tables: readonly string[] };
 }
 
 /** The `$migration` 0.1 document (MIGRATION-FORMAT §2). */
@@ -198,6 +209,9 @@ export class Migration<From = unknown, To = unknown> {
   ddl(sql: string, note?: string): Migration<From, To>;
   /** One data statement spelled directly (`sql`, MIGRATION-FORMAT §9.4). */
   sql(sql: string, note?: string): Migration<From, To>;
+  /** Application code in the migration's transaction (`host`): the host
+   * registered under `run`, at `version`. */
+  host(run: string, version: string, note?: string): Migration<From, To>;
   /** With an explicit current model, both the row and result use that layout. */
   transform<Current extends object, N extends DeclaredNames<Current>, V extends ExprBase<unknown> = MemberExpr<DocOf<Current, N>>>(
     name: N,

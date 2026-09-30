@@ -270,7 +270,10 @@ index method, so it reads `p.get('at').within(region)`. A stored score
 named `similarity` is the same bite with a worse error — `r.similarity`
 is the *method*, so calling it as a member yields a `TypeError` about a
 function rather than a coded build error, because the surface never sees
-a member access at all. `r.get('similarity')` reads the data.
+a member access at all. `r.get('similarity')` reads the data. A stock
+movement stored as `in` (beside `out`) bites the same way since `in()`
+became membership: `s.in` is the method, and `s.get('in')` reads the
+quantity.
 
 **Membership is `in()`, not `eq(array)`.** `$eq` is a general comparison
 (QUERY-FORMAT §8.4): true when any item of one side equals any item of

@@ -51,9 +51,10 @@ export const PHYSICAL_STEP_KINDS = new Set(['ddl', 'sql', 'rebuild', 'derive', '
  * @returns {DbCompileError}
  */
 export function stepFailure(migrationId, index, kind, reason, cause) {
-  return new DbCompileError('JD0023',
+  // a step that cannot succeed as written: no rerun fixes it
+  return Object.assign(new DbCompileError('JD0023',
     `migration '${migrationId}' step ${index} (${kind}) failed: ${reason}`,
-    undefined, cause);
+    undefined, cause), { class: 'error', retryable: false });
 }
 
 /** A path with no filter capable of reading the collection root. */
@@ -276,7 +277,11 @@ export function compileDocumentStep(step, index, context) {
   };
 }
 
-const STEP_KINDS = new Set([...DOCUMENT_STEP_KINDS, ...PHYSICAL_STEP_KINDS]);
+/** The kind that runs application code: a registered host, in the step's
+ * savepoint of its link's transaction — so only where there is one. */
+export const HOST_STEP_KIND = 'host';
+
+const STEP_KINDS = new Set([...DOCUMENT_STEP_KINDS, ...PHYSICAL_STEP_KINDS, HOST_STEP_KIND]);
 
 /**
  * Structural validation of one migration document, including the
@@ -304,6 +309,13 @@ export function checkMigrationDocument(migration) {
       throw new DbCompileError('JD0023',
         `migration '${migration.id}' step ${i} is a rebuild without its rendered `
         + 'table/create/copy/indexes');
+    }
+    if (step.kind === HOST_STEP_KIND && (typeof step.run !== 'string' || step.run === ''
+      || typeof step.version !== 'string' || step.version === ''
+      || (step.note !== undefined && typeof step.note !== 'string')
+      || (step.model !== undefined && (!step.model || typeof step.model !== 'object' || step.model.$model !== '0.1')))) {
+      throw new DbCompileError('JD0023',
+        `migration '${migration.id}' step ${i} is a host step without its run and version names`);
     }
     if (step.kind === 'sql' && typeof step.sql !== 'string') {
       throw new DbCompileError('JD0023',

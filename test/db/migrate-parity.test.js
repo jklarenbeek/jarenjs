@@ -283,7 +283,7 @@ describe('side-effect-free status', () => {
       const beforeBytes = fs.readFileSync(dbPath);
       const migration = planMigration(M0, M1, { dialect: sqliteDialect, id: '0001' }).migration;
       const report = await migrationStatus({ driver: nodeDriver(), path: dbPath }, [migration], { model: M1 });
-      assert.deepStrictEqual(report, { applied: [], pending: ['0001'], drift: null, upToDate: false });
+      assert.deepStrictEqual(report, { applied: [], pending: ['0001'], drift: null, upToDate: false, baseline: null });
       const db = new DatabaseSync(dbPath, { readOnly: true });
       assert.strictEqual(db.prepare("SELECT name FROM sqlite_schema WHERE name = '_jaren_migrations'").get(), undefined);
       db.close();
@@ -292,7 +292,7 @@ describe('side-effect-free status', () => {
       // on a migrated file the answers are what they were
       await migrate({ driver: nodeDriver(), path: dbPath }, [migration], { baseline: M0, model: M1 });
       const after = await migrationStatus({ driver: nodeDriver(), path: dbPath }, [migration], { model: M1 });
-      assert.deepStrictEqual(after, { applied: ['0001'], pending: [], drift: null, upToDate: true });
+      assert.deepStrictEqual(after, { applied: ['0001'], pending: [], drift: null, upToDate: true, baseline: null });
     }
     finally {
       cleanup();

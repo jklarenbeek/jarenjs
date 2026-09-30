@@ -27,7 +27,7 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { DbCompileError } from './errors.js';
 import { refuseCancelled } from './cancellation.js';
 import {
-  compileDocumentStep, checkMigrationDocument, PHYSICAL_STEP_KINDS, DOCUMENT_STEP_KINDS,
+  compileDocumentStep, checkMigrationDocument, PHYSICAL_STEP_KINDS, DOCUMENT_STEP_KINDS, HOST_STEP_KIND,
   normalizeAssertionBounds, createAssertionBoundGuard,
 } from './document-steps.js';
 
@@ -50,6 +50,11 @@ function planStorelessRun(migrations, present, context) {
     // transaction can never take back
     for (let i = 0; i < migration.steps.length; i++) {
       const step = migration.steps[i];
+      if (step.kind === HOST_STEP_KIND) {
+        throw new DbCompileError('JD0025',
+          `migration '${migration.id}' step ${i} runs host '${step.run}', which needs a database `
+          + 'transaction to run in: a document runner has none. Run this migration against a store');
+      }
       if (PHYSICAL_STEP_KINDS.has(step.kind)) {
         throw new DbCompileError('JD0023',
           `migration '${migration.id}' step ${i} (${step.kind}) needs a database: a `

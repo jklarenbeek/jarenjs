@@ -20,7 +20,7 @@ import { describeValue, requireJson } from '../json-boundary.js';
 import { LinqBuildError } from '../errors.js';
 
 /** The kinds the runner accepts, in the artifact's order. */
-const STEP_KINDS = ['ddl', 'jslt', 'query', 'derive', 'sql', 'rebuild', 'table'];
+const STEP_KINDS = ['ddl', 'jslt', 'query', 'derive', 'sql', 'rebuild', 'table', 'host'];
 const EXPECTS = ['empty', 'ebv'];
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** An assertion evaluates with no externals: `p.x` cannot appear. */
@@ -87,6 +87,24 @@ const NO_EXTERNALS = new Proxy(Object.freeze({}), {
 export function ddlStep(sql, note = undefined) {
   const out = { kind: 'ddl', sql: requireSql(sql, 'ddl()') };
   const n = readNote(note, 'ddl()');
+  if (n !== undefined) out.note = n;
+  return out;
+}
+
+/**
+ * `{ kind: 'host', run, version, note? }` — application code in the
+ * migration's transaction: the host the run registers under `run`
+ * (`migrate(…, { hosts })`), at the version the step was reviewed with.
+ * @param {string} run @param {string} version @param {string} [note]
+ */
+export function hostStep(run, version, note = undefined) {
+  for (const [value, what] of [[run, 'run'], [version, 'version']]) {
+    if (typeof value !== 'string' || value === '') {
+      throw new LinqBuildError('JL0101', `host() names its ${what} as a non-empty string, got ${describeValue(value)}`);
+    }
+  }
+  const out = { kind: 'host', run, version };
+  const n = readNote(note, 'host()');
   if (n !== undefined) out.note = n;
   return out;
 }
@@ -253,11 +271,15 @@ export function rawStep(step) {
       need('collection', typeof raw.collection === 'string');
       need('columns', Array.isArray(raw.columns) && raw.columns.length > 0);
       break;
+    case 'host':
+      need('run', typeof raw.run === 'string' && raw.run !== '');
+      need('version', typeof raw.version === 'string' && raw.version !== '');
+      break;
     default: // rebuild
       need('table', typeof raw.table === 'string');
       need('create', Array.isArray(raw.create) && raw.create.length > 0);
       need('copy', typeof raw.copy === 'string');
       need('indexes', Array.isArray(raw.indexes));
   }
-  return ['jslt', 'query'].includes(raw.kind) ? withModel(raw, raw.model) : raw;
+  return ['jslt', 'query', 'host'].includes(raw.kind) ? withModel(raw, raw.model) : raw;
 }

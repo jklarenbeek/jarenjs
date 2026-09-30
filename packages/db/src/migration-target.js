@@ -20,8 +20,29 @@ export function physicalObjectKey(object) {
     : JSON.stringify([object.schema, object.type, object.owner, object.name]);
 }
 
+/**
+ * An owned SQLite connection enforces foreign keys whatever its binding's
+ * default: node:sqlite switches them on, bun:sqlite and a wasm build leave
+ * them off, and a migration's cascade must mean what the schema declares on
+ * every driver — a delete under Bun used to leave the orphan Node removed.
+ * The setting belongs outside any transaction, so it is made once, at open,
+ * and read back. A borrowed connection keeps its caller's setting; the
+ * foreign-key check each link ends with refuses what it would leave behind.
+ * @param {any} connection @returns {any} value-or-promise
+ */
+function enforceForeignKeys(connection) {
+  const dialect = connection.dialect;
+  if (dialect?.capabilities?.foreignKeysAlwaysOn === true || typeof dialect?.pragma?.foreignKeys !== 'function') return null;
+  return chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
+    chain(connection.prepare(dialect.introspect.pragma('foreign_keys')), (statement) => chain(statement.get([]), (row) => {
+      if (Number(row?.foreign_keys) !== 1)
+        throw new DbCompileError('JD0021', 'the migration connection could not switch foreign-key enforcement on');
+    })));
+}
+
 /** Keep synchronous borrowed work synchronous; close only acquired resources.
  * Cleanup failures retain the original failure as well as the close failure.
+ * An owned connection enforces foreign keys before anything runs on it.
  * @param {any} target @param {(connection:any)=>any} run @returns {any} */
 export function withMigrationConnection(target, run) {
   const borrowed = target?.connection !== undefined;
@@ -49,7 +70,7 @@ export function withMigrationConnection(target, run) {
       throw error;
     };
     let result;
-    try { result = ownedRun(connection); }
+    try { result = chain(enforceForeignKeys(connection), () => ownedRun(connection)); }
     catch (error) { return fail(error); }
     return isThenable(result) ? result.then(finish, fail) : finish(result);
   }));
@@ -191,7 +212,10 @@ export function preservationSchemaOf(connection) {
  * @param {any} connection @param {any} physical @param {boolean} after
  * @param {any[]} [allocations] @returns {any} */
 export function verifyPreservation(connection, physical, after, allocations = []) {
-  return chain(preservationSchemaOf(connection), (actual) => {
+  return chain(preservationSchemaOf(connection), (whole) => {
+    // a scoped plan sees its own tables and their programs; an unrelated
+    // table another installation keeps is none of its business
+    const actual = physical.scope === undefined ? whole : whole.filter((object) => physical.scope.tables.includes(object.owner));
     if (!after && canonicalizeJson(actual) !== canonicalizeJson(physical.source))
       throw new DbCompileError('JD0020', 'the physical source schema changed after the plan was prepared');
     if (after) {
@@ -242,6 +266,18 @@ export function checkPhysicalPreservation(physical, dialect) {
   const fail = () => { throw new DbCompileError('JD0021', 'invalid physical source, dispositions, assertions or steps'); };
   if (!physical || !Array.isArray(physical.source) || !physical.dispositions || !Array.isArray(physical.assertions)) fail();
   if (physical.target !== undefined) physicalTargetOf(physical.target);
+  if (physical.scope !== undefined) {
+    const tables = physical.scope?.tables;
+    if (!physical.scope || typeof physical.scope !== 'object' || Array.isArray(physical.scope)
+      || Object.keys(physical.scope).some((key) => key !== 'tables') || !Array.isArray(tables) || tables.length === 0
+      || new Set(tables).size !== tables.length || tables.some((table) => typeof table !== 'string' || table === '' || ENGINE_TABLES.has(table)))
+      throw new DbCompileError('JD0027', 'a physical scope is { tables: [...] }, a non-empty list of distinct table names');
+    if (physical.dialect !== undefined)
+      throw new DbCompileError('JD0021', 'a physical scope is qualified on SQLite; a PostgreSQL plan inventories its schema whole');
+    const outside = physical.source.find((object) => !tables.includes(object?.owner));
+    if (outside !== undefined)
+      throw new DbCompileError('JD0027', `the scoped source holds '${physicalObjectKey(outside)}', which belongs to no table of its scope`);
+  }
   if (physical.dialect !== undefined) {
     if (physical.dialect !== dialect?.name || physical.schema !== dialect.schema
       || physical.target?.dialect !== physical.dialect || physical.target?.schema !== physical.schema) fail();

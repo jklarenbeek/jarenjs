@@ -247,6 +247,59 @@ describe('the rebuild keeps the absent-vs-null rule and names what it loses', ()
   });
 });
 
+describe("a migration's failures are classified: no raw driver error escapes migrate()", () => {
+  const U = { $model: '0.1', collections: { docs: { schema: { type: 'object' }, key: '/id', indexes: [{ name: 'by_email', path: '$.email', unique: true }] } } };
+  const link = (/** @type {string} */ id, /** @type {any[]} */ steps) => ({ $migration: '0.1', id, from: shapeHash(U), to: shapeHash(U), steps });
+  const seeded = async (/** @type {string} */ name) => {
+    const file = fresh(name);
+    const store = await openStore(U, { driver: nodeDriver(), path: file });
+    await store.collection('docs').put({ id: 'a', email: 'x' });
+    await store.collection('docs').put({ id: 'b', email: 'y' });
+    await store.close();
+    return file;
+  };
+
+  it("a transform that meets a UNIQUE index is JD0023 'constraint', the driver's error as its cause", async () => {
+    const file = await seeded('classified-unique');
+    const same = link('same', [{ kind: 'jslt', collection: 'docs', stylesheet: [{ match: '$', body: { id: '$.id', email: 'same' } }] }]);
+    await assert.rejects(migrate({ driver: nodeDriver(), path: file }, [same], { baseline: U, model: U, shadow: false }),
+      (/** @type {any} */ e) => e.code === 'JD0023' && e.class === 'constraint' && e.retryable === false
+        && /step 0 \(jslt\) failed: UNIQUE constraint failed/.test(e.message) && e.cause?.code === 'ERR_SQLITE_ERROR');
+  });
+
+  it("a held writer makes the migration's begin 'busy', retryable — as opening a store answers it", async () => {
+    const file = await seeded('classified-busy');
+    const holder = new DatabaseSync(file);
+    holder.exec('BEGIN IMMEDIATE');
+    try {
+      await assert.rejects(migrate({ driver: nodeDriver(), path: file, busyTimeout: 50 },
+        [link('noop', [{ kind: 'sql', sql: 'UPDATE "docs" SET "doc" = "doc" WHERE 0' }])], { baseline: U, model: U, shadow: false }),
+      (/** @type {any} */ e) => e.code === 'JD0023' && e.class === 'busy' && e.retryable === true && /database is locked/.test(e.message));
+    }
+    finally {
+      holder.exec('ROLLBACK');
+      holder.close();
+    }
+  });
+
+  it('a ddl or sql step that fails carries its verdict; a step that cannot compile is an error no rerun fixes', async () => {
+    const file = await seeded('classified-steps');
+    for (const [kind, sql] of /** @type {const} */ ([['sql', 'INSERT INTO nowhere VALUES (1)'], ['ddl', 'CREATE INDEX broken ON nowhere (x)']])) {
+      await assert.rejects(migrate({ driver: nodeDriver(), path: file }, [link(kind, [{ kind, sql }])], { baseline: U, model: U, shadow: false }),
+        (/** @type {any} */ e) => e.code === 'JD0023' && e.class === 'error' && e.retryable === false && e.cause !== undefined, kind);
+    }
+    await assert.rejects(migrate({ driver: nodeDriver(), path: file },
+      [link('uncompiled', [{ kind: 'jslt', collection: 'docs', stylesheet: /** @type {any} */ ({ templates: [] }) }])], { baseline: U, model: U, shadow: false }),
+    (/** @type {any} */ e) => e.code === 'JD0023' && e.class === 'error' && e.retryable === false);
+  });
+
+  it('a connection that cannot open is classified too', async () => {
+    const missing = path.join(dir, 'no-such-directory', 'store.db');
+    await assert.rejects(migrate({ driver: nodeDriver(), path: missing }, [], { baseline: U }),
+      (/** @type {any} */ e) => /^J[A-Z]\d{4}$/.test(e.code) && typeof e.class === 'string');
+  });
+});
+
 describe('the artifact describes every step kind', () => {
   const validate = {
     latest: compileArtifact(JSON.parse(fs.readFileSync('packages/db/schemas/jaren-migration.schema.json', 'utf8'))),
@@ -265,6 +318,16 @@ describe('the artifact describes every step kind', () => {
     }
     assert.strictEqual(validate.latest({ ...plans[0].migration, steps: [{ kind: 'sql' }] }), false, 'a sql step needs its text');
     assert.strictEqual(validate.latest({ ...plans[1].migration, steps: [{ kind: 'rebuild', table: 'User' }] }), false, 'a rebuild needs its rendered parts');
+  });
+
+  it('a host step and a scoped physical header validate against both artifacts', () => {
+    const doc = { $migration: '0.1', id: 'h', from: 'a', to: 'a', steps: [{ kind: 'host', run: 'repair', version: '1', note: 'why' }],
+      physical: { source: [], dispositions: {}, assertions: [], scope: { tables: ['item'] } } };
+    for (const grammar of [validate.latest, validate.draft7]) {
+      assert.strictEqual(grammar(doc), true);
+      assert.strictEqual(grammar({ ...doc, steps: [{ kind: 'host', run: 'repair' }] }), false, 'a host step names its version');
+      assert.strictEqual(grammar({ ...doc, physical: { ...doc.physical, scope: { tables: [] } } }), false, 'a scope names its tables');
+    }
   });
 });
 

@@ -1,0 +1,46 @@
+{
+  "migration": {
+    "$migration": "0.1",
+    "from": "13xgrbo",
+    "id": "retype",
+    "steps": [
+      {
+        "copy": "INSERT INTO \"User__rebuild\" (\"id\", \"age\", \"doc\") SELECT \"id\", CAST(\"age\" AS TEXT), \"doc\" FROM \"User\"",
+        "create": [
+          "CREATE TABLE \"User__rebuild\" (\"id\" TEXT PRIMARY KEY, \"age\" TEXT, \"doc\" BLOB NOT NULL) STRICT"
+        ],
+        "indexes": [],
+        "kind": "rebuild",
+        "note": "rebuild 'User' (structural change)",
+        "table": "User"
+      },
+      {
+        "collection": "User",
+        "kind": "jslt",
+        "stylesheet": [
+          {
+            "body": {
+              "id": "$.id"
+            },
+            "match": "$"
+          }
+        ]
+      }
+    ],
+    "to": "1yq4e63"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [
+      "User"
+    ],
+    "transformed": [
+      "User"
+    ],
+    "widened": []
+  }
+}
