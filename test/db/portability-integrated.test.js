@@ -167,9 +167,13 @@ describe('the portability corpus', () => {
     assert.ok(differing.length >= 6,
       `only ${differing.length} capabilities differ across the dialects: ${differing}`);
     for (const name of ['pragmas', 'declaredSqlText', 'virtualTables', 'untypedColumns',
-      'foreignKeysAlwaysOn', 'immediateTransactions']) {
+      'foreignKeysAlwaysOn']) {
       assert.ok(differing.includes(name), `${name} does not differ`);
     }
+    // the store's writer lock no longer differs: every dialect takes one,
+    // SQLite as `BEGIN IMMEDIATE` and PostgreSQL as an advisory lock after
+    // `BEGIN`
+    assert.ok(answers.every((one) => one.immediateTransactions === true));
   });
 
   describe('forward and back, on SQLite', () => {

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The query surface over one collection: the D2 provider
+ * @file The query surface over one collection: the provider
  * (`execute(document, options)` — how a linq chain runs here with no
  * import edge), the streaming cursor (`query`), and `explain()`.
  *
@@ -68,7 +68,7 @@ import {
  * residual.
  * @param {number} [bound]
  * @param {{ functions?: any, extensions?: any } | null} [operators]
- * @param {any} [zoneProvider] - D7's injected zone provider, or absent
+ * @param {any} [zoneProvider] - the injected zone provider, or absent
  * @param {(() => number) | undefined} [now] - the store's clock, the one a
  *   `deadline` is compared against before a call and at every row
  *   boundary; the platform's own when the store threads none
@@ -84,7 +84,7 @@ export function createQueryState(bound = undefined, operators = null,
     /** Registry operator name → the SQL AGGREGATE registered for it. */
     registeredAggregates: new Map(),
     operators: operators ?? null,
-    // D7's injected clock: a named zone is host code a database does
+    // The injected clock: a named zone is host code a database does
     // not have, so a calendar ladder over one walks in the residual —
     // and the residual is the caller's OWN document, so the frozen spec
     // reaches the kernel unchanged rather than being rebuilt in UTC
@@ -241,7 +241,7 @@ function recoverOverflow(call, fallback) {
 const bounded = (fn, wrap) => (...args) => attempt(() => fn(...args), wrap);
 
 /**
- * The budget provenance `explain()` carries (D7): which profile applied
+ * The budget provenance `explain()` carries: which profile applied
  * and from where, every bound it imposed — each one the engine COUNTS
  * and enforces — and, by name, the two the driver cannot measure:
  * elapsed statement time and visited rows are empty capability slots on
@@ -1380,12 +1380,12 @@ export function createQueryEngine(context) {
         // classification the cursor itself carries, so the two agree
         streaming: classified.streaming,
         barrier: classified.barrier,
-        // the profile that applied and every bound it imposed (D7)
+        // the profile that applied and every bound it imposed
         budget: budgetOf(profile, profileSource, connection.capabilities),
         // the order the STATEMENT executes under — the plan's declared
         // terms and the tie-breaker the emitter appends, in the same
-        // normalized form the emitter renders (D6: read from the plan,
-        // never parsed back out of SQL). `null` is the honest answer for
+        // normalized form the emitter renders (read from the plan, never
+        // parsed back out of SQL). `null` is the honest answer for
         // a statement that orders nothing at all
         order: planOrder(diverted ? entry.fullScanShape() : entry.plan),
         // what the statement projects: `null` when it reads the whole
@@ -1477,7 +1477,7 @@ export function createQueryEngine(context) {
 }
 
 /**
- * `strictStreaming` (D6 applied to memory): a plan that would buffer is
+ * `strictStreaming` (refusing rather than degrading, applied to memory): a plan that would buffer is
  * declined by name before any statement runs, never run with its memory
  * behaviour quietly changed.
  * @param {any} options
@@ -1497,7 +1497,7 @@ function refuseBuffered(options, classified, docPath) {
 import { mergeEntityRow, parseGraphRow } from './graph.js';
 import { relationTables, joinTableRoots } from './model.js';
 
-/** The default include depth bound (D14: printed, never silent). */
+/** The default include depth bound (printed, never silent). */
 export const INCLUDE_DEPTH_DEFAULT = 3;
 /** The default per-root bounds of an included to-many relation
  * (MODEL-FORMAT §10.4): rows per parent, and serialised bytes per
@@ -1689,7 +1689,7 @@ export function createEntityQueryEngine(context) {
       if (planned.mode !== 'native' && profile.refuseFullScan === true) {
         // the residual reads every row of every referenced root before
         // the engine decides — a full-table scan by shape, refused at
-        // preflight rather than estimated (D6)
+        // preflight rather than estimated
         throw profileEntityRefusal('the profile refuses a full-table scan, and the residual this '
           + `document needs fetches every row of ${planned.referenced.join(', ')} `
           + `('${planned.reasons[0]?.construct}' — ${planned.reasons[0]?.reason})`, docPath);
@@ -2322,7 +2322,7 @@ export function createLoadEngine(context, entityName) {
       if (profile !== null && profile.maxIncludedRows !== null && many && childSpec.count !== true
         && (maxRows === null || maxRows > profile.maxIncludedRows)) {
         // the profile's cap on included rows per root is a hard maximum
-        // the include's own declaration cannot exceed (D6: refused, not
+        // the include's own declaration cannot exceed (refused, not
         // narrowed quietly)
         throw profileEntityRefusal(`the profile caps included rows per root at ${profile.maxIncludedRows}; `
           + `the include '${relationName}' declares ${maxRows === null ? 'no bound (Infinity)' : maxRows}`
@@ -2890,7 +2890,7 @@ export function createLoadEngine(context, entityName) {
         // a graph load pulls one root row per statement row — where the
         // binding can hand rows over one at a time
         ...rowClassOf(connection),
-        // the profile that applied and every bound it imposed (D7)
+        // the profile that applied and every bound it imposed
         budget: budgetOf(entry.profile, profileSourceOf(options), connection.capabilities),
       };
     },

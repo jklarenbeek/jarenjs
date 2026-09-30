@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { migrate, migrationStatus, planPhysicalMigration, readSchema, physicalObjectKey, classifyDriverError,
   planTableMigration, applyTableMigration, planSchemaChange, applySchemaChange } from '@jarenjs/db';
 import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
-import { physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership } from '../../packages/db/src/migration-target.js';
+import { physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, lockMigration } from '../../packages/db/src/migration-target.js';
 import { sqlTokens } from '../../packages/db/src/dialects/check-read.js';
 import { postgresSqlToken } from '../../packages/db/src/dialects/postgres-migration.js';
 
@@ -106,6 +106,22 @@ const preservation = async (connection, target, steps, id = 'change') => planPhy
   dispositions: Object.fromEntries((await readSchema(connection)).catalog.map((object) => [physicalObjectKey(object), 'preserve'])),
 });
 describe('PostgreSQL reviewed physical migrations', { skip: !url && 'JAREN_PG_URL is not set' }, () => {
+  it('takes the migration lock on a session the host left on its own search path, keyed like every other class', async () => {
+    const { default: pg } = await import('pg');
+    const pool = new pg.Pool({ connectionString: url, max: 1 });
+    try {
+      // no schema named: the dialect's catalog reads search the session's
+      // path, and the lock is keyed by its current schema (a list of
+      // schemas is no key — it was a syntax error)
+      const connection = await postgresDriver(pool).open();
+      try {
+        assert.match(connection.dialect.migration.lock, /pg_catalog\.hashtext\(current_schema\(\)\)/);
+        await connection.transaction(async (scope) => { await lockMigration(scope); });
+      }
+      finally { await connection.close(); }
+    }
+    finally { await pool.end(); }
+  });
   it('replays the exact native artifact on an independent database before applying deferred foreign-key work', async () => fixture('shadow', async ({ connection, pool, schema, driver }) => {
     const { default: pg } = await import('pg');
     const database = `jaren_shadow_${process.pid}`;

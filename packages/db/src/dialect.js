@@ -60,8 +60,9 @@ export const DIALECT_CAPABILITIES = Object.freeze({
    * PostgreSQL refuses a savepoint outside a transaction block, so a
    * top-level transaction has to be `BEGIN` and `COMMIT` there. */
   savepointStartsTransaction: false,
-  /** A transaction can take the write lock up front (`tx.beginImmediate`
-   * is a distinct statement rather than a synonym for `tx.begin`). */
+  /** A transaction can take the store's writer lock before its body
+   * runs: `tx.beginImmediate` is a distinct statement, or `tx.writerLock`
+   * follows `BEGIN`. */
   immediateTransactions: false,
   /** A `GROUP BY` / `ORDER BY` term may name a result alias, so a
    * bucket ladder is written once rather than three times. */
@@ -142,6 +143,9 @@ function normalizeCapabilities(declared) {
  *     afterLog?: (connection: any) => any },
  *   jobs?: any,
  *   replication?: any,
+ *   owner?: { kind: 'lease', table: string, create: string, ensure: string, read: string,
+ *     take: string, renew: string, release: string }
+ *     | { kind: 'session', acquire: string, release: string },
  *   foreignKeySuffix?: string,
  *   foreignKeyActions?: Record<string, string>,
  *   comparableForeignKeyAction?: (action: string) => string,
@@ -180,6 +184,8 @@ function normalizeCapabilities(declared) {
  *   excludedRef: (columnSql: string) => string,
  *   tx: { begin: string, beginImmediate: string, commit: string,
  *     rollback: string, deferForeignKeys?: string,
+ *     writerLock?: string, isolationLevels: readonly string[],
+ *     beginAt?: (level: string) => string,
  *     savepoint: (n: string) => string, release: (n: string) => string,
  *     rollbackTo: (n: string) => string },
  *   pragma?: { set: (name: string, value: number | string) => string,
@@ -583,6 +589,8 @@ export function createDialect(spec) {
     capture: spec.capture,
     jobs: spec.jobs,
     replication: spec.replication,
+    // how a store becomes the single owner of its database, or absent
+    owner: spec.owner,
     comparableForeignKeyAction: spec.comparableForeignKeyAction ?? ((action) => action),
     /**
      * A foreign-key action in this engine's SQL spelling: the model's

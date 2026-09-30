@@ -5,7 +5,7 @@
  * nested transaction and the typed client. An unknown member is refused
  * by name with the nearest one (`JD0013`) before the body runs — a
  * misspelt `{ mod: 'immediate' }` used to run DEFERRED, and a bare
- * string, `{ retry: 3 }` or `{ isolation: 'serializable' }` ran as if
+ * string, `{ retry: 3 }` or `{ isolation: 'snapshot' }` ran as if
  * nothing had been asked. A nested transaction reads the same set and
  * refuses what its savepoint cannot honour (`JD0014`): `unitOfWork` is
  * the root's to choose, and only the root can take the writer lock. The
@@ -72,7 +72,7 @@ describe('transaction options are a closed set (JD0013)', () => {
     const store = await openStore(MODEL, { driver: nodeDriver() });
     const client = await open(MODEL, { driver: nodeDriver(), validator: null });
     let ran = 0;
-    for (const options of ['immediate', { retry: 3 }, { isolation: 'serializable' }, { timeout: 10 },
+    for (const options of ['immediate', { retry: 3 }, { isolation: 'snapshot' }, { timeout: 10 },
       { mode: 'bogus' }, { unitOfWork: 'bogus' }, { signal: 'soon' }, null, ['immediate']]) {
       await assert.rejects(store.transaction(async () => { ran++; }, /** @type {any} */ (options)), coded('JD0013'),
         `store.transaction ${JSON.stringify(options)}`);

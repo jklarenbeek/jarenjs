@@ -325,7 +325,8 @@ describe('the injected PostgreSQL driver', () => {
       + 'FROM pg_catalog.pg_namespace n WHERE n.nspname = $1',
       "SELECT pg_catalog.set_config('search_path', $1, false)",
       "SELECT current_setting('server_version_num') AS num, "
-      + "current_setting('server_version') AS version",
+      + "current_setting('server_version') AS version, "
+      + "current_setting('default_transaction_isolation') AS isolation",
     ]);
     assert.strictEqual(connection.capabilities.version, '17.5');
     await connection.close();

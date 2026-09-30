@@ -41,6 +41,7 @@ export const DB_CODES = Object.freeze({
   JD0012: 'work waited too long for the open transaction to settle',
   JD0013: 'an option passed to a store operation is not one it reads, or is malformed',
   JD0014: 'a transaction guarantee was requested where it cannot act',
+  JD0015: 'owner was asked of an adopted store whose database has no owner table',
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
@@ -79,7 +80,7 @@ export const DB_CODES = Object.freeze({
   JD2050: 'a changeset could not be decoded',
   JD2051: 'the change log is not enabled',
   JD2060: 'the maintained live state exceeded its bound',
-  JD2061: 'another context owns the database',
+  JD2061: 'another context owns the database, or another owner holds its lease',
   JD2062: 'the store closed with job handlers still in flight',
   JD2063: 'the store is closed',
   JD2064: 'the call was aborted while it waited for the open transaction',
@@ -157,13 +158,18 @@ export const DB_CODES = Object.freeze({
  *    `jobs: null`, a misspelt `transactions`); refused before the driver
  *    opens, so no file is created and no handle is held
  *  - `JD0013` — an option passed to a store operation — a transaction's
- *    `mode`, `signal`, `unitOfWork` — is not one it reads (named, with
- *    the nearest member), or its value is malformed; refused before the
- *    operation begins
+ *    `mode`, `signal`, `unitOfWork`, `isolation` — is not one it reads
+ *    (named, with the nearest member), or its value is malformed; refused
+ *    before the operation begins
  *  - `JD0014` — a transaction guarantee requested where it cannot act:
- *    `unitOfWork` on a nested transaction (a savepoint writes through the
- *    unit of work around it), or `mode: 'immediate'` inside a
- *    transaction that did not take the writer lock
+ *    `unitOfWork` or `isolation` on a nested transaction (a savepoint
+ *    writes through the unit of work around it and runs at its root's
+ *    level), `mode: 'immediate'` inside a transaction that did not take
+ *    the writer lock, and `retry` or `holdTimeoutMs` on the synchronous
+ *    twin or a nested transaction
+ *  - `JD0015` — `owner` on an adopted SQLite store whose database has no
+ *    owner table: adoption creates nothing, so the operator creates it
+ *    once with the statement the reason names
  *  - `JD0010` — `strict: true` and part of the query would have run
  *    outside the database; the reason names the forcing construct
  *  - `JD0011` — the active profile refused the document before any
@@ -244,7 +250,12 @@ export class DbCompileError extends CodedError {
  *    degrade
  *  - `JD2061` — a second context tried to open a database whose
  *    storage grants one context exclusive access (the owner topology
- *    of LIVE-FORMAT §11); connect to the owner instead
+ *    of LIVE-FORMAT §11); connect to the owner instead. Also the owner
+ *    lease (MODEL-FORMAT §5.1): an open with `owner` while another
+ *    Store holds the lease (`owner` names it, `expiresAt` says until
+ *    when; busy, retryable), and every call of a Store whose lease
+ *    another holder took (not retryable — close it) or that lapsed and
+ *    could not be renewed yet (retryable)
  *  - `JD2063` — a call after `close()`: every entry point of a closed
  *    store refuses by name rather than leaking the driver's own error,
  *    and a second `close()` is a no-op on every driver

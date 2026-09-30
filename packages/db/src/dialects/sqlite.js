@@ -13,6 +13,7 @@ import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
 import { sqliteInvariantTriggers } from './invariant-sql.js';
 import { sqliteChecks } from './check-read.js';
+import { OWNER_TABLE } from '../engine-metadata.js';
 
 /** @param {string} s */
 function quoteIdentifier(s) {
@@ -247,6 +248,11 @@ function readGenerated(rows) {
   return out;
 }
 
+/** The owner lease's one row: the owner's id, the holding store's random
+ * token, and the expiry in epoch milliseconds. */
+const OWNER_COLUMNS = '("slot" INTEGER PRIMARY KEY CHECK ("slot" = 1), "owner" TEXT NOT NULL, '
+  + '"holder" TEXT NOT NULL, "expires_at" INTEGER NOT NULL) STRICT';
+
 export const sqliteDialect = createDialect({
   name: 'sqlite',
   capabilities: {
@@ -412,7 +418,13 @@ export const sqliteDialect = createDialect({
   legacyNumericKeyText: (ref) => `CAST(CAST(${ref} AS REAL) AS TEXT)`,
   tx: {
     begin: 'BEGIN',
+    // the write lock up front: this IS the store's writer lock, so no
+    // second statement follows it (`writerLock` is absent)
     beginImmediate: 'BEGIN IMMEDIATE',
+    // one writer at a time, and a reader that would write after another
+    // writer committed is refused (SQLITE_BUSY_SNAPSHOT): every
+    // transaction is serializable, whatever floor was asked for
+    isolationLevels: Object.freeze(['serializable']),
     deferForeignKeys: 'PRAGMA defer_foreign_keys = ON',
     commit: 'COMMIT',
     rollback: 'ROLLBACK',
@@ -502,6 +514,22 @@ export const sqliteDialect = createDialect({
       + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
   },
   readChecks: sqliteChecks,
+  // the owner lease (MODEL-FORMAT §5.1): one row in an engine table,
+  // taken in the first-open immediate bracket, renewed on a timer and
+  // deleted on close. `create` is the one statement an operator runs for
+  // an adopted store, which creates nothing itself
+  owner: Object.freeze({
+    kind: 'lease',
+    table: OWNER_TABLE,
+    create: `CREATE TABLE "${OWNER_TABLE}" ${OWNER_COLUMNS}`,
+    ensure: `CREATE TABLE IF NOT EXISTS "${OWNER_TABLE}" ${OWNER_COLUMNS}`,
+    read: `SELECT "owner", "holder", "expires_at" AS "expiresAt" FROM "${OWNER_TABLE}" WHERE "slot" = 1`,
+    take: `INSERT INTO "${OWNER_TABLE}" ("slot", "owner", "holder", "expires_at") VALUES (1, ?, ?, ?) `
+      + 'ON CONFLICT ("slot") DO UPDATE SET "owner" = excluded."owner", "holder" = excluded."holder", '
+      + '"expires_at" = excluded."expires_at"',
+    renew: `UPDATE "${OWNER_TABLE}" SET "expires_at" = ? WHERE "slot" = 1 AND "holder" = ?`,
+    release: `DELETE FROM "${OWNER_TABLE}" WHERE "slot" = 1 AND "holder" = ?`,
+  }),
 });
 
 /** SQLite schema inspection and identity preservation statements. */

@@ -21,7 +21,7 @@ import type {
 import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
   SavepointController, SaveReport, StoreCapabilities, TransactionStore,
-  EntityCursorOptions, QueryCursor, LoadContinuation, Page,
+  EntityCursorOptions, QueryCursor, LoadContinuation, Page, IsolationLevel,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 import type { Runtime } from '@jarenjs/core/runtime';
@@ -377,6 +377,9 @@ export interface TransactionOptions {
   /** Roll the transaction back when its body holds the connection
    * longer than this (the store's `holdTimeoutMs`; `JD2098`). */
   readonly holdTimeoutMs?: number;
+  /** The isolation floor (the store's `isolation`): the level asked for,
+   * or the session's stronger default, runs; `tx.isolation` reports it. */
+  readonly isolation?: IsolationLevel;
 }
 
 /**
@@ -400,13 +403,15 @@ export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown
   readonly capabilities: StoreCapabilities;
   /** The attempt of the retried transaction this callback runs in (1-based). */
   readonly attempt: number;
+  /** The isolation level the transaction runs at. */
+  readonly isolation: IsolationLevel;
   readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
   /** Nest through this transaction's savepoint. The options are the
    * root's less `unitOfWork` (`JD0014` at runtime), and `mode:
    * 'immediate'` needs a root that took the writer lock. */
   transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>,
-    options?: Omit<TransactionOptions, 'unitOfWork' | 'retry' | 'holdTimeoutMs'>): Promise<Awaited<R>>;
+    options?: Omit<TransactionOptions, 'unitOfWork' | 'retry' | 'holdTimeoutMs' | 'isolation'>): Promise<Awaited<R>>;
   /** Named partial rollback (MODEL-FORMAT §5.2) — the store's
    * `tx.savepoints`, forwarded unchanged: create, roll back to and
    * release a checkpoint by label without a sentinel exception. Only a

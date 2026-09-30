@@ -128,10 +128,10 @@ function publicJob(row) {
  * The capability one claim mints: the right to settle THIS attempt of
  * this job, for as long as the lease is valid.
  *
- * It is a token, never an owner (D1). One worker reuses one owner for
+ * It is a token, never an owner. One worker reuses one owner for
  * its whole life, so an owner cannot tell two attempts of one job apart
  * — which is how a corpse completed a job another attempt was still
- * running. And it is immutable (D2): `renew` answers a NEW lease, so a
+ * running. And it is immutable: `renew` answers a NEW lease, so a
  * reference someone kept can never become valid again behind their back.
  */
 function leaseOf(row) {
@@ -341,7 +341,7 @@ export function createJobEngine(options) {
   /**
    * Why a settling call matched no row. A guard that answers zero is not
    * `false` — a caller that cannot tell "already done" from "you are
-   * stale" guesses, and guesses wrong (D7). The row itself says which of
+   * stale" guesses, and guesses wrong. The row itself says which of
    * the three it was.
    * @param {any} lease
    * @param {string} verb
@@ -427,7 +427,7 @@ export function createJobEngine(options) {
   }, attempts));
 
   /**
-   * Renew a lease (D2): a NEW token, a later expiry, the same attempt
+   * Renew a lease: a NEW token, a later expiry, the same attempt
    * and the same generation — a renewal is not a new attempt. The lease
    * it answers replaces the one it was given, and that one then fails
    * every settling call, so a reference kept across a renewal can never
@@ -938,7 +938,7 @@ export function createJobEngine(options) {
       attempt.controller.abort(error);
     };
 
-    /** Arm the next renewal. Each one REPLACES the lease (D2), so the
+    /** Arm the next renewal. Each one REPLACES the lease (a lease is immutable), so the
      * attempt's newest lease is the only one that settles anything.
      * Never re-armed once the worker is stopping: after `stop()`
      * resolves, no control path may arm a timer. */

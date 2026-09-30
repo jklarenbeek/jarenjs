@@ -328,6 +328,7 @@ export function fullDoubleDialect(createDialect) {
     legacyNumericKeyText: (ref) => `LEGACYTEXT(${ref})`,
     tx: {
       begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK', deferForeignKeys: 'DEFER CHECKS',
+      isolationLevels: ['serializable'],
       savepoint: (n) => `MARK ${quoteIdentifier(n)}`,
       release: (n) => `UNMARK ${quoteIdentifier(n)}`,
       rollbackTo: (n) => `BACKTO ${quoteIdentifier(n)}`,

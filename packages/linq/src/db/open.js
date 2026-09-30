@@ -110,6 +110,8 @@ export async function open(model, options) {
       capabilities: tx.capabilities,
       // the attempt of a retried transaction this callback runs in (1-based)
       attempt: tx.attempt,
+      // the isolation level the transaction runs at
+      isolation: tx.isolation,
       sql: tx.sql,
       // the store's relational engine as this transaction's owner
       relational: tx.relational,

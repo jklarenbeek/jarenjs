@@ -2,6 +2,7 @@
 /** PostgreSQL locking and catalog strategy for the shared job queue. */
 
 import { verifyPostgresTables } from './postgres-metadata.js';
+import { POSTGRES_LOCK_CLASSES, transactionLock } from './postgres-locks.js';
 
 /** @param {any} connection @param {any} schema @returns {Promise<void>} */
 async function verify(connection, schema) {
@@ -22,8 +23,7 @@ async function verify(connection, schema) {
 export const postgresJobs = Object.freeze({
   numericType: 'NUMERIC', textType: 'TEXT COLLATE "C"',
   claimLock: ' FOR UPDATE SKIP LOCKED', rowLock: ' FOR UPDATE',
-  initialize: (connection) => connection.exec(
-    'SELECT pg_catalog.pg_advisory_xact_lock(1246907990, pg_catalog.hashtext(current_schema()))'),
+  initialize: (connection) => connection.exec(transactionLock(POSTGRES_LOCK_CLASSES.jobs)),
   verify,
   // One locked victim set drives both deletes under READ COMMITTED. A concurrent
   // requeue/reset cannot change which jobs lose their checkpoints halfway through.

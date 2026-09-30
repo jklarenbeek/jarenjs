@@ -33,7 +33,7 @@ import { adaptOo1Database } from './wasm-oo1.js';
 export { adaptOo1Database } from './wasm-oo1.js';
 
 /**
- * Build the injected HANDLE from a loaded sqlite3 module — the D6
+ * Build the injected HANDLE from a loaded sqlite3 module — the
  * recipe: the host loads the wasm build and picks the database class
  * (`sqlite3.oo1.DB` for `:memory:`, the SAH-pool util's `OpfsSAHPoolDb`
  * for OPFS persistence), and this package only adapts it.

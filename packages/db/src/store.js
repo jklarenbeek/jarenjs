@@ -53,6 +53,7 @@ import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js'
 import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine } from './jobs.js';
+import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, readSchema } from './introspect.js';
 import { collectEntityRoots, entityRoot } from './plan.js';
 import {
@@ -809,7 +810,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     stats: () => ({ ...stats, ...engine.stats() }),
     model: collection,
     queryShape: engine.shape,
-    // the D2 provider: value-or-promise, deliberately NOT lifted — a
+    // the provider: value-or-promise, deliberately NOT lifted — a
     // synchronous driver answers a linq chain synchronously
     execute: (document, options) => engine.execute(document, options),
     query: (document, options) => engine.query(document, options),
@@ -933,7 +934,7 @@ function asyncCollection(core, live) {
     put: lift(core.put),
     patch: lift(core.patch),
     delete: lift(core.delete),
-    // the provider contract (D2): execute stays value-or-promise so a
+    // the provider contract: execute stays value-or-promise so a
     // linq chain over a synchronous driver stays synchronous
     execute: (document, options) => core.execute(document, options),
     query: (document, options) => core.query(document, options),
@@ -961,6 +962,7 @@ const OPEN_OPTIONS = new Set([
   'capture', 'replication', 'jobs', 'live', 'adopt', 'transactions',
   'expressions', 'operators', 'functions', 'extensions',
   'profile', 'statementCacheBound', 'zoneProvider', 'runtime', 'holdTimeoutMs',
+  'isolation', 'owner',
 ]);
 
 /**
@@ -1013,6 +1015,39 @@ function refuseMalformedOpenOptions(options) {
   if (holdTimeoutMs !== undefined
     && (!Number.isInteger(holdTimeoutMs) || holdTimeoutMs < 1 || holdTimeoutMs > TIMER_MAX))
     throw refuse('holdTimeoutMs', 'is a whole number of milliseconds from 1 to 2147483647');
+  if (options.isolation !== undefined && !ISOLATION_LEVELS.includes(options.isolation))
+    throw refuse('isolation', "is 'read committed', 'repeatable read' or 'serializable'");
+  readOwnerOption(options);
+}
+
+/**
+ * Read `owner` — `{ id, leaseMs? }`, a closed set: `id` a non-empty string
+ * naming the owner in every refusal, `leaseMs` a whole number of
+ * milliseconds from 1,000 (a renewal runs every third of it) to 2^31 − 1,
+ * 30,000 by default. A read-only store never takes the lease, so asking
+ * one to is refused rather than ignored. Everything here is `JD0009`,
+ * before the driver opens.
+ * @param {Record<string, any>} options
+ * @returns {{ id: string, leaseMs: number } | undefined}
+ */
+function readOwnerOption(options) {
+  const value = options.owner;
+  if (value === undefined) return undefined;
+  const refuse = (/** @type {string} */ rule) => new DbCompileError('JD0009', `openStore option 'owner' ${rule}`);
+  if (!isPlainOptions(value)) throw refuse(`is { id, leaseMs? }, not ${describeValue(value)}`);
+  refuseUnknownMembers(value, ['id', 'leaseMs'], (key, hint) =>
+    refuse(`member '${key}' is not one it reads${hint}`));
+  const { id, leaseMs = OWNER_LEASE_DEFAULT_MS } = value;
+  if (typeof id !== 'string' || id === '') throw refuse(`id is a non-empty string, not ${describeValue(id)}`);
+  if (!Number.isInteger(leaseMs) || leaseMs < OWNER_LEASE_MIN_MS || leaseMs > TIMER_MAX) {
+    throw refuse(`leaseMs is a whole number of milliseconds from ${OWNER_LEASE_MIN_MS} to ${TIMER_MAX}, `
+      + `not ${describeValue(leaseMs)}`);
+  }
+  if (options.readOnly === true) {
+    throw refuse('needs a writable store: a read-only open never takes or checks the lease — '
+      + 'open read-only without owner');
+  }
+  return { id, leaseMs };
 }
 
 /**
@@ -1032,7 +1067,11 @@ function describeValue(value) {
  * nested transaction. A member a surface cannot honour is not unknown
  * there; it is a guarantee requested where it cannot act (`JD0014`).
  */
-const TRANSACTION_OPTIONS = Object.freeze(['mode', 'signal', 'unitOfWork', 'retry', 'holdTimeoutMs']);
+const TRANSACTION_OPTIONS = Object.freeze(['mode', 'signal', 'unitOfWork', 'retry', 'holdTimeoutMs', 'isolation']);
+
+/** The isolation levels a transaction may ask for, weakest first — a
+ * FLOOR: the backend runs the level asked for or a stronger one. */
+const ISOLATION_LEVELS = Object.freeze(['read committed', 'repeatable read', 'serializable']);
 
 /** The members `retry` reads. */
 const RETRY_MEMBERS = Object.freeze(['attempts', 'baseMs', 'maxMs']);
@@ -1044,9 +1083,10 @@ const TIMER_MAX = 0x7fffffff;
  * Read one transaction's options, refusing before the transaction
  * begins: anything but a plain object, an unknown member (named, with
  * the nearest one) or a malformed value is `JD0013`; on a nested
- * transaction, `unitOfWork` and a `mode: 'immediate'` the enclosing
- * transaction did not take are `JD0014` — a savepoint writes through the
- * unit of work around it and cannot take the writer lock.
+ * transaction, `unitOfWork`, `isolation` and a `mode: 'immediate'` the
+ * enclosing transaction did not take are `JD0014` — a savepoint writes
+ * through the unit of work around it, runs at its root's level and cannot
+ * take the writer lock.
  * `retry` and `holdTimeoutMs` act on the asynchronous root only: the
  * synchronous twin cannot wait (between attempts, or for a hold clock),
  * and a savepoint inherits its root's — both are `JD0014` there, as is
@@ -1059,7 +1099,7 @@ const TIMER_MAX = 0x7fffffff;
  *   transaction's mode, for a nested one
  * @returns {{ mode?: 'deferred' | 'immediate', signal?: AbortSignal,
  *   unitOfWork?: 'shared' | 'own', retry?: { attempts: number, baseMs: number, maxMs: number },
- *   holdTimeoutMs?: number }}
+ *   holdTimeoutMs?: number, isolation?: string }}
  */
 function readTransactionOptions(options, surface, spelling, enclosing) {
   if (options === undefined) return {};
@@ -1070,9 +1110,13 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
   }
   refuseUnknownMembers(options, TRANSACTION_OPTIONS, (key, hint) =>
     new DbCompileError('JD0013', `${spelling} option '${key}' is not one a transaction reads${hint}`));
-  const { mode, signal, unitOfWork, holdTimeoutMs } = options;
+  const { mode, signal, unitOfWork, holdTimeoutMs, isolation } = options;
   if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate')
     throw new DbCompileError('JD0013', `${spelling}: mode must be 'deferred' or 'immediate'`);
+  if (isolation !== undefined && !ISOLATION_LEVELS.includes(isolation)) {
+    throw new DbCompileError('JD0013',
+      `${spelling}: isolation must be 'read committed', 'repeatable read' or 'serializable', not ${describeValue(isolation)}`);
+  }
   if (unitOfWork !== undefined && unitOfWork !== 'shared' && unitOfWork !== 'own')
     throw new DbCompileError('JD0013', `${spelling}: unitOfWork must be 'shared' or 'own'`);
   if (signal !== undefined && (signal === null || typeof signal !== 'object'
@@ -1104,13 +1148,18 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
         `${spelling}: unitOfWork cannot act on a nested transaction — a savepoint writes `
         + 'through the unit of work of the transaction around it; choose it on the root transaction');
     }
+    if (isolation !== undefined) {
+      throw new DbCompileError('JD0014',
+        `${spelling}: isolation cannot act on a nested transaction — a savepoint runs at its root `
+        + "transaction's level; choose it on the root transaction");
+    }
     if (mode === 'immediate' && enclosing !== 'immediate') {
       throw new DbCompileError('JD0014',
         `${spelling}: mode 'immediate' cannot act inside a transaction that did not take the `
         + "writer lock — a savepoint cannot take it; begin the ROOT transaction with { mode: 'immediate' }");
     }
   }
-  return { mode, signal, unitOfWork, retry, holdTimeoutMs };
+  return { mode, signal, unitOfWork, retry, holdTimeoutMs, isolation };
 }
 
 /**
@@ -1269,7 +1318,7 @@ function resolveOperators(options) {
  *   functions?: any, extensions?: any, zoneProvider?: any,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime>,
  *   readOnly?: boolean }} options
- *   `zoneProvider` is D7's injected clock: a named zone in a temporal
+ *   `zoneProvider` is the injected clock: a named zone in a temporal
  *   spec (`{ "every": "P1M", "zone": "Europe/Amsterdam" }`) is host code
  *   the database cannot have, so a store that never received one refuses
  *   such a document (`JQ0003`) rather than answering it in UTC. It
@@ -1309,9 +1358,12 @@ export function openStore(model, options) {
   let collections;
   let entities;
   let mapping;
+  /** @type {{ id: string, leaseMs: number } | undefined} */
+  let ownerOption;
   try {
     // first: the model checks below read these switches
     refuseMalformedOpenOptions(options);
+    ownerOption = readOwnerOption(options);
     collections = normalizeModel(model, options.expressions);
     const compiled = compileEntityModel(model);
     entities = compiled.entities;
@@ -1382,6 +1434,17 @@ export function openStore(model, options) {
     (failure) => (isDriverError(failure) ? openFailure(failure) : failure)),
     (opened) => {
       /**
+       * The owner lease (MODEL-FORMAT §5.1) once the open sequence took it,
+       * or `null` for a store opened without `owner`. Every admission — a
+       * store-level call, a transaction's begin — asks it first, so a store
+       * that is not, or no longer, its database's owner runs nothing.
+       * @type {any}
+       */
+      let ownerLease = null;
+      /** @param {boolean} synchronous - whether the caller cannot wait for a renewal */
+      const ownerGuard = (synchronous) => (ownerLease === null ? undefined : ownerLease.guard(synchronous));
+
+      /**
        * The transaction SCOPE that currently owns the driver connection,
        * or `null`. A top-level `store.transaction()` sets it for the
        * callback's whole lifetime so the collection/entity cores below
@@ -1407,11 +1470,14 @@ export function openStore(model, options) {
        * The ROOT record of the open top-level transaction, or `null` while
        * none is open: its `mode` (a nested transaction reads it to refuse
        * a `mode: 'immediate'` its savepoint could not honour, `JD0014`),
-       * its `attempt` (`tx.attempt`), and its hold limit's state — `hold`
+       * its `attempt` (`tx.attempt`), the isolation level it runs at
+       * (`tx.isolation`; `undefined` for the store's own transactions, which
+       * run at the session's), and its hold limit's state — `hold`
        * (ms, or `undefined`), `expired` (set when the limit passed: every
        * handle of the transaction then refuses `JD2098`), and the handle
        * operations in flight, which a hold waits for before it rolls back.
-       * @type {{ mode: 'deferred' | 'immediate', attempt: number, hold: number | undefined,
+       * @type {{ mode: 'deferred' | 'immediate', attempt: number, isolation: string | undefined,
+       *   hold: number | undefined,
        *   expired: { holdTimeoutMs: number, elapsedMs: number } | null, inFlight: number,
        *   onIdle: (() => void) | null } | null}
        */
@@ -1567,7 +1633,8 @@ export function openStore(model, options) {
        *   without one the scope writes through whatever is already in
        *   force, which is what makes an inner savepoint part of the same
        *   unit of work as the transaction around it
-       * @param {{ mode: 'deferred' | 'immediate', attempt?: number, holdTimeoutMs?: number }} [root]
+       * @param {{ mode: 'deferred' | 'immediate', attempt?: number, holdTimeoutMs?: number,
+       *   isolation?: string }} [root]
        *   - a ROOT transaction's record; an inner scope inherits the one in force
        */
       /**
@@ -1607,8 +1674,8 @@ export function openStore(model, options) {
           scope = inner;
           currentScope = identity;
           if (root !== undefined) {
-            currentRoot = { mode: root.mode, attempt: root.attempt ?? 1, hold: root.holdTimeoutMs,
-              expired: null, inFlight: 0, onIdle: null };
+            currentRoot = { mode: root.mode, attempt: root.attempt ?? 1, isolation: root.isolation,
+              hold: root.holdTimeoutMs, expired: null, inFlight: 0, onIdle: null };
           }
           if (currentRoot !== null) identity.root = currentRoot;
           if (ownWork !== undefined) work = ownWork;
@@ -1671,10 +1738,13 @@ export function openStore(model, options) {
        * @param {any} [ownWork]
        */
       // a driver failure of the transaction itself — a `BEGIN IMMEDIATE`
-      // that outwaits the busy timeout — is classified like a statement's
-      // (`wrapDriverError` passes a callback's own error through untouched)
-      const beginTransaction = (inner, signal, mode) =>
-        attempt(() => opened.transaction(inner, signal, mode),
+      // that outwaits the busy timeout, a writer lock past the lock
+      // timeout — is classified like a statement's (`wrapDriverError`
+      // passes a callback's own error through untouched). A store that is
+      // not, or no longer, its database's owner begins nothing (`JD2061`).
+      // `begin` carries the isolation level to spell and the writer lock.
+      const beginTransaction = (inner, signal, mode, begin) =>
+        attempt(() => chain(ownerGuard(false), () => opened.transaction(inner, signal, mode, begin)),
           (error) => wrapDriverError(error, { docPath: '/transaction' }));
       /** Gives the capture engine up for an expired transaction; set once
        * capture exists (a store without capture has nothing to give up). */
@@ -1744,10 +1814,21 @@ export function openStore(model, options) {
         });
       };
 
-      let topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs) =>
-        withScope((inner) => beginTransaction(inner, signal, mode),
+      /**
+       * @param {(store: any) => any} fn
+       * @param {AbortSignal | undefined} signal
+       * @param {any} ownWork
+       * @param {'deferred' | 'immediate' | undefined} mode
+       * @param {number | undefined} attempt
+       * @param {number | undefined} holdTimeoutMs
+       * @param {{ level: string, isolation: string | undefined, writerLock: boolean }} [begin]
+       *   - what a `store.transaction` asks of its BEGIN (see `beginFor`);
+       *   the store's own transactions pass none
+       */
+      let topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs, begin = undefined) =>
+        withScope((inner) => beginTransaction(inner, signal, mode, begin),
           (inner, identity) => holdAround(currentRoot, () => fn(scopedStore(inner, identity))), ownWork,
-          { mode: mode ?? 'deferred', attempt, holdTimeoutMs });
+          { mode: mode ?? 'deferred', attempt, holdTimeoutMs, isolation: begin?.level });
 
       /**
        * Retry a transaction as a whole (MODEL-FORMAT §5.1): each attempt is
@@ -1823,7 +1904,7 @@ export function openStore(model, options) {
       const gated = (fn, what, signal) => {
         if (strictTransactions && opened.mustQueue)
           throw contended("{ transactions: 'strict' } refuses to queue behind it");
-        return withScope((inner) => opened.exclusively(inner, what, signal), fn);
+        return chain(ownerGuard(false), () => withScope((inner) => opened.exclusively(inner, what, signal), fn));
       };
 
       const cursorOwnership = opened.capabilities.cursorTransaction === true
@@ -1839,6 +1920,7 @@ export function openStore(model, options) {
           throw contended('the synchronous surface answers values, so it cannot '
             + 'wait for the commit');
         }
+        ownerGuard(true);
         return withScope(opened.exclusively, fn);
       };
 
@@ -1870,7 +1952,9 @@ export function openStore(model, options) {
           'the store failed to open, and closing the acquired connection failed too'));
         let closing;
         try {
-          closing = opened.close();
+          // a lease the open took is given back first (best effort, never
+          // throwing): on PostgreSQL before the session returns to its pool
+          closing = chain(ownerLease === null ? null : ownerLease.release(), () => opened.close());
         }
         catch (closeError) {
           return both(closeError);
@@ -1880,6 +1964,36 @@ export function openStore(model, options) {
           : Promise.reject(error);
       };
       const dialect = connection.dialect;
+
+      // ————— isolation (MODEL-FORMAT §5.1) —————
+      // The levels this backend runs, weakest first, and the level a
+      // transaction that asks for none runs: the session's own default,
+      // read at open (SQLite's one level; PostgreSQL's
+      // `default_transaction_isolation`, which an operator may have raised).
+      const isolationLevels = Object.freeze([...(dialect.tx.isolationLevels ?? ['serializable'])]);
+      const sessionIsolation = connection.capabilities.postgres?.defaultIsolation ?? isolationLevels[0];
+      const rankOf = (/** @type {string} */ level) => ISOLATION_LEVELS.indexOf(level);
+      /**
+       * What a `store.transaction` asks of its BEGIN. The level asked for is
+       * a FLOOR: the session's stronger default wins over it, and a backend
+       * that cannot run a level runs the next stronger one it can. Nothing
+       * asked keeps the plain `BEGIN` (and the session's default); a level
+       * asked is spelled only where the dialect runs more than one.
+       * `writerLock` takes the store's writer lock for `mode: 'immediate'`
+       * where that is a statement of its own — the store's own transactions
+       * never take it: they chose `'immediate'` for SQLite's read→write
+       * upgrade, which PostgreSQL does not have.
+       * @param {string | undefined} requested
+       * @param {'deferred' | 'immediate' | undefined} mode
+       */
+      const beginFor = (requested, mode) => {
+        const writerLock = mode === 'immediate';
+        if (requested === undefined) return { level: sessionIsolation, isolation: undefined, writerLock };
+        const floor = rankOf(requested) > rankOf(sessionIsolation) ? requested : sessionIsolation;
+        const level = isolationLevels.find((candidate) => rankOf(candidate) >= rankOf(floor))
+          ?? isolationLevels[isolationLevels.length - 1];
+        return { level, isolation: dialect.tx.beginAt === undefined ? undefined : level, writerLock };
+      };
       // The PHYSICAL MAPPING BRANCH for derived index columns. A driver
       // that can index a registered deterministic function generates
       // them; one that cannot has the store write them. It is a
@@ -1971,7 +2085,27 @@ export function openStore(model, options) {
       // what a store that creates no table is, for the JD0002 refusal
       const createsNothing = readOnly ? 'a read-only store'
         : options.adopt === true ? 'an adopted store ({ adopt: true })' : null;
+      // ————— the owner lease (MODEL-FORMAT §5.1) —————
+      // taken before any table of the model is created or verified, so a
+      // refused owner changes nothing; read-only stores never ask (refused
+      // before the driver opened)
+      const acquireOwner = () => {
+        if (ownerOption === undefined) return null;
+        // a retried open (a busy journal-mode switch) takes it again as the
+        // same holder, never as a second one
+        ownerLease ??= createOwnerLease({
+          dialect, connection, owner: ownerOption, adopt: options.adopt === true, now: runtime.now,
+          bracket: (fn) => immediately(connection, fn),
+          // the store gate, waiting whatever `transactions` says: a renewal
+          // is the store's own write, never a caller's
+          exclusively: (fn, what) => opened.exclusively(fn, what),
+          // never from inside a transaction's own synchronous body
+          renewsInline: () => currentRoot === null || opened.mustQueue,
+        });
+        return ownerLease.acquire();
+      };
       const opening = () => chain(pragmas(), () =>
+        chain(acquireOwner(), () =>
         chain(registerExpressionFunctions(connection, expressionNames,
           options.expressions ?? {}), () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
@@ -2157,11 +2291,11 @@ export function openStore(model, options) {
             // The hold clock starts inside capture's scope: what capture does
             // before the body (PostgreSQL's journal takes its advisory lock
             // there) is a wait, and a wait never counts against the limit.
-            topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs) =>
-              withScope((inner) => beginTransaction(inner, signal, mode),
+            topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs, begin = undefined) =>
+              withScope((inner) => beginTransaction(inner, signal, mode, begin),
                 () => capture.nest((innerScope, identity) =>
                   holdAround(currentRoot, () => fn(scopedStore(innerScope, identity)))),
-                ownWork, { mode: mode ?? 'deferred', attempt, holdTimeoutMs });
+                ownWork, { mode: mode ?? 'deferred', attempt, holdTimeoutMs, isolation: begin?.level });
             abandonCapture = () => capture.abandon();
           }
           // the live registry rides the capture stream; its dispatcher
@@ -2401,6 +2535,17 @@ export function openStore(model, options) {
 
           const capabilities = Object.freeze({
             ...connection.capabilities,
+            // `mode: 'immediate'` takes the store's writer lock before the
+            // body runs (MODEL-FORMAT §5.1) — SQLite's `BEGIN IMMEDIATE`,
+            // PostgreSQL's advisory lock after `BEGIN`
+            immediateTransactions: dialect.capabilities.immediateTransactions === true,
+            // the isolation levels a transaction can run here, weakest
+            // first; a level asked for is a floor (`tx.isolation` reports
+            // the one that ran)
+            isolation: isolationLevels,
+            // how this store owns its database: 'none', 'lease' (SQLite's
+            // engine-table row) or 'session' (PostgreSQL's session lock)
+            owner: ownerLease === null ? 'none' : ownerLease.mode,
             // per-operation availability: the binding's declaration, and
             // for the two that write the store's read-only flag — `false`
             // exactly where a call is refused (`JD2077`)
@@ -2439,7 +2584,7 @@ export function openStore(model, options) {
             pushableOperators: operators === null || connection.capabilities.userFunctions !== true
               ? Object.freeze([])
               : Object.freeze([...operators.pushableScalar]),
-            // D7's injected clock: whether a temporal spec naming a
+            // The injected clock: whether a temporal spec naming a
             // ZONE will compile at all here. Without one the document is
             // refused (`JQ0003`) rather than answered in UTC, and a
             // consumer that wants to know before it asks reads this
@@ -2696,7 +2841,7 @@ export function openStore(model, options) {
                   // sets of one store share so their documents may be joined
                   // (it carries every root's `relations`, so a hop may chain),
                   // `relations` this entity's own relation table (§10.1).
-                  // `execute` stays value-or-promise (D2), as a collection's
+                  // `execute` stays value-or-promise, as a collection's
                   execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
                   // the item cursor over the same document: one row per
                   // pull, the statement released on break. It registers
@@ -2851,7 +2996,7 @@ export function openStore(model, options) {
            * `valued` names the members that answer value-or-promise
            * rather than always a promise: the provider contract keeps a
            * chain over a synchronous driver synchronous, so those must
-           * not be lifted (D2). They still answer a promise while another
+           * not be lifted. They still answer a promise while another
            * caller's transaction holds the connection — which is what
            * waiting for a commit means.
            * @param {any} handle
@@ -2887,7 +3032,7 @@ export function openStore(model, options) {
             return undefined;
           };
           /**
-           * The write rules for SQL the store did not plan (D4: ONE function
+           * The write rules for SQL the store did not plan (ONE function
            * for `tx.sql` and the relational engine). A relational write
            * names its table, so a store-only invariant refuses it only when
            * the table is that invariant's entity's, and session capture
@@ -3134,27 +3279,32 @@ export function openStore(model, options) {
             // key and neither sees the other's pending state. It is opt-in
             // because the shared default is what lets a caller add() a
             // document outside the transaction and save it inside.
-            // `mode: 'immediate'` takes the write lock up front (`BEGIN
-            // IMMEDIATE`): a body that reads before it writes never meets
-            // the read→write upgrade busy the handler cannot retry. The
-            // default stays the deferred savepoint; nesting is a savepoint
-            // under either.
+            // `mode: 'immediate'` takes the store's writer lock up front
+            // (`BEGIN IMMEDIATE`; PostgreSQL's advisory lock after `BEGIN`):
+            // a body that reads before it writes never meets the read→write
+            // upgrade busy the handler cannot retry, and never loses an
+            // update to another immediate transaction. The default stays
+            // the deferred savepoint; nesting is a savepoint under either.
+            // `isolation` is a floor: the level asked for, or the
+            // session's stronger default, runs (`tx.isolation`).
             transaction: lift((fn, transactionOptions) => {
               // called from inside a transaction's own synchronous extent,
               // the driver nests the call as a savepoint of that transaction:
               // it IS a nested transaction, with the nested option set
               if (currentRoot !== null && !opened.mustQueue) return nestedAtRoot(fn, transactionOptions, 'store.transaction');
               // a closed set, read before anything begins (JD0013, JD0014)
-              const { mode, signal, unitOfWork, retry, holdTimeoutMs } =
+              const { mode, signal, unitOfWork, retry, holdTimeoutMs, isolation } =
                 readTransactionOptions(transactionOptions, 'async', 'store.transaction');
               const hold = holdTimeoutMs ?? options.holdTimeoutMs;
+              // the call's own level wins over the store's default
+              const begin = beginFor(isolation ?? options.isolation, mode);
               /** @param {number} attempt */
               const once = (attempt) => afterHeldBody(topLevelTransaction(fn, signal,
                 // a retried transaction runs every attempt on a fresh own
                 // unit of work: a failed attempt's restored pending records
                 // must never be saved by the next one
                 unitOfWork === 'own' || retry !== undefined ? createUnitOfWork() : undefined,
-                mode, attempt, hold));
+                mode, attempt, hold, begin));
               return retry === undefined ? once(1) : retrying(once, retry, signal);
             }),
             observe: (fn) => {
@@ -3256,7 +3406,10 @@ export function openStore(model, options) {
               const cursorCleanup = cursorOwnership === undefined ? null
                 : Promise.allSettled([...cursorOwnership.owners].map((cursor) => cursor.return()));
               return chain(jobsEngine === null ? null : jobsEngine.stopAll(closeOptions),
-                (stopped) => chain(connection.close(), () => chain(liveCleanup, () => chain(cursorCleanup, () => {
+                // the lease goes back first — on PostgreSQL before the driver
+                // restores the session's path and returns it to its pool
+                (stopped) => chain(ownerLease === null ? null : ownerLease.release(), () =>
+                  chain(connection.close(), () => chain(liveCleanup, () => chain(cursorCleanup, () => {
                   const stuck = (stopped ?? []).filter(
                     (/** @type {any} */ outcome) => outcome.drained === false);
                   if (stuck.length === 0) return undefined;
@@ -3267,7 +3420,7 @@ export function openStore(model, options) {
                       (/** @type {number} */ n, /** @type {any} */ o) => n + o.inFlight, 0)} `
                     + `job handler(s) still in flight across ${stuck.length} worker(s); `
                     + 'they were signalled to abort and did not settle within the grace period');
-                }))));
+                })))));
             }),
           };
 
@@ -3333,7 +3486,7 @@ export function openStore(model, options) {
            * the exact scope before it runs. `lifted` members answer a
            * promise (the check rejects); `direct` members answer values
            * or value-or-promise (the check throws) — the unit-of-work
-           * bookkeeping and the D2 provider members among them.
+           * bookkeeping and the provider members among them.
            * @param {any} identity
            * @param {any} handle
            * @param {string[]} lifted
@@ -3671,6 +3824,8 @@ export function openStore(model, options) {
             const members = {
               // 1-based: the attempt of a retried transaction this callback runs in
               attempt: override(myRoot?.attempt ?? 1),
+              // the isolation level this transaction runs at
+              isolation: override(myRoot?.isolation ?? sessionIsolation),
               sql: onFirstUse(sqlOfScope),
               relational: onFirstUse(relationalOfScope),
               transaction: override((/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
@@ -3791,6 +3946,7 @@ export function openStore(model, options) {
                 get sql() { return sqlOfScope(); },
                 get relational() { return syncRelationalOfScope(); },
                 attempt: myRoot?.attempt ?? 1,
+                isolation: myRoot?.isolation ?? sessionIsolation,
                 transaction: (fn, transactionOptions) => nested((tx) => synchronousBody(fn, tx),
                   transactionOptions, 'tx.sync.transaction'),
                 savepoints: Object.freeze({
@@ -3895,7 +4051,7 @@ export function openStore(model, options) {
                 }
                 // the root's closed set (JD0013), read first; `unitOfWork`
                 // is honoured exactly as the asynchronous root honours it
-                const { mode, signal, unitOfWork } = readTransactionOptions(
+                const { mode, signal, unitOfWork, isolation } = readTransactionOptions(
                   transactionOptions, 'sync', 'store.sync.transaction');
                 // the synchronous surface answers values: while a
                 // transaction owns the connection it could only QUEUE,
@@ -3909,7 +4065,8 @@ export function openStore(model, options) {
                 // it never queues, so a signal can only refuse it up front
                 if (signal?.aborted === true) throw abortReason(signal);
                 return topLevelTransaction((tx) => synchronousBody(fn, tx), undefined,
-                  unitOfWork === 'own' ? createUnitOfWork() : undefined, mode);
+                  unitOfWork === 'own' ? createUnitOfWork() : undefined, mode, undefined, undefined,
+                  beginFor(isolation ?? options.isolation, mode));
               },
               entity(name) {
                 let handle = gatedSyncEntities.get(name);
@@ -3965,7 +4122,7 @@ export function openStore(model, options) {
           return chain(replicationEngine === null ? null : replicationEngine.ready, () => Object.freeze(store));
           });
           });
-        })))));
+        }))))));
 
       // Journal-mode lock upgrades may report busy without invoking SQLite's
       // busy handler. Yield before retrying this idempotent startup sequence

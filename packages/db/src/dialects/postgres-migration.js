@@ -2,6 +2,7 @@
 /** Native migration vocabulary and session facts; execution belongs to migrate. */
 import { DbCompileError } from '../errors.js';
 import { sqlTokens, quotedSqlToken } from './check-read.js';
+import { POSTGRES_LOCK_CLASSES, transactionLock } from './postgres-locks.js';
 
 /** Native opaque tokens plug into the shared lexer without entering SQLite builds.
  * @param {string} sql @param {number} at @returns {any} */
@@ -38,12 +39,14 @@ function checkSql(sql) {
 
 /** SQL is schema-scoped through the driver's selected session, without a
  * persistent advisory lock surviving client release. lock_timeout bounds waits.
- * @param {string} namespace */
-export function postgresMigration(namespace) {
+ * The lock is keyed by the session's current schema, as every other class
+ * is: the driver's search path puts the store's schema first, and a session
+ * the host left on its own path still has one (a list of schemas is no key). */
+export function postgresMigration() {
   const quote = (name) => `"${name.replaceAll('"', '""')}"`;
   return Object.freeze({
     checkSql,
-    lock: `SELECT pg_catalog.pg_advisory_xact_lock(1246907982, pg_catalog.hashtext(${namespace}))`,
+    lock: transactionLock(POSTGRES_LOCK_CLASSES.migration),
     settings: "SELECT current_setting('standard_conforming_strings') AS strings, current_setting('lock_timeout') AS lock_timeout",
     identity: "SELECT current_database() AS database, inet_server_addr()::text AS address, inet_server_port() AS port, current_schema() AS schema",
     sequence: (object) => `SELECT last_value::text AS value, is_called::text AS called FROM ${quote(object.schema)}.${quote(object.name)}`,

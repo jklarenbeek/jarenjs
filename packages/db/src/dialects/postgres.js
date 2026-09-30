@@ -30,11 +30,12 @@
  * configured by its operator, not by a store at open), no stored CREATE
  * text (`declaredSqlText: false` — the drift check is the structural
  * one), no virtual tables and no triggers (so a `physical: 'rtree'`
- * column set maps back onto the B-tree over its four edge columns), no
- * up-front write lock (`BEGIN IMMEDIATE` has no analogue), and no
- * column without a scalar type — which is why a comparison against a
+ * column set maps back onto the B-tree over its four edge columns), and
+ * no column without a scalar type — which is why a comparison against a
  * member the schema does not type reads the document rather than the
- * column.
+ * column. `BEGIN IMMEDIATE` has no analogue either: the store's writer
+ * lock is an advisory lock of its own class, taken right after `BEGIN`
+ * (`tx.writerLock`).
  */
 
 import { createDialect } from '../dialect.js';
@@ -45,6 +46,7 @@ import { postgresMigration } from './postgres-migration.js';
 import { postgresCapture } from './postgres-capture.js';
 import { postgresJobs } from './postgres-jobs.js';
 import { postgresReplication } from './postgres-replication.js';
+import { POSTGRES_LOCK_CLASSES, OWNER_LOCK, transactionLock } from './postgres-locks.js';
 import { readExpression } from './expression-read.js';
 import { postgresChecks } from './check-read.js';
 
@@ -399,8 +401,11 @@ export function postgresDialect(options = undefined) {
     schema: options?.searchPath,
     physicalNamespaceRequired: true,
     relational: postgresRelational,
-    migration: postgresMigration(namespaces),
+    migration: postgresMigration(),
     jobs: postgresJobs,
+    // the owner lock (MODEL-FORMAT §5.1): no table — a session lock of its
+    // own class, held for the store's session and released at close
+    owner: Object.freeze({ kind: 'session', ...OWNER_LOCK }),
     replication: postgresReplication,
     // Ordinary writes still check after each statement. Logical replay alone
     // defers validation so canonical envelope order need not follow FK order.
@@ -430,10 +435,10 @@ export function postgresDialect(options = undefined) {
       returning: true,
       upsert: true,
       savepoints: true,
-      // no `BEGIN IMMEDIATE`: a PostgreSQL transaction takes its locks
-      // as it needs them, and a read-then-write body meets a
-      // serialization failure rather than a busy database
-      immediateTransactions: false,
+      // the store's writer lock, taken right after `BEGIN` (`tx.writerLock`):
+      // a transaction-scoped advisory lock, so two immediate bodies run one
+      // after the other and the second reads the first one's commit
+      immediateTransactions: true,
       // a GROUP BY / ORDER BY term may name an output column
       groupByAlias: true,
       alterTableFull: true,
@@ -575,9 +580,23 @@ export function postgresDialect(options = undefined) {
     excludedRef: (columnSql) => `excluded.${columnSql}`,
     tx: {
       begin: 'BEGIN',
-      // no up-front write lock exists; the capability says so and the
-      // store's `mode: 'immediate'` is the same transaction here
+      // no BEGIN takes a write lock here: the store's `mode: 'immediate'`
+      // is `BEGIN` followed by `writerLock`, while the engine's own
+      // up-front brackets (the open path's shape work) need no lock at
+      // all — PostgreSQL has no read→write upgrade to be busy on
       beginImmediate: 'BEGIN',
+      // The writer lock: waited for under the session's `lock_timeout`
+      // (55P03, busy and retryable), held until COMMIT or ROLLBACK. At
+      // `read committed` every statement reads a fresh snapshot, so the
+      // body that waited reads the commit it waited for; at `repeatable
+      // read` and `serializable` the snapshot is taken by this very
+      // statement — before the wait — and the same conflict surfaces as
+      // 40001, busy and retryable.
+      writerLock: transactionLock(POSTGRES_LOCK_CLASSES.writer),
+      // the levels a transaction can run, weakest first; `read
+      // uncommitted` runs as `read committed` and is not offered
+      isolationLevels: Object.freeze(['read committed', 'repeatable read', 'serializable']),
+      beginAt: (level) => `BEGIN ISOLATION LEVEL ${level.toUpperCase()}`,
       commit: 'COMMIT',
       rollback: 'ROLLBACK',
       deferForeignKeys: 'SET CONSTRAINTS ALL DEFERRED',

@@ -986,7 +986,7 @@ const KNN_REASONS = {
 };
 
 /**
- * The planner's reason VOCABULARY (D6): every cause a plan can name for
+ * The planner's reason VOCABULARY: every cause a plan can name for
  * work it left in the engine, under a stable identifier. An explanation
  * is public behaviour, so the sentences are a closed set — a new
  * promotion adds an entry here, it does not write prose at the refusal

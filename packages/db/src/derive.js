@@ -142,7 +142,7 @@ export function deriveGeohash(value, precision) {
 
 /**
  * One edge of a value's bounding box, or null when it has none —
- * including the D6 case where a non-finite coordinate refuses the box
+ * including the case where a non-finite coordinate refuses the box
  * rather than producing one that does not bound its input.
  * @param {any} value
  * @param {string} component - `'w'`, `'s'`, `'e'` or `'n'`
@@ -331,7 +331,7 @@ export function registerDeriveFunctions(connection) {
 
 /**
  * The bounding box of a probe value, or `null` when it has none — the
- * D6 refusal included, which is what makes an unbounded probe divert to
+ * non-finite refusal included, which is what makes an unbounded probe divert to
  * the full scan instead of narrowing with a box that does not bound it.
  * @param {any} value - a GeoJSON value or a `[lon, lat]` position
  * @returns {number[] | null} `[west, south, east, north]`

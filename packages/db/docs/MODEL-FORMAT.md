@@ -847,22 +847,77 @@ await store.transaction(async (tx) => {
 });
 ```
 
-**A root transaction may take the write lock up front.**
-`store.transaction(fn, { mode: 'immediate' })` begins with `BEGIN
-IMMEDIATE` instead of a deferred savepoint. A body that reads before it
-writes — a ledger claim: read the record, decide, insert — otherwise
-meets the read→write upgrade `SQLITE_BUSY` when another connection
-commits between its read and its write, the one busy the busy handler
-cannot retry; with the lock taken first that wait is an ordinary busy
-wait the `busyTimeout` covers, and two processes claiming one key see
-one `new`. The default `'deferred'` is unchanged, `tx.transaction()`
-inside either mode is a savepoint, `signal` and `unitOfWork` behave the
-same; the synchronous twin reads the same options (`unitOfWork: 'own'`
-gives its body a tracker of its own, as the asynchronous root's does) and
-refuses thenable callbacks. The open path already
-brackets every first-open object — collection, entity and join tables,
-indexes, the change log and its state row, the job tables — the same
-way (§2.4).
+**A root transaction may take the store's writer lock up front.**
+`store.transaction(fn, { mode: 'immediate' })` takes the store's single
+writer lock before the body runs: on SQLite it begins with `BEGIN
+IMMEDIATE` instead of a deferred savepoint; on PostgreSQL it runs `BEGIN`
+and then a transaction-scoped advisory lock of the store's own class,
+keyed by its schema ([POSTGRESQL.md](POSTGRESQL.md#the-writer-lock-and-the-lock-family)
+lists the family). The guarantee is the same on both: a read-then-write
+body sees every earlier immediate commit and cannot lose an update to
+another immediate transaction, and `capabilities.immediateTransactions`
+is `true`. On SQLite a body that reads before it writes — a ledger claim:
+read the record, decide, insert — otherwise meets the read→write upgrade
+`SQLITE_BUSY` when another connection commits between its read and its
+write, the one busy the busy handler cannot retry; with the lock taken
+first that wait is an ordinary busy wait the `busyTimeout` covers, and
+two processes claiming one key see one `new`. On PostgreSQL two immediate
+bodies on two stores run one after the other. At `read committed` (the
+server default) the second reads the first one's commit: two concurrent
+read-then-write increments of `n = 0` leave `2`, with no retry. At
+`repeatable read` and `serializable` the second body's snapshot is taken
+by the lock statement itself, before the wait, so the same conflict
+surfaces as 40001 — busy and retryable, which `retry` absorbs. There the
+lock orders immediate transactions among themselves only: a plain
+collection write or a deferred transaction takes row locks and never
+waits for it, so no plain write serializes every writer. A lock wait is
+bounded by the session's lock timeout (55P03: busy, retryable) and is not
+counted against `holdTimeoutMs`. The default `'deferred'` is unchanged,
+`tx.transaction()` inside either mode is a savepoint, `signal` and
+`unitOfWork` behave the same; the synchronous twin reads the same options
+(`unitOfWork: 'own'` gives its body a tracker of its own, as the
+asynchronous root's does) and refuses thenable callbacks. On SQLite the
+open path already brackets every first-open object — collection, entity
+and join tables, indexes, the change log and its state row, the job
+tables — the same way (§2.4).
+
+**`isolation` is a floor.** `openStore(model, { isolation })` sets the
+default of every `store.transaction` and `store.sync.transaction`, and a
+call's own `isolation` overrides it: `'read committed'`, `'repeatable
+read'` or `'serializable'`, weakest first. The backend runs the level
+asked for or a stronger one and reports the level it ran as
+`tx.isolation` (also on `tx.sync` and the typed client);
+`capabilities.isolation` lists the levels it can run. PostgreSQL runs all
+three. Nothing asked keeps a plain `BEGIN` and the session's own
+`default_transaction_isolation`, read at open
+(`capabilities.postgres.defaultIsolation`); a level asked is spelled into
+the `BEGIN` — or the session's default instead, where an operator raised
+it above the floor. SQLite runs every transaction serializably (one
+writer at a time, and a reader that would write after another writer
+committed is refused busy), so it accepts any floor and reports
+`serializable`. Under `serializable` two concurrent read-then-write
+transactions produce one commit and one busy, retryable refusal
+(`JD2005`, 40001); with `retry` both commit. The store's own transactions
+— a keyed write's convergence, a job claim, capture's journal — run at
+the session's default. A nested transaction runs at its root's level and
+refuses `isolation` (`JD0014`); a malformed level is `JD0013` on a
+transaction and `JD0009` at open.
+
+**A store can own its database.** `openStore(model, { owner: { id,
+leaseMs } })` opens the store as its database's single writable owner: a
+second store that asks for ownership while this one holds the lease is
+refused `JD2061` by name — `owner` is the holder's id and `expiresAt` when
+its lease ends — instead of writing beside it. On SQLite the lease is one
+row of an engine table, renewed every third of `leaseMs` (default 30 s)
+and deleted at `close()`, and a crashed holder's lease expires; on
+PostgreSQL it is a session lock held for exactly the store's session. The
+lease is cooperative (an open without `owner` neither takes nor checks
+it), a read-only open never takes it (`owner` with `readOnly` is
+`JD0009`), an adopted SQLite store needs the owner table (`JD0015`), and a
+store whose lease another holder took refuses every later call.
+`capabilities.owner` says which mode is in force; [HOSTS.md](HOSTS.md#the-owner-lease)
+has the constraint on `leaseMs`, the table statement and the platform
+status.
 
 **`retry` re-runs a transaction as a whole — explicitly, boundedly, and
 only when that is safe.** `store.transaction(fn, { retry: { attempts,
@@ -888,8 +943,9 @@ retried transaction carries `attempts`.
 store (`openStore(model, { holdTimeoutMs })`, the default) or per call
 (`store.transaction(fn, { holdTimeoutMs })`, which wins): milliseconds
 on the monotonic clock, counted from the moment the BODY starts — after
-queue admission and after the transaction began, so neither the queue
-(`queueTimeout`) nor a lock wait (the driver's lock timeout) counts. At
+queue admission, after the transaction began and after the writer lock
+is held, so neither the queue (`queueTimeout`) nor a lock wait (the
+driver's lock timeout) counts. At
 the limit the transaction is rolled back and the connection handed on —
 another transaction proceeds while the body may still be awaiting — and
 every handle it gave out refuses **`JD2098`** (a handle operation
@@ -916,14 +972,15 @@ own.
 **A transaction's options are one closed set, on every surface.**
 `store.transaction`, `store.sync.transaction`, a nested `tx.transaction`
 / `tx.sync.transaction` and the typed client's `client.transaction` read
-`mode`, `signal`, `unitOfWork`, `retry` and `holdTimeoutMs` — nothing
-else. Anything but a plain
+`mode`, `signal`, `unitOfWork`, `retry`, `holdTimeoutMs` and `isolation`
+— nothing else. Anything but a plain
 object, an unknown member (named, with the nearest one: `{ mod:
 'immediate' }` is refused, where it used to run *deferred*) or a malformed
 value is **`JD0013`**, before the body runs. A nested transaction reads the
 same set and refuses what its savepoint cannot honour, **`JD0014`**:
-`unitOfWork` is the root transaction's to choose (a savepoint writes
-through the unit of work around it), and `mode: 'immediate'` inside a
+`unitOfWork` and `isolation` are the root transaction's to choose (a
+savepoint writes through the unit of work around it, at its level), and
+`mode: 'immediate'` inside a
 transaction that did not take the writer lock asks for a lock no
 savepoint can take — begin the root immediate. A `mode` the root already
 holds, or a weaker one, is accepted. Only the asynchronous root queues, so
@@ -1272,6 +1329,7 @@ error.
 | `JD0012` | work waited too long for the open transaction to settle |
 | `JD0013` | an option passed to a store operation is not one it reads, or is malformed |
 | `JD0014` | a transaction guarantee was requested where it cannot act |
+| `JD0015` | owner was asked of an adopted store whose database has no owner table |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
@@ -1297,7 +1355,7 @@ error.
 | `JD2050` | a changeset could not be decoded |
 | `JD2051` | the change log is not enabled |
 | `JD2060` | the maintained live state exceeded its bound |
-| `JD2061` | another context owns the database |
+| `JD2061` | another context owns the database, or another owner holds its lease |
 | `JD2062` | the store closed with job handlers still in flight |
 | `JD2063` | the store is closed |
 | `JD2064` | the call was aborted while it waited for the open transaction |
@@ -1346,6 +1404,17 @@ error.
 
 The table above is proven in sync with the runtime `DB_CODES` table by
 a test.
+
+**`JD2061` has two sources.** A browser context that finds the database
+owned by another context (LIVE-FORMAT §11) — and the owner lease (§5.1):
+an open with `owner` while another store holds the lease (busy, retryable;
+`owner` names the holder and `expiresAt` says until when — on PostgreSQL,
+whose lock names no one, both are `null`), and every later call of a store
+whose lease another holder took (not retryable: the store is no longer the
+owner, close it) or whose lease lapsed on its own clock and could not be
+renewed yet (retryable). `JD0015` is the owner lease on an adopted SQLite
+store: adoption creates nothing, so the reason names the one statement
+that creates the owner table.
 
 **One classification of driver failures.** Every path that meets a
 driver error — a collection or entity write, the job queue, the query

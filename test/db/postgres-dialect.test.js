@@ -14,11 +14,13 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 
 import { sqliteDialect, planCollection, normalizeModel } from '@jarenjs/db';
 import { postgresDialect, IDENTIFIER_BYTES } from '@jarenjs/db/postgres';
 
 import { runDialectConformance, HOSTILE_NAMES } from './dialect-conformance.js';
+import { POSTGRES_LOCK_CLASSES } from '../../packages/db/src/dialects/postgres-locks.js';
 
 const pg = postgresDialect();
 const q = pg.quoteIdentifier;
@@ -216,13 +218,46 @@ describe('the PostgreSQL mapping', () => {
     assert.deepStrictEqual(pg.rtree, {});
     assert.strictEqual(pg.capabilities.foreignKeysAlwaysOn, true);
     assert.strictEqual(pg.introspect.foreignKeysOn, undefined);
-    assert.strictEqual(pg.capabilities.immediateTransactions, false);
-    assert.strictEqual(pg.tx.beginImmediate, pg.tx.begin);
     // a derived column is STORED here and the store writes its value, so
     // asking this dialect to spell the expression is a planner defect
     assert.throws(
       () => pg.derivedColumn(q('doc'), '{"at"}', { derive: 'geohash', precision: 6 }),
       TypeError);
+  });
+
+  it('the writer lock follows a plain BEGIN, and a BEGIN may name any of the three levels', () => {
+    assert.strictEqual(pg.capabilities.immediateTransactions, true);
+    assert.strictEqual(pg.tx.beginImmediate, pg.tx.begin, 'the open path\'s own brackets take no lock here');
+    assert.strictEqual(pg.tx.writerLock,
+      'SELECT pg_catalog.pg_advisory_xact_lock(1246907984, pg_catalog.hashtext(current_schema()))');
+    assert.deepStrictEqual([...pg.tx.isolationLevels], ['read committed', 'repeatable read', 'serializable']);
+    assert.strictEqual(pg.tx.beginAt('repeatable read'), 'BEGIN ISOLATION LEVEL REPEATABLE READ');
+    assert.strictEqual(sqliteDialect.tx.writerLock, undefined, 'BEGIN IMMEDIATE is the lock itself');
+    assert.deepStrictEqual([...sqliteDialect.tx.isolationLevels], ['serializable']);
+    assert.strictEqual(sqliteDialect.tx.beginAt, undefined);
+  });
+
+  it('every advisory lock is a class of one family, keyed by the current schema, and listed in POSTGRESQL.md', async () => {
+    const ids = Object.values(POSTGRES_LOCK_CLASSES);
+    assert.strictEqual(new Set(ids).size, ids.length, 'one class per lock');
+    for (const id of ids) assert.strictEqual(Math.floor(id / 256), 0x4A524E, `${id} is of the 0x4A524E__ family`);
+    const guide = fs.readFileSync(new URL('../../packages/db/docs/POSTGRESQL.md', import.meta.url), 'utf8');
+    for (const [name, id] of Object.entries(POSTGRES_LOCK_CLASSES))
+      assert.match(guide, new RegExp(`\\| \`${id}\` \\| ${name} \\|`), `POSTGRESQL.md lists ${name} (${id})`);
+    // every statement that takes one, whichever search path the dialect
+    // was built for: a list of schemas is no key
+    /** @type {string[]} */
+    const issued = [];
+    const recorder = { exec: (/** @type {string} */ sql) => { issued.push(sql); } };
+    for (const dialect of [postgresDialect(), postgresDialect({ searchPath: 'tenant' })]) {
+      await dialect.capture.beforeWrite(recorder);
+      await dialect.jobs.initialize(recorder);
+      issued.push(dialect.migration.lock, dialect.tx.writerLock, dialect.owner.acquire, dialect.owner.release);
+    }
+    for (const sql of issued) {
+      assert.match(sql, /pg_catalog\.pg_(try_)?advisory_(xact_)?(un)?lock\((\d+), pg_catalog\.hashtext\(current_schema\(\)\)\)/, sql);
+      assert.ok(ids.includes(Number(/\((\d+),/.exec(sql)?.[1])), `${sql} uses a listed class`);
+    }
   });
 
   it('the catalog statements answer the neutral rows the shape check reads', () => {

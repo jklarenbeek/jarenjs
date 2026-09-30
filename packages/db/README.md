@@ -1341,6 +1341,17 @@ it needs raw SQL or the raw handle. The rules, in one place:
   the caller hears `JD2098` with `{ holdTimeoutMs, elapsedMs }` once the
   body settles. Both belong to the asynchronous root transaction
   (`JD0014` on the synchronous twin and on a nested one).
+- **`immediate` is the writer lock, `isolation` a floor, `owner` a
+  lease.** `mode: 'immediate'` takes the store's writer lock before the
+  body runs — SQLite's `BEGIN IMMEDIATE`, PostgreSQL's advisory lock
+  after `BEGIN` — so two read-then-write bodies never lose an update to
+  each other. `isolation` (per store at open, per call on the
+  transaction) runs the level asked for or a stronger one, and
+  `tx.isolation` reports it: PostgreSQL runs all three levels, SQLite
+  runs every transaction serializably. `owner: { id, leaseMs }` opens the
+  store as its database's single writable owner: a second store that asks
+  while the lease is held is refused `JD2061`, naming the holder and when
+  its lease ends ([HOSTS](docs/HOSTS.md#the-owner-lease)).
 
 ```js
 import { openStore } from '@jarenjs/db';
@@ -1438,6 +1449,72 @@ fs.rmSync(dir, { recursive: true, force: true });
 rejection as `HoldTimeoutError` (`code: 'JD2098'`, `holdTimeoutMs`,
 `elapsedMs`), and `tx.attempt` on every transaction view — the linq
 client forwards all three ([DB-CLIENT](../linq/docs/DB-CLIENT.md)).
+
+The writer lock, the isolation floor and the owner lease, end to end on
+one file — every printed value is what the example answers when it runs:
+
+```js
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const model = {
+  $model: '0.1',
+  collections: {
+    counters: {
+      schema: {
+        type: 'object',
+        required: ['id', 'n'],
+        properties: { id: { type: 'string' }, n: { type: 'integer' } },
+      },
+      key: '/id',
+      indexes: [],
+    },
+  },
+};
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-'));
+const file = path.join(dir, 'app.db');
+
+// the single writable owner of the file, for as long as it is open
+const store = await openStore(model, {
+  driver: nodeDriver(), path: file, owner: { id: 'api-1', leaseMs: 30_000 },
+});
+const { owner, isolation } = store.capabilities;
+// → { owner: 'lease', isolation: [ 'serializable' ] }
+const writerLock = store.capabilities.immediateTransactions;
+// → true
+
+// a second owner is refused by name; a read-only store is never refused
+const second = await openStore(model, { driver: nodeDriver(), path: file, owner: { id: 'api-2' } })
+  .catch((error) => error);
+const refusal = { code: second.code, holder: second.owner, retryable: second.retryable };
+// → { code: 'JD2061', holder: 'api-1', retryable: true }
+
+// read, then write, under the writer lock; the floor asked for is
+// `repeatable read`, and SQLite runs every transaction serializably
+await store.collection('counters').put({ id: 'orders', n: 41 });
+const ran = await store.transaction(async (tx) => {
+  const counter = await tx.collection('counters').get('orders');
+  await tx.collection('counters').put({ id: 'orders', n: counter.n + 1 });
+  return { n: counter.n + 1, level: tx.isolation };
+}, { mode: 'immediate', isolation: 'repeatable read' });
+// → { n: 42, level: 'serializable' }
+
+// close() gives the lease back at once: the next owner opens
+await store.close();
+const next = await openStore(model, { driver: nodeDriver(), path: file, owner: { id: 'api-2' } });
+const reopened = (await next.collection('counters').get('orders'))?.n;
+// → 42
+
+await next.close();
+fs.rmSync(dir, { recursive: true, force: true });
+```
+
+`isolation` is typed as `IsolationLevel` on the open options, the
+transaction options and `tx.isolation`, `owner` as `StoreOwner`, and the
+refusal as `OwnerError` (`code: 'JD2061'`, `owner`, `expiresAt`).
 
 The normative contract is [MODEL-FORMAT](docs/MODEL-FORMAT.md) §4 (the
 pragma set, the maintenance and backup rules, the cancellation report)

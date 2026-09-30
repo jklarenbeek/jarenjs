@@ -486,9 +486,24 @@ export interface CancellationCapabilities {
   readonly midStatement: boolean;
 }
 
+/** A transaction isolation level, weakest first. A level asked for is a
+ * FLOOR: the backend runs it or a stronger one (MODEL-FORMAT §5.1). */
+export type IsolationLevel = 'read committed' | 'repeatable read' | 'serializable';
+
 export interface StoreCapabilities {
   readonly version: string;
   readonly readOnly: boolean;
+  /** `mode: 'immediate'` takes the store's writer lock before the body
+   * runs — SQLite's `BEGIN IMMEDIATE`, PostgreSQL's advisory lock after
+   * `BEGIN`. */
+  readonly immediateTransactions: boolean;
+  /** The isolation levels a transaction can run here, weakest first
+   * (SQLite: `serializable` alone). */
+  readonly isolation: readonly IsolationLevel[];
+  /** How the store owns its database: `'none'` (opened without `owner`),
+   * `'lease'` (SQLite's renewed engine-table row) or `'session'`
+   * (PostgreSQL's session lock). */
+  readonly owner: 'none' | 'lease' | 'session';
   readonly validated: boolean;
   readonly profiled: boolean;
   /** The read-back connection configuration (MODEL-FORMAT §4). */
@@ -518,6 +533,9 @@ export interface StoreCapabilities {
     statementTimeoutMs: number | null; lockTimeoutMs: number | null;
     cursorMode: 'native' | 'buffered'; poolMode: 'session'; prepared: 'named' | 'unnamed';
     cursorCancel: boolean;
+    /** What a transaction that asks for no level runs: the session's
+     * `default_transaction_isolation`, read at open. */
+    defaultIsolation: IsolationLevel;
   }>;
   readonly sessions: boolean;
   readonly sessionReason: string | null;
@@ -882,6 +900,11 @@ export interface TransactionScopeOptions {
    * body settles. Overrides the store's `holdTimeoutMs`. The asynchronous
    * root only (`JD0014` on the synchronous twin or nested). */
   holdTimeoutMs?: number;
+  /** The isolation floor: the level asked for, or the session's stronger
+   * default, runs, and `tx.isolation` reports it. Overrides the store's
+   * `isolation`. SQLite runs every transaction `serializable`. The root
+   * only (`JD0014` nested — a savepoint runs at its root's level). */
+  isolation?: IsolationLevel;
 }
 
 /** A transaction's retry policy: `attempts` 1–32 (1 is no retry); the
@@ -891,6 +914,21 @@ export interface TransactionRetry {
   attempts: number;
   baseMs?: number;
   maxMs?: number;
+}
+
+/** What an open with `owner` rejects with while another Store holds the
+ * lease, and what every call of a Store that lost its lease rejects with
+ * (`JD2061`). */
+export interface OwnerError extends Error {
+  readonly code: 'JD2061';
+  /** The holder's id — `null` on PostgreSQL, whose lock names no one. */
+  readonly owner: string | null;
+  /** When the holder's lease ends (epoch ms) — `null` on PostgreSQL. */
+  readonly expiresAt: number | null;
+  readonly class: 'busy';
+  /** `true` while waiting may help (a live lease, a lapse); `false` once
+   * another holder took this Store's lease. */
+  readonly retryable: boolean;
 }
 
 /** What a transaction that held its connection past its limit rejects
@@ -904,8 +942,9 @@ export interface HoldTimeoutError extends Error {
 
 /** A nested transaction's options: the root's, less what only the root
  * transaction chooses — the unit of work every savepoint in it writes
- * through, its retry and its hold limit (`JD0014` at runtime). */
-export type NestedTransactionOptions = Omit<TransactionScopeOptions, 'unitOfWork' | 'retry' | 'holdTimeoutMs'>;
+ * through, its retry, its hold limit and its isolation level (`JD0014` at
+ * runtime). */
+export type NestedTransactionOptions = Omit<TransactionScopeOptions, 'unitOfWork' | 'retry' | 'holdTimeoutMs' | 'isolation'>;
 
 /** The synchronous twin's options: the root's, less what needs a wait —
  * `retry` and `holdTimeoutMs` (`JD0014` at runtime). */
@@ -943,6 +982,8 @@ export interface TransactionSyncStore extends SyncStore {
   readonly savepoints: SyncSavepointController;
   /** The attempt of the retried transaction this callback runs in (1-based). */
   readonly attempt: number;
+  /** The isolation level the transaction runs at. */
+  readonly isolation: IsolationLevel;
   /** Nest through this scope's savepoint, synchronously — the nested
    * option set (`JD0014` for `unitOfWork` or an immediate the root did
    * not take). */
@@ -977,6 +1018,9 @@ export interface TransactionStore extends Omit<Store,
   /** The attempt of the retried transaction this callback runs in —
    * 1-based; always 1 without `retry`. */
   readonly attempt: number;
+  /** The isolation level the transaction runs at — the level asked for,
+   * or the session's stronger default (SQLite: always `serializable`). */
+  readonly isolation: IsolationLevel;
   /** Nest through this scope's savepoint. Its options are the root's
    * closed set less `unitOfWork` (a savepoint writes through the unit of
    * work around it); `mode: 'immediate'` inside a root that did not take
@@ -1178,6 +1222,15 @@ export interface LiveBounds {
   maxMaintained?: number;
 }
 
+/** The owner lease a Store opens under: `id` names the owner in every
+ * refusal; `leaseMs` (1,000 to 2^31 − 1, default 30,000) is how long the
+ * lease outlives its last renewal — on SQLite it must exceed the longest
+ * transaction the host allows plus a third of itself. */
+export interface StoreOwner {
+  id: string;
+  leaseMs?: number;
+}
+
 export interface OpenStoreOptions {
   /** Verify existing objects and create no schema or infrastructure. */
   adopt?: boolean;
@@ -1220,6 +1273,14 @@ export interface OpenStoreOptions {
   /** The default hold limit of every `store.transaction` (a call's own
    * `holdTimeoutMs` overrides it): milliseconds from 1 to 2^31 − 1. */
   holdTimeoutMs?: number;
+  /** The default isolation floor of every `store.transaction` (a call's
+   * own `isolation` overrides it). */
+  isolation?: IsolationLevel;
+  /** Open as the database's single writable owner (MODEL-FORMAT §5.1): a
+   * second Store that asks while this one holds the lease is refused
+   * `JD2061`. Not with `readOnly`; an adopted SQLite store needs the owner
+   * table (`JD0015`). */
+  owner?: StoreOwner;
   /**
    * The connection pragmas — a closed, validated set (MODEL-FORMAT §4).
    * An option naming any other pragma is `JD0006`; a pragma the driver

@@ -153,6 +153,11 @@ async function main(): Promise<void> {
     await tx.transaction(async () => 1, { retry: { attempts: 2 } });
     // @ts-expect-error — a hold limit is the root's (JD0014)
     await tx.transaction(async () => 1, { holdTimeoutMs: 100 });
+    // the level the transaction runs at, typed; choosing one is the root's
+    const level: 'read committed' | 'repeatable read' | 'serializable' = tx.isolation;
+    void level;
+    // @ts-expect-error — a savepoint runs at its root's level (JD0014)
+    await tx.transaction(async () => 1, { isolation: 'serializable' });
     // named savepoints are the transaction's alone, forwarded from the store
     await tx.savepoints.create('mid');
     await tx.savepoints.rollbackTo('mid');
@@ -170,7 +175,7 @@ async function main(): Promise<void> {
   await client.transaction(async () => 1, { unitOfWork: 'private' });
   // a retried, time-bounded root transaction
   const retried: number = await client.transaction(async (tx) => tx.attempt,
-    { retry: { attempts: 3, baseMs: 5, maxMs: 250 }, holdTimeoutMs: 500 });
+    { retry: { attempts: 3, baseMs: 5, maxMs: 250 }, holdTimeoutMs: 500, isolation: 'serializable' });
   void retried;
   await client.close();
 

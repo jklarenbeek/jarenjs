@@ -66,6 +66,20 @@ describe("the db README's runnable examples", () => {
     printed(example.section, [ran.claimed, { code: ran.code, holdTimeoutMs: ran.holdTimeoutMs }, ran.after]);
   });
 
+  it('the writer lock, the isolation floor and the owner lease (Operating a store) run as written and answer what they print', async () => {
+    const example = exampleAfter('The writer lock, the isolation floor and the owner lease, end to end');
+    assert.ok(example !== null, 'packages/db/README.md no longer carries the isolation-and-owner example');
+    const ran = await run(example.code, ['owner', 'isolation', 'writerLock', 'refusal', 'ran', 'reopened']);
+    assert.equal(ran.owner, 'lease');
+    assert.deepEqual([...ran.isolation], ['serializable']);
+    assert.equal(ran.writerLock, true);
+    assert.deepEqual(ran.refusal, { code: 'JD2061', holder: 'api-1', retryable: true }, 'the second owner is refused by name');
+    assert.deepEqual(ran.ran, { n: 42, level: 'serializable' });
+    assert.equal(ran.reopened, 42, 'close() released the lease at once');
+    printed(example.section, [{ owner: ran.owner, isolation: [...ran.isolation] }, ran.writerLock,
+      ran.refusal, ran.ran, ran.reopened]);
+  });
+
   it('relational statements through a store (Existing relational stores) run as written and answer what they print', async () => {
     const example = exampleAfter('A store carries the same engine as `store.relational`');
     assert.ok(example !== null, 'packages/db/README.md no longer carries the store-bound relational example');

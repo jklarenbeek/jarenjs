@@ -685,18 +685,33 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * busy handler cannot retry when another connection commits in
    * between; taking the lock first makes that wait an ordinary busy
    * wait the timeout covers. Nesting inside it is savepoints, as always.
+   *
+   * `begin` is what the store's own transaction asks of the block: an
+   * `isolation` level (spelled into the `BEGIN` where the dialect runs
+   * more than one), and `writerLock` — the store's writer lock where it
+   * is a statement of its own after `BEGIN` (PostgreSQL's advisory lock).
+   * That statement runs inside the block, before the body: a lock wait
+   * that fails (a lock timeout) rolls the block back, and the body — and
+   * with it any hold clock — starts only once the lock is held.
    * @param {(scope: any) => any} fn
+   * @param {'deferred' | 'immediate'} mode
+   * @param {{ alive: boolean }} life
+   * @param {{ isolation?: string, writerLock?: boolean }} [begin]
    */
-  const blockAround = (fn, mode, life) => {
-    const begin = mode === 'immediate' ? dialect.tx.beginImmediate : dialect.tx.begin;
-    return chain(raw.exec(begin), () => {
+  const blockAround = (fn, mode, life, begin = undefined) => {
+    const statement = begin?.isolation !== undefined && dialect.tx.beginAt !== undefined
+      ? dialect.tx.beginAt(begin.isolation)
+      : mode === 'immediate' ? dialect.tx.beginImmediate : dialect.tx.begin;
+    const lock = begin?.writerLock === true ? dialect.tx.writerLock : undefined;
+    return chain(raw.exec(statement), () => {
       let out;
       const wasInBlock = inBlock;
       inBlock = true;
       const restore = (value) => { inBlock = wasInBlock; return value; };
       try {
-        out = settleTransaction(() => callBody(fn, life),
-          () => raw.exec(dialect.tx.commit), rollbackUnlessClosed(() => raw.exec(dialect.tx.rollback)));
+        out = settleTransaction(() => (lock === undefined ? callBody(fn, life)
+          : chain(raw.exec(lock), () => callBody(fn, life))),
+        () => raw.exec(dialect.tx.commit), rollbackUnlessClosed(() => raw.exec(dialect.tx.rollback)));
       }
       catch (error) {
         restore(undefined);
@@ -833,8 +848,11 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
      * @param {'deferred' | 'immediate'} [mode] - `'immediate'` takes the
      *   write lock up front (a top-level transaction only; a nested call
      *   is a savepoint whichever mode the root chose)
+     * @param {{ isolation?: string, writerLock?: boolean }} [begin] - the
+     *   store transaction's isolation level and writer lock (see
+     *   `blockAround`); a nested call ignores it, as it ignores `mode`
      */
-    transaction(fn, signal, mode = 'deferred') {
+    transaction(fn, signal, mode = 'deferred', begin = undefined) {
       requireOpen();
       if (onStack) return savepointAround(fn, ALWAYS_LIVE);
       return whenFree(() => {
@@ -850,7 +868,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
           // not: an engine that refuses `SAVEPOINT` outside a
           // transaction has to be told one is starting.
           out = mode === 'immediate' || dialect.capabilities.savepointStartsTransaction !== true
-            ? blockAround(fn, mode, life)
+            || (begin?.isolation !== undefined && dialect.tx.beginAt !== undefined)
+            ? blockAround(fn, mode, life, begin)
             : savepointAround(fn, life);
         }
         catch (error) {

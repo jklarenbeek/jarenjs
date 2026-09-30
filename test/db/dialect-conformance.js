@@ -415,8 +415,22 @@ export function runDialectConformance(dialect, { describe, it, assert }) {
       }
       assert.notStrictEqual(tx.commit, tx.rollback);
       assert.notStrictEqual(tx.begin, tx.commit);
-      assert.strictEqual(tx.beginImmediate !== tx.begin, caps.immediateTransactions,
-        'a dialect without an up-front write lock says so rather than pretending');
+      // the writer lock is a BEGIN of its own or a statement after BEGIN
+      assert.strictEqual(tx.beginImmediate !== tx.begin || typeof tx.writerLock === 'string',
+        caps.immediateTransactions, 'a dialect without an up-front write lock says so rather than pretending');
+      if (typeof tx.writerLock === 'string') assert.strictEqual(tx.beginImmediate, tx.begin,
+        'a writer lock after BEGIN follows a plain BEGIN, never a second up-front lock');
+      // the isolation levels a transaction can run: a non-empty run of the
+      // three, weakest first; a BEGIN that spells one exists only where
+      // there is more than one to choose from
+      const LEVELS = ['read committed', 'repeatable read', 'serializable'];
+      assert.ok(Array.isArray(tx.isolationLevels) && tx.isolationLevels.length > 0);
+      assert.deepStrictEqual([...tx.isolationLevels], LEVELS.filter((level) => tx.isolationLevels.includes(level)),
+        'known levels, weakest first');
+      assert.strictEqual(typeof tx.beginAt === 'function', tx.isolationLevels.length > 1);
+      for (const level of tx.isolationLevels) {
+        if (tx.beginAt !== undefined) assert.match(tx.beginAt(level), /^\S+/);
+      }
       if (caps.savepoints) {
         for (const phrase of [tx.savepoint('sp_1'), tx.release('sp_1'), tx.rollbackTo('sp_1')])
           assert.ok(phrase.includes(q('sp_1')), `a checkpoint name is quoted: ${phrase}`);

@@ -13,6 +13,8 @@ export const CHANGES_STATE_TABLE = '_jaren_changes_state';
 export const JOBS_TABLE = '_jaren_jobs';
 /** Durable job checkpoints. */
 export const JOB_CHECKPOINTS_TABLE = '_jaren_job_checkpoints';
+/** The owner lease: one row naming the store that owns the file. */
+export const OWNER_TABLE = '_jaren_owner';
 /** Tables excluded from model adoption and schema drift comparisons. */
 export const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE,
-  JOBS_TABLE, JOB_CHECKPOINTS_TABLE, ...Object.values(REPLICATION_TABLES)]);
+  JOBS_TABLE, JOB_CHECKPOINTS_TABLE, OWNER_TABLE, ...Object.values(REPLICATION_TABLES)]);

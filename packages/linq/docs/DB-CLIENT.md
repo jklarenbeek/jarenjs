@@ -105,19 +105,21 @@ decides which document answers a question about behaviour.
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
 **A transaction's options are the store's.** `client.transaction(fn,
-options)` hands `mode`, `signal`, `unitOfWork`, `retry` and
-`holdTimeoutMs` to the store as they are — the set is the store's closed
+options)` hands `mode`, `signal`, `unitOfWork`, `retry`, `holdTimeoutMs`
+and `isolation` to the store as they are — the set is the store's closed
 one, so an unknown or malformed option is `JD0013` and one the scope
 cannot honour is `JD0014` (MODEL-FORMAT §5.1) — with one default of the
 client's own: a root transaction gets its own unit of work. The client
 the callback receives carries the store's `attempt`, 1-based and above 1
-only under `retry`, whose attempts each start on a fresh unit of work; a
-body held past `holdTimeoutMs` is rolled back at the limit and the call
-rejects `JD2098`. A nested `tx.transaction(fn, options)` is a savepoint
-and takes the savepoint's set — no `unitOfWork`, `retry` or
-`holdTimeoutMs`. `TransactionOptions` types the root's set,
-`TransactionClientOf<E>` carries `attempt`, and the store's README runs
-the retry-and-hold example end to end.
+only under `retry`, whose attempts each start on a fresh unit of work,
+and its `isolation`, the level the transaction runs at; a body held past
+`holdTimeoutMs` is rolled back at the limit and the call rejects
+`JD2098`. A nested `tx.transaction(fn, options)` is a savepoint and takes
+the savepoint's set — no `unitOfWork`, `retry`, `holdTimeoutMs` or
+`isolation`. `TransactionOptions` types the root's set,
+`TransactionClientOf<E>` carries `attempt` and `isolation`, and the
+store's README runs the retry-and-hold and the writer-lock examples end
+to end.
 
 ### 2.2 The exported names
 

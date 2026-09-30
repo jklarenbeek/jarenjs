@@ -72,7 +72,7 @@ FALLBACK or a coded refusal on the common path, never a skip:
 | `untypedColumns` | a comparison against a member the schema does not type reads the member out of the document instead of the column: same answer, unindexed |
 | `indexableGeneratedColumns` | the derived-column mapping is the STORED one — the store writes the values and the columns are ordinary |
 | `rowIdentity` (with a declared identity column) | the dialect adds that column to every table it creates, and it IS `rowIdentity()` |
-| `immediateTransactions` | `tx.beginImmediate` is `tx.begin`, and a read-then-write body takes its lock when it writes |
+| `immediateTransactions` | `mode: 'immediate'` takes no lock before the body, and a read-then-write body takes its row locks when it writes; no shipped dialect answers `false` any more |
 
 Two subsystems are SQLite's own in 0.1 and say so on the connection
 rather than in the dialect: the durable job queue (`capabilities.jobs`)
@@ -222,7 +222,7 @@ common fallback, never a skip.
 | `generatedColumns` / `indexableGeneratedColumns` | yes, `VIRTUAL` | yes, `STORED` |
 | `untypedColumns` | yes (`ANY`) | — (the member is read from the document) |
 | `returning`, `upsert`, `savepoints` | yes | yes |
-| `immediateTransactions` | yes (`BEGIN IMMEDIATE`) | — (`tx.beginImmediate` is `BEGIN`) |
+| `immediateTransactions` | yes (`BEGIN IMMEDIATE`) | yes (`BEGIN`, then the store's advisory writer lock, `tx.writerLock`) |
 | `groupByAlias` | yes | yes |
 | `alterTableFull` | — | yes |
 | `virtualTables` / `triggers` | yes (the R\*Tree mapping) | — (`physical: 'rtree'` maps back onto the four edge columns) |

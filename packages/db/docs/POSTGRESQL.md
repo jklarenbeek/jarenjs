@@ -21,6 +21,7 @@ spatial/vector execution capability to this release.
 | Session ownership | Exact settings restored, missing/inaccessible schema refused, cached-plan failure preserved inside transactions: [session tests](../../../test/db/postgres-session.test.js) | Host provisions schema, roles, TLS and session-affine pool; a Store owns a client until close |
 | Bounded execution | Native cursors, finite admission, server deadlines, cancellation settlement: [cursor tests](../../../test/db/postgres-cursor.test.js) | A normalized row/frame limit cannot prevent allocation inside an injected client; buffered compatibility declares weaker bounds |
 | Retry, hold limit, lost sessions | Whole-transaction retry after 40001, a Store-level hold limit that rolls back without ending the session, a lost session coded JD2087 instead of an uncaught exception: [retry](../../../test/db/transaction-retry.test.js), [hold](../../../test/db/transaction-hold.test.js) and [loss](../../../test/db/connection-loss.test.js) tests | Retry is explicit and never follows a connection loss; the server-side idle/transaction timeouts stay unset because they end the session |
+| Writer lock, isolation, owner | `mode: 'immediate'` loses no update between two Stores, the three isolation levels run and are reported, a lock wait past `lock_timeout` is busy and retryable, one owner per schema: [isolation](../../../test/db/postgres-isolation.test.js) and [owner](../../../test/db/postgres-owner.test.js) tests | The writer lock orders immediate transactions only; plain writes lock rows. The owner lock is cooperative and names no holder |
 | Relational statements through the Store | `store.relational` and `tx.relational` over the native cursors, the write rules shared with trusted SQL, a failed write inside a transaction contained by its savepoint: [store-bound tests](../../../test/db/relational-store.test.js) | A root native cursor holds the session until released, so other root calls wait for it; `lastInsertRowid` is never reported |
 | Physical tables and catalog | Explicit codecs, exact bigint/decimal strings, date/time distinctions, declared layout and rich loss/disposition inventory: [physical tests](../../../test/db/postgres-physical.test.js) | Arbitrary catalog objects are inventoried, not automatically translated into model intent |
 | Native migrations | Reviewed native catalog artifacts, dependency/sequence preservation, receipts, transaction rollback and separate shadow replay: [migration tests](../../../test/db/postgres-migration.test.js) | Concurrent index creation and unreviewed destructive dependencies refuse; opening never silently changes an existing schema |
@@ -35,6 +36,59 @@ The [host contract](HOSTS.md#postgresql-sessions), [physical format](MODEL-FORMA
 [migration format](MIGRATION-FORMAT.md), [feed/live contract](LIVE-FORMAT.md),
 [jobs contract](JOBS-FORMAT.md) and [replication contract](REPLICATION-FORMAT.md)
 define the options, refusal codes and resource owners.
+
+## The writer lock and the lock family
+
+`store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the
+store's writer lock — `SELECT pg_catalog.pg_advisory_xact_lock(1246907984,
+pg_catalog.hashtext(current_schema()))` — and only then runs the body. Two
+immediate transactions on two Stores of one schema therefore run one after
+the other, and a read-then-write body cannot lose an update to the other:
+
+- at `read committed`, the server default, every statement reads a fresh
+  snapshot, so the body that waited reads the commit it waited for — two
+  concurrent increments of `n = 0` leave `2`, with no retry;
+- at `repeatable read` and `serializable` the snapshot is taken by the lock
+  statement itself, before the wait, so the waiter reads the old value and
+  its write fails 40001 — busy and retryable, which `retry` absorbs.
+
+The lock is advisory: it orders immediate transactions among themselves
+only. A plain collection write, a keyed write's convergence, a relational
+write or a deferred transaction takes the row locks it needs and never
+waits for it, so no plain write serializes every writer. A wait is bounded
+by the session's `lock_timeout` (the driver's `lockTimeoutMs`, 5 seconds by
+default): past it the wait fails 55P03, which is `JD2005`, busy and
+retryable, and the refused transaction is rolled back before the session
+serves anything else. The wait is not counted against `holdTimeoutMs`,
+whose clock starts when the body does.
+
+`isolation` (MODEL-FORMAT §5.1) is a floor. A transaction that asks for no
+level runs a plain `BEGIN` at the session's `default_transaction_isolation`,
+read at open (`capabilities.postgres.defaultIsolation`); one that asks runs
+`BEGIN ISOLATION LEVEL …` at that level, or at the session's own when an
+operator raised it higher, and `tx.isolation` reports the level that ran.
+
+Every advisory lock the store takes is a class of one family (`0x4A524E__`,
+the first key) and is keyed by the session's current schema (the second
+key) — the store's own, once the driver has set its search path:
+
+| Class | Lock | Held for | Taken |
+|---|---|---|---|
+| `1246907982` | migration | the transaction | by a native migration run, before it reads its receipts |
+| `1246907983` | capture | the transaction | by a captured write, before the journal allocates its high-water |
+| `1246907984` | writer | the transaction | by `mode: 'immediate'`, before the body runs |
+| `1246907985` | owner | the store's session | by `openStore(model, { owner })`, until `close()` or the session ends |
+| `1246907990` | jobs | the transaction | by the job queue's catalog initialization |
+
+Two classes never contend, and two schemas never do. An immediate
+transaction on a capturing Store takes the writer lock first and the
+capture lock right after it, as its capture scope opens; nothing takes
+them the other way round, so the two cannot deadlock. The owner lock is session-scoped: it is
+taken with `pg_try_advisory_lock` at open (a held lock refuses `JD2061`),
+and released explicitly at `close()` — before the driver restores the
+session's search path and returns it to its pool, which a session lock
+would otherwise outlive — or by the server when the session ends. An
+adopted Store takes it too: it needs no table.
 
 ## Select the backend at build time
 

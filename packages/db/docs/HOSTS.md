@@ -135,6 +135,70 @@ unguarded external effects. Read [queue locking and recovery](JOBS-FORMAT.md)
 for lease expiry, lost replies, forward upgrades and the separate-database
 relay boundary.
 
+## The owner lease
+
+`openStore(model, { owner: { id, leaseMs } })` opens a Store as its database's
+single writable owner (MODEL-FORMAT §5.1). A second Store — in this process or
+another — that asks for ownership while the lease is held is refused `JD2061`,
+busy and retryable, with the holder's `owner` id and the lease's `expiresAt`
+(epoch milliseconds, also printed in the reason). `capabilities.owner` reports
+`'lease'` on SQLite, `'session'` on PostgreSQL and `'none'` without `owner`.
+
+```js
+const store = await openStore(model, {
+  driver: nodeDriver(), path: 'application.sqlite',
+  owner: { id: `api@${hostname()}`, leaseMs: 30_000 },
+});
+```
+
+**SQLite.** The lease is the one row of the engine table `_jaren_owner`: the
+owner's id, the holding Store's random token and the expiry. The open takes it
+in an immediate bracket before it creates or verifies any table of the model,
+so a refused open changes nothing. The Store renews it every third of `leaseMs`
+as an ordinary write under its gate, and deletes it at `close()`; a process
+that dies leaves the row to expire, and the refusal's `expiresAt` tells a
+restarting host how long to wait. The renewal waits behind the Store's own
+transactions, so `leaseMs` must exceed the longest transaction the host allows
+(its `holdTimeoutMs`) plus the renewal interval — `leaseMs` above 1.5 ×
+`holdTimeoutMs` — or a busy owner can lose its lease. Holders compare
+wall-clock expiries, so hosts sharing a file must agree on the time.
+
+A Store checks its lease at every admission — a store-level call, a
+transaction's begin. A lease that lapsed on its own clock (a suspended
+process, a starved event loop) is renewed before the call runs, and the call is
+refused `JD2061`, retryable, only while that renewal cannot confirm the lease.
+A lease another holder took — its clock said the lease had expired — makes
+every later call refuse `JD2061`, not retryable: the Store is no longer the
+owner, so close it (and open again, which waits for the new owner).
+
+An adopted Store (`adopt: true`) creates no table, the owner table included, so
+it refuses `owner` with `JD0015` until the table exists. Create it once with
+the statement the refusal names,
+
+```sql
+CREATE TABLE "_jaren_owner" ("slot" INTEGER PRIMARY KEY CHECK ("slot" = 1), "owner" TEXT NOT NULL, "holder" TEXT NOT NULL, "expires_at" INTEGER NOT NULL) STRICT
+```
+
+or open the file once without `adopt`, which creates it.
+
+**PostgreSQL.** The owner is a session-level advisory lock of its own class,
+keyed by the schema ([the lock family](POSTGRESQL.md#the-writer-lock-and-the-lock-family)):
+no table — an adopted Store takes it too — and no expiry. It is held for
+exactly the Store's session and released at `close()` before the session
+returns to its pool, when an open fails after taking it, or by the server when
+the session ends. The refusal names no holder (`owner` and `expiresAt` are
+`null`); its reason names the schema.
+
+**On both.** The lease is cooperative: only an open that asks for `owner` takes
+or checks it, and a writable open without `owner` still writes. A read-only
+open never takes or checks it, and asking one to is refused (`JD0009`); a
+pool's readers need none, because its writer holds it.
+
+**Platforms.** The SQLite lease uses nothing but SQLite's own locking and one
+row, so it should be portable, but it is qualified on Linux only and is not yet
+qualified on Windows: SQLite's file locking, process termination and path case
+there are unverified.
+
 ## Node workers
 
 ```js

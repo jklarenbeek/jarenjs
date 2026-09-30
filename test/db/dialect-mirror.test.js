@@ -209,8 +209,11 @@ function corpusOf(dialect) {
   out['strContains'] = dialect.strContains(dialect.quoteIdentifier('gx_tag'),
     dialect.parameterRef(1, 'p'));
   out['explainQuery'] = dialect.explainQuery('SELECT 1');
-  for (const [key, value] of Object.entries(dialect.tx))
+  for (const [key, value] of Object.entries(dialect.tx)) {
+    // the isolation levels a transaction can run are data, not a statement
+    if (Array.isArray(value)) continue;
     out[`tx.${key}`] = typeof value === 'function' ? value('sp') : value;
+  }
   /** Each pragma with the arguments it accepts; `set` validates its word. */
   const pragmaArgs = { set: ['journal_mode', 'wal'], foreignKeys: [true], foreignKeyCheck: [],
     walCheckpoint: ['passive'], integrityCheck: [5], optimize: [] };

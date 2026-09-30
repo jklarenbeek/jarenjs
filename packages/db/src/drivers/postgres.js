@@ -165,6 +165,15 @@ function encodeParam(value) {
   return value;
 }
 
+/** A session's `default_transaction_isolation` as the level it runs. */
+const SESSION_ISOLATION = Object.freeze({
+  __proto__: null,
+  'read uncommitted': 'read committed',
+  'read committed': 'read committed',
+  'repeatable read': 'repeatable read',
+  serializable: 'serializable',
+});
+
 /**
  * The PostgreSQL probe. It replaces the SQLite one wholesale — there is
  * no `sqlite_version()` and no compile-options table here — and every
@@ -176,7 +185,8 @@ function encodeParam(value) {
  */
 export function postgresProbe(raw) {
   return chain(raw.prepare("SELECT current_setting('server_version_num') AS num, "
-    + "current_setting('server_version') AS version", { buffered: true }), (statement) =>
+    + "current_setting('server_version') AS version, "
+    + "current_setting('default_transaction_isolation') AS isolation", { buffered: true }), (statement) =>
     chain(statement.get([]), (row) => {
       const num = Number(row?.num);
       const version = String(row?.version ?? '');
@@ -205,7 +215,11 @@ export function postgresProbe(raw) {
           statementTimeoutMs: raw.serverTimeouts === true ? raw.limits.statementTimeoutMs : null,
           lockTimeoutMs: raw.serverTimeouts === true ? raw.limits.lockTimeoutMs : null,
           cursorMode: raw.nativeCursor === true ? 'native' : 'buffered', poolMode: 'session',
-          prepared: raw.preparedMode, cursorCancel: raw.cursorCancel === true }),
+          prepared: raw.preparedMode, cursorCancel: raw.cursorCancel === true,
+          // what a transaction that asks for no level runs: the session's
+          // default, which an operator may have raised (`read uncommitted`
+          // runs as `read committed`)
+          defaultIsolation: SESSION_ISOLATION[String(row?.isolation)] ?? 'read committed' }),
         // the closed configuration vocabulary is SQLite's; a PostgreSQL
         // server is configured by its operator
         configurablePragmas: Object.freeze([]),
