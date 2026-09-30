@@ -38,7 +38,7 @@ import { ContractHostError } from '../errors.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { isReadableStream, isAsyncByteSource } from '../http/body.js';
 import { compatReason } from '../compat.js';
-import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage } from '../http/wire.js';
+import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage, isFieldValue } from '../http/wire.js';
 import { createStreamConsumer, STREAM_ERRORS } from '../stream/client.js';
 import { STREAM_MEDIA } from '../stream/sse.js';
 import {
@@ -270,27 +270,13 @@ function encodingDetails(err) {
 }
 
 /**
- * Whether fetch can carry a string as a field value: no NUL, CR or LF,
- * and nothing beyond Latin-1 — `Headers` throws on either, which used to
- * reach the caller as a retryable network failure after the key was
- * already stored.
- * @param {string} value
- * @returns {boolean}
- */
-function isFieldValue(value) {
-  for (let i = 0; i < value.length; i++) {
-    const c = value.charCodeAt(i);
-    if (c === 0 || c === 10 || c === 13 || c > 0xFF) return false;
-  }
-  return true;
-}
-
-/**
  * A declared header member's value as its field text, or the refusal: a
- * value fetch cannot carry, and — because the list is joined with `, `
- * and the server splits on commas and trims — an item holding a comma or
- * edge whitespace, which would arrive as other items. A scalar with edge
- * whitespace is refused for the same reason: fetch trims it.
+ * value the transport cannot carry (`isFieldValue`), and — because the
+ * list is joined with `, ` and the server splits on commas, trims and
+ * drops empty elements (RFC 9110 §5.6.1) — an item holding a comma, edge
+ * whitespace or nothing, which would arrive as other items or none. A
+ * scalar with edge whitespace is refused for the same reason: fetch trims
+ * it.
  * @param {string} member
  * @param {unknown} v
  * @returns {string}
@@ -302,6 +288,7 @@ function headerMemberText(member, v) {
     if (!isFieldValue(item)) throw new Unencodable(member, `header member '${member}' holds a character a header cannot carry`);
     if (/^[ \t]|[ \t]$/.test(item)) throw new Unencodable(member, `header member '${member}' has edge whitespace, which the transport trims`);
     if (Array.isArray(v) && item.includes(',')) throw new Unencodable(member, `an item of header member '${member}' holds a comma, which would split it`);
+    if (Array.isArray(v) && item === '') throw new Unencodable(member, `an item of header member '${member}' is empty, which a header list drops`);
   }
   return items.join(', ');
 }
@@ -443,7 +430,7 @@ export function openHttpClient(contract, options = {}) {
       const v = options.headers[names[i]];
       if (typeof v !== 'string') throw host('JC1008', `options.headers['${names[i]}'] must be a string`);
       if (!TOKEN.test(names[i])) throw host('JC1008', `options.headers: '${names[i]}' is not a header field name (an HTTP token)`);
-      if (!isFieldValue(v)) throw host('JC1008', `options.headers['${names[i]}'] holds a character a header cannot carry (NUL, CR, LF, or beyond Latin-1)`);
+      if (!isFieldValue(v)) throw host('JC1008', `options.headers['${names[i]}'] holds a character a header cannot carry (a control character other than tab, DEL, or beyond Latin-1)`);
       setObjectMember(staticHeaders, names[i].toLowerCase(), v);
     }
   }
@@ -570,6 +557,8 @@ export function openHttpClient(contract, options = {}) {
       if (text === '' || text === '.' || text === '..') {
         throw new Unencodable(s.text, `path variable '${s.text}' is ${JSON.stringify(text)}, which a URL cannot carry as a segment`);
       }
+      // a lone surrogate has no UTF-8 spelling: encoding it throws
+      if (!text.isWellFormed()) throw new Unencodable(s.text, `path variable '${s.text}' holds an unpaired surrogate, which a URL cannot carry`);
       path += '/' + encodeURIComponent(text);
     }
     if (segments.length === 0) path = '/';
@@ -583,7 +572,10 @@ export function openHttpClient(contract, options = {}) {
         continue;
       }
       if (v === undefined || v === null) continue;
-      params.append(m, transportString(v));
+      const text = transportString(v);
+      // URLSearchParams would quietly send U+FFFD in its place
+      if (!text.isWellFormed()) throw new Unencodable(m, `query member '${m}' holds an unpaired surrogate, which a URL cannot carry`);
+      params.append(m, text);
     }
     const query = params.toString();
     return query.length === 0 ? path : path + '?' + query;
@@ -1043,6 +1035,11 @@ export function openHttpClient(contract, options = {}) {
       return invalidInput(route, meta, encodingDetails(err));
     }
     const upload = uploadBody(ctx.body);
+    // those methods carry no request body: fetch refuses one on GET and
+    // HEAD (a retryable network error), and both adapters drop one on OPTIONS
+    if (upload.init !== undefined && (route.method === 'GET' || route.method === 'HEAD' || route.method === 'OPTIONS')) {
+      throw host('JC1008', `bytes(): '${route.id}' is bound to ${route.method}, which carries no request body — ctx.body must be null`);
+    }
     if (upload.init !== undefined && headers['content-type'] === undefined) headers['content-type'] = route.media;
     if ((signal !== null && signal.aborted) || closed) return cancelled(route, meta);
 

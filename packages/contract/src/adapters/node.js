@@ -428,6 +428,18 @@ export function toNodeHandler(dispatcher, options = {}) {
           // well-formed request; still, a rejection must not hang the socket
           const message = err instanceof Error ? err.message : String(err);
           send(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: message }, true, undefined);
+        })
+        .catch((err) => {
+          // an answer Node refuses to write (a header value it rejects)
+          // must neither crash the process nor hang the socket: before the
+          // head is out, a plain 500 replaces it; after, the socket goes
+          if (res.headersSent) {
+            res.destroy(err instanceof Error ? err : undefined);
+            return;
+          }
+          for (const name of res.getHeaderNames()) res.removeHeader(name);
+          send(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' },
+            body: 'the response could not be written' }, true, undefined);
         });
     };
 

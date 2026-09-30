@@ -67,6 +67,14 @@ export { PORT_LOCAL_ERRORS };
  *   - a message catalog consulted before the English one
  * @property {(error: unknown, ctx: { op: string, trace: string } | null) => void} [onError]
  *   - observes the cause behind every `JC2070` outcome and validator throw
+ * @property {(meta: import('../host.js').IdentifyMeta) => unknown} [identify]
+ *   - the host lifecycle's first hook (docs/CONTRACT-FORMAT.md §7.7), run
+ *   after the operation resolved and before the input is validated;
+ *   `meta.carrier` is `'local'` and the request-line members are `null`
+ * @property {(input: unknown, identity: unknown, enter: (lease: unknown) => Promise<unknown>) => unknown} [acquire]
+ *   - the second hook, run after the input validated; `enter` settles when
+ *   the handler does, so a transaction the host opens around it commits
+ *   or rolls back with the handler's work
  */
 
 /**
@@ -392,7 +400,12 @@ export function openLocalClient(contract, handlers, options = {}) {
     if (first === ABORTED) {
       void running.then((late) => {
         if (late.kind === 'fault') observed(late.cause);
-        else if (late.afterFault !== undefined) observed(late.afterFault);
+        else {
+          // a handler fault after the abort rolled the host back: it is
+          // still the host's fault, observed as it would have been
+          if (late.result?.kind === 'contract' && late.result.cause !== undefined) observed(late.result.cause);
+          if (late.afterFault !== undefined) observed(late.afterFault);
+        }
         return release();
       }, observed);
       return cancelled(route, meta);

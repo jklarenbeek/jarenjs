@@ -96,6 +96,12 @@ const handlers = typedHandlers(Shop, {
   'product.save': (input) => input.product,
 });
 const api = typedClient(openLocalClient(compiled, handlers), Shop);
+// the host lifecycle's hooks are local options too, as serveHttp's and servePort's are
+const hosted = openLocalClient(compiled, handlers, {
+  identify: () => ({ host: 'tenant-a' }),
+  acquire: (_input: unknown, identity: unknown, enter: (lease: unknown) => Promise<unknown>) => enter({ host: identity }),
+});
+void hosted;
 
 async function roundTrip(): Promise<void> {
   const outcome = await api.invoke('product.save', {

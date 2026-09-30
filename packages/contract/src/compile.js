@@ -62,6 +62,20 @@ const LOCATIONS = Object.freeze(['path', 'query', 'header', 'body']);
 const FIELD_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
+ * Header names an input member cannot travel under. The transport's own —
+ * fetch refuses `content-length`, `expect`, `keep-alive`,
+ * `transfer-encoding` and `upgrade`, and replaces `connection` and `host`
+ * — and the binding's own, which the client writes itself: the body's
+ * media, the idempotency key, the entity-tag preconditions, and a
+ * stream's `accept` and resume cursor. A member under one of them failed
+ * every call, or was silently replaced.
+ */
+const RESERVED_HEADERS = new Set([
+  'connection', 'content-length', 'expect', 'host', 'keep-alive', 'transfer-encoding', 'upgrade',
+  'accept', 'content-type', 'idempotency-key', 'if-match', 'if-none-match', 'last-event-id',
+]);
+
+/**
  * Whether a schema's own keywords leave `null` possible — the check a
  * 204/205 binding needs: `false` only where `type`, `const` or `enum`
  * exclude it outright (an applicator is not second-guessed).
@@ -427,6 +441,9 @@ function checkRefs(node, docPath, scope, isRoot) {
  * @typedef {Object} CompiledOutput
  * @property {any} schema
  * @property {CompiledValidate} validate
+ * @property {boolean} admitsNull - whether the schema's own keywords leave
+ *   `null` possible: a 204 or 205 answer carries no content, so a handler
+ *   may choose one only then
  */
 
 /**
@@ -831,6 +848,11 @@ function checkHttp(http, id, kind, members, base) {
       `a subscribe operation must be bound to GET (a stream is fetched, not sent), got ${method}`,
       at(base, 'method'));
   }
+  if (kind === 'command' && method === 'HEAD') {
+    throw refuse('JC0012',
+      'a command cannot be bound to HEAD: a HEAD never executes a command or settles its idempotency claim, and it answers no body',
+      at(base, 'method'));
+  }
   let status = DEFAULT_STATUS;
   if (http.status !== undefined) {
     if (!Number.isInteger(http.status) || http.status < 200 || http.status > 299) {
@@ -937,6 +959,11 @@ function checkHttp(http, id, kind, members, base) {
     if (locations[m] === 'header' && !FIELD_NAME.test(m)) {
       throw refuse('JC0009',
         `'${m}' is mapped to header, but a header's name is its member's name and '${m}' is not an HTTP token (RFC 9110 §5.6.2) — rename the member or map it to query`,
+        inMap[m] !== undefined ? at(at(base, 'in'), m) : base);
+    }
+    if (locations[m] === 'header' && RESERVED_HEADERS.has(m.toLowerCase())) {
+      throw refuse('JC0009',
+        `'${m}' is mapped to header, but '${m.toLowerCase()}' is a field the transport or the binding writes itself — rename the member or map it to query`,
         inMap[m] !== undefined ? at(at(base, 'in'), m) : base);
     }
   }
@@ -1180,7 +1207,8 @@ export function compileContract(doc, options = {}) {
     }
 
     /** @type {CompiledOutput} */
-    const output = { schema: p.output, validate: compileAt(['operations', p.id, 'output'], at(base, 'output')) };
+    const output = { schema: p.output, validate: compileAt(['operations', p.id, 'output'], at(base, 'output')),
+      admitsNull: admitsNull(effectiveSchema(p.output, scope)) };
 
     /** @type {Record<string, CompiledErrorDecl>} */
     const errors = {};

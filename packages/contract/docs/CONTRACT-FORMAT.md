@@ -438,10 +438,10 @@ carries the same codes and a test holds them equal.
 | JC0006 | `output` is absent or not a schema |
 | JC0007 | a `$ref` resolves neither within the document nor against the registered schemas |
 | JC0008 | `http.path` is not a valid path template (§4.2; the message names the reserved form) |
-| JC0009 | a path variable, `http.in` key or `http.body` names no input member, or a member is mapped to a location it cannot travel in (§4.1) — a header-located member whose name is not an HTTP token (RFC 9110 §5.6.2) among them: its name is the header's |
+| JC0009 | a path variable, `http.in` key or `http.body` names no input member, or a member is mapped to a location it cannot travel in (§4.1) — a header-located member whose name is not an HTTP token (RFC 9110 §5.6.2) among them, or whose name is a field the transport or the binding writes itself (`connection`, `content-length`, `expect`, `host`, `keep-alive`, `transfer-encoding`, `upgrade`; `accept`, `content-type`, `idempotency-key`, `if-match`, `if-none-match`, `last-event-id`): its name is the header's, and under one of those it failed every call or was replaced |
 | JC0010 | two operations share method and canonical path shape (§4.4) |
 | JC0011 | `errors` is malformed: not an object, a code is not `^[a-z][a-z0-9_-]*$`, a status is not a 100–599 integer, or a schema is not a schema |
-| JC0012 | `http.method` is not an uppercase token of the supported set, `http.status` is not a 200–299 integer, `http.status` is 204 or 205 on a JSON operation whose `output` cannot be `null` (its `type`, `const` or `enum` exclude it — the status carries no content, so the value could never be answered), or `http.media` is not a media type (or a `type/*` range, which only a non-`subscribe` operation may declare — §4.5) |
+| JC0012 | `http.method` is not an uppercase token of the supported set, or binds a `command` to `HEAD` (a HEAD never executes a command — §7.6), `http.status` is not a 200–299 integer, `http.status` is 204 or 205 on a JSON operation whose `output` cannot be `null` (its `type`, `const` or `enum` exclude it — the status carries no content, so the value could never be answered), or `http.media` is not a media type (or a `type/*` range, which only a non-`subscribe` operation may declare — §4.5) |
 | JC0013 | an unknown member in a closed object (the document root, an operation, `policy`, `limits`, `retry`, `policy.errors`, `http`, or an error declaration) |
 | JC0014 | a `policy` member is mistyped or outside its declared set (§3.1), a read declares `idempotency`, or a command declares `retry` without `idempotency: "required"` |
 | JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped |
@@ -603,13 +603,17 @@ is `JC2008`.
    (an absent body is `null`) — a malformed object is `JC1004`,
    **rejected**, never a response.
 2. **Route.** `url` is split at the first `?`. A path with a segment
-   that decodes to `.` or `..` is `JC2011` before anything is matched —
-   an adapter that normalizes the URL would fold it into another path,
-   one that passes it raw would bind `..` as a value, and the binding
-   answers the same for both. The path goes to `contract.match(method,
+   that decodes to `.` or `..` is `JC2011` before anything is matched, so
+   a raw path — what the node adapter passes — never binds `..` as a
+   value. The fetch adapter cannot make that promise: a WHATWG `Request`
+   resolves dot segments (`%2e%2e` included) before the binding sees it,
+   so the path it hands over already names the operation the segments
+   fold into. The client refuses a `.` or `..` value before sending
+   (`JC2050`, §10.2), which is what keeps a caller from reaching another
+   operation. The path goes to `contract.match(method,
    path)`; under `HEAD` with `head` on, `HEAD` is tried, then `GET` —
-   and a `GET` operation that is not a read is `JC2002` with `Allow: GET`,
-   never executed (§7.6). No match: an undecodable path (a malformed
+   and a `GET` operation that is not a read is `JC2002`, its `Allow` the
+   methods the path serves, never executed (§7.6). No match: an undecodable path (a malformed
    percent-escape) is `JC2011`; the `wellKnown` path answers the public
    description under GET/HEAD (405 otherwise); `contract.allowed(path)`
    non-empty (with `HEAD` added beside a `GET` read when `head` is on) is
@@ -719,7 +723,9 @@ is `JC2008`.
     ledger claim is settled (§8). A raw handler's body passes through as
     it is: text, bytes, or a pull source the adapter streams (no
     `content-length`; HEAD cancels it) — except under 204, 205 or 304,
-    which carry no content: a non-empty raw body there is `JC2010`.
+    which carry no content: a pull source or a non-empty body there is
+    `JC2010` (a source is released, never left open), and so is a raw
+    header value an HTTP field cannot carry.
     Under a lease that **requires settlement** (§7.7) the claim is
     recorded through the lease's ledger inside `enter`, before `enter`
     resolves, and the root ledger stands down; a host fault or a
@@ -784,7 +790,7 @@ below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
 | code | status | msgid | retryable | when |
 |---|---:|---|---|---|
 | `JC2001` | 404 | `contract/not-found` | no | no operation matches method + path (a lowercase method token, an unknown path, a trailing slash) |
-| `JC2002` | 405 | `contract/method-not-allowed` | no | the path shape is served under other methods; `Allow` lists them (`HEAD` beside a `GET` read when `head` is on); a `HEAD` on a `GET`-bound command is this, with `Allow: GET` |
+| `JC2002` | 405 | `contract/method-not-allowed` | no | the path shape is served under other methods; `Allow` lists them (`HEAD` beside a `GET` read when `head` is on); a `HEAD` on a `GET`-bound command is this, its `Allow` the path's methods |
 | `JC2003` | 413 | `contract/body-too-large` | no | `content-length` or read length > `policy.limits.maxBodyBytes` |
 | `JC2004` | 415 | `contract/unsupported-media` | no | a body-carrying operation with a non-empty body whose `content-type` is not the declared media (parameters ignored, `+json` accepted for JSON) |
 | `JC2005` | 400 | `contract/malformed-json` | no | body present and not valid JSON, or not valid UTF-8 |
@@ -814,7 +820,7 @@ wire response:
 | `JC1003` | a binding cannot carry a declared feature: an operation declares `policy.idempotency` and no `ledger` was given (say so, never degrade) |
 | `JC1004` | `dispatch` received a malformed request object (the request-object step of §7.2: a body that is none of a string, a `Uint8Array`, a pull source, a `ReadableStream` or `null`, among them) |
 | `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation — reach that through `bytes()`, or `url()` for a link (§10.6; on `local`/`port` the binding cannot carry it at all — §15, §16) |
-| `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299, or `ctx.header(name, value)` with a header the binding derives, a name that is not a token, or a value carrying CR, LF or NUL (§7.1) |
+| `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299, or 204/205 over an output that never admits `null` (the value would be dropped after the handler committed), or `ctx.header(name, value)` with a header the binding derives, a name that is not a token, or a value an HTTP field cannot carry — anything but tab and visible Latin-1 (§7.1) |
 | `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare, or `namespace`/`statePath` is malformed (§11) |
 | `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect`, `createContractSubscription` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16); and an `invoke` ctx that is not an object, on every client — http, port and local alike |
 | `JC1009` | the stream wire's SSE encoder was handed text the frame cannot carry: a bare carriage return inside `data`, a line terminator inside `event` or `id` (§18) |
@@ -889,9 +895,11 @@ authority.
 
 `head: true` (default) answers `HEAD` for every `GET` **read** operation
 by running the handler and dropping the body (a declared `HEAD`
-operation wins); with `head: false` a HEAD is a 405 listing `GET`. A HEAD
-never executes a command: on a `GET`-bound command (or subscribe) it is a
-405 with `Allow: GET`, and no idempotency claim is ever settled from a
+operation wins, and answers without a body too); with `head: false` a
+HEAD is a 405 listing `GET`. A HEAD never executes a command: a command
+cannot be bound to `HEAD` (`JC0012`), on a `GET`-bound command (or
+subscribe) a HEAD is a 405 whose `Allow` lists the methods the path
+serves, and no idempotency claim is ever settled from a
 HEAD — a link scanner's HEAD must not redeem a magic link, and a bodyless
 settlement would replay as a response without its body. The `wellKnown`
 path (`/.well-known/jaren-contract`, or another absolute path, or `false`)
@@ -1292,6 +1300,11 @@ the platform:
   and `new Response` throws on one — and neither reads an `OPTIONS`
   body, which is why an `OPTIONS` operation cannot declare a body member
   (`JC0016`).
+- **An answer the platform refuses to write never crashes the host.**
+  The binding refuses a header value an HTTP field cannot carry before
+  it answers (`JC1006`, `JC2010`); should one reach the node adapter
+  anyway, a 500 replaces the answer before its head is out, and the
+  socket is destroyed after — never an unhandled rejection.
 
 **A streaming response is written behind backpressure.** The dispatcher
 hands the adapter's sink to `createAwaitedSink` (`@jarenjs/core/async`),
@@ -1427,10 +1440,13 @@ is true exactly for a 304.
    "encoding"`, the member's pointer as `path`), before anything is sent
    or any key is stored: a path variable that is empty, `.` or `..`
    (every URL resolver folds a dot segment into another path — another
-   operation would run); a header value with NUL, CR, LF or a character
-   beyond Latin-1; a header member's value with edge whitespace (the
-   transport trims it), or an array item holding a comma (the list is
-   joined with `, ` and split on commas). `subscribe` sends the declared
+   operation would run); a path or query value holding an unpaired
+   surrogate (no URL spelling — `URLSearchParams` would send U+FFFD); a
+   header value with any control character but tab, DEL, or a character
+   beyond Latin-1 (undici refuses them as it sends); a header member's
+   value with edge whitespace (the transport trims it), or an array item
+   that is empty or holds a comma (the list is joined with `, `, split on
+   commas, and empty elements are dropped). `subscribe` sends the declared
    header members too.
 4. **Idempotency** (§10.3) when `policy.idempotency` is `optional` or
    `required`: key = `ctx.idempotencyKey ?? keys()`, sent as
@@ -1481,7 +1497,7 @@ has exactly these msgids beside §7's; a test holds them equal:
 
 | code | kind | msgid | retryable | when |
 |---|---|---|---|---|
-| `JC2050` | contract | `contract/client-invalid-input` | no | the input fails the operation's input validator, or holds a value the transport cannot carry (step 3: an empty or dot-segment path variable, a header value or item it would alter or refuse), before anything was sent |
+| `JC2050` | contract | `contract/client-invalid-input` | no | the input fails the operation's input validator, or holds a value the transport cannot carry (step 3: an empty or dot-segment path variable, a path or query value with an unpaired surrogate, a header value or item it would alter or refuse), before anything was sent |
 | `JC2051` | network | `contract/network` | yes | the transport rejected or the per-request timeout fired; the message names the error's name only |
 | `JC2052` | cancelled | `contract/cancelled` | no | `ctx.signal` aborted, the client was closed, or an abort interrupted a retry backoff |
 | `JC2053` | contract | `contract/invalid-response` | no | a 2xx body is not JSON or fails the output validator; a response object whose status is not 100–599 |
@@ -1575,8 +1591,11 @@ key, an opaque operation carries none — where `body` is the request
 body to send: text, bytes, a Web `ReadableStream`, an async iterable of
 `Uint8Array` chunks (wrapped in a stream that pulls one chunk per
 demand and cancels the iterator once), or none (`JC1008` for anything
-else). A streamed upload goes out with `duplex: "half"`; a body without
-a caller's `content-type` is sent as the operation's `media`.
+else, and for any body on an operation bound to `GET`, `HEAD` or
+`OPTIONS` — fetch refuses one on the first two, and both adapters drop
+one on the third). A streamed upload goes out with `duplex: "half"`; a
+body without a caller's `content-type` is sent as the operation's
+`media`.
 
 The outcome: a `2xx` is `{ ok: true, value: { status, headers, media,
 body }, meta }` — `headers` the response headers under lowercase names,
@@ -2217,7 +2236,8 @@ The options are a closed set (`JC1001`, naming the nearest). Options:
 `trace`, `runtime` (the record `trace` defaults from), `validateOutput` (`'never'` is a declared downgrade,
 reported in `capabilities.validatedOutput`; the output is validated
 ONCE, in the pipeline — the assembler does not re-validate what never
-crossed a wire), `catalog`, `onError`. Capabilities:
+crossed a wire), `catalog`, `onError`, and the host lifecycle's
+`identify` and `acquire` (§7.7). Capabilities:
 
 ```jsonc
 { "name": "local", "status": false, "headers": false, "media": false,
@@ -2346,7 +2366,7 @@ pre-send). Then one request frame; the outcome:
 | `ok: false` with `JC2070`/`JC2071` | kind `contract`, the code kept — a served-host fault or a contract the two ends disagree about is never dressed as a declared failure |
 | `ok: false` with any other code | kind `contract` `JC2055` (§10.3 — an undeclared response) |
 | a frame addressed to this client that does not match the grammar | kind `contract` `JC2073` |
-| nothing within `timeoutMs` | kind `network` `JC2072` (retryable); the cancel frame is posted, exactly as on an abort, so the server's signal aborts and a retry never runs beside a still-running first attempt; `0` disables the timer |
+| nothing within `timeoutMs` | kind `network` `JC2072` (retryable); the cancel frame is posted, exactly as on an abort, so the server's signal aborts — a handler that honours it stops, while one that ignores it may still be running when a retry arrives; `0` disables the timer |
 | `postMessage` threw (closed, detached) | kind `network` `JC2074` |
 | `ctx.signal` aborted, or `close()` | kind `cancelled` `JC2052`; the cancel frame is posted when the channel still accepts one |
 

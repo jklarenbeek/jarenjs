@@ -179,15 +179,20 @@ describe('openHttpClient — every failure kind, and the assembly rows that need
     const refused = await c.invoke('ping', { x: 1 });
     if (!refused.ok) assert.deepStrictEqual([refused.error.code, refused.error.details], ['JC2050', [{ path: '', keyword: 'input' }]]);
     assert.strictEqual((await c.invoke('ping')).ok, true);
-    // a value the URL cannot carry (a lone surrogate in a path member) is JC2050 with keyword encoding
-    // (a query member's lone surrogate is replaced by URLSearchParams and travels as U+FFFD)
+    // a value the URL cannot carry (a lone surrogate) is JC2050 with keyword encoding, naming the
+    // member — in a path member and in a query member, which URLSearchParams would send as U+FFFD
     const byName = compileContract({ $contract: '0.1', operations: { a: { kind: 'read', output: true,
-      input: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } }, http: { method: 'GET', path: '/a/{name}' } } } });
+      input: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, q: { type: 'string' } } },
+      http: { method: 'GET', path: '/a/{name}' } } } });
     let calls = 0;
     const c2 = openHttpClient(byName, { fetch: async () => { calls++; return new Response('true'); } });
     const enc = await c2.invoke('a', { name: '\uD800' });
     assert.strictEqual(calls, 0);
-    if (!enc.ok) assert.deepStrictEqual([enc.error.code, enc.error.details], ['JC2050', [{ path: '', keyword: 'encoding' }]]);
+    if (!enc.ok) assert.deepStrictEqual([enc.error.code, enc.error.details], ['JC2050', [{ path: '/name', keyword: 'encoding' }]]);
+    const encQuery = await c2.invoke('a', { name: 'n', q: 'x\uD800y' });
+    assert.strictEqual(calls, 0);
+    assert.ok(!encQuery.ok);
+    if (!encQuery.ok) assert.deepStrictEqual([encQuery.error.code, encQuery.error.details], ['JC2050', [{ path: '/q', keyword: 'encoding' }]]);
   });
 
   it('a declared failure from the server is kind failure with status, details and message from the wire', async () => {

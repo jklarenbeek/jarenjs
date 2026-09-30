@@ -38,7 +38,7 @@ import {
   isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
 } from '../stream/server.js';
 import {
-  HTTP_ERRORS, JSON_CONTENT_TYPE, JSON_MEDIA,
+  HTTP_ERRORS, JSON_CONTENT_TYPE, JSON_MEDIA, isFieldValue,
   renderMessage, declaredMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
   entityTagMatches, formatEntityTag, decodeQuery, projectValidationDetails, errorResponse, verdict,
 } from './wire.js';
@@ -304,10 +304,12 @@ function refuse(server, code, trace, params, details, extraHeaders, ctx, retryab
 
 /**
  * Whether a routed segment decodes to `.` or `..`. Such a path is refused
- * before it is matched (`JC2011`): an adapter that normalizes the URL
- * (fetch's `new URL`) would fold it into ANOTHER path and run another
- * operation, while one that passes the raw path (node) would bind `..`
- * as a value — the binding answers one way for both.
+ * before it is matched (`JC2011`), so a raw path — what the node adapter
+ * passes — never binds `..` as a value. A WHATWG `Request` resolves dot
+ * segments (`%2e%2e` included) before any handler sees it, so behind the
+ * fetch adapter the platform has already folded such a path into the one
+ * it names; the client refuses a `.` or `..` value before it sends
+ * (`JC2050`), which is what keeps a caller from reaching another operation.
  * @param {string} path
  * @returns {boolean}
  */
@@ -444,11 +446,16 @@ function run(server, request) {
     // link scanner's HEAD must not redeem a magic link, and a bodyless
     // settlement would replay as a response without its body
     if (get !== null && get.op.kind !== 'read') {
-      return refuse(server, 'JC2002', trace, { allow: 'GET' }, undefined, { allow: 'GET' }, null);
+      // the methods the path serves — HEAD is not one of them
+      const allow = server.contract.allowed(path).join(', ');
+      return refuse(server, 'JC2002', trace, { allow }, undefined, { allow }, null);
     }
     hit = get;
     isHead = hit !== null;
   }
+  // a declared HEAD operation (a read: compile refuses a HEAD command)
+  // answers like the fallback — headers, no body
+  else if (hit !== null && method === 'HEAD') isHead = true;
   if (hit === null) {
     if (path.indexOf('%') !== -1 && !decodable(path)) return refuse(server, 'JC2011', trace, {}, undefined, null, null);
     if (server.wellKnown !== false && path === server.wellKnown) return wellKnown(server, method, trace);
@@ -726,6 +733,11 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
       if (!Number.isInteger(status) || status < 200 || status > 299) {
         throw new ContractHostError('JC1006', `ctx.status: the success status must be an integer in 200–299, got ${String(status)}`);
       }
+      // the answer would be dropped after the handler committed, and the
+      // client would report the missing value as a contract violation
+      if ((status === 204 || status === 205) && !route.raw && !op.output.admitsNull) {
+        throw new ContractHostError('JC1006', `ctx.status: ${status} carries no content, but the output of '${op.id}' never admits null — the value could not be answered`);
+      }
       armed.status = status;
     },
     // A response header the handler owns. It is part of the response
@@ -745,8 +757,10 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
           `ctx.header: '${lower}' is the binding's own — the operation's media type, the trace and `
           + 'the entity tag are derived from the contract and the request (use ctx.etag for the tag)');
       }
-      if (typeof value !== 'string' || /[\r\n\0]/.test(value)) {
-        throw new ContractHostError('JC1006', `ctx.header: '${lower}' takes a string without CR, LF or NUL`);
+      // Node's http and a Response refuse anything else when the answer is
+      // written — after the handler committed, and outside any catch
+      if (typeof value !== 'string' || !isFieldValue(value)) {
+        throw new ContractHostError('JC1006', `ctx.header: '${lower}' takes a string an HTTP field can carry — tab and visible Latin-1, no other control character`);
       }
       if (armed.headers === null) armed.headers = new Map();
       const existing = armed.headers.get(lower);
@@ -1003,8 +1017,8 @@ function wellKnown(server, method, trace) {
  * A subscribe operation, settled: the handler answers the duck-typed
  * subscription (§17.1); a declared failure or a host fault is an
  * ordinary §7.3 response BEFORE any stream starts. With `accept:
- * text/event-stream` the response streams SSE; without it (or under
- * HEAD) the snapshot answers as plain JSON — the one-shot read.
+ * text/event-stream` the response streams SSE; without it the snapshot
+ * answers as plain JSON — the one-shot read.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx - frozen
@@ -1460,8 +1474,11 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
         const v = rawHeaders[names[i]];
         // a repeating field (set-cookie) may arrive as a list
         if (typeof v === 'string'
-          || (Array.isArray(v) && v.every((item) => typeof item === 'string')))
+          || (Array.isArray(v) && v.every((item) => typeof item === 'string'))) {
+          if (!(Array.isArray(v) ? v.every(isFieldValue) : isFieldValue(v)))
+            throw new TypeError(`raw header '${names[i]}' holds a character an HTTP field cannot carry`);
           headers[names[i].toLowerCase()] = v;
+        }
       }
     }
     // a declared media RANGE (`image/*`) is a promise about the answer:
@@ -1477,6 +1494,8 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
     }
   }
   catch (err) {
+    // a refused answer's pull source is released, never left open
+    if (isAsyncByteSource(body)) void discard(body);
     observe(server, err, ctx);
     armed.outcome = 2;
     return refuse(server, 'JC2010', trace, { op: route.op.id }, undefined, null, ctx);

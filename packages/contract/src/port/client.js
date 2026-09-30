@@ -388,8 +388,8 @@ export function openPortClient(contract, options) {
         pending.delete(id);
         entry.cleanup();
         // a timeout abandons the call exactly as an abort does: the server
-        // is told to stop, so a caller's retry never runs beside a
-        // still-running first attempt
+        // is told to stop, and a handler that honours its signal stops —
+        // one that ignores it may still be running beside a retry
         try {
           channel.postMessage(cancelFrame(id));
         }

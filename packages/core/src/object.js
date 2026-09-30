@@ -649,17 +649,21 @@ export function mergeSet(set, ...iterables) {
  * `mode`), or the two are within a small edit distance
  * (`statmentTimeoutMs` → `statementTimeoutMs`) — at most one edit for a
  * name of four characters or fewer, two otherwise, so a short name is
- * not "corrected" into an unrelated one. A prefix match wins, in the
- * order `known` lists the names; otherwise the smallest distance does.
+ * not "corrected" into an unrelated one. A prefix counts only when the
+ * shorter spelling has three characters or more — `a` is a prefix of
+ * everything and a hint of nothing — and an empty key has no nearest
+ * name. A prefix match wins, in the order `known` lists the names;
+ * otherwise the smallest distance does.
  * @param {string} key
  * @param {readonly string[]} known
  * @returns {string | undefined}
  */
 export function nearestName(key, known) {
   const lower = key.toLowerCase();
+  if (lower.length === 0) return undefined;
   const prefix = known.find((name) => {
     const other = name.toLowerCase();
-    return other.startsWith(lower) || lower.startsWith(other);
+    return (lower.length >= 3 && other.startsWith(lower)) || (other.length >= 3 && lower.startsWith(other));
   });
   if (prefix !== undefined) return prefix;
   const limit = lower.length <= 4 ? 1 : 2;

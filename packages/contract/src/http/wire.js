@@ -86,6 +86,20 @@ import { contractCatalogEn } from '../messages.js';
  * two equal, and equal to `CONTRACT_CODES` and the English catalog. The
  * client binding assembles outcomes from exactly these statuses.
  */
+/**
+ * Whether a string can travel as an HTTP field value: horizontal tab and
+ * the visible range of Latin-1, nothing else. Node's `http` and undici
+ * refuse any other control character and DEL when the message is written,
+ * and `Headers` anything beyond Latin-1 — so the client checks a header
+ * member before it sends and the server checks a handler's header before
+ * it answers, with this one rule.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isFieldValue(value) {
+  return !/[^\t\x20-\x7e\x80-\xff]/.test(value);
+}
+
 export const HTTP_ERRORS = Object.freeze({
   JC2001: Object.freeze({ status: 404, msgid: 'contract/not-found', retryable: false }),
   JC2002: Object.freeze({ status: 405, msgid: 'contract/method-not-allowed', retryable: false }),

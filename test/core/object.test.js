@@ -3,7 +3,7 @@ import * as assert from '../assert.node.js';
 
 import {
   equalsDeep, equalsJson, mergeMap, mergeSet, stableStringify,
-  isJsonObject, isJsonValue, setObjectMember, deepFreeze,
+  isJsonObject, isJsonValue, setObjectMember, deepFreeze, nearestName,
 } from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
@@ -480,5 +480,18 @@ describe('deepFreeze', () => {
     assert.isTrue(deepFreeze(1) === 1);
     assert.isTrue(deepFreeze(null) === null);
     assert.isTrue(deepFreeze('s') === 's');
+  });
+});
+
+describe('nearestName', () => {
+  const OPTIONS = ['partial', 'acquire', 'scope', 'onError', 'mode', 'capture', 'statementTimeoutMs'];
+  it('hints a misspelling by prefix or a small edit distance', () => {
+    assert.strictEqual(nearestName('captur', OPTIONS), 'capture');
+    assert.strictEqual(nearestName('modes', OPTIONS), 'mode');
+    assert.strictEqual(nearestName('statmentTimeoutMs', OPTIONS), 'statementTimeoutMs');
+    assert.strictEqual(nearestName('Scope', OPTIONS), 'scope');
+  });
+  it('an empty key and a one- or two-letter key hint nothing', () => {
+    for (const key of ['', 'a', 's', 'o', 'ms']) assert.strictEqual(nearestName(key, OPTIONS), undefined, JSON.stringify(key));
   });
 });
