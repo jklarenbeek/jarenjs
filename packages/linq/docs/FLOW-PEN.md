@@ -563,8 +563,9 @@ The capture every flow callback runs in adds one more refusal, which is
 the chain's and listed in QUERY-PEN. In a guard, effect, node or edge callback, `==`, `+`, a
 template literal or `<` over a captured value is `JL0108`
 ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
-`=== null` and truthiness cannot be refused, since they test the proxy
-and never the value. Write `.eq(null)`, `.exists()` or `.isEmpty()`.
+`=== null`, `== null` (and `!= null`), `==` between two captures and
+truthiness cannot be refused, since they test the proxy and never the
+value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 
 | Code | What this pen raises it for |
 |---|---|
@@ -760,7 +761,7 @@ it has no rules.
 
 ## 5. The types
 
-The declarations are `packages/linq/types/flow.d.ts` (285 lines), and
+The declarations are `packages/linq/types/flow.d.ts`, and
 every claim below is pinned at compile level in
 `test/consumer/linq-flow.ts` with a runtime twin in
 `test/linq/flow-pen.test.js`. This subpath exports **no builder class, no
@@ -896,7 +897,7 @@ not mid-run.
 
 ### 5.4 What the pins hold
 
-`test/consumer/linq-flow.ts` (119 lines) is the compile-level record. It
+`test/consumer/linq-flow.ts` is the compile-level record. It
 pins, with `Equals<A, B>` — identity in both directions, never
 assignability — `StatesOf<>`, `EventsOf<>` and `ContextOf<>` of a machine
 with a mixed `states` array, a `payload`-declared guard, an annotated
@@ -1021,14 +1022,14 @@ two effects as a consumer would — `defineFsm`, `state`, `on` and
   chain's bundle nor the schema pen's carries a byte of
   `packages/linq/src/flow/`.
 
-Two documents, two grammars, thirteen exported names — and 57 bytes more
-than `./jslt`'s <!--fact:bundle.jslt-->18,837<!--/fact-->, which writes one. The reason is that most of
+Two documents, two grammars, thirteen exported names — and a bundle of <!--fact:bundle.flow-->18,891<!--/fact-->
+bytes beside `./jslt`'s <!--fact:bundle.jslt-->18,837<!--/fact-->, which writes one. The reason is that most of
 both prices is the same shared machinery: the recording proxy
 (`expression.js`), the root capture (`capture-root.js`) and the JSON
-boundary (`json-boundary.js`). What this pen adds on top of them is 685
-lines of member checks and the messages §4 quotes — and, as the model
-pen's own §7 notes, the message text is most of what a mirrored rule
-costs.
+boundary (`json-boundary.js`). What this pen adds on top of them is its
+member checks (`packages/linq/src/flow/`) and the messages §4 quotes —
+and, as the model pen's own §7 notes, the message text is most of what a
+mirrored rule costs.
 
 What a consumer actually pays for §3.6's graph is both subpaths, since
 the stylesheet has to be written by something — but not the sum: the

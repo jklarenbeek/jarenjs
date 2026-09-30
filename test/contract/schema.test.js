@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 
 import { JarenValidator } from '@jarenjs/validate';
 import { jsonFormats } from '@jarenjs/formats';
-import { compileContract, ContractCompileError, CONTRACT_CODES } from '@jarenjs/contract';
+import { compileContract, ContractCompileError, CONTRACT_CODES, CONTRACT_GRAMMARS } from '@jarenjs/contract';
 import {
   downlevelDraft07,
   draftNeutralSubsetViolations,
@@ -99,6 +99,15 @@ describe('the jaren-contract schema artifact', () => {
     const wms = routesToContract(ROUTES);
     assert.strictEqual(validate(wms), true, ':name templates are grammatical');
     assert.strictEqual(validate07(wms), true);
+  });
+
+  it('holds its identifier patterns to the one grammar table (CONTRACT_GRAMMARS), a dotted error code included', () => {
+    const errors = schema.$defs.operation.properties.errors.propertyNames.pattern;
+    assert.strictEqual(errors, CONTRACT_GRAMMARS.errorCode);
+    assert.strictEqual(schema.properties.id.pattern, CONTRACT_GRAMMARS.contractId);
+    const dotted = { $contract: '0.1', operations: { 'ai.chat': { ...READ, errors: { 'ai.rate-limited': { status: 429 } } } } };
+    assert.doesNotThrow(() => compileContract(dotted));
+    for (const artifact of [schema, schema07]) assert.strictEqual(compileGrammar(artifact)(dotted), true);
   });
 
   it('accepts the smallest document and the canonical-binding operation', () => {

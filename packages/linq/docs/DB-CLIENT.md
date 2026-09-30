@@ -293,7 +293,12 @@ one file and a domain write on another are two commits.
 Both clients fit the declared type, whatever model opened them: a JSON
 model, a pen model or a transaction client. `LedgerClient` is the
 structural shape the ledger reads, the declared `collections` and a
-`transaction(fn, options?)`, with no cast. A JSON model's
+`transaction(fn, options?)`, with no cast. The ledger tells the two
+apart by `close()`: a client that has one is the root, and one without
+is used as a transaction's client, its work nested in the caller's
+transaction with no write lock of its own. A hand-built client meant as
+a root must therefore carry `close()`, which a type cannot demand
+without refusing the transaction client. A JSON model's
 `client.collections` is typed per name (`CollectionHandle<unknown>`), so
 `db.collections.ledger` compiles as it runs.
 
@@ -905,7 +910,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->45,117<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->45,209<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

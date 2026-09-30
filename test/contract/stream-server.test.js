@@ -661,12 +661,19 @@ describe('stream runner — a source error the operation declares', () => {
       'a ctx.fail value carries the params its message renders with, mid-stream as on a request');
   });
 
-  it('params that are not a JSON plain object — an array, a function inside, a cycle — cross as {}', async () => {
-    const cyclic = /** @type {any} */ ({});
-    cyclic.self = cyclic;
-    for (const params of [['r1'], { room: () => 'r1' }, cyclic, 'r1', null]) {
+  it('params render as a request\'s do: an object crosses as a copy, members that are not JSON included; anything else crosses as {}', async () => {
+    // they never reach the wire — only the host catalog renders them — so a
+    // member a request's message would render (undefined, a Date) crosses
+    const given = { message: 'moved on', hint: undefined, at: new Date(0) };
+    const crossed = (await endWith({ code: 'gone', params: given })).declared.params;
+    assert.deepStrictEqual(crossed, given);
+    assert.notStrictEqual(crossed, given, 'a copy, never the source\'s own object');
+    for (const params of [['r1'], 'r1', null, 5]) {
       assert.deepStrictEqual((await endWith({ code: 'gone', params })).declared.params, {});
     }
+    // params that throw when read are a hostile error: the source intent
+    const hostile = new Proxy({}, { ownKeys() { throw new Error('hostile'); } });
+    assert.strictEqual((await endWith({ code: 'gone', params: hostile })).intent, 'source');
   });
 
   it('retryable without an own boolean is the retry set\'s verdict', async () => {

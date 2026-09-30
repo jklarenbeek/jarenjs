@@ -61,7 +61,7 @@ export function contractRevision(contract, options = undefined) {
   if (memo !== undefined) return memo.promise;
   /** @type {{ promise: Promise<string>, value: string | null }} */
   const record = { promise: /** @type {any} */ (null), value: null };
-  record.promise = digest(contract, record, memos, all ? hostProjection : publicProjection);
+  record.promise = digest(contract, record, memos, all ? hostProjection : publicProjection, all ? 'host' : 'public');
   memos.set(contract, record);
   return record.promise;
 }
@@ -89,9 +89,10 @@ function revisionAudience(options) {
  * @param {{ promise: Promise<string>, value: string | null }} record
  * @param {WeakMap<object, { promise: Promise<string>, value: string | null }>} memos
  * @param {(contract: Contract) => Record<string, unknown>} project
+ * @param {'public' | 'host'} which - the projection's name, for the refusal
  * @returns {Promise<string>}
  */
-async function digest(contract, record, memos, project) {
+async function digest(contract, record, memos, project, which) {
   let hex;
   try {
     hex = await canonicalSha256(project(contract));
@@ -100,7 +101,7 @@ async function digest(contract, record, memos, project) {
     memos.delete(contract);
     if (err !== null && typeof err === 'object' && /** @type {any} */ (err).name === 'JsonCanonicalizeError') {
       throw new ContractCompileError('JC0061',
-        `the public projection is not canonicalizable: ${/** @type {Error} */ (err).message}`,
+        `the ${which} projection is not canonicalizable: ${/** @type {Error} */ (err).message}`,
         /** @type {any} */ (err).dataPath, /** @type {Error} */ (err));
     }
     throw err;

@@ -244,6 +244,9 @@ export function ContractFailure(code, params, details, options) {
         throw new TypeError(`ctx.fail: options has no member '${key}' (it reads retryable and retryAfterMs)`);
       }
     }
+    if (options.retryable !== undefined && options.retryable !== null && typeof options.retryable !== 'boolean') {
+      throw new TypeError(`ctx.fail: retryable must be a boolean, got ${typeof options.retryable}`);
+    }
     retryAfterMs = options.retryAfterMs;
     if (retryAfterMs !== undefined && (!Number.isSafeInteger(retryAfterMs) || retryAfterMs < 0)) {
       throw new TypeError(`ctx.fail: retryAfterMs must be a non-negative integer of milliseconds, got ${String(retryAfterMs)}`);

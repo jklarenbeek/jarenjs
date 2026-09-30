@@ -328,8 +328,10 @@ export interface DbLedger {
 /** What the durable adapters need of a client (DB-CLIENT.md §2.6): the
  * declared collections and entities, and a transaction. It is the root
  * client (writes take the write lock up front, `mode: 'immediate'`) or the
- * one a transaction callback received (they nest in that transaction).
- * Every `open()` client and transaction client fits, whatever its model.
+ * one a transaction callback received (they nest in that transaction) —
+ * told apart by `close()`: a client that has one is the root, one without
+ * is used as a transaction's client. Every `open()` client and
+ * transaction client fits, whatever its model.
  * `createDbRunStore` and `createDbEffectStore` assert a job lease on the
  * transaction client's `jobs`, so their store must be opened with `jobs`. */
 export interface DurableClient {

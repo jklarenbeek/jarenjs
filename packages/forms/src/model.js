@@ -189,6 +189,32 @@ function getOneOfConstBranches(schema) {
 }
 
 /**
+ * Whether a resolved schema admits `null` — what layer 1 reads so an
+ * explicit `null` is judged as the validator judges it: a type that lists
+ * `null` (an `enum` or `const` beside it must admit `null` too), OpenAPI's
+ * `nullable: true` (which the validator honours), or an `anyOf`/`oneOf`
+ * with a branch that admits it.
+ * @param {unknown} schema
+ * @param {object} rootSchema
+ * @param {number} depth
+ * @returns {boolean}
+ */
+function admitsNull(schema, rootSchema, depth) {
+  if (!isJsonObject(schema) || depth > DEFAULT_MAX_DEPTH) return false;
+  if (Array.isArray(schema.enum) && !schema.enum.includes(null)) return false;
+  if (Object.hasOwn(schema, 'const') && schema.const !== null) return false;
+  if (schema.nullable === true) return true;
+  const type = schema.type;
+  if (type !== undefined) return type === 'null' || (Array.isArray(type) && type.includes('null'));
+  if (Array.isArray(schema.enum) || Object.hasOwn(schema, 'const')) return true;
+  for (const key of ['anyOf', 'oneOf']) {
+    const branches = schema[key];
+    if (Array.isArray(branches) && branches.some((branch) => admitsNull(resolveSchema(branch, rootSchema, depth + 1), rootSchema, depth + 1))) return true;
+  }
+  return false;
+}
+
+/**
  * Derive the field kind from a resolved schema.
  * @param {object|boolean} schema
  * @returns {string}
@@ -294,10 +320,11 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
   // One meaning for the two nullable spellings (@jarenjs/core/schema): an
   // anyOf/oneOf of one branch and null renders as its branch — with the
   // node's own annotations over it — just as `type: [T, 'null']` renders
-  // as T. The validator still judges the whole schema.
-  const split = splitNullable(resolved);
-  const nullable = split !== null
-    || (isJsonObject(resolved) && Array.isArray(resolved.type) && resolved.type.includes('null'));
+  // as T. The validator still judges the whole schema. The oneOf
+  // const/title idiom is not a nullable spelling: its null branch is one
+  // of the options (a "none" choice), so it stays an enum.
+  const split = isJsonObject(resolved) && getOneOfConstBranches(resolved) !== null ? null : splitNullable(resolved);
+  const nullable = admitsNull(resolved, rootSchema, depth);
   const schema = split !== null && !Array.isArray(resolved.type)
     ? resolveSchema(split.schema, rootSchema, depth + 1)
     : resolved;

@@ -217,7 +217,12 @@ function refuseNormalizerUnder(builder, where, at) {
 function emitNode(builder, ctx, at) {
   const st = builder.state;
   let node = emitCore(builder, st, ctx, at);
-  if (st.nullable) node = nullableOf(node, st);
+  if (st.nullable) {
+    node = nullableOf(node, st);
+    // wrapped in an anyOf branch, the core is never entered by the
+    // normalizer; the node's own annotations sit on the wrapper and run
+    if (Array.isArray(node.anyOf)) for (const child of children(st)) refuseNormalizerUnder(child, 'nullable()', at);
+  }
   for (const key of Object.keys(st.keywords)) {
     const value = st.keywords[key];
     setObjectMember(node, key, emitKeyword(value, ctx, `${at}/${token(key)}`, key));
@@ -238,7 +243,7 @@ function emitKeyword(value, ctx, at, keyword) {
     // under one would be promised by the document and never happen.
     // `allOf` is not among them — the normalizer descends it.
     if (['not', 'unevaluatedProperties', 'unevaluatedItems', 'dependentSchemas', 'dependencies', 'contentSchema',
-      'anyOf', 'oneOf', 'if', 'then', 'else'].includes(keyword))
+      'anyOf', 'oneOf', 'if', 'then', 'else', 'contains', 'propertyNames'].includes(keyword))
       refuseNormalizerUnder(value, keyword, at);
     return emitNode(value, ctx, at);
   }

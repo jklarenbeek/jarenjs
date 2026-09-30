@@ -34,7 +34,7 @@
 
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { canonicalNullable } from '@jarenjs/core/schema';
+import { canonicalNullable, splitNullable } from '@jarenjs/core/schema';
 import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
@@ -126,12 +126,16 @@ function resolveHops(node, side) {
  * @typedef {Object} Sink
  * @property {(direction: 'narrowed' | 'widened', keyword: string, path: string, from: unknown, to: unknown) => void} constraint
  * @property {(event: 'removed' | 'added-required' | 'added-optional' | 'made-required' | 'made-optional',
- *   direction: 'narrowed' | 'widened' | null, path: string, member: string, closedBefore: boolean) => void} member
+ *   direction: 'narrowed' | 'widened' | 'unknown' | null, path: string, member: string, closedBefore: boolean,
+ *   catchAll?: string | null) => void} member
  *   `direction` is the AP-aware narrowing/widening reading of the member
  *   event (`null` when it is a no-op, e.g. an unconstrained optional
- *   member added to an open object); `closedBefore` says whether the
- *   object refused unknown members in `a` — an output member a closed
- *   schema never allowed is one the old client's validator refuses
+ *   member added to an open object; `'unknown'` when a constraining
+ *   catch-all — named by `catchAll` — judges the member on the other
+ *   side); `closedBefore` says whether the object refused unknown members
+ *   in `a` (`additionalProperties` or `unevaluatedProperties` false) — an
+ *   output member a closed schema never allowed is one the old client's
+ *   validator refuses
  * @property {(keyword: string, path: string, from: unknown, to: unknown) => void} unknown
  * @property {(path: string, from: unknown, to: unknown) => void} respelled - a nullable
  *   node respelled between a type array and a two-branch `anyOf`/`oneOf` (R16)
@@ -144,6 +148,46 @@ function resolveHops(node, side) {
  */
 function nullableSpelling(node) {
   return Array.isArray(node.anyOf) ? 'anyOf' : Array.isArray(node.oneOf) ? 'oneOf' : 'type';
+}
+
+/**
+ * The index of the non-null branch of a two-branch nullable union — the
+ * branch that, paired with a null branch, still reads as nullable (the
+ * null-only rule stays @jarenjs/core/schema's own).
+ * @param {readonly unknown[]} branches
+ * @returns {number}
+ */
+function nonNullBranch(branches) {
+  return branches.findIndex((branch) => splitNullable({ anyOf: [branch, { type: 'null' }] }) !== null);
+}
+
+/** The applicators the checker does not model: a constraint may sit inside one. */
+const APPLICATORS = ['anyOf', 'oneOf', 'allOf', 'not', 'if', 'then', 'else', 'dependentSchemas'];
+
+/** @param {Record<string, any>} node */
+const carriesApplicator = (node) => APPLICATORS.some((key) => node[key] !== undefined);
+
+/**
+ * Whether an object schema forbids the members it does not name.
+ * @param {Record<string, any>} node
+ */
+const closedObject = (node) => node.additionalProperties === false || node.unevaluatedProperties === false;
+
+/**
+ * The keyword of a catch-all that constrains the members an object schema
+ * does not name — a member added beside it may or may not satisfy it,
+ * which the checker cannot decide — or `null`.
+ * @param {Record<string, any>} node
+ * @returns {string | null}
+ */
+function constrainingCatchAll(node) {
+  for (const key of ['additionalProperties', 'unevaluatedProperties']) {
+    const value = node[key];
+    if (value !== undefined && value !== true && value !== false && !(isObject(value) && Object.keys(value).length === 0)) return key;
+  }
+  if (isObject(node.patternProperties) && Object.keys(node.patternProperties).length > 0) return 'patternProperties';
+  if (node.propertyNames !== undefined && node.propertyNames !== true) return 'propertyNames';
+  return null;
 }
 
 /**
@@ -198,11 +242,20 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   const canonA = canonicalNullable(A);
   const canonB = canonA === null ? null : canonicalNullable(B);
   if (canonA !== null && canonB !== null) {
-    if (canon(canonA) === canon(canonB)) {
-      if (canon(A) !== canon(B)) sink.respelled(path, A, B);
+    const spellingA = nullableSpelling(A);
+    const spellingB = nullableSpelling(B);
+    // a reorder inside one spelling (a type array's items, a union's
+    // branches) is no respelling: silent, as any other reorder is
+    if (spellingA !== spellingB) sink.respelled(path, A, B);
+    if (canon(canonA) === canon(canonB)) return;
+    if (spellingA !== 'type' && spellingB !== 'type') {
+      // two unions: compare the non-null branches where they sit, so a
+      // change's pointer resolves in the documents
+      const ia = nonNullBranch(A[spellingA]);
+      const ib = nonNullBranch(B[spellingB]);
+      compareSchema(A[spellingA][ia], B[spellingB][ib], `${path}/${spellingB}/${ib}`, a, b, sink, visited);
       return;
     }
-    if (nullableSpelling(A) !== nullableSpelling(B)) sink.respelled(path, A, B);
     A = canonA;
     B = canonB;
   }
@@ -237,8 +290,16 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
  * @param {Sink} sink
  */
 function compareConstraints(A, B, path, sink) {
-  const emit = (/** @type {'narrowed' | 'widened'} */ d, /** @type {string} */ k) =>
-    sink.constraint(d, k, path + '/' + k, A[k], B[k]);
+  // a constraint present on one side only may have moved into an
+  // applicator the other side carries (anyOf, allOf, …): which way the
+  // accepted values moved cannot be decided, so it is R15, never a guess
+  const aApplies = carriesApplicator(A);
+  const bApplies = carriesApplicator(B);
+  const emit = (/** @type {'narrowed' | 'widened'} */ d, /** @type {string} */ k) => {
+    const oneSided = A[k] === undefined ? aApplies : B[k] === undefined ? bApplies : false;
+    if (oneSided) sink.unknown(k, path + '/' + k, A[k], B[k]);
+    else sink.constraint(d, k, path + '/' + k, A[k], B[k]);
+  };
 
   // type and enum/const compare as value sets: what was removed narrows,
   // what was added widens — an incomparable change (string → integer)
@@ -257,8 +318,11 @@ function compareConstraints(A, B, path, sink) {
     else {
       const beforeTexts = new Set(before.map(canon));
       const afterTexts = new Set(after.map(canon));
-      if ([...beforeTexts].some((t) => !afterTexts.has(t))) emit('narrowed', key);
-      if ([...afterTexts].some((t) => !beforeTexts.has(t))) emit('widened', key);
+      // a type set counts `integer` as inside `number`: every integer is a number
+      const covered = (/** @type {string} */ t, /** @type {Set<string>} */ set) => set.has(t)
+        || (key === 'type' && t === canon('integer') && set.has(canon('number')));
+      if ([...beforeTexts].some((t) => !covered(t, afterTexts))) emit('narrowed', key);
+      if ([...afterTexts].some((t) => !covered(t, beforeTexts))) emit('widened', key);
     }
   }
 
@@ -299,39 +363,59 @@ function compareObject(A, B, path, a, b, sink, visited) {
   const bProps = isObject(B.properties) ? B.properties : {};
   const aReq = new Set(Array.isArray(A.required) ? A.required : []);
   const bReq = new Set(Array.isArray(B.required) ? B.required : []);
-  const aClosed = A.additionalProperties === false;
-  const bClosed = B.additionalProperties === false;
+  const aClosed = closedObject(A);
+  const bClosed = closedObject(B);
+  const aCatchAll = aClosed ? null : constrainingCatchAll(A);
+  const bCatchAll = bClosed ? null : constrainingCatchAll(B);
+  // a member or requirement present on one side only may have moved into
+  // an applicator the other side carries: undecidable, R15
+  const aApplies = carriesApplicator(A);
+  const bApplies = carriesApplicator(B);
 
   for (const m of new Set([...Object.keys(aProps), ...Object.keys(bProps)])) {
     const at = path + '/properties/' + encodeJSONPointerSegment(m);
     const inA = Object.hasOwn(aProps, m);
     const inB = Object.hasOwn(bProps, m);
+    if ((inA && !inB && bApplies) || (!inA && inB && aApplies)) {
+      sink.unknown('properties', at, inA ? m : undefined, inB ? m : undefined);
+      continue;
+    }
     if (inA && !inB) {
-      // removed: forbidden under a closed b, unconstrained under an open one
-      sink.member('removed', bClosed ? 'narrowed' : 'widened', at, m, aClosed);
+      // removed: forbidden under a closed b, unconstrained under an open
+      // one, judged by b's catch-all under one that constrains
+      sink.member('removed', bClosed ? 'narrowed' : bCatchAll !== null ? 'unknown' : 'widened', at, m, aClosed, bCatchAll);
       continue;
     }
     if (!inA && inB) {
       const unconstrained = bProps[m] === true || (isObject(bProps[m]) && Object.keys(bProps[m]).length === 0);
-      if (bReq.has(m)) sink.member('added-required', 'narrowed', at, m, aClosed);
+      if (aCatchAll !== null) sink.member(bReq.has(m) ? 'added-required' : 'added-optional', 'unknown', at, m, aClosed, aCatchAll);
+      else if (bReq.has(m)) sink.member('added-required', 'narrowed', at, m, aClosed);
       else if (aClosed) sink.member('added-optional', 'widened', at, m, aClosed); // was forbidden, now allowed
       else sink.member('added-optional', unconstrained ? null : 'narrowed', at, m, aClosed); // was unconstrained
       continue;
     }
-    if (!aReq.has(m) && bReq.has(m)) sink.member('made-required', 'narrowed', at, m, aClosed);
-    else if (aReq.has(m) && !bReq.has(m)) sink.member('made-optional', 'widened', at, m, aClosed);
+    if (!aReq.has(m) && bReq.has(m)) {
+      if (aApplies) sink.unknown('required', at, undefined, m);
+      else sink.member('made-required', 'narrowed', at, m, aClosed);
+    }
+    else if (aReq.has(m) && !bReq.has(m)) {
+      if (bApplies) sink.unknown('required', at, m, undefined);
+      else sink.member('made-optional', 'widened', at, m, aClosed);
+    }
     compareSchema(aProps[m], bProps[m], at, a, b, sink, visited);
   }
 
   // a required name without a properties entry is still a requirement
   for (const m of bReq) {
     if (!aReq.has(m) && !Object.hasOwn(bProps, m) && !Object.hasOwn(aProps, m)) {
-      sink.member('added-required', 'narrowed', path + '/required', m, aClosed);
+      if (aApplies) sink.unknown('required', path + '/required', undefined, m);
+      else sink.member('added-required', 'narrowed', path + '/required', m, aClosed);
     }
   }
   for (const m of aReq) {
     if (!bReq.has(m) && !Object.hasOwn(aProps, m) && !Object.hasOwn(bProps, m)) {
-      sink.member('made-optional', 'widened', path + '/required', m, aClosed);
+      if (bApplies) sink.unknown('required', path + '/required', m, undefined);
+      else sink.member('made-optional', 'widened', path + '/required', m, aClosed);
     }
   }
 
@@ -393,7 +477,13 @@ function schemaSink(diff, op, root, what) {
       const [rule, kind] = directionRule(direction);
       push(classOf(diff, rule), { kind, op, docPath: root + path, from, to, rule, note: keyword });
     },
-    member(event, direction, path, member, closedBefore) {
+    member(event, direction, path, member, closedBefore, catchAll) {
+      if (direction === 'unknown' && (what === 'input' || event !== 'removed')) {
+        // a catch-all (additionalProperties as a schema, patternProperties,
+        // propertyNames) judges the member on the other side: undecidable
+        push(diff.unknown, { kind: 'schema-unknown', op, docPath: root + path, from: member, to: member, rule: 'R15', note: catchAll ?? 'additionalProperties' });
+        return;
+      }
       if (what === 'output') {
         // the consumer's view: a removed or no-longer-guaranteed member
         // breaks a client that reads it, and a new member breaks a client
@@ -584,14 +674,28 @@ function comparePolicy(diff, aOp, bOp) {
     ['retry', from.retry, to.retry],
     ['cache', from.cache, to.cache],
     ['revision', from.revision, to.revision],
-    // a stream's resume policy, heartbeat or patch bound: the stream's
-    // behaviour, not its wire shape — reported, neutral like the others
-    ['stream', from.stream, to.stream],
   ]);
   for (const [member, before, after] of neutral) {
     if (canon(before) !== canon(after)) {
       push(diff.neutral, { kind: 'policy-changed', op, docPath: at(member), from: before, to: after, rule: 'R13' });
     }
+  }
+  // a stream's resume policy, heartbeat or patch bound is the stream's
+  // behaviour, not its wire shape — neutral, but for one move: a slower
+  // heartbeat breaks an older client, whose watchdog, armed from its own
+  // contract, declares the stream lost at twice the interval it expects
+  const beatBefore = from.stream === null ? null : from.stream.heartbeatMs;
+  const beatAfter = to.stream === null ? null : to.stream.heartbeatMs;
+  const slower = typeof beatBefore === 'number' && typeof beatAfter === 'number' && beatAfter > beatBefore;
+  if (slower) {
+    push(diff.breaking, {
+      kind: 'heartbeat-slowed', op, docPath: at('stream') + '/heartbeatMs', from: beatBefore, to: beatAfter, rule: 'R13',
+      note: 'an older client arms its watchdog from its own contract and reports the stream lost (JC2094) after twice the interval it expects',
+    });
+  }
+  const rest = (/** @type {any} */ stream) => (stream === null || !slower ? stream : { ...stream, heartbeatMs: null });
+  if (canon(rest(from.stream)) !== canon(rest(to.stream))) {
+    push(diff.neutral, { kind: 'policy-changed', op, docPath: at('stream'), from: from.stream, to: to.stream, rule: 'R13' });
   }
   if ((aOp.doc ?? null) !== (bOp.doc ?? null)) {
     push(diff.neutral, { kind: 'doc-changed', op, docPath: opPath(op) + '/doc', from: aOp.doc, to: bOp.doc, rule: 'R13' });
@@ -617,8 +721,9 @@ function asCompiled(value) {
  * sides are outside the compatibility surface and are skipped — unless
  * `options.audience` is `'all'`, an internal gate's choice, which runs
  * the same rules on them and marks each of their changes `audience:
- * 'server'`. An audience flip is R14 and subsumes the operation's other
- * changes.
+ * 'server'`. An audience flip is R14; for public consumers it subsumes
+ * the operation's other changes, and under `'all'` they are compared too,
+ * each marked `audience: 'server'`.
  * @param {Contract | Record<string, unknown>} a - the contract consumers hold today
  * @param {Contract | Record<string, unknown>} b - the contract they would meet
  * @param {{ audience?: 'public' | 'all' }} [options] - a closed set (`JC1008`)
@@ -714,15 +819,35 @@ function compareOperation(diff, id, aOp, bOp, sideA, sideB, audience) {
       op: id, docPath: opPath(id) + '/policy/audience',
       from: aOp.policy.audience, to: bOp.policy.audience, rule: 'R14',
     });
-    return false; // the flip subsumes the operation's other changes
+    // for a public client the flip is the whole story; an internal gate
+    // also sees what changed inside the operation its server callers used
+    if (!all) return false;
+    const marks = CLASSES.map((name) => diff[name].length);
+    compareInside(diff, id, aOp, bOp, sideA, sideB);
+    CLASSES.forEach((name, i) => {
+      for (let j = marks[i]; j < diff[name].length; j++) diff[name][j].audience = 'server';
+    });
+    return false;
   }
   if (aOp.policy.audience === 'server' && !all) return false; // invisible on both sides
+  compareInside(diff, id, aOp, bOp, sideA, sideB);
+  return aOp.policy.audience === 'server';
+}
 
+/**
+ * One operation's binding, input, output, errors and policy, both sides present.
+ * @param {ContractDiff} diff
+ * @param {string} id
+ * @param {CompiledOperation} aOp
+ * @param {CompiledOperation} bOp
+ * @param {Side} sideA
+ * @param {Side} sideB
+ */
+function compareInside(diff, id, aOp, bOp, sideA, sideB) {
   compareBinding(diff, aOp, bOp);
   compareInput(diff, aOp, bOp, sideA, sideB);
   const outSink = schemaSink(diff, id, opPath(id) + '/output', 'output');
   compareSchema(aOp.output.schema, bOp.output.schema, '', sideA, sideB, outSink, new Map());
   compareErrors(diff, aOp, bOp);
   comparePolicy(diff, aOp, bOp);
-  return aOp.policy.audience === 'server';
 }

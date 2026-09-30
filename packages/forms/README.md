@@ -63,7 +63,7 @@ const result = validate(data); // { valid, errors: [{ instancePath, keyword, mes
 | `kind` | `string` `number` `integer` `boolean` `enum` `const` `object` `array` |
 | `control` | Rendering hint: `text` `email` `url` `password` `textarea` `number` `checkbox` `select` `date` `datetime-local` `time` `color` `json` |
 | `required` | Whether the parent object requires this property |
-| `nullable` | Whether the schema admits `null` beside its type: `type: [T, 'null']` (or any type list naming `'null'`), or an `anyOf`/`oneOf` of one branch and a null-only branch |
+| `nullable` | Whether the schema admits `null`, as the validator reads it: a type list naming `'null'` (an `enum` or `const` beside it must admit `null` too), OpenAPI's `nullable: true`, or an `anyOf`/`oneOf` with a branch that admits it |
 | `constraints` | `minLength`/`maxLength`/`pattern`/`format`/`minimum`/`maximum`/`multipleOf`/`minItems`/... |
 | `rules` | The raw `x-form` rules annotation, if any (see below) |
 | `enumValues` / `constValue` / `defaultValue` / `placeholder` | Values for the UI |
@@ -73,7 +73,7 @@ const result = validate(data); // { valid, errors: [{ instancePath, keyword, mes
 
 Field kinds are inferred from structural keywords when `type` is absent, and `format` maps to input controls and placeholders through the same registry the preemptive validation uses (`getFormatInfo`).
 
-The two spellings of a nullable member are one field. `{ type: ['string', 'null'], format: 'date' }` and `{ anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] }` both give kind `string`, control `date`, the same constraints and `nullable: true`. The union's branch is read through `splitNullable` from [`@jarenjs/core/schema`](../core) (a `$ref` branch resolves like any field), and the node's own `title` and other annotations apply over it. Only the non-null branch picks the control; the authoritative validator still judges the whole schema.
+The two spellings of a nullable member are one field. `{ type: ['string', 'null'], format: 'date' }` and `{ anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] }` both give kind `string`, control `date`, the same constraints and `nullable: true`. The union's branch is read through `splitNullable` from [`@jarenjs/core/schema`](../core) (a `$ref` branch resolves like any field), and the node's own `title` and other annotations apply over it. Only the non-null branch picks the control; the authoritative validator still judges the whole schema. The `oneOf` const/title idiom is not a nullable spelling: `oneOf: [{ const: 'high', title: 'High' }, { const: null, title: 'None' }]` stays an `enum` select, its `null` one of the options.
 
 ### The preview hint — a renderer described as data
 
@@ -122,7 +122,7 @@ depends on it — the schema is the contract.
 - **numbers**: type/integer checks, bounds, `multipleOf`
 - **enum/const**: deep equality (`equalsDeep`)
 - **arrays**: `minItems`/`maxItems`/`uniqueItems` (`isUniqueDeepArray`)
-- **`null` is a value**, as it is to the validator: a `nullable` field accepts it, and any other field reports its `type`. Only an absent member (`undefined`) meets `required`.
+- **`null` is a value**, as it is to the validator: a `nullable` field accepts it, and any other field reports what refuses it — its `type`, or its `enum` or `const`. Only an absent member (`undefined`) meets `required`, except on a field layer 1 cannot judge (a `json` control): there a `null` it does not admit is what the control writes for half-typed input, and a required field reports `required` for it.
 
 `validateAllFields(model, data)` walks the whole tree and returns a `{ '/pointer': errors }` map — ideal for rendering inline errors next to every field. It reads own JSON members, like the pointer helpers: a field named `constructor`, `toString` or `__proto__` is absent until the data supplies that member.
 

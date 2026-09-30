@@ -77,6 +77,10 @@ export async function readBody(body, options = {}) {
   const as = options.as === undefined ? 'bytes' : options.as;
   if (as !== 'bytes' && as !== 'text') throw new TypeError("readBody: options.as is 'bytes' or 'text'");
   const signal = options.signal === undefined ? null : options.signal;
+  if (signal !== null && signal.aborted) {
+    if (isAsyncByteSource(body)) await discard(body);
+    throw signal.reason;
+  }
   /** @type {Uint8Array} */
   let bytes;
   if (body === null || body === undefined) bytes = new Uint8Array(0);
@@ -89,7 +93,9 @@ export async function readBody(body, options = {}) {
     // the counting source enforces the binding's limit by throwing
     const collected = await collectBytes(body, Infinity, signal);
     if (!collected.ok) {
-      if (collected.kind === 'aborted') throw /** @type {AbortSignal} */ (signal).reason;
+      // a source that failed because the peer went away failed for the
+      // abort: its reason is the answer, not the socket's error
+      if (collected.kind === 'aborted' || (signal !== null && signal.aborted)) throw /** @type {AbortSignal} */ (signal).reason;
       throw /** @type {any} */ (collected).cause;
     }
     bytes = /** @type {any} */ (collected).bytes;

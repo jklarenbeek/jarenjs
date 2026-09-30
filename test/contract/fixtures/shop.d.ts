@@ -229,8 +229,8 @@ export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'lo
 /** The per-request context a server binding hands a handler, selected by carrier: the HTTP context by default; a carrier union is a discriminated union to narrow on `carrier`. */
 export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> = Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;
 
-/** The context a binding's onError(error, ctx) observer receives: the handler context of the request that failed, or null for a fault no request context reached. */
-export type ErrorContext<Host = null> = HandlerContext<Host, CarrierName> | null;
+/** The context a binding's onError(error, ctx) observer receives: on HTTP the handler context of the request that failed; on port and local the operation id and the trace; null for a fault no request context reached. Only the HTTP context has a carrier to narrow on. */
+export type ErrorContext<Host = null> = HandlerContext<Host, 'http'> | { op: string; trace: string } | null;
 
 /** The typed handler table of a server binding: one handler per invokable operation, answering the output, a declared failure, or a promise of either. */
 export type Handlers<Host = null, Carrier extends CarrierName = 'http'> = { [K in keyof Operations]: (input: Operations[K]['input'], ctx: HandlerContext<Host, Carrier>) => Operations[K]['output'] | Failure | Promise<Operations[K]['output'] | Failure> };

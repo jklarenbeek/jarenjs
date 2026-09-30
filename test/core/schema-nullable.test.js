@@ -148,6 +148,21 @@ describe('canonicalNullable — value-exact', () => {
     for (const schema of apart) assert.strictEqual(canonicalNullable(schema), null, JSON.stringify(schema));
   });
 
+  it('a normalizer keyword at any depth below the branch keeps them apart: the normalizer enters the type array, never the union', () => {
+    const apart = [
+      { anyOf: [{ type: 'object', properties: { zip: { type: 'string', 'x-trim': true } } }, { type: 'null' }] },
+      { anyOf: [{ type: 'object', properties: { city: { type: 'string', default: 'Utrecht' } } }, { type: 'null' }] },
+      { anyOf: [{ type: 'array', items: { type: 'integer', 'x-coerce': true } }, { type: 'null' }] },
+      { anyOf: [{ type: 'object', additionalProperties: { type: 'string', default: '' } }, { type: 'null' }] },
+    ];
+    for (const schema of apart) assert.strictEqual(canonicalNullable(schema), null, JSON.stringify(schema));
+    // a nested member without one still has the one spelling, and a $ref is not followed
+    assert.deepStrictEqual(canonicalNullable({ anyOf: [{ type: 'object', properties: { zip: { type: 'string' } } }, { type: 'null' }] }),
+      { type: ['object', 'null'], properties: { zip: { type: 'string' } } });
+    assert.deepStrictEqual(canonicalNullable({ anyOf: [{ type: 'object', properties: { next: { $ref: '#/$defs/N' } } }, { type: 'null' }] }),
+      { type: ['object', 'null'], properties: { next: { $ref: '#/$defs/N' } } });
+  });
+
   it('the check() example: the type array rejects null, the union accepts it — so they stay apart', () => {
     const check = { $gt: [{ '$string-length': '$' }, 2] };
     const array = { type: ['string', 'null'], $query: check };

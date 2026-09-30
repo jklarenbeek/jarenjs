@@ -172,8 +172,9 @@ export class SchemaBuilder<Out = unknown, In = Out, F extends Flag = never> {
   /** Raw constraint escape hatch, without inferred narrowing. A builder
    * inside the value is emitted as its schema node. A `default()`,
    * `coerce()` or `trim()` under `anyOf`, `oneOf`, `if`, `then`, `else`,
-   * `not` and the other branches the normalizer never enters is refused
-   * (`JL0102`); `allOf` is not one of them. */
+   * `not`, `contains`, `propertyNames` and the other branches the
+   * normalizer never enters is refused (`JL0102`); `allOf` is not one of
+   * them. */
   keyword(key: string, value: KeywordValue): this;
   /** Validation or annotation only; retains the current phantom. */
   anchor(value: string): this;
@@ -209,7 +210,9 @@ export class SchemaBuilder<Out = unknown, In = Out, F extends Flag = never> {
   legacyNullable(value: boolean): SchemaBuilder<unknown, unknown, F>;
   /** As an object member: left out of `required`. */
   optional(): SchemaBuilder<Out, In, F | 'optional'>;
-  /** Admit `null`. */
+  /** Admit `null`. A builder the pen wraps in an `anyOf` for it (a named,
+   * lazy or intersection builder) must not carry a `default()`, `coerce()`
+   * or `trim()` below: the normalizer never enters the branch (`JL0102`). */
   nullable(): SchemaBuilder<Out | null, In | null, F>;
   /** `default`: present after normalization, optional before it. */
   default(value: Out): SchemaBuilder<Out, In, F | 'defaulted'>;

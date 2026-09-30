@@ -350,10 +350,11 @@ export interface ChannelHandlerContext<Host = null, Carrier extends 'port' | 'lo
 export type HandlerContext<Host = null, Carrier extends CarrierName = 'http'> =
   Extract<HttpHandlerContext<Host> | ChannelHandlerContext<Host, 'port'> | ChannelHandlerContext<Host, 'local'>, { carrier: Carrier }>;
 
-/** The context a binding's `onError(error, ctx)` observer receives: the
- * handler context of the request that failed, or `null` for a fault no
- * request context reached. */
-export type ErrorContext<Host = null> = HandlerContext<Host, CarrierName> | null;
+/** The context a binding's `onError(error, ctx)` observer receives: on
+ * HTTP the handler context of the request that failed; on port and local
+ * the operation id and the trace; `null` for a fault no request context
+ * reached. Only the HTTP context has a `carrier` to narrow on. */
+export type ErrorContext<Host = null> = HandlerContext<Host, 'http'> | { op: string; trace: string } | null;
 
 /** Per-call options of `bytes` (§10.6): the members of `InvokeContext`
  * that apply to an opaque call, plus the request body to send. */

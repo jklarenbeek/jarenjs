@@ -552,6 +552,9 @@ export function openHttpClient(contract, options = {}) {
         path += '/' + s.text;
         continue;
       }
+      // a URL has no spelling for null: a segment "null" would be the
+      // string "null" to the server, a value the client never sent
+      if (value[s.text] === null) throw new Unencodable(s.text, `path variable '${s.text}' is null, which a URL cannot carry as a segment`);
       const text = transportString(value[s.text]);
       // an empty value leaves `//`; `.` and `..` are dot segments every URL
       // resolver folds into ANOTHER path — `/users/../sessions` is

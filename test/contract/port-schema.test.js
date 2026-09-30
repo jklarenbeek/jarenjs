@@ -44,6 +44,7 @@ describe('the jaren-contract-port schema artifact', () => {
     ['a null-valued success', { jaren: 'contract/0.1', id: 'c0ffee:1', ok: true, value: null, trace: 't-1' }],
     ['a declared-error response', { jaren: 'contract/0.1', id: 'c0ffee:1', ok: false, error: { code: 'conflict', message: 'm', details: { current: 1 }, retryable: false }, trace: 't-1' }],
     ['a taxonomy-error response', { jaren: 'contract/0.1', id: 'c0ffee:1', ok: false, error: { code: 'JC2071', message: 'm', retryable: false }, trace: 't-1' }],
+    ['a dotted declared-error response', { jaren: 'contract/0.1', id: 'c0ffee:1', ok: false, error: { code: 'ai.rate-limited', message: 'm', retryable: true }, trace: 't-1' }],
     ['a cancel', { jaren: 'contract/0.1', cancel: 'c0ffee:1' }],
     ['a subscribe', { jaren: 'contract/0.1', subscribe: 'c0ffee:4', op: 'data.live', input: { collection: 'notes' } }],
     ['an input-less subscribe', { jaren: 'contract/0.1', subscribe: 'c0ffee:5', op: 'feed', input: null }],

@@ -80,8 +80,9 @@ export function retainedOperations(contract, ops, who, audiences = undefined) {
       }
       const audience = contract.operations[id].policy.audience;
       if (audiences !== undefined && !audiences.includes(audience)) {
+        const suggested = [...audiences, audience].map((a) => `'${a}'`).join(', ');
         throw new ContractHostError('JC1008', `${who}: ops[${i}] names '${id}', a ${audience}-audience operation — `
-          + `pass audiences: ['public', '${audience}'] to expose it`);
+          + `pass audiences: [${suggested}] to expose it`);
       }
       wanted.add(id);
     }

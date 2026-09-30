@@ -187,7 +187,7 @@ describe('jaren-contract diff — the compatibility gate', () => {
         withV2((v2) => { delete v2.operations['product.remove']; }));
       assert.strictEqual(r.status, 2, JSON.stringify(suffix));
       assert.strictEqual(r.stdout, '');
-      assert.match(r.stderr, /--fail-on needs at least one change class/);
+      assert.match(r.stderr, /--fail-on needs (a value: change classes for diff|at least one change class)/);
     }
   });
 });
@@ -340,5 +340,39 @@ describe('jaren-contract diff --audience and lint', () => {
     assert.deepStrictEqual(JSON.parse(clean.stdout), []);
     const unknown = run(['lint', '--contract', 'shop.json', '--fail-on', 'nope']);
     assert.strictEqual(unknown.status, 2);
+  });
+
+  it('lint of a document that is not an object is a usage failure (exit 2, the coded reason), never a stack', () => {
+    for (const text of ['[]', '"string"']) {
+      const r = run(['lint', '--contract', 'bad.json'], (dir) => fs.writeFileSync(path.join(dir, 'bad.json'), text));
+      assert.strictEqual(r.status, 2, text);
+      assert.match(r.stderr, /^jaren-contract: JC1008 /m);
+      assert.doesNotMatch(r.stderr, /at .*lint\.js/);
+    }
+  });
+
+  it('a typo beside `all` in --fail-on still refuses; a bare --fail-on names what it needs', () => {
+    const typo = run(['lint', '--contract', 'shop.json', '--fail-on', 'all,bogus']);
+    assert.strictEqual(typo.status, 2);
+    assert.match(typo.stderr, /--fail-on 'bogus' is not a lint rule/);
+    const bare = run(['lint', '--contract', 'shop.json', '--fail-on']);
+    assert.strictEqual(bare.status, 2);
+    assert.match(bare.stderr, /--fail-on needs a value: change classes for diff, lint rules \(or all\) for lint/);
+  });
+
+  it('an option a command does not read is a usage error, never silently ignored', () => {
+    for (const args of [
+      ['lint', '--contract', 'shop.json', '--out', 'x.json'],
+      ['lint', '--contract', 'shop.json', '--check'],
+      ['lint', '--contract', 'shop.json', '--audience', 'all'],
+      ['describe', '--contract', 'shop.json', '--audience', 'all'],
+      ['describe', '--contract', 'shop.json', '--fail-on', 'breaking'],
+      ['diff', '--from', 'shop.json', '--to', 'shop.json', '--out', 'x.json'],
+    ]) {
+      const r = run(args);
+      assert.strictEqual(r.status, 2, args.join(' '));
+      assert.match(r.stderr, /is not an option of/, args.join(' '));
+      assert.deepStrictEqual(Object.keys(r.files), ['shop.json'], 'nothing written');
+    }
   });
 });

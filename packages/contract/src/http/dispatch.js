@@ -361,6 +361,18 @@ function hasContent(body) {
 }
 
 /**
+ * Whether a handler's failure is the peer's cancellation: the request's
+ * signal aborted, and the failure is its reason (what `readBody` and a
+ * handler honouring `ctx.signal` reject with).
+ * @param {RequestContext | null} ctx
+ * @param {unknown} cause
+ * @returns {boolean}
+ */
+function cancelledBy(ctx, cause) {
+  return ctx !== null && ctx.signal !== null && ctx.signal.aborted && cause === ctx.signal.reason;
+}
+
+/**
  * The AbortSignal of a request, when the adapter supplied one.
  * @param {HttpRequest} request
  * @returns {AbortSignal | null}
@@ -793,7 +805,12 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
         ? Promise.resolve(preconditionedBoundary(server, route, hctx, rawInput, trace, armed, isHead, ifMatch, ifNoneMatch, true))
         : boundary(server, route, hctx, rawInput, trace, armed, isHead, ifMatch, ifNoneMatch, true);
       return (requestSource === null ? ran : ran.then((response) => settleUpload(server, hctx, response, requestSource)))
-        .then((response) => deferToBody(server, life, response));
+        .then((response) => {
+          // a server fault is never committed work: the host transaction
+          // around enter rolls back, as for a JSON operation (enterHandler)
+          if (armed.outcome === 2) throw new RollbackCarrier(response, undefined);
+          return deferToBody(server, life, response);
+        });
     });
   }
 
@@ -1371,7 +1388,9 @@ function project(server, route, ctx, result, trace, armed, isHead, ifMatch, ifNo
       armed.outcome = 2;
       return refuse(server, 'JC2016', trace, { op: route.op.id }, undefined, null, ctx);
     }
-    if (result.cause !== undefined) observe(server, result.cause, ctx);
+    // a handler that rejects with the request signal's own reason is
+    // cancelled by the peer — not a fault of the host's to observe
+    if (result.cause !== undefined && !cancelledBy(ctx, result.cause)) observe(server, result.cause, ctx);
     armed.outcome = 2;
     return refuse(server, result.code, trace, { op: route.op.id }, result.details, null, ctx);
   }
@@ -1491,9 +1510,11 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead, ifMatch, ifN
         // a repeating field (set-cookie) may arrive as a list
         if (typeof v === 'string'
           || (Array.isArray(v) && v.every((item) => typeof item === 'string'))) {
+          const lower = names[i].toLowerCase();
+          if (!FIELD_NAME.test(lower)) throw new TypeError(`raw header name ${JSON.stringify(names[i])} is not an HTTP field token`);
           if (!(Array.isArray(v) ? v.every(isFieldValue) : isFieldValue(v)))
             throw new TypeError(`raw header '${names[i]}' holds a character an HTTP field cannot carry`);
-          headers[names[i].toLowerCase()] = v;
+          headers[lower] = v;
         }
       }
     }
@@ -1518,7 +1539,11 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead, ifMatch, ifN
   }
   applyArmedHeaders(headers, armed);
   headers['x-jaren-trace'] = trace;
-  if (armed.etag !== null) {
+  // the tag describes the representation a success selects: a raw error or
+  // redirect answer carries none, and preconditions never override it (RFC
+  // 9110 §13.2.1); a 304 the handler answered itself carries the tag
+  const success = status >= 200 && status < 300;
+  if (armed.etag !== null && (success || status === 304)) {
     // the operation's tag — the resolver's, or the handler's ctx.etag — is
     // the one source of truth: a raw etag header must agree with it
     const etag = formatEntityTag(armed.etag, armed.strong);
@@ -1529,7 +1554,7 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead, ifMatch, ifN
       armed.outcome = 2;
       return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
     }
-    if (!armed.decided) {
+    if (success && !armed.decided) {
       // the post-handler conditionals, as finishValue's: a cache device,
       // never a write guard — the handler has already run
       if (ifMatch !== undefined && !entityTagMatches(ifMatch, armed.etag, armed.strong, true)) {

@@ -309,7 +309,12 @@ compilation. A nullable union — an `anyOf`/`oneOf` of one branch and a
 null-only branch — reads as its branch (`splitNullable` from
 `@jarenjs/core/schema`), so `anyOf: [{ type: 'array', … }, { type: 'null' }]`
 travels as one JSON value exactly as `type: ['array', 'null']` does, and a
-header member of that shape is `repeated` like its type-array twin.
+header member of that shape is `repeated` like its type-array twin. Both
+spellings of a nullable scalar path, query or header member decode by
+their non-null branch (`?n=5` is the integer 5 for `type: ['integer',
+'null']` and for its union twin alike): the transport never carries a
+`null` — the client omits an optional one and refuses a required one, or
+any on the path (`JC2050`).
 Unconstrained schemas and any other `anyOf`/`oneOf` union do not imply a
 codec — declare a top-level `type` to choose one. Malformed JSON or multiple occurrences of a JSON member are `JC2012`;
 a well-formed value of the wrong type is `JC2006`. Undeclared query keys
@@ -457,7 +462,10 @@ the options are closed.
 - The limit stays the binding's: a streamed upload is pulled through
   its counting source, whose `BodyLimitError` is rethrown, so the
   binding still answers 413 `JC2003`.
-- An aborted `signal` rejects with its reason and cancels the source.
+- An aborted `signal` rejects with its reason, whatever `ctx.body` is,
+  and cancels a source. A source that fails because the peer went away
+  rejects with the signal's reason too, never the socket's error, so a
+  handler that lets it propagate is cancelled, not a fault (§7.7).
 
 A handler that streams the upload onward reads `ctx.body` chunk by
 chunk instead (§7.1). An opaque operation takes a `preconditions`
@@ -805,7 +813,8 @@ is `JC2008`.
     `content-length`; HEAD cancels it) — except under 204, 205 or 304,
     which carry no content: a pull source or a non-empty body there is
     `JC2010` (a source is released, never left open), and so is a raw
-    header value an HTTP field cannot carry.
+    header name that is not an HTTP field token or a value an HTTP field
+    cannot carry.
     Under a lease that **requires settlement** (§7.7) the claim is
     recorded through the lease's ledger inside `enter`, before `enter`
     resolves, and the root ledger stands down; a host fault or a
@@ -1008,7 +1017,10 @@ The operation's tag has one source. A raw handler that also answers an
 `etag` header must answer the same value as the resolver or `ctx.etag`,
 or the binding answers `JC2008` (a server fault, its cause observed). A
 raw `etag` header with no tag armed is the handler's own and passes
-through.
+through. The armed tag describes the representation a success selects:
+a raw answer that is not a 2xx (a 404, a 302, a 500) carries no armed
+tag, and no post-handler conditional rewrites it (RFC 9110 §13.2.1); a
+304 the handler answered itself carries the tag.
 
 ### §7.6 HEAD, the well-known path, options
 
@@ -1102,8 +1114,20 @@ host's fault: observed through `onError` and answered as the binding's
 host fault — `JC2008` on HTTP, `JC2070` on port and local. A declared
 failure is recognized by the `ContractFailure` brand only (`meta.fail`,
 or the package's `ContractFailure`), never by shape, and is validated
-against the operation exactly as a handler's `ctx.fail` is. A
-shape-compatible object is a malformed lease.
+against the operation exactly as a handler's `ctx.fail` is — its
+`retryAfterMs` included, so a hook's retryable refusal carries
+`retry-after` as the handler's does. A shape-compatible object is a
+malformed lease.
+
+**A server fault never commits.** When the answer inside `enter` is a
+server fault — the handler threw or rejected, its output broke the
+contract, the binding's own continuation failed (`JC2008`, `JC2010` on
+HTTP; `JC2070` on port and local) — `enter` rejects with the binding's
+private carrier of that answer, so a host transaction opened around it
+rolls back, on a JSON and an opaque operation alike. A handler that
+rejects with the request signal's own reason — the peer went away, and
+the handler honoured `ctx.signal` (`readBody` does) — is cancelled by
+the peer, not a fault of the host's: it answers `JC2008` unobserved.
 
 **Release.** The acquired release runs, then the identity's, each at
 most once, on every exit that reached it: an ordinary response releases
@@ -1607,7 +1631,9 @@ is true exactly for a 304.
    string — a URL has no spelling for null, so a `null` for a **required**
    scalar query or header member is `JC2050` (`keyword: "encoding"`)
    before anything is sent, where leaving it out would only meet the
-   server's `JC2006`); header members → the header named by the
+   server's `JC2006`, and so is a `null` path variable, which the
+   segment `null` would deliver as the string "null"); header members →
+   the header named by the
    member lowercased (an array as a `, `-joined list); the body: `http.body`
    names a member → `JSON.stringify` of that member's value; otherwise
    the object of the body-located members, stringified. `method` from
@@ -1676,7 +1702,7 @@ has exactly these msgids beside §7's; a test holds them equal:
 
 | code | kind | msgid | retryable | when |
 |---|---|---|---|---|
-| `JC2050` | contract | `contract/client-invalid-input` | no | the input fails the operation's input validator, or holds a value the transport cannot carry (step 3: an empty or dot-segment path variable, a path or query value with an unpaired surrogate, a header value or item it would alter or refuse), before anything was sent |
+| `JC2050` | contract | `contract/client-invalid-input` | no | the input fails the operation's input validator, or holds a value the transport cannot carry (step 3: an empty, dot-segment or `null` path variable, a path or query value with an unpaired surrogate, a header value or item it would alter or refuse), before anything was sent |
 | `JC2051` | network | `contract/network` | yes | the transport rejected or the per-request timeout fired; the message names the error's name only |
 | `JC2052` | cancelled | `contract/cancelled` | no | `ctx.signal` aborted, the client was closed, or an abort interrupted a retry backoff |
 | `JC2053` | contract | `contract/invalid-response` | no | a 2xx body is not JSON or fails the output validator; a response object whose status is not 100–599 |
@@ -2279,9 +2305,14 @@ directory that gets `<contract id><extension>`
 `--check` writes nothing and exits **1** when the file differs from
 what the document projects today — the CI drift gate; exit **0** when
 current or written; exit **2** on a usage error, an unreadable document,
-or a compile refusal, printed as `code docPath reason`. `openapi`
-reports every dropped keyword on stderr; without `--lenient` a
-rejectable keyword is exit 2 with `JC0060` and its `docPath`.
+or a compile refusal, printed as `code docPath reason` (a `lint` document
+that is not an object prints `JC1008` and its reason). Each command reads
+its own options — `--out`/`--check` the projections, `--lenient` and
+`--info-*` `openapi` only, `--fail-on` `lint` and `diff`, `--audience`
+`diff` only — and any other is a usage error (exit 2), never silently
+ignored. `openapi` reports every dropped keyword on stderr; without
+`--lenient` a rejectable keyword is exit 2 with `JC0060` and its
+`docPath`.
 
 ## §13 The breaking-change diff
 
@@ -2307,15 +2338,15 @@ validator error would name.
 | R5 | input: a member removed while the new input schema is `additionalProperties: false` (or the input removed entirely) | breaking; otherwise `neutral` with a note (the member is now ignored, not validated) |
 | R6 | input: a member's schema narrowed (type set shrinks, `enum`/`const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
 | R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
-| R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false`) | breaking |
+| R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false` or `unevaluatedProperties: false`) | breaking |
 | R9 | output: a member added to an open object, a member added to `required`, or narrowed | additive |
 | R10 | error code removed, or its `status` changed | breaking |
 | R11 | error code added | additive |
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key) | breaking; `required → optional/none` and `none ↔ optional` additive |
-| R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral |
+| R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …) | **unknown** — reported, never silently classed |
-| R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not |
+| R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …); a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
+| R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
 
@@ -2329,12 +2360,15 @@ Riders the rows carry:
   narrower answer. Member events take the consumer's view on both sides.
   A removed or no-longer-guaranteed output member breaks a client that
   reads it. A new output member breaks a client whose schema was closed,
-  and is additive on an open one.
+  and is additive on an open one. A type set counts `integer` inside
+  `number`: `number → integer` narrows, `integer → number` widens.
 - **`audience: 'all'`** — an internal gate's option (CLI `--audience
   all`). The same rules then run on server-audience operations, and each
-  of their changes carries `audience: "server"`. The default, `'public'`,
-  keeps the compatibility surface to what clients see. The option set is
-  closed (`JC1008`).
+  of their changes carries `audience: "server"`; an audience flip reports
+  R14 and then the operation's other changes, each marked `audience:
+  "server"`, since the internal callers used it before. The default,
+  `'public'`, keeps the compatibility surface to what clients see. The
+  option set is closed (`JC1008`).
 
 - **R3 covers the whole wire shape.** The order's five members plus a
   member's `in` location and the whole-body `body` member — a member
@@ -2359,7 +2393,9 @@ Riders the rows carry:
   depth.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
-  an audience flip is R14 and subsumes the operation's other changes.
+  an audience flip is R14 and, for public consumers, subsumes the
+  operation's other changes (under `audience: 'all'` they are reported
+  too).
   `policy.limits` and `policy.errors.details` are server-side knobs
   outside the public projection and are never reported.
 
@@ -2379,10 +2415,15 @@ by a person, a revision (§14) moves by itself.
   type or annotates. A `$query`, an `enum` or `const`, an applicator or a
   `$ref` in the branch keeps them apart: `{ type: ['string', 'null'],
   $query: … }` runs the check on `null` and refuses it, while the union
-  lets `null` through its other branch. Such a respelling stays R15
-  unknown. A respelling beside a real change reports both. The change is
-  read on the type-array spelling, so its `docPath` names that
-  spelling's keyword.
+  lets `null` through its other branch. So does a normalizer keyword
+  (`default`, `x-coerce`, `x-trim`) at any depth below the branch: the
+  normalizer enters a type array and never a union branch. Such a
+  respelling stays R15 unknown: the constraints it moves into the
+  applicator are R15, never a guessed direction. A respelling beside a
+  real change reports both. The change is read on the type-array
+  spelling, so its `docPath` names that spelling's keyword; when both
+  sides are unions, it is read on the non-null branches where they sit
+  (`…/anyOf/0/minLength`), a pointer that resolves in both documents.
 
 The CLI's compatibility gate: `jaren-contract diff --from a.json --to
 b.json [--fail-on breaking[,unknown,…]]` prints the classified diff as
@@ -2401,9 +2442,9 @@ The rule ids are stable (`LINT_RULES`):
 
 | rule | finds | the fix the message names |
 |---|---|---|
-| `read-query-on-body-method` | a read bound to POST, PUT or PATCH whose members default to the query string: the client sends them there, and a hand-written JSON body is ignored | bind the read to GET, or declare the members' location (`http.in`) or a whole-body member |
-| `body-limit-unsatisfiable` | the smallest body the required members can encode to exceeds `policy.limits.maxBodyBytes`, so every valid request is refused `JC2003` | raise the limit or relax the bounds. The size is a **lower bound**: `maxLength` counts code points and JSON escaping only adds bytes |
-| `retry-on-undeclared` | a `policy.retry.on` entry that is neither a code the operation declares nor a `JC` code a binding raises (`bussy`, `JC9999`), so the retry it asks for can never happen | name a declared code, or a transport code (`JC2051` is a network loss) |
+| `read-query-on-body-method` | a read bound to POST, PUT or PATCH whose members default to the query string: the client sends them there, and a hand-written JSON body is ignored (a read that declares a whole-body member, or an opaque read, has chosen its layout and is not reported) | bind the read to GET, or declare the members' location (`http.in`) or a whole-body member |
+| `body-limit-unsatisfiable` | the smallest body the required members can encode to exceeds `policy.limits.maxBodyBytes`, so every valid request is refused `JC2003` (an optional whole-body member can be left out, so it counts nothing; a requirement listed twice counts once) | raise the limit or relax the bounds. The size is a **lower bound**: `maxLength` counts code points and JSON escaping only adds bytes |
+| `retry-on-undeclared` | a `policy.retry.on` entry the client can never retry: neither a code the operation declares, a `JC20xx` wire code (a failure outcome — `JC2009` is an in-progress claim), nor `JC2051` (a network loss, retried under any declared retry). `bussy`, `JC9999`, a compile or host code (`JC0003`, `JC1008`) and a client-side contract code (`JC2053`) are reported | name a declared code or a `JC20xx` wire code |
 
 A header member whose name is not an HTTP token, and an opaque operation's
 idempotency, are refused at compile (`JC0009`, `JC0022`), so they are not

@@ -470,6 +470,10 @@ function write(res, response, close, done) {
     send(res, response, close, done);
   }
   catch (err) {
+    // a streamed body that will never be written is released, never left
+    // open (its release runs the request's deferred leases)
+    const body = response.body;
+    if (body !== null && typeof body === 'object' && !(body instanceof Uint8Array)) void discard(body);
     if (res.headersSent) {
       if (typeof res.destroy === 'function') res.destroy(err instanceof Error ? err : undefined);
       return;

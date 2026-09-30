@@ -84,7 +84,7 @@ describe('toTypeScript — what it declares', () => {
     assert.match(out, /^export interface HandlerContextBase<Host = null> \{\n {2}op: OperationInfo;$/m);
     assert.match(out, /^export interface HttpHandlerContext<Host = null> extends HandlerContextBase<Host> \{\n(?: {2}.*\n)*? {2}header\(name: string, value: string\): void;\n\}/m);
     assert.match(out, /^export interface ChannelHandlerContext<[^\n]*\{\n(?: {2}.*\n)*? {2}header: null;\n\}/m);
-    assert.match(out, /^export type ErrorContext<Host = null> = HandlerContext<Host, CarrierName> \| null;$/m);
+    assert.match(out, /^export type ErrorContext<Host = null> = HandlerContext<Host, 'http'> \| \{ op: string; trace: string \} \| null;$/m);
     assert.match(out, /^ {2}readonly errors: Readonly<Record<string, \{ readonly status: number \}>>;$/m);
   });
 

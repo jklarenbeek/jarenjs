@@ -315,9 +315,11 @@ Three rules the tables imply, spelled out:
   `if`/`then`/`else`, `contains` or `propertyNames`, so a `default()`,
   `coerce()` or `trim()` under one would promise a normalization that
   never happens; the pen refuses it (`JL0102`) at assembly, naming the
-  branch and the `docPath`. The same rule is why `coerce()` and
-  `nullable()` exclude each other: the normalizer coerces only a
-  single-typed scalar.
+  branch and the `docPath` — whether the branch is written with a
+  builder method, with `keyword()`, or by `nullable()` over a builder it
+  wraps in an `anyOf` (a named, lazy or intersection builder). The same
+  rule is why `coerce()` and `nullable()` exclude each other: the
+  normalizer coerces only a single-typed scalar.
 - **A rule against the root reads from the root.** `check()`'s `root` is
   an object whose members are the honest top, so a typed member compares
   with it from the root's side — `x.root.currency.eq(l.currency)` — the
@@ -784,8 +786,9 @@ The capture every schema callback runs in adds one more refusal, which is
 the chain's and listed in QUERY-PEN. In a `check()` callback, `==`, `+`, a
 template literal or `<` over a captured value is `JL0108`
 ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
-`=== null` and truthiness cannot be refused, since they test the proxy
-and never the value. Write `.eq(null)`, `.exists()` or `.isEmpty()`.
+`=== null`, `== null` (and `!= null`), `==` between two captures and
+truthiness cannot be refused, since they test the proxy and never the
+value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 
 | Code | What this pen raises it for |
 |---|---|
@@ -876,10 +879,14 @@ assembly (a shape whose emitted form would mean something else).
 | `s.document(b, { draft: 'draft-07' })` | `document() writes the 2020-12 vocabulary only; 'draft-07' is not a draft it can declare` | `{ draft: '2020-12' }`, or no draft |
 | `s.document(s.never(), { draft: '2020-12' })` | `a boolean schema cannot declare a $schema` | give the document a non-boolean root |
 
-The normalizer rule fires under seven names, and the message carries
-whichever one it was: `union()`, `discriminated()`, `when()`, `then()`,
-`else()`, `contains()` and `propertyNames()`. Its `docPath` names the
-exact branch (`/anyOf/0`, `/if`, `/contains`, `/propertyNames`).
+The normalizer rule fires under the name of whatever wrote the branch,
+and the message carries it: `union()`, `discriminated()`, `when()`,
+`then()`, `else()`, `contains()`, `propertyNames()`, `nullable()` (over
+a builder it wraps in an `anyOf`) and the keyword a `keyword()` call
+named (`anyOf`, `oneOf`, `if`, `then`, `else`, `contains`,
+`propertyNames`, `not`, …). Its `docPath` names the exact branch
+(`/anyOf/0`, `/if`, `/contains`, `/propertyNames`), or the member
+`nullable()` wrapped.
 
 ### 4.3 `JL0103` — the definition
 
@@ -1205,7 +1212,7 @@ hand, or generate it some other way, when:
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->35,773<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->35,865<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.schema.kb-->36<!--/fact--> kB) beside the other nine subpath prices in

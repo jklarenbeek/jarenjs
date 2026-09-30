@@ -191,15 +191,51 @@ export function splitNullable(schema) {
   return { schema: isNode(union.branch) ? { ...union.branch, ...union.annotations } : union.branch, nullable: true };
 }
 
+/** Keywords holding one subschema, a map of them, or a list of them. */
+const ONE_SUBSCHEMA = ['items', 'contains', 'additionalProperties', 'propertyNames', 'unevaluatedItems',
+  'unevaluatedProperties', 'not', 'if', 'then', 'else', 'contentSchema'];
+const MAP_OF_SUBSCHEMAS = ['properties', 'patternProperties', 'dependentSchemas'];
+const LIST_OF_SUBSCHEMAS = ['prefixItems', 'allOf', 'anyOf', 'oneOf'];
+
+/**
+ * Whether a normalizer keyword (`default`, `x-coerce`, `x-trim`) sits at
+ * or below a node, through every subschema position. A `$ref` is not
+ * followed: this reads the node alone, without its document.
+ * @param {unknown} node
+ * @param {Set<object>} [seen]
+ * @returns {boolean}
+ */
+function reachesNormalizer(node, seen = new Set()) {
+  if (!isNode(node) || seen.has(node)) return false;
+  seen.add(node);
+  if (Object.hasOwn(node, 'default') || Object.hasOwn(node, 'x-coerce') || Object.hasOwn(node, 'x-trim')) return true;
+  for (const key of ONE_SUBSCHEMA) if (reachesNormalizer(node[key], seen)) return true;
+  for (const key of MAP_OF_SUBSCHEMAS) {
+    const map = node[key];
+    if (isNode(map) && Object.keys(map).some((name) => reachesNormalizer(map[name], seen))) return true;
+  }
+  for (const key of LIST_OF_SUBSCHEMAS) {
+    const list = node[key];
+    if (Array.isArray(list) && list.some((sub) => reachesNormalizer(sub, seen))) return true;
+  }
+  return false;
+}
+
 /**
  * The one canonical spelling of a nullable schema — `{ …S, type: [T,
  * 'null'] }` — when, and only when, the two spellings accept exactly the
  * same values: the non-null branch `S` has `type: T` and every other
  * keyword of `S` is scoped to `T` (TYPE_SCOPED_KEYWORDS) or annotates.
- * A `$query`, an applicator, `const`, `enum`, `$ref`, a `default` inside
- * the branch (the normalizer reads it only at the top) or two different
- * values for one annotation keep the spellings distinct, and the result
- * is `null`. A schema that is not nullable is `null` too.
+ * A `$query`, an applicator, `const`, `enum`, `$ref`, two different
+ * values for one annotation, or a normalizer keyword (`default`,
+ * `x-coerce`, `x-trim`) at or below the branch keep the spellings
+ * distinct, and the result is `null`: the normalizer enters a type array
+ * and never a union branch, so such a keyword would act on one spelling
+ * only. (A `$ref` below the branch is not followed — this reads the node
+ * without its document.) (A host's own normalizer OPTIONS — `coerceTypes`,
+ * `removeAdditional` — act on the type array alone too; a host that uses
+ * them reads a union through `splitNullable`.) A schema that is not
+ * nullable is `null` too.
  * @param {unknown} schema
  * @returns {Record<string, any> | null}
  * @example
@@ -229,6 +265,7 @@ export function canonicalNullable(schema) {
     if (key === 'type' || scoped.has(key)) continue;
     if (key === 'default' || !annotates(key)) return null;
   }
+  if (reachesNormalizer(branch)) return null;
   /** @type {Record<string, any>} */
   const canonical = { ...branch };
   for (const key of Object.keys(union.annotations)) {

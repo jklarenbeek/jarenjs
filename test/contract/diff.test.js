@@ -539,10 +539,22 @@ describe('diffContracts — the internal gate and the stream policy', () => {
     }
   });
 
-  it('a policy.stream change is reported (R13, neutral)', () => {
-    const sub = (/** @type {number} */ heartbeatMs) => one({ kind: 'subscribe', output: { type: 'object' }, http: { method: 'GET', path: '/a' }, policy: { stream: { heartbeatMs } } });
-    const c = only(diffContracts(sub(15000), sub(30000)).neutral);
-    assert.deepStrictEqual([c.rule, c.kind, c.docPath], ['R13', 'policy-changed', '/operations/a.b/policy/stream']);
-    assert.deepStrictEqual([c.from.heartbeatMs, c.to.heartbeatMs], [15000, 30000]);
+  it('a policy.stream change is reported R13: neutral, but a slower heartbeat breaks an older client', () => {
+    const sub = (/** @type {number} */ heartbeatMs, resume = 'snapshot') => one({ kind: 'subscribe', output: { type: 'object' },
+      http: { method: 'GET', path: '/a' }, policy: { stream: { heartbeatMs, resume } } });
+    // faster, or another resume policy: neutral
+    const faster = only(diffContracts(sub(30000), sub(15000)).neutral);
+    assert.deepStrictEqual([faster.rule, faster.kind, faster.docPath], ['R13', 'policy-changed', '/operations/a.b/policy/stream']);
+    assert.deepStrictEqual([faster.from.heartbeatMs, faster.to.heartbeatMs], [30000, 15000]);
+    onlyClasses(diffContracts(sub(15000), sub(15000, 'replay')), ['neutral']);
+    // slower: the old client's watchdog (twice its own interval) reports
+    // the stream lost before the new server's first heartbeat
+    const slower = diffContracts(sub(15000), sub(30000));
+    onlyClasses(slower, ['breaking']);
+    const c = only(slower.breaking);
+    assert.deepStrictEqual([c.rule, c.kind, c.docPath, c.from, c.to], ['R13', 'heartbeat-slowed', '/operations/a.b/policy/stream/heartbeatMs', 15000, 30000]);
+    // slower AND another resume policy: both, each once
+    const both = diffContracts(sub(15000), sub(30000, 'replay'));
+    assert.deepStrictEqual([both.breaking.map((x) => x.kind), both.neutral.map((x) => x.kind)], [['heartbeat-slowed'], ['policy-changed']]);
   });
 });

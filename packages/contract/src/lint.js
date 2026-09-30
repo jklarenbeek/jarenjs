@@ -86,6 +86,9 @@ export function lintContract(contract) {
  */
 function readQueryOnBodyMethod(op, declared, base, findings) {
   if (op.kind !== 'read' || !BODY_METHODS.has(op.http.method)) return;
+  // a declared whole-body member makes the body layout the author's
+  // choice, and an opaque read has no JSON body to write members into
+  if (op.http.body !== null || op.http.opaque) return;
   const declaredIn = isJsonObject(declared?.http?.in) ? declared.http.in : {};
   const defaulted = Object.keys(op.http.in).filter((m) =>
     op.http.in[m] === 'query' && !Object.hasOwn(declaredIn, m));
@@ -115,7 +118,8 @@ function bodyLimitUnsatisfiable(op, contract, base, findings) {
   const properties = isJsonObject(effective.properties) ? effective.properties : {};
   const scope = { doc: contract.doc, seen: new Set() };
   let least;
-  if (op.http.body !== null) least = minimumBytes(properties[op.http.body], scope, 0);
+  // an optional body member left out sends no body at all
+  if (op.http.body !== null) least = required.has(op.http.body) ? minimumBytes(properties[op.http.body], scope, 0) : 0;
   else {
     const kept = members.filter((m) => required.has(m));
     least = 2 + Math.max(0, kept.length - 1);
@@ -177,7 +181,8 @@ function minimumOfType(type, schema, scope, depth) {
       return n === 0 ? 2 : 2 + (n - 1) + n * minimumBytes(schema.items, scope, depth + 1);
     }
     case 'object': {
-      const required = Array.isArray(schema.required) ? schema.required.filter((/** @type {unknown} */ r) => typeof r === 'string') : [];
+      const required = Array.isArray(schema.required)
+        ? [...new Set(schema.required.filter((/** @type {unknown} */ r) => typeof r === 'string'))] : [];
       const properties = isJsonObject(schema.properties) ? schema.properties : {};
       let n = 2 + Math.max(0, required.length - 1);
       for (const m of required) n += utf8Bytes(JSON.stringify(m)) + 1 + minimumBytes(properties[m], scope, depth + 1);
@@ -202,13 +207,26 @@ function retryOnUndeclared(op, base, findings) {
   const on = op.policy.retry.on;
   for (let i = 0; i < on.length; i++) {
     const code = on[i];
-    if (Object.hasOwn(op.errors, code) || Object.hasOwn(CONTRACT_CODES, code)) continue;
+    if (Object.hasOwn(op.errors, code) || retriedCode(code)) continue;
     findings.push({
       rule: 'retry-on-undeclared',
       op: op.id,
       docPath: `${base}/policy/retry/on/${i}`,
-      message: `policy.retry.on names '${code}', which '${op.id}' does not declare and no binding raises — the retry it asks for `
-        + 'can never happen. Name a declared error code, or a JC code the transport reports (JC2051 is a network loss)',
+      message: `policy.retry.on names '${code}', which '${op.id}' does not declare and the client never retries — the retry it `
+        + 'asks for can never happen. Name a declared error code, or a JC20xx wire code (JC2009 is an in-progress claim); '
+        + 'a network loss (JC2051) is retried under any declared retry',
     });
   }
+}
+
+/**
+ * Whether the client retries an outcome with this JC code: the HTTP wire
+ * taxonomy (`JC2001`–`JC2049`), which arrives as a `failure` outcome, and
+ * the network loss `JC2051`, retried under any declared `policy.retry`.
+ * A compile or host code, or a client-side contract code (`JC2053`), never
+ * arrives as a retryable outcome.
+ * @param {string} code
+ */
+function retriedCode(code) {
+  return Object.hasOwn(CONTRACT_CODES, code) && (/^JC20[0-4]\d$/.test(code) || code === 'JC2051');
 }

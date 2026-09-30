@@ -76,6 +76,17 @@ const COMMANDS = /** @type {const} */ ({
   docs: { extension: '.md' },
 });
 
+/** The options each command reads: any other is a usage error, never silently ignored. */
+const COMMAND_OPTIONS = /** @type {Record<string, readonly string[]>} */ ({
+  describe: ['--contract', '--out', '--check'],
+  public: ['--contract', '--out', '--check'],
+  openapi: ['--contract', '--out', '--check', '--lenient', '--info-title', '--info-version'],
+  types: ['--contract', '--out', '--check'],
+  docs: ['--contract', '--out', '--check'],
+  diff: ['--from', '--to', '--fail-on', '--audience'],
+  lint: ['--contract', '--fail-on'],
+});
+
 /**
  * @param {string[]} argv
  */
@@ -86,15 +97,18 @@ function parseArgs(argv) {
     infoTitle: /** @type {string | null} */ (null), infoVersion: /** @type {string | null} */ (null),
     from: /** @type {string | null} */ (null), to: /** @type {string | null} */ (null),
     failOn: /** @type {string | null} */ (null), audience: /** @type {string | null} */ (null),
+    /** @type {string[]} the options given, as spelt */
+    given: [],
   };
   for (let i = 2; i < argv.length; i++) {
+    if (argv[i].startsWith('--') && argv[i] !== '--help') options.given.push(argv[i]);
     switch (argv[i]) {
       case '--contract': options.contract = argv[++i] ?? null; break;
       case '--from': options.from = argv[++i] ?? null; break;
       case '--to': options.to = argv[++i] ?? null; break;
       case '--fail-on':
         if (argv[i + 1] === undefined || argv[i + 1].startsWith('-'))
-          throw new Error('--fail-on needs at least one change class');
+          throw new Error('--fail-on needs a value: change classes for diff, lint rules (or all) for lint');
         options.failOn = argv[++i];
         break;
       case '--audience':
@@ -229,10 +243,11 @@ async function runLint(options) {
   if (options.failOn !== null) {
     failOn = options.failOn.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
     if (failOn.length === 0) return fail('--fail-on needs at least one rule', true);
-    if (failOn.includes('all')) failOn = [...LINT_RULES];
+    // every name is checked before `all` expands, so a typo beside it still refuses
     for (const name of failOn) {
-      if (!LINT_RULES.includes(name)) return fail(`--fail-on '${name}' is not a lint rule (${LINT_RULES.join(', ')}, or all)`, true);
+      if (name !== 'all' && !LINT_RULES.includes(name)) return fail(`--fail-on '${name}' is not a lint rule (${LINT_RULES.join(', ')}, or all)`, true);
     }
+    if (failOn.includes('all')) failOn = [...LINT_RULES];
   }
   const document = await readDocument(options.contract, 'contract');
   let findings;
@@ -241,6 +256,7 @@ async function runLint(options) {
   }
   catch (error) {
     if (error instanceof ContractCompileError) return fail(`${error.code} ${error.docPath ?? ''} ${error.reason}`);
+    if (error instanceof ContractHostError) return fail(`${error.code} ${error.reason}`);
     throw error;
   }
   process.stdout.write(JSON.stringify(findings, null, 2) + '\n');
@@ -262,6 +278,11 @@ async function main() {
   if (options.help) {
     console.log(USAGE);
     return;
+  }
+  const allowed = options.command === null ? undefined : COMMAND_OPTIONS[options.command];
+  if (allowed !== undefined) {
+    const stray = options.given.find((option) => !allowed.includes(option));
+    if (stray !== undefined) return fail(`${stray} is not an option of ${options.command} (it reads ${allowed.join(', ')})`, true);
   }
   if (options.command === 'diff') return runDiff(options);
   if (options.command === 'lint') return runLint(options);

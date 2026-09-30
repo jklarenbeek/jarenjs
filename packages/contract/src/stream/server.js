@@ -274,10 +274,11 @@ function declaredFailureOf(error, route) {
     const params = e.params;
     const retryable = typeof e.retryable === 'boolean' ? e.retryable : route.retryOn.has(code);
     // the catalog parameters a declared failure's message renders with — a
-    // ctx.fail value carries them, as it does on a request
+    // ctx.fail value carries them, as it does on a request, and they render
+    // as a request's do: they never reach the wire, so they need not be JSON
     return {
       code,
-      params: params !== null && typeof params === 'object' && !Array.isArray(params) && isJsonValue(params) ? params : {},
+      params: params !== null && typeof params === 'object' && !Array.isArray(params) ? { ...params } : {},
       details: details !== undefined && isJsonValue(details) ? details : undefined,
       retryable,
     };

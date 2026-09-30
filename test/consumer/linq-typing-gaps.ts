@@ -47,9 +47,12 @@ export const handlers = typedHandlers(Labels, {
   'label.purge': () => true,
 });
 export const onError = (err: unknown, ctx: ErrorContext): void => {
-  const opId: string | undefined = ctx?.op.id;
+  // HTTP hands the handler context (it has a carrier); port and local the id and the trace
+  const opId: string | undefined = ctx === null ? undefined : 'carrier' in ctx ? ctx.op.id : ctx.op;
   void [err, opId];
 };
+// @ts-expect-error a port or local error context carries the id, not an OperationInfo
+export const unnarrowed = (ctx: ErrorContext): string | undefined => ctx?.op.id;
 export function channelHeaderIsNull(ctx: HandlerContext<null, 'port'>): null { return ctx.header; }
 
 // ——— every tool's execute exists ———

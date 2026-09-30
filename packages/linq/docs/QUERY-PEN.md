@@ -1409,8 +1409,8 @@ A captured value is a proxy that stands for a value the engine computes
 later, so JavaScript's own operators cannot see what it holds. Whenever
 JavaScript asks the proxy for a primitive, the capture refuses with a
 coded message instead of the raw `TypeError: Cannot convert object to
-primitive value`. That covers loose equality, `+`, a template literal
-and a relational comparison.
+primitive value`. That covers loose equality against a string, a number
+or a boolean, `+`, a template literal and a relational comparison.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
@@ -1418,10 +1418,18 @@ and a relational comparison.
 | `` (v) => `${v.first} ${v.last}` `` | the same message | `(v) => v.first.concat(' ').concat(v.last)` |
 | `(v) => v.n + 1`, `(v) => v.n < 2` | the same message | `(v) => v.n.add(1)`, `(v) => v.n.lt(2)` |
 
-Two spellings cannot be trapped, because JavaScript never asks the
-proxy for anything. `v.payload === null` is `false` for every value,
-and `if (v.tab)` is always true: both test the proxy itself. Write
-`v.payload.eq(null)`, `v.payload.exists()` or `v.payload.isEmpty()`.
+Some spellings cannot be trapped, because JavaScript never asks the
+proxy for anything:
+- `v.payload === null` is `false` for every value, and so is
+  `v.payload == null` (and `== undefined`); their negations are `true`.
+- `r.a == r.b` compares two proxies, so it is `false`, and
+  `r.a != r.b` is `true`.
+- `if (v.tab)` is always true.
+
+Each of these tests the proxy itself: `.where(r => r.a == null)` keeps
+no row, and `.check(x => x != null)` accepts everything. Write
+`v.payload.eq(null)`, `v.payload.exists()`, `v.payload.isEmpty()` or
+`r.a.eq(r.b)`.
 
 ### 14.10 The runtime codes
 
@@ -1750,7 +1758,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->200,247<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,542<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->200,340<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,541<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

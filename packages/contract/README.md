@@ -652,20 +652,23 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //              required input member, a narrowed input, a removed/optional-
 //              ized/WIDENED output (a closed output gaining a member too —
 //              the old client refuses it), idempotency now required, an
-//              operation withdrawn to audience: server
+//              operation withdrawn to audience: server, a SLOWER stream
+//              heartbeat (the old client's watchdog fires first)
 //   additive — an operation/error added, an optional input member, a widened
 //              input, a NARROWED output, a relaxed idempotency
 //   neutral  — task mode, retry, cache, policy.revision, policy.stream, doc,
 //              a nullable respelling that accepts the same values (R16)
 //   unknown  — what the checker does not model (anyOf/if/not, a CHANGED
-//              pattern, an external $ref, an error details schema):
-//              REPORTED, never silently classed
+//              pattern, an external $ref, an error details schema, a
+//              constraint moved into an applicator, a member beside a
+//              catch-all): REPORTED, never silently classed
 // each Change = { kind, op, docPath, from?, to?, rule } — the docPath a
 // validator error would name, $refs resolved
 
 diffContracts(v1, v2, { audience: 'all' });
 // an internal gate: the same rules over server-audience operations too, each
-// of their changes marked audience: 'server' — and contract.revision({ audience:
+// of their changes marked audience: 'server' (an audience flip reports R14 and
+// then the operation's own changes) — and contract.revision({ audience:
 // 'all' }) fingerprints every operation (never served)
 
 isCompatible(clientContract, serverContract);

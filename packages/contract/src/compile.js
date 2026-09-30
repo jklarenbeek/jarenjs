@@ -1186,21 +1186,28 @@ export function compileContract(doc, options = {}) {
       const queryJson = [];
       /** @type {Record<string, any>} */
       const pick = {};
+      /** @type {Record<string, any>} what each member decodes by */
+      const decodePick = {};
       for (let i = 0; i < p.members.length; i++) {
         const m = p.members[i];
         const loc = p.http.in[m];
         if (loc === 'body') continue;
         const schema = p.inputEffective.properties[m];
         setObjectMember(pick, m, schema);
+        // a nullable member reads as its non-null branch, whichever of the
+        // two spellings it uses (splitNullable): it decodes by that branch
+        // — the transport never carries a null (the client omits an
+        // optional one and refuses a required one), and the normalizer
+        // coerces neither a type array's items nor a union's branches —
+        // and `anyOf: [array, null]` travels as JSON exactly as
+        // `type: ['array', 'null']` does
+        const eff = effectiveSchema(schema, scope);
+        const split = splitNullable(eff);
+        setObjectMember(decodePick, m, split === null ? schema : split.schema);
         if (loc === 'path') pathMembers.push(m);
         else {
           if (loc === 'query') queryMembers.push(m);
           else headerMembers.push(m);
-          // a nullable member reads as its non-null branch, whichever of the
-          // two spellings it uses (splitNullable): `anyOf: [array, null]`
-          // travels as JSON exactly as `type: ['array', 'null']` does
-          const eff = effectiveSchema(schema, scope);
-          const split = splitNullable(eff);
           const branch = split === null ? eff : effectiveSchema(split.schema, scope);
           const type = isJsonObject(branch) ? branch.type : undefined;
           if (type === 'array' || (Array.isArray(type) && type.includes('array'))) repeated.push(m);
@@ -1214,7 +1221,7 @@ export function compileContract(doc, options = {}) {
         // it does for the validator
         // JSON query values have the same typing discipline as a JSON
         // body: validate them verbatim, never coerce their descendants.
-        const scalarPick = Object.fromEntries(Object.entries(pick).filter(([name]) => !queryJson.includes(name)));
+        const scalarPick = Object.fromEntries(Object.entries(decodePick).filter(([name]) => !queryJson.includes(name)));
         const sub = { ...src, type: 'object', properties: scalarPick };
         const normalize = compileNormalizer(sub, { coerceTypes: true });
         const declaredRequired = Array.isArray(p.inputEffective.required) ? p.inputEffective.required : [];

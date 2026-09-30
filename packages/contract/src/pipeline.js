@@ -176,7 +176,7 @@ function declaredResult(route, code, params, details, retryable, retryAfterMs = 
  * @returns {OperationResult}
  */
 export function classifyDeclared(route, failure) {
-  return declaredResult(route, failure.code, failure.params, failure.details, failure.retryable);
+  return declaredResult(route, failure.code, failure.params, failure.details, failure.retryable, failure.retryAfterMs);
 }
 
 /**

@@ -522,8 +522,9 @@ The capture every JSLT callback runs in adds one more refusal, which is
 the chain's and listed in QUERY-PEN. In a rule callback, `==`, `+`, a
 template literal or `<` over a captured value is `JL0108`
 ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
-`=== null` and truthiness cannot be refused, since they test the proxy
-and never the value. Write `.eq(null)`, `.exists()` or `.isEmpty()`.
+`=== null`, `== null` (and `!= null`), `==` between two captures and
+truthiness cannot be refused, since they test the proxy and never the
+value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 
 | Code | What this pen raises it for |
 |---|---|

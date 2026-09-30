@@ -227,6 +227,10 @@ export function validateField(field, value, catalog = undefined) {
     }
 
     default:
+      // a schema layer 1 cannot judge (a json control): a null it does
+      // not admit is what the json control writes for half-typed input,
+      // so a required field says so here, as it does for an absent value
+      if (value === null && field.required) pushError(errors, catalog, 'required', {});
       return errors;
   }
 }

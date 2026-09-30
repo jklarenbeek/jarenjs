@@ -884,15 +884,22 @@ and readers ask two different questions of them:
 - **`splitNullable(schema)`** answers structurally. It returns the non-null
   branch (and `nullable: true`) of either spelling, with the node's
   annotations laid over the branch. Forms uses it to choose a control; the
-  contract transport compiler uses it to choose an encoding. Both leave
-  acceptance to the validator.
+  contract transport compiler uses it to choose an encoding and to decode
+  a member by its branch. Both leave acceptance to the validator.
 - **`canonicalNullable(schema)`** answers value-exactly. It returns the one
   type-array spelling only when the two spellings accept the same values:
   every keyword of the branch is scoped to its type (`TYPE_SCOPED_KEYWORDS`,
   composed from the groups) or annotates (`ANNOTATION_KEYWORDS`). A
-  `$query`, an applicator, `const`, `enum`, `$ref` or a `default` inside the
-  branch keeps them apart, and the answer is `null`. The contract diff reads
-  this, so it never calls two schemas equal unless they are.
+  `$query`, an applicator, `const`, `enum` or `$ref` in the branch keeps
+  them apart, and the answer is `null`. So does a normalizer keyword
+  (`default`, `x-coerce`, `x-trim`) at any depth below the branch — at its
+  top or under its `properties`, `items` or any other subschema — because
+  the normalizer enters a type array and never a union branch. (A `$ref`
+  below the branch is not followed, and a host's own normalizer options,
+  `coerceTypes` and `removeAdditional`, also act on the type array alone:
+  a host that uses them reads a union through `splitNullable`.) The
+  contract diff reads this, so it never calls two schemas equal unless
+  they are.
 
 Readers whose reading is persisted do not use either. The db column mapper
 (a union spelling stays in the document, the type array gets a column),
