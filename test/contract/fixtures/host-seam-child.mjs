@@ -1,4 +1,4 @@
-// The campaign's north star in one child: a node:sqlite store's cursor,
+// The whole host seam in one child: a node:sqlite store's cursor,
 // pulled one row at a time into `stringifyCsvStream` / `stringifyJoslStream`,
 // encoded as an opaque handler's `AsyncIterable<Uint8Array>`, served
 // through the real Node HTTP adapter under the host lifecycle, read with

@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The two seams a credential-minting command needs (WorkOps
- * JAR-021, JAR-022): `ctx.header(name, value)` arms a response header
+ * @file The two seams a credential-minting command needs:
+ * `ctx.header(name, value)` arms a response header
  * the handler owns, and because the ledger records the ASSEMBLED
  * response, a replay under the same idempotency key carries the header
  * too — a refresh whose answer was lost is retried into the same
@@ -154,7 +154,7 @@ describe('scope(ctx, input) — the validated input is available', () => {
   });
 });
 
-describe('an opaque operation may declare a media-type family (JAR-015)', () => {
+describe('an opaque operation may declare a media-type family', () => {
   const downloads = compileContract({
     $contract: '0.1',
     operations: {

@@ -667,7 +667,7 @@ describe('transaction(): a typed client bound to the transaction', () => {
   });
 });
 
-describe('the typed client over the corrected scopes (order 07)', () => {
+describe('the typed client over the corrected scopes', () => {
   it("capture + unitOfWork: 'own' keeps client and transaction trackers independent", async () => {
     // the C4 twin, through the typed door: the capture wrapper used to
     // drop ownWork, so the transaction consumed the client's pending state

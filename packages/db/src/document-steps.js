@@ -345,7 +345,7 @@ export function checkMigrationDocument(migration) {
  * migration that used to read a large collection whole now refuses
  * instead, naming the bound and the two assertion shapes that are
  * answered in batches. An unbounded read that nobody declared is the
- * thing this campaign exists to remove, so `null` must be asked for.
+ * thing this bound exists to remove, so `null` must be asked for.
  */
 export const ASSERTION_BOUNDS_DEFAULT = Object.freeze({
   maxRows: 100_000,

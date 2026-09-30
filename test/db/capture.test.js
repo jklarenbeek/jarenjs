@@ -317,7 +317,7 @@ describe('session capture', () => {
   });
 });
 
-describe('capture is transparent to transaction options (order 07)', () => {
+describe('capture is transparent to transaction options', () => {
   it('an aborted queued transaction never runs and issues no statement — JD2064', async () => {
     // C3: at v0.57.0 the capture wrapper dropped `signal`, so the
     // aborted callback ran anyway and its row landed

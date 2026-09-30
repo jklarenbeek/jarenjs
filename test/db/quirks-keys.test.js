@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Key quirks the phase 1 sweep reproduced, each pinned:
+ * @file Key quirks, each reproduced and pinned:
  *
  * 1. A string key spelled like a legacy float (`'7.0'`) was taken for
  *    number 7's old-style row: reads of 7 answered it, writes of 7 moved

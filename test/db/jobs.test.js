@@ -662,7 +662,7 @@ const defer = () => {
 const settle = (p) => Promise.resolve(p).then(
   (value) => ({ value }), (error) => ({ code: error.code, message: error.message }));
 
-describe('root jobs and tx.jobs — the ownership split (order 07)', () => {
+describe('root jobs and tx.jobs — the ownership split', () => {
   it('concurrent_root_job_enqueue_never_joins_awaited_transaction', async () => {
     // C2: at v0.57.0 the ungated root enqueue joined the open
     // transaction and rolled back with it
@@ -747,7 +747,7 @@ describe('root jobs and tx.jobs — the ownership split (order 07)', () => {
   });
 });
 
-describe('transient renewal failures are not lease loss (order 07)', () => {
+describe('transient renewal failures are not lease loss', () => {
   /** A driver whose renewal statement fails ONCE with the error the
    * test injects — the C5 reproduction's exact seam. Injected at the
    * RAW binding, because the worker's gated renewal prepares through

@@ -12,8 +12,7 @@
  * `return()`, the acquired release and the identity release exactly
  * once, with no pull after cancellation reaches the byte source. The
  * carrier half repeats through the
- * Fetch adapter. The exact figures are in the campaign record; the
- * assertions here are the bounds.
+ * Fetch adapter. The assertions here are the bounds.
  */
 
 import { describe, it } from 'node:test';

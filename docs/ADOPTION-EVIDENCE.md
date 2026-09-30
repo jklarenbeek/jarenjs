@@ -205,7 +205,7 @@ Each original request has one accountable public owner below. “Implemented”
 means the bounded library contract and synthetic portable composition; “narrowed”
 keeps an unproved part of the original request open. The remaining work column
 is preserved in [the open roadmap](ROADMAP.md). The evidence links are executable
-fixtures or public contracts, independent of campaign notes and private checkouts.
+fixtures or public contracts, independent of any private notes or checkouts.
 
 | Request | Accountable owner | Final library disposition and matching evidence | Remaining intent |
 |---|---|---|---|

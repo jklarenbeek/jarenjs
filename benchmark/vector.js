@@ -456,7 +456,7 @@ async function runLeg(n, d, rival) {
   const jsonDocRow = n <= JSON_DOC_MAX;
   if (!jsonDocRow) await plain.store.close();
 
-  // -- the store the campaign built
+  // -- the indexed store
   const indexed = await openOwned(vectorIndex(d));
   leg.rows.loadIndexed = loadStore(indexed.store, corpus);
   leg.storage.indexedBytes = databaseBytes(indexed.db);
@@ -472,7 +472,7 @@ async function runLeg(n, d, rival) {
   }
   // one declared width here, so the plan's one alternative IS the
   // column it binds; a model declaring two would report both, and the
-  // `selected` width says which the call took (QUERYREACH 06)
+  // `selected` width says which the call took
   const [alternative] = explained.rank.alternatives;
   leg.column = alternative.column;
   leg.fetchSql = explained.sql;

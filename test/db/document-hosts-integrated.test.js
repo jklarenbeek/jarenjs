@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The campaign's end-to-end proof: ONE fixture through every
+ * @file The end-to-end proof: ONE fixture through every
  * document host, and one durable run through every resume outcome.
  *
  * A migration's document steps mean the same thing wherever they run.
@@ -14,7 +14,7 @@
  * a changed one.
  *
  * A failure here means two hosts have drifted, which is the one thing the
- * whole campaign exists to prevent.
+ * whole design exists to prevent.
  */
 
 import { describe, it, before, after } from 'node:test';

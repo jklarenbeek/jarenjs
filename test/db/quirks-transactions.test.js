@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Transaction quirks the phase 1 sweep reproduced, each pinned:
+ * @file Transaction quirks, each reproduced and pinned:
  *
  * 1. A hold limit gave the capture engine up while a nested scope of the
  *    expired body still ran; that scope's late failure truncated the NEXT

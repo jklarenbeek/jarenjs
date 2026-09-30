@@ -80,7 +80,7 @@ async function drain(until = () => true) {
   for (let i = 0; i < 16; i++) await Promise.resolve();
 }
 
-describe('the campaign story — one contract, every end', () => {
+describe('one contract, every end', () => {
   const contract = compileContract(DOC);
 
   /** @type {any} */ let store;
@@ -209,7 +209,7 @@ describe('the campaign story — one contract, every end', () => {
   });
 
   it('the CLI emits OpenAPI, types and docs to a directory and --check answers 0 for all three', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-campaign-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-end-to-end-'));
     try {
       fs.writeFileSync(path.join(dir, 'shop.json'), JSON.stringify(DOC));
       const cli = (/** @type {string[]} */ args) =>

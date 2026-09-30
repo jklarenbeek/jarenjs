@@ -1,7 +1,6 @@
 //@ts-check
 /**
- * @file Regressions for the relation quirks a consumer (PlatformOps, on
- * 0.91.3) found: a foreign-key column that also declares `index` or
+ * @file Regressions for relation quirks found on 0.91.3: a foreign-key column that also declares `index` or
  * `unique` is ONE index — planned twice, `createModelShape` failed and a
  * reopen counted two declared indexes against one physical; `unique` on
  * the key of a one-to-many edge is refused; a `setNull` key reopens

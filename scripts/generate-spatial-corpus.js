@@ -119,7 +119,7 @@ const POLAR = [
   { id: 'elsewhere', at: AMS },
 ];
 
-/** The pair order 03 measured at 9.7 m apart, in different level-1 cells. */
+/** A pair measured at 9.7 m apart, in different level-1 cells. */
 const GREENWICH = [
   { id: 'here', at: [-0.00007, 51.4779] },
   { id: 'there', at: [0.00007, 51.4779] },

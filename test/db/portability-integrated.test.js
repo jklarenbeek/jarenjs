@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The portability close-out: ONE hostile model corpus through the
+ * @file The portability proof: ONE hostile model corpus through the
  * whole round trip, on every dialect this suite has.
  *
  * pen → schema → plan → create → introspect → plan against the original

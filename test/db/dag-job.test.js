@@ -513,7 +513,7 @@ describe('the DAG runner over the fence', () => {
   });
 });
 
-describe('the runner forwards stopGraceMs (order 07)', () => {
+describe('the runner forwards stopGraceMs', () => {
   /** A DAG whose one task wedges until its signal aborts, so `stop()`
    * always waits out its grace period — which makes the grace bound
    * itself measurable. */

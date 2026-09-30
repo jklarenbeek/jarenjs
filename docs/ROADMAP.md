@@ -670,7 +670,7 @@ still open is listed here, each with its reason.
   `$where` per row; an `$orderby` over `$distance` (or over a member beside a
   refined predicate) and a spatial aggregate re-run on invalidation with the
   reason in `live.mode`. Maintaining a distance-ordered window incrementally is
-  an incremental spatial index, which is a different campaign; the honest
+  an incremental spatial index, which is separate work; the honest
   re-run is the shipped answer until it is built. **Maintenance boundary:** a new ordered spatial
   strategy must account for changed distances, window membership, ties and
   declared state credits; native bounding-box filtering alone supplies none of

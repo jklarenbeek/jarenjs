@@ -296,7 +296,7 @@ const check = (name, agrees, detail) => {
 };
 
 /** The committed spatial corpus's plan cases, through a store that
- * declares the derived indexes: the oracle orders 03 and 05 built. */
+ * declares the derived indexes: the oracle the corpus drives. */
 async function checkCorpus() {
   const corpus = JSON.parse(readFileSync(
     new URL('../test/json/fixtures/spatial-corpus.json', import.meta.url), 'utf8'));
@@ -474,7 +474,7 @@ for (const table of tables) {
 const ms = (key) => measured[key].results[0] / 1e6;
 const ratio = (a, b) => Math.round((ms(a) / ms(b)) * 100) / 100;
 const figures = {
-  // the campaign's headline: what a consumer writes, before and after
+  // the headline: what a consumer writes, before and after
   scanVsIndexed: ratio('within-scan', 'within-indexed'),
   // the row the database has to win: not using the database at all
   engineVsIndexed: ratio('engine', 'within-indexed'),

@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file Regressions for the store quirks a consumer (WorkOps, on
- * 0.91.4) found, plus the one its report led to: a misspelt `openStore`
+ * @file Regressions for store quirks found on 0.91.4, and one more they
+ * led to: a misspelt `openStore`
  * option is refused rather than dropped (`JD0009`); an additive,
  * optional-only model change is a WIDENING, so the planner drafts no
  * transform and the plan applies unattended; an `enum` of one scalar

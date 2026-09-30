@@ -11,7 +11,7 @@ import { mulberry32 } from '@jarenjs/core/random';
 // can be checked against without checking themselves.
 //
 // Every value in the randomized corpora is a multiple of 1/4096, the
-// rule order 01 established for the same reason: a partial sum of them
+// rule the other series tests keep for the same reason: a partial sum of them
 // is exact, so a carried total equals a fresh one bit for bit and
 // equality is the check rather than a tolerance that would hide a real
 // divergence.
@@ -230,7 +230,7 @@ describe('rollingSeries — complexity', () => {
     // The earlier form was a stopwatch, and the site gate runs five
     // stages at once: it measured the HOST, reading 46.6x and then 25.1x
     // on a machine where it reads ~1x idle. A counter cannot be
-    // descheduled (order 02's rule, applied where a counter reaches).
+    // descheduled.
     const counting = (rows) => {
       let reads = 0;
       const array = rows.map((row) => ({

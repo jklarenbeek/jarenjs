@@ -478,7 +478,7 @@ describe('the spatial corpus, as the site ships it for the browser runner', func
 
 describe('a workspace the website has never heard of', function () {
   /**
-   * The campaign's definition of done, as a test: a package reaches the
+   * The definition of done, as a test: a package reaches the
    * site because the root manifest lists it and its own document
    * describes it, so adding one needs NO website edit. The proof runs
    * the real collector over a fabricated repository — a root manifest

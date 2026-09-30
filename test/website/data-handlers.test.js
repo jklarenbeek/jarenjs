@@ -420,7 +420,7 @@ describe('the oracle — a second executor held to the engine from any tab', fun
       assert.deepStrictEqual(explained.explain.indexes, ['places_by_box'], 'the physical name the store gave the declared by_box');
       assert.match(explained.explain.sql, /SELECT/);
       assert.strictEqual(explained.explain.residual?.mode, 'set');
-      // and without asking, the answer is the answer — the shape order 07 fixed
+      // and without asking, the answer is the answer
       const plain = await table.handlers['data.oracle'](request);
       assert.deepStrictEqual(Object.keys(plain).sort(), ['answer', 'empty']);
       assert.deepStrictEqual(fixture.scratch, { opened: 2, closed: 2 });

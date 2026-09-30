@@ -715,8 +715,8 @@ capture) is stated beside the Bun tables. The losses stay in the
 tables with their reasons.
 
 **Run-to-run spread, measured rather than assumed.** Three unchanged
-runs of this suite on one host (Node v24.19.0, Linux x86_64) at the
-campaign's close-out put 9 of 78 Node figures beyond the ±10 % this
+runs of this suite on one host (Node v24.19.0, Linux x86_64), measured
+for the published figures, put 9 of 78 Node figures beyond the ±10 % this
 repository's README quotes for micro-timings, the widest at 16.7 %, and
 moved the graph-load headline across 9.0× / 6.7× / 7.1×. **Treat this
 suite as noisier than ±10 %**: the numbers are file-database work at a

@@ -841,7 +841,7 @@ function geohashDerivation(node, itSlot, shape, construct) {
  * merely implied beyond it, where the column can only confirm its own
  * first k characters.
  *
- * A prefix range is what order 01 made sargable; `LIKE` and `substr`
+ * A prefix range is sargable (the index seeks it); `LIKE` and `substr`
  * both scan.
  * @param {any} node
  * @param {number} itSlot
@@ -857,7 +857,7 @@ function planCellPrefix(node, itSlot, shape) {
   const exact = pattern.value.length <= derivation.precision;
   const cell = exact ? pattern.value : pattern.value.slice(0, derivation.precision);
   // a pattern as long as the column's own cell is an EQUALITY on it;
-  // a shorter one is the half-open range order 01 made sargable
+  // a shorter one is a half-open range, which the index seeks
   const pred = cell.length === derivation.precision
     ? { p: 'cellIn', column: derivation.column, cells: [cell] }
     : { p: 'cellPrefix', column: derivation.column, prefix: cell };
@@ -1497,8 +1497,8 @@ function resampleBucket(spec, shape) {
   // planner does not have: asking the kernel about it would report the
   // missing provider rather than the reason a ladder is not native
   if (spec.zone !== undefined && spec.zone !== 'UTC') return { code: 'named-zone' };
-  // The kernel's own rules, asked once, by running it over NO rows —
-  // order 04's trick, for order 04's reason. `analyzeQuery` does not
+  // The kernel's own rules, asked once, by running it over NO rows:
+  // `analyzeQuery` does not
   // compile an operator, so a spec the kernel refuses reaches the
   // planner before the engine has had its say, and a plan that answered
   // where the engine raises is the one thing a pushdown may never do.

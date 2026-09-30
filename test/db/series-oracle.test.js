@@ -5,8 +5,8 @@
  * `test/json/fixtures/series-corpus.json` records, for every case, the
  * answer a PLAIN reference gives it — a map keyed by bucket, a fresh
  * sum per window, a linear scan per match, written in
- * `scripts/lib/series-corpus.js` and touching no kernel. Order 04 made
- * the validated query vocabulary a second executor of those cases.
+ * `scripts/lib/series-corpus.js` and touching no kernel. The validated
+ * query vocabulary is a second executor of those cases.
  * This file makes the STORE the third, fourth and fifth: `node:sqlite`,
  * the real wasm build, and both of them again with pushdown forced off,
  * so the plan is compared against the engine answering alone rather

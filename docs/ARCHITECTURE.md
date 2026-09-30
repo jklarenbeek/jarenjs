@@ -792,5 +792,4 @@ Library readiness, installed synthetic consumer qualification, and actual
 platform/operator acceptance are distinct. Linux executables and automated
 browser sessions do not establish PostgreSQL, other OS deployments, AT/native IME,
 real providers or downstream cutover. Exact combined peak heap remains unmeasured.
-These limits and the remaining roadmap clauses survive independently of campaign
-notes; no retained oracle or unresolved original is retired by a library gate.
+These limits and the remaining roadmap clauses stand on their own; no retained oracle or unresolved original is retired by a library gate.

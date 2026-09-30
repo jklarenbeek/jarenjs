@@ -724,8 +724,8 @@ floating-point arithmetic. That is the trade this module exists to make — it
 is the difference between a containment test that is right on near-collinear
 input and one that is merely fast. Cheap straddle/span tests already skip the
 predicate on edges that cannot affect the answer, which took this from 0.2×
-to about 0.5×; the rest is the predicate itself, and the campaign that made
-geography reachable across the suite never traded it away. The bounding box
+to about 0.5×; the rest is the predicate itself, and making geography
+reachable across the suite never traded it away. The bounding box
 of the same ring and the index build against Flatbush sit within a few tenths
 of level (<!--fact:geo.bbox2000-->0.9×<!--/fact--> and <!--fact:geo.indexBuild-->0.8×<!--/fact-->) and move
 between runs and Node versions; they are published as measured rather than

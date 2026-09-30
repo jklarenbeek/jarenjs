@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The campaign's integrated proof: every shape QUERYREACH taught
- * the planner, run four ways over one corpus, and required to answer
+ * @file The integrated proof: every shape the planner pushes down, run
+ * four ways over one corpus, and required to answer
  * identically.
  *
  * The per-order suites each prove their own shape in depth. What this
@@ -36,7 +36,7 @@ import { queryJson } from '@jarenjs/json/query';
 
 const ORIGIN = 1767225600000;
 
-/** One model carrying every declared shape the campaign planned. */
+/** One model carrying every declared shape the planner covers. */
 const MODEL = (indexed) => ({
   $model: '0.1',
   collections: {
@@ -129,7 +129,7 @@ const PETS = [
 ];
 
 /**
- * Every campaign shape, as one document each.
+ * Every shape, as one document each.
  * `root` names what it runs over; `mode` is the plan the INDEXED store
  * must take, which is what makes a lost promotion a failure here.
  */
@@ -207,7 +207,7 @@ async function seeded(indexed) {
   return store;
 }
 
-describe('the campaign as one capability: every shape, four ways', () => {
+describe('one capability: every shape, four ways', () => {
   /** @type {any} */ let indexed;
   /** @type {any} */ let unindexed;
 
@@ -235,7 +235,7 @@ describe('the campaign as one capability: every shape, four ways', () => {
         'and so does the same store with the pushdown turned off');
     });
 
-    it(`${shape.name} — the plan is the one the campaign promised`, async () => {
+    it(`${shape.name} — the plan is the one the shape declares`, async () => {
       const explained = await indexed.collection(shape.root).explain(shape.document);
       assert.strictEqual(explained.mode, shape.mode,
         `${shape.name}: ${explained.mode} — ${JSON.stringify(explained.residual?.reasons ?? [])}`);

@@ -386,7 +386,7 @@ describe('jaren-db, code-first (modules, the snapshot, purity, --types)', () => 
 });
 
 describe('jaren-db — every command, run twice', () => {
-  // The campaign's rule (§4.1): every importer, migration and CLI command
+  // The rule: every importer, migration and CLI command
   // in scope passes the two-run check BY TEST. "Passes" is bytes, not a
   // word: the second run of a command leaves every file in the working
   // directory exactly as the first left it. Reading commands are trivially

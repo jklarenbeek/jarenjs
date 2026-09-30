@@ -7,7 +7,7 @@
  * answer a PLAIN reference gives it. The kernel answers it, the query
  * engine answers it, and `test/db/series-oracle.test.js` makes stock
  * SQLite answer it four ways. This file makes `@jarenjs/linq` the last
- * executor, so the campaign's claim — one fixture, every executor —
+ * executor, so the claim — one fixture, every executor —
  * is a run rather than a sentence.
  *
  * The document is the case's OWN document, not a chain rebuilt by hand:

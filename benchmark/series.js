@@ -29,7 +29,7 @@
  *                         ladder routed through an injected zone
  *                         provider, and a downsampler
  *
- * The kernel rows arrived in the order the campaign built them, against
+ * The kernel rows were added one at a time, against
  * a ground that was published before any of them existed. The one-pass
  * references are the ceiling, not a rival: they answer a fixed question
  * with a loop written for that question, and a kernel that validates a
@@ -1135,7 +1135,7 @@ const notes = [
     + ` ${times(figures.kernelRollingVsOnePass)} the one-pass ring sum, and answers`
     + ` ${times(figures.kernelBucketVsQuery)} faster than the generic bucket route and`
     + ` ${times(figures.kernelRollingVsQuery)} faster than the labelled window. That is the trade`
-    + ' this campaign is making, stated as two numbers rather than one: a loop written for one'
+    + ' the kernels make, stated as two numbers rather than one: a loop written for one'
     + ' question stays the ceiling, and the gap the vocabulary was paying is closed.',
   `Routing every bucket boundary through the shipped Intl zone provider costs`
     + ` ${times(figures.providerCost)} the integer ladder over the identical answer. A 28-hour corpus`

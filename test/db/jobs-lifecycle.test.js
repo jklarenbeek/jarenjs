@@ -227,7 +227,7 @@ describe('bounded shutdown', () => {
   });
 });
 
-describe('stop quiesces store I/O before close (order 07)', () => {
+describe('stop quiesces store I/O before close', () => {
   it('stop_quiesces_store_io_before_close: a queued claim is cancelled, not left behind', async () => {
     // C7's mechanism: a worker claim queued behind an open application
     // transaction used to stay in the connection queue after stop(),

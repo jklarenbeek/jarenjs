@@ -4,10 +4,10 @@
  * The version bump, as one command with an exit code.
  *
  *   npm run release:bump            # patch
- *   npm run release:bump -- minor   # a phase-opening order or a new capability
+ *   npm run release:bump -- minor   # a new capability
  *   npm run release:bump -- major
  *
- * Step 2 of the close-out protocol used to be four commands run in order
+ * Step 2 of the release protocol used to be four commands run in order
  * from memory, and the first of them has a trap: `npm install` under a
  * DIFFERENT npm than the one `packageManager` pins rewrites the lockfile
  * in a shape the pinned npm then refuses, which has cost this repository a

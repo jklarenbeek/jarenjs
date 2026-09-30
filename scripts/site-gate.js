@@ -18,7 +18,7 @@
  * Browser scope (`--browser=`):
  *   full   (default) — the three-engine matrix, required for any change
  *                      that touches the website workspace or anything it
- *                      imports, and for phase-close / close-out orders;
+ *                      imports, and before every release;
  *   smoke            — chromium only, allowed for changes that cannot
  *                      affect the site (CI's browser job still runs the
  *                      full matrix on every push, so the backstop holds);

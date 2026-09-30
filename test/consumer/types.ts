@@ -1014,8 +1014,8 @@ void asyncUntyped;
 void linqFrom({ root: 42, execute: linqProvider.execute });
 
 // the two operators §4 records as `unsupported` do not compile. A
-// `never` RETURN alone is half an encoding — order 06 settled that for
-// the pens' `never()` builders — so `zip` takes a `never` PARAMETER and
+// `never` RETURN alone is half an encoding — as the pens' `never()`
+// builders already show — so `zip` takes a `never` PARAMETER and
 // neither spelling reaches the run-time `JL0006`, on either surface.
 // @ts-expect-error — zip is unsupported: no positional co-iteration
 void linqFrom(linqUsers).zip();
@@ -1578,7 +1578,7 @@ async function typedWorkerHosts() {
 }
 void [typedWorkerHosts, indexedDbSnapshotHandle, openSnapshotStorage];
 
-// REPLAYSAFE public surfaces: sequence boundaries, bounded plans and explicit reset.
+// Replay surfaces: sequence boundaries, bounded plans and explicit reset.
 import { createQueryAccumulator } from '@jarenjs/json/query';
 import { readCollectionBundle } from '@jarenjs/db/node';
 const orderedAggregate = createQueryAccumulator('$avg');

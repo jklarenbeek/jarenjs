@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Relational-engine quirks the phase 1 sweep reproduced, each pinned:
+ * @file Relational-engine quirks, each reproduced and pinned:
  *
  * 1. The Store's statement cache evicted without finalizing, and a worker
  *    keeps every statement it prepared: past `maxStatements` distinct

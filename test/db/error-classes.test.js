@@ -328,7 +328,7 @@ describe('the write, entity, job, maintenance and open paths', () => {
   });
 });
 
-describe('the paths beside the query engines (the close-out quirk hunt)', () => {
+describe('the paths beside the query engines', () => {
   const ENTITIES = {
     $model: '0.1',
     collections: MODEL.collections,

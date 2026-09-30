@@ -187,7 +187,7 @@ describe('website boundaries — benchmark suite derivations', function () {
     // it saves against the vocabulary a consumer had instead. A page
     // carrying only the second would be a win with its price left out.
     assert.ok(data.rows.some((/** @type {any} */ r) => r.route.startsWith('kernel')),
-      'the kernel rows the campaign added are published');
+      'the kernel rows are published');
     assert.match(text, /core resampleSeries/, 'the kernel row renders beside the loop it is measured against');
     assert.ok(data.meta.figures.kernelBucketVsOnePass > 1,
       'the kernel is published as costing more than the one-pass ceiling, because it does');

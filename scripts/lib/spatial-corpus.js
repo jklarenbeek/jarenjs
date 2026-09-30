@@ -18,8 +18,8 @@
  *
  * A store runner answers under every mapping `SPATIAL_MAPPINGS` names —
  * three of them, because `derive: 'bbox'` has two physical realizations
- * and a physical mapping that changed an answer would be the campaign's
- * claim falsified.
+ * and a physical mapping that changed an answer would falsify the
+ * claim that a mapping never changes one.
  *
  * The projection is a pure function of the fixture: nothing here reads
  * the clock or the repository, so a rebuild of the same fixture writes

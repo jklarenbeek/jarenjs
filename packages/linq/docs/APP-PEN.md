@@ -728,8 +728,8 @@ defineApp({ state: {}, view: [], actions: { __proto__: action(fn) } })
 ```
 
 The computed key IS an own property, and then `__proto__` is ORDINARY
-DATA all the way through this pen — which the app pen is where the
-campaign proves end to end, because it is the one pen whose document
+DATA all the way through this pen — and the app pen is where that is
+proved end to end, because it is the one pen whose document
 carries a name map on both sides at once:
 
 ```js
