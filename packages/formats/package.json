@@ -43,7 +43,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.92.0",
-    "@jarenjs/json": "^0.92.0"
+    "@jarenjs/core": "0.92.0",
+    "@jarenjs/json": "0.92.0"
   }
 }

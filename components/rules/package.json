@@ -51,9 +51,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.92.0",
-    "@jarenjs/view": "^0.92.0",
-    "@jarenjs/app": "^0.92.0",
-    "@jarenjs/forms": "^0.92.0"
+    "@jarenjs/core": "0.92.0",
+    "@jarenjs/view": "0.92.0",
+    "@jarenjs/app": "0.92.0",
+    "@jarenjs/forms": "0.92.0"
   }
 }

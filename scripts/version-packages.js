@@ -42,39 +42,63 @@ export const rangeOnlyFiles = [];
 /** The root manifest is bumped too (its version is the suite version). */
 export const rootFile = 'package.json';
 
-// run only as a CLI: importing the lists (the drift gate) bumps nothing
+/** The dependency maps an internal `@jarenjs/*` edge can live in. */
+export const dependencyFields = ['dependencies', 'devDependencies', 'peerDependencies'];
+
+/**
+ * Rewrite every internal edge of one dependency map to the suite version,
+ * exactly — never a range. The suite is released in lockstep (every
+ * package at one version, every release), so a caret bought nothing and
+ * let a consumer's resolution mix two releases' packages in one closure;
+ * an exact edge makes a consumer's direct pins decide the whole closure
+ * (docs/CONSUMING.md). `peerDependenciesMeta` is not a dependency map and
+ * is never touched, so an optional peer stays optional.
+ * @param {Record<string, string> | undefined} dependencies - one of a manifest's `dependencyFields`
+ * @param {ReadonlySet<string>} names - the publishable package names
+ * @param {string} version - the suite version
+ * @returns {number} how many edges changed
+ */
+export function updateInternalRanges(dependencies, names, version) {
+  if (dependencies == null) return 0;
+  let changed = 0;
+  for (const name of Object.keys(dependencies)) {
+    if (!names.has(name) || dependencies[name] === version) continue;
+    dependencies[name] = version;
+    changed += 1;
+  }
+  return changed;
+}
+
+// run only as a CLI: importing the lists (the drift gate) bumps nothing.
+//   node scripts/version-packages.js patch|minor|major|<version>
+//     sets every manifest's version and every internal edge to it;
+//   node scripts/version-packages.js pin
+//     rewrites every internal edge to the root's current version and changes
+//     no version — for a tree whose edges drifted from the version it carries.
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const rootPackage = readPackage(rootFile);
   const requested = process.argv[2];
-  const nextVersion = resolveVersion(rootPackage.version, requested);
+  const pinOnly = requested === 'pin';
+  const nextVersion = pinOnly ? rootPackage.version : resolveVersion(rootPackage.version, requested);
   const packageNames = new Set(packageFiles.map((file) => readPackage(file).name));
-
-  const updateInternalRanges = (dependencies) => {
-    if (dependencies == null) return;
-    for (const name of Object.keys(dependencies)) {
-      if (packageNames.has(name))
-        dependencies[name] = `^${nextVersion}`;
-    }
-  };
+  let changed = 0;
 
   for (const file of [rootFile, ...packageFiles]) {
     const manifest = readPackage(file);
-    manifest.version = nextVersion;
-    updateInternalRanges(manifest.dependencies);
-    updateInternalRanges(manifest.devDependencies);
-    updateInternalRanges(manifest.peerDependencies);
+    if (!pinOnly) manifest.version = nextVersion;
+    for (const field of dependencyFields) changed += updateInternalRanges(manifest[field], packageNames, nextVersion);
     writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
   }
 
   for (const file of rangeOnlyFiles) {
     const manifest = readPackage(file);
-    updateInternalRanges(manifest.dependencies);
-    updateInternalRanges(manifest.devDependencies);
-    updateInternalRanges(manifest.peerDependencies);
+    for (const field of dependencyFields) changed += updateInternalRanges(manifest[field], packageNames, nextVersion);
     writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
   }
 
-  console.log(`Set all publishable Jaren packages to ${nextVersion}.`);
+  console.log(pinOnly
+    ? `Pinned ${changed} internal edge${changed === 1 ? '' : 's'} to ${nextVersion}; no version changed.`
+    : `Set all publishable Jaren packages to ${nextVersion} (${changed} internal edge${changed === 1 ? '' : 's'} rewritten).`);
 }
 
 function readPackage(file) {
@@ -104,6 +128,6 @@ function resolveVersion(current, value) {
     default:
       if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value ?? ''))
         return value;
-      throw new Error('Usage: node scripts/version-packages.js patch|minor|major|<version>');
+      throw new Error('Usage: node scripts/version-packages.js patch|minor|major|<version>|pin');
   }
 }

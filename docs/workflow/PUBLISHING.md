@@ -54,7 +54,10 @@ Never put the token itself in this repository's `.npmrc`. Revoke and replace it 
 ## Compatibility policy
 
 Jaren is pre-1.0. All public workspaces share one version and are released
-together, so a version number describes the suite, not a single package.
+together, so a version number describes the suite, not a single package —
+and every internal `@jarenjs/*` edge names that exact version, so a
+consumer's direct pins decide the whole closure
+([CONSUMING.md](../CONSUMING.md#one-version-for-the-whole-closure)).
 
 - **Patch releases never break a public API.** Bug fixes, performance work,
   documentation and additive internals only. Upgrading a patch should require
@@ -110,7 +113,7 @@ pin a reviewed tag and upgrade deliberately; the recipe is in
 
 ## Prepare a release
 
-All public workspaces use one version. One command increments them and their internal dependency ranges together, syncs the lockfile and re-verifies the build:
+All public workspaces use one version. One command increments them, pins every internal dependency to the new version exactly, syncs the lockfile and re-verifies the build:
 
 ```bash
 npm run release:bump            # patch
@@ -119,6 +122,8 @@ npm run release:bump            # patch
 ```
 
 It runs the npm that launched it — `npm run` publishes its own CLI path as `npm_execpath`, and the bump executes that file under the current Node with a fixed argument vector (no PATH lookup, no shell, no `.cmd` shim on Windows) — and **refuses under an npm that is not the `packageManager` pin** before it writes anything — see the lockfile note below for why that is the first thing it checks. Invoked as `node scripts/release-bump.js`, or under pnpm/yarn, it refuses too: there is no executing npm to run. It then runs `scripts/version-packages.js`, `npm install`, `npm run test:lock` and `npm run build`. (The bare `npm run version:patch|minor|major` still exists and is what it calls; use it only when you deliberately want the manifest edit without the rest.)
+
+**Internal edges are exact versions, never ranges.** The suite is released in lockstep, so a caret bought nothing and let a consumer's resolution mix two releases' packages in one closure. An exact edge is only safe while it equals the workspace's own version: a drifted one makes npm quietly fetch the registry tarball into a nested `node_modules`, and the workspace link stops being what runs. So `test/scripts/version-packages.test.js` holds every internal edge of the root and the publishable manifests equal to the suite version, and every `@jarenjs/*` lockfile entry a root-level workspace link with exact recorded edges. `node scripts/version-packages.js pin` rewrites drifted edges to the current version without bumping anything (run `npm install` after it).
 
 Review the resulting manifest changes. The release gate is every gate the working path runs ([`CONVENTIONS.md`](CONVENTIONS.md) §2 — lint, tests, website build, the dead-code audit, the figure gate, the document gate, the design sweep and the three-engine browser matrix) plus the packaging evidence a release additionally needs: a portable-lock check, a native-toolchain probe, a clean rebuild, a TypeScript consumer check, tree-shaking, packed consumers under Node **and** Bun, a source-consumer fixture, a dependency check and npm tarball dry runs:
 

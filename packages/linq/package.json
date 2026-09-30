@@ -108,13 +108,13 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.92.0",
-    "@jarenjs/json": "^0.92.0"
+    "@jarenjs/core": "0.92.0",
+    "@jarenjs/json": "0.92.0"
   },
   "peerDependencies": {
-    "@jarenjs/db": "^0.92.0",
-    "@jarenjs/formats": "^0.92.0",
-    "@jarenjs/validate": "^0.92.0"
+    "@jarenjs/db": "0.92.0",
+    "@jarenjs/formats": "0.92.0",
+    "@jarenjs/validate": "0.92.0"
   },
   "peerDependenciesMeta": {
     "@jarenjs/db": {

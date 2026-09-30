@@ -54,6 +54,28 @@ under strict packed TypeScript, and bundles the `@jarenjs/app` closure under
 an isolated Vite build — so "it installs and imports cleanly from a registry
 tarball" is a tested property, not an assumption.
 
+### One version for the whole closure
+
+Every Jaren package is released at one version, together, and every internal
+edge names that exact version: `@jarenjs/validate` depends on `@jarenjs/core`
+at the suite version itself, not a range. So pin each direct `@jarenjs/*`
+dependency to the same exact version (no `^`) and the whole closure follows —
+npm installs one copy of each package, all from one release, with no
+`overrides` block.
+
+- A direct pin that disagrees with the others (`@jarenjs/app` from one
+  release, `@jarenjs/core` from another) shows up as a second, nested copy of
+  the shared packages (`node_modules/@jarenjs/app/node_modules/@jarenjs/core`)
+  instead of a silently mixed closure. `npm ls @jarenjs/core` lists every
+  copy; a healthy tree has one.
+- Taking one package's patch alone is not possible — upgrade the suite
+  together, which the lockstep release already required.
+
+Up to 0.92.0 the internal edges were caret ranges, so pinning
+`@jarenjs/app` could still resolve its siblings from a later release, each
+with its own nested `@jarenjs/core`; an `overrides` block was the only way to
+hold the closure together. With exact edges it is not needed.
+
 ## Mode 2: pinned source (git submodule or vendored checkout)
 
 Consume the repository directly when you want a reviewed, reproducible pin
@@ -187,10 +209,10 @@ packages:
 ```
 
 **On pnpm 9, workspace globs alone are not enough.** The internal edges in
-this repository are ordinary semver ranges (`@jarenjs/validate` depends on
-`@jarenjs/core@^0.22.27`), not the `workspace:` protocol — npm, which this
-repository uses, does not understand `workspace:`, so it cannot be adopted
-here without breaking publishing. pnpm 9 in turn defaults
+this repository are exact versions (`@jarenjs/validate` depends on
+`@jarenjs/core` at exactly the suite version), not the `workspace:` protocol —
+npm, which this repository uses, does not understand `workspace:`, so it
+cannot be adopted here without breaking publishing. pnpm 9 in turn defaults
 `link-workspace-packages` to **false**. The combination means a transitive
 `@jarenjs/core` can be satisfied from the registry even though you vendored
 it, producing a build that silently mixes vendored and published code. Turn

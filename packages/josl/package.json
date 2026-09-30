@@ -99,6 +99,6 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@jarenjs/core": "^0.92.0"
+    "@jarenjs/core": "0.92.0"
   }
 }

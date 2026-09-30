@@ -201,7 +201,7 @@ describe('one edge, one direction (D6)', () => {
     for (const peer of PEERS) {
       assert.strictEqual(peer in (linq.dependencies ?? {}), false, `${peer} must not be a dependency`);
       assert.deepStrictEqual(linq.peerDependenciesMeta[peer], { optional: true });
-      assert.match(linq.peerDependencies[peer], /^\^\d+\.\d+\.\d+$/, 'a caret range the version bump moves');
+      assert.strictEqual(linq.peerDependencies[peer], linq.version, 'the exact suite version the version bump moves');
     }
     assert.deepStrictEqual(Object.keys(linq.dependencies).sort(), ['@jarenjs/core', '@jarenjs/json']);
     assert.strictEqual(linq.devDependencies, undefined);
